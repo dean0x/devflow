@@ -1,0 +1,31 @@
+# DevFlow .gitignore
+
+# Backup files created during installation
+*.backup.*
+
+# Test documentation created during development
+.docs/
+test-docs/
+
+# Temporary files
+/tmp/
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local configuration overrides
+config/local-*
+commands/local-*
+
+# Installation logs
+install.log
