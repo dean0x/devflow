@@ -83,11 +83,12 @@ devflow/
 │   │   ├── commands/            # CLI command implementations
 │   │   │   └── init.ts            # Init command
 │   │   └── cli.ts               # CLI entry point
-│   ├── agents/                # AI sub-agents
-│   ├── commands/              # Slash command definitions
-│   ├── scripts/               # DevFlow scripts
-│   │   └── statusline.sh        # Smart statusline script
-│   └── settings.json          # Unified Claude Code settings (statusline, model)
+│   └── claude/                # Claude Code configuration
+│       ├── agents/              # AI sub-agents
+│       ├── commands/            # Slash command definitions
+│       ├── scripts/             # DevFlow scripts
+│       │   └── statusline.sh      # Smart statusline script
+│       └── settings.json        # Unified Claude Code settings (statusline, model)
 ├── package.json             # Node.js package configuration
 └── tsconfig.json            # TypeScript configuration
 ```
@@ -107,10 +108,10 @@ devflow init
 ```
 
 The `devflow init` command automatically:
-- Copies commands from `src/commands/` to `~/.claude/commands/`
-- Copies agents from `src/agents/` to `~/.claude/agents/`
-- Copies scripts from `src/scripts/` to `~/.devflow/scripts/`
-- Installs unified settings from `src/settings.json` to `~/.claude/settings.json`
+- Copies commands from `src/claude/commands/` to `~/.claude/commands/`
+- Copies agents from `src/claude/agents/` to `~/.claude/agents/`
+- Copies scripts from `src/claude/scripts/` to `~/.devflow/scripts/`
+- Installs unified settings from `src/claude/settings.json` to `~/.claude/settings.json`
 - Configures smart statusline
 - Optionally creates `.docs/` project structure (use `--skip-docs` to skip)
 
@@ -196,7 +197,7 @@ Sub-agents are configured in `.claude/agents/` and included in your project setu
 ### Development Loop
 ```bash
 # 1. Modify command in devflow repo
-vim devflow/src/commands/audit-tests.md
+vim devflow/src/claude/commands/audit-tests.md
 
 # 2. Reinstall to global context for testing
 node dist/cli.js init

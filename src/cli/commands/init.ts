@@ -30,26 +30,26 @@ export const initCommand = new Command('init')
 
     // Get the root directory of the devflow package
     const rootDir = path.resolve(__dirname, '../..');
-    const srcDir = path.join(rootDir, 'src');
+    const claudeSourceDir = path.join(rootDir, 'src', 'claude');
 
     try {
       // Install commands
       console.log('  📂 Installing commands...');
       const commandsDir = path.join(claudeDir, 'commands');
       await fs.mkdir(commandsDir, { recursive: true });
-      await copyDirectory(path.join(srcDir, 'commands'), commandsDir);
+      await copyDirectory(path.join(claudeSourceDir, 'commands'), commandsDir);
 
       // Install sub-agents
       console.log('  🤖 Installing sub-agents...');
       const agentsDir = path.join(claudeDir, 'agents');
       await fs.mkdir(agentsDir, { recursive: true });
-      await copyDirectory(path.join(srcDir, 'agents'), agentsDir);
+      await copyDirectory(path.join(claudeSourceDir, 'agents'), agentsDir);
 
       // Install scripts
       console.log('  📜 Installing scripts...');
       const devflowDir = path.join(process.env.HOME || '', '.devflow', 'scripts');
       await fs.mkdir(devflowDir, { recursive: true });
-      await copyDirectory(path.join(srcDir, 'scripts'), devflowDir);
+      await copyDirectory(path.join(claudeSourceDir, 'scripts'), devflowDir);
 
       // Make scripts executable
       const scripts = await fs.readdir(devflowDir);
@@ -60,7 +60,7 @@ export const initCommand = new Command('init')
       // Install settings
       console.log('  ⚙️ Installing settings...');
       await fs.copyFile(
-        path.join(srcDir, 'settings.json'),
+        path.join(claudeSourceDir, 'settings.json'),
         path.join(claudeDir, 'settings.json')
       );
 

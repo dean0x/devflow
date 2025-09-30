@@ -76,10 +76,11 @@ devflow/
 │   ├── cli/                   # CLI source code
 │   │   ├── commands/            # CLI command implementations
 │   │   └── cli.ts               # CLI entry point
-│   ├── agents/                # AI sub-agents
-│   ├── commands/              # Slash command definitions
-│   ├── scripts/               # DevFlow scripts
-│   └── settings.json          # Claude Code settings
+│   └── claude/                # Claude Code configuration
+│       ├── agents/              # AI sub-agents
+│       ├── commands/            # Slash command definitions
+│       ├── scripts/             # DevFlow scripts
+│       └── settings.json        # Claude Code settings
 ├── package.json             # Node.js package
 └── tsconfig.json            # TypeScript config
 ```
