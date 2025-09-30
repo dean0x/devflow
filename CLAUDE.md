@@ -78,11 +78,11 @@ DevFlow is designed specifically for Claude Code with a clean, organized structu
 
 ```
 devflow/
-├── cli/                     # CLI source code
-│   ├── commands/              # CLI command implementations
-│   │   └── init.ts              # Init command
-│   └── cli.ts                 # CLI entry point
-├── src/                     # DevFlow source files
+├── src/                     # All source files
+│   ├── cli/                   # CLI source code
+│   │   ├── commands/            # CLI command implementations
+│   │   │   └── init.ts            # Init command
+│   │   └── cli.ts               # CLI entry point
 │   ├── agents/                # AI sub-agents
 │   ├── commands/              # Slash command definitions
 │   ├── scripts/               # DevFlow scripts

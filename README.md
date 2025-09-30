@@ -72,10 +72,10 @@ devflow init --skip-docs
 
 ```
 devflow/
-├── cli/                     # CLI source code
-│   ├── commands/              # CLI command implementations
-│   └── cli.ts                 # CLI entry point
-├── src/                     # DevFlow source files
+├── src/                     # All source files
+│   ├── cli/                   # CLI source code
+│   │   ├── commands/            # CLI command implementations
+│   │   └── cli.ts               # CLI entry point
 │   ├── agents/                # AI sub-agents
 │   ├── commands/              # Slash command definitions
 │   ├── scripts/               # DevFlow scripts
