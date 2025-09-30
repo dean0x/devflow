@@ -218,7 +218,7 @@ This command integrates with other DevFlow tools:
 
 - **After planning**: Agent can work through todo list systematically
 - **During work**: Use `/constraint-check` to ensure patterns are followed
-- **After completion**: Use `/code-review` to verify quality
+- **After completion**: Use `/review-commit` for pre-commit checks or `/review-branch` for comprehensive review
 - **End of session**: Use `/note-to-future-self` to document progress
 
 The goal is capturing concrete next steps from discussions and making them trackable in the agent's internal todo system.

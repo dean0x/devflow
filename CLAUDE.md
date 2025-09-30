@@ -8,7 +8,7 @@ DevFlow transforms your coding environment into an intelligence-augmented worksp
 
 - **Audit Commands** - Deep analysis of code quality, security, performance, and architecture
 - **Session Management** - Status tracking and context preservation across coding sessions
-- **Agent Accountability** - Tools to verify AI agent work and rollback problematic changes
+- **Agent Accountability** - Tools to verify AI agent work
 - **Development Intelligence** - Smart statusline, dependency analysis, and workflow optimization
 
 ## Philosophy
@@ -25,7 +25,9 @@ DevFlow bridges the gap between AI capability and development reliability.
 ## Core Components
 
 ### 📊 Audit Suite
-Comprehensive code analysis commands:
+Comprehensive code analysis available as both commands and specialized sub-agents:
+
+**Commands** (Slash Commands):
 - `/audit-tests` - Verify test quality and catch fake/tautological tests
 - `/audit-security` - Scan for vulnerabilities, secrets, and security issues
 - `/audit-performance` - Find N+1 queries, memory leaks, and bottlenecks
@@ -34,12 +36,22 @@ Comprehensive code analysis commands:
 - `/audit-database` - Review schemas, queries, and database design
 - `/audit-architecture` - Detect anti-patterns and structural issues
 
+**Sub-Agents** (Specialized AI Assistants):
+- `audit-security` - Expert security vulnerability detection specialist
+- `audit-performance` - Performance optimization and bottleneck specialist
+- `audit-architecture` - Software architecture and design pattern specialist
+- `audit-database` - Database design and optimization specialist
+- `audit-dependencies` - Dependency management and security specialist
+- `audit-complexity` - Code complexity and maintainability specialist
+- `audit-tests` - Test quality and coverage analysis specialist
+- `forensic-analysis` - AI agent accountability and forensic analysis specialist
+
 ### 🤖 Agent Management
 Tools for working safely with AI agents:
-- `/agent-review` - Forensic analysis of what agents actually did vs claimed
-- `/rollback` - Surgical rollback of AI changes when things go wrong
+- `/forensic-analysis` - Forensic analysis of what agents actually did vs claimed
 - `/constraint-check` - Verify agents follow your rules and patterns
-- `/code-review` - Comprehensive review of recent changes
+- `/review-commit` - Review uncommitted changes before committing
+- `/review-branch` - Comprehensive branch review for PR readiness
 
 ### 📝 Session Intelligence
 Context preservation and handoff tools:
@@ -51,28 +63,64 @@ Context preservation and handoff tools:
 - **Adaptive Statusline** - Shows model, git state, session duration, cost
 - **Structured Documentation** - Organized status tracking in `.docs/`
 
+### 📊 Smart Statusline
+Intelligent project context display:
+- **Real-time Status** - Shows project context, git status, session metrics
+- **Cost Tracking** - Displays session cost and duration
+- **Git Integration** - Current branch, uncommitted changes indicator
+- **Zero Configuration** - Works immediately after installation
+
 ## Installation & Setup
 
-### 1. Copy Commands to Global Context
-```bash
-# Copy all commands to your global Claude Code commands directory
-cp -r commands/* ~/.claude/commands/
+### Claude Code Installation
 
-# Copy settings
-cp settings.json ~/.claude/settings.json
+DevFlow is designed specifically for Claude Code with a clean, organized structure:
 
-# Copy statusline script
-cp statusline.sh ~/.claude/statusline.sh
-chmod +x ~/.claude/statusline.sh
+```
+devflow/
+├── cli/                     # CLI source code
+│   ├── commands/              # CLI command implementations
+│   │   └── init.ts              # Init command
+│   └── cli.ts                 # CLI entry point
+├── src/                     # DevFlow source files
+│   ├── agents/                # AI sub-agents
+│   ├── commands/              # Slash command definitions
+│   ├── scripts/               # DevFlow scripts
+│   │   └── statusline.sh        # Smart statusline script
+│   └── settings.json          # Unified Claude Code settings (statusline, model)
+├── package.json             # Node.js package configuration
+└── tsconfig.json            # TypeScript configuration
 ```
 
-### 2. Initialize Project Documentation
+### Installation
+```bash
+# Install dependencies and build
+npm install
+npm run build
+
+# Run the CLI to install DevFlow
+node dist/cli.js init
+
+# Or use npx for global installation
+npm install -g .
+devflow init
+```
+
+The `devflow init` command automatically:
+- Copies commands from `src/commands/` to `~/.claude/commands/`
+- Copies agents from `src/agents/` to `~/.claude/agents/`
+- Copies scripts from `src/scripts/` to `~/.devflow/scripts/`
+- Installs unified settings from `src/settings.json` to `~/.claude/settings.json`
+- Configures smart statusline
+- Optionally creates `.docs/` project structure (use `--skip-docs` to skip)
+
+### 3. Initialize Project Documentation
 ```bash
 # Create documentation structure in your project
-mkdir -p .docs/{status/compact,reviews,audits,rollbacks}
+mkdir -p .docs/{status/compact,reviews,audits}
 ```
 
-### 3. First Run
+### 4. First Run
 ```bash
 # Document your current project state
 /note-to-future-self
@@ -80,6 +128,40 @@ mkdir -p .docs/{status/compact,reviews,audits,rollbacks}
 # Run an audit to establish baseline
 /audit-architecture
 ```
+
+## Using Sub-Agents
+
+### Commands vs Sub-Agents
+DevFlow provides both **slash commands** and **specialized sub-agents** for flexibility:
+
+**Slash Commands** (`/audit-security`):
+- Quick, direct execution
+- Immediate results in current context
+- Good for spot checks and manual audits
+
+**Sub-Agents** (`audit-security`):
+- Specialized AI assistants with deep expertise
+- Separate context windows for focused analysis
+- Ideal for complex, multi-step investigations
+- Can be invoked automatically by orchestrator commands
+
+### Invoking Sub-Agents
+```bash
+# Explicit invocation
+"Use the audit-security sub-agent to analyze this authentication code"
+
+# Automatic delegation
+"Review this code for security issues" # May automatically use audit-security sub-agent
+
+# Multiple sub-agents
+"Analyze this database code" # May invoke both audit-database and audit-performance
+```
+
+### Sub-Agent Configuration
+Sub-agents are configured in `.claude/agents/` and included in your project setup. Each sub-agent has:
+- Specialized expertise and system prompts
+- Restricted tool access appropriate to their domain
+- Focused analysis capabilities
 
 ## Development Workflow
 
@@ -89,18 +171,18 @@ mkdir -p .docs/{status/compact,reviews,audits,rollbacks}
 3. **Plan work**: Review recommended next actions from catch-up summary
 
 ### During Development
-1. **Verify AI work**: Use `/agent-review` after significant AI changes
+1. **Verify AI work**: Use `/forensic-analysis` or `forensic-analysis` sub-agent after significant AI changes
 2. **Check constraints**: Run `/constraint-check` to ensure patterns are followed
-3. **Monitor quality**: Run relevant audit commands as you work
+3. **Monitor quality**: Run relevant audit commands or invoke specialized sub-agents
 
 ### Ending a Session
 1. **Document progress**: `/note-to-future-self` - Capture decisions and state
-2. **Review changes**: `/code-review` for final quality check
+2. **Review changes**: `/review-commit` for pre-commit checks, `/review-branch` for comprehensive PR review
 3. **Commit safely**: Only after verification and documentation
 
 ### When Things Go Wrong
-1. **Emergency rollback**: `/rollback` to undo problematic AI changes
-2. **Analyze failure**: `/agent-review` to understand what went wrong
+1. **Analyze failure**: `/forensic-analysis` to understand what went wrong
+2. **Review changes**: Use git to review and revert if needed
 3. **Document lessons**: Update constraints and patterns
 
 ## Environment Integration
@@ -114,10 +196,10 @@ mkdir -p .docs/{status/compact,reviews,audits,rollbacks}
 ### Development Loop
 ```bash
 # 1. Modify command in devflow repo
-vim devflow/commands/audit-tests.md
+vim devflow/src/commands/audit-tests.md
 
-# 2. Copy to global context for testing
-cp devflow/commands/audit-tests.md ~/.claude/commands/
+# 2. Reinstall to global context for testing
+node dist/cli.js init
 
 # 3. Test immediately
 /audit-tests
@@ -208,10 +290,10 @@ This toolkit grows through usage. As you encounter new AI agent issues, add comm
 | `/catch-up` | Review recent work | Starting a session |
 | `/note-to-future-self` | Document session | Ending a session |
 | `/audit-*` | Code quality analysis | Before major commits |
-| `/agent-review` | Verify AI work | After AI makes changes |
-| `/rollback` | Undo AI changes | When AI breaks things |
+| `/forensic-analysis` | Verify AI work | After AI makes changes |
 | `/constraint-check` | Verify compliance | During development |
-| `/code-review` | Comprehensive review | Before releasing |
+| `/review-commit` | Pre-commit review | Before committing |
+| `/review-branch` | Comprehensive PR review | Before releasing |
 
 ## Support
 
@@ -219,7 +301,7 @@ This toolkit is designed to be self-documenting and self-improving. When you enc
 
 1. Check the command documentation
 2. Review recent status documents
-3. Use `/agent-review` to understand what happened
+3. Use `/forensic-analysis` to understand what happened
 4. Improve the tools based on your experience
 
 The best way to get support is to make the tools better.

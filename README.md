@@ -1,294 +1,122 @@
 # DevFlow - Agentic Development Toolkit
 
-> Intelligent tools for reliable AI-assisted development
+A comprehensive collection of Claude Code commands and configurations designed to enhance developer workflows when working with AI coding assistants.
 
 ## Quick Start
 
 ```bash
-# Install to your Claude Code environment
-./install.sh
+# 1. Install dependencies
+npm install
 
-# Start using immediately
-/catch-up           # Review recent work
-/audit-architecture # Analyze your codebase
-/note-to-future-self # Document your session
+# 2. Build the CLI
+npm run build
+
+# 3. Install DevFlow for Claude Code
+node dist/cli.js init
+
+# Or install globally
+npm install -g .
+devflow init
 ```
 
-## What is DevFlow?
+## What's Included
 
-DevFlow is a comprehensive toolkit for developers working with AI coding assistants like Claude Code. It provides:
+### 📊 Audit Commands
+Deep analysis of code quality, security, performance, and architecture:
+- `/audit-security` - Security vulnerabilities and secrets scanning
+- `/audit-performance` - N+1 queries, memory leaks, bottlenecks
+- `/audit-architecture` - Anti-patterns and structural issues
+- `/audit-tests` - Test quality and fake test detection
+- `/audit-dependencies` - Package health and vulnerabilities
+- `/audit-complexity` - Code maintainability metrics
+- `/audit-database` - Database design and optimization
 
-- **🔍 Deep Code Audits** - Security, performance, architecture, and quality analysis
-- **🤖 AI Agent Management** - Verification, rollback, and constraint checking
-- **📝 Session Intelligence** - Context preservation and smart handoffs
-- **⚙️ Smart Configuration** - Adaptive statusline and workflow optimization
+### 🤖 Agent Management
+Tools for working safely with AI agents:
+- `/forensic-analysis` - Verify what AI agents actually did vs claimed
+- `/constraint-check` - Verify agents follow your rules and patterns
+- `/review-commit` - Review uncommitted changes before committing
+- `/review-branch` - Comprehensive branch review for PR readiness
 
-## The Problem
+### 📝 Session Intelligence
+Context preservation and handoff tools:
+- `/note-to-future-self` - Comprehensive session documentation
+- `/catch-up` - Smart summaries for starting new sessions
+- `/plan-next-steps` - Extract actionable next steps
 
-AI coding assistants are powerful but unpredictable:
-- They make subtle mistakes that look correct
-- They claim to complete tasks when they don't
-- They ignore constraints and architectural patterns
-- Context is lost between sessions
+### 📊 Smart Statusline
+Real-time project context display showing:
+- Current model and session duration
+- Git branch and uncommitted changes indicator
+- Session cost tracking
+- Project context
 
-## The Solution
+## CLI Commands
 
-DevFlow provides the missing reliability layer:
-- **Verification tools** to catch AI mistakes
-- **Rollback capabilities** when things go wrong
-- **Context preservation** across sessions
-- **Quality gates** for AI-generated code
+### `devflow init`
+Initialize DevFlow for Claude Code. Copies commands, agents, scripts, and settings to your Claude Code configuration.
 
-## Installation
+**Options:**
+- `--skip-docs` - Skip creating `.docs/` structure
 
-### Option 1: Automatic Install
+**Example:**
 ```bash
-chmod +x install.sh
-./install.sh
+# Standard installation
+devflow init
+
+# Skip project documentation setup
+devflow init --skip-docs
 ```
-
-### Option 2: Manual Setup
-```bash
-# Copy commands
-cp -r commands/* ~/.claude/commands/
-
-# Copy configuration
-cp config/settings.json ~/.claude/settings.json
-cp config/statusline.sh ~/.claude/statusline.sh
-chmod +x ~/.claude/statusline.sh
-
-# Initialize project docs
-mkdir -p .docs/{status/compact,reviews,audits,rollbacks}
-```
-
-## Core Commands
-
-### 📊 Audit Suite
-| Command | Purpose | Output |
-|---------|---------|---------|
-| `/audit-tests` | Verify test quality | Finds fake/tautological tests |
-| `/audit-security` | Security analysis | Vulnerabilities, secrets, injections |
-| `/audit-performance` | Performance review | N+1 queries, memory leaks, bottlenecks |
-| `/audit-dependencies` | Package analysis | Vulnerable, bloated, abandoned packages |
-| `/audit-complexity` | Code complexity | Cognitive load, duplication, maintainability |
-| `/audit-database` | Database review | Schema issues, query problems, missing indexes |
-| `/audit-architecture` | Structural analysis | Anti-patterns, violations, design issues |
-
-### 🤖 AI Agent Management
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| `/agent-review` | Forensic analysis of AI work | After AI makes significant changes |
-| `/rollback` | Undo problematic changes | When AI breaks something |
-| `/constraint-check` | Verify rule compliance | During development |
-| `/code-review` | Comprehensive review | Before commits/releases |
-
-### 📝 Session Management
-| Command | Purpose | Workflow |
-|---------|---------|----------|
-| `/catch-up` | Review recent work | **Start** of session |
-| `/note-to-future-self` | Document progress | **End** of session |
-
-## Example Workflow
-
-### Starting a New Session
-```bash
-# Get oriented on recent work
-/catch-up
-
-# Check current project health
-/audit-architecture
-
-# Review what AI agents have been doing
-/agent-review
-```
-
-### During Development
-```bash
-# After AI makes changes, verify them
-/agent-review
-
-# Check if architectural patterns are followed
-/constraint-check
-
-# Run targeted audits as needed
-/audit-security
-/audit-performance
-```
-
-### Ending a Session
-```bash
-# Document what was accomplished
-/note-to-future-self
-
-# Final code review
-/code-review
-
-# Commit only after verification
-git add .
-git commit -m "Feature: user authentication
-
-✅ Verified with agent-review
-✅ Passed constraint-check
-✅ Security audit clean"
-```
-
-### When Things Go Wrong
-```bash
-# Emergency: undo AI changes
-/rollback
-
-# Analyze what happened
-/agent-review
-
-# Update constraints to prevent recurrence
-vim ~/.claude/commands/constraint-check.md
-```
-
-## Smart Statusline
-
-The included statusline shows real-time context:
-
-```
-workspace / main (add user auth) / 2h45m / api:15% / $3.47 / Sonnet 4
-```
-
-- **Directory + Git**: Current location and branch
-- **Last Commit**: Recent work context
-- **Session Duration**: How long you've been working
-- **API Efficiency**: Time spent waiting for AI responses
-- **Cost Tracking**: Session expenses
-- **Model**: Which AI you're using
 
 ## Project Structure
 
 ```
 devflow/
-├── CLAUDE.md              # Main documentation
-├── README.md              # Quick reference
-├── install.sh             # Installation script
-├── commands/              # All Claude Code commands
-│   ├── audit-tests.md
-│   ├── audit-security.md
-│   ├── agent-review.md
-│   ├── rollback.md
-│   ├── catch-up.md
-│   └── note-to-future-self.md
-└── config/
-    ├── settings.json      # Claude Code settings
-    └── statusline.sh      # Smart statusline script
+├── cli/                     # CLI source code
+│   ├── commands/              # CLI command implementations
+│   └── cli.ts                 # CLI entry point
+├── src/                     # DevFlow source files
+│   ├── agents/                # AI sub-agents
+│   ├── commands/              # Slash command definitions
+│   ├── scripts/               # DevFlow scripts
+│   └── settings.json          # Claude Code settings
+├── package.json             # Node.js package
+└── tsconfig.json            # TypeScript config
 ```
 
-## Development Workflow
+## Development
 
-This repo follows a unique development pattern:
-
-1. **Modify** commands in `devflow/commands/`
-2. **Copy** to global context: `cp devflow/commands/new-cmd.md ~/.claude/commands/`
-3. **Test** immediately with `/new-cmd`
-4. **Iterate** until satisfied
-5. **Commit** to devflow repo
-
-This ensures all tools are continuously dogfooded and improved.
-
-## Command Design Philosophy
-
-### Brutal Honesty
-Commands expose the truth, not what you want to hear:
-- Security audits find real vulnerabilities
-- Performance audits reveal actual bottlenecks
-- Agent reviews catch AI deception
-
-### Actionable Output
-Every audit provides:
-- **Specific problems** with file/line references
-- **Clear severity** levels (Critical/High/Medium/Low)
-- **Concrete fixes** with code examples
-- **Cost estimates** for remediation
-
-### Context Preservation
-Creates historical records:
-- Decisions and rationale
-- Problems and solutions
-- Architecture evolution
-- AI agent interaction lessons
-
-## Advanced Usage
-
-### Custom Rules
-Extend commands for your project:
 ```bash
-# Add project-specific security rules
-echo "grep -r 'mySecretPattern' --include='*.js'" >> ~/.claude/commands/audit-security.md
+# Install dependencies
+npm install
+
+# Build TypeScript
+npm run build
+
+# Watch mode for development
+npm run dev
+
+# Test CLI locally
+node dist/cli.js init
 ```
 
-### CI/CD Integration
-```bash
-# Generate reports for pipeline
-/audit-security --format=json > security-report.json
-/audit-dependencies --format=json > deps-report.json
-```
+## Philosophy
 
-### Team Collaboration
-```bash
-# Share session context with team
-/note-to-future-self
-git add .docs/status/
-git commit -m "Session: completed user auth backend"
-```
+Modern development increasingly involves AI agents that can read, write, and modify code autonomously. DevFlow provides:
 
-## Contributing
+- **Trust but Verify** - Tools to catch AI agent mistakes
+- **Context Preservation** - Memory across long-term projects
+- **Quality Gates** - Automated checks for AI changes
+- **Developer Empowerment** - Enhance human judgment, not replace it
 
-This toolkit improves through usage:
+## Documentation
 
-1. **Encounter new AI issues?** → Add commands to handle them
-2. **Find better patterns?** → Codify them into tools
-3. **Discover edge cases?** → Update audit logic
-4. **Learn new lessons?** → Document in session tools
-
-The goal is reliable, high-quality development with AI assistance.
-
-## Examples
-
-### Catching AI Mistakes
-```bash
-$ /agent-review
-❌ LIES DETECTED
-1. Agent claimed to "fix authentication" - Actually broke it worse
-2. Said "all tests passing" - Never ran tests
-3. Claimed "improved performance" - Added sleep(5000)
-
-📊 Statistics
-- Files Modified: 47
-- Files Actually Improved: 3
-- Files Made Worse: 28
-```
-
-### Security Audit
-```bash
-$ /audit-security
-🚨 CRITICAL VULNERABILITIES
-1. HARDCODED AWS CREDENTIALS - config/aws.js:14
-2. SQL INJECTION - routes/auth.js:45
-3. NO AUTHENTICATION ON ADMIN ROUTES
-```
-
-### Session Handoff
-```bash
-$ /catch-up
-🚀 WHERE WE LEFT OFF
-Last Session: Added user authentication (60% complete)
-Next Priority: Implement signup flow
-Blockers: Session timeout bug in auth.js:89
-```
+See [CLAUDE.md](./CLAUDE.md) for comprehensive documentation including:
+- Detailed command descriptions
+- Sub-agent system architecture
+- Development workflow patterns
+- Command design principles
 
 ## License
 
-MIT - Use freely, improve constantly
-
-## Support
-
-The best support is making the tools better. When you find issues:
-1. Check command documentation
-2. Use `/agent-review` to analyze problems
-3. Improve the tools based on experience
-4. Share improvements with the community
+MIT

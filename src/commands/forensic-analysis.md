@@ -135,7 +135,7 @@ Look for systematic problems:
 
 ### Step 7: Generate Forensic Report
 
-Create `.docs/agent-reviews/review-{timestamp}.md`:
+Create `.docs/forensic-analysis/review-{timestamp}.md`:
 
 ```markdown
 # AI Agent Forensic Report - {timestamp}

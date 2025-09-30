@@ -1,0 +1,30 @@
+{
+  "name": "devflow",
+  "version": "1.0.0",
+  "description": "Agentic Development Toolkit for Claude Code",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "devflow": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "cli": "node dist/cli.js"
+  },
+  "keywords": [
+    "claude",
+    "ai",
+    "development",
+    "toolkit"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}

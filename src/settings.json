@@ -1,7 +1,7 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline.sh"
+    "command": "~/.devflow/scripts/statusline.sh"
   },
   "model": "opusplan"
 }
