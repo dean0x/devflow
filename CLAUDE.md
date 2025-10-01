@@ -275,7 +275,7 @@ echo "Additional pattern: check for exposed API keys in config files" >> ~/.clau
 ### Team Usage
 ```bash
 # Share status with team
-/note-to-future-self
+/devlog
 git add .docs/status/
 git commit -m "Session status: completed user auth feature"
 ```
