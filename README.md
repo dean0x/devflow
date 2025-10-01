@@ -45,9 +45,7 @@ devflow init
 - `audit-database` - Database design and optimization review
 
 **Workflow Specialists:**
-- `pre-commit` - Comprehensive pre-commit review orchestrator
-- `pre-pr` - Branch review and PR readiness assessment
-- `catch-up` - Project status and context restoration
+- `catch-up` - Project status and context restoration with validation
 - `commit` - Intelligent commit creation with safety checks
 
 ### 📊 Smart Statusline
@@ -57,10 +55,24 @@ Real-time project context display showing:
 - Session cost tracking
 - Project context
 
+### 🔒 Security & Token Optimization
+DevFlow automatically creates a comprehensive `.claudeignore` file to:
+- **Protect sensitive files** - Prevents exposure of credentials, keys, and secrets
+- **Reduce token usage** - Excludes build artifacts, dependencies, and non-essential files
+- **Support all languages** - Covers patterns for Node.js, Python, Ruby, Go, Rust, Java, and more
+
 ## CLI Commands
 
 ### `devflow init`
-Initialize DevFlow for Claude Code. Copies commands, agents, scripts, and settings to your Claude Code configuration.
+Initialize DevFlow for Claude Code. Installs commands, agents, scripts, and settings to your Claude Code configuration. Also creates security and optimization files.
+
+**What it does:**
+- Installs commands to `~/.claude/commands/devflow/`
+- Installs sub-agents to `~/.claude/agents/devflow/`
+- Installs scripts to `~/.devflow/scripts/`
+- Installs settings to `~/.claude/settings.json`
+- Creates `.claudeignore` at git repository root (if in git repo)
+- Creates `.docs/` structure for project documentation
 
 **Options:**
 - `--skip-docs` - Skip creating `.docs/` structure

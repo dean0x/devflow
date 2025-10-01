@@ -48,14 +48,13 @@ DevFlow bridges the gap between AI capability and development reliability.
 - `audit-database` - Database design and optimization review
 
 **Workflow Specialists:**
-- `pre-commit` - Comprehensive pre-commit review orchestrator
-- `pre-pr` - Branch review and PR readiness assessment
 - `catch-up` - Project status and context restoration with validation
 - `commit` - Intelligent commit creation with safety checks
 
 ### ⚙️ Configuration
 - **Adaptive Statusline** - Shows model, git state, session duration, cost
 - **Structured Documentation** - Organized status tracking in `.docs/`
+- **Security & Optimization** - Automatic `.claudeignore` for sensitive files and token efficiency
 
 ### 📊 Smart Statusline
 Intelligent project context display:
@@ -63,6 +62,25 @@ Intelligent project context display:
 - **Cost Tracking** - Displays session cost and duration
 - **Git Integration** - Current branch, uncommitted changes indicator
 - **Zero Configuration** - Works immediately after installation
+
+### 🔒 .claudeignore Security & Optimization
+DevFlow automatically creates a comprehensive `.claudeignore` file to protect your codebase:
+
+**Security Protection:**
+- **Environment files** - `.env`, `.env.*`, `.envrc`
+- **Credentials & Keys** - `*.key`, `*.pem`, `id_rsa`, SSH keys
+- **Cloud configs** - `.aws/`, `.gcp/`, `.azure/` credentials
+- **Package configs** - `.npmrc`, `.pypirc` with tokens
+- **Database files** - `*.sql`, `*.db` with potential data
+
+**Token Optimization:**
+- **Dependencies** - `node_modules/`, `vendor/`, `venv/` (saves thousands of tokens)
+- **Build artifacts** - `dist/`, `build/`, `.next/` output
+- **IDE files** - `.vscode/`, `.idea/` settings
+- **Lock files** - `package-lock.json`, `yarn.lock` (rarely needed for context)
+- **Large files** - Media, archives, binaries
+
+The `.claudeignore` is created at your git repository root and covers patterns for all major languages and operating systems.
 
 ## Installation & Setup
 
@@ -106,6 +124,7 @@ The `devflow init` command automatically:
 - Copies agents from `src/claude/agents/devflow/` to `~/.claude/agents/devflow/`
 - Copies scripts from `src/claude/scripts/` to `~/.devflow/scripts/`
 - Installs unified settings from `src/claude/settings.json` to `~/.claude/settings.json`
+- Creates `.claudeignore` at git repository root for security and token efficiency
 - Configures smart statusline
 - Optionally creates `.docs/` project structure (use `--skip-docs` to skip)
 
@@ -120,8 +139,8 @@ mkdir -p .docs/{status/compact,reviews,audits}
 # Document your current project state
 /note-to-future-self
 
-# Run an audit to establish baseline
-/audit-architecture
+# Get oriented with the project
+/catch-up
 ```
 
 ## Using Sub-Agents
@@ -129,10 +148,10 @@ mkdir -p .docs/{status/compact,reviews,audits}
 ### Commands vs Sub-Agents
 DevFlow provides both **slash commands** and **specialized sub-agents** for flexibility:
 
-**Slash Commands** (`/audit-security`):
+**Slash Commands** (`/pre-commit`, `/catch-up`):
 - Quick, direct execution
 - Immediate results in current context
-- Good for spot checks and manual audits
+- Good for workflow orchestration and session management
 
 **Sub-Agents** (`audit-security`):
 - Specialized AI assistants with deep expertise

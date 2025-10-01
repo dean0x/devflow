@@ -327,7 +327,7 @@ Pipfile.lock
       console.log('🚀 QUICK START:');
       console.log('  1. Navigate to a project directory');
       console.log('  2. Run \'/catch-up\' to get oriented');
-      console.log('  3. Use \'/audit-security\' or other commands to analyze code');
+      console.log('  3. Use \'/pre-commit\' to review uncommitted changes');
       console.log('  4. Run \'/note-to-future-self\' to document sessions\n');
       console.log('📚 DOCUMENTATION:');
       console.log('  • Read CLAUDE.md for comprehensive guide');
