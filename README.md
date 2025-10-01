@@ -21,28 +21,34 @@ devflow init
 
 ## What's Included
 
-### 📊 Audit Commands
-Deep analysis of code quality, security, performance, and architecture:
-- `/audit-security` - Security vulnerabilities and secrets scanning
-- `/audit-performance` - N+1 queries, memory leaks, bottlenecks
-- `/audit-architecture` - Anti-patterns and structural issues
-- `/audit-tests` - Test quality and fake test detection
-- `/audit-dependencies` - Package health and vulnerabilities
-- `/audit-complexity` - Code maintainability metrics
-- `/audit-database` - Database design and optimization
+### 📊 Slash Commands
 
-### 🤖 Agent Management
-Tools for working safely with AI agents:
-- `/forensic-analysis` - Verify what AI agents actually did vs claimed
-- `/constraint-check` - Verify agents follow your rules and patterns
-- `/review-commit` - Review uncommitted changes before committing
-- `/review-branch` - Comprehensive branch review for PR readiness
+**Code Review & Quality:**
+- `/pre-commit` - Review uncommitted changes before committing
+- `/pre-pr` - Comprehensive branch review for PR readiness
+- `/commit` - Intelligent atomic commits with safety checks
 
-### 📝 Session Intelligence
-Context preservation and handoff tools:
-- `/note-to-future-self` - Comprehensive session documentation
+**Session Management:**
 - `/catch-up` - Smart summaries for starting new sessions
-- `/plan-next-steps` - Extract actionable next steps
+- `/note-to-future-self` - Comprehensive session documentation
+- `/plan-next-steps` - Extract actionable next steps from discussion
+
+### 🤖 Sub-Agents
+
+**Audit Specialists:**
+- `audit-security` - Security vulnerability detection and analysis
+- `audit-performance` - Performance optimization and bottleneck detection
+- `audit-architecture` - Software architecture and design pattern analysis
+- `audit-tests` - Test quality and coverage analysis
+- `audit-dependencies` - Dependency management and security analysis
+- `audit-complexity` - Code complexity and maintainability assessment
+- `audit-database` - Database design and optimization review
+
+**Workflow Specialists:**
+- `pre-commit` - Comprehensive pre-commit review orchestrator
+- `pre-pr` - Branch review and PR readiness assessment
+- `catch-up` - Project status and context restoration
+- `commit` - Intelligent commit creation with safety checks
 
 ### 📊 Smart Statusline
 Real-time project context display showing:

@@ -63,10 +63,15 @@ git branch --show-current 2>/dev/null
 git status --short 2>/dev/null
 
 # Recent file changes
-find . -type f -mtime -1 -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null | head -20
+find . -type f -mtime -1 -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/venv/*" -not -path "*/target/*" -not -path "*/build/*" 2>/dev/null | head -20
 
-# Check for TODO/FIXME comments
-grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" --include="*.py" --include="*.go" --include="*.java" -l 2>/dev/null | head -10
+# Check for TODO/FIXME comments across common source file extensions
+grep -r "TODO\|FIXME\|HACK\|XXX" \
+  --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" \
+  --include="*.py" --include="*.go" --include="*.rs" --include="*.java" \
+  --include="*.c" --include="*.cpp" --include="*.h" --include="*.hpp" \
+  --include="*.rb" --include="*.php" --include="*.swift" --include="*.kt" \
+  -l 2>/dev/null | head -10
 ```
 
 ### Step 5: Check Documentation
@@ -136,10 +141,10 @@ Create `.docs/status/{timestamp}.md` with the following structure:
    - Impact: {How it affects the codebase}
 
 ### Technology Stack
-- **Language**: {Primary language}
-- **Framework**: {Main framework}
-- **Database**: {If applicable}
-- **Key Dependencies**: {Critical libraries}
+- **Language**: {Primary programming language}
+- **Framework**: {Main framework or runtime}
+- **Data Storage**: {Database or storage system}
+- **Key Dependencies**: {Critical libraries or packages}
 
 ### Design Patterns in Use
 - {Pattern 1}: {Where and why}

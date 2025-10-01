@@ -24,40 +24,34 @@ DevFlow bridges the gap between AI capability and development reliability.
 
 ## Core Components
 
-### 📊 Audit Suite
-Comprehensive code analysis available as both commands and specialized sub-agents:
+### 📊 Slash Commands
 
-**Commands** (Slash Commands):
-- `/audit-tests` - Verify test quality and catch fake/tautological tests
-- `/audit-security` - Scan for vulnerabilities, secrets, and security issues
-- `/audit-performance` - Find N+1 queries, memory leaks, and bottlenecks
-- `/audit-dependencies` - Analyze package health, vulnerabilities, and bloat
-- `/audit-complexity` - Measure cognitive load and code maintainability
-- `/audit-database` - Review schemas, queries, and database design
-- `/audit-architecture` - Detect anti-patterns and structural issues
+**Code Review & Quality:**
+- `/pre-commit` - Review uncommitted changes before committing using specialized sub-agents
+- `/pre-pr` - Comprehensive branch review for PR readiness assessment
+- `/commit` - Intelligent atomic commit creation with safety checks and clean git history
 
-**Sub-Agents** (Specialized AI Assistants):
-- `audit-security` - Expert security vulnerability detection specialist
-- `audit-performance` - Performance optimization and bottleneck specialist
-- `audit-architecture` - Software architecture and design pattern specialist
-- `audit-database` - Database design and optimization specialist
-- `audit-dependencies` - Dependency management and security specialist
-- `audit-complexity` - Code complexity and maintainability specialist
-- `audit-tests` - Test quality and coverage analysis specialist
-- `forensic-analysis` - AI agent accountability and forensic analysis specialist
+**Session Management:**
+- `/catch-up` - Smart summaries for starting new sessions with status validation
+- `/note-to-future-self` - Comprehensive session documentation and context preservation
+- `/plan-next-steps` - Extract actionable next steps from current discussion
 
-### 🤖 Agent Management
-Tools for working safely with AI agents:
-- `/forensic-analysis` - Forensic analysis of what agents actually did vs claimed
-- `/constraint-check` - Verify agents follow your rules and patterns
-- `/review-commit` - Review uncommitted changes before committing
-- `/review-branch` - Comprehensive branch review for PR readiness
+### 🤖 Sub-Agents
 
-### 📝 Session Intelligence
-Context preservation and handoff tools:
-- `/note-to-future-self` - Comprehensive session documentation
-- `/catch-up` - Smart summaries for starting new sessions
-- **Smart Statusline** - Real-time project context display
+**Audit Specialists:**
+- `audit-security` - Expert security vulnerability detection and analysis
+- `audit-performance` - Performance optimization and bottleneck detection
+- `audit-architecture` - Software architecture and design pattern analysis
+- `audit-tests` - Test quality and coverage analysis
+- `audit-dependencies` - Dependency management and security analysis
+- `audit-complexity` - Code complexity and maintainability assessment
+- `audit-database` - Database design and optimization review
+
+**Workflow Specialists:**
+- `pre-commit` - Comprehensive pre-commit review orchestrator
+- `pre-pr` - Branch review and PR readiness assessment
+- `catch-up` - Project status and context restoration with validation
+- `commit` - Intelligent commit creation with safety checks
 
 ### ⚙️ Configuration
 - **Adaptive Statusline** - Shows model, git state, session duration, cost
@@ -172,19 +166,19 @@ Sub-agents are configured in `.claude/agents/` and included in your project setu
 3. **Plan work**: Review recommended next actions from catch-up summary
 
 ### During Development
-1. **Verify AI work**: Use `/forensic-analysis` or `forensic-analysis` sub-agent after significant AI changes
-2. **Check constraints**: Run `/constraint-check` to ensure patterns are followed
-3. **Monitor quality**: Run relevant audit commands or invoke specialized sub-agents
+1. **Review changes**: Use `/pre-commit` for quick review before committing
+2. **Create commits**: Use `/commit` for intelligent atomic commits with safety checks
+3. **Monitor quality**: Invoke specialized audit sub-agents as needed
 
 ### Ending a Session
 1. **Document progress**: `/note-to-future-self` - Capture decisions and state
-2. **Review changes**: `/review-commit` for pre-commit checks, `/review-branch` for comprehensive PR review
-3. **Commit safely**: Only after verification and documentation
+2. **Review changes**: `/pre-commit` for uncommitted changes, `/pre-pr` for branch review
+3. **Commit safely**: Use `/commit` for intelligent, atomic commits with validation
 
 ### When Things Go Wrong
-1. **Analyze failure**: `/forensic-analysis` to understand what went wrong
-2. **Review changes**: Use git to review and revert if needed
-3. **Document lessons**: Update constraints and patterns
+1. **Review history**: Check git log and recent commits
+2. **Revert changes**: Use git to review and revert if needed
+3. **Document lessons**: Update project documentation and constraints
 
 ## Environment Integration
 
@@ -196,17 +190,17 @@ Sub-agents are configured in `.claude/agents/` and included in your project setu
 
 ### Development Loop
 ```bash
-# 1. Modify command in devflow repo
-vim devflow/src/claude/commands/audit-tests.md
+# 1. Modify command or agent in devflow repo
+vim devflow/src/claude/commands/pre-commit.md
 
 # 2. Reinstall to global context for testing
 node dist/cli.js init
 
 # 3. Test immediately
-/audit-tests
+/pre-commit
 
 # 4. Iterate until satisfied
-# 5. Commit to devflow repo
+# 5. Commit to devflow repo using /commit
 ```
 
 ## Command Design Principles
@@ -241,17 +235,22 @@ Status and review commands create historical records:
 ## Advanced Usage
 
 ### Custom Audit Rules
-Extend audit commands for project-specific patterns:
+Extend audit sub-agents for project-specific patterns:
 ```bash
-# Add custom security rules
-echo "grep -r 'process.env.SECRET' --include='*.js'" >> ~/.claude/commands/audit-security.md
+# Add custom security rules to sub-agent
+echo "Additional pattern: check for exposed API keys in config files" >> ~/.claude/agents/audit-security.md
 ```
 
-### Integration with CI/CD
+### Integration with Workflow
 ```bash
-# Run critical audits in pipeline
-/audit-security --format=json > security-report.json
-/audit-dependencies --format=json > deps-report.json
+# Pre-commit review
+/pre-commit
+
+# Intelligent commits
+/commit
+
+# Branch review before PR
+/pre-pr
 ```
 
 ### Team Usage
@@ -290,19 +289,18 @@ This toolkit grows through usage. As you encounter new AI agent issues, add comm
 |---------|---------|-------------|
 | `/catch-up` | Review recent work | Starting a session |
 | `/note-to-future-self` | Document session | Ending a session |
-| `/audit-*` | Code quality analysis | Before major commits |
-| `/forensic-analysis` | Verify AI work | After AI makes changes |
-| `/constraint-check` | Verify compliance | During development |
-| `/review-commit` | Pre-commit review | Before committing |
-| `/review-branch` | Comprehensive PR review | Before releasing |
+| `/plan-next-steps` | Extract action items | After planning discussion |
+| `/pre-commit` | Review uncommitted changes | Before committing |
+| `/commit` | Create atomic commits | When ready to commit |
+| `/pre-pr` | Comprehensive branch review | Before creating PR |
 
 ## Support
 
 This toolkit is designed to be self-documenting and self-improving. When you encounter issues:
 
-1. Check the command documentation
-2. Review recent status documents
-3. Use `/forensic-analysis` to understand what happened
+1. Check the command documentation in `src/claude/commands/`
+2. Review sub-agent definitions in `src/claude/agents/`
+3. Review recent status documents in `.docs/status/`
 4. Improve the tools based on your experience
 
 The best way to get support is to make the tools better.

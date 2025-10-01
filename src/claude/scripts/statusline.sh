@@ -89,27 +89,27 @@ fi
 STATUS_LINE="\033[1;34m$DIR_NAME\033[0m$GIT_INFO"
 
 # Add session duration if meaningful
-if [ "$TOTAL_DURATION_MS" -gt 60000 ]; then  # > 1 minute
-    STATUS_LINE="$STATUS_LINE / \033[1;33m$SESSION_DURATION\033[0m"
-fi
+# if [ "$TOTAL_DURATION_MS" -gt 60000 ]; then  # > 1 minute
+#     STATUS_LINE="$STATUS_LINE \033[1;33m$SESSION_DURATION\033[0m"
+# fi
 
 # Add API efficiency if session is long enough and efficiency is notable
 if [ "$TOTAL_DURATION_MS" -gt 300000 ] && [ "$API_EFFICIENCY" -gt 10 ]; then  # > 5 min and >10% API time
-    STATUS_LINE="$STATUS_LINE / \033[1;91mapi:${API_EFFICIENCY}%\033[0m"
+    STATUS_LINE="$STATUS_LINE \033[1;91mapi:${API_EFFICIENCY}%\033[0m"
 fi
 
 # Add large context warning
 if [ "$EXCEEDS_200K" = "true" ]; then
-    STATUS_LINE="$STATUS_LINE / \033[1;93m⚠️large\033[0m"
+    STATUS_LINE="$STATUS_LINE \033[1;93m⚠️large\033[0m"
 fi
 
 # Add cost if non-zero and meaningful (> $0.01)
 COST_CENTS=$(echo "$TOTAL_COST" | awk '{printf "%.0f", $1*100}')
 if [ "$COST_CENTS" -gt 1 ]; then
-    STATUS_LINE="$STATUS_LINE / \033[1;32m\$$COST_FORMATTED\033[0m"
+    STATUS_LINE="$STATUS_LINE \033[1;32m\$$COST_FORMATTED\033[0m"
 fi
 
 # Add model at the end
-STATUS_LINE="$STATUS_LINE / \033[1;36m$MODEL\033[0m"
+# STATUS_LINE="$STATUS_LINE \033[1;36m$MODEL\033[0m"
 
 echo -e "$STATUS_LINE"

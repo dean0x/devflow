@@ -36,10 +36,10 @@ Analyze the current discussion and convert it into specific, actionable next ste
 Transform the extracted items into specific todo tasks that can be tracked:
 
 **Good todo items**:
-- ✅ "Add authentication middleware to Express routes in `/src/middleware/auth.js`"
-- ✅ "Write unit tests for user registration in `/tests/auth.test.js`"
-- ✅ "Install bcrypt dependency: `npm install bcrypt`"
-- ✅ "Research GraphQL schema design for user endpoints"
+- ✅ "Add authentication middleware to routes in `/src/middleware/auth`"
+- ✅ "Write unit tests for user registration in `/tests/auth_test`"
+- ✅ "Install password hashing library dependency"
+- ✅ "Research API schema design for user endpoints"
 - ✅ "Update README.md with new authentication setup instructions"
 
 **Bad todo items**:
@@ -60,22 +60,22 @@ Example todo structure:
 ```json
 [
   {
-    "content": "Install bcrypt dependency with npm install bcrypt",
+    "content": "Install password hashing library dependency",
     "status": "pending",
-    "activeForm": "Installing bcrypt dependency"
+    "activeForm": "Installing password hashing library"
   },
   {
-    "content": "Create authentication middleware in src/middleware/auth.js",
+    "content": "Create authentication middleware in src/middleware/auth",
     "status": "pending",
     "activeForm": "Creating authentication middleware"
   },
   {
-    "content": "Add password hashing to user registration in src/routes/users.js",
+    "content": "Add password hashing to user registration in src/routes/users",
     "status": "pending",
     "activeForm": "Adding password hashing to user registration"
   },
   {
-    "content": "Write unit tests for auth middleware in tests/auth.test.js",
+    "content": "Write unit tests for auth middleware in tests/auth_test",
     "status": "pending",
     "activeForm": "Writing unit tests for auth middleware"
   },
@@ -131,15 +131,15 @@ Based on our discussion, I've identified and saved these action items:
 
 ### Example 1: After Feature Discussion
 ```
-Human: "Add user authentication to our Express app"
+Human: "Add user authentication to our web application"
 AI: "I can help with that. What type of auth do you prefer?"
-Human: "JWT tokens, and we need password reset functionality"
-AI: "Got it. Should I use bcrypt for hashing?"
-Human: "Yes, and integrate with our existing PostgreSQL database"
-Developer: "/plan-next-steps"
+Human: "Token-based auth, and we need password reset functionality"
+AI: "Got it. Should I use a password hashing library?"
+Human: "Yes, and integrate with our existing database"
+Developer: "/standup"
 
 Result: AI extracts action items from discussion:
-- Install bcrypt and jsonwebtoken dependencies
+- Install password hashing and token libraries
 - Create user authentication middleware
 - Set up password reset email functionality
 - Create database migration for user auth tables
@@ -169,19 +169,19 @@ Result: AI creates specific action items:
 
 ### Example 3: After Planning Discussion
 ```
-Human: "I want to migrate our REST API to GraphQL"
+Human: "I want to migrate our REST API to a query-based API"
 AI: "That's a big change. Should we do it gradually?"
 Human: "Yes, start with user endpoints but keep REST for compatibility"
-AI: "I'll create a hybrid approach with both schemas."
-Developer: "/plan-next-steps"
+AI: "I'll create a hybrid approach with both API styles."
+Developer: "/standup"
 
 Result: AI saves implementation steps:
-- Install GraphQL dependencies (apollo-server-express)
-- Create GraphQL schema for user types
-- Implement user resolvers
-- Set up GraphQL endpoint alongside REST
-- Write integration tests for GraphQL API
-- Update documentation for new GraphQL endpoints
+- Install query API framework dependencies
+- Create API schema for user types
+- Implement user query resolvers
+- Set up query endpoint alongside REST
+- Write integration tests for new API
+- Update documentation for new endpoints
 
 📋 6 tasks added to internal todo list
 ```
@@ -210,19 +210,3 @@ Result: AI saves implementation steps:
 - 🎯 **Save**: Use TodoWrite to store in agent's todo list
 - 🎯 **Present**: Show what was captured for verification
 
----
-
-## Integration with DevFlow
-
-This command integrates with other DevFlow tools:
-
-- **After planning**: Agent can work through todo list systematically
-- **During work**: Use `/constraint-check` to ensure patterns are followed
-- **After completion**: Use `/review-commit` for pre-commit checks or `/review-branch` for comprehensive review
-- **End of session**: Use `/note-to-future-self` to document progress
-
-The goal is capturing concrete next steps from discussions and making them trackable in the agent's internal todo system.
-
----
-
-*This command embodies the DevFlow principle: "Turn discussion into action. Extract it, track it, do it."*
