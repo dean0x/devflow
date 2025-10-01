@@ -32,6 +32,13 @@ devflow init
 - `/catch-up` - Smart summaries for starting new sessions
 - `/devlog` - Development log for session documentation
 - `/plan-next-steps` - Extract actionable next steps from discussion
+- `/standup` - Generate daily standup report
+
+**Development Workflow:**
+- `/feature` - Complete feature development lifecycle
+- `/debug` - Systematic debugging workflow
+- `/release` - Production release preparation
+- `/onboard` - Project onboarding for new developers
 
 ### 🤖 Sub-Agents
 
