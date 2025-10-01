@@ -102,8 +102,8 @@ devflow init
 ```
 
 The `devflow init` command automatically:
-- Copies commands from `src/claude/commands/` to `~/.claude/commands/`
-- Copies agents from `src/claude/agents/` to `~/.claude/agents/`
+- Copies commands from `src/claude/commands/devflow/` to `~/.claude/commands/devflow/`
+- Copies agents from `src/claude/agents/devflow/` to `~/.claude/agents/devflow/`
 - Copies scripts from `src/claude/scripts/` to `~/.devflow/scripts/`
 - Installs unified settings from `src/claude/settings.json` to `~/.claude/settings.json`
 - Configures smart statusline
@@ -153,7 +153,7 @@ DevFlow provides both **slash commands** and **specialized sub-agents** for flex
 ```
 
 ### Sub-Agent Configuration
-Sub-agents are configured in `.claude/agents/` and included in your project setup. Each sub-agent has:
+Sub-agents are configured in `.claude/agents/devflow/` and included in your project setup. Each sub-agent has:
 - Specialized expertise and system prompts
 - Restricted tool access appropriate to their domain
 - Focused analysis capabilities
@@ -238,7 +238,7 @@ Status and review commands create historical records:
 Extend audit sub-agents for project-specific patterns:
 ```bash
 # Add custom security rules to sub-agent
-echo "Additional pattern: check for exposed API keys in config files" >> ~/.claude/agents/audit-security.md
+echo "Additional pattern: check for exposed API keys in config files" >> ~/.claude/agents/devflow/audit-security.md
 ```
 
 ### Integration with Workflow
@@ -266,7 +266,7 @@ git commit -m "Session status: completed user auth feature"
 ### Adding New Commands
 1. Create command in `devflow/commands/new-command.md`
 2. Follow existing patterns for structure and output
-3. Copy to `~/.claude/commands/` for testing
+3. Copy to `~/.claude/commands/devflow/` for testing
 4. Document in this README
 
 ### Improving Existing Commands
@@ -298,8 +298,8 @@ This toolkit grows through usage. As you encounter new AI agent issues, add comm
 
 This toolkit is designed to be self-documenting and self-improving. When you encounter issues:
 
-1. Check the command documentation in `src/claude/commands/`
-2. Review sub-agent definitions in `src/claude/agents/`
+1. Check the command documentation in `src/claude/commands/devflow/`
+2. Review sub-agent definitions in `src/claude/agents/devflow/`
 3. Review recent status documents in `.docs/status/`
 4. Improve the tools based on your experience
 

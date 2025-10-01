@@ -35,38 +35,38 @@ export const initCommand = new Command('init')
     try {
       // Clean old DevFlow files before installing
       console.log('  🧹 Cleaning old DevFlow files...');
-      const commandsDir = path.join(claudeDir, 'commands');
-      const agentsDir = path.join(claudeDir, 'agents');
-      const devflowDir = path.join(process.env.HOME || '', '.devflow', 'scripts');
+      const commandsDevflowDir = path.join(claudeDir, 'commands', 'devflow');
+      const agentsDevflowDir = path.join(claudeDir, 'agents', 'devflow');
+      const devflowScriptsDir = path.join(process.env.HOME || '', '.devflow', 'scripts');
 
-      // Remove old DevFlow commands/agents/scripts
+      // Remove old DevFlow subdirectories (not entire commands/agents folders)
       try {
-        await fs.rm(commandsDir, { recursive: true, force: true });
-        await fs.rm(agentsDir, { recursive: true, force: true });
-        await fs.rm(devflowDir, { recursive: true, force: true });
+        await fs.rm(commandsDevflowDir, { recursive: true, force: true });
+        await fs.rm(agentsDevflowDir, { recursive: true, force: true });
+        await fs.rm(devflowScriptsDir, { recursive: true, force: true });
       } catch (e) {
         // Directories might not exist on first install
       }
 
       // Install commands
       console.log('  📂 Installing commands...');
-      await fs.mkdir(commandsDir, { recursive: true });
-      await copyDirectory(path.join(claudeSourceDir, 'commands'), commandsDir);
+      await fs.mkdir(commandsDevflowDir, { recursive: true });
+      await copyDirectory(path.join(claudeSourceDir, 'commands', 'devflow'), commandsDevflowDir);
 
       // Install sub-agents
       console.log('  🤖 Installing sub-agents...');
-      await fs.mkdir(agentsDir, { recursive: true });
-      await copyDirectory(path.join(claudeSourceDir, 'agents'), agentsDir);
+      await fs.mkdir(agentsDevflowDir, { recursive: true });
+      await copyDirectory(path.join(claudeSourceDir, 'agents', 'devflow'), agentsDevflowDir);
 
       // Install scripts
       console.log('  📜 Installing scripts...');
-      await fs.mkdir(devflowDir, { recursive: true });
-      await copyDirectory(path.join(claudeSourceDir, 'scripts'), devflowDir);
+      await fs.mkdir(devflowScriptsDir, { recursive: true });
+      await copyDirectory(path.join(claudeSourceDir, 'scripts'), devflowScriptsDir);
 
       // Make scripts executable
-      const scripts = await fs.readdir(devflowDir);
+      const scripts = await fs.readdir(devflowScriptsDir);
       for (const script of scripts) {
-        await fs.chmod(path.join(devflowDir, script), 0o755);
+        await fs.chmod(path.join(devflowScriptsDir, script), 0o755);
       }
 
       // Install settings
