@@ -33,7 +33,7 @@ DevFlow bridges the gap between AI capability and development reliability.
 
 **Session Management:**
 - `/catch-up` - Smart summaries for starting new sessions with status validation
-- `/note-to-future-self` - Comprehensive session documentation and context preservation
+- `/devlog` - Development log for comprehensive session documentation
 - `/plan-next-steps` - Extract actionable next steps from current discussion
 
 ### 🤖 Sub-Agents
@@ -137,7 +137,7 @@ mkdir -p .docs/{status/compact,reviews,audits}
 ### 4. First Run
 ```bash
 # Document your current project state
-/note-to-future-self
+/devlog
 
 # Get oriented with the project
 /catch-up
@@ -190,7 +190,7 @@ Sub-agents are configured in `.claude/agents/devflow/` and included in your proj
 3. **Monitor quality**: Invoke specialized audit sub-agents as needed
 
 ### Ending a Session
-1. **Document progress**: `/note-to-future-self` - Capture decisions and state
+1. **Document progress**: `/devlog` - Capture decisions and state
 2. **Review changes**: `/pre-commit` for uncommitted changes, `/pre-pr` for branch review
 3. **Commit safely**: Use `/commit` for intelligent, atomic commits with validation
 
@@ -307,7 +307,7 @@ This toolkit grows through usage. As you encounter new AI agent issues, add comm
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | `/catch-up` | Review recent work | Starting a session |
-| `/note-to-future-self` | Document session | Ending a session |
+| `/devlog` | Document session | Ending a session |
 | `/plan-next-steps` | Extract action items | After planning discussion |
 | `/pre-commit` | Review uncommitted changes | Before committing |
 | `/commit` | Create atomic commits | When ready to commit |

@@ -30,7 +30,7 @@ devflow init
 
 **Session Management:**
 - `/catch-up` - Smart summaries for starting new sessions
-- `/note-to-future-self` - Comprehensive session documentation
+- `/devlog` - Development log for session documentation
 - `/plan-next-steps` - Extract actionable next steps from discussion
 
 ### 🤖 Sub-Agents

@@ -22,7 +22,7 @@ Look for preserved todo list state in the most recent status document:
 ```bash
 # Check if status directory exists
 if [ ! -d ".docs/status" ]; then
-    echo "No status documents found. Run /note-to-future-self to create the first one."
+    echo "No status documents found. Run /devlog to create the first one."
     exit 1
 fi
 
@@ -278,7 +278,7 @@ Create a focused summary document at `.docs/CATCH_UP.md`:
 ### If You're Stuck
 - Check the latest status document for detailed context
 - Look at recent git commits for what was changed
-- Run `/note-to-future-self` when you make progress
+- Run `/devlog` when you make progress
 
 ---
 
