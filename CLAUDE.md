@@ -141,20 +141,182 @@ node dist/cli.js init
 node dist/cli.js uninstall --keep-docs
 ```
 
-### Publishing Updates
+### Release Process
+
+Follow this process for creating new releases of DevFlow Kit:
+
+#### 1. Prepare the Release
+
+**Update Version:**
+```bash
+# Edit package.json version manually (e.g., 0.1.0 -> 0.1.1)
+# For patch: increment third digit (bug fixes, docs)
+# For minor: increment second digit (new features, backwards compatible)
+# For major: increment first digit (breaking changes)
+```
+
+**Update CHANGELOG.md:**
+```markdown
+## [0.1.x] - 2025-10-03
+
+### Added
+- New features added in this release
+
+### Changed
+- Changes to existing functionality
+
+### Fixed
+- Bug fixes
+
+### Documentation
+- Documentation improvements
+
+---
+
+[0.1.x]: https://github.com/dean0x/devflow/releases/tag/v0.1.x
+```
+
+#### 2. Build and Test
 
 ```bash
-# Update version in package.json
-npm version patch|minor|major
-
-# Build and publish
+# Build the CLI
 npm run build
+
+# Test the build locally
+node dist/cli.js --version  # Should show new version
+node dist/cli.js init       # Test installation works
+
+# Verify package contents
+npm pack --dry-run
+```
+
+#### 3. Commit Version Bump
+
+```bash
+# Commit version and changelog changes
+rm -f .git/index.lock && \
+git add package.json CHANGELOG.md && \
+git commit -m "chore: bump version to 0.1.x
+
+- Update package.json to 0.1.x
+- Add CHANGELOG entry for v0.1.x
+- Document [summary of changes]"
+
+# Push to GitHub
+git push origin main
+```
+
+#### 4. Publish to npm
+
+```bash
+# Publish to npm registry
 npm publish
 
-# Tag release
-git tag v0.1.x
+# Verify publication
+npm view devflow-kit version  # Should show new version
+```
+
+#### 5. Create Git Tag and GitHub Release
+
+**Create and Push Tag:**
+```bash
+git tag -a v0.1.x -m "Version 0.1.x - [Brief Description]
+
+- Key change 1
+- Key change 2
+- Key change 3"
+
 git push origin v0.1.x
 ```
+
+**Create GitHub Release:**
+```bash
+gh release create v0.1.x \
+  --title "v0.1.x - [Release Title]" \
+  --notes "$(cat <<'EOF'
+# DevFlow Kit v0.1.x
+
+[Brief description of release]
+
+## 🎯 Highlights
+
+### [Main Feature/Change]
+- Key improvement 1
+- Key improvement 2
+
+## 📝 Changes
+
+### Added
+- New features
+
+### Changed
+- Modified functionality
+
+### Fixed
+- Bug fixes
+
+### Documentation
+- Doc improvements
+
+## 📦 Installation
+
+\`\`\`bash
+npx devflow-kit init
+\`\`\`
+
+## 🔗 Links
+- npm: https://www.npmjs.com/package/devflow-kit
+- Changelog: https://github.com/dean0x/devflow/blob/main/CHANGELOG.md
+- Previous Release: https://github.com/dean0x/devflow/releases/tag/v0.1.[x-1]
+EOF
+)"
+```
+
+#### 6. Verify Release
+
+```bash
+# Check npm
+npm view devflow-kit
+
+# Check GitHub releases
+gh release view v0.1.x
+
+# Test installation
+npx devflow-kit@latest init
+```
+
+#### Release Checklist
+
+- [ ] Version bumped in package.json
+- [ ] CHANGELOG.md updated with all changes
+- [ ] Code built successfully (`npm run build`)
+- [ ] Local testing passed
+- [ ] Version bump committed and pushed
+- [ ] Published to npm successfully
+- [ ] Git tag created and pushed
+- [ ] GitHub release created with detailed notes
+- [ ] Verified npm shows correct version
+- [ ] Tested installation with `npx devflow-kit init`
+
+#### Version Numbering Guide
+
+**Patch (0.1.x):**
+- Bug fixes
+- Documentation improvements
+- Minor tweaks without functional changes
+- Internal refactoring
+
+**Minor (0.x.0):**
+- New features (backwards compatible)
+- New commands or sub-agents
+- New CLI options
+- Significant documentation additions
+
+**Major (x.0.0):**
+- Breaking changes
+- Removed or renamed commands
+- Changed CLI interface
+- Incompatible with previous versions
 
 ## File Organization
 
