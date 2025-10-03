@@ -1,0 +1,41 @@
+# Development files
+.docs/
+.git/
+.github/
+.vscode/
+.idea/
+*.log
+*.tgz
+
+# Source files (we include dist instead)
+# Note: We DO want to include src/claude/ for the commands/agents
+# src/cli/ is not needed since we have dist/
+
+# Test files
+test/
+tests/
+*.test.ts
+*.spec.ts
+
+# Config files not needed in package
+.gitignore
+.claudeignore
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Documentation source files that aren't needed
+CLAUDE.md
+docs/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Development dependencies
+node_modules/
+
+# Build artifacts we don't want
+*.map
