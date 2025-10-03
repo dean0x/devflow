@@ -5,6 +5,20 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-10-03
+
+### Changed
+- **Simplified Installation**: Single command installation using `npx devflow-kit init` (no global install needed)
+- **Improved Documentation**: Commands and sub-agents now displayed in easy-to-scan tables
+- **Better Organization**: Separated user documentation (README.md) from developer guide (CLAUDE.md)
+- **Reduced Duplication**: Eliminated redundant information throughout README
+
+### Documentation
+- Reorganized README.md with table-based layout for commands and sub-agents
+- Moved developer/AI agent instructions to CLAUDE.md
+- Updated installation to promote npx usage over global install
+- Reduced README from 289 lines to 204 lines while preserving all information
+
 ## [0.1.0] - 2024-10-03
 
 ### 🎉 Initial Release
@@ -61,4 +75,5 @@ devflow init
 
 ---
 
+[0.1.1]: https://github.com/dean0x/devflow/releases/tag/v0.1.1
 [0.1.0]: https://github.com/dean0x/devflow/releases/tag/v0.1.0
