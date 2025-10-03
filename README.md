@@ -5,12 +5,11 @@ A comprehensive collection of Claude Code commands and configurations designed t
 ## Installation
 
 ```bash
-# Install globally from npm
-npm install -g devflow-kit
-
-# Initialize DevFlow in Claude Code
-devflow init
+# Run with npx (recommended - no global install needed)
+npx devflow-kit init
 ```
+
+That's it! DevFlow is now installed and ready to use in Claude Code.
 
 ## What's Included
 
