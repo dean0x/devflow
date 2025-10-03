@@ -1,231 +1,56 @@
-# DevFlow - Agentic Development Toolkit
+# DevFlow Development Guide
 
-A comprehensive collection of Claude Code commands and configurations designed to enhance developer workflows when working with AI coding assistants.
+This document contains instructions for developers and AI agents working on the DevFlow codebase. For user documentation, see README.md.
 
-## Purpose
+## Purpose for AI Agents
 
-DevFlow transforms your coding environment into an intelligence-augmented workspace where AI agents can effectively collaborate with human developers. This toolkit provides:
+When working on DevFlow code, understand that this toolkit is designed to enhance Claude Code with intelligent development workflows. Your modifications should:
 
-- **Audit Commands** - Deep analysis of code quality, security, performance, and architecture
-- **Session Management** - Status tracking and context preservation across coding sessions
-- **Agent Accountability** - Tools to verify AI agent work
-- **Development Intelligence** - Smart statusline, dependency analysis, and workflow optimization
+- Maintain brutal honesty in audit outputs
+- Preserve context across sessions
+- Enhance developer empowerment without replacing judgment
+- Ensure all commands are self-documenting
 
-## Philosophy
+## Architecture Overview
 
-Modern development increasingly involves AI agents that can read, write, and modify code autonomously. However, this power comes with risks:
+DevFlow consists of three main components:
 
-- **Trust but Verify** - AI agents make mistakes; we need tools to catch them
-- **Context Preservation** - Long-term projects need memory across sessions
-- **Quality Gates** - Automated checks ensure AI changes meet standards
-- **Developer Empowerment** - Tools should enhance human judgment, not replace it
+1. **CLI Tool** (`src/cli/`) - TypeScript-based installer and manager
+2. **Claude Code Commands** (`src/claude/commands/`) - Markdown-based slash commands
+3. **Sub-Agents** (`src/claude/agents/`) - Specialized AI assistants for focused tasks
 
-DevFlow bridges the gap between AI capability and development reliability.
+## Development Environment
 
-## Core Components
+### Working on DevFlow
 
-### 📊 Slash Commands
+**CRITICAL**: This toolkit is designed for live development. When modifying DevFlow:
 
-**Code Review & Quality:**
-- `/pre-commit` - Review uncommitted changes before committing using specialized sub-agents
-- `/pre-pr` - Comprehensive branch review for PR readiness assessment
-- `/commit` - Intelligent atomic commit creation with safety checks and clean git history
-
-**Session Management:**
-- `/catch-up` - Smart summaries for starting new sessions with status validation
-- `/devlog` - Development log for comprehensive session documentation
-- `/plan-next-steps` - Extract actionable next steps from current discussion
-
-**Development Tools:**
-- `/debug [issue]` - Systematic debugging with issue-specific investigation (accepts issue description as argument)
-
-### 🤖 Sub-Agents
-
-**Audit Specialists:**
-- `audit-security` - Expert security vulnerability detection and analysis
-- `audit-performance` - Performance optimization and bottleneck detection
-- `audit-architecture` - Software architecture and design pattern analysis
-- `audit-tests` - Test quality and coverage analysis
-- `audit-dependencies` - Dependency management and security analysis
-- `audit-complexity` - Code complexity and maintainability assessment
-- `audit-database` - Database design and optimization review
-
-**Workflow Specialists:**
-- `catch-up` - Project status and context restoration with validation
-- `commit` - Intelligent commit creation with safety checks
-
-### ⚙️ Configuration
-- **Adaptive Statusline** - Shows model, git state, session duration, cost
-- **Structured Documentation** - Organized status tracking in `.docs/`
-- **Security & Optimization** - Automatic `.claudeignore` for sensitive files and token efficiency
-
-### 📊 Smart Statusline
-Intelligent project context display:
-- **Real-time Status** - Shows project context, git status, session metrics
-- **Cost Tracking** - Displays session cost and duration
-- **Git Integration** - Current branch, uncommitted changes indicator
-- **Zero Configuration** - Works immediately after installation
-
-### 🔒 .claudeignore Security & Optimization
-DevFlow automatically creates a comprehensive `.claudeignore` file to protect your codebase:
-
-**Security Protection:**
-- **Environment files** - `.env`, `.env.*`, `.envrc`
-- **Credentials & Keys** - `*.key`, `*.pem`, `id_rsa`, SSH keys
-- **Cloud configs** - `.aws/`, `.gcp/`, `.azure/` credentials
-- **Package configs** - `.npmrc`, `.pypirc` with tokens
-- **Database files** - `*.sql`, `*.db` with potential data
-
-**Token Optimization:**
-- **Dependencies** - `node_modules/`, `vendor/`, `venv/` (saves thousands of tokens)
-- **Build artifacts** - `dist/`, `build/`, `.next/` output
-- **IDE files** - `.vscode/`, `.idea/` settings
-- **Lock files** - `package-lock.json`, `yarn.lock` (rarely needed for context)
-- **Large files** - Media, archives, binaries
-
-The `.claudeignore` is created at your git repository root and covers patterns for all major languages and operating systems.
-
-## Installation & Setup
-
-### Claude Code Installation
-
-DevFlow is designed specifically for Claude Code with a clean, organized structure:
-
-```
-devflow/
-├── src/                     # All source files
-│   ├── cli/                   # CLI source code
-│   │   ├── commands/            # CLI command implementations
-│   │   │   └── init.ts            # Init command
-│   │   └── cli.ts               # CLI entry point
-│   └── claude/                # Claude Code configuration
-│       ├── agents/              # AI sub-agents
-│       ├── commands/            # Slash command definitions
-│       ├── scripts/             # DevFlow scripts
-│       │   └── statusline.sh      # Smart statusline script
-│       └── settings.json        # Unified Claude Code settings (statusline, model)
-├── package.json             # Node.js package configuration
-└── tsconfig.json            # TypeScript configuration
-```
-
-### Installation
-```bash
-# Install dependencies and build
-npm install
-npm run build
-
-# Run the CLI to install DevFlow
-node dist/cli.js init
-
-# Or use npx for global installation
-npm install -g .
-devflow init
-```
-
-The `devflow init` command automatically:
-- Copies commands from `src/claude/commands/devflow/` to `~/.claude/commands/devflow/`
-- Copies agents from `src/claude/agents/devflow/` to `~/.claude/agents/devflow/`
-- Copies scripts from `src/claude/scripts/` to `~/.devflow/scripts/`
-- Installs unified settings from `src/claude/settings.json` to `~/.claude/settings.json`
-- Creates `.claudeignore` at git repository root for security and token efficiency
-- Configures smart statusline
-- Optionally creates `.docs/` project structure (use `--skip-docs` to skip)
-
-### 3. Initialize Project Documentation
-```bash
-# Create documentation structure in your project
-mkdir -p .docs/{status/compact,reviews,audits}
-```
-
-### 4. First Run
-```bash
-# Document your current project state
-/devlog
-
-# Get oriented with the project
-/catch-up
-```
-
-## Using Sub-Agents
-
-### Commands vs Sub-Agents
-DevFlow provides both **slash commands** and **specialized sub-agents** for flexibility:
-
-**Slash Commands** (`/pre-commit`, `/catch-up`):
-- Quick, direct execution
-- Immediate results in current context
-- Good for workflow orchestration and session management
-
-**Sub-Agents** (`audit-security`):
-- Specialized AI assistants with deep expertise
-- Separate context windows for focused analysis
-- Ideal for complex, multi-step investigations
-- Can be invoked automatically by orchestrator commands
-
-### Invoking Sub-Agents
-```bash
-# Explicit invocation
-"Use the audit-security sub-agent to analyze this authentication code"
-
-# Automatic delegation
-"Review this code for security issues" # May automatically use audit-security sub-agent
-
-# Multiple sub-agents
-"Analyze this database code" # May invoke both audit-database and audit-performance
-```
-
-### Sub-Agent Configuration
-Sub-agents are configured in `.claude/agents/devflow/` and included in your project setup. Each sub-agent has:
-- Specialized expertise and system prompts
-- Restricted tool access appropriate to their domain
-- Focused analysis capabilities
-
-## Development Workflow
-
-### Starting a Session
-1. **Get oriented**: `/catch-up` - Review what was done previously
-2. **Check status**: Use statusline to see current model, git state, duration
-3. **Plan work**: Review recommended next actions from catch-up summary
-
-### During Development
-1. **Review changes**: Use `/pre-commit` for quick review before committing
-2. **Create commits**: Use `/commit` for intelligent atomic commits with safety checks
-3. **Monitor quality**: Invoke specialized audit sub-agents as needed
-
-### Ending a Session
-1. **Document progress**: `/devlog` - Capture decisions and state
-2. **Review changes**: `/pre-commit` for uncommitted changes, `/pre-pr` for branch review
-3. **Commit safely**: Use `/commit` for intelligent, atomic commits with validation
-
-### When Things Go Wrong
-1. **Review history**: Check git log and recent commits
-2. **Revert changes**: Use git to review and revert if needed
-3. **Document lessons**: Update project documentation and constraints
-
-## Environment Integration
-
-**CRITICAL**: This toolkit is designed for live development environments. Every command and setting should be:
-
-1. **Immediately Available** - Copied to global Claude Code configuration
-2. **Instantly Testable** - Work on the devflow repo, test in global context
+1. **Immediately Available** - Changes should be testable in global Claude Code configuration
+2. **Instantly Testable** - Work in the devflow repo, test in global context
 3. **Continuously Improved** - Dogfood your own tools
 
 ### Development Loop
+
 ```bash
 # 1. Modify command or agent in devflow repo
-vim devflow/src/claude/commands/pre-commit.md
+vim devflow/src/claude/commands/devflow/pre-commit.md
 
-# 2. Reinstall to global context for testing
+# 2. Rebuild if CLI changes
+npm run build
+
+# 3. Reinstall to global context for testing
 node dist/cli.js init
 
-# 3. Test immediately
+# 4. Test immediately
 /pre-commit
 
-# 4. Iterate until satisfied
-# 5. Commit to devflow repo using /commit
+# 5. Iterate until satisfied
+# 6. Commit using /commit
 ```
 
 ## Command Design Principles
+
+When creating or modifying commands, follow these principles:
 
 ### 1. Brutal Honesty
 Commands should expose the truth, not what developers want to hear:
@@ -254,76 +79,203 @@ Status and review commands create historical records:
 - Status tracking captures comprehensive context
 - Agent reviews assume skepticism
 
-## Advanced Usage
+## Adding New Commands
 
-### Custom Audit Rules
-Extend audit sub-agents for project-specific patterns:
-```bash
-# Add custom security rules to sub-agent
-echo "Additional pattern: check for exposed API keys in config files" >> ~/.claude/agents/devflow/audit-security.md
+### Command Structure
+
+1. Create command in `src/claude/commands/devflow/new-command.md`
+2. Follow this template:
+
+```markdown
+# Command: /new-command
+
+## Description
+Brief description of what the command does.
+
+## Usage
+`/new-command [arguments]`
+
+## Implementation
+[Bash script or instructions for AI agent]
+
+## Output Format
+[Description of expected output]
 ```
 
-### Integration with Workflow
+3. Test locally before committing
+4. Update README.md with user-facing documentation
+5. Add to init.ts command list if needed
+
+## Adding New Sub-Agents
+
+### Sub-Agent Structure
+
+1. Create agent in `src/claude/agents/devflow/new-agent.md`
+2. Follow existing agent patterns:
+   - Clear specialty definition
+   - Restricted tool access
+   - Focused analysis scope
+   - Specific output format
+
+3. Test with explicit invocation
+4. Document in README.md for users
+
+## CLI Development
+
+### Building and Testing
+
 ```bash
-# Pre-commit review
-/pre-commit
+# Install dependencies
+npm install
 
-# Intelligent commits
-/commit
+# Build TypeScript
+npm run build
 
-# Branch review before PR
-/pre-pr
+# Watch mode for development
+npm run dev
+
+# Test locally
+node dist/cli.js init
+
+# Run specific command
+node dist/cli.js uninstall --keep-docs
 ```
 
-### Team Usage
+### Publishing Updates
+
 ```bash
-# Share status with team
-/devlog
-git add .docs/status/
-git commit -m "Session status: completed user auth feature"
+# Update version in package.json
+npm version patch|minor|major
+
+# Build and publish
+npm run build
+npm publish
+
+# Tag release
+git tag v0.1.x
+git push origin v0.1.x
 ```
+
+## File Organization
+
+### Source Structure
+```
+src/
+├── cli/                      # CLI implementation
+│   ├── commands/               # CLI command implementations
+│   │   ├── init.ts              # Installation command
+│   │   └── uninstall.ts         # Uninstallation command
+│   └── cli.ts                  # CLI entry point
+└── claude/                   # Claude Code assets
+    ├── agents/devflow/         # Sub-agent definitions
+    ├── commands/devflow/       # Slash command definitions
+    ├── scripts/                # Supporting scripts
+    └── settings.json           # Claude Code settings
+```
+
+### Installation Paths
+- Commands: `~/.claude/commands/devflow/`
+- Agents: `~/.claude/agents/devflow/`
+- Scripts: `~/.devflow/scripts/`
+- Settings: `~/.claude/settings.json`
+
+## Testing Guidelines
+
+### Command Testing
+1. Test in isolation first
+2. Test with real git repositories
+3. Verify output formatting
+4. Check error handling
+5. Test with various project types
+
+### Sub-Agent Testing
+1. Test explicit invocation
+2. Verify specialized expertise
+3. Check output accuracy
+4. Test error scenarios
+5. Verify tool restrictions
+
+## Contributing Guidelines
+
+### Code Style
+- TypeScript for CLI code
+- Markdown for commands and agents
+- Clear, self-documenting code
+- Comprehensive error messages
+
+### Commit Messages
+Use conventional commits:
+- `feat:` New features
+- `fix:` Bug fixes
+- `docs:` Documentation updates
+- `refactor:` Code refactoring
+- `test:` Test additions/changes
+- `chore:` Maintenance tasks
+
+### Pull Request Process
+1. Test all changes locally
+2. Update documentation
+3. Ensure backward compatibility
+4. Add examples for new features
+5. Update CHANGELOG.md
 
 ## Extending DevFlow
 
-### Adding New Commands
-1. Create command in `devflow/commands/new-command.md`
-2. Follow existing patterns for structure and output
-3. Copy to `~/.claude/commands/devflow/` for testing
-4. Document in this README
+### Custom Project Rules
+Projects can extend DevFlow by:
+1. Adding custom `.docs/` templates
+2. Creating project-specific audit rules
+3. Extending `.claudeignore` patterns
+4. Adding team-specific workflows
 
-### Improving Existing Commands
-1. Test changes in your global environment first
-2. Ensure backward compatibility
-3. Update command documentation
-4. Add examples of new functionality
+### Integration Points
+- Git hooks integration
+- CI/CD pipeline integration
+- Team workflow customization
+- Project-specific validations
 
-## Contributing
+## Important Implementation Notes
 
-This toolkit grows through usage. As you encounter new AI agent issues, add commands to address them. As you discover better workflow patterns, codify them into the session management tools.
+### Git Safety
+- Always use `rm -f .git/index.lock &&` before git operations
+- Run git commands sequentially, never in parallel
+- Preserve user's git configuration
+- Never force push without explicit user request
 
-**Remember**: The goal is reliable, high-quality development with AI assistance, not blind trust in AI output.
+### Token Optimization
+- Sub-agents cannot invoke other sub-agents (by design)
+- Use parallel execution where possible
+- Leverage `.claudeignore` for context reduction
+- Keep commands focused and efficient
 
----
+### Error Handling
+- Provide clear error messages
+- Suggest fixes for common issues
+- Log errors to `.docs/debug/` when appropriate
+- Never hide failures from users
 
-## Quick Reference
+## Maintenance Tasks
 
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| `/catch-up` | Review recent work | Starting a session |
-| `/devlog` | Document session | Ending a session |
-| `/plan-next-steps` | Extract action items | After planning discussion |
-| `/debug [issue]` | Debug specific issues | When troubleshooting |
-| `/pre-commit` | Review uncommitted changes | Before committing |
-| `/commit` | Create atomic commits | When ready to commit |
-| `/pre-pr` | Comprehensive branch review | Before creating PR |
+### Regular Updates
+1. Review and update audit patterns
+2. Optimize command performance
+3. Update dependencies
+4. Improve error messages
+5. Enhance documentation
 
-## Support
+### Monitoring Usage
+- Track common error patterns
+- Identify missing features
+- Gather performance metrics
+- Review user feedback
 
-This toolkit is designed to be self-documenting and self-improving. When you encounter issues:
+## Support for Developers
 
-1. Check the command documentation in `src/claude/commands/devflow/`
-2. Review sub-agent definitions in `src/claude/agents/devflow/`
-3. Review recent status documents in `.docs/status/`
-4. Improve the tools based on your experience
+When working on DevFlow:
+1. Review existing command patterns
+2. Test changes thoroughly
+3. Document all modifications
+4. Consider backward compatibility
+5. Focus on user value
 
-The best way to get support is to make the tools better.
+Remember: The goal is reliable, high-quality development with AI assistance, not blind trust in AI output.

@@ -55,7 +55,7 @@ devflow init
 ```
 
 ### Documentation
-- Comprehensive guide in CLAUDE.md
+- Comprehensive guide in README.md
 - Quick reference in README.md
 - Self-documenting commands
 

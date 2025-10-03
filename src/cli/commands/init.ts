@@ -330,9 +330,9 @@ Pipfile.lock
       console.log('  3. Use \'/pre-commit\' to review uncommitted changes');
       console.log('  4. Run \'/devlog\' to document sessions\n');
       console.log('📚 DOCUMENTATION:');
-      console.log('  • Read CLAUDE.md for comprehensive guide');
+      console.log('  • Check README for comprehensive guide');
       console.log('  • Commands are self-documenting');
-      console.log('  • Check README.md for quick reference\n');
+      console.log('  • Visit npm or GitHub for full documentation\n');
       console.log('Happy coding with DevFlow! 🚀');
     } catch (error) {
       console.error('❌ Installation failed:', error);
