@@ -35,13 +35,6 @@ DevFlow bridges the gap between AI capability and development reliability.
 - `/catch-up` - Smart summaries for starting new sessions with status validation
 - `/devlog` - Development log for comprehensive session documentation
 - `/plan-next-steps` - Extract actionable next steps from current discussion
-- `/standup` - Generate daily standup report with progress and plans
-
-**Development Workflow:**
-- `/feature` - Complete feature development lifecycle from branch to PR
-- `/debug` - Systematic debugging workflow with hypothesis tracking
-- `/release` - Production release preparation with versioning and changelog
-- `/onboard` - Generate onboarding guide for new developers
 
 ### 🤖 Sub-Agents
 
@@ -315,15 +308,10 @@ This toolkit grows through usage. As you encounter new AI agent issues, add comm
 |---------|---------|-------------|
 | `/catch-up` | Review recent work | Starting a session |
 | `/devlog` | Document session | Ending a session |
-| `/standup` | Daily progress report | Start of workday |
 | `/plan-next-steps` | Extract action items | After planning discussion |
-| `/feature` | Start new feature | Beginning feature work |
-| `/debug` | Track debugging session | When troubleshooting |
 | `/pre-commit` | Review uncommitted changes | Before committing |
 | `/commit` | Create atomic commits | When ready to commit |
 | `/pre-pr` | Comprehensive branch review | Before creating PR |
-| `/release` | Prepare production release | Before deployment |
-| `/onboard` | Generate onboarding guide | New team member joins |
 
 ## Support
 
