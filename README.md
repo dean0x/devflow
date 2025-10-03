@@ -33,6 +33,9 @@ devflow init
 - `/devlog` - Development log for session documentation
 - `/plan-next-steps` - Extract actionable next steps from discussion
 
+**Development Tools:**
+- `/debug [issue]` - Systematic debugging with issue-specific investigation
+
 ### 🤖 Sub-Agents
 
 **Audit Specialists:**

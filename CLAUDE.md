@@ -36,6 +36,9 @@ DevFlow bridges the gap between AI capability and development reliability.
 - `/devlog` - Development log for comprehensive session documentation
 - `/plan-next-steps` - Extract actionable next steps from current discussion
 
+**Development Tools:**
+- `/debug [issue]` - Systematic debugging with issue-specific investigation (accepts issue description as argument)
+
 ### 🤖 Sub-Agents
 
 **Audit Specialists:**
@@ -309,6 +312,7 @@ This toolkit grows through usage. As you encounter new AI agent issues, add comm
 | `/catch-up` | Review recent work | Starting a session |
 | `/devlog` | Document session | Ending a session |
 | `/plan-next-steps` | Extract action items | After planning discussion |
+| `/debug [issue]` | Debug specific issues | When troubleshooting |
 | `/pre-commit` | Review uncommitted changes | Before committing |
 | `/commit` | Create atomic commits | When ready to commit |
 | `/pre-pr` | Comprehensive branch review | Before creating PR |
