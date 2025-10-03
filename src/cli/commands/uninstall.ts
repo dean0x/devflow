@@ -72,5 +72,5 @@ export const uninstallCommand = new Command('uninstall')
       console.log('\n✅ DevFlow uninstalled successfully');
     }
 
-    console.log('\n💡 To reinstall: npm install -g devflow && devflow init');
+    console.log('\n💡 To reinstall: npm install -g devflow-kit && devflow init');
   });

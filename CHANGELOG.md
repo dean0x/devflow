@@ -50,7 +50,7 @@ DevFlow is an Agentic Development Toolkit designed to enhance Claude Code with i
 
 ### Installation
 ```bash
-npm install -g devflow
+npm install -g devflow-kit
 devflow init
 ```
 
