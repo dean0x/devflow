@@ -1,6 +1,6 @@
 {
-  "name": "@devflow/cli",
-  "version": "1.0.0",
+  "name": "devflow",
+  "version": "0.1.0",
   "description": "Agentic Development Toolkit for Claude Code - Enhance AI-assisted development with intelligent commands and workflows",
   "main": "dist/index.js",
   "type": "module",

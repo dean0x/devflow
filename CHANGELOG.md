@@ -5,7 +5,7 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2024-10-03
+## [0.1.0] - 2024-10-03
 
 ### 🎉 Initial Release
 
@@ -50,7 +50,7 @@ DevFlow is an Agentic Development Toolkit designed to enhance Claude Code with i
 
 ### Installation
 ```bash
-npm install -g @devflow/cli
+npm install -g devflow
 devflow init
 ```
 
@@ -61,4 +61,4 @@ devflow init
 
 ---
 
-[1.0.0]: https://github.com/dean0x/devflow/releases/tag/v1.0.0
+[0.1.0]: https://github.com/dean0x/devflow/releases/tag/v0.1.0
