@@ -5,6 +5,22 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-10-05
+
+### Added
+- `/research [topic]` - Comprehensive pre-implementation research and planning command
+- `research` sub-agent - Specialized agent for systematic implementation research with 10-step workflow
+  - Analyzes multiple implementation approaches with pros/cons/trade-offs
+  - Studies official documentation and code examples
+  - Reviews existing codebase patterns and conventions
+  - Designs integration strategy with specific file paths
+  - Identifies risks and creates actionable implementation plans
+  - Saves research reports to `.docs/research/`
+
+### Documentation
+- Updated README.md with `/research` command in workflow examples
+- Added research sub-agent to sub-agents table
+
 ## [0.1.1] - 2025-10-03
 
 ### Changed
@@ -75,5 +91,6 @@ devflow init
 
 ---
 
+[0.1.2]: https://github.com/dean0x/devflow/releases/tag/v0.1.2
 [0.1.1]: https://github.com/dean0x/devflow/releases/tag/v0.1.1
 [0.1.0]: https://github.com/dean0x/devflow/releases/tag/v0.1.0

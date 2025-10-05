@@ -1,4 +1,4 @@
-# DevFlow Kit - Agentic Development Toolkit
+# DevFlow - Agentic Development Toolkit
 
 A comprehensive collection of Claude Code commands and configurations designed to enhance developer workflows when working with AI coding assistants.
 
@@ -18,6 +18,7 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
+| `/research [topic]` | Comprehensive pre-implementation research and planning | Before implementing features |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 | `/plan-next-steps` | Extract actionable next steps from current discussion | After planning discussion |
 | `/debug [issue]` | Systematic debugging with issue-specific investigation | When troubleshooting |
@@ -38,6 +39,7 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | `audit-database` | Database | Database design and optimization review |
 | `catch-up` | Context Restoration | Project status and context restoration with validation |
 | `commit` | Git Operations | Intelligent commit creation with safety checks |
+| `research` | Implementation Planning | Pre-implementation research, approach analysis, and planning |
 
 **How Sub-Agents Work:**
 - Specialized AI assistants with deep expertise in specific domains
@@ -91,9 +93,10 @@ Covers patterns for all major languages and operating systems.
 3. Review recommended next actions
 
 ### During Development
-1. `/pre-commit` - Review changes before committing
-2. `/commit` - Create intelligent atomic commits
-3. Invoke audit sub-agents as needed
+1. `/research [topic]` - Research implementation approaches before coding
+2. `/pre-commit` - Review changes before committing
+3. `/commit` - Create intelligent atomic commits
+4. Invoke audit sub-agents as needed
 
 ### Ending a Session
 1. `/devlog` - Document decisions and state
@@ -146,6 +149,7 @@ git commit -m "Session status: completed user auth feature"
 
 ### Integration Examples
 ```bash
+/research "add JWT authentication"  # Research before implementing
 /pre-commit    # Review uncommitted changes
 /commit        # Create atomic commits
 /pre-pr        # Branch review before PR
