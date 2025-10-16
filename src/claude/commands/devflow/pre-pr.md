@@ -85,8 +85,9 @@ Launch these sub-agents in parallel based on change detection:
 6. audit-dependencies sub-agent
 7. audit-documentation sub-agent
 
-**Conditional Audits**:
-8. audit-database sub-agent (only if database changes detected)
+**Conditional Audits** (automatically detect and skip if not applicable):
+8. audit-typescript sub-agent (only if .ts/.tsx files changed or tsconfig.json exists)
+9. audit-database sub-agent (only if database changes detected)
 
 ### Step 4: Synthesize Comprehensive Review
 
@@ -156,6 +157,16 @@ Create a detailed review document at `.docs/reviews/branch-{BRANCH_NAME}-{YYYY-M
 
 #### Security Recommendations
 {specific security improvements needed}
+
+### 📘 TypeScript Analysis (audit-typescript)
+**Type Safety**: {Excellent/Good/Acceptable/Poor}
+**Note**: Only included if TypeScript files changed or project uses TypeScript
+
+#### TypeScript Issues Found
+{detailed type safety findings with file:line references}
+
+#### TypeScript Recommendations
+{specific type safety improvements needed}
 
 ### ⚡ Performance Analysis (audit-performance)
 **Performance Impact**: {Positive/Neutral/Negative}
@@ -247,6 +258,7 @@ Create a detailed review document at `.docs/reviews/branch-{BRANCH_NAME}-{YYYY-M
 
 **Breakdown**:
 - Security: {score}/10
+- TypeScript: {score}/10 (if applicable)
 - Performance: {score}/10
 - Architecture: {score}/10
 - Test Coverage: {score}/10

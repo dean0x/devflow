@@ -9,6 +9,7 @@ Perform a comprehensive review of uncommitted changes by orchestrating multiple 
 
 **Audit Strategy**:
 - **Always Run** (5 core audits): Security, Performance, Architecture, Tests, Complexity
+- **Language-Specific** (conditional): TypeScript (runs only if .ts/.tsx files changed or tsconfig.json exists)
 - **Available on demand**: Documentation, Dependencies, Database (use `/pre-pr` for full audit)
 
 This lightweight approach provides fast feedback for individual commits. Use `/pre-pr` for comprehensive branch reviews before creating pull requests.
@@ -38,10 +39,15 @@ echo ""
 Launch these sub-agents in parallel:
 
 1. audit-security sub-agent
-2. audit-performance sub-agent
-3. audit-architecture sub-agent
-4. audit-tests sub-agent
-5. audit-complexity sub-agent
+2. audit-typescript sub-agent (automatically skips if not applicable)
+3. audit-performance sub-agent
+4. audit-architecture sub-agent
+5. audit-tests sub-agent
+6. audit-complexity sub-agent
+
+**Note**: The audit-typescript agent contains built-in detection logic and will automatically skip if:
+- No .ts/.tsx files were changed AND
+- No tsconfig.json exists in the project
 
 ### Step 3: Synthesize Review Findings
 
@@ -83,6 +89,9 @@ Create a comprehensive review document at `.docs/reviews/diff-{YYYY-MM-DD_HHMM}.
 
 ### Security Review (audit-security)
 {security findings with file:line references}
+
+### TypeScript Review (audit-typescript)
+{type safety findings, or "⏭️ Skipped - not applicable" if no TS files}
 
 ### Performance Review (audit-performance)
 {performance findings with specific optimizations}
