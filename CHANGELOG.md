@@ -5,6 +5,96 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-10-16
+
+### Added
+
+#### Language-Agnostic Global CLAUDE.md
+- **Global engineering principles** - Universal CLAUDE.md works across all programming languages
+  - Strips language-specific syntax, focuses on concepts (Result types, DI, immutability, pure functions)
+  - Critical anti-patterns enforcement (NO FAKE SOLUTIONS, FAIL HONESTLY, BE TRANSPARENT)
+  - Code quality enforcement (root cause analysis over workarounds)
+  - Architecture documentation standards (document patterns, boundaries, exceptions)
+  - Type safety best practices, security requirements, naming conventions
+  - Structured as ~330 lines of precise, non-bloated global instructions
+
+#### Smart CLAUDE.md Installation
+- **Intelligent mounting logic** - Preserves user's existing global configuration
+  - Fresh install: Directly installs CLAUDE.md (no conflicts)
+  - Existing CLAUDE.md: Preserves user file, creates CLAUDE.devflow.md with merge instructions
+  - `--force` flag: Prompts for confirmation, backs up to .backup before override
+  - `-y` flag: Auto-approves prompts for automation/CI/CD workflows
+  - Parallel implementation to settings.json (consistent UX across installations)
+  - Never overwrites without explicit permission
+
+#### TypeScript Auditor Sub-Agent
+- **audit-typescript** - Specialized TypeScript code quality and type safety auditor
+  - Conditional execution: Runs only if .ts/.tsx files changed OR tsconfig.json exists
+  - Built-in detection logic (gracefully skips non-TypeScript projects)
+  - Comprehensive audits: type safety config, `any` usage, type assertions, branded types
+  - Advanced patterns: discriminated unions, immutability, Result types
+  - Code quality: naming conventions, dependency injection, pure functions
+  - Severity-based reporting (CRITICAL/HIGH/MEDIUM/LOW) with file:line references
+  - Integrated into `/pre-commit` and `/pre-pr` workflows
+
+#### Release Automation Workflow
+- **`/release` command** - Project-agnostic release automation for professional releases
+  - Multi-step interactive workflow with user confirmations
+  - Preview changes before committing, pushing, or publishing
+  - Clear rollback instructions if any step fails
+  - Comprehensive final summary with verification links
+
+- **release sub-agent** - Specialized agent for safe, automated release management
+  - Universal project detection (10+ ecosystems supported)
+  - Intelligent version bumping based on conventional commit analysis
+  - Auto-generated changelogs from git history
+  - Built-in safety checks (clean directory, builds, tests)
+  - Platform integration (creates GitHub/GitLab releases via gh/glab)
+
+#### Supported Release Ecosystems
+- Node.js (package.json + npm)
+- Rust (Cargo.toml + cargo)
+- Python (pyproject.toml/setup.py + pip/twine)
+- Go (go.mod + git tags)
+- Ruby (gemspec + gem)
+- PHP (composer.json + composer)
+- Java/Maven (pom.xml + mvn)
+- Java/Gradle (build.gradle + gradle)
+- Swift (Package.swift + git tags)
+- Generic (VERSION file + git tags)
+
+#### Release Workflow Steps
+1. Detect project type and configuration
+2. Verify clean working directory
+3. Analyze commits since last release
+4. Generate changelog entry from commit history
+5. Update version files (automatic detection)
+6. Build and test project
+7. Preview changes and await user confirmation
+8. Commit version bump
+9. Push to remote repository
+10. Publish to package registry (npm, crates.io, PyPI, etc.)
+11. Create annotated git tag
+12. Create platform release (GitHub/GitLab)
+13. Provide verification links and next steps
+
+### Changed
+- **Pre-commit workflow** - Integrated audit-typescript into 5-agent review
+  - Conditionally executes for TypeScript projects
+  - No manual configuration needed
+- **Pre-PR workflow** - Integrated audit-typescript into comprehensive review
+  - Automatic TypeScript detection and execution
+  - Preserves existing audit orchestration patterns
+
+### Documentation
+- Added `/release` command to README commands table
+- Added `release` sub-agent to README sub-agents table
+- Added `audit-typescript` sub-agent to README sub-agents table
+- Created "Creating a Release" workflow section in README
+- Documented smart CLAUDE.md installation behavior
+- Included release automation in integration examples
+
+
 ## [0.2.0] - 2025-10-16
 
 ### Added
@@ -148,6 +238,7 @@ devflow init
 
 ---
 
+[0.3.0]: https://github.com/dean0x/devflow/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dean0x/devflow/releases/tag/v0.2.0
 [0.1.2]: https://github.com/dean0x/devflow/releases/tag/v0.1.2
 [0.1.1]: https://github.com/dean0x/devflow/releases/tag/v0.1.1
