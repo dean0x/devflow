@@ -118,20 +118,20 @@ For each approach, document:
 ```bash
 echo "=== DOCUMENTATION RESEARCH ==="
 
-# Look for package.json or requirements to understand current stack
-if [ -f "package.json" ]; then
-    echo "Node.js project detected"
-    cat package.json | grep -A 20 "dependencies"
-elif [ -f "requirements.txt" ]; then
-    echo "Python project detected"
-    cat requirements.txt
-elif [ -f "Cargo.toml" ]; then
-    echo "Rust project detected"
-    cat Cargo.toml | grep -A 10 "dependencies"
-elif [ -f "go.mod" ]; then
-    echo "Go project detected"
-    cat go.mod
-fi
+# Auto-detect project stack from common manifest files
+echo "Detecting project stack..."
+for manifest in package.json requirements.txt Pipfile Cargo.toml go.mod Gemfile pom.xml build.gradle composer.json Package.swift; do
+    if [ -f "$manifest" ]; then
+        echo "=== Found: $manifest ==="
+        head -30 "$manifest" | grep -i "depend\|version\|name" || head -30 "$manifest"
+        echo ""
+    fi
+done
+
+# Show detected languages from git (file extensions)
+echo "Primary file types in project:"
+find . -type f ! -path "*/.*" ! -path "*/node_modules/*" ! -path "*/vendor/*" ! -path "*/target/*" ! -path "*/build/*" ! -path "*/dist/*" 2>/dev/null \
+    | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -10
 ```
 
 **For each relevant library/framework**:
@@ -185,17 +185,23 @@ echo "=== CODEBASE PATTERN ANALYSIS ==="
 # Find similar existing implementations
 echo "Searching for similar patterns..."
 
-# Example: If implementing auth, search for existing auth patterns
-# grep -r "auth\|Auth\|authenticate" --include="*.js" --include="*.ts" . | head -20
+# Generic search across all source files (language-agnostic)
+# Example: If implementing auth, adapt the search term below
+# find . -type f \( -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.go" -o -name "*.rs" \
+#     -o -name "*.java" -o -name "*.rb" -o -name "*.php" -o -name "*.cs" -o -name "*.cpp" \) \
+#     ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/vendor/*" ! -path "*/target/*" \
+#     -exec grep -l "auth\|authenticate" {} \; | head -20
 
 # Find architectural patterns
 echo "Analyzing project structure..."
 ls -la | head -20
-find . -type f -name "*.config.*" -o -name "*.json" | head -10
+find . -type f \( -name "*.config.*" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.toml" \) \
+    ! -path "*/node_modules/*" ! -path "*/.git/*" | head -15
 
-# Look for test patterns
+# Look for test patterns (language-agnostic)
 echo "Checking test patterns..."
-find . -type f -name "*.test.*" -o -name "*.spec.*" | head -10
+find . -type f \( -name "*test*" -o -name "*spec*" -o -name "*Test*" -o -name "*Spec*" \) \
+    ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/vendor/*" | head -15
 ```
 
 **Analysis Areas**:
@@ -217,17 +223,22 @@ find . -type f -name "*.test.*" -o -name "*.spec.*" | head -10
 ### 4.2 Code Style & Conventions
 
 ```bash
-# Check TypeScript/JavaScript patterns
-if [ -f "tsconfig.json" ]; then
-    echo "TypeScript configuration:"
-    cat tsconfig.json | head -30
-fi
+# Auto-detect language configuration files
+echo "=== DETECTING CODE STYLE & CONVENTIONS ==="
 
-# Check linting rules
-if [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ]; then
-    echo "ESLint configuration found"
-    cat .eslintrc.* | head -20
-fi
+# Check for common configuration files across languages
+for config in tsconfig.json jsconfig.json .eslintrc* .prettierrc* pyproject.toml setup.cfg .pylintrc \
+    .rubocop.yml Cargo.toml rustfmt.toml .editorconfig .clang-format checkstyle.xml; do
+    if [ -f "$config" ] || ls $config 2>/dev/null | grep -q .; then
+        echo "=== Found: $config ==="
+        head -30 "$config" 2>/dev/null
+        echo ""
+    fi
+done
+
+# Look for linter/formatter patterns
+echo "Checking for linting/formatting tools..."
+ls -la | grep -E "lint|format|style" | head -10
 ```
 
 **Document**:
@@ -247,9 +258,17 @@ fi
 # Find similar features already implemented
 echo "Looking for similar existing features..."
 
-# Example searches - adapt to specific research topic
-# grep -r "export.*function" --include="*.ts" --include="*.js" . | head -10
-# grep -r "export.*class" --include="*.ts" --include="*.js" . | head -10
+# Generic pattern search across all source files (adapt search term to research topic)
+# Example: searching for function/class definitions across common languages
+# find . -type f \( -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" \
+#     -o -name "*.py" -o -name "*.go" -o -name "*.rs" -o -name "*.java" -o -name "*.rb" \
+#     -o -name "*.php" -o -name "*.cs" -o -name "*.cpp" -o -name "*.c" -o -name "*.h" \) \
+#     ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/vendor/*" ! -path "*/target/*" \
+#     -exec grep -H "^export\|^public\|^def\|^func\|^fn\|^function\|^class" {} \; 2>/dev/null | head -20
+
+# Show most commonly edited files (good candidates for similar patterns)
+echo "Frequently modified files (likely contain patterns to follow):"
+git log --pretty=format: --name-only --since="6 months ago" 2>/dev/null | sort | uniq -c | sort -rn | head -15
 ```
 
 **Analyze and document**:

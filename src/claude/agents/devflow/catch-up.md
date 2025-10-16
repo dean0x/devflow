@@ -77,12 +77,36 @@ For each found status document:
 # Check if "completed" features actually work
 echo "=== VALIDATING STATUS CLAIMS ==="
 
-# Test basic functionality - adapt these commands to your project
-echo "Testing basic commands/functionality..."
-# Try common test commands - adapt based on project
-(npm test 2>/dev/null || pytest 2>/dev/null || cargo test 2>/dev/null || mvn test 2>/dev/null || go test 2>/dev/null) || echo "⚠️ Could not run tests (verify test command for your stack)"
-# Try common build commands - adapt based on project
-(npm run build 2>/dev/null || cargo build 2>/dev/null || mvn package 2>/dev/null || make 2>/dev/null) || echo "⚠️ Could not run build (verify build command for your stack)"
+# Detect and run project's test command
+echo "Attempting to run tests..."
+TEST_CMD=""
+BUILD_CMD=""
+
+# Auto-detect test command from common manifest files
+if [ -f "package.json" ]; then
+    TEST_CMD=$(command -v jq >/dev/null && jq -r '.scripts.test // empty' package.json 2>/dev/null || grep -o '"test"[^"]*"[^"]*"' package.json | cut -d'"' -f4)
+    BUILD_CMD=$(command -v jq >/dev/null && jq -r '.scripts.build // empty' package.json 2>/dev/null || grep -o '"build"[^"]*"[^"]*"' package.json | cut -d'"' -f4)
+elif [ -f "Makefile" ]; then
+    grep -q "^test:" Makefile && TEST_CMD="make test"
+    grep -q "^build:" Makefile && BUILD_CMD="make build"
+fi
+
+# Run tests if detected
+if [ -n "$TEST_CMD" ]; then
+    echo "Running: $TEST_CMD"
+    eval $TEST_CMD 2>&1 | head -20 || echo "⚠️ Tests failed - verify 'all tests passing' claims"
+else
+    echo "ℹ️  No test command auto-detected. Manually verify test claims."
+    echo "   Try common commands: npm test, pytest, cargo test, go test, mvn test, etc."
+fi
+
+# Run build if detected
+if [ -n "$BUILD_CMD" ]; then
+    echo "Running: $BUILD_CMD"
+    eval $BUILD_CMD 2>&1 | head -20 || echo "⚠️ Build failed - verify 'build successful' claims"
+else
+    echo "ℹ️  No build command auto-detected. Manually verify build claims."
+fi
 
 # Check for claimed files/features
 echo "Verifying claimed file changes..."
@@ -90,21 +114,23 @@ git status --porcelain | head -10
 
 # Look for obvious broken states
 echo "Checking for red flags..."
-find . -name "*.tmp" -o -name "*.bak" -o -name "*~" | head -5
-# Search across common source file extensions
-grep -r "TODO\|FIXME\|HACK\|XXX" --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" --include="*.py" --include="*.go" --include="*.rs" --include="*.java" --include="*.c" --include="*.cpp" --include="*.rb" --include="*.php" . 2>/dev/null | head -5
+find . -type f \( -name "*.tmp" -o -name "*.bak" -o -name "*~" \) ! -path "*/node_modules/*" ! -path "*/.git/*" | head -5
 
-# Check if dependencies are actually installed - adapt based on project
-if [ -f "package.json" ]; then
-    echo "Checking Node.js dependencies..."
-    npm ls 2>/dev/null | grep -i "missing\|invalid" || echo "✅ Node dependencies seem consistent"
-elif [ -f "requirements.txt" ] || [ -f "Pipfile" ]; then
-    echo "Checking Python dependencies..."
-    pip list 2>/dev/null >/dev/null || echo "⚠️ Check Python dependencies"
-elif [ -f "Cargo.toml" ]; then
-    echo "Checking Rust dependencies..."
-    cargo check 2>/dev/null || echo "⚠️ Check Rust dependencies"
-fi
+# Search for TODO/FIXME across all source files (language-agnostic)
+echo "Scanning for TODO/FIXME markers..."
+find . -type f ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/vendor/*" ! -path "*/target/*" ! -path "*/build/*" ! -path "*/dist/*" \
+    \( -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.py" -o -name "*.go" -o -name "*.rs" \
+    -o -name "*.java" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.rb" -o -name "*.php" \
+    -o -name "*.cs" -o -name "*.swift" -o -name "*.kt" -o -name "*.scala" \) \
+    -exec grep -l "TODO\|FIXME\|HACK\|XXX" {} \; 2>/dev/null | head -5
+
+# Generic dependency check
+echo "Checking dependency health..."
+for manifest in package.json requirements.txt Cargo.toml go.mod Gemfile pom.xml; do
+    if [ -f "$manifest" ]; then
+        echo "Found: $manifest - verify dependencies are installed for your environment"
+    fi
+done
 
 echo "=== END VALIDATION ==="
 ```

@@ -57,30 +57,29 @@ You are a dependency audit specialist focused on package security, licensing, an
 - Initialization overhead
 - Runtime performance impact
 
-## Package Manager Specific
+## Package Manager Analysis
 
-### npm/yarn
-- package.json analysis
-- package-lock.json validation
-- Audit reports interpretation
-- Peer dependency conflicts
+The agent automatically detects and analyzes your project's dependency management system by identifying:
+- Package manifest files (package.json, requirements.txt, Cargo.toml, go.mod, Gemfile, composer.json, etc.)
+- Lock files (package-lock.json, Pipfile.lock, Cargo.lock, go.sum, Gemfile.lock, composer.lock, etc.)
+- Package manager configuration and best practices
 
-### pip/Poetry
-- requirements.txt analysis
-- Poetry.lock validation
-- Virtual environment setup
-- Python version compatibility
+### Universal Analysis Patterns
+- **Manifest validation** - Parse and validate dependency declarations
+- **Lock file consistency** - Verify lock files match manifests
+- **Version constraint analysis** - Check semantic versioning and ranges
+- **Transitive dependency mapping** - Analyze full dependency trees
+- **Peer/dev dependency separation** - Verify appropriate categorization
+- **Audit tool integration** - Run language-specific security scanners when available
 
-### Maven/Gradle
-- pom.xml dependency analysis
-- Version conflict resolution
-- Transitive dependency management
-- Repository security
+### Auto-Detection Strategy
+1. Scan for manifest files in project root
+2. Identify package manager from file patterns
+3. Apply language-specific audit tools if available
+4. Use universal patterns for security/license analysis
+5. Adapt recommendations to detected ecosystem
 
-### Composer
-- composer.json analysis
-- Autoloader optimization
-- Package stability requirements
+Supports all major package managers including npm/yarn/pnpm, pip/Poetry/pipenv, Cargo, Go modules, Maven/Gradle, Bundler, Composer, NuGet, CocoaPods, Swift Package Manager, and others.
 
 ## Analysis Approach
 
