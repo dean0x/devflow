@@ -1,6 +1,41 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { homedir } from 'os';
+
+/**
+ * Get home directory with proper fallback and validation
+ * Priority: process.env.HOME > os.homedir()
+ */
+function getHomeDirectory(): string {
+  const home = process.env.HOME || homedir();
+  if (!home) {
+    throw new Error('Unable to determine home directory. Set HOME environment variable.');
+  }
+  return home;
+}
+
+/**
+ * Get Claude Code directory with environment variable override support
+ * Priority: CLAUDE_CODE_DIR env var > ~/.claude
+ */
+function getClaudeDirectory(): string {
+  if (process.env.CLAUDE_CODE_DIR) {
+    return process.env.CLAUDE_CODE_DIR;
+  }
+  return path.join(getHomeDirectory(), '.claude');
+}
+
+/**
+ * Get DevFlow directory with environment variable override support
+ * Priority: DEVFLOW_DIR env var > ~/.devflow
+ */
+function getDevFlowDirectory(): string {
+  if (process.env.DEVFLOW_DIR) {
+    return process.env.DEVFLOW_DIR;
+  }
+  return path.join(getHomeDirectory(), '.devflow');
+}
 
 export const uninstallCommand = new Command('uninstall')
   .description('Uninstall DevFlow from Claude Code')
@@ -8,8 +43,17 @@ export const uninstallCommand = new Command('uninstall')
   .action(async (options) => {
     console.log('🧹 Uninstalling DevFlow...\n');
 
-    const claudeDir = path.join(process.env.HOME || '', '.claude');
-    const devflowScriptsDir = path.join(process.env.HOME || '', '.devflow');
+    let claudeDir: string;
+    let devflowScriptsDir: string;
+
+    try {
+      claudeDir = getClaudeDirectory();
+      devflowScriptsDir = getDevFlowDirectory();
+    } catch (error) {
+      console.error('❌ Path configuration error:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+
     let hasErrors = false;
 
     // Remove commands

@@ -1,12 +1,47 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { homedir } from 'os';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Get home directory with proper fallback and validation
+ * Priority: process.env.HOME > os.homedir()
+ */
+function getHomeDirectory(): string {
+  const home = process.env.HOME || homedir();
+  if (!home) {
+    throw new Error('Unable to determine home directory. Set HOME environment variable.');
+  }
+  return home;
+}
+
+/**
+ * Get Claude Code directory with environment variable override support
+ * Priority: CLAUDE_CODE_DIR env var > ~/.claude
+ */
+function getClaudeDirectory(): string {
+  if (process.env.CLAUDE_CODE_DIR) {
+    return process.env.CLAUDE_CODE_DIR;
+  }
+  return path.join(getHomeDirectory(), '.claude');
+}
+
+/**
+ * Get DevFlow directory with environment variable override support
+ * Priority: DEVFLOW_DIR env var > ~/.devflow
+ */
+function getDevFlowDirectory(): string {
+  if (process.env.DEVFLOW_DIR) {
+    return process.env.DEVFLOW_DIR;
+  }
+  return path.join(getHomeDirectory(), '.devflow');
+}
 
 export const initCommand = new Command('init')
   .description('Initialize DevFlow for Claude Code')
@@ -15,14 +50,26 @@ export const initCommand = new Command('init')
     console.log('🚀 DevFlow - Agentic Development Toolkit');
     console.log('   Intelligent tools for reliable AI-assisted development\n');
 
+    // Get installation paths with proper validation
+    let claudeDir: string;
+    let devflowDir: string;
+
+    try {
+      claudeDir = getClaudeDirectory();
+      devflowDir = getDevFlowDirectory();
+    } catch (error) {
+      console.error('❌ Path configuration error:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+
     // Check for Claude Code
-    const claudeDir = path.join(process.env.HOME || '', '.claude');
     try {
       await fs.access(claudeDir);
-      console.log('🔍 Detected Claude Code ✅\n');
+      console.log(`🔍 Detected Claude Code at ${claudeDir} ✅\n`);
     } catch {
-      console.error('❌ Claude Code not detected');
+      console.error(`❌ Claude Code not detected at ${claudeDir}`);
       console.error('\nInstall Claude Code from: https://claude.com/claude-code');
+      console.error('\nOr set CLAUDE_CODE_DIR environment variable if installed elsewhere.');
       process.exit(1);
     }
 
@@ -37,7 +84,7 @@ export const initCommand = new Command('init')
       console.log('  🧹 Cleaning old DevFlow files...');
       const commandsDevflowDir = path.join(claudeDir, 'commands', 'devflow');
       const agentsDevflowDir = path.join(claudeDir, 'agents', 'devflow');
-      const devflowScriptsDir = path.join(process.env.HOME || '', '.devflow', 'scripts');
+      const devflowScriptsDir = path.join(devflowDir, 'scripts');
 
       // Remove old DevFlow subdirectories (not entire commands/agents folders)
       try {
@@ -69,14 +116,66 @@ export const initCommand = new Command('init')
         await fs.chmod(path.join(devflowScriptsDir, script), 0o755);
       }
 
-      // Install settings
+      // Install settings with smart backup
       console.log('  ⚙️ Installing settings...');
-      await fs.copyFile(
-        path.join(claudeSourceDir, 'settings.json'),
-        path.join(claudeDir, 'settings.json')
-      );
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      const managedSettingsPath = path.join(claudeDir, 'managed-settings.json');
+      const devflowSettingsPath = path.join(claudeDir, 'settings.devflow.json');
+      const sourceSettingsPath = path.join(claudeSourceDir, 'settings.json');
+
+      let settingsAction = '';
+
+      try {
+        // Check if user has existing settings.json
+        await fs.access(settingsPath);
+
+        // User has settings.json - need to preserve it
+        try {
+          // Check if managed-settings.json already exists
+          await fs.access(managedSettingsPath);
+
+          // managed-settings.json exists - install as settings.devflow.json
+          await fs.copyFile(sourceSettingsPath, devflowSettingsPath);
+          settingsAction = 'saved-as-devflow';
+          console.log('  ⚠️  Your existing settings.json is preserved');
+          console.log('  📄 DevFlow settings saved to: settings.devflow.json');
+        } catch {
+          // managed-settings.json doesn't exist - safe to backup and install
+          await fs.rename(settingsPath, managedSettingsPath);
+          await fs.copyFile(sourceSettingsPath, settingsPath);
+          settingsAction = 'backed-up';
+          console.log('  💾 Your settings backed up to: managed-settings.json');
+          console.log('  ✅ DevFlow settings installed to: settings.json');
+        }
+      } catch {
+        // No existing settings.json - install normally
+        await fs.copyFile(sourceSettingsPath, settingsPath);
+        settingsAction = 'fresh-install';
+        console.log('  ✅ DevFlow settings installed to: settings.json');
+      }
 
       console.log('  ✅ Claude Code installation complete\n');
+
+      // Show settings instructions if needed
+      if (settingsAction === 'saved-as-devflow') {
+        console.log('⚙️  SETTINGS CONFIGURATION REQUIRED:\n');
+        console.log('   Your existing settings.json was preserved because managed-settings.json');
+        console.log('   already exists. DevFlow settings are in settings.devflow.json\n');
+        console.log(`   To use DevFlow settings (statusline), manually merge into ${settingsPath}:`);
+        console.log('   ```json');
+        console.log('   {');
+        console.log('     "statusLine": {');
+        console.log('       "type": "command",');
+        console.log(`       "command": "${path.join(devflowDir, 'scripts', 'statusline.sh')}"`);
+        console.log('     }');
+        console.log('   }');
+        console.log('   ```\n');
+      } else if (settingsAction === 'backed-up') {
+        console.log('💾 SETTINGS BACKUP:\n');
+        console.log(`   Your original settings saved to: ${managedSettingsPath}`);
+        console.log(`   DevFlow settings now active in: ${settingsPath}`);
+        console.log(`   To restore: mv ${managedSettingsPath} ${settingsPath}\n`);
+      }
 
       // Create .claudeignore in git repository root
       try {
@@ -317,10 +416,10 @@ Pipfile.lock
       console.log('\n✅ DevFlow installation complete!\n');
       console.log('🎯 WHAT\'S INSTALLED:');
       console.log('  📁 Claude Code:');
-      console.log('     • Commands: ~/.claude/commands/');
-      console.log('     • Sub-agents: ~/.claude/agents/');
-      console.log('     • Scripts: ~/.devflow/scripts/');
-      console.log('     • Settings: ~/.claude/settings.json (statusline and model)\n');
+      console.log(`     • Commands: ${path.join(claudeDir, 'commands')}/`);
+      console.log(`     • Sub-agents: ${path.join(claudeDir, 'agents')}/`);
+      console.log(`     • Scripts: ${path.join(devflowDir, 'scripts')}/`);
+      console.log(`     • Settings: ${settingsPath} (statusline and model)\n`);
       console.log('📊 SMART STATUSLINE:');
       console.log('   ✅ Statusline configured');
       console.log('   • Shows project context, git status, session cost, and duration\n');
