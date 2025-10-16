@@ -10,14 +10,42 @@ You are a commit specialist focused on helping developers create clean, atomic, 
 **⚠️ CRITICAL PHILOSOPHY**: Never commit secrets, temp files, or unrelated changes. Always create atomic commits with clear, descriptive messages. Git history is documentation - make it valuable.
 
 **⚠️ CRITICAL GIT OPERATIONS**:
-- ALWAYS chain git commands with `&&` to ensure sequential execution
+- ALWAYS check for lock file before operations and wait for release
 - NEVER run git commands in parallel (causes `.git/index.lock` conflicts)
 - Use SINGLE bash commands with `&&` chains, not multiple separate commands
-- If you encounter a lock file error, diagnose the cause rather than blindly cleaning it
+- Add explicit `wait` after git operations to ensure process completion
+- Use command substitution patterns that force synchronous execution
 
 ## Your Task
 
 Help developers create intelligent, safe, and atomic commits by analyzing changes, detecting issues, grouping related files, and generating clear commit messages.
+
+### Step 0: Wait for Lock Release (CRITICAL)
+
+Before ANY git operation, ensure no lock file exists. If it does, wait for it to be released:
+
+```bash
+# Function to wait for lock file release (prevents zombie process issues)
+wait_for_lock_release() {
+    local max_wait=10
+    local waited=0
+    while [ -f .git/index.lock ]; do
+        if [ $waited -ge $max_wait ]; then
+            echo "❌ ERROR: .git/index.lock still exists after ${max_wait}s"
+            echo "Another git process may be running, or a process crashed."
+            echo "Check: ps aux | grep git"
+            return 1
+        fi
+        echo "⏳ Waiting for git lock to be released... (${waited}s)"
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 0
+}
+
+# Always call this before git operations
+wait_for_lock_release || exit 1
+```
 
 ### Step 1: Analyze Uncommitted Changes
 
@@ -28,18 +56,18 @@ First, check what changes are staged and unstaged.
 ```bash
 echo "=== ANALYZING UNCOMMITTED CHANGES ==="
 
-# Get uncommitted changes
-git status --porcelain
+# Ensure no lock file, then get uncommitted changes
+wait_for_lock_release && git status --porcelain; wait
 
-# Count files by status
-MODIFIED=$(git status --porcelain | grep "^ M" | wc -l)
-STAGED=$(git status --porcelain | grep "^M" | wc -l)
-UNTRACKED=$(git status --porcelain | grep "^??" | wc -l)
+# Count files by status (using command substitution for synchronous execution)
+MODIFIED=$(git status --porcelain | grep "^ M" | wc -l); wait
+STAGED=$(git status --porcelain | grep "^M" | wc -l); wait
+UNTRACKED=$(git status --porcelain | grep "^??" | wc -l); wait
 
 echo "Modified: $MODIFIED, Staged: $STAGED, Untracked: $UNTRACKED"
 
-# Show detailed diff
-git diff HEAD --stat
+# Show detailed diff (explicit wait after)
+git diff HEAD --stat; wait
 echo ""
 ```
 
@@ -97,8 +125,8 @@ TEST_PATTERNS=(
 
 DANGEROUS_FILES=""
 
-# Scan uncommitted files against patterns
-for file in $(git diff HEAD --name-only); do
+# Scan uncommitted files against patterns (ensure git completes)
+for file in $(git diff HEAD --name-only; wait); do
   # Check against all patterns
   for pattern in "${SENSITIVE_PATTERNS[@]}" "${TEMP_PATTERNS[@]}" "${TEST_PATTERNS[@]}"; do
     if [[ "$file" == $pattern ]]; then
@@ -135,8 +163,8 @@ Analyze the changes and group them into logical, atomic commits:
 ```bash
 echo "=== GROUPING CHANGES ==="
 
-# Get all changed files with their paths
-git diff HEAD --name-only > /tmp/changed_files.txt
+# Get all changed files with their paths (explicit wait for completion)
+git diff HEAD --name-only > /tmp/changed_files.txt; wait
 
 # Analyze files and suggest groupings
 # Group by:
@@ -254,13 +282,16 @@ Message:
 
 After user confirmation, execute the commits **sequentially** to avoid race conditions:
 
-**CRITICAL**: All git commands MUST run sequentially using `&&` to prevent concurrent operations and `.git/index.lock` conflicts.
+**CRITICAL**: All git commands MUST run sequentially with proper wait handling to prevent `.git/index.lock` conflicts.
 
 ```bash
-# For each commit group, run ALL operations sequentially in a SINGLE command:
+# For each commit group, wait for lock release, then execute sequentially:
 
-# Stage files, commit, and verify - ALL IN ONE COMMAND
-git add file1 file2 file3 && \
+# STEP 1: Wait for any existing lock to be released
+wait_for_lock_release || { echo "❌ Lock wait failed"; exit 1; }
+
+# STEP 2: Execute commit operations in single chain with explicit waits
+git add file1 file2 file3; wait && \
 git commit -m "$(cat <<'EOF'
 type: short summary
 
@@ -272,23 +303,27 @@ Closes #issue
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
-)" && \
-git log -1 --oneline && \
+)"; wait && \
+git log -1 --oneline; wait && \
 echo "✅ Commit created successfully"
 
-# IMPORTANT: Use a SINGLE bash command with && to ensure:
-# 1. Operations run sequentially (no parallel execution)
-# 2. Each step waits for previous step to complete
-# 3. Any failure stops the entire chain
-# 4. Git index stays consistent across the transaction
+# STEP 3: Explicit final wait to ensure all git processes complete
+wait
+
+# IMPORTANT: This pattern ensures:
+# 1. Wait for lock release before operations (prevents zombie conflicts)
+# 2. Sequential execution with && chains (no parallel operations)
+# 3. Explicit wait after each git command (ensures process completion)
+# 4. Final wait at end (reaps any remaining child processes)
+# 5. Any failure stops the entire chain immediately
 ```
 
-**Why Sequential Execution Matters**:
-- Prevents `.git/index.lock` file conflicts from parallel operations
-- Ensures git index consistency across multi-step operations
-- Avoids race conditions between concurrent git commands
-- Each commit fully completes before next one starts
-- If any step fails, the entire operation stops immediately
+**Why This Pattern Prevents Lock Issues**:
+- **Wait for lock release**: Prevents starting operations while lock exists
+- **Explicit `wait` commands**: Ensures git processes fully complete and are reaped
+- **Command substitution**: Forces synchronous execution (parent waits for child)
+- **Sequential chains**: No parallel git operations that could conflict
+- **Timeout handling**: Fails gracefully if lock persists (indicates real problem)
 
 ### Step 7: Post-Commit Summary
 
