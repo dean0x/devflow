@@ -53,27 +53,51 @@ git log --oneline $BASE_BRANCH..HEAD
 echo ""
 ```
 
-### Step 2: Launch Specialized Sub-Agents in Parallel
+### Step 2: Detect Change Categories
 
-Launch these sub-agents in parallel:
+Analyze what types of changes are in this branch to determine which specialized agents are needed:
 
+```bash
+# Check if database-related files changed
+DB_CHANGES=$(git diff --name-only $BASE_BRANCH...HEAD | grep -E '\.(sql|prisma|migration|knex|sequelize|db)' || true)
+DB_CHANGES+=$(git diff --name-only $BASE_BRANCH...HEAD | grep -iE '(migration|schema|database|models/)' || true)
+
+if [ -n "$DB_CHANGES" ]; then
+    echo "🗄️  Database changes detected - will run database audit"
+    INCLUDE_DB_AUDIT=true
+else
+    echo "ℹ️  No database changes detected - skipping database audit"
+    INCLUDE_DB_AUDIT=false
+fi
+echo ""
+```
+
+### Step 3: Launch Specialized Sub-Agents in Parallel
+
+Launch these sub-agents in parallel based on change detection:
+
+**Core Audits (Always Run)**:
 1. audit-security sub-agent
 2. audit-performance sub-agent
 3. audit-architecture sub-agent
 4. audit-tests sub-agent
 5. audit-complexity sub-agent
 6. audit-dependencies sub-agent
+7. audit-documentation sub-agent
 
-### Step 3: Synthesize Comprehensive Review
+**Conditional Audits**:
+8. audit-database sub-agent (only if database changes detected)
+
+### Step 4: Synthesize Comprehensive Review
 
 After all sub-agents complete their analysis:
 
-1. **Collect Results**: Gather findings from all 6 specialized sub-agents
+1. **Collect Results**: Gather findings from all 7-8 specialized sub-agents (depending on change types)
 2. **Cross-Reference Issues**: Identify overlapping concerns between domains
 3. **Prioritize for PR**: Focus on merge-blocking vs nice-to-have improvements
 4. **Create PR-Ready Review**: Structure for easy consumption by human reviewers
 
-### Step 4: Save Comprehensive Review Document
+### Step 5: Save Comprehensive Review Document
 
 Create a detailed review document at `.docs/reviews/branch-{BRANCH_NAME}-{YYYY-MM-DD_HHMM}.md`:
 
@@ -178,6 +202,25 @@ Create a detailed review document at `.docs/reviews/branch-{BRANCH_NAME}-{YYYY-M
 #### Dependency Recommendations
 {specific dependency management improvements}
 
+### 📚 Documentation Analysis (audit-documentation)
+**Documentation Quality**: {Excellent/Good/Acceptable/Poor}
+
+#### Documentation Issues Found
+{detailed documentation drift, missing docs, stale examples}
+
+#### Documentation Recommendations
+{specific documentation updates needed}
+
+### 🗄️ Database Analysis (audit-database)
+**Database Health**: {Excellent/Good/Acceptable/Poor}
+**Note**: Only included if database changes detected
+
+#### Database Issues Found
+{detailed database design, migration, and query issues}
+
+#### Database Recommendations
+{specific database improvements needed}
+
 ---
 
 ## 🎯 Action Plan
@@ -209,6 +252,8 @@ Create a detailed review document at `.docs/reviews/branch-{BRANCH_NAME}-{YYYY-M
 - Test Coverage: {score}/10
 - Maintainability: {score}/10
 - Dependencies: {score}/10
+- Documentation: {score}/10
+- Database: {score}/10 (if applicable)
 
 ### Comparison to {BASE_BRANCH}
 - Quality Trend: {Improving/Stable/Declining}
@@ -253,7 +298,7 @@ Based on sub-agent analysis, human reviewers should focus on:
 *Next: Address blocking issues, then create PR with this review as reference*
 ```
 
-### Step 5: Provide Executive Summary
+### Step 6: Provide Executive Summary
 
 Give the developer a clear, actionable summary:
 

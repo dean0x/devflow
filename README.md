@@ -33,10 +33,11 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | `audit-security` | Security Analysis | Expert vulnerability detection and security code review |
 | `audit-performance` | Performance | Optimization and bottleneck detection |
 | `audit-architecture` | Architecture | Design pattern analysis and code structure review |
-| `audit-tests` | Testing | Test quality, coverage, and effectiveness analysis |
-| `audit-dependencies` | Dependencies | Dependency management and security analysis |
+| `audit-tests` | Testing | Test quality, coverage, and effectiveness analysis (surgical execution) |
 | `audit-complexity` | Complexity | Code complexity and maintainability assessment |
+| `audit-dependencies` | Dependencies | Dependency management and security analysis |
 | `audit-database` | Database | Database design and optimization review |
+| `audit-documentation` | Documentation | Docs-code alignment, API accuracy, comment quality |
 | `catch-up` | Context Restoration | Project status and context restoration with validation |
 | `commit` | Git Operations | Intelligent commit creation with safety checks |
 | `research` | Implementation Planning | Pre-implementation research, approach analysis, and planning |

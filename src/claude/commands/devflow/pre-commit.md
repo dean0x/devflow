@@ -7,6 +7,12 @@ allowed-tools: Task, Bash, Read, Write, Grep, Glob
 
 Perform a comprehensive review of uncommitted changes by orchestrating multiple specialized sub-agents in parallel. This provides quick feedback before committing changes.
 
+**Audit Strategy**:
+- **Always Run** (5 core audits): Security, Performance, Architecture, Tests, Complexity
+- **Available on demand**: Documentation, Dependencies, Database (use `/pre-pr` for full audit)
+
+This lightweight approach provides fast feedback for individual commits. Use `/pre-pr` for comprehensive branch reviews before creating pull requests.
+
 ### Step 1: Analyze Current Changes
 
 First, check what changes are available for review:
