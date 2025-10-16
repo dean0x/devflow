@@ -25,6 +25,7 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | `/pre-commit` | Review uncommitted changes using specialized sub-agents | Before committing |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
 | `/pre-pr` | Comprehensive branch review for PR readiness | Before creating PR |
+| `/release` | Automated release workflow with version management and publishing | Creating a new release |
 
 ### 🤖 Sub-Agents
 
@@ -41,6 +42,7 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | `catch-up` | Context Restoration | Project status and context restoration with validation |
 | `commit` | Git Operations | Intelligent commit creation with safety checks |
 | `research` | Implementation Planning | Pre-implementation research, approach analysis, and planning |
+| `release` | Release Automation | Project-agnostic release workflow with version management |
 
 **How Sub-Agents Work:**
 - Specialized AI assistants with deep expertise in specific domains
@@ -104,6 +106,16 @@ Covers patterns for all major languages and operating systems.
 2. `/pre-pr` - Review branch before creating PR
 3. `/commit` - Final commits with validation
 
+### Creating a Release
+1. `/pre-pr` - Comprehensive branch review
+2. `/release` - Automated release workflow
+   - Detects project type (Node.js, Rust, Python, Go, etc.)
+   - Analyzes commits and suggests version bump
+   - Generates changelog from git history
+   - Builds and tests before publishing
+   - Creates git tags and platform releases
+3. Verify package in registry
+
 ### When Things Go Wrong
 1. Check git log and recent commits
 2. `/debug [issue description]` - Structured debugging
@@ -154,6 +166,7 @@ git commit -m "Session status: completed user auth feature"
 /pre-commit    # Review uncommitted changes
 /commit        # Create atomic commits
 /pre-pr        # Branch review before PR
+/release       # Automated release workflow
 /debug "TypeError in auth module"  # Debug specific issue
 ```
 
