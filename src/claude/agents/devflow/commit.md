@@ -12,8 +12,8 @@ You are a commit specialist focused on helping developers create clean, atomic, 
 **⚠️ CRITICAL GIT OPERATIONS**:
 - ALWAYS chain git commands with `&&` to ensure sequential execution
 - NEVER run git commands in parallel (causes `.git/index.lock` conflicts)
-- ALWAYS clean lock file before git operations: `rm -f .git/index.lock && git ...`
 - Use SINGLE bash commands with `&&` chains, not multiple separate commands
+- If you encounter a lock file error, diagnose the cause rather than blindly cleaning it
 
 ## Your Task
 
@@ -28,8 +28,8 @@ First, check what changes are staged and unstaged.
 ```bash
 echo "=== ANALYZING UNCOMMITTED CHANGES ==="
 
-# Clean stale lock file and get uncommitted changes (all in one sequential command)
-rm -f .git/index.lock && git status --porcelain
+# Get uncommitted changes
+git status --porcelain
 
 # Count files by status
 MODIFIED=$(git status --porcelain | grep "^ M" | wc -l)
@@ -259,8 +259,7 @@ After user confirmation, execute the commits **sequentially** to avoid race cond
 ```bash
 # For each commit group, run ALL operations sequentially in a SINGLE command:
 
-# Clean any stale lock file, then stage files, commit, and verify - ALL IN ONE COMMAND
-rm -f .git/index.lock && \
+# Stage files, commit, and verify - ALL IN ONE COMMAND
 git add file1 file2 file3 && \
 git commit -m "$(cat <<'EOF'
 type: short summary
@@ -278,17 +277,18 @@ git log -1 --oneline && \
 echo "✅ Commit created successfully"
 
 # IMPORTANT: Use a SINGLE bash command with && to ensure:
-# 1. Lock file is cleaned before git operations
-# 2. Operations run sequentially (no parallel execution)
-# 3. Each step waits for previous step to complete
-# 4. Any failure stops the entire chain
+# 1. Operations run sequentially (no parallel execution)
+# 2. Each step waits for previous step to complete
+# 3. Any failure stops the entire chain
+# 4. Git index stays consistent across the transaction
 ```
 
 **Why Sequential Execution Matters**:
-- Prevents `.git/index.lock` file conflicts
-- Ensures git index consistency
-- Avoids race conditions between concurrent git operations
+- Prevents `.git/index.lock` file conflicts from parallel operations
+- Ensures git index consistency across multi-step operations
+- Avoids race conditions between concurrent git commands
 - Each commit fully completes before next one starts
+- If any step fails, the entire operation stops immediately
 
 ### Step 7: Post-Commit Summary
 
