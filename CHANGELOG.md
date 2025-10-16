@@ -5,6 +5,63 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-10-16
+
+### Added
+- **audit-documentation sub-agent** - Ensures documentation stays aligned with code
+  - Validates README accuracy (installation, usage, examples)
+  - Checks API documentation matches actual function signatures
+  - Detects stale code comments and commented-out code
+  - Verifies code examples actually work
+  - Language-agnostic documentation pattern detection
+  - Severity-based reporting (CRITICAL/HIGH/MEDIUM/LOW)
+- **Smart settings.json management** - 3-tier backup strategy prevents data loss
+  - First install: Direct installation
+  - Existing settings: Backup to managed-settings.json
+  - Both exist: Save as settings.devflow.json with clear instructions
+  - User maintains control of their configuration
+- **Surgical test execution** - Prevents Claude Code session crashes
+  - Static analysis by default (80% value, 0% crash risk)
+  - Smart test selection based on git changes
+  - Individual test file execution with 30s timeouts
+  - Max 10 test files per run with resource limits
+  - Early termination on repeated error patterns
+- **Language-agnostic agents** - Works with any programming language
+  - Auto-detection for 9+ package managers
+  - Universal ORM and database patterns
+  - Smart test command detection from manifests
+  - Generic file search patterns for all ecosystems
+
+### Changed
+- **Pre-commit strategy** - Lightweight 5-agent review for fast feedback
+  - Core audits: Security, Performance, Architecture, Tests, Complexity
+  - Typical execution: 30-60 seconds
+  - Additional audits available on explicit request
+- **Pre-pr strategy** - Comprehensive 7-8 agent review
+  - All core audits plus Dependencies and Documentation
+  - Conditional Database audit (only if DB files changed)
+  - Typical execution: 2-3 minutes
+  - Thorough branch review before PR creation
+- **Path handling** - No longer assumes HOME environment variable
+  - Uses Node.js homedir() as fallback
+  - Environment variable overrides: CLAUDE_CODE_DIR, DEVFLOW_DIR
+  - Cross-platform compatibility improvements
+
+### Fixed
+- **Git lock file conflicts** - Wait-based prevention instead of deletion
+  - Implemented wait_for_lock_release() with 10s timeout
+  - Explicit wait commands after each git operation
+  - Command substitution patterns for synchronous execution
+  - Prevents zombie process lock file issues
+  - No more `.git/index.lock` errors
+- **Settings overwrite issue** - User settings preserved with backup strategy
+- **Hardcoded path assumptions** - Proper fallbacks and environment overrides
+
+### Documentation
+- Added audit-documentation to sub-agents table in README
+- Clarified audit strategies for pre-commit vs pre-pr
+- Updated workflow examples with refined command usage
+
 ## [0.1.2] - 2025-10-05
 
 ### Added
@@ -91,6 +148,7 @@ devflow init
 
 ---
 
+[0.2.0]: https://github.com/dean0x/devflow/releases/tag/v0.2.0
 [0.1.2]: https://github.com/dean0x/devflow/releases/tag/v0.1.2
 [0.1.1]: https://github.com/dean0x/devflow/releases/tag/v0.1.1
 [0.1.0]: https://github.com/dean0x/devflow/releases/tag/v0.1.0
