@@ -20,13 +20,11 @@ Help developers catch up on recent project activity by reviewing status document
 Look for preserved todo list state in the most recent status document:
 
 ```bash
-# Check if status directory exists
 if [ ! -d ".docs/status" ]; then
     echo "No status documents found. Run /devlog to create the first one."
     exit 1
 fi
 
-# Find the most recent status document
 LATEST_STATUS=$(find .docs/status -name "*.md" -not -name "INDEX.md" | sort -r | head -1)
 ```
 
@@ -77,36 +75,9 @@ For each found status document:
 # Check if "completed" features actually work
 echo "=== VALIDATING STATUS CLAIMS ==="
 
-# Detect and run project's test command
-echo "Attempting to run tests..."
-TEST_CMD=""
-BUILD_CMD=""
-
-# Auto-detect test command from common manifest files
-if [ -f "package.json" ]; then
-    TEST_CMD=$(command -v jq >/dev/null && jq -r '.scripts.test // empty' package.json 2>/dev/null || grep -o '"test"[^"]*"[^"]*"' package.json | cut -d'"' -f4)
-    BUILD_CMD=$(command -v jq >/dev/null && jq -r '.scripts.build // empty' package.json 2>/dev/null || grep -o '"build"[^"]*"[^"]*"' package.json | cut -d'"' -f4)
-elif [ -f "Makefile" ]; then
-    grep -q "^test:" Makefile && TEST_CMD="make test"
-    grep -q "^build:" Makefile && BUILD_CMD="make build"
-fi
-
-# Run tests if detected
-if [ -n "$TEST_CMD" ]; then
-    echo "Running: $TEST_CMD"
-    eval $TEST_CMD 2>&1 | head -20 || echo "⚠️ Tests failed - verify 'all tests passing' claims"
-else
-    echo "ℹ️  No test command auto-detected. Manually verify test claims."
-    echo "   Try common commands: npm test, pytest, cargo test, go test, mvn test, etc."
-fi
-
-# Run build if detected
-if [ -n "$BUILD_CMD" ]; then
-    echo "Running: $BUILD_CMD"
-    eval $BUILD_CMD 2>&1 | head -20 || echo "⚠️ Build failed - verify 'build successful' claims"
-else
-    echo "ℹ️  No build command auto-detected. Manually verify build claims."
-fi
+# Check test files in recently modified files only
+echo "Checking test files in last commit..."
+git diff --name-only HEAD~1 2>/dev/null | grep -E "(test|spec)" | head -5
 
 # Check for claimed files/features
 echo "Verifying claimed file changes..."
@@ -116,13 +87,12 @@ git status --porcelain | head -10
 echo "Checking for red flags..."
 find . -type f \( -name "*.tmp" -o -name "*.bak" -o -name "*~" \) ! -path "*/node_modules/*" ! -path "*/.git/*" | head -5
 
-# Search for TODO/FIXME across all source files (language-agnostic)
-echo "Scanning for TODO/FIXME markers..."
-find . -type f ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/vendor/*" ! -path "*/target/*" ! -path "*/build/*" ! -path "*/dist/*" \
-    \( -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.py" -o -name "*.go" -o -name "*.rs" \
-    -o -name "*.java" -o -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.rb" -o -name "*.php" \
-    -o -name "*.cs" -o -name "*.swift" -o -name "*.kt" -o -name "*.scala" \) \
-    -exec grep -l "TODO\|FIXME\|HACK\|XXX" {} \; 2>/dev/null | head -5
+echo "Checking recently modified files for TODO/FIXME markers..."
+git diff --name-only HEAD~1 2>/dev/null | head -5 | while read -r file; do
+    if [ -f "$file" ]; then
+        grep -l "TODO\|FIXME\|HACK\|XXX" "$file" 2>/dev/null && echo "  Found in: $file"
+    fi
+done
 
 # Generic dependency check
 echo "Checking dependency health..."
