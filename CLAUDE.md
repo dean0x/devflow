@@ -33,7 +33,7 @@ DevFlow consists of three main components:
 
 ```bash
 # 1. Modify command or agent in devflow repo
-vim devflow/src/claude/commands/devflow/pre-commit.md
+vim devflow/src/claude/commands/devflow/code-review.md
 
 # 2. Rebuild if CLI changes
 npm run build
@@ -42,7 +42,7 @@ npm run build
 node dist/cli.js init
 
 # 4. Test immediately
-/pre-commit
+/code-review
 
 # 5. Iterate until satisfied
 # 6. Commit using /commit

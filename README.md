@@ -22,9 +22,8 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 | `/plan-next-steps` | Extract actionable next steps from current discussion | After planning discussion |
 | `/debug [issue]` | Systematic debugging with issue-specific investigation | When troubleshooting |
-| `/pre-commit` | Review uncommitted changes using specialized sub-agents | Before committing |
+| `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
-| `/pre-pr` | Comprehensive branch review for PR readiness | Before creating PR |
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
 
 ### 🤖 Sub-Agents
@@ -97,17 +96,17 @@ Covers patterns for all major languages and operating systems.
 
 ### During Development
 1. `/research [topic]` - Research implementation approaches before coding
-2. `/pre-commit` - Review changes before committing
+2. `/code-review` - Review changes before committing
 3. `/commit` - Create intelligent atomic commits
 4. Invoke audit sub-agents as needed
 
 ### Ending a Session
 1. `/devlog` - Document decisions and state
-2. `/pre-pr` - Review branch before creating PR
+2. `/code-review` - Review branch before creating PR
 3. `/commit` - Final commits with validation
 
 ### Creating a Release
-1. `/pre-pr` - Comprehensive branch review
+1. `/code-review` - Comprehensive branch review
 2. `/release` - Automated release workflow
    - Detects project type (Node.js, Rust, Python, Go, etc.)
    - Analyzes commits and suggests version bump
@@ -163,9 +162,8 @@ git commit -m "Session status: completed user auth feature"
 ### Integration Examples
 ```bash
 /research "add JWT authentication"  # Research before implementing
-/pre-commit    # Review uncommitted changes
+/code-review   # Review changes (uncommitted or full branch)
 /commit        # Create atomic commits
-/pre-pr        # Branch review before PR
 /release       # Automated release workflow
 /debug "TypeError in auth module"  # Debug specific issue
 ```

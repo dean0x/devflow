@@ -67,8 +67,17 @@ export const initCommand = new Command('init')
   .option('--force', 'Override existing settings.json and CLAUDE.md (prompts for confirmation)')
   .option('-y, --yes', 'Auto-approve all prompts (use with --force)')
   .action(async (options) => {
-    console.log('🚀 DevFlow - Agentic Development Toolkit');
-    console.log('   Intelligent tools for reliable AI-assisted development\n');
+    // Get package version
+    const packageJsonPath = path.resolve(__dirname, '../../package.json');
+    let version = '';
+    try {
+      const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
+      version = packageJson.version;
+    } catch {
+      version = 'unknown';
+    }
+
+    console.log(`🚀 DevFlow v${version}${options.force ? ' [--force]' : ''}\n`);
 
     // Get installation paths with proper validation
     let claudeDir: string;
@@ -85,15 +94,30 @@ export const initCommand = new Command('init')
     // Check for Claude Code
     try {
       await fs.access(claudeDir);
-      console.log(`🔍 Detected Claude Code at ${claudeDir} ✅\n`);
     } catch {
       console.error(`❌ Claude Code not detected at ${claudeDir}`);
-      console.error('\nInstall Claude Code from: https://claude.com/claude-code');
-      console.error('\nOr set CLAUDE_CODE_DIR environment variable if installed elsewhere.');
+      console.error('   Install from: https://claude.com/claude-code');
+      console.error('   Or set CLAUDE_CODE_DIR if installed elsewhere\n');
       process.exit(1);
     }
 
-    console.log('🛠️ Installing DevFlow for Claude Code...');
+    // Handle --force flag prompt
+    let forceOverride = false;
+    if (options.force) {
+      if (options.yes) {
+        forceOverride = true;
+      } else {
+        console.log('⚠️  WARNING: Force override will replace settings.json and CLAUDE.md');
+        console.log('   Backups: settings.json.backup, CLAUDE.md.backup\n');
+        forceOverride = await promptUser('Proceed? (y/N): ');
+        console.log();
+
+        if (!forceOverride) {
+          console.log('❌ Cancelled. Use init without --force for safe installation.\n');
+          process.exit(0);
+        }
+      }
+    }
 
     // Get the root directory of the devflow package
     const rootDir = path.resolve(__dirname, '../..');
@@ -101,7 +125,6 @@ export const initCommand = new Command('init')
 
     try {
       // Clean old DevFlow files before installing
-      console.log('  🧹 Cleaning old DevFlow files...');
       const commandsDevflowDir = path.join(claudeDir, 'commands', 'devflow');
       const agentsDevflowDir = path.join(claudeDir, 'agents', 'devflow');
       const devflowScriptsDir = path.join(devflowDir, 'scripts');
@@ -115,18 +138,13 @@ export const initCommand = new Command('init')
         // Directories might not exist on first install
       }
 
-      // Install commands
-      console.log('  📂 Installing commands...');
+      // Install components silently
       await fs.mkdir(commandsDevflowDir, { recursive: true });
       await copyDirectory(path.join(claudeSourceDir, 'commands', 'devflow'), commandsDevflowDir);
 
-      // Install sub-agents
-      console.log('  🤖 Installing sub-agents...');
       await fs.mkdir(agentsDevflowDir, { recursive: true });
       await copyDirectory(path.join(claudeSourceDir, 'agents', 'devflow'), agentsDevflowDir);
 
-      // Install scripts
-      console.log('  📜 Installing scripts...');
       await fs.mkdir(devflowScriptsDir, { recursive: true });
       await copyDirectory(path.join(claudeSourceDir, 'scripts'), devflowScriptsDir);
 
@@ -136,30 +154,10 @@ export const initCommand = new Command('init')
         await fs.chmod(path.join(devflowScriptsDir, script), 0o755);
       }
 
-      // Handle --force flag
-      let forceOverride = false;
-      if (options.force) {
-        if (options.yes) {
-          console.log('  ⚠️  Force override enabled with auto-approval (-y flag)\n');
-          forceOverride = true;
-        } else {
-          console.log('  ⚠️  WARNING: --force flag will override existing settings.json and CLAUDE.md\n');
-          console.log('  This will:');
-          console.log('    • Replace ~/.claude/settings.json with DevFlow settings');
-          console.log('    • Replace ~/.claude/CLAUDE.md with DevFlow global instructions\n');
-          forceOverride = await promptUser('  Do you want to proceed? (y/N): ');
-          console.log();
-
-          if (!forceOverride) {
-            console.log('  ❌ Force override cancelled. Proceeding with safe installation.\n');
-          } else {
-            console.log('  ✅ Force override approved. Proceeding...\n');
-          }
-        }
-      }
+      console.log('✓ Claude Code detected');
+      console.log('✓ Installing components... (commands, agents, scripts)');
 
       // Install settings with smart backup
-      console.log('  ⚙️ Installing settings...');
       const settingsPath = path.join(claudeDir, 'settings.json');
       const managedSettingsPath = path.join(claudeDir, 'managed-settings.json');
       const devflowSettingsPath = path.join(claudeDir, 'settings.devflow.json');
@@ -172,13 +170,11 @@ export const initCommand = new Command('init')
         try {
           await fs.access(settingsPath);
           await fs.rename(settingsPath, path.join(claudeDir, 'settings.json.backup'));
-          console.log('  💾 Existing settings backed up to: settings.json.backup');
         } catch {
           // No existing file
         }
         await fs.copyFile(sourceSettingsPath, settingsPath);
         settingsAction = 'force-installed';
-        console.log('  ✅ DevFlow settings force-installed to: settings.json');
       } else {
         // Safe installation logic
         try {
@@ -193,26 +189,20 @@ export const initCommand = new Command('init')
             // managed-settings.json exists - install as settings.devflow.json
             await fs.copyFile(sourceSettingsPath, devflowSettingsPath);
             settingsAction = 'saved-as-devflow';
-            console.log('  ⚠️  Your existing settings.json is preserved');
-            console.log('  📄 DevFlow settings saved to: settings.devflow.json');
           } catch {
             // managed-settings.json doesn't exist - safe to backup and install
             await fs.rename(settingsPath, managedSettingsPath);
             await fs.copyFile(sourceSettingsPath, settingsPath);
             settingsAction = 'backed-up';
-            console.log('  💾 Your settings backed up to: managed-settings.json');
-            console.log('  ✅ DevFlow settings installed to: settings.json');
           }
         } catch {
           // No existing settings.json - install normally
           await fs.copyFile(sourceSettingsPath, settingsPath);
           settingsAction = 'fresh-install';
-          console.log('  ✅ DevFlow settings installed to: settings.json');
         }
       }
 
       // Install CLAUDE.md with smart backup
-      console.log('  📘 Installing global CLAUDE.md...');
       const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
       const devflowClaudeMdPath = path.join(claudeDir, 'CLAUDE.devflow.md');
       const sourceClaudeMdPath = path.join(claudeSourceDir, 'CLAUDE.md');
@@ -224,13 +214,11 @@ export const initCommand = new Command('init')
         try {
           await fs.access(claudeMdPath);
           await fs.rename(claudeMdPath, path.join(claudeDir, 'CLAUDE.md.backup'));
-          console.log('  💾 Existing CLAUDE.md backed up to: CLAUDE.md.backup');
         } catch {
           // No existing file
         }
         await fs.copyFile(sourceClaudeMdPath, claudeMdPath);
         claudeMdAction = 'force-installed';
-        console.log('  ✅ DevFlow CLAUDE.md force-installed');
       } else {
         // Safe installation logic
         try {
@@ -240,68 +228,34 @@ export const initCommand = new Command('init')
           // User has CLAUDE.md - install as CLAUDE.devflow.md
           await fs.copyFile(sourceClaudeMdPath, devflowClaudeMdPath);
           claudeMdAction = 'saved-as-devflow';
-          console.log('  ⚠️  Your existing CLAUDE.md is preserved');
-          console.log('  📄 DevFlow CLAUDE.md saved to: CLAUDE.devflow.md');
         } catch {
           // No existing CLAUDE.md - install normally
           await fs.copyFile(sourceClaudeMdPath, claudeMdPath);
           claudeMdAction = 'fresh-install';
-          console.log('  ✅ DevFlow CLAUDE.md installed');
         }
       }
 
-      console.log('  ✅ Claude Code installation complete\n');
-
-      // Show settings instructions if needed
-      if (settingsAction === 'saved-as-devflow') {
-        console.log('⚙️  SETTINGS CONFIGURATION REQUIRED:\n');
-        console.log('   Your existing settings.json was preserved because managed-settings.json');
-        console.log('   already exists. DevFlow settings are in settings.devflow.json\n');
-        console.log(`   To use DevFlow settings (statusline), manually merge into ${settingsPath}:`);
-        console.log('   ```json');
-        console.log('   {');
-        console.log('     "statusLine": {');
-        console.log('       "type": "command",');
-        console.log(`       "command": "${path.join(devflowDir, 'scripts', 'statusline.sh')}"`);
-        console.log('     }');
-        console.log('   }');
-        console.log('   ```\n');
+      // Show concise status messages
+      if (settingsAction === 'force-installed') {
+        console.log('✓ Settings force-installed (backup: settings.json.backup)');
       } else if (settingsAction === 'backed-up') {
-        console.log('💾 SETTINGS BACKUP:\n');
-        console.log(`   Your original settings saved to: ${managedSettingsPath}`);
-        console.log(`   DevFlow settings now active in: ${settingsPath}`);
-        console.log(`   To restore: mv ${managedSettingsPath} ${settingsPath}\n`);
-      } else if (settingsAction === 'force-installed') {
-        console.log('⚠️  FORCE OVERRIDE APPLIED:\n');
-        console.log(`   Your original settings backed up to: ${path.join(claudeDir, 'settings.json.backup')}`);
-        console.log(`   DevFlow settings now active in: ${settingsPath}\n`);
+        console.log('✓ Settings configured');
+      } else if (settingsAction === 'saved-as-devflow') {
+        console.log('⚠️  Existing settings preserved → DevFlow saved to settings.devflow.json');
+      } else {
+        console.log('✓ Settings configured');
       }
 
-      // Show CLAUDE.md instructions if needed
-      if (claudeMdAction === 'saved-as-devflow') {
-        console.log('📘 CLAUDE.MD CONFIGURATION REQUIRED:\n');
-        console.log('   Your existing CLAUDE.md was preserved.');
-        console.log(`   DevFlow global instructions are in: ${devflowClaudeMdPath}\n`);
-        console.log('   To use DevFlow global instructions, manually merge into your CLAUDE.md:');
-        console.log('   • Engineering Principles (Result types, DI, immutability)');
-        console.log('   • Critical Anti-Patterns (NO FAKE SOLUTIONS, FAIL HONESTLY)');
-        console.log('   • Code Quality Enforcement (root cause analysis)');
-        console.log('   • Type Safety Best Practices (language-agnostic)');
-        console.log('   • Architecture Documentation (inline docs)\n');
-        console.log(`   Or replace entirely: cp ${devflowClaudeMdPath} ${claudeMdPath}\n`);
-      } else if (claudeMdAction === 'fresh-install') {
-        console.log('📘 CLAUDE.MD INSTALLED:\n');
-        console.log(`   DevFlow global instructions active in: ${claudeMdPath}`);
-        console.log('   • Language-agnostic engineering principles');
-        console.log('   • Critical anti-patterns and foolishness prevention');
-        console.log('   • Code quality enforcement rules\n');
-      } else if (claudeMdAction === 'force-installed') {
-        console.log('⚠️  CLAUDE.MD FORCE OVERRIDE APPLIED:\n');
-        console.log(`   Your original CLAUDE.md backed up to: ${path.join(claudeDir, 'CLAUDE.md.backup')}`);
-        console.log(`   DevFlow global instructions now active in: ${claudeMdPath}\n`);
+      if (claudeMdAction === 'force-installed') {
+        console.log('✓ CLAUDE.md force-installed (backup: CLAUDE.md.backup)');
+      } else if (claudeMdAction === 'saved-as-devflow') {
+        console.log('⚠️  Existing CLAUDE.md preserved → DevFlow saved to CLAUDE.devflow.md');
+      } else {
+        console.log('✓ CLAUDE.md configured');
       }
 
       // Create .claudeignore in git repository root
+      let claudeignoreCreated = false;
       try {
         // Find git repository root
         const gitRoot = execSync('git rev-parse --show-toplevel', {
@@ -314,7 +268,6 @@ export const initCommand = new Command('init')
         // Check if .claudeignore already exists
         try {
           await fs.access(claudeignorePath);
-          console.log('🔒 Security: .claudeignore already exists (skipping)');
         } catch {
           // Create comprehensive .claudeignore
           const claudeignoreContent = `# DevFlow .claudeignore - Protects against sensitive files and context pollution
@@ -508,56 +461,59 @@ Pipfile.lock
 `;
 
           await fs.writeFile(claudeignorePath, claudeignoreContent, 'utf-8');
-          console.log('🔒 Security: Created .claudeignore at repository root');
-          console.log('   • Protects sensitive files (credentials, keys, secrets)');
-          console.log('   • Reduces context pollution (node_modules, build artifacts)');
-          console.log('   • Covers common patterns for all major languages\n');
+          claudeignoreCreated = true;
         }
       } catch (error) {
         // Not a git repository or other error - skip .claudeignore creation
-        console.log('ℹ️  Skipped .claudeignore (not in a git repository)\n');
+      }
+
+      if (claudeignoreCreated) {
+        console.log('✓ .claudeignore created');
       }
 
       // Offer to install project documentation structure
+      let docsCreated = false;
       if (!options.skipDocs) {
-        console.log('📁 Project Documentation Setup\n');
         const docsDir = path.join(process.cwd(), '.docs');
 
         try {
           await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'audits'), { recursive: true });
-
-          console.log('   ✅ Created .docs/ structure');
-          console.log('   • .docs/status/ - Session documentation');
-          console.log('   • .docs/reviews/ - Code review reports');
-          console.log('   • .docs/audits/ - Security, performance, architecture audits');
+          docsCreated = true;
         } catch (error) {
-          console.log('   ⚠️ Could not create .docs/ structure (may already exist)');
+          // .docs/ structure may already exist
         }
       }
 
-      console.log('\n✅ DevFlow installation complete!\n');
-      console.log('🎯 WHAT\'S INSTALLED:');
-      console.log('  📁 Claude Code:');
-      console.log(`     • Commands: ${path.join(claudeDir, 'commands')}/`);
-      console.log(`     • Sub-agents: ${path.join(claudeDir, 'agents')}/`);
-      console.log(`     • Scripts: ${path.join(devflowDir, 'scripts')}/`);
-      console.log(`     • Settings: ${settingsPath} (statusline and model)`);
-      console.log(`     • Global Instructions: ${claudeMdPath} (language-agnostic)\n`);
-      console.log('📊 SMART STATUSLINE:');
-      console.log('   ✅ Statusline configured');
-      console.log('   • Shows project context, git status, session cost, and duration\n');
-      console.log('🚀 QUICK START:');
-      console.log('  1. Navigate to a project directory');
-      console.log('  2. Run \'/catch-up\' to get oriented');
-      console.log('  3. Use \'/pre-commit\' to review uncommitted changes');
-      console.log('  4. Run \'/devlog\' to document sessions\n');
-      console.log('📚 DOCUMENTATION:');
-      console.log('  • Check README for comprehensive guide');
-      console.log('  • Commands are self-documenting');
-      console.log('  • Visit npm or GitHub for full documentation\n');
-      console.log('Happy coding with DevFlow! 🚀');
+      if (docsCreated) {
+        console.log('✓ .docs/ structure ready');
+      }
+
+      console.log('\n✅ Installation complete!\n');
+
+      // Show manual merge instructions if needed
+      if (settingsAction === 'saved-as-devflow' || claudeMdAction === 'saved-as-devflow') {
+        console.log('⚠️  Manual merge required:');
+        if (settingsAction === 'saved-as-devflow') {
+          console.log('   Settings: Merge settings.devflow.json → settings.json');
+        }
+        if (claudeMdAction === 'saved-as-devflow') {
+          console.log('   Instructions: cp ~/.claude/CLAUDE.devflow.md ~/.claude/CLAUDE.md');
+        }
+        console.log();
+      }
+
+      console.log('Available commands:');
+      console.log('  /catch-up         Session context and status');
+      console.log('  /research         Pre-implementation planning');
+      console.log('  /code-review      Comprehensive code review');
+      console.log('  /commit           Intelligent atomic commits');
+      console.log('  /devlog           Session documentation');
+      console.log('  /debug            Systematic debugging');
+      console.log('  /release          Release automation');
+      console.log('  /plan-next-steps  Extract actionable tasks');
+      console.log('\nDocs: npm home devflow-kit');
     } catch (error) {
       console.error('❌ Installation failed:', error);
       process.exit(1);
