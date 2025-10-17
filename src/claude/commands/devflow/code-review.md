@@ -337,7 +337,7 @@ Give the developer a clear, actionable summary:
 
 🔄 NEXT STEPS:
 1. Address blocking issues above
-2. Run `/pre-commit` after fixes to verify
+2. Run `/code-review` after fixes to verify
 3. Create PR using this review as reference
 4. Share review with team for human review focus
 ```
