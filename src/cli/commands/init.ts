@@ -504,8 +504,16 @@ Pipfile.lock
         console.log();
       }
 
-      console.log('Get started: cd <project> && /catch-up');
-      console.log('Full docs: npm home devflow-kit');
+      console.log('Available commands:');
+      console.log('  /catch-up         Session context and status');
+      console.log('  /research         Pre-implementation planning');
+      console.log('  /code-review      Comprehensive code review');
+      console.log('  /commit           Intelligent atomic commits');
+      console.log('  /devlog           Session documentation');
+      console.log('  /debug            Systematic debugging');
+      console.log('  /release          Release automation');
+      console.log('  /plan-next-steps  Extract actionable tasks');
+      console.log('\nDocs: npm home devflow-kit');
     } catch (error) {
       console.error('❌ Installation failed:', error);
       process.exit(1);
