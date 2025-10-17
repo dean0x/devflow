@@ -5,6 +5,18 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2025-10-17
+
+### Changed
+- **Simplified init command output** - Reduced installation output from ~60-80 lines to ~10-15 lines
+- **Unified review commands** - Consolidated /pre-commit and /pre-pr into single /code-review command
+- **Streamlined statusline** - Removed cost/API metrics, added CPU/memory monitoring (28% code reduction)
+
+### Improved
+- Replaced /catch-up suggestion with comprehensive commands reference for better initial UX
+
+---
+
 ## [0.3.1] - 2025-10-17
 
 ### Fixed
@@ -250,6 +262,7 @@ devflow init
 
 ---
 
+[0.3.2]: https://github.com/dean0x/devflow/releases/tag/v0.3.2
 [0.3.1]: https://github.com/dean0x/devflow/releases/tag/v0.3.1
 [0.3.0]: https://github.com/dean0x/devflow/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dean0x/devflow/releases/tag/v0.2.0
