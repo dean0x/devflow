@@ -73,3 +73,69 @@ For each finding, include:
 - Relevant security standards (OWASP, etc.)
 
 Focus on actionable, specific security issues that can be immediately addressed by developers.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Security Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Security Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of security posture}
+
+---
+
+## Critical Findings
+
+{CRITICAL severity issues}
+
+---
+
+## High Priority Findings
+
+{HIGH severity issues}
+
+---
+
+## Medium Priority Findings
+
+{MEDIUM severity issues}
+
+---
+
+## Low Priority Findings
+
+{LOW severity issues}
+
+---
+
+## Security Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Security audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/security-report.${TIMESTAMP}.md`

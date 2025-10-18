@@ -486,7 +486,7 @@ Pipfile.lock
         try {
           await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
-          await fs.mkdir(path.join(docsDir, 'audits'), { recursive: true });
+          await fs.mkdir(path.join(docsDir, 'audits', 'standalone'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'releases'), { recursive: true });
           docsCreated = true;
         } catch (error) {

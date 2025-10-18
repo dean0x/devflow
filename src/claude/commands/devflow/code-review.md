@@ -70,24 +70,46 @@ else
     INCLUDE_DB_AUDIT=false
 fi
 echo ""
+
+# Set up audit directory structure
+TIMESTAMP=$(date +%Y-%m-%d_%H%M)
+AUDIT_BASE_DIR=".docs/audits/${CURRENT_BRANCH}"
+mkdir -p "$AUDIT_BASE_DIR"
+
+echo "📁 Audit reports will be saved to: $AUDIT_BASE_DIR"
+echo ""
 ```
 
 ### Step 3: Launch Specialized Sub-Agents in Parallel
 
-Launch these sub-agents in parallel based on change detection:
+Launch these sub-agents in parallel based on change detection.
+
+**IMPORTANT**: Pass the following variables to each sub-agent:
+- `CURRENT_BRANCH`: The branch being reviewed
+- `AUDIT_BASE_DIR`: Base directory for audit reports (`.docs/audits/${CURRENT_BRANCH}`)
+- `TIMESTAMP`: Current timestamp for report filenames
+
+Each sub-agent should save its report to:
+```
+${AUDIT_BASE_DIR}/<audit-type>-report.${TIMESTAMP}.md
+```
+
+**Example paths**:
+- `.docs/audits/feature-auth/security-report.2025-10-18_1430.md`
+- `.docs/audits/feature-auth/performance-report.2025-10-18_1430.md`
 
 **Core Audits (Always Run)**:
-1. audit-security sub-agent
-2. audit-performance sub-agent
-3. audit-architecture sub-agent
-4. audit-tests sub-agent
-5. audit-complexity sub-agent
-6. audit-dependencies sub-agent
-7. audit-documentation sub-agent
+1. audit-security sub-agent → `${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md`
+2. audit-performance sub-agent → `${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md`
+3. audit-architecture sub-agent → `${AUDIT_BASE_DIR}/architecture-report.${TIMESTAMP}.md`
+4. audit-tests sub-agent → `${AUDIT_BASE_DIR}/tests-report.${TIMESTAMP}.md`
+5. audit-complexity sub-agent → `${AUDIT_BASE_DIR}/complexity-report.${TIMESTAMP}.md`
+6. audit-dependencies sub-agent → `${AUDIT_BASE_DIR}/dependencies-report.${TIMESTAMP}.md`
+7. audit-documentation sub-agent → `${AUDIT_BASE_DIR}/documentation-report.${TIMESTAMP}.md`
 
 **Conditional Audits** (automatically detect and skip if not applicable):
-8. audit-typescript sub-agent (only if .ts/.tsx files changed or tsconfig.json exists)
-9. audit-database sub-agent (only if database changes detected)
+8. audit-typescript sub-agent → `${AUDIT_BASE_DIR}/typescript-report.${TIMESTAMP}.md`
+9. audit-database sub-agent → `${AUDIT_BASE_DIR}/database-report.${TIMESTAMP}.md`
 
 ### Step 4: Synthesize Comprehensive Review
 
@@ -100,7 +122,13 @@ After all sub-agents complete their analysis:
 
 ### Step 5: Save Comprehensive Review Document
 
-Create a detailed review document at `.docs/reviews/branch-{BRANCH_NAME}-{YYYY-MM-DD_HHMM}.md`:
+Create a detailed review document at `${AUDIT_BASE_DIR}/comprehensive-review.${TIMESTAMP}.md`:
+
+```bash
+REVIEW_FILE="${AUDIT_BASE_DIR}/comprehensive-review.${TIMESTAMP}.md"
+```
+
+**File structure**:
 
 ```markdown
 # Branch Review - {BRANCH_NAME}
@@ -333,7 +361,18 @@ Give the developer a clear, actionable summary:
 - {Easy fix 1} ({estimated time})
 - {Easy fix 2} ({estimated time})
 
-📄 Full review: .docs/reviews/branch-{branch}-{timestamp}.md
+📄 Full review: ${AUDIT_BASE_DIR}/comprehensive-review.${TIMESTAMP}.md
+
+📁 Individual audit reports:
+   ${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md
+   ${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md
+   ${AUDIT_BASE_DIR}/architecture-report.${TIMESTAMP}.md
+   ${AUDIT_BASE_DIR}/tests-report.${TIMESTAMP}.md
+   ${AUDIT_BASE_DIR}/complexity-report.${TIMESTAMP}.md
+   ${AUDIT_BASE_DIR}/dependencies-report.${TIMESTAMP}.md
+   ${AUDIT_BASE_DIR}/documentation-report.${TIMESTAMP}.md
+   (+ typescript-report.${TIMESTAMP}.md if applicable)
+   (+ database-report.${TIMESTAMP}.md if applicable)
 
 🔄 NEXT STEPS:
 1. Address blocking issues above
