@@ -100,3 +100,69 @@ For each finding, include:
 - Estimated effort for fixes
 
 Focus on complexity issues that significantly impact code maintainability, readability, and development velocity.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/complexity-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Complexity Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Complexity Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of complexity and maintainability}
+
+---
+
+## Critical Issues
+
+{CRITICAL severity extremely complex code hampering development}
+
+---
+
+## High Priority Issues
+
+{HIGH severity significant complexity issues}
+
+---
+
+## Medium Priority Issues
+
+{MEDIUM severity moderate complexity improvements needed}
+
+---
+
+## Low Priority Issues
+
+{LOW severity minor complexity optimizations}
+
+---
+
+## Maintainability Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Complexity audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/complexity-report.${TIMESTAMP}.md`

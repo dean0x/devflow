@@ -105,3 +105,69 @@ For each finding, include:
 - Monitoring suggestions
 
 Focus on database issues that affect data integrity, query performance, or system scalability.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/database-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Database Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Database Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of database design and performance}
+
+---
+
+## Critical Issues
+
+{CRITICAL severity data integrity or severe performance issues}
+
+---
+
+## High Priority Issues
+
+{HIGH severity significant performance or design problems}
+
+---
+
+## Medium Priority Issues
+
+{MEDIUM severity optimization opportunities}
+
+---
+
+## Low Priority Issues
+
+{LOW severity minor improvements}
+
+---
+
+## Database Health Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Database audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/database-report.${TIMESTAMP}.md`

@@ -453,3 +453,69 @@ For each finding, include:
 - Refactoring suggestions
 
 Focus on test issues that affect code confidence, development velocity, and regression detection capabilities.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/tests-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Test Quality Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Test Quality Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of test coverage and quality}
+
+---
+
+## Critical Issues
+
+{CRITICAL severity major test gaps or quality issues}
+
+---
+
+## High Priority Issues
+
+{HIGH severity significant testing problems}
+
+---
+
+## Medium Priority Issues
+
+{MEDIUM severity test improvement opportunities}
+
+---
+
+## Low Priority Issues
+
+{LOW severity minor test optimizations}
+
+---
+
+## Test Coverage Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Test quality audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/tests-report.${TIMESTAMP}.md`

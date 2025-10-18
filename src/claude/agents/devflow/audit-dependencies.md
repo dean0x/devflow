@@ -106,3 +106,69 @@ For each finding, include:
 - Update compatibility notes
 
 Focus on dependency issues that pose security, legal, or maintenance risks to the project.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/dependencies-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Dependency Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Dependencies Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of dependency health and security}
+
+---
+
+## Critical Issues
+
+{CRITICAL severity security vulnerabilities requiring immediate action}
+
+---
+
+## High Priority Issues
+
+{HIGH severity significant security or legal risks}
+
+---
+
+## Medium Priority Issues
+
+{MEDIUM severity maintenance or performance concerns}
+
+---
+
+## Low Priority Issues
+
+{LOW severity minor improvements or optimizations}
+
+---
+
+## Dependency Health Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Dependency audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/dependencies-report.${TIMESTAMP}.md`
