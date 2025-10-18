@@ -772,7 +772,7 @@ mkdir -p .docs/releases
 RELEASE_DATE=$(date +%Y-%m-%d)
 
 # Generate release notes file
-RELEASE_NOTES_FILE=".docs/releases/${NEW_VERSION}.md"
+RELEASE_NOTES_FILE=".docs/releases/RELEASE_NOTES_v${NEW_VERSION}.md"
 
 # Write comprehensive release notes
 cat > "$RELEASE_NOTES_FILE" <<EOF
@@ -1032,7 +1032,7 @@ echo "- New version: $NEW_VERSION"
 echo "- Project type: $PROJECT_TYPE"
 echo "- Commits included: $(git rev-list --count $COMMIT_RANGE 2>/dev/null || echo "N/A")"
 echo "- Tag: $TAG_NAME"
-echo "- Release notes: .docs/releases/${NEW_VERSION}.md"
+echo "- Release notes: .docs/releases/RELEASE_NOTES_v${NEW_VERSION}.md"
 echo ""
 
 if [ -n "$PUBLISH_CMD" ] && [ "$PUBLISH_CMD" != "echo"* ]; then
@@ -1060,7 +1060,7 @@ if command -v gh >/dev/null && git remote get-url origin 2>/dev/null | grep -q "
     echo "- Release: $REPO_URL/releases/tag/$TAG_NAME"
     echo "- Commits: $REPO_URL/compare/$LAST_TAG...$TAG_NAME"
     echo "- Changelog: $REPO_URL/blob/main/$CHANGELOG_FILE"
-    echo "- Release Notes: $REPO_URL/blob/main/.docs/releases/${NEW_VERSION}.md"
+    echo "- Release Notes: $REPO_URL/blob/main/.docs/releases/RELEASE_NOTES_v${NEW_VERSION}.md"
 fi
 
 echo ""
@@ -1070,10 +1070,10 @@ echo "2. Test installation in a fresh environment"
 if [ ${#DOC_ISSUES[@]} -gt 0 ]; then
     echo "3. ⚠️  Address documentation issues (${#DOC_ISSUES[@]} found)"
     echo "4. Announce release to users/team"
-    echo "5. Review release notes: .docs/releases/${NEW_VERSION}.md"
+    echo "5. Review release notes: .docs/releases/RELEASE_NOTES_v${NEW_VERSION}.md"
 else
     echo "3. Announce release to users/team"
-    echo "4. Review release notes: .docs/releases/${NEW_VERSION}.md"
+    echo "4. Review release notes: .docs/releases/RELEASE_NOTES_v${NEW_VERSION}.md"
 fi
 echo ""
 ```
@@ -1129,7 +1129,7 @@ Before declaring release complete:
 - [ ] Tag created and pushed
 - [ ] Package published (if applicable)
 - [ ] Platform release created (if applicable)
-- [ ] Release notes saved to `.docs/releases/<version>.md`
+- [ ] Release notes saved to `.docs/releases/RELEASE_NOTES_v<version>.md`
 - [ ] Documentation alignment verified (ROADMAP, READMEs, docs/)
 - [ ] Version references updated across all documentation
 - [ ] No installation instruction inconsistencies in subpackages
