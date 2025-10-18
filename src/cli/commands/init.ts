@@ -163,6 +163,13 @@ export const initCommand = new Command('init')
       const devflowSettingsPath = path.join(claudeDir, 'settings.devflow.json');
       const sourceSettingsPath = path.join(claudeSourceDir, 'settings.json');
 
+      // Read template and replace ~ with actual home directory
+      const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
+      const settingsContent = settingsTemplate.replace(
+        /~\/\.devflow\/scripts\/statusline\.sh/g,
+        path.join(devflowDir, 'scripts', 'statusline.sh')
+      );
+
       let settingsAction = '';
 
       if (forceOverride) {
@@ -173,7 +180,7 @@ export const initCommand = new Command('init')
         } catch {
           // No existing file
         }
-        await fs.copyFile(sourceSettingsPath, settingsPath);
+        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
         settingsAction = 'force-installed';
       } else {
         // Safe installation logic
@@ -187,17 +194,17 @@ export const initCommand = new Command('init')
             await fs.access(managedSettingsPath);
 
             // managed-settings.json exists - install as settings.devflow.json
-            await fs.copyFile(sourceSettingsPath, devflowSettingsPath);
+            await fs.writeFile(devflowSettingsPath, settingsContent, 'utf-8');
             settingsAction = 'saved-as-devflow';
           } catch {
             // managed-settings.json doesn't exist - safe to backup and install
             await fs.rename(settingsPath, managedSettingsPath);
-            await fs.copyFile(sourceSettingsPath, settingsPath);
+            await fs.writeFile(settingsPath, settingsContent, 'utf-8');
             settingsAction = 'backed-up';
           }
         } catch {
           // No existing settings.json - install normally
-          await fs.copyFile(sourceSettingsPath, settingsPath);
+          await fs.writeFile(settingsPath, settingsContent, 'utf-8');
           settingsAction = 'fresh-install';
         }
       }
@@ -480,6 +487,7 @@ Pipfile.lock
           await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'audits'), { recursive: true });
+          await fs.mkdir(path.join(docsDir, 'releases'), { recursive: true });
           docsCreated = true;
         } catch (error) {
           // .docs/ structure may already exist
