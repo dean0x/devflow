@@ -93,14 +93,6 @@ ENFORCE these strictly:
 - Stick to ONE async pattern (don't mix callback/promise/async styles)
 - NO global state unless explicitly justified
 
-### Test Quality Standards
-
-Tests must validate BEHAVIOR, not work around BAD DESIGN:
-- If tests need complex setup, the design is probably wrong
-- If tests have repetitive boilerplate, the API is probably wrong
-- If mocking is difficult, dependencies are probably wrong
-- Tests should be SIMPLE when design is correct
-
 ### Change Process for Failing Tests
 
 1. **STOP** - Don't fix tests immediately
@@ -126,6 +118,82 @@ Before declaring work complete:
 - Are tests simple and focused on behavior?
 - Is error handling consistent throughout?
 - **Don't run the entire test suite all at once** - Only specific test files, one by one
+
+---
+
+### Production Build Optimization
+
+**CRITICAL**: Never ship test files, debug symbols, or sourcemaps to production.
+
+**Requirements:**
+1. **Separate configs** - Dev config (with debug info) vs prod config (optimized)
+2. **Exclude tests** - No test files in build output
+3. **Exclude debug artifacts** - No sourcemaps, debug symbols, or profiling data
+4. **Clean builds** - Remove old artifacts before building
+5. **Watch mode** - Fast rebuilds during development
+
+**Implementation checklist:**
+- [ ] Production build excludes test files
+- [ ] Production build excludes sourcemaps/debug symbols
+- [ ] Separate dev build with full debug info
+- [ ] Pre-build cleanup of old artifacts
+- [ ] Watch mode for development
+- [ ] Verify package contents before publishing
+
+**File patterns to exclude from production:**
+**/.test.
+**/.spec.
+**/_test.
+**/*.map
+**/debug/
+**/coverage/
+**/tests/
+**/tests/
+
+**Build script structure:**
+```json
+{
+  "prebuild": "clean artifacts",
+  "build": "production build (no debug)",
+  "build:dev": "development build (with debug)",
+  "build:watch": "watch mode for development"
+}
+```
+
+---
+
+## Testing & Build Standards
+
+### Test Quality Standards
+
+Tests must validate BEHAVIOR, not work around BAD DESIGN:
+- If tests need complex setup, the design is probably wrong
+- If tests have repetitive boilerplate, the API is probably wrong
+- If mocking is difficult, dependencies are probably wrong
+- Tests should be SIMPLE when design is correct
+
+### Test Suite Safety
+
+**CRITICAL**: Always configure tests to run sequentially to prevent resource
+exhaustion and crashes.
+
+**Requirements:**
+1. **Sequential execution** - One test at a time, no parallelism
+2. **Memory limits** - Set explicit limits for test processes
+3. **Resource cleanup** - Clean temp files/databases before and after tests
+4. **Isolation** - Separate unit/integration/e2e test suites
+
+**Implementation checklist:**
+- [ ] Test runner configured for sequential execution (maxWorkers=1, no parallel)
+- [ ] Memory limits set in test command (language-specific)
+- [ ] Cleanup hooks: before (clean temp files) and after (close connections)
+- [ ] Default `test` command runs safely (unit then integration, sequentially)
+
+**Framework-specific flags:**
+- **Vitest/Jest**: `maxWorkers: 1`, `--runInBand`, `fileParallelism: false`
+- **pytest**: `-n 0` (no xdist), `--maxprocesses=1`
+- **Go**: `-p 1` (parallel=1)
+- **Rust**: `-- --test-threads=1`
 
 ---
 

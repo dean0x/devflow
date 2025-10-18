@@ -82,3 +82,69 @@ For each finding, include:
 - Migration strategies for large changes
 
 Focus on structural issues that affect long-term maintainability and team productivity.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/architecture-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Architecture Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Architecture Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of architectural quality}
+
+---
+
+## Critical Issues
+
+{CRITICAL severity fundamental architectural flaws}
+
+---
+
+## High Priority Issues
+
+{HIGH severity significant design issues}
+
+---
+
+## Medium Priority Issues
+
+{MEDIUM severity pattern inconsistencies}
+
+---
+
+## Low Priority Issues
+
+{LOW severity minor organizational improvements}
+
+---
+
+## Architecture Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Architecture audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/architecture-report.${TIMESTAMP}.md`

@@ -305,3 +305,69 @@ Detect documentation format from language and validate accordingly.
    - Show correct examples
 
 Focus on documentation issues that prevent users from using the software correctly or developers from understanding the codebase.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/documentation-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Documentation Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Documentation Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of documentation quality and alignment}
+
+---
+
+## Critical Issues
+
+{CRITICAL severity documentation contradicts code behavior}
+
+---
+
+## High Priority Issues
+
+{HIGH severity missing docs for public APIs or key features}
+
+---
+
+## Medium Priority Issues
+
+{MEDIUM severity incomplete or unclear documentation}
+
+---
+
+## Low Priority Issues
+
+{LOW severity minor improvements or style issues}
+
+---
+
+## Documentation Quality Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Documentation audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/documentation-report.${TIMESTAMP}.md`

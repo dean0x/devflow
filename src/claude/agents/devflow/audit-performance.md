@@ -83,3 +83,69 @@ For each finding, include:
 - Measurement suggestions
 
 Focus on performance issues that will have measurable impact on user experience or system scalability.
+
+## Report Storage
+
+**IMPORTANT**: When invoked by `/code-review`, save your audit report to the standardized location:
+
+```bash
+# Expect these variables from the orchestrator:
+# - CURRENT_BRANCH: Current git branch name
+# - AUDIT_BASE_DIR: Base directory (.docs/audits/${CURRENT_BRANCH})
+# - TIMESTAMP: Timestamp for report filename
+
+# Save report to:
+REPORT_FILE="${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md"
+
+# Create report
+cat > "$REPORT_FILE" <<'EOF'
+# Performance Audit Report
+
+**Branch**: ${CURRENT_BRANCH}
+**Date**: $(date +%Y-%m-%d)
+**Time**: $(date +%H:%M:%S)
+**Auditor**: DevFlow Performance Agent
+
+---
+
+## Executive Summary
+
+{Brief summary of performance analysis}
+
+---
+
+## Critical Issues
+
+{CRITICAL severity performance bottlenecks}
+
+---
+
+## High Priority Issues
+
+{HIGH severity optimization opportunities}
+
+---
+
+## Medium Priority Issues
+
+{MEDIUM severity performance improvements}
+
+---
+
+## Low Priority Issues
+
+{LOW severity minor optimizations}
+
+---
+
+## Performance Score: {X}/10
+
+**Recommendation**: {BLOCK MERGE | REVIEW REQUIRED | APPROVED WITH CONDITIONS | APPROVED}
+
+EOF
+
+echo "✅ Performance audit report saved to: $REPORT_FILE"
+```
+
+**If invoked standalone** (not by /code-review), use a simpler path:
+- `.docs/audits/standalone/performance-report.${TIMESTAMP}.md`
