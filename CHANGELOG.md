@@ -5,6 +5,32 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2025-10-19
+
+### Fixed
+- **Statusline path resolution** - Use absolute paths instead of tilde (~) for reliable execution
+- **Audit report organization** - Formalized structured storage for all audit reports
+  - Branch-specific directories: `.docs/audits/<branch-name>/`
+  - Timestamped reports for historical tracking
+  - Standardized naming: `<audit-type>-report.<timestamp>.md`
+  - Standalone directory for direct agent invocations
+  - Applied consistently across all 9 audit agents
+
+### Added
+- **Release notes persistence** - Save comprehensive release notes to `.docs/releases/RELEASE_NOTES_v<version>.md`
+- **Documentation verification** - Release agent now verifies documentation alignment
+  - Checks version references across ROADMAP, READMEs, CHANGELOG
+  - Detects monorepo subpackages
+  - Provides search-and-replace commands for fixing mismatches
+- **Production build standards** - Global CLAUDE.md guidelines for production optimization
+  - Never ship test files, debug symbols, or sourcemaps
+  - Separate dev/prod build configurations
+- **Test suite safety** - Sequential test execution standards to prevent Claude Code crashes
+  - Memory limits and resource cleanup requirements
+  - Framework-specific configuration flags
+
+---
+
 ## [0.3.2] - 2025-10-17
 
 ### Changed
@@ -262,6 +288,7 @@ devflow init
 
 ---
 
+[0.3.3]: https://github.com/dean0x/devflow/releases/tag/v0.3.3
 [0.3.2]: https://github.com/dean0x/devflow/releases/tag/v0.3.2
 [0.3.1]: https://github.com/dean0x/devflow/releases/tag/v0.3.1
 [0.3.0]: https://github.com/dean0x/devflow/releases/tag/v0.3.0
