@@ -13,15 +13,33 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 
 ## What's Included
 
-### 📊 Slash Commands
+### 🎯 Skills (Auto-Activate)
+
+**Skills are model-invoked** - Claude automatically activates them based on context, enforcing quality without manual invocation.
+
+| Skill | Purpose | Auto-Triggers When |
+|-------|---------|---------------------|
+| `pattern-check` | Architectural pattern validation (Result types, DI, immutability) | Code changes are made, new functions added |
+| `test-design` | Test quality enforcement (setup complexity, mocking, behavior vs implementation) | Tests are written or modified |
+| `code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features are implemented, code is reviewed |
+| `research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
+| `debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
+| `input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
+| `error-handling` | Result type consistency and exception boundary enforcement | Error handling code written, functions that can fail |
+
+**How Skills Work:**
+- **Proactive enforcement** - Catch issues during implementation, not after
+- **No manual invocation** - Model decides when skills are relevant
+- **Quality gates** - Block anti-patterns automatically
+- **Context-aware** - Activate based on what you're doing
+
+### 📊 Slash Commands (User-Invoked)
 
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
-| `/research [topic]` | Comprehensive pre-implementation research and planning | Before implementing features |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 | `/plan-next-steps` | Extract actionable next steps from current discussion | After planning discussion |
-| `/debug [issue]` | Systematic debugging with issue-specific investigation | When troubleshooting |
 | `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
@@ -95,10 +113,10 @@ Covers patterns for all major languages and operating systems.
 3. Review recommended next actions
 
 ### During Development
-1. `/research [topic]` - Research implementation approaches before coding
-2. `/code-review` - Review changes before committing
-3. `/commit` - Create intelligent atomic commits
-4. Invoke audit sub-agents as needed
+1. **Skills auto-activate** - `research` skill triggers for unfamiliar features, `pattern-check` validates architecture
+2. **Code with confidence** - Skills catch anti-patterns and violations during implementation
+3. `/code-review` - Review changes before committing
+4. `/commit` - Create intelligent atomic commits
 
 ### Ending a Session
 1. `/devlog` - Document decisions and state
@@ -116,10 +134,10 @@ Covers patterns for all major languages and operating systems.
 3. Verify package in registry
 
 ### When Things Go Wrong
-1. Check git log and recent commits
-2. `/debug [issue description]` - Structured debugging
+1. **Skills auto-activate** - `debug` skill triggers on errors/failures with systematic approach
+2. Check git log and recent commits
 3. Revert changes using git
-4. Document lessons learned
+4. Document lessons learned in `.docs/debug/`
 
 ## CLI Commands
 
@@ -131,6 +149,7 @@ Covers patterns for all major languages and operating systems.
 **What `devflow init` does:**
 - Installs commands to `~/.claude/commands/devflow/`
 - Installs sub-agents to `~/.claude/agents/devflow/`
+- Installs skills to `~/.claude/skills/devflow/`
 - Installs scripts to `~/.devflow/scripts/`
 - Updates `~/.claude/settings.json` (statusline and model)
 - Creates `.claudeignore` at git repository root
@@ -161,11 +180,14 @@ git commit -m "Session status: completed user auth feature"
 
 ### Integration Examples
 ```bash
-/research "add JWT authentication"  # Research before implementing
+# Skills auto-activate during development
+"Add JWT authentication"  # research skill triggers automatically
+"Fix this error"          # debug skill activates and guides systematic approach
+
+# Manual command invocation
 /code-review   # Review changes (uncommitted or full branch)
 /commit        # Create atomic commits
 /release       # Automated release workflow
-/debug "TypeError in auth module"  # Debug specific issue
 ```
 
 ## Philosophy
@@ -202,6 +224,7 @@ src/
 └── claude/                # Claude Code configuration
     ├── agents/devflow/     # Sub-agent definitions (.md)
     ├── commands/devflow/   # Slash command definitions (.md)
+    ├── skills/devflow/     # Auto-activate skill definitions (.md)
     ├── scripts/            # statusline.sh
     └── settings.json       # Claude Code settings
 ```
@@ -210,7 +233,7 @@ src/
 
 - Check installed command documentation
 - Review `.docs/status/` for recent sessions
-- Use `/debug [issue]` for systematic troubleshooting
+- Skills auto-activate for systematic troubleshooting
 - Report issues at https://github.com/dean0x/devflow/issues
 
 ## License
