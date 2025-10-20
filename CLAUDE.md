@@ -13,11 +13,12 @@ When working on DevFlow code, understand that this toolkit is designed to enhanc
 
 ## Architecture Overview
 
-DevFlow consists of three main components:
+DevFlow consists of four main components:
 
 1. **CLI Tool** (`src/cli/`) - TypeScript-based installer and manager
-2. **Claude Code Commands** (`src/claude/commands/`) - Markdown-based slash commands
-3. **Sub-Agents** (`src/claude/agents/`) - Specialized AI assistants for focused tasks
+2. **Claude Code Commands** (`src/claude/commands/`) - Markdown-based slash commands (user-invoked)
+3. **Skills** (`src/claude/skills/`) - Auto-activate quality enforcement (model-invoked)
+4. **Sub-Agents** (`src/claude/agents/`) - Specialized AI assistants for focused tasks
 
 ## Development Environment
 
@@ -119,6 +120,88 @@ Brief description of what the command does.
 
 3. Test with explicit invocation
 4. Document in README.md for users
+
+## Adding New Skills
+
+### Skill Structure
+
+Skills are **model-invoked** capabilities that auto-activate based on context. They enforce quality without requiring manual invocation.
+
+1. Create skill directory in `src/claude/skills/devflow/skill-name/`
+2. Create `SKILL.md` with YAML frontmatter:
+
+```markdown
+---
+name: skill-name
+description: When and why to use this skill (critical for auto-activation)
+allowed-tools: Read, Grep, Glob, AskUserQuestion
+---
+
+# Skill Name
+
+## Purpose
+What this skill enforces and why
+
+## When This Skill Activates
+Be specific about trigger conditions
+
+## Pattern Validation Process
+Detailed checks and enforcement logic
+
+## Violation Report Format
+How to report issues found
+
+## Success Criteria
+What passes validation
+```
+
+3. Follow existing skill patterns:
+   - **Focused enforcement** - One skill, one responsibility
+   - **Clear activation triggers** - Specific context patterns
+   - **Actionable reports** - File/line references, severity, fixes
+   - **Read-only tools** - Most skills should not modify code
+   - **Philosophy alignment** - Enforce project principles
+
+4. Test skill activation:
+   - Write code that should trigger the skill
+   - Verify skill activates automatically
+   - Check violation reports are clear
+   - Ensure fixes are actionable
+
+5. Document in README.md for users
+
+### Skill vs Command Decision
+
+**Use a Skill when:**
+- Should activate automatically based on context
+- Enforces patterns/quality (proactive)
+- Detects violations during implementation
+- Read-only analysis and reporting
+
+**Use a Command when:**
+- Requires explicit user decision
+- Performs state changes (commits, releases)
+- User controls timing (devlog, catch-up)
+- Orchestrates complex workflows
+
+**Both (Skill + Command):**
+- Common workflow that benefits from both auto and manual modes
+- Example: research (auto when unfamiliar, manual when user wants deep dive)
+
+### Current Skills
+
+**Philosophy Enforcers:**
+- `pattern-check` - Result types, DI, immutability, pure functions
+- `test-design` - Test quality red flags (complex setup, difficult mocking)
+- `code-smell` - Fake solutions, unlabeled workarounds, magic values
+
+**Workflow Automation:**
+- `research` - Pre-implementation planning and integration strategy
+- `debug` - Systematic debugging with hypothesis testing
+
+**Safety Validators:**
+- `input-validation` - Boundary validation, SQL injection prevention
+- `error-handling` - Result type consistency, exception boundaries
 
 ## CLI Development
 
@@ -331,6 +414,7 @@ src/
 └── claude/                   # Claude Code assets
     ├── agents/devflow/         # Sub-agent definitions
     ├── commands/devflow/       # Slash command definitions
+    ├── skills/devflow/         # Auto-activate skill definitions
     ├── scripts/                # Supporting scripts
     └── settings.json           # Claude Code settings
 ```
@@ -338,6 +422,7 @@ src/
 ### Installation Paths
 - Commands: `~/.claude/commands/devflow/`
 - Agents: `~/.claude/agents/devflow/`
+- Skills: `~/.claude/skills/devflow/`
 - Scripts: `~/.devflow/scripts/`
 - Settings: `~/.claude/settings.json`
 
