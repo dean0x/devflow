@@ -127,12 +127,14 @@ export const initCommand = new Command('init')
       // Clean old DevFlow files before installing
       const commandsDevflowDir = path.join(claudeDir, 'commands', 'devflow');
       const agentsDevflowDir = path.join(claudeDir, 'agents', 'devflow');
+      const skillsDevflowDir = path.join(claudeDir, 'skills', 'devflow');
       const devflowScriptsDir = path.join(devflowDir, 'scripts');
 
-      // Remove old DevFlow subdirectories (not entire commands/agents folders)
+      // Remove old DevFlow subdirectories (not entire commands/agents/skills folders)
       try {
         await fs.rm(commandsDevflowDir, { recursive: true, force: true });
         await fs.rm(agentsDevflowDir, { recursive: true, force: true });
+        await fs.rm(skillsDevflowDir, { recursive: true, force: true });
         await fs.rm(devflowScriptsDir, { recursive: true, force: true });
       } catch (e) {
         // Directories might not exist on first install
@@ -145,6 +147,9 @@ export const initCommand = new Command('init')
       await fs.mkdir(agentsDevflowDir, { recursive: true });
       await copyDirectory(path.join(claudeSourceDir, 'agents', 'devflow'), agentsDevflowDir);
 
+      await fs.mkdir(skillsDevflowDir, { recursive: true });
+      await copyDirectory(path.join(claudeSourceDir, 'skills', 'devflow'), skillsDevflowDir);
+
       await fs.mkdir(devflowScriptsDir, { recursive: true });
       await copyDirectory(path.join(claudeSourceDir, 'scripts'), devflowScriptsDir);
 
@@ -155,7 +160,7 @@ export const initCommand = new Command('init')
       }
 
       console.log('✓ Claude Code detected');
-      console.log('✓ Installing components... (commands, agents, scripts)');
+      console.log('✓ Installing components... (commands, agents, skills, scripts)');
 
       // Install settings with smart backup
       const settingsPath = path.join(claudeDir, 'settings.json');
@@ -514,13 +519,19 @@ Pipfile.lock
 
       console.log('Available commands:');
       console.log('  /catch-up         Session context and status');
-      console.log('  /research         Pre-implementation planning');
       console.log('  /code-review      Comprehensive code review');
       console.log('  /commit           Intelligent atomic commits');
       console.log('  /devlog           Session documentation');
-      console.log('  /debug            Systematic debugging');
       console.log('  /release          Release automation');
       console.log('  /plan-next-steps  Extract actionable tasks');
+      console.log('\nInstalled skills (auto-activate):');
+      console.log('  pattern-check     Architectural pattern validation');
+      console.log('  test-design       Test quality enforcement');
+      console.log('  code-smell        Anti-pattern detection');
+      console.log('  research          Pre-implementation planning');
+      console.log('  debug             Systematic debugging');
+      console.log('  input-validation  Boundary validation');
+      console.log('  error-handling    Result type consistency');
       console.log('\nDocs: npm home devflow-kit');
     } catch (error) {
       console.error('❌ Installation failed:', error);
