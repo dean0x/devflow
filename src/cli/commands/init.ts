@@ -280,11 +280,23 @@ export const initCommand = new Command('init')
       // Create .claudeignore in git repository root
       let claudeignoreCreated = false;
       try {
-        // Find git repository root
-        const gitRoot = execSync('git rev-parse --show-toplevel', {
+        // Find git repository root with validation
+        const gitRootRaw = execSync('git rev-parse --show-toplevel', {
           cwd: process.cwd(),
-          encoding: 'utf-8'
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'] // Isolate stderr
         }).trim();
+
+        // Validate git root path (security: prevent injection)
+        if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
+          throw new Error('Invalid git root path returned');
+        }
+
+        // Validate it's an absolute path
+        const gitRoot = path.resolve(gitRootRaw);
+        if (!path.isAbsolute(gitRoot)) {
+          throw new Error('Git root must be an absolute path');
+        }
 
         const claudeignorePath = path.join(gitRoot, '.claudeignore');
 
