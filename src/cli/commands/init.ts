@@ -124,38 +124,54 @@ export const initCommand = new Command('init')
     const claudeSourceDir = path.join(rootDir, 'src', 'claude');
 
     try {
-      // Clean old DevFlow files before installing
-      const commandsDevflowDir = path.join(claudeDir, 'commands', 'devflow');
-      const agentsDevflowDir = path.join(claudeDir, 'agents', 'devflow');
-      const devflowScriptsDir = path.join(devflowDir, 'scripts');
+      // DevFlow namespace directories (single source of truth)
+      const devflowDirectories = [
+        {
+          target: path.join(claudeDir, 'commands', 'devflow'),
+          source: path.join(claudeSourceDir, 'commands', 'devflow'),
+          name: 'commands'
+        },
+        {
+          target: path.join(claudeDir, 'agents', 'devflow'),
+          source: path.join(claudeSourceDir, 'agents', 'devflow'),
+          name: 'agents'
+        },
+        {
+          target: path.join(claudeDir, 'skills', 'devflow'),
+          source: path.join(claudeSourceDir, 'skills', 'devflow'),
+          name: 'skills'
+        },
+        {
+          target: path.join(devflowDir, 'scripts'),
+          source: path.join(claudeSourceDir, 'scripts'),
+          name: 'scripts'
+        }
+      ];
 
-      // Remove old DevFlow subdirectories (not entire commands/agents folders)
-      try {
-        await fs.rm(commandsDevflowDir, { recursive: true, force: true });
-        await fs.rm(agentsDevflowDir, { recursive: true, force: true });
-        await fs.rm(devflowScriptsDir, { recursive: true, force: true });
-      } catch (e) {
-        // Directories might not exist on first install
+      // Clean old DevFlow files before installing
+      for (const dir of devflowDirectories) {
+        try {
+          await fs.rm(dir.target, { recursive: true, force: true });
+        } catch (e) {
+          // Directory might not exist on first install
+        }
       }
 
-      // Install components silently
-      await fs.mkdir(commandsDevflowDir, { recursive: true });
-      await copyDirectory(path.join(claudeSourceDir, 'commands', 'devflow'), commandsDevflowDir);
-
-      await fs.mkdir(agentsDevflowDir, { recursive: true });
-      await copyDirectory(path.join(claudeSourceDir, 'agents', 'devflow'), agentsDevflowDir);
-
-      await fs.mkdir(devflowScriptsDir, { recursive: true });
-      await copyDirectory(path.join(claudeSourceDir, 'scripts'), devflowScriptsDir);
+      // Install all DevFlow components
+      for (const dir of devflowDirectories) {
+        await fs.mkdir(dir.target, { recursive: true });
+        await copyDirectory(dir.source, dir.target);
+      }
 
       // Make scripts executable
-      const scripts = await fs.readdir(devflowScriptsDir);
+      const scriptsDir = devflowDirectories.find(d => d.name === 'scripts')!.target;
+      const scripts = await fs.readdir(scriptsDir);
       for (const script of scripts) {
-        await fs.chmod(path.join(devflowScriptsDir, script), 0o755);
+        await fs.chmod(path.join(scriptsDir, script), 0o755);
       }
 
       console.log('✓ Claude Code detected');
-      console.log('✓ Installing components... (commands, agents, scripts)');
+      console.log('✓ Installing components... (commands, agents, skills, scripts)');
 
       // Install settings with smart backup
       const settingsPath = path.join(claudeDir, 'settings.json');
@@ -264,11 +280,23 @@ export const initCommand = new Command('init')
       // Create .claudeignore in git repository root
       let claudeignoreCreated = false;
       try {
-        // Find git repository root
-        const gitRoot = execSync('git rev-parse --show-toplevel', {
+        // Find git repository root with validation
+        const gitRootRaw = execSync('git rev-parse --show-toplevel', {
           cwd: process.cwd(),
-          encoding: 'utf-8'
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'] // Isolate stderr
         }).trim();
+
+        // Validate git root path (security: prevent injection)
+        if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
+          throw new Error('Invalid git root path returned');
+        }
+
+        // Validate it's an absolute path
+        const gitRoot = path.resolve(gitRootRaw);
+        if (!path.isAbsolute(gitRoot)) {
+          throw new Error('Git root must be an absolute path');
+        }
 
         const claudeignorePath = path.join(gitRoot, '.claudeignore');
 
@@ -514,14 +542,23 @@ Pipfile.lock
 
       console.log('Available commands:');
       console.log('  /catch-up         Session context and status');
-      console.log('  /research         Pre-implementation planning');
+      console.log('  /research         Pre-implementation planning (manual)');
+      console.log('  /debug            Systematic debugging (manual)');
       console.log('  /code-review      Comprehensive code review');
       console.log('  /commit           Intelligent atomic commits');
       console.log('  /devlog           Session documentation');
-      console.log('  /debug            Systematic debugging');
       console.log('  /release          Release automation');
       console.log('  /plan-next-steps  Extract actionable tasks');
-      console.log('\nDocs: npm home devflow-kit');
+      console.log('\nInstalled skills (auto-activate):');
+      console.log('  pattern-check     Architectural pattern validation');
+      console.log('  test-design       Test quality enforcement');
+      console.log('  code-smell        Anti-pattern detection');
+      console.log('  research          Pre-implementation planning (auto)');
+      console.log('  debug             Systematic debugging (auto)');
+      console.log('  input-validation  Boundary validation');
+      console.log('  error-handling    Result type consistency');
+      console.log('\nNote: research and debug exist as both commands (manual) and skills (auto)');
+      console.log('Docs: npm home devflow-kit');
     } catch (error) {
       console.error('❌ Installation failed:', error);
       process.exit(1);

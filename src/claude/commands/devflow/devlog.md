@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Grep, Glob, Write, TodoWrite, Task
+allowed-tools: Task, Write, TodoWrite
 description: Create a development log entry capturing current project state and context
 ---
 
@@ -7,186 +7,208 @@ description: Create a development log entry capturing current project state and 
 
 Create a comprehensive development log entry that captures the current state of the project, recent work, decisions made, and what's left to do. This serves as a time capsule for any developer (including yourself) returning to this project later.
 
-### Step 1: Capture Agent's Internal Todo List
+**Architecture**: Session context (inline) + Project state (agent) → Synthesized documentation
 
-**CRITICAL FIRST STEP**: Before doing anything else, capture the agent's current internal todo list state.
+---
 
-Use TodoWrite to dump the current todo list, then immediately document it:
+## Step 1: Capture Session Context
 
-```bash
-# This will be the current todo list that needs to be preserved
-# The agent should use TodoWrite to get their current state
+**CRITICAL**: Capture session-local data that only the main session has access to.
+
+### 1.1 Get Current Todo List State
+
+Use TodoWrite to get the current todo list state. This MUST be preserved for session continuity:
+
+```json
+{Current todo list with exact status of all tasks}
 ```
 
-**MANDATORY**: Document ALL current todos with their exact status:
-- content (exact task description)
-- status (pending/in_progress/completed)
-- activeForm (present tense description)
+**Document**:
+- All current todos with content, status, activeForm
+- Summary counts (pending, in_progress, completed)
+- Current active task
+- Next priority
 
-This state MUST be preserved so future sessions can recreate the todo list exactly.
+### 1.2 Analyze Current Conversation
 
-### Step 2: Gather Context
+Review the current conversation to extract:
 
-Determine the current date/time and project information:
+**What We Were Working On:**
+- Main feature/task being developed
+- Specific goals of this session
+
+**Problems Solved:**
+- Issues encountered and how they were resolved
+- Blockers that were removed
+- Bugs fixed
+
+**Decisions Made:**
+- Technical decisions with rationale
+- Alternatives considered and why rejected
+- Architecture or design choices
+
+**Session Metadata:**
+- Estimated complexity (Simple/Medium/Complex)
+- Original user request
+- Approach taken
+
+### 1.3 Extract Next Steps
+
+From the conversation, identify:
+- Immediate tasks for next session
+- Short-term goals (this week)
+- Long-term goals (this month)
+
+---
+
+## Step 2: Launch Project State Agent
+
+Launch the `project-state` agent to gather comprehensive codebase analysis:
+
+```
+Task(
+  subagent_type="project-state",
+  description="Analyze project state",
+  prompt="Analyze the current project state including:
+  - Git history and recent commits
+  - Recently modified files
+  - Pending work (TODOs, FIXMEs, HACKs)
+  - Documentation structure
+  - Technology stack
+  - Dependencies
+  - Code statistics
+
+  Return structured data for status documentation."
+)
+```
+
+The agent will analyze and return:
+- Git history (commits, branch, status)
+- Recent file changes
+- TODO/FIXME/HACK markers
+- Documentation structure
+- Tech stack detection
+- Dependencies overview
+- Code statistics
+
+---
+
+## Step 3: Synthesize Comprehensive Status Document
+
+After the agent completes, synthesize session context + agent data.
+
+### 3.1 Prepare Data
+
+Extract from agent output:
+- Git log → Recent Changes section
+- File changes → Files Modified section
+- TODOs → Known Issues section
+- Documentation → Related Documents section
+- Tech stack → Technology Stack section
+
+Combine with session context:
+- Current Focus → From conversation analysis
+- Problems Solved → From session
+- Decisions Made → From session
+- Todo List State → From TodoWrite
+- Next Steps → From conversation
+
+### 3.2 Generate Timestamp and Paths
 
 ```bash
-# Get current date in DD-MM-YYYY format
+# Get timestamp
 DATE=$(date +"%d-%m-%Y")
 TIME=$(date +"%H%M")
 TIMESTAMP="${DATE}_${TIME}"
-
-# Get project name from current directory
 PROJECT_NAME=$(basename $(pwd))
-
-# Create docs directory if it doesn't exist
-mkdir -p .docs/status
 ```
 
-### Step 3: Analyze Current Conversation
+Paths:
+- Full: `.docs/status/${TIMESTAMP}.md`
+- Compact: `.docs/status/compact/${TIMESTAMP}.md`
+- Index: `.docs/status/INDEX.md`
 
-Review the current conversation context to understand:
-- What was being worked on
-- What problems were solved
-- What decisions were made
-- What's still pending
+---
 
-### Step 4: Gather Project State
+## Step 4: Write Comprehensive Status Document
 
-Analyze the current project state:
-
-```bash
-# Recent git activity
-git log --oneline -10 2>/dev/null || echo "No git history"
-
-# Current branch and status
-git branch --show-current 2>/dev/null
-git status --short 2>/dev/null
-
-# Recent file changes
-find . -type f -mtime -1 -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/venv/*" -not -path "*/target/*" -not -path "*/build/*" 2>/dev/null | head -20
-
-# Check for TODO/FIXME comments across common source file extensions
-grep -r "TODO\|FIXME\|HACK\|XXX" \
-  --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" \
-  --include="*.py" --include="*.go" --include="*.rs" --include="*.java" \
-  --include="*.c" --include="*.cpp" --include="*.h" --include="*.hpp" \
-  --include="*.rb" --include="*.php" --include="*.swift" --include="*.kt" \
-  -l 2>/dev/null | head -10
-```
-
-### Step 5: Check Documentation
-
-Look for existing project documentation to understand:
-- Architecture decisions (ARCHITECTURE.md, ADR/)
-- README status
-- API documentation
-- Any existing notes
-
-### Step 6: Generate Comprehensive Status Document
-
-Create `.docs/status/{timestamp}.md` with the following structure:
+Create `.docs/status/${TIMESTAMP}.md` with:
 
 ```markdown
-# Project Status - {PROJECT_NAME}
-**Date**: {DATE}
-**Time**: {TIME}
+# Project Status - ${PROJECT_NAME}
+**Date**: ${DATE}
+**Time**: ${TIME}
 **Author**: Claude (AI Assistant)
-**Session Context**: {Brief description of what was being worked on}
+**Session Context**: {Brief description from conversation}
 
 ---
 
 ## 🎯 Current Focus
 
 ### What We Were Working On
-{Detailed description of the current task/feature being developed}
+{From conversation analysis - detailed description}
 
 ### Problems Solved Today
-1. {Problem 1 and solution}
-2. {Problem 2 and solution}
-3. {Problem 3 and solution}
+{From conversation - list with solutions}
 
 ### Decisions Made
-- **Decision**: {What was decided}
-  **Rationale**: {Why this approach}
-  **Alternatives Considered**: {Other options that were rejected}
+{From conversation - decisions with rationale and alternatives}
 
 ---
 
 ## 📊 Project State
 
 ### Recent Changes
-```
-{Git log showing recent commits}
-```
+{From agent - git log}
 
 ### Files Modified Recently
-- `path/to/file1` - {What was changed and why}
-- `path/to/file2` - {What was changed and why}
+{From agent - recent file changes with analysis}
 
 ### Current Branch
-- Branch: `{branch_name}`
-- Status: {Clean/Dirty with uncommitted changes}
+{From agent - branch name and status}
 
 ---
 
 ## 🏗️ Architecture & Design
 
 ### Key Architectural Decisions
-1. {Pattern/Decision 1}
-   - Why: {Rationale}
-   - Impact: {How it affects the codebase}
-
-2. {Pattern/Decision 2}
-   - Why: {Rationale}
-   - Impact: {How it affects the codebase}
+{From conversation - patterns and decisions from session}
 
 ### Technology Stack
-- **Language**: {Primary programming language}
-- **Framework**: {Main framework or runtime}
-- **Data Storage**: {Database or storage system}
-- **Key Dependencies**: {Critical libraries or packages}
+{From agent - detected tech stack}
 
 ### Design Patterns in Use
-- {Pattern 1}: {Where and why}
-- {Pattern 2}: {Where and why}
+{From conversation + existing docs}
 
 ---
 
 ## ⚠️ Known Issues & Technical Debt
 
 ### Critical Issues
-1. {Issue description}
-   - Location: `file/path`
-   - Impact: {High/Medium/Low}
-   - Suggested Fix: {Approach}
+{From conversation - issues discussed}
 
 ### Technical Debt
-1. {Debt item}
-   - Why it exists: {Historical reason}
-   - Cost of fixing: {Estimate}
-   - Priority: {High/Medium/Low}
+{From conversation - debt mentioned}
 
 ### TODOs in Codebase
-```
-{List of files with TODO/FIXME comments}
-```
+{From agent - TODO/FIXME/HACK analysis}
 
 ---
 
 ## 📋 Agent Todo List State
 
-**CRITICAL**: This section preserves the agent's internal todo list state for session continuity.
+**CRITICAL**: Preserves agent's internal todo list for session continuity.
 
 ### Current Todo List (for recreation)
 ```json
-{Exact TodoWrite JSON with all current todos}
+{Exact TodoWrite JSON from Step 1}
 ```
 
 ### Todo Summary
 - **Total tasks**: {count}
-- **Pending**: {count of pending tasks}
-- **In Progress**: {count of in_progress tasks}
-- **Completed**: {count of completed tasks}
+- **Pending**: {count}
+- **In Progress**: {count}
+- **Completed**: {count}
 
 ### Key Active Tasks
 - 🔄 **In Progress**: {current active task}
@@ -198,69 +220,58 @@ Create `.docs/status/{timestamp}.md` with the following structure:
 
 ### Immediate (Next Session)
 - [ ] **FIRST**: Recreate agent todo list using TodoWrite with preserved state above
-- [ ] {Task 1 from conversation}
-- [ ] {Task 2 from conversation}
-- [ ] {Task 3 from conversation}
+{From conversation - immediate tasks}
 
 ### Short Term (This Week)
-- [ ] {Goal 1}
-- [ ] {Goal 2}
+{From conversation - short term goals}
 
 ### Long Term (This Month)
-- [ ] {Major milestone 1}
-- [ ] {Major milestone 2}
+{From conversation - long term goals}
 
 ---
 
 ## 💡 Context for Future Developer
 
 ### Things to Know
-1. **Gotcha #1**: {Something non-obvious}
-2. **Gotcha #2**: {Another tricky thing}
-3. **Convention**: {Project-specific convention}
+{From conversation - gotchas, conventions, non-obvious things}
 
 ### Where to Start
-If you're picking this up later, here's where to begin:
-1. Check {specific file/area}
-2. Review {documentation}
-3. Run {command} to verify setup
+{Guidance for picking up this work}
 
 ### Key Files to Understand
-- `path/to/important/file1` - {Why it's important}
-- `path/to/important/file2` - {Why it's important}
+{From conversation + agent file analysis}
 
 ### Testing Strategy
-- How to run tests: `{command}`
-- Test coverage: {status}
-- Critical test files: {list}
+{From agent - test detection and conversation}
 
 ---
 
 ## 🔗 Related Documents
 
 ### Project Documentation
-- README.md - {Status: Updated/Outdated/Missing}
-- CONTRIBUTING.md - {Status}
-- ARCHITECTURE.md - {Status}
+{From agent - README, CONTRIBUTING, ARCHITECTURE status}
+
+### DevFlow Documentation
+{From agent - .docs/ structure}
 
 ### Previous Status Notes
-{Link to previous status documents if they exist}
+{Link to previous status documents}
 
 ---
 
 ## 📝 Raw Session Notes
 
 ### What the User Asked For
-{Original user request}
+{From conversation - original request}
 
 ### Approach Taken
-{Step-by-step what was done}
+{From conversation - what was done}
 
 ### Challenges Encountered
-{Any difficulties and how they were resolved}
+{From conversation - difficulties and resolutions}
 
 ### Time Spent
-- Estimated session duration: {from timestamp data if available}
+- Estimated session duration: {infer from context}
 - Complexity level: {Simple/Medium/Complex}
 
 ---
@@ -268,19 +279,17 @@ If you're picking this up later, here's where to begin:
 ## 🤖 AI Assistant Metadata
 
 ### Model Used
-- Model: {Claude model version}
-- Capabilities: {What tools were available}
-- Limitations encountered: {Any AI limitations that affected work}
+- Model: Claude Sonnet 4.5
+- Session type: {Regular/Continued/Catch-up}
 
 ### Commands/Tools Used
-- {Tool 1}: {How it was used}
-- {Tool 2}: {How it was used}
+{From conversation - which DevFlow commands were used}
 
 ---
 
 ## 📌 Final Thoughts
 
-{A brief paragraph of final thoughts, advice, or warnings for whoever picks this up next. Written in first person as if leaving a note to your future self or a colleague.}
+{A brief paragraph from the perspective of leaving a note to future self or colleague. Written in first person with context, advice, and warnings.}
 
 **Remember**: This is a snapshot in time. The project will have evolved since this was written. Use this as a starting point for understanding, not as gospel truth.
 
@@ -289,82 +298,112 @@ If you're picking this up later, here's where to begin:
 *To generate a new status report, run `/devlog` in Claude Code*
 ```
 
-### Step 7: Create Compact Version
+---
 
-Create a compact summary at `.docs/status/compact/{timestamp}.md`:
+## Step 5: Write Compact Summary
+
+Create `.docs/status/compact/${TIMESTAMP}.md`:
 
 ```markdown
-# Compact Status - {DATE}
+# Compact Status - ${DATE}
 
-**Focus**: {One-line summary of what was worked on}
+**Focus**: {One-line summary from conversation}
 
 **Key Accomplishments**:
-- {Accomplishment 1}
-- {Accomplishment 2}
-- {Accomplishment 3}
+{Top 3 accomplishments from session}
 
 **Critical Decisions**:
-- {Decision 1}: {Brief rationale}
-- {Decision 2}: {Brief rationale}
+{Top 2-3 decisions with brief rationale}
 
 **Next Priority Actions**:
-- [ ] {Top priority task}
-- [ ] {Second priority task}
-- [ ] {Third priority task}
+{Top 3 immediate todos}
 
 **Critical Issues**:
-- {Blocker 1}: {One-line description}
-- {Blocker 2}: {One-line description}
+{Top 2 blockers or issues}
 
 **Key Files Modified**:
-- `{file1}` - {Brief change description}
-- `{file2}` - {Brief change description}
-- `{file3}` - {Brief change description}
+{Top 5 files from agent analysis}
 
 **Context Notes**:
 {2-3 sentences of essential context for future sessions}
 
 ---
-*Quick summary of [full status](./../{timestamp}.md)*
+*Quick summary of [full status](./../${TIMESTAMP}.md)*
 ```
 
-### Step 8: Create Summary Index
+---
 
-Also update or create `.docs/status/INDEX.md` to list all status documents:
+## Step 6: Update Status Index
+
+Update or create `.docs/status/INDEX.md`:
 
 ```markdown
 # Status Document Index
 
 ## Quick Reference
-- [Latest Catch-Up Summary](../CATCH_UP.md) - For getting back up to speed
+- Latest session: ${DATE} ${TIME}
 
 ## Recent Status Reports
 
 | Date | Time | Focus | Full | Compact |
 |------|------|-------|------|---------|
-| {DATE} | {TIME} | {Brief description} | [Full](./{timestamp}.md) | [Quick](./compact/{timestamp}.md) |
-{Previous entries...}
+| ${DATE} | ${TIME} | {Brief from conversation} | [Full](./${TIMESTAMP}.md) | [Quick](./compact/${TIMESTAMP}.md) |
+{Keep previous 10 entries}
 
 ## Usage
-- **Starting a session?** → Use `/catch-up` command or check latest compact status
+- **Starting a session?** → Use `/catch-up` command
 - **Ending a session?** → Use `/devlog` to document progress
 - **Need full context?** → Read the full status documents
 - **Quick reference?** → Use compact versions
 ```
 
-### Step 9: Confirm Creation
+---
 
-After creating the document, provide confirmation:
-- Full path to the created document
-- Brief summary of what was captured
-- Suggestion to review and edit if needed
+## Step 7: Confirm Creation
 
-### Important Considerations
+Provide confirmation to user:
 
-1. **Be Honest**: Include both successes and failures
-2. **Be Specific**: Use actual file paths and function names
-3. **Be Helpful**: Write as if explaining to someone unfamiliar with recent work
-4. **Be Concise**: Balance detail with readability
-5. **Include Context**: Explain the "why" behind decisions
+```markdown
+📝 **Development Log Created**
+
+**Full Status**: `.docs/status/${TIMESTAMP}.md`
+**Compact**: `.docs/status/compact/${TIMESTAMP}.md`
+**Index**: `.docs/status/INDEX.md`
+
+### Captured
+- ✅ Session conversation and decisions
+- ✅ Current todo list state (for continuity)
+- ✅ Project state analysis from agent
+- ✅ {X} commits, {Y} files modified
+- ✅ {Z} TODOs/FIXMEs tracked
+- ✅ Next steps documented
+
+### Next Session
+Run `/catch-up` to restore context and recreate todo list.
+
+{Brief 2-3 sentence summary of what was accomplished this session}
+```
+
+---
+
+## Important Notes
+
+**What Stays Inline:**
+- Todo list capture (session state)
+- Conversation analysis (session context)
+- Document synthesis and writing
+
+**What Agent Handles:**
+- Git history analysis
+- File change detection
+- TODO/FIXME scanning
+- Documentation structure
+- Tech stack detection
+
+**Benefits:**
+- Main session stays focused on conversation
+- Heavy codebase analysis offloaded to agent
+- Clean separation: session context vs project state
+- Agent can evolve independently
 
 The goal is to create a time capsule that will be genuinely useful when someone (maybe you!) returns to this project after weeks or months away.

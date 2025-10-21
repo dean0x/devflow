@@ -56,33 +56,23 @@ export const uninstallCommand = new Command('uninstall')
 
     let hasErrors = false;
 
-    // Remove commands
-    try {
-      const commandsDevflowDir = path.join(claudeDir, 'commands', 'devflow');
-      await fs.rm(commandsDevflowDir, { recursive: true, force: true });
-      console.log('  ✅ Removed DevFlow commands');
-    } catch (error) {
-      console.error('  ⚠️ Could not remove commands:', error);
-      hasErrors = true;
-    }
+    // DevFlow namespace directories to remove
+    const devflowDirectories = [
+      { path: path.join(claudeDir, 'commands', 'devflow'), name: 'commands' },
+      { path: path.join(claudeDir, 'agents', 'devflow'), name: 'agents' },
+      { path: path.join(claudeDir, 'skills', 'devflow'), name: 'skills' },
+      { path: devflowScriptsDir, name: 'scripts' }
+    ];
 
-    // Remove agents
-    try {
-      const agentsDevflowDir = path.join(claudeDir, 'agents', 'devflow');
-      await fs.rm(agentsDevflowDir, { recursive: true, force: true });
-      console.log('  ✅ Removed DevFlow agents');
-    } catch (error) {
-      console.error('  ⚠️ Could not remove agents:', error);
-      hasErrors = true;
-    }
-
-    // Remove scripts
-    try {
-      await fs.rm(devflowScriptsDir, { recursive: true, force: true });
-      console.log('  ✅ Removed DevFlow scripts');
-    } catch (error) {
-      console.error('  ⚠️ Could not remove scripts:', error);
-      hasErrors = true;
+    // Remove all DevFlow directories
+    for (const dir of devflowDirectories) {
+      try {
+        await fs.rm(dir.path, { recursive: true, force: true });
+        console.log(`  ✅ Removed DevFlow ${dir.name}`);
+      } catch (error) {
+        console.error(`  ⚠️ Could not remove ${dir.name}:`, error);
+        hasErrors = true;
+      }
     }
 
     // Handle .docs directory
