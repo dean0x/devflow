@@ -5,6 +5,75 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-10-21
+
+### Added
+
+#### Skills Infrastructure
+- **Auto-activating skills system** - Intelligent context-aware capabilities that activate when relevant
+  - Skills replace standalone commands with intelligent activation patterns
+  - 7 new skills: research, debug, devlog, test-generation, api-integration, data-migration, refactoring-assistant
+  - Skills displayed on devflow init with clear descriptions
+  - Installed to `~/.claude/skills/devflow/` directory
+  - Automatic activation based on conversation context
+
+#### Smart Interactive Commands
+- **/implement command** - Orchestrator for guided feature implementation
+  - Interactive workflow for planning, research, and execution
+  - Integrates with project-state agent for context gathering
+  - Guides through research, design, implementation, and testing phases
+  - Prevents blind coding by requiring user approval at each stage
+
+#### Command→Agent→Skill Architecture
+- **Dual-mode pattern** - Commands for explicit invocation, skills for auto-activation
+  - Commands: `/research`, `/debug` for explicit user requests
+  - Skills: Auto-activated versions when conversation context matches
+  - Clear separation of concerns and activation modes
+  - Documented pattern for extending DevFlow functionality
+
+#### Enhanced /devlog Command
+- **Orchestrator pattern** - Refactored to use project-state agent
+  - Delegates project analysis to specialized agent
+  - Cleaner separation of orchestration vs analysis logic
+  - More maintainable and extensible architecture
+  - Comprehensive session documentation with context gathering
+
+### Changed
+- **Skills-first approach** - research and debug migrated to dual-mode (command + skill)
+  - Commands remain for explicit invocation
+  - Skills provide automatic activation based on context
+  - No loss of functionality, enhanced discoverability
+
+### Fixed
+- **Security vulnerability** - Added input validation for execSync to prevent command injection
+  - Validates all user input before shell execution
+  - Proper escaping and sanitization
+  - Security hardening in CLI commands
+
+- **Uninstall bug** - Fixed cleanup issue and refactored CLI to namespace pattern
+  - Proper cleanup of all installed assets
+  - Consistent namespace pattern across CLI
+  - Improved error handling and user feedback
+
+### Documentation
+- **Comprehensive skills guide** - Added to README and CLAUDE.md
+  - Detailed explanation of skills infrastructure
+  - How to create new skills
+  - When to use skills vs commands
+  - Auto-activation patterns and best practices
+
+- **Development guide updates** - Enhanced CLAUDE.md for contributors
+  - Skills development patterns
+  - Command→Agent→Skill architecture explanation
+  - Testing guidelines for dual-mode functionality
+
+- **Documentation gap fixes** - Addressed critical gaps from code review
+  - Improved clarity and completeness
+  - Fixed missing examples and use cases
+  - Better organization and navigation
+
+---
+
 ## [0.3.3] - 2025-10-19
 
 ### Fixed
@@ -288,6 +357,7 @@ devflow init
 
 ---
 
+[0.4.0]: https://github.com/dean0x/devflow/releases/tag/v0.4.0
 [0.3.3]: https://github.com/dean0x/devflow/releases/tag/v0.3.3
 [0.3.2]: https://github.com/dean0x/devflow/releases/tag/v0.3.2
 [0.3.1]: https://github.com/dean0x/devflow/releases/tag/v0.3.1
