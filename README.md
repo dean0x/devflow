@@ -33,6 +33,14 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 - **Quality gates** - Block anti-patterns automatically
 - **Context-aware** - Activate based on what you're doing
 
+**IMPORTANT**: Skills are **automatically activated** by Claude based on context. They cannot be manually invoked like slash commands.
+
+**Dual-Mode Pattern**: The `research` and `debug` skills also exist as slash commands (`/research`, `/debug`) for manual control:
+- **Skill mode** (auto): Activates when Claude detects unfamiliar features or errors
+- **Command mode** (manual): Use `/research` or `/debug` when you want explicit control over the workflow
+
+This gives you the best of both worlds: automatic assistance when needed, manual control when preferred.
+
 ### 📊 Slash Commands (User-Invoked)
 
 | Command | Purpose | When to Use |
@@ -40,6 +48,9 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 | `/plan-next-steps` | Extract actionable next steps from current discussion | After planning discussion |
+| `/implement` | Smart interactive implementation orchestrator with todo triage | After planning, ready to implement todos |
+| `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
+| `/research` | Pre-implementation research and approach analysis | Before implementing unfamiliar features or integrations |
 | `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
