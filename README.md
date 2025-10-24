@@ -9,6 +9,29 @@ A comprehensive collection of Claude Code commands and configurations designed t
 npx devflow-kit init
 ```
 
+### Installation Scopes
+
+DevFlow supports two installation scopes:
+
+**Global Scope (Default)** - Install for all projects
+```bash
+npx devflow-kit init --scope global
+# Or interactively: npx devflow-kit init (prompts for scope)
+```
+- Installs to `~/.claude/` and `~/.devflow/`
+- Available across all projects
+- Recommended for personal use
+
+**Local Scope** - Install for current project only
+```bash
+npx devflow-kit init --scope local
+```
+- Installs to `<git-root>/.claude/` and `<git-root>/.devflow/`
+- Only available in the current project
+- Recommended for team projects where DevFlow should be project-specific
+- Requires a git repository (run `git init` first)
+- Add `.claude/` and `.devflow/` to `.gitignore` (done automatically)
+
 That's it! DevFlow is now installed and ready to use in Claude Code.
 
 ## What's Included
@@ -154,10 +177,12 @@ Covers patterns for all major languages and operating systems.
 
 | Command | Purpose | Options |
 |---------|---------|---------|
-| `devflow init` | Initialize DevFlow for Claude Code | `--skip-docs` - Skip creating `.docs/` structure |
+| `devflow init` | Initialize DevFlow for Claude Code | `--scope <global\|local>` - Installation scope (global: user-wide, local: project-only)<br>`--skip-docs` - Skip creating `.docs/` structure<br>`--force` - Override existing files<br>`-y, --yes` - Auto-approve prompts |
 | `devflow uninstall` | Remove DevFlow from Claude Code | `--keep-docs` - Keep `.docs/` directory |
 
 **What `devflow init` does:**
+
+**Global Scope** (default):
 - Installs commands to `~/.claude/commands/devflow/`
 - Installs sub-agents to `~/.claude/agents/devflow/`
 - Installs skills to `~/.claude/skills/devflow/`
@@ -165,6 +190,16 @@ Covers patterns for all major languages and operating systems.
 - Updates `~/.claude/settings.json` (statusline and model)
 - Creates `.claudeignore` at git repository root
 - Creates `.docs/` structure for project documentation
+
+**Local Scope** (`--scope local`):
+- Installs commands to `<git-root>/.claude/commands/devflow/`
+- Installs sub-agents to `<git-root>/.claude/agents/devflow/`
+- Installs skills to `<git-root>/.claude/skills/devflow/`
+- Installs scripts to `<git-root>/.devflow/scripts/`
+- Creates `<git-root>/.claude/settings.json` (statusline and model)
+- Creates `.claudeignore` at git repository root
+- Creates `.docs/` structure for project documentation
+- Adds `.claude/` and `.devflow/` to `.gitignore`
 
 **First Run:**
 ```bash

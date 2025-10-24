@@ -45,6 +45,59 @@ function getDevFlowDirectory(): string {
 }
 
 /**
+ * Get git repository root directory
+ * Returns null if not in a git repository
+ */
+function getGitRoot(): string | null {
+  try {
+    const gitRootRaw = execSync('git rev-parse --show-toplevel', {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'] // Isolate stderr
+    }).trim();
+
+    // Validate git root path (security: prevent injection)
+    if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
+      return null;
+    }
+
+    // Validate it's an absolute path
+    const gitRoot = path.resolve(gitRootRaw);
+    if (!path.isAbsolute(gitRoot)) {
+      return null;
+    }
+
+    return gitRoot;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get installation paths based on scope
+ * @param scope - 'global' or 'local'
+ * @returns Object with claudeDir and devflowDir
+ */
+function getInstallationPaths(scope: 'global' | 'local'): { claudeDir: string; devflowDir: string } {
+  if (scope === 'global') {
+    return {
+      claudeDir: getClaudeDirectory(),
+      devflowDir: getDevFlowDirectory()
+    };
+  } else {
+    // Local scope - install to git repository root
+    const gitRoot = getGitRoot();
+    if (!gitRoot) {
+      throw new Error('Local scope requires a git repository. Run "git init" first or use --scope global');
+    }
+    return {
+      claudeDir: path.join(gitRoot, '.claude'),
+      devflowDir: path.join(gitRoot, '.devflow')
+    };
+  }
+}
+
+/**
  * Prompt user for confirmation (async)
  */
 async function promptUser(question: string): Promise<boolean> {
@@ -66,6 +119,7 @@ export const initCommand = new Command('init')
   .option('--skip-docs', 'Skip creating .docs/ structure')
   .option('--force', 'Override existing settings.json and CLAUDE.md (prompts for confirmation)')
   .option('-y, --yes', 'Auto-approve all prompts (use with --force)')
+  .option('--scope <type>', 'Installation scope: global (user-wide) or local (project-only)', /^(global|local)$/i)
   .action(async (options) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -79,26 +133,79 @@ export const initCommand = new Command('init')
 
     console.log(`🚀 DevFlow v${version}${options.force ? ' [--force]' : ''}\n`);
 
+    // Determine installation scope
+    let scope: 'global' | 'local' = 'global'; // Default to global for backwards compatibility
+
+    if (options.scope) {
+      scope = options.scope.toLowerCase() as 'global' | 'local';
+    } else {
+      // Interactive prompt for scope
+      console.log('📦 Installation Scope:\n');
+      console.log('  global - Install for all projects (user-wide)');
+      console.log('             └─ ~/.claude/ and ~/.devflow/');
+      console.log('  local  - Install for current project only');
+      console.log('             └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
+
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question('Choose scope (global/local) [global]: ', (input) => {
+          rl.close();
+          resolve(input.trim().toLowerCase() || 'global');
+        });
+      });
+
+      if (answer === 'local' || answer === 'l') {
+        scope = 'local';
+      } else if (answer === 'global' || answer === 'g' || answer === '') {
+        scope = 'global';
+      } else {
+        console.error('❌ Invalid scope. Use "global" or "local"\n');
+        process.exit(1);
+      }
+      console.log();
+    }
+
     // Get installation paths with proper validation
     let claudeDir: string;
     let devflowDir: string;
 
     try {
-      claudeDir = getClaudeDirectory();
-      devflowDir = getDevFlowDirectory();
+      const paths = getInstallationPaths(scope);
+      claudeDir = paths.claudeDir;
+      devflowDir = paths.devflowDir;
+
+      console.log(`📍 Installation scope: ${scope}`);
+      console.log(`   Claude dir: ${claudeDir}`);
+      console.log(`   DevFlow dir: ${devflowDir}\n`);
     } catch (error) {
       console.error('❌ Path configuration error:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
 
-    // Check for Claude Code
-    try {
-      await fs.access(claudeDir);
-    } catch {
-      console.error(`❌ Claude Code not detected at ${claudeDir}`);
-      console.error('   Install from: https://claude.com/claude-code');
-      console.error('   Or set CLAUDE_CODE_DIR if installed elsewhere\n');
-      process.exit(1);
+    // Check for Claude Code (only for global scope)
+    if (scope === 'global') {
+      try {
+        await fs.access(claudeDir);
+      } catch {
+        console.error(`❌ Claude Code not detected at ${claudeDir}`);
+        console.error('   Install from: https://claude.com/claude-code');
+        console.error('   Or set CLAUDE_CODE_DIR if installed elsewhere\n');
+        process.exit(1);
+      }
+      console.log('✓ Claude Code detected');
+    } else {
+      // Local scope - create .claude directory if it doesn't exist
+      try {
+        await fs.mkdir(claudeDir, { recursive: true });
+        console.log('✓ Local .claude directory ready');
+      } catch (error) {
+        console.error(`❌ Failed to create ${claudeDir}:`, error);
+        process.exit(1);
+      }
     }
 
     // Handle --force flag prompt
@@ -170,7 +277,6 @@ export const initCommand = new Command('init')
         await fs.chmod(path.join(scriptsDir, script), 0o755);
       }
 
-      console.log('✓ Claude Code detected');
       console.log('✓ Installing components... (commands, agents, skills, scripts)');
 
       // Install settings with smart backup
