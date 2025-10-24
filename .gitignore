@@ -37,3 +37,6 @@ commands/local-*
 
 # Installation logs
 install.log
+# DevFlow local scope installation (use --scope local)
+.claude/
+.devflow/
