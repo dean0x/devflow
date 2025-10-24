@@ -80,7 +80,7 @@ async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
 export const uninstallCommand = new Command('uninstall')
   .description('Uninstall DevFlow from Claude Code')
   .option('--keep-docs', 'Keep .docs/ directory and documentation')
-  .option('--scope <type>', 'Uninstall scope: user, local, or both (auto-detect)', /^(user|local|both)$/i)
+  .option('--scope <type>', 'Uninstall from specific scope only (default: auto-detect all)', /^(user|local)$/i)
   .action(async (options) => {
     console.log('🧹 Uninstalling DevFlow...\n');
 
@@ -88,12 +88,7 @@ export const uninstallCommand = new Command('uninstall')
     let scopesToUninstall: ('user' | 'local')[] = [];
 
     if (options.scope) {
-      const scope = options.scope.toLowerCase();
-      if (scope === 'both') {
-        scopesToUninstall = ['user', 'local'];
-      } else {
-        scopesToUninstall = [scope as 'user' | 'local'];
-      }
+      scopesToUninstall = [options.scope.toLowerCase() as 'user' | 'local'];
     } else {
       // Auto-detect installed scopes
       const userClaudeDir = getClaudeDirectory();

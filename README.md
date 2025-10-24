@@ -178,7 +178,7 @@ Covers patterns for all major languages and operating systems.
 | Command | Purpose | Options |
 |---------|---------|---------|
 | `devflow init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope (user: user-wide, local: project-only)<br>`--skip-docs` - Skip creating `.docs/` structure<br>`--force` - Override existing files<br>`-y, --yes` - Auto-approve prompts |
-| `devflow uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local\|both>` - Uninstall scope (auto-detects if not specified)<br>`--keep-docs` - Keep `.docs/` directory |
+| `devflow uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only (default: auto-detect all)<br>`--keep-docs` - Keep `.docs/` directory |
 
 **What `devflow init` does:**
 
