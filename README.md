@@ -13,9 +13,9 @@ npx devflow-kit init
 
 DevFlow supports two installation scopes:
 
-**Global Scope (Default)** - Install for all projects
+**User Scope (Default)** - Install for all projects
 ```bash
-npx devflow-kit init --scope global
+npx devflow-kit init --scope user
 # Or interactively: npx devflow-kit init (prompts for scope)
 ```
 - Installs to `~/.claude/` and `~/.devflow/`
@@ -177,12 +177,12 @@ Covers patterns for all major languages and operating systems.
 
 | Command | Purpose | Options |
 |---------|---------|---------|
-| `devflow init` | Initialize DevFlow for Claude Code | `--scope <global\|local>` - Installation scope (global: user-wide, local: project-only)<br>`--skip-docs` - Skip creating `.docs/` structure<br>`--force` - Override existing files<br>`-y, --yes` - Auto-approve prompts |
+| `devflow init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope (user: user-wide, local: project-only)<br>`--skip-docs` - Skip creating `.docs/` structure<br>`--force` - Override existing files<br>`-y, --yes` - Auto-approve prompts |
 | `devflow uninstall` | Remove DevFlow from Claude Code | `--keep-docs` - Keep `.docs/` directory |
 
 **What `devflow init` does:**
 
-**Global Scope** (default):
+**User Scope** (default):
 - Installs commands to `~/.claude/commands/devflow/`
 - Installs sub-agents to `~/.claude/agents/devflow/`
 - Installs skills to `~/.claude/skills/devflow/`

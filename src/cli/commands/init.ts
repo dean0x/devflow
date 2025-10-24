@@ -75,11 +75,11 @@ function getGitRoot(): string | null {
 
 /**
  * Get installation paths based on scope
- * @param scope - 'global' or 'local'
+ * @param scope - 'user' or 'local'
  * @returns Object with claudeDir and devflowDir
  */
-function getInstallationPaths(scope: 'global' | 'local'): { claudeDir: string; devflowDir: string } {
-  if (scope === 'global') {
+function getInstallationPaths(scope: 'user' | 'local'): { claudeDir: string; devflowDir: string } {
+  if (scope === 'user') {
     return {
       claudeDir: getClaudeDirectory(),
       devflowDir: getDevFlowDirectory()
@@ -88,7 +88,7 @@ function getInstallationPaths(scope: 'global' | 'local'): { claudeDir: string; d
     // Local scope - install to git repository root
     const gitRoot = getGitRoot();
     if (!gitRoot) {
-      throw new Error('Local scope requires a git repository. Run "git init" first or use --scope global');
+      throw new Error('Local scope requires a git repository. Run "git init" first or use --scope user');
     }
     return {
       claudeDir: path.join(gitRoot, '.claude'),
@@ -119,7 +119,7 @@ export const initCommand = new Command('init')
   .option('--skip-docs', 'Skip creating .docs/ structure')
   .option('--force', 'Override existing settings.json and CLAUDE.md (prompts for confirmation)')
   .option('-y, --yes', 'Auto-approve all prompts (use with --force)')
-  .option('--scope <type>', 'Installation scope: global (user-wide) or local (project-only)', /^(global|local)$/i)
+  .option('--scope <type>', 'Installation scope: user (user-wide) or local (project-only)', /^(user|local)$/i)
   .action(async (options) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -134,17 +134,17 @@ export const initCommand = new Command('init')
     console.log(`🚀 DevFlow v${version}${options.force ? ' [--force]' : ''}\n`);
 
     // Determine installation scope
-    let scope: 'global' | 'local' = 'global'; // Default to global for backwards compatibility
+    let scope: 'user' | 'local' = 'user'; // Default to user for backwards compatibility
 
     if (options.scope) {
-      scope = options.scope.toLowerCase() as 'global' | 'local';
+      scope = options.scope.toLowerCase() as 'user' | 'local';
     } else {
       // Interactive prompt for scope
       console.log('📦 Installation Scope:\n');
-      console.log('  global - Install for all projects (user-wide)');
-      console.log('             └─ ~/.claude/ and ~/.devflow/');
-      console.log('  local  - Install for current project only');
-      console.log('             └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
+      console.log('  user  - Install for all projects (user-wide)');
+      console.log('            └─ ~/.claude/ and ~/.devflow/');
+      console.log('  local - Install for current project only');
+      console.log('            └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
 
       const rl = readline.createInterface({
         input: process.stdin,
@@ -152,18 +152,18 @@ export const initCommand = new Command('init')
       });
 
       const answer = await new Promise<string>((resolve) => {
-        rl.question('Choose scope (global/local) [global]: ', (input) => {
+        rl.question('Choose scope (user/local) [user]: ', (input) => {
           rl.close();
-          resolve(input.trim().toLowerCase() || 'global');
+          resolve(input.trim().toLowerCase() || 'user');
         });
       });
 
       if (answer === 'local' || answer === 'l') {
         scope = 'local';
-      } else if (answer === 'global' || answer === 'g' || answer === '') {
-        scope = 'global';
+      } else if (answer === 'user' || answer === 'u' || answer === '') {
+        scope = 'user';
       } else {
-        console.error('❌ Invalid scope. Use "global" or "local"\n');
+        console.error('❌ Invalid scope. Use "user" or "local"\n');
         process.exit(1);
       }
       console.log();
@@ -186,8 +186,8 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // Check for Claude Code (only for global scope)
-    if (scope === 'global') {
+    // Check for Claude Code (only for user scope)
+    if (scope === 'user') {
       try {
         await fs.access(claudeDir);
       } catch {
