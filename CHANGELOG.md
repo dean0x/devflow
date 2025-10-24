@@ -5,6 +5,66 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-10-24
+
+### Added
+
+#### Installation Scope Support
+- **Two-tier installation strategy** - Choose between user-wide and project-specific installation
+  - **User scope** (default): Install to `~/.claude/` for all projects
+  - **Local scope**: Install to `<git-root>/.claude/` for current project only
+  - Interactive prompt with clear descriptions when `--scope` flag not provided
+  - CLI flag: `devflow init --scope <user|local>`
+  - Automatic .gitignore updates for local scope (excludes `.claude/` and `.devflow/`)
+  - Perfect for team projects where DevFlow should be project-specific
+
+#### Smart Uninstall with Scope Detection
+- **Auto-detection of installed scopes** - Intelligently finds and removes DevFlow installations
+  - Automatically detects which scopes have DevFlow installed (user and/or local)
+  - Default behavior: Remove from all detected scopes
+  - Manual override: `--scope <user|local>` to target specific scope
+  - Clear feedback showing which scopes are being uninstalled
+  - Graceful handling when no installation found
+
+### Changed
+
+#### Code Quality Improvements
+- **Extracted shared utilities** - Eliminated code duplication between init and uninstall commands
+  - Created `src/cli/utils/paths.ts` for path resolution functions
+  - Created `src/cli/utils/git.ts` for git repository operations
+  - Reduced duplication by ~65 lines
+  - Single source of truth for path and git logic
+
+#### Performance Optimizations
+- **Eliminated redundant git detection** - Cache git root result for reuse
+  - Previously called `git rev-parse` twice during installation
+  - Now cached once and reused throughout installation process
+  - Faster installation, especially in large repositories
+
+### Fixed
+
+#### CI/CD Compatibility
+- **TTY detection for interactive prompts** - Prevents hanging in non-interactive environments
+  - Detects when running in CI/CD pipelines, Docker containers, or automated scripts
+  - Falls back to default scope (user) when no TTY available
+  - Clear messaging when non-interactive environment detected
+  - Explicit instructions for CI/CD usage: `devflow init --scope <user|local>`
+
+#### Security Hardening
+- **Environment variable path validation** - Prevents malicious path overrides
+  - Validates `CLAUDE_CODE_DIR` and `DEVFLOW_DIR` are absolute paths
+  - Warns when paths point outside user's home directory
+  - Prevents path traversal attacks via environment variables
+  - Security-first approach to custom path configuration
+
+### Documentation
+- **Installation Scopes section** in README with clear use cases
+- **Updated CLI commands table** with scope options for init and uninstall
+- **Migration guide** for existing users (scope defaults to user for compatibility)
+- **.gitignore patterns** documented for local scope installations
+
+---
+
 ## [0.4.0] - 2025-10-21
 
 ### Added
@@ -357,6 +417,7 @@ devflow init
 
 ---
 
+[0.5.0]: https://github.com/dean0x/devflow/releases/tag/v0.5.0
 [0.4.0]: https://github.com/dean0x/devflow/releases/tag/v0.4.0
 [0.3.3]: https://github.com/dean0x/devflow/releases/tag/v0.3.3
 [0.3.2]: https://github.com/dean0x/devflow/releases/tag/v0.3.2

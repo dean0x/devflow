@@ -1,101 +1,14 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { homedir } from 'os';
-import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import * as readline from 'readline';
+import { getInstallationPaths } from '../utils/paths.js';
+import { getGitRoot } from '../utils/git.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-/**
- * Get home directory with proper fallback and validation
- * Priority: process.env.HOME > os.homedir()
- */
-function getHomeDirectory(): string {
-  const home = process.env.HOME || homedir();
-  if (!home) {
-    throw new Error('Unable to determine home directory. Set HOME environment variable.');
-  }
-  return home;
-}
-
-/**
- * Get Claude Code directory with environment variable override support
- * Priority: CLAUDE_CODE_DIR env var > ~/.claude
- */
-function getClaudeDirectory(): string {
-  if (process.env.CLAUDE_CODE_DIR) {
-    return process.env.CLAUDE_CODE_DIR;
-  }
-  return path.join(getHomeDirectory(), '.claude');
-}
-
-/**
- * Get DevFlow directory with environment variable override support
- * Priority: DEVFLOW_DIR env var > ~/.devflow
- */
-function getDevFlowDirectory(): string {
-  if (process.env.DEVFLOW_DIR) {
-    return process.env.DEVFLOW_DIR;
-  }
-  return path.join(getHomeDirectory(), '.devflow');
-}
-
-/**
- * Get git repository root directory
- * Returns null if not in a git repository
- */
-function getGitRoot(): string | null {
-  try {
-    const gitRootRaw = execSync('git rev-parse --show-toplevel', {
-      cwd: process.cwd(),
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'] // Isolate stderr
-    }).trim();
-
-    // Validate git root path (security: prevent injection)
-    if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
-      return null;
-    }
-
-    // Validate it's an absolute path
-    const gitRoot = path.resolve(gitRootRaw);
-    if (!path.isAbsolute(gitRoot)) {
-      return null;
-    }
-
-    return gitRoot;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get installation paths based on scope
- * @param scope - 'user' or 'local'
- * @returns Object with claudeDir and devflowDir
- */
-function getInstallationPaths(scope: 'user' | 'local'): { claudeDir: string; devflowDir: string } {
-  if (scope === 'user') {
-    return {
-      claudeDir: getClaudeDirectory(),
-      devflowDir: getDevFlowDirectory()
-    };
-  } else {
-    // Local scope - install to git repository root
-    const gitRoot = getGitRoot();
-    if (!gitRoot) {
-      throw new Error('Local scope requires a git repository. Run "git init" first or use --scope user');
-    }
-    return {
-      claudeDir: path.join(gitRoot, '.claude'),
-      devflowDir: path.join(gitRoot, '.devflow')
-    };
-  }
-}
 
 /**
  * Prompt user for confirmation (async)
@@ -137,44 +50,56 @@ export const initCommand = new Command('init')
     if (options.scope) {
       scope = options.scope.toLowerCase() as 'user' | 'local';
     } else {
-      // Interactive prompt for scope
-      console.log('📦 Installation Scope:\n');
-      console.log('  user  - Install for all projects (user-wide)');
-      console.log('            └─ ~/.claude/ and ~/.devflow/');
-      console.log('  local - Install for current project only');
-      console.log('            └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
-
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
-
-      const answer = await new Promise<string>((resolve) => {
-        rl.question('Choose scope (user/local) [user]: ', (input) => {
-          rl.close();
-          resolve(input.trim().toLowerCase() || 'user');
-        });
-      });
-
-      if (answer === 'local' || answer === 'l') {
-        scope = 'local';
-      } else if (answer === 'user' || answer === 'u' || answer === '') {
+      // Check if running in interactive terminal (TTY)
+      if (!process.stdin.isTTY) {
+        // Non-interactive environment (CI/CD, scripts) - use default
+        console.log('📦 Non-interactive environment detected, using default scope: user');
+        console.log('   To specify scope in CI/CD, use: devflow init --scope <user|local>\n');
         scope = 'user';
       } else {
-        console.error('❌ Invalid scope. Use "user" or "local"\n');
-        process.exit(1);
+        // Interactive prompt for scope
+        console.log('📦 Installation Scope:\n');
+        console.log('  user  - Install for all projects (user-wide)');
+        console.log('            └─ ~/.claude/ and ~/.devflow/');
+        console.log('  local - Install for current project only');
+        console.log('            └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
+
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+
+        const answer = await new Promise<string>((resolve) => {
+          rl.question('Choose scope (user/local) [user]: ', (input) => {
+            rl.close();
+            resolve(input.trim().toLowerCase() || 'user');
+          });
+        });
+
+        if (answer === 'local' || answer === 'l') {
+          scope = 'local';
+        } else if (answer === 'user' || answer === 'u' || answer === '') {
+          scope = 'user';
+        } else {
+          console.error('❌ Invalid scope. Use "user" or "local"\n');
+          process.exit(1);
+        }
+        console.log();
       }
-      console.log();
     }
 
     // Get installation paths with proper validation
     let claudeDir: string;
     let devflowDir: string;
+    let gitRoot: string | null = null;
 
     try {
-      const paths = getInstallationPaths(scope);
+      const paths = await getInstallationPaths(scope);
       claudeDir = paths.claudeDir;
       devflowDir = paths.devflowDir;
+
+      // Cache git root for later use (already computed in getInstallationPaths for local scope)
+      gitRoot = await getGitRoot();
 
       console.log(`📍 Installation scope: ${scope}`);
       console.log(`   Claude dir: ${claudeDir}`);
@@ -259,7 +184,7 @@ export const initCommand = new Command('init')
 
       console.log('✓ Installing components... (commands, agents, skills, scripts)');
 
-      // Install settings.json - never override existing files
+      // Install settings.json - never override existing files (atomic operation)
       const settingsPath = path.join(claudeDir, 'settings.json');
       const devflowSettingsPath = path.join(claudeDir, 'settings.devflow.json');
       const sourceSettingsPath = path.join(claudeSourceDir, 'settings.json');
@@ -273,64 +198,54 @@ export const initCommand = new Command('init')
 
       let settingsExists = false;
       try {
-        await fs.access(settingsPath);
-        settingsExists = true;
-        // Existing settings.json found - install as settings.devflow.json
-        await fs.writeFile(devflowSettingsPath, settingsContent, 'utf-8');
-        console.log('⚠️  Existing settings.json preserved → DevFlow config: settings.devflow.json');
-      } catch {
-        // No existing settings.json - install normally
-        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+        // Atomic exclusive create - fails if file already exists
+        await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
         console.log('✓ Settings configured');
+      } catch (error: any) {
+        if (error.code === 'EEXIST') {
+          // Existing settings.json found - install as settings.devflow.json
+          settingsExists = true;
+          await fs.writeFile(devflowSettingsPath, settingsContent, 'utf-8');
+          console.log('⚠️  Existing settings.json preserved → DevFlow config: settings.devflow.json');
+        } else {
+          throw error;
+        }
       }
 
-      // Install CLAUDE.md - never override existing files
+      // Install CLAUDE.md - never override existing files (atomic operation)
       const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
       const devflowClaudeMdPath = path.join(claudeDir, 'CLAUDE.devflow.md');
       const sourceClaudeMdPath = path.join(claudeSourceDir, 'CLAUDE.md');
 
       let claudeMdExists = false;
       try {
-        await fs.access(claudeMdPath);
-        claudeMdExists = true;
-        // Existing CLAUDE.md found - install as CLAUDE.devflow.md
-        await fs.copyFile(sourceClaudeMdPath, devflowClaudeMdPath);
-        console.log('⚠️  Existing CLAUDE.md preserved → DevFlow guide: CLAUDE.devflow.md');
-      } catch {
-        // No existing CLAUDE.md - install normally
-        await fs.copyFile(sourceClaudeMdPath, claudeMdPath);
+        // Atomic exclusive create - fails if file already exists
+        const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
+        await fs.writeFile(claudeMdPath, content, { encoding: 'utf-8', flag: 'wx' });
         console.log('✓ CLAUDE.md configured');
+      } catch (error: any) {
+        if (error.code === 'EEXIST') {
+          // Existing CLAUDE.md found - install as CLAUDE.devflow.md
+          claudeMdExists = true;
+          await fs.copyFile(sourceClaudeMdPath, devflowClaudeMdPath);
+          console.log('⚠️  Existing CLAUDE.md preserved → DevFlow guide: CLAUDE.devflow.md');
+        } else {
+          throw error;
+        }
       }
 
       // Create .claudeignore in git repository root
       let claudeignoreCreated = false;
       try {
-        // Find git repository root with validation
-        const gitRootRaw = execSync('git rev-parse --show-toplevel', {
-          cwd: process.cwd(),
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe'] // Isolate stderr
-        }).trim();
-
-        // Validate git root path (security: prevent injection)
-        if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
-          throw new Error('Invalid git root path returned');
-        }
-
-        // Validate it's an absolute path
-        const gitRoot = path.resolve(gitRootRaw);
-        if (!path.isAbsolute(gitRoot)) {
-          throw new Error('Git root must be an absolute path');
+        // Use cached git root (already computed and validated earlier)
+        if (!gitRoot) {
+          throw new Error('Not in a git repository');
         }
 
         const claudeignorePath = path.join(gitRoot, '.claudeignore');
 
-        // Check if .claudeignore already exists
-        try {
-          await fs.access(claudeignorePath);
-        } catch {
-          // Create comprehensive .claudeignore
-          const claudeignoreContent = `# DevFlow .claudeignore - Protects against sensitive files and context pollution
+        // Atomic exclusive create - only create if doesn't exist
+        const claudeignoreContent = `# DevFlow .claudeignore - Protects against sensitive files and context pollution
 # Generated by DevFlow - Edit as needed for your project
 
 # === SECURITY: Sensitive Files ===
@@ -520,15 +435,49 @@ poetry.lock
 Pipfile.lock
 `;
 
-          await fs.writeFile(claudeignorePath, claudeignoreContent, 'utf-8');
-          claudeignoreCreated = true;
-        }
+        // Atomic exclusive create - fails if file already exists
+        await fs.writeFile(claudeignorePath, claudeignoreContent, { encoding: 'utf-8', flag: 'wx' });
+        claudeignoreCreated = true;
       } catch (error) {
         // Not a git repository or other error - skip .claudeignore creation
       }
 
       if (claudeignoreCreated) {
         console.log('✓ .claudeignore created');
+      }
+
+      // For local scope, update .gitignore to exclude .claude/ and .devflow/
+      if (scope === 'local' && gitRoot) {
+        try {
+          const gitignorePath = path.join(gitRoot, '.gitignore');
+          const entriesToAdd = ['.claude/', '.devflow/'];
+
+          let gitignoreContent = '';
+          try {
+            gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+          } catch {
+            // .gitignore doesn't exist, will create it
+          }
+
+          const linesToAdd: string[] = [];
+          for (const entry of entriesToAdd) {
+            // Check if entry already exists (exact match or pattern)
+            if (!gitignoreContent.split('\n').some(line => line.trim() === entry)) {
+              linesToAdd.push(entry);
+            }
+          }
+
+          if (linesToAdd.length > 0) {
+            const newContent = gitignoreContent
+              ? `${gitignoreContent.trimEnd()}\n\n# DevFlow local scope installation\n${linesToAdd.join('\n')}\n`
+              : `# DevFlow local scope installation\n${linesToAdd.join('\n')}\n`;
+
+            await fs.writeFile(gitignorePath, newContent, 'utf-8');
+            console.log('✓ .gitignore updated (excluded .claude/ and .devflow/)');
+          }
+        } catch (error) {
+          console.warn('⚠️  Could not update .gitignore:', error instanceof Error ? error.message : error);
+        }
       }
 
       // Offer to install project documentation structure

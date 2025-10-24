@@ -1,69 +1,8 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { homedir } from 'os';
-import { execSync } from 'child_process';
-
-/**
- * Get home directory with proper fallback and validation
- * Priority: process.env.HOME > os.homedir()
- */
-function getHomeDirectory(): string {
-  const home = process.env.HOME || homedir();
-  if (!home) {
-    throw new Error('Unable to determine home directory. Set HOME environment variable.');
-  }
-  return home;
-}
-
-/**
- * Get Claude Code directory with environment variable override support
- * Priority: CLAUDE_CODE_DIR env var > ~/.claude
- */
-function getClaudeDirectory(): string {
-  if (process.env.CLAUDE_CODE_DIR) {
-    return process.env.CLAUDE_CODE_DIR;
-  }
-  return path.join(getHomeDirectory(), '.claude');
-}
-
-/**
- * Get DevFlow directory with environment variable override support
- * Priority: DEVFLOW_DIR env var > ~/.devflow
- */
-function getDevFlowDirectory(): string {
-  if (process.env.DEVFLOW_DIR) {
-    return process.env.DEVFLOW_DIR;
-  }
-  return path.join(getHomeDirectory(), '.devflow');
-}
-
-/**
- * Get git repository root directory
- * Returns null if not in a git repository
- */
-function getGitRoot(): string | null {
-  try {
-    const gitRootRaw = execSync('git rev-parse --show-toplevel', {
-      cwd: process.cwd(),
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
-
-    if (!gitRootRaw || gitRootRaw.includes('\n') || gitRootRaw.includes(';') || gitRootRaw.includes('&&')) {
-      return null;
-    }
-
-    const gitRoot = path.resolve(gitRootRaw);
-    if (!path.isAbsolute(gitRoot)) {
-      return null;
-    }
-
-    return gitRoot;
-  } catch {
-    return null;
-  }
-}
+import { getInstallationPaths, getClaudeDirectory } from '../utils/paths.js';
+import { getGitRoot } from '../utils/git.js';
 
 /**
  * Check if DevFlow is installed at the given paths
@@ -92,7 +31,7 @@ export const uninstallCommand = new Command('uninstall')
     } else {
       // Auto-detect installed scopes
       const userClaudeDir = getClaudeDirectory();
-      const gitRoot = getGitRoot();
+      const gitRoot = await getGitRoot();
 
       if (await isDevFlowInstalled(userClaudeDir)) {
         scopesToUninstall.push('user');
@@ -123,22 +62,23 @@ export const uninstallCommand = new Command('uninstall')
 
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
+      // Get installation paths for this scope
       let claudeDir: string;
       let devflowScriptsDir: string;
 
-      if (scope === 'user') {
-        claudeDir = getClaudeDirectory();
-        devflowScriptsDir = getDevFlowDirectory();
-        console.log('📍 Uninstalling user scope (~/.claude/)');
-      } else {
-        const gitRoot = getGitRoot();
-        if (!gitRoot) {
-          console.log('⚠️  Cannot uninstall local scope: not in a git repository\n');
-          continue;
+      try {
+        const paths = await getInstallationPaths(scope);
+        claudeDir = paths.claudeDir;
+        devflowScriptsDir = paths.devflowDir;
+
+        if (scope === 'user') {
+          console.log('📍 Uninstalling user scope (~/.claude/)');
+        } else {
+          console.log('📍 Uninstalling local scope (git-root/.claude/)');
         }
-        claudeDir = path.join(gitRoot, '.claude');
-        devflowScriptsDir = path.join(gitRoot, '.devflow');
-        console.log('📍 Uninstalling local scope (git-root/.claude/)');
+      } catch (error) {
+        console.log(`⚠️  Cannot uninstall ${scope} scope: ${error instanceof Error ? error.message : error}\n`);
+        continue;
       }
 
       // DevFlow namespace directories to remove
