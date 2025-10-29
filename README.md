@@ -70,12 +70,15 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
-| `/plan-next-steps` | Extract actionable next steps from current discussion | After planning discussion |
-| `/implement` | Smart interactive implementation orchestrator with todo triage | After planning, ready to implement todos |
-| `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
 | `/research` | Pre-implementation research and approach analysis | Before implementing unfamiliar features or integrations |
+| `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
+| `/plan` | Interactive planning with task selection and prioritization | After research/review, deciding which tasks to tackle |
+| `/plan-next-steps` | Extract actionable next steps from current discussion | After planning discussion, quick task capture |
+| `/implement` | Smart interactive implementation orchestrator with todo triage | After planning, ready to implement todos |
 | `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
+| `/pull-request` | Create PR with comprehensive analysis and smart description | After commits, ready to create PR |
+| `/resolve-comments` | Systematically address PR review feedback | After PR feedback, need to resolve comments |
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
 
 ### 🤖 Sub-Agents
@@ -90,10 +93,13 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `audit-dependencies` | Dependencies | Dependency management and security analysis |
 | `audit-database` | Database | Database design and optimization review |
 | `audit-documentation` | Documentation | Docs-code alignment, API accuracy, comment quality |
+| `audit-typescript` | TypeScript | Type safety enforcement and TypeScript code quality |
 | `catch-up` | Context Restoration | Project status and context restoration with validation |
 | `commit` | Git Operations | Intelligent commit creation with safety checks |
+| `pull-request` | PR Creation | Analyze commits/changes and generate comprehensive PR descriptions |
 | `research` | Implementation Planning | Pre-implementation research, approach analysis, and planning |
 | `release` | Release Automation | Project-agnostic release workflow with version management |
+| `debug` | Debugging | Systematic debugging with hypothesis testing and issue tracking |
 
 **How Sub-Agents Work:**
 - Specialized AI assistants with deep expertise in specific domains
@@ -148,14 +154,25 @@ Covers patterns for all major languages and operating systems.
 
 ### During Development
 1. **Skills auto-activate** - `research` skill triggers for unfamiliar features, `pattern-check` validates architecture
-2. **Code with confidence** - Skills catch anti-patterns and violations during implementation
-3. `/code-review` - Review changes before committing
-4. `/commit` - Create intelligent atomic commits
+2. **Plan your work** - `/plan` to select which tasks to tackle, or `/plan-next-steps` for quick capture
+3. **Implement systematically** - `/implement` to work through todos with guidance
+4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
+5. `/code-review` - Review changes before committing
+6. `/commit` - Create intelligent atomic commits
+
+### Creating Pull Requests
+1. `/code-review` - Comprehensive branch review
+2. `/commit` - Final commits with validation
+3. `/pull-request` - Create PR with smart description
+4. Wait for review feedback
+5. `/resolve-comments` - Address feedback systematically
+6. Repeat steps 4-5 until approved
 
 ### Ending a Session
 1. `/devlog` - Document decisions and state
 2. `/code-review` - Review branch before creating PR
 3. `/commit` - Final commits with validation
+4. `/pull-request` - Create PR if ready
 
 ### Creating a Release
 1. `/code-review` - Comprehensive branch review

@@ -1,5 +1,5 @@
 ---
-allowed-tools: TodoWrite, Read, Write, Edit, MultiEdit, Bash, Grep, Glob, Task
+allowed-tools: TodoWrite, Read, Write, Edit, Bash, Grep, Glob
 description: Extract actionable next steps from current discussion and save to todo list
 ---
 

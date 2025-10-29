@@ -519,11 +519,15 @@ Pipfile.lock
       console.log('  /catch-up         Session context and status');
       console.log('  /research         Pre-implementation planning (manual)');
       console.log('  /debug            Systematic debugging (manual)');
+      console.log('  /plan             Interactive planning with design decisions');
+      console.log('  /plan-next-steps  Extract actionable tasks from discussion');
+      console.log('  /implement        Interactive implementation orchestrator');
       console.log('  /code-review      Comprehensive code review');
       console.log('  /commit           Intelligent atomic commits');
+      console.log('  /pull-request     Create PR with smart description');
+      console.log('  /resolve-comments Address PR review feedback');
       console.log('  /devlog           Session documentation');
       console.log('  /release          Release automation');
-      console.log('  /plan-next-steps  Extract actionable tasks');
       console.log('\nInstalled skills (auto-activate):');
       console.log('  pattern-check     Architectural pattern validation');
       console.log('  test-design       Test quality enforcement');
