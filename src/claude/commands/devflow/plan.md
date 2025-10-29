@@ -462,6 +462,45 @@ Total tasks in todo list: 7
 
 ---
 
+## Edge Cases
+
+### User Cancels Selection
+If user cancels the selection dialog:
+- No tasks are added to todo list
+- Command exits gracefully with message
+- Todo list remains unchanged
+- **Suggestion**: Re-run `/plan` or use `/plan-next-steps` for automatic addition
+
+### User Selects Nothing
+If user deselects all options:
+- Shows message: "No tasks selected. Your todo list remains unchanged."
+- Suggests using `/plan-next-steps` for automatic addition
+- Exits without saving
+- **Reason**: Respects user's decision to not add tasks at this time
+
+### No Tasks Extracted
+If no actionable tasks found in discussion:
+- Shows message explaining no tasks were identified
+- Suggests continuing discussion or using `/research` first
+- Exits without showing selection dialog
+- **Common causes**: Discussion was exploratory, no concrete next steps agreed upon
+
+### Tasks Already Exist
+If extracted tasks duplicate existing todos:
+- De-duplicates automatically based on content similarity
+- Shows which tasks were skipped (already in list)
+- Only new/unique tasks are presented for selection
+- **Note**: Exact duplicates are filtered, similar tasks are shown
+
+### Empty Discussion Context
+If command run without prior discussion:
+- Shows message: "No discussion context found"
+- Suggests having a discussion first about what needs to be done
+- Exits without extraction
+- **Tip**: Use `/research` or discuss your goals first
+
+---
+
 ## Integration with Workflow
 
 ```

@@ -194,10 +194,10 @@ Covers patterns for all major languages and operating systems.
 
 | Command | Purpose | Options |
 |---------|---------|---------|
-| `devflow init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope (user: user-wide, local: project-only)<br>`--skip-docs` - Skip creating `.docs/` structure |
-| `devflow uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only (default: auto-detect all)<br>`--keep-docs` - Keep `.docs/` directory |
+| `npx devflow-kit init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope (user: user-wide, local: project-only)<br>`--skip-docs` - Skip creating `.docs/` structure |
+| `npx devflow-kit uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only (default: auto-detect all)<br>`--keep-docs` - Keep `.docs/` directory |
 
-**What `devflow init` does:**
+**What `npx devflow-kit init` does:**
 
 **User Scope** (default):
 - Installs commands to `~/.claude/commands/devflow/`

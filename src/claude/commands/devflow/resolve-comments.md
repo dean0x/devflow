@@ -11,6 +11,33 @@ Fetch PR review comments, triage them with the user, implement requested changes
 
 ---
 
+## Prerequisites
+
+This command requires the GitHub CLI (`gh`) to be installed and authenticated:
+
+**Installation:**
+- macOS: `brew install gh`
+- Linux: See https://github.com/cli/cli#installation
+- Windows: `winget install GitHub.cli`
+
+**Authentication:**
+```bash
+gh auth login
+```
+
+**Verify:**
+```bash
+gh auth status
+gh pr list  # Should work in a repository with PRs
+```
+
+**Common Issues:**
+- `gh: command not found` - Install gh CLI using the instructions above
+- `authentication required` - Run `gh auth login` and follow the prompts
+- `no pull requests found` - Ensure you're in a git repository with a configured remote
+
+---
+
 ## Step 1: Detect PR Context
 
 Find the PR associated with the current branch:
