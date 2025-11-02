@@ -11,6 +11,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
+ * Type guard for Node.js system errors with error codes
+ */
+interface NodeSystemError extends Error {
+  code: string;
+}
+
+function isNodeSystemError(error: unknown): error is NodeSystemError {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    typeof (error as NodeSystemError).code === 'string'
+  );
+}
+
+/**
  * Prompt user for confirmation (async)
  */
 async function promptUser(question: string): Promise<boolean> {
@@ -201,8 +216,8 @@ export const initCommand = new Command('init')
         // Atomic exclusive create - fails if file already exists
         await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
         console.log('✓ Settings configured');
-      } catch (error: any) {
-        if (error.code === 'EEXIST') {
+      } catch (error: unknown) {
+        if (isNodeSystemError(error) && error.code === 'EEXIST') {
           // Existing settings.json found - install as settings.devflow.json
           settingsExists = true;
           await fs.writeFile(devflowSettingsPath, settingsContent, 'utf-8');
@@ -223,8 +238,8 @@ export const initCommand = new Command('init')
         const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
         await fs.writeFile(claudeMdPath, content, { encoding: 'utf-8', flag: 'wx' });
         console.log('✓ CLAUDE.md configured');
-      } catch (error: any) {
-        if (error.code === 'EEXIST') {
+      } catch (error: unknown) {
+        if (isNodeSystemError(error) && error.code === 'EEXIST') {
           // Existing CLAUDE.md found - install as CLAUDE.devflow.md
           claudeMdExists = true;
           await fs.copyFile(sourceClaudeMdPath, devflowClaudeMdPath);
