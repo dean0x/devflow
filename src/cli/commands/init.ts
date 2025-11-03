@@ -164,7 +164,7 @@ export const initCommand = new Command('init')
           name: 'agents'
         },
         {
-          target: path.join(claudeDir, 'skills', 'devflow'),
+          target: path.join(claudeDir, 'skills'),
           source: path.join(claudeSourceDir, 'skills', 'devflow'),
           name: 'skills'
         },
@@ -177,10 +177,39 @@ export const initCommand = new Command('init')
 
       // Clean old DevFlow files before installing
       for (const dir of devflowDirectories) {
-        try {
-          await fs.rm(dir.target, { recursive: true, force: true });
-        } catch (e) {
-          // Directory might not exist on first install
+        if (dir.name === 'skills') {
+          // Special handling for skills: clean old nested structure and individual skills
+          // Remove old devflow/ subdirectory if it exists (migration from old structure)
+          const oldSkillsDir = path.join(claudeDir, 'skills', 'devflow');
+          try {
+            await fs.rm(oldSkillsDir, { recursive: true, force: true });
+          } catch (e) {
+            // Directory might not exist
+          }
+
+          // Remove individual skill directories that we're about to reinstall
+          try {
+            const skillEntries = await fs.readdir(dir.source, { withFileTypes: true });
+            for (const entry of skillEntries) {
+              if (entry.isDirectory()) {
+                const skillTarget = path.join(dir.target, entry.name);
+                try {
+                  await fs.rm(skillTarget, { recursive: true, force: true });
+                } catch (e) {
+                  // Skill might not exist
+                }
+              }
+            }
+          } catch (e) {
+            // Source directory might not exist
+          }
+        } else {
+          // For other components (commands, agents, scripts), clean the entire directory
+          try {
+            await fs.rm(dir.target, { recursive: true, force: true });
+          } catch (e) {
+            // Directory might not exist on first install
+          }
         }
       }
 
