@@ -11,6 +11,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
+ * Type guard for Node.js system errors with error codes
+ */
+interface NodeSystemError extends Error {
+  code: string;
+}
+
+function isNodeSystemError(error: unknown): error is NodeSystemError {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    typeof (error as NodeSystemError).code === 'string'
+  );
+}
+
+/**
  * Prompt user for confirmation (async)
  */
 async function promptUser(question: string): Promise<boolean> {
@@ -201,8 +216,8 @@ export const initCommand = new Command('init')
         // Atomic exclusive create - fails if file already exists
         await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
         console.log('✓ Settings configured');
-      } catch (error: any) {
-        if (error.code === 'EEXIST') {
+      } catch (error: unknown) {
+        if (isNodeSystemError(error) && error.code === 'EEXIST') {
           // Existing settings.json found - install as settings.devflow.json
           settingsExists = true;
           await fs.writeFile(devflowSettingsPath, settingsContent, 'utf-8');
@@ -223,8 +238,8 @@ export const initCommand = new Command('init')
         const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
         await fs.writeFile(claudeMdPath, content, { encoding: 'utf-8', flag: 'wx' });
         console.log('✓ CLAUDE.md configured');
-      } catch (error: any) {
-        if (error.code === 'EEXIST') {
+      } catch (error: unknown) {
+        if (isNodeSystemError(error) && error.code === 'EEXIST') {
           // Existing CLAUDE.md found - install as CLAUDE.devflow.md
           claudeMdExists = true;
           await fs.copyFile(sourceClaudeMdPath, devflowClaudeMdPath);
@@ -519,11 +534,15 @@ Pipfile.lock
       console.log('  /catch-up         Session context and status');
       console.log('  /research         Pre-implementation planning (manual)');
       console.log('  /debug            Systematic debugging (manual)');
+      console.log('  /plan             Interactive planning with design decisions');
+      console.log('  /plan-next-steps  Extract actionable tasks from discussion');
+      console.log('  /implement        Interactive implementation orchestrator');
       console.log('  /code-review      Comprehensive code review');
       console.log('  /commit           Intelligent atomic commits');
+      console.log('  /pull-request     Create PR with smart description');
+      console.log('  /resolve-comments Address PR review feedback');
       console.log('  /devlog           Session documentation');
       console.log('  /release          Release automation');
-      console.log('  /plan-next-steps  Extract actionable tasks');
       console.log('\nInstalled skills (auto-activate):');
       console.log('  pattern-check     Architectural pattern validation');
       console.log('  test-design       Test quality enforcement');
