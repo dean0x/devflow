@@ -5,6 +5,74 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-11-03
+
+### Added
+
+#### Complete PR Workflow Commands
+- **`/plan` command** - Interactive planning with design decisions
+  - Extracts actionable tasks from discussion
+  - Presents tasks to user for selection via interactive UI
+  - Saves only chosen tasks to todo list
+  - Enables focused, intentional work sessions
+- **`/pull-request` command** - Smart PR creation with auto-generated descriptions
+  - Analyzes all commits and changes in branch
+  - Generates comprehensive PR description automatically
+  - Includes summary, key changes, and test plan
+  - Supports `--draft` flag and custom base branch
+  - Uses new pull-request sub-agent for deep analysis
+- **`/resolve-comments` command** - Systematic PR feedback resolution
+  - Fetches PR review comments via GitHub CLI
+  - Triages comments with user (implement, respond, defer)
+  - Implements changes and updates PR
+  - Posts replies to reviewers
+  - Tracks completion status
+
+#### Enhanced Audit System
+- **Three-category reporting** - All 9 audit agents refactored for clearer feedback
+  - **🔴 Issues in Your Changes** - NEW vulnerabilities/problems introduced (BLOCKING)
+  - **⚠️ Issues in Code You Touched** - Problems near your changes (SHOULD FIX)
+  - **ℹ️ Pre-existing Issues** - Legacy problems unrelated to PR (INFORMATIONAL)
+  - Prevents scope creep in code reviews by clearly separating what you introduced
+- **New pull-request sub-agent** - Comprehensive PR analysis specialist
+  - Analyzes commit history and code changes
+  - Generates structured PR descriptions
+  - Identifies breaking changes and migration paths
+  - Creates test plans and verification steps
+
+### Changed
+
+#### Code Review Command Rewrite
+- **Completely rewritten `/code-review` command** - Better orchestration and synthesis
+  - Orchestrates all audit sub-agents in parallel for faster execution
+  - Synthesizes findings from three-category reports
+  - Generates actionable summary with clear priorities
+  - Separates blocking issues from informational findings
+  - Provides focused feedback on what actually needs fixing
+
+#### Type Safety Improvements
+- **Enhanced error handling in CLI** - Proper TypeScript type guards
+  - Added `NodeSystemError` interface with proper typing
+  - Created `isNodeSystemError()` type guard function
+  - Replaced `error: any` with `error: unknown` in init command
+  - Safely checks `error.code` property with type guard
+  - Maintains runtime behavior while improving type safety
+
+### Fixed
+
+#### Documentation
+- **README CLI examples** - Corrected command invocation format
+  - Fixed examples to use `npx devflow-kit` instead of `devflow`
+  - Ensures users can successfully run installation commands
+- **Statusline metrics** - Fixed container-specific resource monitoring
+  - Now reads container-specific CPU and memory metrics correctly
+  - Removed redundant CPU and memory metrics from statusline implementation
+  - Improved accuracy for Docker container environments
+
+---
+
+[0.6.0]: https://github.com/dean0x/devflow/compare/v0.5.0...v0.6.0
+
 ## [0.5.0] - 2025-10-24
 
 ### Added
