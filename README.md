@@ -202,7 +202,7 @@ Covers patterns for all major languages and operating systems.
 **User Scope** (default):
 - Installs commands to `~/.claude/commands/devflow/`
 - Installs sub-agents to `~/.claude/agents/devflow/`
-- Installs skills to `~/.claude/skills/` (flat structure for auto-discovery)
+- Installs skills to `~/.claude/skills/`
 - Installs scripts to `~/.devflow/scripts/`
 - Updates `~/.claude/settings.json` (statusline and model)
 - Creates `.claudeignore` at git repository root
@@ -211,7 +211,7 @@ Covers patterns for all major languages and operating systems.
 **Local Scope** (`--scope local`):
 - Installs commands to `<git-root>/.claude/commands/devflow/`
 - Installs sub-agents to `<git-root>/.claude/agents/devflow/`
-- Installs skills to `<git-root>/.claude/skills/` (flat structure for auto-discovery)
+- Installs skills to `<git-root>/.claude/skills/`
 - Installs scripts to `<git-root>/.devflow/scripts/`
 - Creates `<git-root>/.claude/settings.json` (statusline and model)
 - Creates `.claudeignore` at git repository root
