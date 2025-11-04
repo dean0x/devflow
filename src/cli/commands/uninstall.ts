@@ -85,7 +85,6 @@ export const uninstallCommand = new Command('uninstall')
       const devflowDirectories = [
         { path: path.join(claudeDir, 'commands', 'devflow'), name: 'commands' },
         { path: path.join(claudeDir, 'agents', 'devflow'), name: 'agents' },
-        { path: path.join(claudeDir, 'skills', 'devflow'), name: 'skills' },
         { path: devflowScriptsDir, name: 'scripts' }
       ];
 
@@ -98,6 +97,40 @@ export const uninstallCommand = new Command('uninstall')
           console.error(`  ⚠️ Could not remove ${dir.name}:`, error);
           hasErrors = true;
         }
+      }
+
+      // Remove individual DevFlow skills (flat structure)
+      const skillsDir = path.join(claudeDir, 'skills');
+      const devflowSkills = [
+        'pattern-check',
+        'test-design',
+        'code-smell',
+        'research',
+        'debug',
+        'input-validation',
+        'error-handling'
+      ];
+
+      let skillsRemoved = 0;
+      for (const skillName of devflowSkills) {
+        try {
+          const skillPath = path.join(skillsDir, skillName);
+          await fs.rm(skillPath, { recursive: true, force: true });
+          skillsRemoved++;
+        } catch (error) {
+          // Skill might not exist, continue
+        }
+      }
+
+      if (skillsRemoved > 0) {
+        console.log(`  ✅ Removed ${skillsRemoved} DevFlow skills`);
+      }
+
+      // Also remove old nested skills structure if it exists (migration cleanup)
+      try {
+        await fs.rm(path.join(claudeDir, 'skills', 'devflow'), { recursive: true, force: true });
+      } catch {
+        // Old structure doesn't exist, ignore
       }
 
       console.log();
