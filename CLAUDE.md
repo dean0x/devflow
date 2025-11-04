@@ -414,7 +414,7 @@ src/
 └── claude/                   # Claude Code assets
     ├── agents/devflow/         # Sub-agent definitions
     ├── commands/devflow/       # Slash command definitions
-    ├── skills/devflow/         # Auto-activate skill definitions
+    ├── skills/devflow/         # Skill source (installed flat)
     ├── scripts/                # Supporting scripts
     └── settings.json           # Claude Code settings
 ```
@@ -422,9 +422,11 @@ src/
 ### Installation Paths
 - Commands: `~/.claude/commands/devflow/`
 - Agents: `~/.claude/agents/devflow/`
-- Skills: `~/.claude/skills/devflow/`
+- Skills: `~/.claude/skills/` (flat structure - no devflow/ subdirectory)
 - Scripts: `~/.devflow/scripts/`
 - Settings: `~/.claude/settings.json`
+
+**Note:** Skills are installed flat (directly under `skills/`) for Claude Code auto-discovery. Commands and agents use the `devflow/` subdirectory for namespacing.
 
 ## Testing Guidelines
 
