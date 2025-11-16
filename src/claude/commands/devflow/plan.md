@@ -1,485 +1,223 @@
 ---
-allowed-tools: AskUserQuestion, TodoWrite, Read, Write, Edit, Bash, Grep, Glob
-description: Extract actionable next steps from discussion and let user select which to tackle
+allowed-tools: AskUserQuestion, TodoWrite, Bash
+description: Triage issues from discussion - implement now, defer to GitHub issue, or skip
 ---
 
 ## Your task
 
-Analyze the current discussion to extract actionable next steps, present them to the user for selection, and save only the chosen tasks to the todo list. This command is identical to `/plan-next-steps` but adds user selection before loading todos.
+Triage issues and decisions from the current conversation. For each item, help user understand it and decide: implement now, defer to GitHub issue, or skip entirely. Convert "now" decisions into actionable todos.
 
-**🎯 FOCUS**: Extract action items from discussion, let user choose which to tackle, then save to todo list.
-
----
-
-## Step 1: Extract Next Steps from Discussion
-
-**FOCUS**: Look at the current discussion and identify concrete next steps that emerged from the conversation.
-
-**What to Extract**:
-- **Immediate tasks** mentioned or implied in the discussion
-- **Code changes** that were discussed or agreed upon
-- **Files** that need to be created, modified, or reviewed
-- **Dependencies** that need to be installed or configured
-- **Tests** that need to be written or updated
-- **Documentation** that needs updating
-- **Investigations** or research tasks mentioned
-- **Decisions** that need to be made before proceeding
-
-**Look for phrases like**:
-- "We should..."
-- "Next, I'll..."
-- "Let me..."
-- "I need to..."
-- "We could..."
-- "First, we'll..."
-
-**From recent context:**
-- Look at the last 10-20 messages in the conversation
-- Extract tasks from `/research` output if present
-- Extract issues from `/code-review` output if present
-- Extract action items from general discussion
+**Goal**: Deliberate decision-making on each issue, not batch selection.
 
 ---
 
-## Step 2: Convert to Actionable Todo Items
+## Step 1: Extract Issues from Conversation
 
-Transform the extracted items into specific todo tasks:
+Scan the conversation for:
+- **Technical issues** found in code review
+- **Design decisions** that need to be made
+- **Bugs or vulnerabilities** discovered
+- **Refactoring opportunities** discussed
+- **Missing features** or incomplete implementations
+- **Technical debt** identified
+- **Questions or uncertainties** raised
 
-**Good todo items**:
-- ✅ "Add authentication middleware to routes in `/src/middleware/auth`"
-- ✅ "Write unit tests for user registration in `/tests/auth_test`"
-- ✅ "Install password hashing library dependency"
-- ✅ "Research API schema design for user endpoints"
-- ✅ "Update README.md with new authentication setup instructions"
+For each item, note:
+- What is it?
+- Why does it matter?
+- Severity/impact (Critical, High, Medium, Low)
 
-**Bad todo items**:
-- ❌ "Improve authentication" (too vague)
-- ❌ "Add better error handling" (not specific)
-- ❌ "Make it more secure" (not actionable)
-
-Create a preliminary list of todo items with:
-- Specific description
-- File paths when relevant
-- Clear success criteria
-- Logical grouping (dependencies, implementation, tests, docs)
+Group similar or trivial items together for batch triage.
 
 ---
 
-## Step 3: Present Extracted Items to User
+## Step 2: Triage Each Issue
 
-Show the user what you extracted from the discussion:
+Present issues one at a time (or in small batches for similar items):
 
 ```markdown
-📋 EXTRACTED ACTION ITEMS
+## Issue ${n}/${total}: ${short_title}
 
-Based on our discussion, I identified these potential tasks:
+**What**: ${clear_explanation}
 
-### Dependencies & Setup
-1. ${task_description}
-2. ${task_description}
+**Why it matters**: ${impact_and_consequences}
 
-### Core Implementation
-3. ${task_description}
-4. ${task_description}
-5. ${task_description}
-
-### Testing
-6. ${task_description}
-7. ${task_description}
-
-### Documentation
-8. ${task_description}
-
-**Total: ${count} potential tasks**
-
-Let me help you decide which ones to tackle.
+**Severity**: ${Critical|High|Medium|Low}
 ```
 
----
+Then ask using `AskUserQuestion`:
 
-## Step 4: Let User Select Tasks to Tackle
-
-Use `AskUserQuestion` to let user choose which tasks to add to the todo list:
-
-**Question 1: Select tasks**
 ```
-header: "Select tasks"
-question: "Which tasks do you want to add to your todo list?"
-multiSelect: true
-options: [
-  {
-    label: "Task 1: ${short_summary}",
-    description: "${full_description}"
-  },
-  {
-    label: "Task 2: ${short_summary}",
-    description: "${full_description}"
-  },
-  {
-    label: "Task 3: ${short_summary}",
-    description: "${full_description}"
-  },
-  ...all extracted tasks...
-  {
-    label: "All tasks",
-    description: "Add all extracted tasks to todo list"
-  }
-]
-```
-
-**If user selects "All tasks":**
-Include all extracted tasks.
-
-**If user selects specific tasks:**
-Only include the selected tasks.
-
-**If user selects nothing:**
-```markdown
-No tasks selected. Your todo list remains unchanged.
-
-💡 Use `/plan-next-steps` if you want to add all items without selection.
-```
-Exit without saving.
-
----
-
-## Step 5: Prioritize Selected Tasks (Optional)
-
-**Question 2: Prioritization**
-```
-header: "Priority order"
-question: "How should we prioritize these ${count} tasks?"
+header: "Issue ${n}"
+question: "What do you want to do with: ${short_title}?"
 multiSelect: false
 options: [
   {
-    label: "Logical order (dependencies first)",
-    description: "Arrange by dependencies → implementation → tests → docs"
+    label: "Implement now",
+    description: "Add to current implementation tasks"
   },
   {
-    label: "Quick wins first",
-    description: "Start with easiest tasks to build momentum"
+    label: "Create GitHub issue",
+    description: "Defer to later - will create and lock issue"
   },
   {
-    label: "Critical items first",
-    description: "Start with most important tasks"
-  },
-  {
-    label: "Keep current order",
-    description: "Use the order I extracted them in"
+    label: "Skip entirely",
+    description: "Not relevant or not worth tracking"
   }
 ]
 ```
 
-Reorder tasks based on user's choice:
+**Batch similar issues** when appropriate:
+```
+header: "Simple fixes"
+question: "These 3 similar issues (typos, formatting, minor cleanup) - handle them together?"
+options: [
+  { label: "Implement all now", description: "Add all to current tasks" },
+  { label: "Create single GitHub issue", description: "Group into one deferred issue" },
+  { label: "Skip all", description: "Not worth the effort" }
+]
+```
 
-**Logical order:**
-1. Dependencies & setup
-2. Core implementation
-3. Tests
-4. Documentation
-
-**Quick wins first:**
-1. Simple, fast tasks first
-2. Complex tasks last
-
-**Critical items first:**
-1. High-priority tasks first
-2. Nice-to-have tasks last
-
-**Keep current order:**
-Don't reorder, use extraction order.
+**Handle emerging clarifications**: If user's response raises new questions or reveals misunderstandings, address them immediately before continuing triage.
 
 ---
 
-## Step 6: Save to Todo List with TodoWrite
+## Step 3: Create GitHub Issues for Deferred Items
 
-Use `TodoWrite` to save the selected tasks:
+For each "Create GitHub issue" decision, use `Bash` to create the issue:
+
+```bash
+gh issue create \
+  --title "${issue_title}" \
+  --body "$(cat <<'EOF'
+## Context
+
+${why_this_was_identified}
+
+## Issue Details
+
+${clear_description_of_the_issue}
+
+## Suggested Approach
+
+${potential_solution_if_discussed}
+
+## Severity
+
+${Critical|High|Medium|Low}
+
+---
+
+*Created during triage session. Review before implementation.*
+EOF
+)" \
+  --label "${appropriate_labels}"
+```
+
+Then lock the issue (no reason required):
+
+```bash
+gh issue lock ${issue_number}
+```
+
+Track created issues for final summary.
+
+---
+
+## Step 4: Convert "Now" Items to Actionable Todos
+
+For all items marked "Implement now":
+
+1. **Break down** into specific, actionable tasks
+2. **Order** by dependencies and priority
+3. **Estimate** complexity (simple: 15min, medium: 30min, complex: 1hr+)
+
+Good task breakdown:
+- ✅ "Fix SQL injection in `src/db/users.ts:45` - use parameterized queries"
+- ✅ "Add input validation for email field in registration endpoint"
+- ✅ "Refactor `UserService` to use Result types instead of throwing"
+
+Bad task breakdown:
+- ❌ "Fix security issues" (too vague)
+- ❌ "Improve error handling" (not specific)
+
+---
+
+## Step 5: Save Todos with TodoWrite
+
+Use `TodoWrite` to save actionable tasks:
 
 ```json
 [
   {
-    "content": "${task_description}",
+    "content": "${specific_task_description}",
     "status": "pending",
-    "activeForm": "${active_form_description}"
-  },
-  {
-    "content": "${task_description}",
-    "status": "pending",
-    "activeForm": "${active_form_description}"
-  },
-  ...
+    "activeForm": "${task_in_progress_form}"
+  }
 ]
 ```
 
-**Each task should:**
-- Be specific and testable
+Each task should be:
+- Completable in 15-60 minutes
+- Clear success criteria
 - Include file paths when relevant
-- Be completable in 15-30 minutes
-- Have clear success criteria
-- Start as "pending" status
+- Ordered by dependencies
 
 ---
 
-## Step 7: Present Final Todo List
-
-Show the developer what was saved:
+## Step 6: Final Summary
 
 ```markdown
-## ✅ TASKS ADDED TO TODO LIST
+## TRIAGE COMPLETE
 
-Based on your selection, I've added these ${count} tasks:
+### Implementing Now (${count} items → ${task_count} tasks)
 
-### Selected Tasks (In Priority Order)
+${For each "now" item:}
+- **${issue_title}**
+  - ${brief_description}
+  - Tasks: ${list_of_specific_todos}
 
-1. **${task_name}**
-   - ${description}
-   - ${file_paths}
+### Deferred to GitHub Issues (${count} items)
 
-2. **${task_name}**
-   - ${description}
-   - ${file_paths}
+${For each deferred item:}
+- **${issue_title}** → Issue #${number}
+  - ${brief_description}
+  - Severity: ${severity}
+  - [View issue](${issue_url})
 
-3. **${task_name}**
-   - ${description}
-   - ${file_paths}
+### Skipped (${count} items)
 
----
-
-### Not Selected (${count} tasks)
-${If any tasks weren't selected:}
-- ${task_name} - ${reason_not_selected}
-- ${task_name} - ${reason_not_selected}
+${For each skipped item:}
+- ${issue_title} - ${reason_user_gave_or_inferred}
 
 ---
 
-**Total tasks in todo list: ${count}**
-
-💡 **Ready to start?** Run `/implement` to work through these tasks systematically.
-```
-
----
-
-## Usage Examples
-
-### Example 1: After /research
-
-```
-User: [runs /research on authentication implementation]
-Research output: [Comprehensive analysis with multiple approaches]
-
-User: /plan
-
-AI: 📋 EXTRACTED ACTION ITEMS
-
-Based on the research, I identified these potential tasks:
-
-### Core Implementation
-1. Create JWT authentication middleware in src/middleware/auth.ts
-2. Add token validation logic using jsonwebtoken library
-3. Integrate auth middleware into API routes
-
-### Testing
-4. Write unit tests for token generation
-5. Write integration tests for auth flow
-
-### Documentation
-6. Update API docs with authentication endpoints
-
-Total: 6 potential tasks
-
-[Shows selection question]
-User: Selects tasks 1, 2, 3, 4 (skips 5 and 6)
-
-[Shows prioritization question]
-User: Chooses "Logical order"
-
-AI: ✅ TASKS ADDED TO TODO LIST
-
-1. Create JWT authentication middleware in src/middleware/auth.ts
-2. Add token validation logic using jsonwebtoken library
-3. Integrate auth middleware into API routes
-4. Write unit tests for token generation
-
-Not Selected (2 tasks):
-- Integration tests for auth flow
-- Update API docs with authentication endpoints
-
-Total tasks in todo list: 4
-
-💡 Ready to start? Run /implement
-```
-
-### Example 2: After /code-review
-
-```
-User: [runs /code-review]
-Review output: [Multiple issues found]
-
-User: /plan
-
-AI: 📋 EXTRACTED ACTION ITEMS
-
-Based on the code review, I identified these issues to fix:
-
-### Critical Issues
-1. Fix SQL injection vulnerability in user query (src/db/users.ts:45)
-2. Add input validation for API endpoints (src/routes/api.ts)
-
-### High Priority
-3. Refactor error handling to use Result types (src/services/user.ts)
-4. Add missing tests for edge cases (tests/user.test.ts)
-
-### Medium Priority
-5. Update documentation for new error format (docs/errors.md)
-6. Optimize database query performance (src/db/queries.ts)
-
-Total: 6 potential tasks
-
-[Shows selection question]
-User: Selects tasks 1, 2, 3 (critical + high priority)
-
-[Shows prioritization question]
-User: Chooses "Critical items first"
-
-AI: ✅ TASKS ADDED TO TODO LIST
-
-1. Fix SQL injection vulnerability in user query (src/db/users.ts:45)
-2. Add input validation for API endpoints (src/routes/api.ts)
-3. Refactor error handling to use Result types (src/services/user.ts)
-
-Not Selected (3 tasks):
-- Add missing tests for edge cases
-- Update documentation for new error format
-- Optimize database query performance
-
-Total tasks in todo list: 3
-
-💡 Ready to start? Run /implement
-```
-
-### Example 3: After General Discussion
-
-```
-User: "I want to add dark mode support to the app"
-AI: "We could add a theme provider with CSS variables..."
-User: "Yeah, and we need to persist the preference..."
-AI: "We should also update the color palette..."
-
-User: /plan
-
-AI: 📋 EXTRACTED ACTION ITEMS
-
-Based on our discussion about dark mode, I identified:
-
-### Core Implementation
-1. Create ThemeProvider component with light/dark modes
-2. Define CSS variables for light and dark color palettes
-3. Add theme toggle button in settings
-
-### Persistence
-4. Store theme preference in localStorage
-5. Read theme preference on app load
-
-### Updates
-6. Update existing components to use theme variables
-7. Test dark mode across all pages
-
-Total: 7 potential tasks
-
-[Shows selection question]
-User: Selects "All tasks"
-
-[Shows prioritization question]
-User: Chooses "Logical order"
-
-AI: ✅ TASKS ADDED TO TODO LIST
-
-1. Create ThemeProvider component with light/dark modes
-2. Define CSS variables for light and dark color palettes
-3. Store theme preference in localStorage
-4. Read theme preference on app load
-5. Add theme toggle button in settings
-6. Update existing components to use theme variables
-7. Test dark mode across all pages
-
-Total tasks in todo list: 7
-
-💡 Ready to start? Run /implement
+**Next Steps**:
+- ${task_count} tasks saved to todo list
+- ${issue_count} GitHub issues created and locked
+- Run `/implement` to start working through tasks
 ```
 
 ---
 
-## Command Behavior Rules
+## Behavior Rules
 
-### ALWAYS Do These:
-- ✅ Extract concrete action items from the discussion
-- ✅ Present all extracted items to user
-- ✅ Use AskUserQuestion to let user select which to tackle
-- ✅ Use AskUserQuestion to let user prioritize order
-- ✅ Save only selected tasks using TodoWrite
-- ✅ Show what was added and what wasn't
+### ALWAYS:
+- Explain each issue clearly before asking for decision
+- Create actual GitHub issues via `gh` CLI
+- Lock created issues immediately
+- Break "now" items into specific, actionable todos
+- Track all decisions for final summary
+- Address clarifications that arise during triage
 
-### NEVER Do These:
-- ❌ Automatically add all tasks without user selection
-- ❌ Skip the selection step (that's what /plan-next-steps is for)
-- ❌ Create vague or untestable tasks
-- ❌ Skip showing what wasn't selected
-- ❌ Forget to use TodoWrite to save the list
+### NEVER:
+- Present all issues as a batch selection list
+- Skip the understanding phase
+- Create vague or unactionable todos
+- Forget to lock GitHub issues
+- Ignore user questions that arise during triage
 
-### Focus Areas:
-- 🎯 **Extract**: Pull concrete next steps from discussion
-- 🎯 **Present**: Show all options clearly
-- 🎯 **Select**: Let user choose which to tackle
-- 🎯 **Prioritize**: Let user decide order
-- 🎯 **Save**: Use TodoWrite only for selected tasks
-
----
-
-## Differences from /plan-next-steps
-
-| Feature | /plan | /plan-next-steps |
-|---------|-------|------------------|
-| Extract action items | ✅ Yes | ✅ Yes |
-| Show extracted items | ✅ Yes | ❌ No |
-| User selects tasks | ✅ Yes | ❌ No |
-| User prioritizes | ✅ Yes | ❌ No |
-| Save to todos | ✅ Selected only | ✅ All items |
-| Speed | Slower (interactive) | Faster (automatic) |
-
-**When to use which:**
-
-**Use `/plan`:**
-- After `/research` or `/code-review` (lots of potential tasks)
-- When you only want to tackle some items
-- When you want to prioritize before starting
-- When you want to see options before committing
-
-**Use `/plan-next-steps`:**
-- After discussion where you've already decided
-- When you want all items added quickly
-- When you trust AI to extract and prioritize
-- When you want minimal interaction
-
----
-
-## Integration with Workflow
-
-```
-Common workflows:
-
-1. Research → Plan → Implement
-   /research → /plan → /implement
-
-2. Review → Plan → Implement
-   /code-review → /plan → /implement
-
-3. Discussion → Plan → Implement
-   [discussion] → /plan → /implement
-
-4. Quick capture (no selection)
-   [discussion] → /plan-next-steps → /implement
-```
-
----
-
-This creates a user-controlled planning process where you see all potential tasks and choose which ones to tackle, rather than blindly adding everything to your todo list.
+### Handle Edge Cases:
+- **No issues found**: "I didn't identify any issues to triage from this conversation. Did I miss something?"
+- **gh CLI not available**: Warn user, offer to output issue text for manual creation
+- **User wants to reconsider**: Allow changing previous decisions before final save
