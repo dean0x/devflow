@@ -212,7 +212,7 @@ Performance problems in files you reviewed but are unrelated to your changes:
 REPORT_FILE="${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md"
 
 # When invoked standalone
-REPORT_FILE=".docs/audits/standalone/performance-report.$(date +%Y%m%d_%H%M%S).md"
+REPORT_FILE=".docs/audits/standalone/performance-report.$(date +%Y-%m-%d_%H%M).md"
 
 mkdir -p "$(dirname "$REPORT_FILE")"
 cat > "$REPORT_FILE" <<'EOF'

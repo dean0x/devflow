@@ -212,7 +212,7 @@ Save to standardized location:
 REPORT_FILE="${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md"
 
 # When invoked standalone
-REPORT_FILE=".docs/audits/standalone/security-report.$(date +%Y%m%d_%H%M%S).md"
+REPORT_FILE=".docs/audits/standalone/security-report.$(date +%Y-%m-%d_%H%M).md"
 
 # Ensure directory exists
 mkdir -p "$(dirname "$REPORT_FILE")"

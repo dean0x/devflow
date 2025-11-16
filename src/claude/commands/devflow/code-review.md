@@ -60,7 +60,8 @@ Create directory for audit reports:
 
 ```bash
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-AUDIT_BASE_DIR=".docs/audits/${CURRENT_BRANCH}"
+BRANCH_SLUG=$(echo "$CURRENT_BRANCH" | sed 's/\//-/g')
+AUDIT_BASE_DIR=".docs/audits/${BRANCH_SLUG}"
 mkdir -p "$AUDIT_BASE_DIR"
 
 echo "📁 Audit reports: $AUDIT_BASE_DIR"

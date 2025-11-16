@@ -23,7 +23,8 @@ Follow this systematic debugging workflow:
 
 ```bash
 # Create debug session tracking
-DEBUG_SESSION="debug-$(date +%Y%m%d-%H%M%S)"
+TIMESTAMP=$(date +%Y-%m-%d_%H%M)
+DEBUG_SESSION="debug-${TIMESTAMP}"
 mkdir -p .docs/debug
 
 echo "=== DEBUG SESSION STARTED ==="
