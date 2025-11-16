@@ -272,15 +272,13 @@ Message:
 
 ### ⚠️ Files Excluded from Commits
 {List files that will be left unstaged for review}
-
----
-
-**Proceed with commits?** (requires user confirmation)
 ```
 
 ### Step 6: Execute Atomic Commits
 
-After user confirmation, execute the commits **sequentially** to avoid race conditions:
+**Execute immediately without user confirmation** (safety checks already passed).
+
+Execute the commits **sequentially** to avoid race conditions:
 
 **CRITICAL**: All git commands MUST run sequentially with proper wait handling to prevent `.git/index.lock` conflicts.
 
