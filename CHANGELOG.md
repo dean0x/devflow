@@ -5,6 +5,54 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-11-16
+
+### Added
+- **`/brainstorm` command** - Explore design decisions and architectural approaches
+  - Launches brainstorm sub-agent for structured exploration
+  - Analyzes trade-offs between different approaches
+  - Saves exploration to `.docs/brainstorm/`
+- **`/design` command** - Create detailed implementation plans with integration points
+  - Launches design sub-agent for concrete planning
+  - Studies existing codebase patterns
+  - Saves implementation plan to `.docs/design/`
+- **`/breakdown` command** - Quick task decomposition without interaction
+  - Renamed from `/plan-next-steps` for conciseness
+  - Extracts action items from conversation
+  - Saves todos immediately without triage
+
+### Changed
+- **`/plan` command** - Redesigned for deliberate issue triage
+  - Examine each issue individually (what, why, severity)
+  - Three-way decision: implement now, defer to GitHub issue, or skip
+  - Creates and locks actual GitHub issues via `gh` CLI
+  - Applies orchestration principle (minimal tools)
+- **`/commit` command** - Execute immediately without user confirmation
+  - Trust agent judgment after safety checks pass
+  - Only abort for genuine issues (secrets, credentials)
+  - Faster workflow without back-and-forth
+- **`/implement` command** - Streamlined from 507 to ~100 lines
+  - Removed over-engineered interactive triage
+  - Focus on efficient task execution
+  - Only stop for genuine design decisions
+- **Documentation framework** - Standardized across all agents
+  - Timestamps: YYYY-MM-DD_HHMM (sortable, readable)
+  - Branch slugs: sanitize `/` to `-` for file paths
+  - Consistent `.docs/` directory structure
+- **Research skill** - Updated to use brainstorm agent
+  - Auto-launches brainstorm for unfamiliar features
+  - Suggests `/design` after exploration completes
+
+### Removed
+- **`/research` command** - Replaced by `/brainstorm` + `/design` workflow
+- **`/plan-next-steps` command** - Renamed to `/breakdown`
+- **research sub-agent** - Replaced by brainstorm and design agents
+
+### Breaking Changes
+- `/plan-next-steps` renamed to `/breakdown`
+- `/research` command removed (use `/brainstorm` + `/design`)
+- `/plan` behavior completely changed (triage vs batch selection)
+
 ## [0.6.1] - 2025-11-04
 
 ### Fixed
