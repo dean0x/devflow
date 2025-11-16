@@ -117,9 +117,8 @@ Combine with session context:
 
 ```bash
 # Get timestamp
-DATE=$(date +"%d-%m-%Y")
-TIME=$(date +"%H%M")
-TIMESTAMP="${DATE}_${TIME}"
+TIMESTAMP=$(date +%Y-%m-%d_%H%M)
+DATE=$(date +"%Y-%m-%d")
 PROJECT_NAME=$(basename $(pwd))
 ```
 

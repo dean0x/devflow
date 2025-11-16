@@ -20,6 +20,106 @@ DevFlow consists of four main components:
 3. **Skills** (`src/claude/skills/`) - Auto-activate quality enforcement (model-invoked)
 4. **Sub-Agents** (`src/claude/agents/`) - Specialized AI assistants for focused tasks
 
+## Documentation Framework
+
+All sub-agents that persist artifacts MUST follow this standardized framework for consistency and predictability.
+
+### Directory Structure
+
+All generated documentation lives under `.docs/` in the project root:
+
+```
+.docs/
+├── audits/{branch-slug}/              # Code review reports per branch
+│   ├── {type}-report-{timestamp}.md
+│   └── review-summary-{timestamp}.md
+├── brainstorm/                        # Design explorations
+│   └── {topic-slug}-{timestamp}.md
+├── design/                            # Implementation plans
+│   └── {topic-slug}-{timestamp}.md
+├── debug/                             # Debug sessions
+│   ├── debug-{timestamp}.md
+│   └── KNOWLEDGE_BASE.md
+├── releases/                          # Release notes
+│   └── RELEASE_NOTES_v{version}.md
+├── status/                            # Development logs
+│   ├── {timestamp}.md
+│   ├── compact/{timestamp}.md
+│   └── INDEX.md
+└── CATCH_UP.md                        # Latest summary (overwritten)
+```
+
+### Naming Conventions
+
+**Timestamps**: `YYYY-MM-DD_HHMM` (sortable, readable)
+```bash
+TIMESTAMP=$(date +%Y-%m-%d_%H%M)  # Example: 2025-11-14_2030
+```
+
+**Branch slugs**: Replace `/` with `-`, sanitize special characters
+```bash
+BRANCH_SLUG=$(git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone")
+# feature/auth → feature-auth
+```
+
+**Topic slugs**: Lowercase, dashes, alphanumeric only, max 50 chars
+```bash
+TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50)
+# "JWT Authentication" → jwt-authentication
+```
+
+**File types**:
+- Special indexes: `UPPERCASE.md` (CATCH_UP.md, INDEX.md, KNOWLEDGE_BASE.md)
+- Generated artifacts: `lowercase-{timestamp}.md` or `{type}-{id}.md`
+
+### Standard Helper Functions
+
+Use `.devflow/scripts/docs-helpers.sh` for consistent naming:
+
+```bash
+# Source helpers
+source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
+    # Inline fallback if script not found
+    get_timestamp() { date +%Y-%m-%d_%H%M; }
+    get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
+    get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
+    ensure_docs_dir() { mkdir -p ".docs/$1"; }
+}
+
+# Use helpers
+TIMESTAMP=$(get_timestamp)
+BRANCH_SLUG=$(get_branch_slug)
+ensure_docs_dir "audits/$BRANCH_SLUG"
+```
+
+### Agent Persistence Rules
+
+**Persisting agents** (create files in `.docs/`):
+- `catch-up` → `.docs/CATCH_UP.md` (overwrite latest)
+- `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
+- `debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
+- `brainstorm` → `.docs/brainstorm/{topic-slug}-{timestamp}.md`
+- `design` → `.docs/design/{topic-slug}-{timestamp}.md`
+- `audit-*` (9 types) → `.docs/audits/{branch-slug}/{type}-report-{timestamp}.md`
+- `code-review` → `.docs/audits/{branch-slug}/review-summary-{timestamp}.md`
+- `release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
+
+**Non-persisting agents** (ephemeral, no files):
+- `commit` - Creates git commit only
+- `pull-request` - Creates GitHub PR only
+- `project-state` - Read-only, used by catch-up
+
+### Implementation Checklist
+
+When creating or modifying persisting agents:
+- [ ] Use standard timestamp format (`YYYY-MM-DD_HHMM`)
+- [ ] Sanitize branch names (replace `/` with `-`)
+- [ ] Sanitize topic names (lowercase, dashes, alphanumeric)
+- [ ] Create directory with `mkdir -p .docs/{subdir}`
+- [ ] Document output location in agent's final message
+- [ ] Follow special file naming (UPPERCASE for indexes)
+- [ ] Use helper functions from `docs-helpers.sh` when possible
+
 ## Development Environment
 
 ### Working on DevFlow

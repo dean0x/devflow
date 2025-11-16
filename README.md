@@ -58,9 +58,9 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 
 **IMPORTANT**: Skills are **automatically activated** by Claude based on context. They cannot be manually invoked like slash commands.
 
-**Dual-Mode Pattern**: The `research` and `debug` skills also exist as slash commands (`/research`, `/debug`) for manual control:
-- **Skill mode** (auto): Activates when Claude detects unfamiliar features or errors
-- **Command mode** (manual): Use `/research` or `/debug` when you want explicit control over the workflow
+**Dual-Mode Pattern**: The `debug` skill also exists as a slash command (`/debug`) for manual control:
+- **Skill mode** (auto): Activates when Claude detects errors or failures
+- **Command mode** (manual): Use `/debug` when you want explicit control over the debugging workflow
 
 This gives you the best of both worlds: automatic assistance when needed, manual control when preferred.
 
@@ -69,17 +69,18 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
-| `/devlog` | Development log for comprehensive session documentation | Ending a session |
-| `/research` | Pre-implementation research and approach analysis | Before implementing unfamiliar features or integrations |
+| `/brainstorm` | Explore design decisions and architectural approaches | Before implementation, evaluating options |
+| `/design` | Create detailed implementation plan with integration points | After brainstorming, ready for detailed design |
+| `/plan` | Triage issues - implement now, defer to GitHub issue, or skip | After code-review or discussion, deciding what to tackle |
+| `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
+| `/implement` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
 | `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
-| `/plan` | Interactive planning with task selection and prioritization | After research/review, deciding which tasks to tackle |
-| `/plan-next-steps` | Extract actionable next steps from current discussion | After planning discussion, quick task capture |
-| `/implement` | Smart interactive implementation orchestrator with todo triage | After planning, ready to implement todos |
 | `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
 | `/pull-request` | Create PR with comprehensive analysis and smart description | After commits, ready to create PR |
 | `/resolve-comments` | Systematically address PR review feedback | After PR feedback, need to resolve comments |
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
+| `/devlog` | Development log for comprehensive session documentation | Ending a session |
 
 ### 🤖 Sub-Agents
 
@@ -94,10 +95,11 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `audit-database` | Database | Database design and optimization review |
 | `audit-documentation` | Documentation | Docs-code alignment, API accuracy, comment quality |
 | `audit-typescript` | TypeScript | Type safety enforcement and TypeScript code quality |
+| `brainstorm` | Design Decisions | Explore architectural approaches and evaluate trade-offs |
+| `design` | Implementation Planning | Detailed implementation design with integration points and edge cases |
 | `catch-up` | Context Restoration | Project status and context restoration with validation |
 | `commit` | Git Operations | Intelligent commit creation with safety checks |
 | `pull-request` | PR Creation | Analyze commits/changes and generate comprehensive PR descriptions |
-| `research` | Implementation Planning | Pre-implementation research, approach analysis, and planning |
 | `release` | Release Automation | Project-agnostic release workflow with version management |
 | `debug` | Debugging | Systematic debugging with hypothesis testing and issue tracking |
 
@@ -145,6 +147,69 @@ DevFlow automatically creates a comprehensive `.claudeignore` file at your git r
 
 Covers patterns for all major languages and operating systems.
 
+## Documentation Structure
+
+DevFlow agents automatically create and maintain project documentation in the `.docs/` directory with a consistent, predictable structure.
+
+### Directory Layout
+
+```
+.docs/
+├── audits/{branch-slug}/       # Code review reports per branch
+│   ├── {type}-report-{timestamp}.md
+│   └── review-summary-{timestamp}.md
+├── brainstorm/                 # Design explorations
+│   └── {topic-slug}-{timestamp}.md
+├── design/                     # Implementation plans
+│   └── {topic-slug}-{timestamp}.md
+├── debug/                      # Debug sessions
+│   ├── debug-{timestamp}.md
+│   └── KNOWLEDGE_BASE.md
+├── releases/                   # Release notes
+│   └── RELEASE_NOTES_v{version}.md
+├── status/                     # Development logs
+│   ├── {timestamp}.md
+│   ├── compact/{timestamp}.md
+│   └── INDEX.md
+└── CATCH_UP.md                 # Latest summary
+```
+
+### Naming Conventions
+
+**Timestamps**: `YYYY-MM-DD_HHMM` (sortable, chronological)
+- Example: `2025-11-14_2030`
+
+**Branch slugs**: Sanitized branch names (slashes replaced with dashes)
+- `feature/auth` → `feature-auth`
+
+**Topic slugs**: Lowercase, alphanumeric with dashes
+- `"JWT Authentication"` → `jwt-authentication`
+
+### What Gets Created
+
+- **`/catch-up`** → `.docs/CATCH_UP.md` (overwritten each run)
+- **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
+- **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
+- **`/brainstorm`** → `.docs/brainstorm/{topic}-{timestamp}.md`
+- **`/design`** → `.docs/design/{topic}-{timestamp}.md`
+- **`/code-review`** → `.docs/audits/{branch}/` (9 audit reports + summary)
+- **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
+
+### Version Control
+
+**Recommended `.gitignore`**:
+```gitignore
+# Exclude ephemeral catch-up summaries
+.docs/CATCH_UP.md
+
+# Optional: Exclude debug sessions (team preference)
+.docs/debug/
+
+# Keep everything else for project history
+```
+
+The `.docs/` structure provides a searchable history of decisions, designs, and debugging sessions.
+
 ## Development Workflow
 
 ### Starting a Session
@@ -154,8 +219,8 @@ Covers patterns for all major languages and operating systems.
 
 ### During Development
 1. **Skills auto-activate** - `research` skill triggers for unfamiliar features, `pattern-check` validates architecture
-2. **Plan your work** - `/plan` to select which tasks to tackle, or `/plan-next-steps` for quick capture
-3. **Implement systematically** - `/implement` to work through todos with guidance
+2. **Plan your work** - `/plan` to triage issues, or `/breakdown` for quick task capture
+3. **Implement efficiently** - `/implement` flows through todos automatically
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
 5. `/code-review` - Review changes before committing
 6. `/commit` - Create intelligent atomic commits
@@ -244,13 +309,15 @@ git commit -m "Session status: completed user auth feature"
 ### Integration Examples
 ```bash
 # Skills auto-activate during development
-"Add JWT authentication"  # research skill triggers automatically
+"Add JWT authentication"  # research skill triggers for unfamiliar features
 "Fix this error"          # debug skill activates and guides systematic approach
 
-# Manual command invocation
-/code-review   # Review changes (uncommitted or full branch)
-/commit        # Create atomic commits
-/release       # Automated release workflow
+# Manual command invocation for structured workflows
+/brainstorm user authentication  # Explore architectural approaches
+/design JWT token system         # Create detailed implementation plan
+/code-review                     # Review changes before committing
+/commit                          # Create atomic commits
+/release                         # Automated release workflow
 ```
 
 ## Philosophy

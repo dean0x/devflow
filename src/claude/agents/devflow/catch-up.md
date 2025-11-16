@@ -111,15 +111,12 @@ echo "=== END VALIDATION ==="
 # Get the date of the most recent status document
 LATEST_STATUS=$(find .docs/status -name "*.md" -not -name "INDEX.md" | sort -r | head -1)
 if [ -n "$LATEST_STATUS" ]; then
-    # Extract date from filename (format: DD-MM-YYYY_HHMM.md)
+    # Extract date from filename (format: YYYY-MM-DD_HHMM.md)
     STATUS_DATE=$(basename "$LATEST_STATUS" .md | cut -d'_' -f1)
-    STATUS_DAY=$(echo "$STATUS_DATE" | cut -d'-' -f1)
-    STATUS_MONTH=$(echo "$STATUS_DATE" | cut -d'-' -f2)
-    STATUS_YEAR=$(echo "$STATUS_DATE" | cut -d'-' -f3)
 
-    # Get git activity since that date
+    # Get git activity since that date (STATUS_DATE is already in YYYY-MM-DD format)
     echo "=== Git Activity Since Last Status ==="
-    git log --since="$STATUS_YEAR-$STATUS_MONTH-$STATUS_DAY" --oneline 2>/dev/null || echo "No git activity or not a git repo"
+    git log --since="$STATUS_DATE" --oneline 2>/dev/null || echo "No git activity or not a git repo"
 fi
 ```
 

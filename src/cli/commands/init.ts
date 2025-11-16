@@ -561,10 +561,11 @@ Pipfile.lock
 
       console.log('Available commands:');
       console.log('  /catch-up         Session context and status');
-      console.log('  /research         Pre-implementation planning (manual)');
+      console.log('  /brainstorm       Explore design decisions and approaches');
+      console.log('  /design           Create detailed implementation plan');
       console.log('  /debug            Systematic debugging (manual)');
-      console.log('  /plan             Interactive planning with design decisions');
-      console.log('  /plan-next-steps  Extract actionable tasks from discussion');
+      console.log('  /plan             Triage issues - now, defer to GH issue, or skip');
+      console.log('  /breakdown        Quickly break down discussion into tasks');
       console.log('  /implement        Interactive implementation orchestrator');
       console.log('  /code-review      Comprehensive code review');
       console.log('  /commit           Intelligent atomic commits');
@@ -580,7 +581,7 @@ Pipfile.lock
       console.log('  debug             Systematic debugging (auto)');
       console.log('  input-validation  Boundary validation');
       console.log('  error-handling    Result type consistency');
-      console.log('\nNote: research and debug exist as both commands (manual) and skills (auto)');
+      console.log('\nNote: debug exists as both command (manual) and skill (auto)');
       console.log('Docs: npm home devflow-kit');
     } catch (error) {
       console.error('❌ Installation failed:', error);
