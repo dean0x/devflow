@@ -1,339 +1,184 @@
 ---
 description: Comprehensive branch review using specialized sub-agents for PR readiness
-allowed-tools: Task, Bash, Read, Write, Grep, Glob
+allowed-tools: Task, Bash, Read, Grep, Glob
 ---
 
 ## Your Task
 
-Orchestrate multiple specialized audit sub-agents to review the current branch, then synthesize their findings into an actionable summary.
+Orchestrate specialized audit sub-agents to review the current branch, then synthesize findings into PR comments and tech debt tracking.
 
 ---
 
-## Step 1: Determine Review Scope
-
-Get the current branch and base branch:
+## Phase 1: Setup
 
 ```bash
-# Get current branch
+# Get current branch for directory naming
 CURRENT_BRANCH=$(git branch --show-current)
-if [ -z "$CURRENT_BRANCH" ]; then
-    echo "❌ Not on a branch (detached HEAD)"
-    exit 1
-fi
+BRANCH_SLUG=$(echo "${CURRENT_BRANCH:-standalone}" | sed 's/\//-/g')
 
-# Find base branch
-BASE_BRANCH=""
-for branch in main master develop; do
-  if git show-ref --verify --quiet refs/heads/$branch; then
-    BASE_BRANCH=$branch
-    break
-  fi
-done
-
-if [ -z "$BASE_BRANCH" ]; then
-    echo "❌ Could not find base branch (main/master/develop)"
-    exit 1
-fi
-
-# Check for changes
-if git diff --quiet $BASE_BRANCH...HEAD; then
-    echo "ℹ️ No changes between $BASE_BRANCH and $CURRENT_BRANCH"
-    exit 0
-fi
-
-# Show change summary
-echo "=== CODE REVIEW SCOPE ==="
-echo "Branch: $CURRENT_BRANCH"
-echo "Base: $BASE_BRANCH"
-echo ""
-git diff --stat $BASE_BRANCH...HEAD
-echo ""
-git log --oneline $BASE_BRANCH..HEAD | head -5
-echo ""
-```
-
----
-
-## Step 2: Set Up Audit Structure
-
-Create directory for audit reports:
-
-```bash
+# Coordination variables (shared across all sub-agents)
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-BRANCH_SLUG=$(echo "$CURRENT_BRANCH" | sed 's/\//-/g')
 AUDIT_BASE_DIR=".docs/audits/${BRANCH_SLUG}"
 mkdir -p "$AUDIT_BASE_DIR"
 
-echo "📁 Audit reports: $AUDIT_BASE_DIR"
-echo ""
+# Detect project type for conditional audits
+HAS_TYPESCRIPT=false
+[ -f "tsconfig.json" ] && HAS_TYPESCRIPT=true
+
+HAS_DB_CHANGES=false
+git diff --name-only HEAD~10..HEAD 2>/dev/null | grep -qiE '(migration|schema|\.sql|prisma|drizzle|knex)' && HAS_DB_CHANGES=true
+
+echo "=== CODE REVIEW ==="
+echo "📁 Reports: $AUDIT_BASE_DIR"
+echo "⏱️  Timestamp: $TIMESTAMP"
+echo "📦 TypeScript: $HAS_TYPESCRIPT"
+echo "🗄️  Database: $HAS_DB_CHANGES"
 ```
 
 ---
 
-## Step 3: Launch Audit Sub-Agents in Parallel
+## Phase 2: Run Audit Sub-Agents (Parallel)
 
-Use the Task tool to launch all audit sub-agents in parallel. Each will analyze the branch and save its report.
+Launch ALL applicable audit sub-agents in a **single message** using multiple Task tool calls for parallel execution.
 
-**Launch these sub-agents:**
+**IMPORTANT:** You MUST launch these as parallel Task calls in ONE message.
 
-Use Task tool with `subagent_type` for each audit:
+**Always Launch (7 core audits):**
+
+1. **audit-security**
+   ```
+   Analyze branch for security issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md
+   ```
+
+2. **audit-performance**
+   ```
+   Analyze branch for performance issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md
+   ```
+
+3. **audit-architecture**
+   ```
+   Analyze branch for architecture issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/architecture-report.${TIMESTAMP}.md
+   ```
+
+4. **audit-tests**
+   ```
+   Analyze branch for test coverage and quality issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/tests-report.${TIMESTAMP}.md
+   ```
+
+5. **audit-complexity**
+   ```
+   Analyze branch for code complexity issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/complexity-report.${TIMESTAMP}.md
+   ```
+
+6. **audit-dependencies**
+   ```
+   Analyze branch for dependency issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/dependencies-report.${TIMESTAMP}.md
+   ```
+
+7. **audit-documentation**
+   ```
+   Analyze branch for documentation issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/documentation-report.${TIMESTAMP}.md
+   ```
+
+**Conditional Audits:**
+
+8. **audit-typescript** (if HAS_TYPESCRIPT=true)
+   ```
+   Analyze branch for TypeScript issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/typescript-report.${TIMESTAMP}.md
+   ```
+
+9. **audit-database** (if HAS_DB_CHANGES=true)
+   ```
+   Analyze branch for database issues. Compare against base branch.
+   Save report to: ${AUDIT_BASE_DIR}/database-report.${TIMESTAMP}.md
+   ```
+
+---
+
+## Phase 3: Synthesis (After Audits Complete)
+
+**WAIT for all Phase 2 audits to complete before proceeding.**
+
+After all audit sub-agents have finished, launch THREE synthesis sub-agents in **parallel**:
+
+### 3.1 code-review sub-agent (Summary Report)
 
 ```
-1. Launch audit-security sub-agent:
-   "Analyze branch ${CURRENT_BRANCH} for security issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md"
+Generate code review summary for branch ${CURRENT_BRANCH}.
 
-2. Launch audit-performance sub-agent:
-   "Analyze branch ${CURRENT_BRANCH} for performance issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md"
+Context:
+- Branch: ${CURRENT_BRANCH}
+- Base: ${BASE_BRANCH}
+- Audit Directory: ${AUDIT_BASE_DIR}
+- Timestamp: ${TIMESTAMP}
 
-3. Launch audit-architecture sub-agent:
-   "Analyze branch ${CURRENT_BRANCH} for architecture issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/architecture-report.${TIMESTAMP}.md"
+Tasks:
+1. Read all audit reports from ${AUDIT_BASE_DIR}/*-report.${TIMESTAMP}.md
+2. Extract and categorize all issues (🔴/⚠️/ℹ️)
+3. Generate summary report at ${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md
+4. Determine merge recommendation
 
-4. Launch audit-tests sub-agent:
-   "Analyze branch ${CURRENT_BRANCH} for test coverage and quality issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/tests-report.${TIMESTAMP}.md"
-
-5. Launch audit-complexity sub-agent:
-   "Analyze branch ${CURRENT_BRANCH} for code complexity issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/complexity-report.${TIMESTAMP}.md"
-
-6. Launch audit-dependencies sub-agent:
-   "Analyze branch ${CURRENT_BRANCH} for dependency issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/dependencies-report.${TIMESTAMP}.md"
-
-7. Launch audit-documentation sub-agent:
-   "Analyze branch ${CURRENT_BRANCH} for documentation issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/documentation-report.${TIMESTAMP}.md"
-
-8. Launch audit-typescript sub-agent (if TypeScript project):
-   "Analyze branch ${CURRENT_BRANCH} for TypeScript issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/typescript-report.${TIMESTAMP}.md"
-
-9. Launch audit-database sub-agent (if database changes detected):
-   "Analyze branch ${CURRENT_BRANCH} for database issues. Compare against ${BASE_BRANCH}. Save report to ${AUDIT_BASE_DIR}/database-report.${TIMESTAMP}.md"
+Report back: Merge recommendation and issue counts
 ```
 
-**IMPORTANT:** Launch ALL applicable sub-agents in a single message using multiple Task tool calls for parallel execution.
+### 3.2 pr-comments sub-agent (PR Comments)
 
----
+```
+Create PR comments for code review findings on branch ${CURRENT_BRANCH}.
 
-## Step 4: Read Audit Reports
+Context:
+- Branch: ${CURRENT_BRANCH}
+- Audit Directory: ${AUDIT_BASE_DIR}
+- Timestamp: ${TIMESTAMP}
 
-After all sub-agents complete, read each generated report:
+Tasks:
+1. Read all audit reports from ${AUDIT_BASE_DIR}/*-report.${TIMESTAMP}.md
+2. Ensure PR exists (create draft if missing)
+3. Create individual comments for all 🔴 blocking issues
+4. Create individual comments for all ⚠️ should-fix issues
+5. Include suggested fixes with code examples
+6. Show pros/cons table when multiple approaches exist
+7. Add Claude Code attribution to each comment
 
-```bash
-# List generated reports
-ls -1 "$AUDIT_BASE_DIR"/*-report.${TIMESTAMP}.md
+Report back: PR number and count of comments created
 ```
 
-Use the Read tool to read each report file:
-- `${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md`
-- `${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md`
-- `${AUDIT_BASE_DIR}/architecture-report.${TIMESTAMP}.md`
-- `${AUDIT_BASE_DIR}/tests-report.${TIMESTAMP}.md`
-- `${AUDIT_BASE_DIR}/complexity-report.${TIMESTAMP}.md`
-- `${AUDIT_BASE_DIR}/dependencies-report.${TIMESTAMP}.md`
-- `${AUDIT_BASE_DIR}/documentation-report.${TIMESTAMP}.md`
-- (Plus typescript and database reports if generated)
+### 3.3 tech-debt sub-agent (Tech Debt Management)
 
----
+```
+Manage tech debt for code review on branch ${CURRENT_BRANCH}.
 
-## Step 5: Extract Blocking Issues
+Context:
+- Branch: ${CURRENT_BRANCH}
+- Audit Directory: ${AUDIT_BASE_DIR}
+- Timestamp: ${TIMESTAMP}
 
-From each report, extract issues from the **🔴 Issues in Your Changes** section.
+Tasks:
+1. Read all audit reports from ${AUDIT_BASE_DIR}/*-report.${TIMESTAMP}.md
+2. Find or create Tech Debt Backlog issue
+3. Check if archive needed (approaching 60k char limit)
+4. Add new ℹ️ pre-existing issues (deduplicated)
+5. Check existing items - remove those that are fixed
+6. Update issue with changes
 
-These are blocking issues introduced in this branch that must be fixed before merge.
-
-For each report:
-1. Look for the "🔴 Issues in Your Changes (BLOCKING)" section
-2. Extract all CRITICAL and HIGH severity issues
-3. Note the file:line references
-
-Create a consolidated list of all blocking issues across all audits.
-
----
-
-## Step 6: Create Summary Report
-
-Create a comprehensive summary at `${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md`:
-
-```markdown
-# Code Review Summary - ${CURRENT_BRANCH}
-
-**Date**: $(date +%Y-%m-%d %H:%M:%S)
-**Branch**: ${CURRENT_BRANCH}
-**Base**: ${BASE_BRANCH}
-**Audits Run**: {count} specialized audits
-
----
-
-## 🚦 Merge Recommendation
-
-{One of:}
-- ❌ **BLOCK MERGE** - Critical issues in your changes must be fixed
-- ⚠️ **REVIEW REQUIRED** - High priority issues need attention
-- ✅ **APPROVED WITH CONDITIONS** - Minor issues to address
-- ✅ **APPROVED** - No blocking issues found
-
-**Confidence**: {High/Medium/Low}
-
----
-
-## 🔴 Blocking Issues (Must Fix Before Merge)
-
-Issues introduced in lines you added or modified:
-
-### Security (CRITICAL: X, HIGH: Y)
-{List critical/high issues from security audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### Performance (CRITICAL: X, HIGH: Y)
-{List critical/high issues from performance audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### Architecture (HIGH: X)
-{List high issues from architecture audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### Tests (HIGH: X)
-{List high issues from tests audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### Complexity (HIGH: X)
-{List high issues from complexity audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### Dependencies (CRITICAL: X, HIGH: Y)
-{List critical/high issues from dependencies audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### Documentation (HIGH: X)
-{List high issues from documentation audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### TypeScript (HIGH: X)
-{If applicable - list high issues from typescript audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
-### Database (CRITICAL: X, HIGH: Y)
-{If applicable - list critical/high issues from database audit's 🔴 section}
-- **[Issue]** - `file:line` - {description}
-
----
-
-## ⚠️ Should Fix While You're Here
-
-Issues in code you touched (from ⚠️ sections of each audit):
-
-{Count of issues by audit - don't list all, just summarize}
-- Security: {count} issues in code you touched
-- Performance: {count} issues in code you touched
-- Architecture: {count} issues in code you touched
-- Tests: {count} issues in code you touched
-- Complexity: {count} issues in code you touched
-
-See individual audit reports for details.
-
----
-
-## ℹ️ Pre-existing Issues Found
-
-Issues unrelated to your changes (from ℹ️ sections):
-
-{Count by audit}
-- Security: {count} pre-existing issues
-- Performance: {count} pre-existing issues
-- Architecture: {count} pre-existing issues
-- Tests: {count} pre-existing issues
-- Complexity: {count} pre-existing issues
-- Dependencies: {count} pre-existing issues
-- Documentation: {count} pre-existing issues
-
-Consider fixing in separate PRs.
-
----
-
-## 📊 Summary by Category
-
-**Your Changes (🔴 BLOCKING):**
-- CRITICAL: {total_critical}
-- HIGH: {total_high}
-- MEDIUM: {total_medium}
-
-**Code You Touched (⚠️ SHOULD FIX):**
-- HIGH: {total_high}
-- MEDIUM: {total_medium}
-
-**Pre-existing (ℹ️ OPTIONAL):**
-- MEDIUM: {total_medium}
-- LOW: {total_low}
-
----
-
-## 🎯 Action Plan
-
-**Before Merge (Priority Order):**
-
-1. {Highest priority blocking issue from any audit}
-   - File: {file:line}
-   - Fix: {recommended fix}
-
-2. {Second highest priority blocking issue}
-   - File: {file:line}
-   - Fix: {recommended fix}
-
-3. {Third highest priority blocking issue}
-   - File: {file:line}
-   - Fix: {recommended fix}
-
-{Continue for all blocking issues}
-
-**While You're Here (Optional):**
-- Review ⚠️ sections in individual audit reports
-- Fix issues in code you modified
-
-**Future Work:**
-- Create issues for pre-existing problems
-- Track in technical debt backlog
-
----
-
-## 📁 Individual Audit Reports
-
-Detailed analysis available in:
-- [Security Audit](security-report.${TIMESTAMP}.md)
-- [Performance Audit](performance-report.${TIMESTAMP}.md)
-- [Architecture Audit](architecture-report.${TIMESTAMP}.md)
-- [Test Coverage Audit](tests-report.${TIMESTAMP}.md)
-- [Complexity Audit](complexity-report.${TIMESTAMP}.md)
-- [Dependencies Audit](dependencies-report.${TIMESTAMP}.md)
-- [Documentation Audit](documentation-report.${TIMESTAMP}.md)
-{If applicable:}
-- [TypeScript Audit](typescript-report.${TIMESTAMP}.md)
-- [Database Audit](database-report.${TIMESTAMP}.md)
-
----
-
-## 💡 Next Steps
-
-{If blocking issues exist:}
-**Fix blocking issues then re-run `/code-review` to verify**
-
-{If no blocking issues:}
-**Ready to create PR:**
-1. Run `/commit` to create final commits
-2. Run `/pull-request` to create PR with this review as reference
-
-{If issues in touched code:}
-**Consider fixing ⚠️ issues while you're working in these files**
-
----
-
-*Review generated by DevFlow audit orchestration*
-*{Timestamp}*
+Report back: Issue number, items added, items removed
 ```
 
-Save this summary using Write tool.
+**IMPORTANT:** Launch all THREE synthesis sub-agents in a SINGLE message for parallel execution.
 
 ---
 
-## Step 7: Present Results to Developer
+## Phase 4: Present Results
 
-Show clear, actionable summary:
+After ALL synthesis sub-agents complete, consolidate their reports and display final summary:
 
 ```markdown
 🔍 CODE REVIEW COMPLETE
@@ -343,90 +188,50 @@ Show clear, actionable summary:
 
 ---
 
-## 🚦 Merge Status
-
-{Show the merge recommendation - one of:}
-❌ **BLOCK MERGE** - {count} critical issues in your changes
-⚠️ **REVIEW REQUIRED** - {count} high priority issues
-✅ **APPROVED WITH CONDITIONS** - {count} minor issues
-✅ **APPROVED** - No blocking issues found
+## 🚦 Merge Status: {RECOMMENDATION from code-review agent}
 
 ---
 
-## 🔴 Issues You Introduced ({total_count})
+## 📊 Issues Found
 
-{Show top 3-5 most critical blocking issues}
-
-**Security:**
-- {Issue 1} - `file:line`
-
-**Performance:**
-- {Issue 1} - `file:line`
-
-**Architecture:**
-- {Issue 1} - `file:line`
-
-{Show total counts}
-Total blocking issues: {count}
-- CRITICAL: {count}
-- HIGH: {count}
-- MEDIUM: {count}
+| Category | Count | Action |
+|----------|-------|--------|
+| 🔴 Blocking | {count} | Must fix before merge |
+| ⚠️ Should Fix | {count} | Fix while you're here |
+| ℹ️ Pre-existing | {count} | Managed in tech debt |
 
 ---
 
-## ⚠️ Issues in Code You Touched ({total_count})
+## 📝 Artifacts Created
 
-{Show counts by audit}
-- Security: {count} issues
-- Performance: {count} issues
-- Architecture: {count} issues
-- Tests: {count} issues
-- Complexity: {count} issues
-
-See individual reports for details.
-
----
-
-## ℹ️ Pre-existing Issues ({total_count})
-
-{Show count by audit}
-Found {count} legacy issues unrelated to your changes.
-Consider fixing in separate PRs.
-
----
-
-## 📁 Reports Saved
-
-**Summary**: ${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md
-
-**Individual Audits**:
-{List all generated reports}
+- **Summary**: `${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md`
+- **PR Comments**: {count} comments on PR #{number from pr-comments agent}
+- **Tech Debt**: Issue #{number from tech-debt agent}
+  - Added: {count} new items
+  - Removed: {count} fixed items
 
 ---
 
 ## 🎯 Next Steps
 
-{If blocking issues:}
-1. Fix the {count} blocking issues listed above
-2. Re-run `/code-review` to verify fixes
-3. Then create PR with `/pull-request`
+{If BLOCK MERGE:}
+1. Review PR comments for fix suggestions
+2. Address 🔴 blocking issues
+3. Re-run `/code-review` to verify
 
-{If no blocking issues:}
-1. Review ⚠️ issues (optional improvements)
+{If APPROVED:}
+1. Review ⚠️ suggestions (optional)
 2. Create commits: `/commit`
 3. Create PR: `/pull-request`
-
-{Always show:}
-💡 Full details in: ${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md
 ```
 
 ---
 
-## Key Principles
+## Orchestration Rules
 
-1. **Launch sub-agents in parallel** - Use multiple Task calls in one message
-2. **Read all reports** - Don't skip any audit results
-3. **Extract blocking issues** - Focus on 🔴 sections from each report
-4. **Be specific** - File:line references, exact issues, clear fixes
-5. **Prioritize** - Blocking (must fix) vs should fix vs optional
-6. **Be actionable** - Clear next steps based on findings
+1. **Phase 2 is parallel** - Launch ALL audit sub-agents in a single message
+2. **Phase 3 is parallel** - Launch ALL synthesis sub-agents in a single message (after Phase 2)
+3. **Don't read reports yourself** - Sub-agents handle all file reading
+4. **Don't create artifacts yourself** - Each sub-agent creates its own outputs
+5. **Pass context accurately** - Ensure AUDIT_BASE_DIR and TIMESTAMP reach all sub-agents
+6. **Consolidate results** - Combine reports from all three synthesis agents for final output
