@@ -13,77 +13,28 @@ Orchestrate specialized audit sub-agents to review the current branch, then dele
 
 ## Phase 1: Setup
 
-### Step 1.1: Determine Review Scope
-
 ```bash
-# Get current branch
+# Get current branch for directory naming
 CURRENT_BRANCH=$(git branch --show-current)
-if [ -z "$CURRENT_BRANCH" ]; then
-    echo "❌ Not on a branch (detached HEAD)"
-    exit 1
-fi
+BRANCH_SLUG=$(echo "${CURRENT_BRANCH:-standalone}" | sed 's/\//-/g')
 
-# Find base branch
-BASE_BRANCH=""
-for branch in main master develop; do
-  if git show-ref --verify --quiet refs/heads/$branch; then
-    BASE_BRANCH=$branch
-    break
-  fi
-done
-
-if [ -z "$BASE_BRANCH" ]; then
-    echo "❌ Could not find base branch (main/master/develop)"
-    exit 1
-fi
-
-# Check for changes
-if git diff --quiet $BASE_BRANCH...HEAD; then
-    echo "ℹ️ No changes between $BASE_BRANCH and $CURRENT_BRANCH"
-    exit 0
-fi
-
-# Show change summary
-echo "=== CODE REVIEW SCOPE ==="
-echo "Branch: $CURRENT_BRANCH"
-echo "Base: $BASE_BRANCH"
-echo ""
-git diff --stat $BASE_BRANCH...HEAD
-echo ""
-git log --oneline $BASE_BRANCH..HEAD | head -5
-echo ""
-```
-
-### Step 1.2: Set Up Audit Structure
-
-```bash
+# Coordination variables (shared across all sub-agents)
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-BRANCH_SLUG=$(echo "$CURRENT_BRANCH" | sed 's/\//-/g')
 AUDIT_BASE_DIR=".docs/audits/${BRANCH_SLUG}"
 mkdir -p "$AUDIT_BASE_DIR"
 
-echo "📁 Audit reports: $AUDIT_BASE_DIR"
-echo "⏱️  Timestamp: $TIMESTAMP"
-echo ""
-```
-
-### Step 1.3: Detect Project Type
-
-```bash
-# Check for TypeScript
+# Detect project type for conditional audits
 HAS_TYPESCRIPT=false
-if [ -f "tsconfig.json" ] || ls *.ts 2>/dev/null | head -1 > /dev/null; then
-    HAS_TYPESCRIPT=true
-fi
+[ -f "tsconfig.json" ] && HAS_TYPESCRIPT=true
 
-# Check for database changes
 HAS_DB_CHANGES=false
-if git diff --name-only $BASE_BRANCH...HEAD | grep -qiE '(migration|schema|\.sql|prisma|drizzle|knex)'; then
-    HAS_DB_CHANGES=true
-fi
+git diff --name-only HEAD~10..HEAD 2>/dev/null | grep -qiE '(migration|schema|\.sql|prisma|drizzle|knex)' && HAS_DB_CHANGES=true
 
-echo "TypeScript project: $HAS_TYPESCRIPT"
-echo "Database changes: $HAS_DB_CHANGES"
+echo "=== CODE REVIEW ==="
+echo "📁 Reports: $AUDIT_BASE_DIR"
+echo "⏱️  Timestamp: $TIMESTAMP"
+echo "📦 TypeScript: $HAS_TYPESCRIPT"
+echo "🗄️  Database: $HAS_DB_CHANGES"
 ```
 
 ---
