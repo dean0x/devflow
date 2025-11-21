@@ -5,9 +5,7 @@ allowed-tools: Task, Bash, Read, Grep, Glob
 
 ## Your Task
 
-Orchestrate specialized audit sub-agents to review the current branch, then delegate synthesis to the code-review sub-agent for PR comments and tech debt management.
-
-**This command is a lightweight orchestrator. Heavy lifting is done by sub-agents.**
+Orchestrate specialized audit sub-agents to review the current branch, then synthesize findings into PR comments and tech debt tracking.
 
 ---
 

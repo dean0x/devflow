@@ -15,8 +15,6 @@ After audit sub-agents complete their analysis, you:
 3. Generate comprehensive summary report
 4. Provide merge recommendation
 
-**Note:** PR comments and tech debt management are handled by separate sub-agents.
-
 ---
 
 ## Step 1: Gather Context
