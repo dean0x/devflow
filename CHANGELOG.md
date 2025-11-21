@@ -5,6 +5,18 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-11-21
+
+### Added
+- PR comments and tech debt tracking for code-review command
+- Robustness improvements (rate limiting, auto-archive for tech debt)
+
+### Changed
+- Split code-review into three specialized sub-agents (code-review, pr-comments, tech-debt)
+- Simplified code-review Phase 1 setup
+
+---
+
 ## [0.7.0] - 2025-11-16
 
 ### Added
@@ -540,6 +552,10 @@ devflow init
 
 ---
 
+[0.8.0]: https://github.com/dean0x/devflow/releases/tag/v0.8.0
+[0.7.0]: https://github.com/dean0x/devflow/releases/tag/v0.7.0
+[0.6.1]: https://github.com/dean0x/devflow/releases/tag/v0.6.1
+[0.6.0]: https://github.com/dean0x/devflow/releases/tag/v0.6.0
 [0.5.0]: https://github.com/dean0x/devflow/releases/tag/v0.5.0
 [0.4.0]: https://github.com/dean0x/devflow/releases/tag/v0.4.0
 [0.3.3]: https://github.com/dean0x/devflow/releases/tag/v0.3.3
