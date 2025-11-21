@@ -154,15 +154,16 @@ Launch ALL applicable audit sub-agents in a **single message** using multiple Ta
 
 ---
 
-## Phase 3: Synthesis (Sequential - After Audits Complete)
+## Phase 3: Synthesis (After Audits Complete)
 
 **WAIT for all Phase 2 audits to complete before proceeding.**
 
-After all audit sub-agents have finished and saved their reports, launch the code-review sub-agent:
+After all audit sub-agents have finished, launch THREE synthesis sub-agents in **parallel**:
 
-**code-review sub-agent:**
+### 3.1 code-review sub-agent (Summary Report)
+
 ```
-Synthesize code review findings for branch ${CURRENT_BRANCH}.
+Generate code review summary for branch ${CURRENT_BRANCH}.
 
 Context:
 - Branch: ${CURRENT_BRANCH}
@@ -170,29 +171,65 @@ Context:
 - Audit Directory: ${AUDIT_BASE_DIR}
 - Timestamp: ${TIMESTAMP}
 
-Your tasks:
+Tasks:
 1. Read all audit reports from ${AUDIT_BASE_DIR}/*-report.${TIMESTAMP}.md
-2. Generate summary report at ${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md
-3. Ensure PR exists for this branch (create draft if missing)
-4. Create individual PR comments for all 🔴 blocking and ⚠️ should-fix issues
-   - Include suggested fixes with code examples
-   - When multiple approaches exist, show pros/cons table with recommendation
-5. Update tech debt GitHub issue with all ℹ️ pre-existing issues
-   - Deduplicate semantically (same file + audit type + similar description)
-   - Brief summary format with links to review docs
+2. Extract and categorize all issues (🔴/⚠️/ℹ️)
+3. Generate summary report at ${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md
+4. Determine merge recommendation
 
-Report back:
-- Merge recommendation
-- Number of PR comments created
-- Number of tech debt items added
-- Links to PR and tech debt issue
+Report back: Merge recommendation and issue counts
 ```
+
+### 3.2 pr-comments sub-agent (PR Comments)
+
+```
+Create PR comments for code review findings on branch ${CURRENT_BRANCH}.
+
+Context:
+- Branch: ${CURRENT_BRANCH}
+- Audit Directory: ${AUDIT_BASE_DIR}
+- Timestamp: ${TIMESTAMP}
+
+Tasks:
+1. Read all audit reports from ${AUDIT_BASE_DIR}/*-report.${TIMESTAMP}.md
+2. Ensure PR exists (create draft if missing)
+3. Create individual comments for all 🔴 blocking issues
+4. Create individual comments for all ⚠️ should-fix issues
+5. Include suggested fixes with code examples
+6. Show pros/cons table when multiple approaches exist
+7. Add Claude Code attribution to each comment
+
+Report back: PR number and count of comments created
+```
+
+### 3.3 tech-debt sub-agent (Tech Debt Management)
+
+```
+Manage tech debt for code review on branch ${CURRENT_BRANCH}.
+
+Context:
+- Branch: ${CURRENT_BRANCH}
+- Audit Directory: ${AUDIT_BASE_DIR}
+- Timestamp: ${TIMESTAMP}
+
+Tasks:
+1. Read all audit reports from ${AUDIT_BASE_DIR}/*-report.${TIMESTAMP}.md
+2. Find or create Tech Debt Backlog issue
+3. Check if archive needed (approaching 60k char limit)
+4. Add new ℹ️ pre-existing issues (deduplicated)
+5. Check existing items - remove those that are fixed
+6. Update issue with changes
+
+Report back: Issue number, items added, items removed
+```
+
+**IMPORTANT:** Launch all THREE synthesis sub-agents in a SINGLE message for parallel execution.
 
 ---
 
 ## Phase 4: Present Results
 
-After the code-review sub-agent completes, display final summary:
+After ALL synthesis sub-agents complete, consolidate their reports and display final summary:
 
 ```markdown
 🔍 CODE REVIEW COMPLETE
@@ -202,7 +239,7 @@ After the code-review sub-agent completes, display final summary:
 
 ---
 
-## 🚦 Merge Status: {RECOMMENDATION}
+## 🚦 Merge Status: {RECOMMENDATION from code-review agent}
 
 ---
 
@@ -212,21 +249,31 @@ After the code-review sub-agent completes, display final summary:
 |----------|-------|--------|
 | 🔴 Blocking | {count} | Must fix before merge |
 | ⚠️ Should Fix | {count} | Fix while you're here |
-| ℹ️ Pre-existing | {count} | Added to tech debt |
+| ℹ️ Pre-existing | {count} | Managed in tech debt |
 
 ---
 
 ## 📝 Artifacts Created
 
 - **Summary**: `${AUDIT_BASE_DIR}/review-summary.${TIMESTAMP}.md`
-- **PR Comments**: {count} comments on PR #{number}
-- **Tech Debt**: Issue #{number} updated
+- **PR Comments**: {count} comments on PR #{number from pr-comments agent}
+- **Tech Debt**: Issue #{number from tech-debt agent}
+  - Added: {count} new items
+  - Removed: {count} fixed items
 
 ---
 
 ## 🎯 Next Steps
 
-{Based on merge recommendation}
+{If BLOCK MERGE:}
+1. Review PR comments for fix suggestions
+2. Address 🔴 blocking issues
+3. Re-run `/code-review` to verify
+
+{If APPROVED:}
+1. Review ⚠️ suggestions (optional)
+2. Create commits: `/commit`
+3. Create PR: `/pull-request`
 ```
 
 ---
@@ -234,7 +281,8 @@ After the code-review sub-agent completes, display final summary:
 ## Orchestration Rules
 
 1. **Phase 2 is parallel** - Launch ALL audit sub-agents in a single message
-2. **Phase 3 is sequential** - Only start after ALL Phase 2 audits complete
-3. **Don't read reports yourself** - The code-review sub-agent handles synthesis
-4. **Don't create PR comments yourself** - The code-review sub-agent handles GitHub
-5. **Pass context accurately** - Ensure AUDIT_BASE_DIR and TIMESTAMP reach sub-agent
+2. **Phase 3 is parallel** - Launch ALL synthesis sub-agents in a single message (after Phase 2)
+3. **Don't read reports yourself** - Sub-agents handle all file reading
+4. **Don't create artifacts yourself** - Each sub-agent creates its own outputs
+5. **Pass context accurately** - Ensure AUDIT_BASE_DIR and TIMESTAMP reach all sub-agents
+6. **Consolidate results** - Combine reports from all three synthesis agents for final output
