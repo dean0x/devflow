@@ -42,11 +42,137 @@ async function promptUser(question: string): Promise<boolean> {
   });
 }
 
+/**
+ * Options for the init command parsed by Commander.js
+ */
+interface InitOptions {
+  skipDocs?: boolean;
+  scope?: string;
+  verbose?: boolean;
+}
+
+/**
+ * Command definition with name and user-friendly description
+ */
+interface CommandDefinition {
+  name: string;
+  description: string;
+}
+
+/**
+ * DevFlow commands with user-friendly descriptions.
+ * Used for displaying available commands in init output.
+ */
+const DEVFLOW_COMMANDS: CommandDefinition[] = [
+  { name: '/catch-up', description: 'Get up to speed on project state' },
+  { name: '/brainstorm', description: 'Explore design decisions' },
+  { name: '/design', description: 'Create implementation plan' },
+  { name: '/plan', description: 'Triage issues from discussion' },
+  { name: '/breakdown', description: 'Break down tasks quickly' },
+  { name: '/implement', description: 'Interactive implementation' },
+  { name: '/code-review', description: 'Comprehensive code review' },
+  { name: '/commit', description: 'Smart atomic commits' },
+  { name: '/pull-request', description: 'Create PR with description' },
+  { name: '/release', description: 'Automated releases' },
+  { name: '/devlog', description: 'Document session progress' },
+  { name: '/debug', description: 'Systematic debugging' },
+  { name: '/resolve-comments', description: 'Address PR feedback' },
+];
+
+/**
+ * DevFlow skills with descriptions.
+ * Displayed only in verbose mode to show auto-activating capabilities.
+ */
+const DEVFLOW_SKILLS: CommandDefinition[] = [
+  { name: 'pattern-check', description: 'Architectural pattern validation' },
+  { name: 'test-design', description: 'Test quality enforcement' },
+  { name: 'code-smell', description: 'Anti-pattern detection' },
+  { name: 'research', description: 'Pre-implementation planning (auto)' },
+  { name: 'debug', description: 'Systematic debugging (auto)' },
+  { name: 'input-validation', description: 'Boundary validation' },
+  { name: 'error-handling', description: 'Result type consistency' },
+];
+
+/**
+ * Render clean, minimal output for default (non-verbose) mode.
+ * Shows only essential information: version, available commands, and docs link.
+ *
+ * @param version - The DevFlow version string to display
+ */
+function renderCleanOutput(version: string): void {
+  console.log(`\n✓ DevFlow v${version} installed\n`);
+  console.log('Commands available:');
+
+  // Calculate max command name length for alignment
+  const maxLen = Math.max(...DEVFLOW_COMMANDS.map(c => c.name.length));
+
+  for (const cmd of DEVFLOW_COMMANDS) {
+    const padding = ' '.repeat(maxLen - cmd.name.length + 2);
+    console.log(`  ${cmd.name}${padding}${cmd.description}`);
+  }
+
+  console.log('\nRun any command in Claude Code to get started.');
+  console.log('\nDocs: https://github.com/dean0x/devflow');
+}
+
+/**
+ * Render detailed output for verbose mode.
+ * Shows full installation details including paths, merge instructions, and skills.
+ *
+ * @param version - The DevFlow version string to display
+ * @param scope - Installation scope ('user' for user-wide, 'local' for project-only)
+ * @param claudeDir - Path to the Claude Code directory
+ * @param devflowDir - Path to the DevFlow directory
+ * @param settingsExists - Whether existing settings.json was preserved
+ * @param claudeMdExists - Whether existing CLAUDE.md was preserved
+ */
+function renderVerboseOutput(
+  version: string,
+  scope: 'user' | 'local',
+  claudeDir: string,
+  devflowDir: string,
+  settingsExists: boolean,
+  claudeMdExists: boolean
+): void {
+  console.log(`\n✅ DevFlow v${version} installed!\n`);
+
+  console.log(`📍 Installation scope: ${scope}`);
+  console.log(`   Claude dir: ${claudeDir}`);
+  console.log(`   DevFlow dir: ${devflowDir}\n`);
+
+  // Show manual merge instructions if needed
+  if (settingsExists || claudeMdExists) {
+    console.log('📝 Manual merge recommended:\n');
+    if (settingsExists) {
+      console.log('   Settings: Review settings.devflow.json and merge desired config into settings.json');
+      console.log('             Key setting: statusLine configuration for DevFlow statusline\n');
+    }
+    if (claudeMdExists) {
+      console.log('   Instructions: Review CLAUDE.devflow.md and adopt desired practices');
+      console.log("                 This contains DevFlow's recommended development patterns\n");
+    }
+  }
+
+  console.log('Available commands:');
+  for (const cmd of DEVFLOW_COMMANDS) {
+    console.log(`  ${cmd.name.padEnd(18)}${cmd.description}`);
+  }
+
+  console.log('\nInstalled skills (auto-activate):');
+  for (const skill of DEVFLOW_SKILLS) {
+    console.log(`  ${skill.name.padEnd(18)}${skill.description}`);
+  }
+
+  console.log('\nNote: debug exists as both command (manual) and skill (auto)');
+  console.log('Docs: https://github.com/dean0x/devflow');
+}
+
 export const initCommand = new Command('init')
   .description('Initialize DevFlow for Claude Code')
   .option('--skip-docs', 'Skip creating .docs/ structure')
   .option('--scope <type>', 'Installation scope: user (user-wide) or local (project-only)', /^(user|local)$/i)
-  .action(async (options) => {
+  .option('--verbose', 'Show detailed installation output')
+  .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
     let version = '';
@@ -57,35 +183,53 @@ export const initCommand = new Command('init')
       version = 'unknown';
     }
 
-    console.log(`🚀 DevFlow v${version}\n`);
+    const verbose = options.verbose ?? false;
+
+    if (verbose) {
+      console.log(`🚀 DevFlow v${version}\n`);
+    }
 
     // Determine installation scope
     let scope: 'user' | 'local' = 'user'; // Default to user for backwards compatibility
 
     if (options.scope) {
-      scope = options.scope.toLowerCase() as 'user' | 'local';
+      const normalizedScope = options.scope.toLowerCase();
+      // Runtime validation (Commander regex already validates, but be defensive)
+      if (normalizedScope !== 'user' && normalizedScope !== 'local') {
+        console.error('❌ Invalid scope. Use "user" or "local"\n');
+        process.exit(1);
+      }
+      scope = normalizedScope;
     } else {
       // Check if running in interactive terminal (TTY)
       if (!process.stdin.isTTY) {
         // Non-interactive environment (CI/CD, scripts) - use default
-        console.log('📦 Non-interactive environment detected, using default scope: user');
-        console.log('   To specify scope in CI/CD, use: devflow init --scope <user|local>\n');
+        if (verbose) {
+          console.log('📦 Non-interactive environment detected, using default scope: user');
+          console.log('   To specify scope in CI/CD, use: devflow init --scope <user|local>\n');
+        }
         scope = 'user';
       } else {
         // Interactive prompt for scope
-        console.log('📦 Installation Scope:\n');
-        console.log('  user  - Install for all projects (user-wide)');
-        console.log('            └─ ~/.claude/ and ~/.devflow/');
-        console.log('  local - Install for current project only');
-        console.log('            └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
+        if (verbose) {
+          console.log('📦 Installation Scope:\n');
+          console.log('  user  - Install for all projects (user-wide)');
+          console.log('            └─ ~/.claude/ and ~/.devflow/');
+          console.log('  local - Install for current project only');
+          console.log('            └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
+        }
 
         const rl = readline.createInterface({
           input: process.stdin,
           output: process.stdout
         });
 
+        const prompt = verbose
+          ? 'Choose scope (user/local) [user]: '
+          : 'Install scope - user (all projects) or local (this project only) [user]: ';
+
         const answer = await new Promise<string>((resolve) => {
-          rl.question('Choose scope (user/local) [user]: ', (input) => {
+          rl.question(prompt, (input) => {
             rl.close();
             resolve(input.trim().toLowerCase() || 'user');
           });
@@ -99,7 +243,9 @@ export const initCommand = new Command('init')
           console.error('❌ Invalid scope. Use "user" or "local"\n');
           process.exit(1);
         }
-        console.log();
+        if (verbose) {
+          console.log();
+        }
       }
     }
 
@@ -116,9 +262,11 @@ export const initCommand = new Command('init')
       // Cache git root for later use (already computed in getInstallationPaths for local scope)
       gitRoot = await getGitRoot();
 
-      console.log(`📍 Installation scope: ${scope}`);
-      console.log(`   Claude dir: ${claudeDir}`);
-      console.log(`   DevFlow dir: ${devflowDir}\n`);
+      if (verbose) {
+        console.log(`📍 Installation scope: ${scope}`);
+        console.log(`   Claude dir: ${claudeDir}`);
+        console.log(`   DevFlow dir: ${devflowDir}\n`);
+      }
     } catch (error) {
       console.error('❌ Path configuration error:', error instanceof Error ? error.message : error);
       process.exit(1);
@@ -134,12 +282,16 @@ export const initCommand = new Command('init')
         console.error('   Or set CLAUDE_CODE_DIR if installed elsewhere\n');
         process.exit(1);
       }
-      console.log('✓ Claude Code detected');
+      if (verbose) {
+        console.log('✓ Claude Code detected');
+      }
     } else {
       // Local scope - create .claude directory if it doesn't exist
       try {
         await fs.mkdir(claudeDir, { recursive: true });
-        console.log('✓ Local .claude directory ready');
+        if (verbose) {
+          console.log('✓ Local .claude directory ready');
+        }
       } catch (error) {
         console.error(`❌ Failed to create ${claudeDir}:`, error);
         process.exit(1);
@@ -226,7 +378,9 @@ export const initCommand = new Command('init')
         await fs.chmod(path.join(scriptsDir, script), 0o755);
       }
 
-      console.log('✓ Installing components... (commands, agents, skills, scripts)');
+      if (verbose) {
+        console.log('✓ Installing components... (commands, agents, skills, scripts)');
+      }
 
       // Install settings.json - never override existing files (atomic operation)
       const settingsPath = path.join(claudeDir, 'settings.json');
@@ -244,13 +398,17 @@ export const initCommand = new Command('init')
       try {
         // Atomic exclusive create - fails if file already exists
         await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
-        console.log('✓ Settings configured');
+        if (verbose) {
+          console.log('✓ Settings configured');
+        }
       } catch (error: unknown) {
         if (isNodeSystemError(error) && error.code === 'EEXIST') {
           // Existing settings.json found - install as settings.devflow.json
           settingsExists = true;
           await fs.writeFile(devflowSettingsPath, settingsContent, 'utf-8');
-          console.log('⚠️  Existing settings.json preserved → DevFlow config: settings.devflow.json');
+          if (verbose) {
+            console.log('⚠️  Existing settings.json preserved → DevFlow config: settings.devflow.json');
+          }
         } else {
           throw error;
         }
@@ -266,13 +424,17 @@ export const initCommand = new Command('init')
         // Atomic exclusive create - fails if file already exists
         const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
         await fs.writeFile(claudeMdPath, content, { encoding: 'utf-8', flag: 'wx' });
-        console.log('✓ CLAUDE.md configured');
+        if (verbose) {
+          console.log('✓ CLAUDE.md configured');
+        }
       } catch (error: unknown) {
         if (isNodeSystemError(error) && error.code === 'EEXIST') {
           // Existing CLAUDE.md found - install as CLAUDE.devflow.md
           claudeMdExists = true;
           await fs.copyFile(sourceClaudeMdPath, devflowClaudeMdPath);
-          console.log('⚠️  Existing CLAUDE.md preserved → DevFlow guide: CLAUDE.devflow.md');
+          if (verbose) {
+            console.log('⚠️  Existing CLAUDE.md preserved → DevFlow guide: CLAUDE.devflow.md');
+          }
         } else {
           throw error;
         }
@@ -486,7 +648,7 @@ Pipfile.lock
         // Not a git repository or other error - skip .claudeignore creation
       }
 
-      if (claudeignoreCreated) {
+      if (claudeignoreCreated && verbose) {
         console.log('✓ .claudeignore created');
       }
 
@@ -517,10 +679,14 @@ Pipfile.lock
               : `# DevFlow local scope installation\n${linesToAdd.join('\n')}\n`;
 
             await fs.writeFile(gitignorePath, newContent, 'utf-8');
-            console.log('✓ .gitignore updated (excluded .claude/ and .devflow/)');
+            if (verbose) {
+              console.log('✓ .gitignore updated (excluded .claude/ and .devflow/)');
+            }
           }
         } catch (error) {
-          console.warn('⚠️  Could not update .gitignore:', error instanceof Error ? error.message : error);
+          if (verbose) {
+            console.warn('⚠️  Could not update .gitignore:', error instanceof Error ? error.message : error);
+          }
         }
       }
 
@@ -540,49 +706,16 @@ Pipfile.lock
         }
       }
 
-      if (docsCreated) {
+      if (docsCreated && verbose) {
         console.log('✓ .docs/ structure ready');
       }
 
-      console.log('\n✅ Installation complete!\n');
-
-      // Show manual merge instructions if needed
-      if (settingsExists || claudeMdExists) {
-        console.log('📝 Manual merge recommended:\n');
-        if (settingsExists) {
-          console.log('   Settings: Review settings.devflow.json and merge desired config into settings.json');
-          console.log('             Key setting: statusLine configuration for DevFlow statusline\n');
-        }
-        if (claudeMdExists) {
-          console.log('   Instructions: Review CLAUDE.devflow.md and adopt desired practices');
-          console.log('                 This contains DevFlow\'s recommended development patterns\n');
-        }
+      // Render output based on verbose flag
+      if (verbose) {
+        renderVerboseOutput(version, scope, claudeDir, devflowDir, settingsExists, claudeMdExists);
+      } else {
+        renderCleanOutput(version);
       }
-
-      console.log('Available commands:');
-      console.log('  /catch-up         Session context and status');
-      console.log('  /brainstorm       Explore design decisions and approaches');
-      console.log('  /design           Create detailed implementation plan');
-      console.log('  /debug            Systematic debugging (manual)');
-      console.log('  /plan             Triage issues - now, defer to GH issue, or skip');
-      console.log('  /breakdown        Quickly break down discussion into tasks');
-      console.log('  /implement        Interactive implementation orchestrator');
-      console.log('  /code-review      Comprehensive code review');
-      console.log('  /commit           Intelligent atomic commits');
-      console.log('  /pull-request     Create PR with smart description');
-      console.log('  /resolve-comments Address PR review feedback');
-      console.log('  /devlog           Session documentation');
-      console.log('  /release          Release automation');
-      console.log('\nInstalled skills (auto-activate):');
-      console.log('  pattern-check     Architectural pattern validation');
-      console.log('  test-design       Test quality enforcement');
-      console.log('  code-smell        Anti-pattern detection');
-      console.log('  research          Pre-implementation planning (auto)');
-      console.log('  debug             Systematic debugging (auto)');
-      console.log('  input-validation  Boundary validation');
-      console.log('  error-handling    Result type consistency');
-      console.log('\nNote: debug exists as both command (manual) and skill (auto)');
-      console.log('Docs: npm home devflow-kit');
     } catch (error) {
       console.error('❌ Installation failed:', error);
       process.exit(1);

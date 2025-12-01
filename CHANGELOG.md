@@ -5,6 +5,20 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`--verbose` flag for `devflow init`** - Clean, command-focused output by default
+  - Default output shows only version, available commands, and docs link
+  - Use `--verbose` for detailed installation progress, paths, and skills list
+  - Improves first-run experience by reducing noise
+
+### Changed
+- Refactored init command output rendering into separate functions
+- Extracted command and skill lists into maintainable constants
+
+---
+
 ## [0.8.0] - 2025-11-21
 
 ### Added
