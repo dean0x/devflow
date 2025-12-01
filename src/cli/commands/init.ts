@@ -43,9 +43,27 @@ async function promptUser(question: string): Promise<boolean> {
 }
 
 /**
- * DevFlow commands with user-friendly descriptions
+ * Options for the init command parsed by Commander.js
  */
-const DEVFLOW_COMMANDS = [
+interface InitOptions {
+  skipDocs?: boolean;
+  scope?: string;
+  verbose?: boolean;
+}
+
+/**
+ * Command definition with name and user-friendly description
+ */
+interface CommandDefinition {
+  name: string;
+  description: string;
+}
+
+/**
+ * DevFlow commands with user-friendly descriptions.
+ * Used for displaying available commands in init output.
+ */
+const DEVFLOW_COMMANDS: CommandDefinition[] = [
   { name: '/catch-up', description: 'Get up to speed on project state' },
   { name: '/brainstorm', description: 'Explore design decisions' },
   { name: '/design', description: 'Create implementation plan' },
@@ -62,9 +80,10 @@ const DEVFLOW_COMMANDS = [
 ];
 
 /**
- * DevFlow skills for verbose output
+ * DevFlow skills with descriptions.
+ * Displayed only in verbose mode to show auto-activating capabilities.
  */
-const DEVFLOW_SKILLS = [
+const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'pattern-check', description: 'Architectural pattern validation' },
   { name: 'test-design', description: 'Test quality enforcement' },
   { name: 'code-smell', description: 'Anti-pattern detection' },
@@ -75,7 +94,10 @@ const DEVFLOW_SKILLS = [
 ];
 
 /**
- * Render clean output for default mode
+ * Render clean, minimal output for default (non-verbose) mode.
+ * Shows only essential information: version, available commands, and docs link.
+ *
+ * @param version - The DevFlow version string to display
  */
 function renderCleanOutput(version: string): void {
   console.log(`\n✓ DevFlow v${version} installed\n`);
@@ -94,7 +116,15 @@ function renderCleanOutput(version: string): void {
 }
 
 /**
- * Render verbose output preserving current detailed behavior
+ * Render detailed output for verbose mode.
+ * Shows full installation details including paths, merge instructions, and skills.
+ *
+ * @param version - The DevFlow version string to display
+ * @param scope - Installation scope ('user' for user-wide, 'local' for project-only)
+ * @param claudeDir - Path to the Claude Code directory
+ * @param devflowDir - Path to the DevFlow directory
+ * @param settingsExists - Whether existing settings.json was preserved
+ * @param claudeMdExists - Whether existing CLAUDE.md was preserved
  */
 function renderVerboseOutput(
   version: string,
@@ -142,7 +172,7 @@ export const initCommand = new Command('init')
   .option('--skip-docs', 'Skip creating .docs/ structure')
   .option('--scope <type>', 'Installation scope: user (user-wide) or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
-  .action(async (options) => {
+  .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
     let version = '';
@@ -153,7 +183,7 @@ export const initCommand = new Command('init')
       version = 'unknown';
     }
 
-    const verbose = options.verbose || false;
+    const verbose = options.verbose ?? false;
 
     if (verbose) {
       console.log(`🚀 DevFlow v${version}\n`);
@@ -163,7 +193,13 @@ export const initCommand = new Command('init')
     let scope: 'user' | 'local' = 'user'; // Default to user for backwards compatibility
 
     if (options.scope) {
-      scope = options.scope.toLowerCase() as 'user' | 'local';
+      const normalizedScope = options.scope.toLowerCase();
+      // Runtime validation (Commander regex already validates, but be defensive)
+      if (normalizedScope !== 'user' && normalizedScope !== 'local') {
+        console.error('❌ Invalid scope. Use "user" or "local"\n');
+        process.exit(1);
+      }
+      scope = normalizedScope;
     } else {
       // Check if running in interactive terminal (TTY)
       if (!process.stdin.isTTY) {
