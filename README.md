@@ -73,6 +73,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `/design` | Create detailed implementation plan with integration points | After brainstorming, ready for detailed design |
 | `/plan` | Triage issues - implement now, defer to GitHub issue, or skip | After code-review or discussion, deciding what to tackle |
 | `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
+| `/get-issue` | Fetch GitHub issue details and create working branch | Starting work on a GitHub issue |
 | `/implement` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
 | `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
 | `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
@@ -99,6 +100,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `design` | Implementation Planning | Detailed implementation design with integration points and edge cases |
 | `catch-up` | Context Restoration | Project status and context restoration with validation |
 | `commit` | Git Operations | Intelligent commit creation with safety checks |
+| `get-issue` | GitHub Issues | Fetch issue details and create working branches |
 | `pull-request` | PR Creation | Analyze commits/changes and generate comprehensive PR descriptions |
 | `release` | Release Automation | Project-agnostic release workflow with version management |
 | `debug` | Debugging | Systematic debugging with hypothesis testing and issue tracking |
