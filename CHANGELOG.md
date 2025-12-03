@@ -5,6 +5,19 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`/get-issue` command** - Fetch GitHub issue details and create working branch
+  - Fetch issue by number (`/get-issue 42`) or search term (`/get-issue fix login`)
+  - Display comprehensive issue details (title, body, labels, assignees, comments)
+  - Auto-generate branch names: `{type}/{number}-{slug}`
+  - Branch type derived from labels (feature, fix, docs, refactor, chore)
+  - Pre-flight checks for gh authentication and repository validation
+- **`get-issue` sub-agent** - Specialized agent for GitHub issue workflow
+
+---
+
 ## [0.8.1] - 2025-12-02
 
 ### Added

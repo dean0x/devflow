@@ -2,7 +2,7 @@
 name: pr-comments
 description: Creates individual PR comments with fix suggestions for code review findings
 tools: Bash, Read, Grep, Glob
-model: inherit
+model: haiku
 ---
 
 You are a PR comment specialist responsible for creating actionable, well-formatted comments on pull requests for issues found during code review.

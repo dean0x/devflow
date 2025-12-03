@@ -2,7 +2,7 @@
 name: pull-request
 description: Analyze commits and changes to generate comprehensive PR title and description
 tools: Bash, Read, Grep, Glob
-model: inherit
+model: haiku
 ---
 
 You are a pull request specialist focused on analyzing code changes and generating comprehensive, accurate PR descriptions. Your task is to understand what changed, why it changed, and communicate that clearly to human reviewers.
@@ -11,11 +11,54 @@ You are a pull request specialist focused on analyzing code changes and generati
 
 ## Your Task
 
-Analyze all commits and code changes in the current branch compared to the base branch, then generate a comprehensive PR title and description that helps reviewers understand the changes quickly.
+Create a pull request from the current branch with comprehensive analysis and description.
 
-You will receive:
-- `CURRENT_BRANCH`: The feature branch being reviewed
-- `BASE_BRANCH`: The base branch to compare against
+You will receive arguments that may contain:
+- Base branch name (e.g., `main`, `develop`)
+- `--draft` flag for draft PR
+
+### Step 0: Setup and Pre-Flight Checks
+
+```bash
+# Parse arguments
+ARGS="$1"
+BASE_BRANCH=""
+DRAFT_FLAG=""
+
+for arg in $ARGS; do
+  case $arg in
+    --draft) DRAFT_FLAG="--draft" ;;
+    *) [ -z "$BASE_BRANCH" ] && BASE_BRANCH="$arg" ;;
+  esac
+done
+
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+if [ -z "$CURRENT_BRANCH" ]; then
+    echo "ERROR: Not on a branch (detached HEAD)"
+    exit 1
+fi
+
+# Auto-detect base branch
+if [ -z "$BASE_BRANCH" ]; then
+  for branch in main master develop; do
+    git show-ref --verify --quiet refs/heads/$branch && BASE_BRANCH=$branch && break
+  done
+fi
+[ -z "$BASE_BRANCH" ] && echo "ERROR: Could not detect base branch" && exit 1
+
+# Pre-flight checks
+COMMITS_AHEAD=$(git rev-list --count $BASE_BRANCH..HEAD)
+[ "$COMMITS_AHEAD" -eq 0 ] && echo "ERROR: No commits ahead of $BASE_BRANCH" && exit 1
+
+EXISTING_PR=$(gh pr list --head "$CURRENT_BRANCH" --json number --jq '.[0].number' 2>/dev/null || echo "")
+[ -n "$EXISTING_PR" ] && echo "ERROR: PR #$EXISTING_PR already exists" && exit 1
+
+# Push if needed
+git ls-remote --exit-code --heads origin "$CURRENT_BRANCH" >/dev/null 2>&1 || git push -u origin "$CURRENT_BRANCH"
+
+echo "Branch: $CURRENT_BRANCH -> $BASE_BRANCH ($COMMITS_AHEAD commits)"
+```
 
 ### Step 1: Analyze Commit History
 
@@ -420,4 +463,31 @@ END OF PR CONTENT
 - [ ] PR size assessed accurately
 - [ ] Split recommendations if needed
 
-This ensures high-quality PR descriptions that make reviews efficient and effective.
+### Step 9: Create the Pull Request
+
+After generating the title and description, create the PR:
+
+```bash
+# Create PR with generated content
+gh pr create \
+  --base "$BASE_BRANCH" \
+  --head "$CURRENT_BRANCH" \
+  --title "{GENERATED_TITLE}" \
+  --body "$(cat <<'EOF'
+{GENERATED_DESCRIPTION}
+EOF
+)" $DRAFT_FLAG
+
+# Get PR URL
+PR_URL=$(gh pr view --json url --jq '.url')
+echo ""
+echo "PR Created: $PR_URL"
+```
+
+**Final Output:**
+```
+PR Created: {PR_URL}
+Branch: {CURRENT_BRANCH} -> {BASE_BRANCH}
+Commits: {N}
+Status: {Draft/Ready for review}
+```
