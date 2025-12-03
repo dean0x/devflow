@@ -69,6 +69,7 @@ const DEVFLOW_COMMANDS: CommandDefinition[] = [
   { name: '/design', description: 'Create implementation plan' },
   { name: '/plan', description: 'Triage issues from discussion' },
   { name: '/breakdown', description: 'Break down tasks quickly' },
+  { name: '/get-issue', description: 'Fetch issue and create branch' },
   { name: '/implement', description: 'Interactive implementation' },
   { name: '/code-review', description: 'Comprehensive code review' },
   { name: '/commit', description: 'Smart atomic commits' },
