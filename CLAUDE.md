@@ -106,8 +106,11 @@ ensure_docs_dir "audits/$BRANCH_SLUG"
 
 **Non-persisting agents** (ephemeral, no files):
 - `commit` - Creates git commit only
+- `get-issue` - Fetches GitHub issue, creates branch
 - `pull-request` - Creates GitHub PR only
 - `project-state` - Read-only, used by catch-up
+- `pr-comments` - Creates PR comments only
+- `tech-debt` - Updates GitHub issue only
 
 ### Implementation Checklist
 
