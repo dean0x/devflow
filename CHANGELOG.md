@@ -5,7 +5,7 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2025-12-04
 
 ### Added
 - **`/get-issue` command** - Fetch GitHub issue details and create working branch
@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Branch type derived from labels (feature, fix, docs, refactor, chore)
   - Pre-flight checks for gh authentication and repository validation
 - **`get-issue` sub-agent** - Specialized agent for GitHub issue workflow
+
+### Changed
+- Optimized sub-agent model selection - 5 sub-agents switched to haiku model (get-issue, pull-request, project-state, tech-debt, pr-comments)
+- Minimized command files - `/get-issue` (16 lines) and `/pull-request` (20 lines) delegate to sub-agents
 
 ---
 
@@ -579,6 +583,7 @@ devflow init
 
 ---
 
+[0.9.0]: https://github.com/dean0x/devflow/releases/tag/v0.9.0
 [0.8.1]: https://github.com/dean0x/devflow/releases/tag/v0.8.1
 [0.8.0]: https://github.com/dean0x/devflow/releases/tag/v0.8.0
 [0.7.0]: https://github.com/dean0x/devflow/releases/tag/v0.7.0
