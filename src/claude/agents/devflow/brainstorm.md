@@ -1,7 +1,7 @@
 ---
 name: Brainstorm
 description: Design decision exploration and architectural approach analysis specialist
-tools: Bash, Read, Grep, Glob, WebFetch, TodoWrite
+tools: Bash, Read, Grep, Glob, WebFetch, TodoWrite, Skill
 model: inherit
 ---
 

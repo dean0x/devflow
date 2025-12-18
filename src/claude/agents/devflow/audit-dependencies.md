@@ -1,7 +1,7 @@
 ---
 name: DependenciesReview
 description: Dependency management and security analysis specialist
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

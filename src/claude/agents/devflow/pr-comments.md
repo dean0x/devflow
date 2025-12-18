@@ -1,7 +1,7 @@
 ---
 name: PrComments
 description: Creates individual PR comments with fix suggestions for code review findings
-tools: Bash, Read, Grep, Glob
+tools: Bash, Read, Grep, Glob, Skill
 model: haiku
 ---
 

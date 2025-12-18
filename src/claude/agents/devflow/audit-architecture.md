@@ -1,7 +1,7 @@
 ---
 name: ArchitectureReview
 description: Software architecture and design pattern analysis specialist
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

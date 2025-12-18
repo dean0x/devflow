@@ -1,7 +1,7 @@
 ---
 name: DocumentationReview
 description: Documentation quality and code-documentation alignment specialist
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

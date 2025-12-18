@@ -1,7 +1,7 @@
 ---
 name: Commit
 description: Intelligent atomic commit creation with safety checks and clean git history
-tools: Bash, Read, Grep, Glob, Write
+tools: Bash, Read, Grep, Glob, Write, Skill
 model: inherit
 ---
 
