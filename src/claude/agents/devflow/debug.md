@@ -1,7 +1,6 @@
 ---
 name: Debug
 description: Systematic debugging with hypothesis testing and issue tracking specialist
-tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, Skill
 model: inherit
 ---
 

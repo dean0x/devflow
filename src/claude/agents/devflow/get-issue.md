@@ -1,7 +1,6 @@
 ---
 name: GetIssue
 description: Fetch GitHub issue details and create a working branch for implementation
-tools: Bash, Read, Grep, Glob, Skill
 model: haiku
 ---
 

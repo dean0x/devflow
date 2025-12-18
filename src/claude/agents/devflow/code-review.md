@@ -1,7 +1,6 @@
 ---
 name: CodeReview
 description: Synthesizes audit findings into a comprehensive summary report
-tools: Bash, Read, Write, Grep, Glob, Skill
 model: inherit
 ---
 

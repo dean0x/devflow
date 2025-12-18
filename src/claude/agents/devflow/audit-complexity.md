@@ -1,7 +1,6 @@
 ---
 name: ComplexityReview
 description: Code complexity and maintainability analysis specialist
-tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

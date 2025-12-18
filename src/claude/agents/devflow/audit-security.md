@@ -1,7 +1,6 @@
 ---
 name: SecurityReview
 description: Expert security vulnerability detection and analysis specialist
-tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

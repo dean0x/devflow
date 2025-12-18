@@ -1,7 +1,6 @@
 ---
 name: DatabaseReview
 description: Database design and optimization review specialist
-tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

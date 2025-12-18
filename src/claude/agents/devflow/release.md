@@ -1,7 +1,6 @@
 ---
 name: Release
 description: Project-agnostic release automation with version management and publishing
-tools: Bash, Read, Write, Edit, Grep, Glob, Skill
 model: inherit
 ---
 

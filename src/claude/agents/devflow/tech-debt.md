@@ -1,7 +1,6 @@
 ---
 name: TechDebt
 description: Manages tech debt GitHub issue - adds new items and cleans up fixed ones
-tools: Bash, Read, Grep, Glob, Skill
 model: haiku
 ---
 

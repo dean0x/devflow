@@ -1,7 +1,6 @@
 ---
 name: TypescriptReview
 description: TypeScript code quality and type safety enforcement specialist
-tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

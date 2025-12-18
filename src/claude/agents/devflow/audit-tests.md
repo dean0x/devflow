@@ -1,7 +1,6 @@
 ---
 name: TestsReview
 description: Test quality, coverage, and effectiveness analysis specialist
-tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 

@@ -1,7 +1,6 @@
 ---
 name: PerformanceReview
 description: Performance optimization and bottleneck detection specialist
-tools: Read, Grep, Glob, Bash, Skill
 model: inherit
 ---
 
