@@ -87,23 +87,23 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 
 | Sub-Agent | Specialty | Purpose |
 |-----------|-----------|---------|
-| `audit-security` | Security Analysis | Expert vulnerability detection and security code review |
-| `audit-performance` | Performance | Optimization and bottleneck detection |
-| `audit-architecture` | Architecture | Design pattern analysis and code structure review |
-| `audit-tests` | Testing | Test quality, coverage, and effectiveness analysis (surgical execution) |
-| `audit-complexity` | Complexity | Code complexity and maintainability assessment |
-| `audit-dependencies` | Dependencies | Dependency management and security analysis |
-| `audit-database` | Database | Database design and optimization review |
-| `audit-documentation` | Documentation | Docs-code alignment, API accuracy, comment quality |
-| `audit-typescript` | TypeScript | Type safety enforcement and TypeScript code quality |
-| `brainstorm` | Design Decisions | Explore architectural approaches and evaluate trade-offs |
-| `design` | Implementation Planning | Detailed implementation design with integration points and edge cases |
-| `catch-up` | Context Restoration | Project status and context restoration with validation |
-| `commit` | Git Operations | Intelligent commit creation with safety checks |
-| `get-issue` | GitHub Issues | Fetch issue details and create working branches |
-| `pull-request` | PR Creation | Analyze commits/changes and generate comprehensive PR descriptions |
-| `release` | Release Automation | Project-agnostic release workflow with version management |
-| `debug` | Debugging | Systematic debugging with hypothesis testing and issue tracking |
+| `SecurityReview` | Security Analysis | Expert vulnerability detection and security code review |
+| `PerformanceReview` | Performance | Optimization and bottleneck detection |
+| `ArchitectureReview` | Architecture | Design pattern analysis and code structure review |
+| `TestsReview` | Testing | Test quality, coverage, and effectiveness analysis (surgical execution) |
+| `ComplexityReview` | Complexity | Code complexity and maintainability assessment |
+| `DependenciesReview` | Dependencies | Dependency management and security analysis |
+| `DatabaseReview` | Database | Database design and optimization review |
+| `DocumentationReview` | Documentation | Docs-code alignment, API accuracy, comment quality |
+| `TypescriptReview` | TypeScript | Type safety enforcement and TypeScript code quality |
+| `Brainstorm` | Design Decisions | Explore architectural approaches and evaluate trade-offs |
+| `Design` | Implementation Planning | Detailed implementation design with integration points and edge cases |
+| `CatchUp` | Context Restoration | Project status and context restoration with validation |
+| `Commit` | Git Operations | Intelligent commit creation with safety checks |
+| `GetIssue` | GitHub Issues | Fetch issue details and create working branches |
+| `PullRequest` | PR Creation | Analyze commits/changes and generate comprehensive PR descriptions |
+| `Release` | Release Automation | Project-agnostic release workflow with version management |
+| `Debug` | Debugging | Systematic debugging with hypothesis testing and issue tracking |
 
 **How Sub-Agents Work:**
 - Specialized AI assistants with deep expertise in specific domains
@@ -114,7 +114,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 **Invoking Sub-Agents:**
 ```bash
 # Explicit invocation
-"Use the audit-security sub-agent to analyze this authentication code"
+"Use the SecurityReview sub-agent to analyze this authentication code"
 
 # Automatic delegation (Claude Code decides which sub-agent to use)
 "Review this code for security issues"

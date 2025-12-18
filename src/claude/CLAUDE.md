@@ -1,4 +1,4 @@
-# Global Claude Code Instructions
+# Global Development Context
 
 ## ROLE
 

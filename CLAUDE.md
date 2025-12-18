@@ -95,22 +95,22 @@ ensure_docs_dir "audits/$BRANCH_SLUG"
 ### Agent Persistence Rules
 
 **Persisting agents** (create files in `.docs/`):
-- `catch-up` → `.docs/CATCH_UP.md` (overwrite latest)
+- `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
-- `debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
-- `brainstorm` → `.docs/brainstorm/{topic-slug}-{timestamp}.md`
-- `design` → `.docs/design/{topic-slug}-{timestamp}.md`
-- `audit-*` (9 types) → `.docs/audits/{branch-slug}/{type}-report-{timestamp}.md`
-- `code-review` → `.docs/audits/{branch-slug}/review-summary-{timestamp}.md`
-- `release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
+- `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
+- `Brainstorm` → `.docs/brainstorm/{topic-slug}-{timestamp}.md`
+- `Design` → `.docs/design/{topic-slug}-{timestamp}.md`
+- `*Review` (9 types) → `.docs/audits/{branch-slug}/{type}-report-{timestamp}.md`
+- `CodeReview` → `.docs/audits/{branch-slug}/review-summary-{timestamp}.md`
+- `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 **Non-persisting agents** (ephemeral, no files):
-- `commit` - Creates git commit only
-- `get-issue` - Fetches GitHub issue, creates branch
-- `pull-request` - Creates GitHub PR only
-- `project-state` - Read-only, used by catch-up
-- `pr-comments` - Creates PR comments only
-- `tech-debt` - Updates GitHub issue only
+- `Commit` - Creates git commit only
+- `GetIssue` - Fetches GitHub issue, creates branch
+- `PullRequest` - Creates GitHub PR only
+- `ProjectState` - Read-only, used by CatchUp
+- `PrComments` - Creates PR comments only
+- `TechDebt` - Updates GitHub issue only
 
 ### Implementation Checklist
 
