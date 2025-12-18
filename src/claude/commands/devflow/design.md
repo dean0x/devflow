@@ -8,6 +8,25 @@ If no arguments provided, ask the user what feature they want to design.
 
 ---
 
+## Critical Design Philosophy
+
+**NEVER create generic plans.** Every design must be:
+
+1. **Grounded in actual code** - Read files, find patterns, reference specific file:line locations
+2. **Aligned with existing architecture** - Follow established patterns, don't introduce new ones without justification
+3. **Detailed enough to execute** - Someone unfamiliar with the feature could implement it by following the steps
+4. **Honest about trade-offs** - Surface risks, edge cases, and limitations explicitly
+
+**Evaluation Priority** (in order):
+1. Alignment with existing patterns
+2. Follows project philosophy (Result types, DI, immutability)
+3. Minimal disruption to existing code
+4. Testability with current test infrastructure
+5. Maintainability and readability
+6. Performance requirements
+
+---
+
 ## Phase 1: Parallel Exploration
 
 Launch **3 Explore agents in parallel** to thoroughly understand the codebase:
@@ -18,41 +37,47 @@ Task tool (run all 3 in parallel):
 1. subagent_type="Explore", model="haiku":
    "Analyze architecture and patterns for implementing: {FEATURE}
 
+   CRITICAL: Read actual code files. Never assume - verify by reading.
+
    Focus on:
-   - How similar features are currently implemented
-   - Code patterns in use (Result types, DI, error handling)
+   - How similar features are currently implemented (find examples, read them)
+   - Code patterns in use (Result types, DI, error handling) with file:line proof
    - File/directory structure conventions
    - Naming conventions for similar components
 
    Thoroughness: very thorough
 
-   Report: existing patterns, conventions, and architectural constraints"
+   Report MUST include specific file:line references for every pattern claimed."
 
 2. subagent_type="Explore", model="haiku":
-   "Find integration points and dependencies for: {FEATURE}
+   "Find ALL integration points and dependencies for: {FEATURE}
+
+   CRITICAL: Search exhaustively. Missing an integration point causes bugs.
 
    Focus on:
-   - Where this feature would be invoked (entry points)
-   - What existing modules it needs to use
-   - What existing code needs to know about this feature
-   - Configuration, database, API changes needed
+   - Where this feature would be invoked (entry points) - search for similar invocations
+   - What existing modules it needs to use - read their interfaces
+   - What existing code needs to know about this feature (side effects)
+   - Configuration, database, API, UI changes needed
 
    Thoroughness: very thorough
 
-   Report: all integration points with file:line references"
+   Report MUST include file:line for EVERY integration point. If unsure, list it anyway."
 
 3. subagent_type="Explore", model="haiku":
    "Find reusable code and utilities for: {FEATURE}
 
+   CRITICAL: Avoid duplication. Find existing code before planning new code.
+
    Focus on:
-   - Existing utilities, helpers, and common functions
+   - Existing utilities, helpers, common functions - READ them to understand usage
    - Similar implementations to reference or extend
-   - Validation, error handling, logging patterns to reuse
-   - Test patterns and fixtures to leverage
+   - Validation, error handling, logging patterns already in use
+   - Test patterns, fixtures, and mocking strategies to leverage
 
    Thoroughness: very thorough
 
-   Report: reusable code with file:line and usage examples"
+   Report MUST include file:line AND usage example for each reusable component."
 ```
 
 ---
@@ -98,34 +123,47 @@ Task tool (sequential - Planner 2 reviews Planner 1's output):
 1. subagent_type="Plan":
    "Create implementation plan for: {FEATURE}
 
+   CRITICAL REQUIREMENTS:
+   - Every step MUST reference specific files from exploration findings
+   - Follow existing patterns exactly - don't introduce new patterns
+   - Include edge case handling in each step
+   - Plan must be detailed enough for someone unfamiliar to execute
+
    Context from exploration:
-   {Summary of Phase 1 findings}
+   {Summary of Phase 1 findings - patterns, integration points, reusable code}
 
    User clarifications:
    {Summary of Phase 2 decisions}
 
-   Create a detailed step-by-step implementation plan with:
-   - Specific files to create/modify
-   - Code changes needed at each step
-   - Dependencies between steps
-   - Testing approach for each component
+   For each step provide:
+   - Files to create/modify (specific paths)
+   - What pattern to follow (reference file:line)
+   - Edge cases to handle
+   - How to test this step
 
-   Be specific - reference actual files and patterns found."
+   Evaluation priority: pattern alignment > philosophy > minimal disruption > testability"
 
 2. subagent_type="Plan":
-   "Review and improve this implementation plan for: {FEATURE}
+   "Critically review this implementation plan for: {FEATURE}
+
+   ROLE: You are a skeptical reviewer. Find problems.
 
    Original plan:
    {Planner 1's output}
 
-   Critically evaluate:
-   - Are there missing steps or edge cases?
-   - Is the order optimal (dependencies correct)?
-   - Are there simpler approaches?
-   - Does it follow the codebase patterns correctly?
-   - Are there risks or gotchas not addressed?
+   Check for these common failures:
+   - Generic steps without file:line references (REJECT)
+   - Missing edge cases (invalid input, missing deps, race conditions, permissions)
+   - Wrong order (dependencies not respected)
+   - Unnecessary complexity (simpler approach exists)
+   - Pattern violations (doesn't match existing code)
+   - Missing integration points (will cause bugs)
+   - Inadequate testing strategy
 
-   Output: Refined plan with improvements and risk mitigations"
+   Output:
+   1. List of issues found (be harsh)
+   2. Refined plan with fixes
+   3. Remaining risks that cannot be eliminated"
 ```
 
 ---
@@ -259,6 +297,23 @@ Present summary to user:
 
 Run `/implement` or start with Step 1 from the design document.
 ```
+
+---
+
+## Quality Gates (Before Completing)
+
+**Verify the design passes ALL checks:**
+
+- [ ] **No generic steps** - Every step has specific file:line references
+- [ ] **Patterns verified** - Read actual code to confirm patterns claimed
+- [ ] **All integration points found** - Searched exhaustively, nothing missed
+- [ ] **Edge cases explicit** - Invalid input, missing deps, race conditions, permissions
+- [ ] **Code reuse maximized** - Found existing utilities, not reinventing
+- [ ] **Testing strategy concrete** - Specific test files and approaches
+- [ ] **Scope boundaries clear** - What's in and what's explicitly out
+- [ ] **Risks surfaced** - Remaining risks documented with mitigations
+
+**If any check fails**, iterate with additional exploration or planning before completing.
 
 ---
 
