@@ -5,7 +5,7 @@ description: Systematic debugging workflow with issue tracking - use '/debug [is
 
 ## Your task
 
-Launch the `debug` sub-agent to conduct systematic debugging for: `$ARGUMENTS`
+Launch the `Debug` sub-agent to conduct systematic debugging for: `$ARGUMENTS`
 
 If no arguments provided, prompt the user for the issue description.
 

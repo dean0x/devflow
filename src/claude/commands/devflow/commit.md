@@ -5,7 +5,7 @@ description: Create intelligent atomic commits with safety checks and clean git 
 
 ## Your task
 
-Launch the `commit` sub-agent to analyze changes, detect safety issues, group into atomic commits, and **execute them immediately**.
+Launch the `Commit` sub-agent to analyze changes, detect safety issues, group into atomic commits, and **execute them immediately**.
 
 The agent will:
 1. Analyze uncommitted changes

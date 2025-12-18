@@ -5,7 +5,7 @@ description: Explore design decisions and architectural approaches for a feature
 
 ## Your task
 
-Launch the `brainstorm` sub-agent to explore design decisions and architectural approaches for: `$ARGUMENTS`
+Launch the `Brainstorm` sub-agent to explore design decisions and architectural approaches for: `$ARGUMENTS`
 
 If no arguments provided, use the previous discussion context to infer the feature, or prompt the user for the feature to brainstorm.
 

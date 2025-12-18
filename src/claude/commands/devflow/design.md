@@ -5,7 +5,7 @@ description: Create detailed implementation design with integration points and e
 
 ## Your task
 
-Launch the `design` sub-agent to create a detailed implementation design for: `$ARGUMENTS`
+Launch the `Design` sub-agent to create a detailed implementation design for: `$ARGUMENTS`
 
 If no arguments provided, use the previous discussion context to infer the feature, or prompt the user for the feature to design.
 

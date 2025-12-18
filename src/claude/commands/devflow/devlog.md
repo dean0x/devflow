@@ -63,11 +63,11 @@ From the conversation, identify:
 
 ## Step 2: Launch Project State Agent
 
-Launch the `project-state` agent to gather comprehensive codebase analysis:
+Launch the `ProjectState` agent to gather comprehensive codebase analysis:
 
 ```
 Task(
-  subagent_type="project-state",
+  subagent_type="ProjectState",
   description="Analyze project state",
   prompt="Analyze the current project state including:
   - Git history and recent commits

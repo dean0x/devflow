@@ -5,7 +5,7 @@ description: Review recent status updates to get up to speed on project state
 
 ## Your task
 
-Launch the `catch-up` sub-agent to review recent project activity and status documents, then synthesize the results for the user.
+Launch the `CatchUp` sub-agent to review recent project activity and status documents, then synthesize the results for the user.
 
 ### Next: Synthesize Results
 

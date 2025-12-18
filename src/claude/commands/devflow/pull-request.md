@@ -5,7 +5,7 @@ description: Create pull request with comprehensive analysis and smart descripti
 
 ## Your task
 
-Launch the `pull-request` sub-agent to create a PR from the current branch.
+Launch the `PullRequest` sub-agent to create a PR from the current branch.
 
 Pass `$ARGUMENTS` to the sub-agent (may contain base branch and/or `--draft` flag).
 

@@ -5,7 +5,7 @@ description: Fetch GitHub issue details and create a working branch for implemen
 
 ## Your task
 
-Launch the `get-issue` sub-agent with the issue identifier: `$ARGUMENTS`
+Launch the `GetIssue` sub-agent with the issue identifier: `$ARGUMENTS`
 
 The agent will:
 1. Fetch issue by number or search term
