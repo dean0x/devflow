@@ -111,13 +111,41 @@ git diff $BASE_BRANCH...HEAD --unified=0 | grep -E '^@@' > /tmp/changed_lines.tx
 - ✅ APPROVED
 ```
 
-### Step 5: Save Report
+### Step 5: Create PR Line Comments
+
+**If PR_NUMBER is provided**, create line-specific comments for 🔴 blocking issues:
+
+```bash
+REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+COMMIT_SHA=$(git rev-parse HEAD)
+COMMENTS_CREATED=0
+COMMENTS_SKIPPED=0
+
+create_pr_comment() {
+    local FILE="$1" LINE="$2" BODY="$3"
+    if gh pr diff "$PR_NUMBER" --name-only 2>/dev/null | grep -q "^${FILE}$"; then
+        gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+            -f body="$BODY" -f commit_id="$COMMIT_SHA" \
+            -f path="$FILE" -f line="$LINE" -f side="RIGHT" 2>/dev/null \
+            && COMMENTS_CREATED=$((COMMENTS_CREATED + 1)) \
+            || COMMENTS_SKIPPED=$((COMMENTS_SKIPPED + 1))
+    else
+        COMMENTS_SKIPPED=$((COMMENTS_SKIPPED + 1))
+    fi
+    sleep 1
+}
+```
+
+### Step 6: Save Report
 
 ```bash
 REPORT_FILE="${AUDIT_BASE_DIR}/tests-report.${TIMESTAMP}.md"
 mkdir -p "$(dirname "$REPORT_FILE")"
 cat > "$REPORT_FILE" <<'REPORT'
 {Generated report content}
+
+---
+## PR Comments: ${COMMENTS_CREATED} created, ${COMMENTS_SKIPPED} skipped
 REPORT
 echo "✅ Tests audit saved: $REPORT_FILE"
 ```

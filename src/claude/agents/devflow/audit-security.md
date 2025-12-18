@@ -202,23 +202,101 @@ These vulnerabilities exist in files you reviewed but are unrelated to your chan
 - Track technical debt separately
 ```
 
-### Step 5: Save Report
+### Step 5: Create PR Line Comments
 
-Save to standardized location:
+**If PR_NUMBER is provided**, create line-specific comments for issues in the diff:
+
+```bash
+# Get repo info
+REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+COMMIT_SHA=$(git rev-parse HEAD)
+
+# Function to create PR line comment
+create_line_comment() {
+    local FILE="$1"
+    local LINE="$2"
+    local BODY="$3"
+
+    # Check if line is in the PR diff
+    if gh pr diff "$PR_NUMBER" --name-only | grep -q "^${FILE}$"; then
+        gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+            -f body="$BODY" \
+            -f commit_id="$COMMIT_SHA" \
+            -f path="$FILE" \
+            -f line="$LINE" \
+            -f side="RIGHT" 2>/dev/null && echo "✅ Comment: $FILE:$LINE" || echo "⚠️ Skipped (line not in diff): $FILE:$LINE"
+    else
+        echo "⚠️ Skipped (file not in diff): $FILE:$LINE"
+    fi
+
+    # Rate limiting
+    sleep 1
+}
+```
+
+**Comment format for issues:**
+
+```markdown
+**🔴 Security: {Issue Title}**
+
+{Brief description of the vulnerability}
+
+**Suggested Fix:**
+```{language}
+{code fix}
+```
+
+**Why:** {Explanation}
+
+---
+*Severity: {CRITICAL/HIGH/MEDIUM} | Standard: {OWASP reference}*
+<sub>🤖 [Claude Code](https://claude.com/code) `/code-review`</sub>
+```
+
+**For each 🔴 BLOCKING issue found:**
+1. Create line comment if file:line is in PR diff
+2. Track as "skipped" if not in diff (will go to summary)
+
+```bash
+COMMENTS_CREATED=0
+COMMENTS_SKIPPED=0
+
+# For each blocking issue
+for issue in blocking_issues; do
+    if create_line_comment "$FILE" "$LINE" "$COMMENT_BODY"; then
+        COMMENTS_CREATED=$((COMMENTS_CREATED + 1))
+    else
+        COMMENTS_SKIPPED=$((COMMENTS_SKIPPED + 1))
+    fi
+done
+
+echo "Created: $COMMENTS_CREATED comments, Skipped: $COMMENTS_SKIPPED"
+```
+
+### Step 6: Save Report
+
+Save summary to standardized location:
 
 ```bash
 # When invoked by /code-review
 REPORT_FILE="${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md"
 
 # When invoked standalone
-REPORT_FILE=".docs/audits/standalone/security-report.$(date +%Y-%m-%d_%H%M).md"
+REPORT_FILE="${REPORT_FILE:-.docs/audits/standalone/security-report.$(date +%Y-%m-%d_%H%M).md}"
 
 # Ensure directory exists
 mkdir -p "$(dirname "$REPORT_FILE")"
 
-# Save report
+# Save report (include comment stats)
 cat > "$REPORT_FILE" <<'EOF'
 {Generated report content}
+
+---
+
+## PR Comment Summary
+
+- **Comments Created**: ${COMMENTS_CREATED}
+- **Comments Skipped**: ${COMMENTS_SKIPPED} (lines not in PR diff)
 EOF
 
 echo "✅ Security audit saved: $REPORT_FILE"

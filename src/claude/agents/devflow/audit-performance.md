@@ -204,18 +204,43 @@ Performance problems in files you reviewed but are unrelated to your changes:
 - Add performance tests for hot paths
 ```
 
-### Step 5: Save Report
+### Step 5: Create PR Line Comments
+
+**If PR_NUMBER is provided**, create line-specific comments for 🔴 blocking issues:
 
 ```bash
-# When invoked by /code-review
-REPORT_FILE="${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md"
+REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+COMMIT_SHA=$(git rev-parse HEAD)
+COMMENTS_CREATED=0
+COMMENTS_SKIPPED=0
 
-# When invoked standalone
-REPORT_FILE=".docs/audits/standalone/performance-report.$(date +%Y-%m-%d_%H%M).md"
+create_pr_comment() {
+    local FILE="$1" LINE="$2" BODY="$3"
+    if gh pr diff "$PR_NUMBER" --name-only 2>/dev/null | grep -q "^${FILE}$"; then
+        gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+            -f body="$BODY" -f commit_id="$COMMIT_SHA" \
+            -f path="$FILE" -f line="$LINE" -f side="RIGHT" 2>/dev/null \
+            && COMMENTS_CREATED=$((COMMENTS_CREATED + 1)) \
+            || COMMENTS_SKIPPED=$((COMMENTS_SKIPPED + 1))
+    else
+        COMMENTS_SKIPPED=$((COMMENTS_SKIPPED + 1))
+    fi
+    sleep 1
+}
+```
+
+### Step 6: Save Report
+
+```bash
+REPORT_FILE="${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md"
+REPORT_FILE="${REPORT_FILE:-.docs/audits/standalone/performance-report.$(date +%Y-%m-%d_%H%M).md}"
 
 mkdir -p "$(dirname "$REPORT_FILE")"
 cat > "$REPORT_FILE" <<'EOF'
 {Generated report content}
+
+---
+## PR Comments: ${COMMENTS_CREATED} created, ${COMMENTS_SKIPPED} skipped
 EOF
 
 echo "✅ Performance audit saved: $REPORT_FILE"
