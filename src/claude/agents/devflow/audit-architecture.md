@@ -1,5 +1,5 @@
 ---
-name: audit-architecture
+name: ArchitectureReview
 description: Software architecture and design pattern analysis specialist
 tools: Read, Grep, Glob, Bash
 model: inherit

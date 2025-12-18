@@ -1,5 +1,5 @@
 ---
-name: pull-request
+name: PullRequest
 description: Analyze commits and changes to generate comprehensive PR title and description
 tools: Bash, Read, Grep, Glob
 model: haiku

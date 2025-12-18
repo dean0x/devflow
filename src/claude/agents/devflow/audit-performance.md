@@ -1,5 +1,5 @@
 ---
-name: audit-performance
+name: PerformanceReview
 description: Performance optimization and bottleneck detection specialist
 tools: Read, Grep, Glob, Bash
 model: inherit

@@ -1,5 +1,5 @@
 ---
-name: design
+name: Design
 description: Detailed implementation design specialist - patterns, integration, edge cases
 tools: Bash, Read, Grep, Glob, TodoWrite
 model: inherit

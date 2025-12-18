@@ -1,5 +1,5 @@
 ---
-name: project-state
+name: ProjectState
 description: Analyze current project state including git history, file changes, TODOs, and documentation for status reporting
 tools: Bash, Read, Grep, Glob
 model: haiku

@@ -1,5 +1,5 @@
 ---
-name: catch-up
+name: CatchUp
 description: Review recent status updates to get up to speed on project state
 tools: Bash, Read, Grep, Glob, Write, TodoWrite
 model: inherit

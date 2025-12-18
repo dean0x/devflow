@@ -1,5 +1,5 @@
 ---
-name: audit-database
+name: DatabaseReview
 description: Database design and optimization review specialist
 tools: Read, Grep, Glob, Bash
 model: inherit

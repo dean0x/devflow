@@ -1,5 +1,5 @@
 ---
-name: brainstorm
+name: Brainstorm
 description: Design decision exploration and architectural approach analysis specialist
 tools: Bash, Read, Grep, Glob, WebFetch, TodoWrite
 model: inherit

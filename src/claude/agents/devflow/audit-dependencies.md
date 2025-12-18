@@ -1,5 +1,5 @@
 ---
-name: audit-dependencies
+name: DependenciesReview
 description: Dependency management and security analysis specialist
 tools: Read, Grep, Glob, Bash
 model: inherit
