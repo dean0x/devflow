@@ -63,41 +63,59 @@ Extract initial understanding:
 
 ---
 
-## Phase 2: Explore
+## Phase 2: Explore (Inline)
 
-### Codebase Context
+Use Glob, Grep, and Read tools directly to understand existing patterns.
 
-Spawn Explore agent to understand existing patterns:
+### 2.1 Find Related Features
 
 ```
-Task tool with subagent_type="Explore":
-
-"Explore the codebase to understand context for: ${FEATURE_IDEA}
-
-Find:
-1. Related existing functionality
-2. Patterns used for similar features
-3. Database models that might be affected
-4. API patterns in use
-5. Authentication/authorization patterns
-6. Testing patterns
-
-Report back with: relevant files, patterns to follow, integration points."
+Glob: **/*.ts, **/*.py, **/*.go
+Grep: keywords related to ${FEATURE_IDEA}
 ```
 
-### Synthesize Context
+Search for:
+- Related existing functionality
+- Similar feature implementations
+- How the codebase handles similar concerns
+
+### 2.2 Identify Patterns
+
+Read files found to extract:
+
+1. **API patterns** in use
+   ```
+   Grep: route, endpoint, handler, controller
+   ```
+
+2. **Database models** that might be affected
+   ```
+   Grep: model, schema, entity, table
+   ```
+
+3. **Authentication/authorization patterns**
+   ```
+   Grep: auth, permission, role, token
+   ```
+
+4. **Testing patterns**
+   ```
+   Glob: **/*.test.*, **/*.spec.*
+   ```
+
+### 2.3 Synthesize Context
 
 ```markdown
 ## Codebase Context
 
 **Existing Related Features**:
-- [feature]: [how it relates]
+- [feature]: [how it relates] (file:line)
 
 **Patterns to Follow**:
-- API: [pattern]
-- Database: [pattern]
-- Auth: [pattern]
-- Testing: [pattern]
+- API: [pattern] (file:line)
+- Database: [pattern] (file:line)
+- Auth: [pattern] (file:line)
+- Testing: [pattern] (file:line)
 
 **Integration Points**:
 - [where this feature connects to existing code]
@@ -105,32 +123,22 @@ Report back with: relevant files, patterns to follow, integration points."
 
 ---
 
-## Phase 3: Plan
+## Phase 3: Plan (Inline)
 
-### Technical Approach
+Based on exploration findings, think through the technical design.
 
-Spawn Plan agent to think through the technical design:
+### 3.1 Technical Approach Analysis
 
-```
-Task tool with subagent_type="Plan":
+Consider and document:
 
-"Plan the technical approach for: ${FEATURE_IDEA}
+1. **Architecture** - How does this fit into the existing system?
+2. **Data model** - What entities/tables are needed?
+3. **API design** - What endpoints/interfaces are required?
+4. **Integration** - How does this connect to existing code?
+5. **Edge cases** - What could go wrong?
+6. **Trade-offs** - What are the key design decisions?
 
-Based on codebase context:
-${EXPLORE_FINDINGS}
-
-Consider:
-1. Architecture - How does this fit into the existing system?
-2. Data model - What entities/tables are needed?
-3. API design - What endpoints/interfaces are required?
-4. Integration - How does this connect to existing code?
-5. Edge cases - What could go wrong?
-6. Trade-offs - What are the key design decisions?
-
-Output a draft technical approach with alternatives where applicable."
-```
-
-### Synthesize Technical Plan
+### 3.2 Synthesize Technical Plan
 
 ```markdown
 ## Technical Approach (Draft)
