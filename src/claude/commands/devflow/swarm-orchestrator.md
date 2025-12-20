@@ -1,577 +1,642 @@
 ---
-description: Orchestrate multiple tasks in parallel - spawns Swarm units, manages dependencies, coordinates merging, creates release PR
+description: Coordinate a product release - parse release issue, prioritize features, spawn parallel Swarm units, supervise progress
 ---
 
-# Swarm Orchestrator - Multi-Task Parallel Execution
+# Swarm Orchestrator - Release Coordinator
 
-Coordinate multiple tasks executed in parallel using isolated worktrees. Spawns Swarm units for each task, manages dependencies between them, and produces a unified release.
+Coordinate feature development for a product release. Parse a GitHub release issue containing the release plan, prioritize features, spawn Swarm units in parallel, and supervise their progress until all features are ready.
+
+**Does NOT handle merging or releasing** - that's a separate workflow.
 
 ## Usage
 
 ```
-/swarm-orchestrator task1 description, task2 description, task3 description
+/swarm-orchestrator #42
+/swarm-orchestrator https://github.com/org/repo/issues/42
 ```
 
-Or with explicit task list:
-```
-/swarm-orchestrator
-- Implement user authentication
-- Add rate limiting to API endpoints
-- Refactor database connection pooling
-```
-
-For single-task execution, use `/swarm` instead.
+The release issue should contain references to feature issues (e.g., `#101`, `#102`).
 
 ---
 
 ## Input
 
 You receive:
-- `TASKS`: Array of task descriptions to implement
+- `RELEASE_ISSUE`: GitHub issue number or URL containing the release plan
 - `BASE_BRANCH`: Branch to base work on (default: main)
-- `RELEASE_NAME` (optional): Custom release identifier
 
 ## Your Mission
 
-Coordinate multiple Swarm units:
+Coordinate feature development for a release:
 
 ```
-SETUP → ANALYZE → SPAWN SWARMS → COLLECT → MERGE → RELEASE
+PARSE → PRIORITIZE → SETUP → EXECUTE → SUPERVISE → REPORT
 ```
 
-**Output**: A release PR containing all completed tasks, ready for final merge to main.
+**Output**: All feature PRs ready for review, with progress tracked and issues surfaced.
 
 ---
 
-## Phase 1: Setup
+## Phase 1: Parse Release Issue
 
-### Parse and Validate Tasks
-
-```bash
-# Validate we have tasks to process
-if [ ${#TASKS[@]} -eq 0 ]; then
-    echo "ERROR: No tasks provided"
-    exit 1
-fi
-
-NUM_TASKS=${#TASKS[@]}
-echo "=== SWARM ORCHESTRATOR ==="
-echo "Tasks to process: ${NUM_TASKS}"
-
-for i in "${!TASKS[@]}"; do
-    echo "  $((i+1)). ${TASKS[$i]}"
-done
-```
-
-### Create Release Infrastructure
+### Fetch Release Issue
 
 ```bash
-TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-SWARM_ID="${RELEASE_NAME:-swarm-${TIMESTAMP}}"
-RELEASE_BRANCH="release/${SWARM_ID}"
+# Extract issue number from URL or use directly
+ISSUE_NUMBER=$(echo "${RELEASE_ISSUE}" | grep -oE '[0-9]+$' || echo "${RELEASE_ISSUE}")
 
-# Determine base branch
-BASE_BRANCH="${BASE_BRANCH:-main}"
-if ! git show-ref --verify --quiet "refs/heads/${BASE_BRANCH}"; then
-    for branch in main master develop; do
-        if git show-ref --verify --quiet "refs/heads/${branch}"; then
-            BASE_BRANCH="${branch}"
-            break
-        fi
-    done
-fi
+# Fetch issue details
+gh issue view "${ISSUE_NUMBER}" --json title,body,labels,milestone
 
-echo ""
-echo "Swarm ID: ${SWARM_ID}"
-echo "Release Branch: ${RELEASE_BRANCH}"
-echo "Base Branch: ${BASE_BRANCH}"
-
-# Create release branch
-git checkout "${BASE_BRANCH}"
-git pull origin "${BASE_BRANCH}" 2>/dev/null || true
-git checkout -b "${RELEASE_BRANCH}"
-git push -u origin "${RELEASE_BRANCH}"
-
-# Setup directories
-mkdir -p .docs/swarm/orchestrator
-mkdir -p .worktrees
-
-# Ensure worktrees is gitignored
-grep -q "^.worktrees/" .gitignore 2>/dev/null || echo ".worktrees/" >> .gitignore
-
-echo "✅ Release infrastructure created"
+# Store for reference
+gh issue view "${ISSUE_NUMBER}" > .docs/swarm/release-issue.md
 ```
 
-### Create Worktrees for Each Task
+### Extract Feature Issues
 
-```bash
-echo ""
-echo "=== CREATING WORKTREES ==="
-
-for i in $(seq 1 ${NUM_TASKS}); do
-    TASK_ID="task-${i}"
-    WORKTREE_DIR=".worktrees/${TASK_ID}"
-    BRANCH_NAME="swarm/${SWARM_ID}/${TASK_ID}"
-
-    git worktree add -b "${BRANCH_NAME}" "${WORKTREE_DIR}" "${RELEASE_BRANCH}"
-    echo "✅ ${TASK_ID}: ${WORKTREE_DIR}"
-done
-
-git worktree list
-```
-
-### Initialize State
-
-Create `.docs/swarm/orchestrator/state.json`:
-
-```json
-{
-  "swarm_id": "${SWARM_ID}",
-  "release_branch": "${RELEASE_BRANCH}",
-  "base_branch": "${BASE_BRANCH}",
-  "started_at": "$(date -Iseconds)",
-  "status": "setup",
-  "tasks": [
-    {
-      "id": "task-1",
-      "description": "${TASK_DESCRIPTION}",
-      "worktree": ".worktrees/task-1",
-      "branch": "swarm/${SWARM_ID}/task-1",
-      "status": "pending",
-      "pr_number": null,
-      "files_touched": [],
-      "depends_on": [],
-      "swarm_result": null
-    }
-  ],
-  "merge_sequence": [],
-  "completed": [],
-  "failed": []
-}
-```
-
----
-
-## Phase 2: Light Dependency Analysis
-
-Before spawning Swarm units, do a quick analysis to identify potential conflicts.
-
-### Quick Exploration
-
-For each task, do a lightweight scan to predict which areas of the codebase will be touched:
-
-```
-For each task (PARALLEL):
-    Launch Task tool with subagent_type="Explore" (quick mode):
-
-    "Quick scan: What areas of the codebase would be affected by: ${TASK_DESCRIPTION}
-
-    Just identify:
-    - Main directories/modules likely affected
-    - Key files that might be modified
-
-    Keep it brief - this is just for conflict prediction."
-```
-
-### Build Potential Conflict Matrix
-
-Based on exploration results:
+Parse the release issue body to find referenced feature issues:
 
 ```markdown
-## Preliminary Conflict Analysis
+Look for patterns:
+- #123 (issue references)
+- https://github.com/org/repo/issues/123 (full URLs)
+- - [ ] #123 Feature name (checklist items)
+- Fixes #123, Closes #123, Relates to #123
+```
 
-| Task | Likely Areas | Potential Conflicts |
-|------|--------------|---------------------|
-| task-1 | src/auth/* | task-2 (shared utils) |
-| task-2 | src/api/*, src/utils/* | task-1 |
-| task-3 | src/ui/* | (none) |
+**For each referenced issue:**
 
-## Execution Strategy
+```bash
+# Fetch feature issue details
+gh issue view "${FEATURE_ISSUE}" --json number,title,body,labels,assignees,state
 
-**Parallel Group 1** (no predicted conflicts):
-- task-1
-- task-3
+# Extract:
+# - Title (feature name)
+# - Body (requirements/acceptance criteria)
+# - Labels (priority, complexity, type)
+# - State (open/closed - skip closed)
+```
 
-**Sequential After Group 1**:
-- task-2 (may conflict with task-1)
+### Build Feature List
+
+```markdown
+## 📋 Release Features
+
+| # | Issue | Title | Priority | Complexity | Dependencies |
+|---|-------|-------|----------|------------|--------------|
+| 1 | #101 | User authentication | P0 | High | None |
+| 2 | #102 | Rate limiting | P1 | Medium | #101 |
+| 3 | #103 | Dashboard redesign | P1 | Medium | None |
+| 4 | #104 | API documentation | P2 | Low | #101, #102 |
+
+### Closed/Completed (skip)
+- #100 - Already merged
+```
+
+---
+
+## Phase 2: Prioritize and Plan
+
+### Analyze Dependencies
+
+From issue bodies and labels, identify:
+
+1. **Explicit dependencies**: "Depends on #X", "Blocked by #X"
+2. **Implicit dependencies**: Shared code areas, API contracts
+3. **Priority labels**: P0 (critical), P1 (high), P2 (medium), P3 (low)
+
+### Build Dependency Graph
+
+```markdown
+## Dependency Analysis
+
+#101 (User auth)
+  └── blocks: #102, #104
+
+#102 (Rate limiting)
+  ├── depends on: #101
+  └── blocks: #104
+
+#103 (Dashboard)
+  └── independent
+
+#104 (API docs)
+  └── depends on: #101, #102
+```
+
+### Determine Execution Order
+
+```markdown
+## Execution Plan
+
+### Wave 1 (Parallel - no dependencies)
+- #101 User authentication (P0)
+- #103 Dashboard redesign (P1)
+
+### Wave 2 (After Wave 1)
+- #102 Rate limiting (P1) - requires #101
+
+### Wave 3 (After Wave 2)
+- #104 API documentation (P2) - requires #101, #102
+
+### Parallelization
+- Max concurrent Swarms: 2-3 (based on complexity)
+- Wave 1: 2 parallel
+- Wave 2: 1 (waiting on #101)
+- Wave 3: 1 (waiting on #102)
 ```
 
 ### User Checkpoint
 
-Present analysis and get approval:
+Present the plan for approval:
 
 ```markdown
-## 🚦 SWARM READY TO LAUNCH
+## 🚦 RELEASE PLAN: ${RELEASE_TITLE}
 
-### Tasks
-| ID | Description | Predicted Areas | Risk |
-|----|-------------|-----------------|------|
-| task-1 | ${DESC} | src/auth/* | Low |
-| task-2 | ${DESC} | src/api/* | Medium (conflict) |
-| task-3 | ${DESC} | src/ui/* | Low |
+### Features to Implement: ${NUM_FEATURES}
 
-### Execution Plan
-- **Parallel**: task-1, task-3
-- **After task-1**: task-2
+| Wave | Issues | Parallel | Blocked By |
+|------|--------|----------|------------|
+| 1 | #101, #103 | 2 | - |
+| 2 | #102 | 1 | #101 |
+| 3 | #104 | 1 | #102 |
 
-### Estimated Parallel Swarms: 2 initially, 1 after
+### Estimated Swarm Invocations: ${TOTAL}
 
-**Proceed?** (yes/no/modify)
+### Skipped (already complete)
+- #100 (closed)
+
+### Questions/Clarifications Needed
+${LIST_ANY_AMBIGUITIES}
+
+**Proceed with execution?** (yes/no/modify)
 ```
 
-**Wait for user approval before spawning Swarm units.**
+**Wait for user approval before proceeding.**
 
 ---
 
-## Phase 3: Spawn Swarm Units
+## Phase 3: Setup Infrastructure
 
-Launch Swarm agents based on conflict analysis.
+### Create Release Branch
 
-### Group 1: Independent Tasks (Parallel)
+```bash
+TIMESTAMP=$(date +%Y-%m-%d_%H%M)
+RELEASE_ID="release-${ISSUE_NUMBER}-${TIMESTAMP}"
+RELEASE_BRANCH="release/${RELEASE_ID}"
 
-Launch Swarm units for tasks without predicted conflicts in a **single message**:
+# Determine base branch
+BASE_BRANCH="${BASE_BRANCH:-main}"
+git checkout "${BASE_BRANCH}"
+git pull origin "${BASE_BRANCH}"
+git checkout -b "${RELEASE_BRANCH}"
+git push -u origin "${RELEASE_BRANCH}"
 
-```
-For each independent task (PARALLEL):
-
-Task tool with subagent_type="Swarm":
-
-"Execute single-task lifecycle for: ${TASK_DESCRIPTION}
-
-TASK_ID: task-1
-TASK_DESCRIPTION: ${DESCRIPTION}
-WORKTREE_DIR: .worktrees/task-1
-TASK_BRANCH: swarm/${SWARM_ID}/task-1
-TARGET_BRANCH: ${RELEASE_BRANCH}
-
-Complete the full lifecycle: Design → Implement → Review.
-Report back with: PR number, files touched, review status, and any blocking issues."
+echo "✅ Release branch: ${RELEASE_BRANCH}"
 ```
 
-### Collect Group 1 Results
+### Create Worktrees for Each Feature
 
-Wait for all parallel Swarm units to complete. For each:
+```bash
+mkdir -p .worktrees
+
+for ISSUE in ${FEATURE_ISSUES[@]}; do
+    TASK_ID="feature-${ISSUE}"
+    WORKTREE_DIR=".worktrees/${TASK_ID}"
+    BRANCH_NAME="${RELEASE_ID}/${TASK_ID}"
+
+    git worktree add -b "${BRANCH_NAME}" "${WORKTREE_DIR}" "${RELEASE_BRANCH}"
+    echo "✅ ${TASK_ID}: ${WORKTREE_DIR}"
+done
+```
+
+### Initialize State
+
+Create `.docs/swarm/orchestrator-state.json`:
 
 ```json
 {
-  "id": "task-1",
-  "status": "completed" | "failed",
-  "pr_number": 101,
-  "files_touched": ["src/auth/handler.ts", "tests/auth.test.ts"],
-  "review_status": "approved" | "changes_requested",
-  "blocking_issues": []
+  "release_id": "${RELEASE_ID}",
+  "release_issue": "${ISSUE_NUMBER}",
+  "release_branch": "${RELEASE_BRANCH}",
+  "started_at": "$(date -Iseconds)",
+  "status": "executing",
+  "waves": [
+    {
+      "wave": 1,
+      "status": "pending",
+      "features": ["#101", "#103"]
+    }
+  ],
+  "features": {
+    "#101": {
+      "title": "User authentication",
+      "priority": "P0",
+      "status": "pending",
+      "wave": 1,
+      "depends_on": [],
+      "blocks": ["#102", "#104"],
+      "worktree": ".worktrees/feature-101",
+      "branch": "${RELEASE_ID}/feature-101",
+      "pr_number": null,
+      "swarm_status": null,
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    }
+  },
+  "completed": [],
+  "failed": [],
+  "blocked": []
 }
 ```
 
-### Group 2+: Dependent Tasks
-
-After Group 1 completes:
-
-1. Update conflict analysis with actual files touched
-2. Determine if predicted conflicts materialized
-3. Launch next group of Swarm units
-
-```
-If task-2 conflicts with task-1:
-    - Rebase task-2's worktree on updated release branch
-    - Then spawn Swarm unit for task-2
-```
-
 ---
 
-## Phase 4: Collect and Validate Results
+## Phase 4: Execute Waves
 
-After all Swarm units complete:
+### Wave Execution Loop
 
-### Aggregate Results
+For each wave in order:
+
+```
+For wave in waves:
+    1. Check all dependencies satisfied
+    2. Spawn Swarm units in parallel
+    3. Monitor progress
+    4. Collect results
+    5. Update state
+    6. Proceed to next wave (or handle failures)
+```
+
+### Spawn Swarm Units (Parallel)
+
+For each feature in current wave, spawn in a **single message**:
+
+```
+Task tool with subagent_type="Swarm":
+
+"Implement GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+
+TASK_ID: feature-${ISSUE_NUMBER}
+TASK_DESCRIPTION: ${ISSUE_BODY}
+WORKTREE_DIR: .worktrees/feature-${ISSUE_NUMBER}
+TASK_BRANCH: ${RELEASE_ID}/feature-${ISSUE_NUMBER}
+TARGET_BRANCH: ${RELEASE_BRANCH}
+
+Requirements from issue:
+${ISSUE_BODY}
+
+Acceptance criteria:
+${EXTRACTED_CRITERIA}
+
+Complete the full lifecycle: Design → Implement → Review.
+Report back with: PR number, status, blocking issues."
+```
+
+### Track Active Swarms
 
 ```markdown
-## Swarm Results Summary
+## 🔄 Wave 1 Progress
 
-| Task | Status | PR | Review | Files |
-|------|--------|-----|--------|-------|
-| task-1 | ✅ Complete | #101 | Approved | 5 |
-| task-2 | ✅ Complete | #102 | Approved | 8 |
-| task-3 | ❌ Failed | - | - | - |
-
-### Completed: 2/3
-### Failed: 1/3
-```
-
-### Determine Merge Order
-
-Based on actual files touched and dependencies:
-
-```markdown
-## Merge Order
-
-1. **task-1** (PR #101)
-   - Files: src/auth/*
-   - No dependencies
-
-2. **task-2** (PR #102)
-   - Files: src/api/*, src/utils/*
-   - Depends on: task-1 (shared src/utils/validate.ts)
-
-### Conflict Risk: Medium
-- task-1 and task-2 both touched src/utils/validate.ts
-- Strategy: Merge task-1 first, rebase task-2 if needed
+| Feature | Status | PR | Started | Duration |
+|---------|--------|-----|---------|----------|
+| #101 | 🔄 Implementing | - | 10:30 | 15m |
+| #103 | 🔄 In Review | #201 | 10:30 | 20m |
 ```
 
 ---
 
-## Phase 5: Merge (Sequential)
+## Phase 5: Supervise Progress
 
-Merge PRs in dependency order.
+### Monitor Swarm Results
 
-### For Each PR in Order
+As each Swarm completes, capture:
 
-```bash
-MERGE_ORDER=("task-1" "task-2")
-
-for TASK_ID in "${MERGE_ORDER[@]}"; do
-    PR_NUMBER=${PR_NUMBERS[$TASK_ID]}
-
-    echo "=== Merging ${TASK_ID} (PR #${PR_NUMBER}) ==="
-
-    # Merge PR
-    gh pr merge "${PR_NUMBER}" --squash --delete-branch
-
-    if [ $? -eq 0 ]; then
-        echo "✅ ${TASK_ID} merged"
-
-        # Pull latest release branch
-        git checkout "${RELEASE_BRANCH}"
-        git pull origin "${RELEASE_BRANCH}"
-
-        # Run integration tests
-        npm test || {
-            echo "❌ Integration tests failed after merging ${TASK_ID}"
-            # Handle failure - potentially revert
-            exit 1
-        }
-
-        echo "✅ Integration tests pass"
-    else
-        echo "❌ Failed to merge ${TASK_ID}"
-        # Handle merge conflict
-    fi
-done
+```json
+{
+  "feature": "#101",
+  "status": "completed" | "failed" | "blocked",
+  "pr_number": 201,
+  "files_touched": [...],
+  "review_status": "approved" | "changes_requested",
+  "blocking_issues": [],
+  "duration": "25m"
+}
 ```
 
-### Handle Merge Conflicts
+### Handle Completion
 
-If a PR cannot merge cleanly:
-
-```markdown
-## ⚠️ MERGE CONFLICT
-
-**Task**: task-2 (PR #102)
-**Conflict with**: task-1's changes to src/utils/validate.ts
-
-**Resolution Options**:
-1. Rebase task-2 branch on updated release branch
-2. Manual conflict resolution
-3. Skip task-2, handle separately
-
-**Automated resolution attempt**: Rebasing...
-```
+When a Swarm succeeds:
 
 ```bash
-# Attempt automatic rebase
-cd ".worktrees/task-2"
-git fetch origin "${RELEASE_BRANCH}"
-git rebase "origin/${RELEASE_BRANCH}"
+# Update state
+# Mark feature as completed
+# Check if this unblocks other features
+# Update release issue with progress
 
-if [ $? -eq 0 ]; then
-    git push --force-with-lease
-    echo "✅ Rebase successful, retrying merge"
-else
-    echo "❌ Rebase failed, escalating to user"
-fi
-```
+gh issue comment "${RELEASE_ISSUE}" --body "$(cat <<'EOF'
+## ✅ Feature Completed: #${FEATURE_ISSUE}
 
----
+**PR**: #${PR_NUMBER}
+**Status**: Ready for review
 
-## Phase 6: Create Release PR
-
-After all successful merges:
-
-```bash
-gh pr create \
-    --base "${BASE_BRANCH}" \
-    --head "${RELEASE_BRANCH}" \
-    --title "Release: ${SWARM_ID}" \
-    --body "$(cat <<'EOF'
-## 🚀 Swarm Release: ${SWARM_ID}
-
-### Tasks Completed
-
-| Task | PR | Description | Status |
-|------|-----|-------------|--------|
-| task-1 | #101 | ${TASK_1_DESC} | ✅ Merged |
-| task-2 | #102 | ${TASK_2_DESC} | ✅ Merged |
-| task-3 | - | ${TASK_3_DESC} | ❌ Failed |
-
-### Summary
-
-- **Tasks Attempted**: ${NUM_TASKS}
-- **Tasks Completed**: ${NUM_COMPLETED}
-- **Tasks Failed**: ${NUM_FAILED}
-- **PRs Merged**: ${NUM_MERGED}
-- **Files Changed**: ${TOTAL_FILES}
-
-### Merge Order Used
-
-1. task-1 (independent)
-2. task-2 (after task-1)
-
-### Testing
-
-- ✅ All individual PRs passed review
-- ✅ Integration tests pass on release branch
-- ✅ No merge conflicts
-
-### Failed Tasks (if any)
-
-${FAILED_TASK_DETAILS}
-
----
-
-🤖 Generated by DevFlow SwarmOrchestrator
+Progress: ${COMPLETED}/${TOTAL} features complete
 EOF
 )"
-
-RELEASE_PR=$(gh pr view --json number -q '.number')
-echo ""
-echo "🚀 Release PR: #${RELEASE_PR}"
 ```
 
----
+### Handle Failures
 
-## Phase 7: Cleanup
-
-After release PR is created:
-
-```bash
-echo "=== CLEANUP ==="
-
-# Remove worktrees
-for worktree in .worktrees/*/; do
-    if [ -d "$worktree" ]; then
-        git worktree remove "$worktree" --force
-    fi
-done
-git worktree prune
-
-# Delete task branches (already deleted by squash merge)
-for branch in $(git branch --list "swarm/${SWARM_ID}/*" | tr -d ' '); do
-    git branch -D "$branch" 2>/dev/null
-done
-
-# Archive state
-mkdir -p .docs/swarm/archive
-mv .docs/swarm/orchestrator/state.json ".docs/swarm/archive/${SWARM_ID}-state.json"
-
-echo "✅ Cleanup complete"
-```
-
----
-
-## Final Report
+When a Swarm fails:
 
 ```markdown
-## 🎉 SWARM ORCHESTRATION COMPLETE
+## ❌ Feature Failed: #${FEATURE_ISSUE}
 
-### Release: ${SWARM_ID}
+**Phase**: ${FAILED_PHASE}
+**Error**: ${ERROR_MESSAGE}
 
-| Metric | Value |
-|--------|-------|
-| Tasks Attempted | ${NUM_TASKS} |
-| Tasks Completed | ${NUM_COMPLETED} |
-| Tasks Failed | ${NUM_FAILED} |
-| PRs Created | ${NUM_PRS} |
-| PRs Merged | ${NUM_MERGED} |
-| Total Files Changed | ${TOTAL_FILES} |
-| Duration | ${DURATION} |
+### Impact Analysis
 
-### Task Results
-
-| Task | Description | Status | PR |
-|------|-------------|--------|-----|
-| task-1 | ${DESC} | ✅ Merged | #101 |
-| task-2 | ${DESC} | ✅ Merged | #102 |
-| task-3 | ${DESC} | ❌ Failed | - |
-
-### Release PR
-
-- **PR Number**: #${RELEASE_PR}
-- **Target**: ${BASE_BRANCH}
-- **Status**: Ready for final review
-
-### Artifacts
-
-- State archive: `.docs/swarm/archive/${SWARM_ID}-state.json`
-- Design docs: `.docs/design/task-*-design.md`
-
-### Next Steps
-
-1. Review release PR #${RELEASE_PR}
-2. Merge to ${BASE_BRANCH}
-3. Tag release: `git tag v${VERSION}`
-4. Handle failed tasks separately (if any)
-```
-
----
-
-## Error Handling
-
-### Partial Completion
-
-If some tasks complete but others fail:
-
-```markdown
-## ⚠️ PARTIAL SWARM COMPLETION
-
-### Completed Tasks
-- task-1: ✅ Merged (#101)
-- task-2: ✅ Merged (#102)
-
-### Failed Tasks
-- task-3: ❌ Design phase failed
+**Blocked features**:
+- #102 (depends on #101)
+- #104 (depends on #101)
 
 ### Options
 
-1. **Proceed with partial release**
-   - Create release PR with completed tasks
-   - Handle task-3 as separate follow-up
+1. **Retry** - Spawn new Swarm for this feature
+2. **Skip** - Continue with other features, handle this separately
+3. **Escalate** - Pause and get user input
 
-2. **Retry failed tasks**
-   - Attempt to re-run failed Swarm units
-   - Then complete release
+**Recommendation**: ${RECOMMENDATION}
+```
 
-3. **Abort**
-   - Revert all changes
-   - Start fresh
+**Ask user how to proceed for failures.**
 
-**Recommendation**: Proceed with partial release
+### Unblock Dependent Features
+
+When a feature completes:
+
+```bash
+# Check what features are now unblocked
+for BLOCKED in ${BLOCKED_BY_THIS[@]}; do
+    # Check if all dependencies are now satisfied
+    if all_deps_complete "${BLOCKED}"; then
+        # Add to next execution batch
+        add_to_ready_queue "${BLOCKED}"
+    fi
+done
+```
+
+---
+
+## Phase 6: Progress Reporting
+
+### Real-time Status
+
+Maintain and display:
+
+```markdown
+## 📊 Release Progress: ${RELEASE_TITLE}
+
+### Overall: ${COMPLETED}/${TOTAL} (${PERCENT}%)
+
+| Wave | Status | Features | Completed | Failed |
+|------|--------|----------|-----------|--------|
+| 1 | ✅ Complete | 2 | 2 | 0 |
+| 2 | 🔄 Executing | 1 | 0 | 0 |
+| 3 | ⏳ Waiting | 1 | - | - |
+
+### Feature Status
+
+| Issue | Title | Wave | Status | PR |
+|-------|-------|------|--------|-----|
+| #101 | User auth | 1 | ✅ Complete | #201 |
+| #103 | Dashboard | 1 | ✅ Complete | #202 |
+| #102 | Rate limit | 2 | 🔄 Implementing | - |
+| #104 | API docs | 3 | ⏳ Blocked | - |
+
+### Active Swarms: 1
+### Blocked: 1 (waiting on #102)
+### Failed: 0
+```
+
+### Update Release Issue
+
+Periodically update the release issue with progress:
+
+```bash
+gh issue comment "${RELEASE_ISSUE}" --body "$(cat <<'EOF'
+## 📊 Orchestrator Status Update
+
+**Time**: $(date)
+**Progress**: ${COMPLETED}/${TOTAL} features
+
+### Completed
+${COMPLETED_LIST}
+
+### In Progress
+${IN_PROGRESS_LIST}
+
+### Blocked
+${BLOCKED_LIST}
+
+### PRs Ready for Review
+${PR_LIST}
+EOF
+)"
+```
+
+---
+
+## Phase 7: Final Report
+
+When all features are processed:
+
+```markdown
+## 🎉 RELEASE DEVELOPMENT COMPLETE
+
+### Release: ${RELEASE_TITLE}
+### Issue: #${RELEASE_ISSUE}
+
+---
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Features Attempted | ${TOTAL} |
+| Features Completed | ${COMPLETED} |
+| Features Failed | ${FAILED} |
+| PRs Created | ${NUM_PRS} |
+| Total Duration | ${DURATION} |
+
+---
+
+## Feature Results
+
+| Issue | Title | Status | PR | Review |
+|-------|-------|--------|-----|--------|
+| #101 | User auth | ✅ | #201 | Approved |
+| #103 | Dashboard | ✅ | #202 | Approved |
+| #102 | Rate limit | ✅ | #203 | Approved |
+| #104 | API docs | ❌ | - | Failed |
+
+---
+
+## PRs Ready for Merge
+
+All PRs target: `${RELEASE_BRANCH}`
+
+1. #201 - User authentication
+2. #202 - Dashboard redesign
+3. #203 - Rate limiting
+
+---
+
+## Failed Features (require attention)
+
+### #104 - API documentation
+**Error**: Design phase failed - unclear requirements
+**Recommendation**: Clarify issue requirements and retry manually
+
+---
+
+## Next Steps
+
+1. Review PRs: #201, #202, #203
+2. Address failed features
+3. Run integration tests on release branch
+4. Merge release branch to ${BASE_BRANCH}
+5. Close release issue #${RELEASE_ISSUE}
+
+---
+
+## Artifacts
+
+- Release branch: `${RELEASE_BRANCH}`
+- State file: `.docs/swarm/orchestrator-state.json`
+- Design docs: `.docs/design/feature-*-design.md`
+```
+
+### Update Release Issue
+
+```bash
+gh issue comment "${RELEASE_ISSUE}" --body "$(cat <<'EOF'
+## 🎉 Development Complete
+
+All features have been processed.
+
+### Results
+- ✅ Completed: ${COMPLETED}
+- ❌ Failed: ${FAILED}
+
+### PRs Ready for Review
+${PR_LIST}
+
+### Next Steps
+1. Review and merge PRs
+2. Address any failed features
+3. Close this issue when release ships
+
+---
+🤖 Generated by DevFlow SwarmOrchestrator
+EOF
+)"
+```
+
+---
+
+## Supervision Patterns
+
+### Stuck Detection
+
+If a Swarm takes too long:
+
+```markdown
+## ⚠️ Swarm Possibly Stuck
+
+**Feature**: #101
+**Phase**: Implementation
+**Duration**: 45m (expected: 20m)
+
+### Options
+1. Check swarm status
+2. Set timeout and move on
+3. Escalate to user
+```
+
+### Conflict Detection
+
+If multiple Swarms touch same files:
+
+```markdown
+## ⚠️ Potential Conflict Detected
+
+**Features**: #101, #103
+**Shared files**: src/utils/helpers.ts
+
+### Resolution
+- #101 should merge first (earlier wave)
+- #103 may need rebase after #101 merges
+```
+
+### Resource Management
+
+```markdown
+## 📊 Resource Usage
+
+- Active Swarms: 2/3 max
+- Pending features: 2
+- Estimated remaining: 45m
+
+### Throttling
+- Limiting concurrent swarms to prevent context overload
+- Next batch will start when current completes
+```
+
+---
+
+## Error Recovery
+
+### Partial Completion
+
+```markdown
+## ⚠️ PARTIAL RELEASE COMPLETION
+
+### Completed: 3/4 features
+### Failed: 1 feature
+
+### Options
+
+1. **Proceed without failed feature**
+   - Merge completed PRs
+   - Handle #104 as follow-up issue
+
+2. **Retry failed feature**
+   - Attempt once more with different approach
+
+3. **Pause for manual intervention**
+   - User reviews and fixes
+   - Then resume orchestration
+
+**Recommendation**: Proceed with completed features
 ```
 
 ### Full Abort
 
 ```bash
-echo "=== ABORTING SWARM ==="
+echo "=== ABORTING ORCHESTRATION ==="
 
-# Close all open PRs
-for TASK_ID in $(jq -r '.tasks[].id' .docs/swarm/orchestrator/state.json); do
-    BRANCH="swarm/${SWARM_ID}/${TASK_ID}"
-    PR=$(gh pr list --head "$BRANCH" --json number -q '.[0].number')
-    [ -n "$PR" ] && gh pr close "$PR"
-done
+# Update release issue
+gh issue comment "${RELEASE_ISSUE}" --body "## ❌ Orchestration Aborted
 
-# Delete release branch
-git push origin --delete "${RELEASE_BRANCH}" 2>/dev/null
-git branch -D "${RELEASE_BRANCH}" 2>/dev/null
+Reason: ${REASON}
+
+### Cleanup
+- PRs closed
+- Branches deleted
+- Worktrees removed"
 
 # Cleanup worktrees
 for worktree in .worktrees/*/; do
@@ -579,19 +644,20 @@ for worktree in .worktrees/*/; do
 done
 git worktree prune
 
-echo '{"status": "aborted"}' > .docs/swarm/orchestrator/state.json
+# Update state
+echo '{"status": "aborted", "reason": "${REASON}"}' > .docs/swarm/orchestrator-state.json
 
-echo "✅ Swarm aborted and cleaned up"
+echo "✅ Aborted and cleaned up"
 ```
 
 ---
 
-## Orchestration Principles
+## Principles
 
-1. **Coordinate, don't micromanage** - Let Swarm units handle task details
-2. **Parallelize aggressively** - Run independent tasks concurrently
-3. **Sequence when needed** - Handle dependencies correctly
-4. **Fail gracefully** - One task failure doesn't abort others
-5. **User checkpoints** - Get approval before major phases
-6. **State tracking** - Always know what's happening
-7. **Clean recovery** - Can abort/retry at any point
+1. **Issue-driven** - Everything traces back to GitHub issues
+2. **Prioritize smartly** - P0 first, respect dependencies
+3. **Parallelize safely** - Independent features run concurrently
+4. **Supervise actively** - Monitor progress, detect problems early
+5. **Fail gracefully** - One failure doesn't stop others
+6. **Communicate clearly** - Update release issue with progress
+7. **Don't merge** - That's a separate, human-controlled workflow
