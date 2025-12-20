@@ -85,21 +85,20 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 
 ### 🤖 Sub-Agents
 
-**Orchestration Agents** (spawn other agents, manage workflows):
+**Architecture Note**: Commands run in the main context and can spawn agents. Agents cannot spawn other agents - they do focused work inline.
+
+**Worker Agents** (implementation and specification):
 
 | Sub-Agent | Specialty | Purpose |
 |-----------|-----------|---------|
-| `Planner` | Release Planning | Plan releases from feature list, spawn Specifiers |
-| `Specifier` | Feature Specification | Create detailed specs, spawn Design agents |
-| `Coordinator` | Release Orchestration | Orchestrate parallel feature development with worktrees |
-| `Swarm` | Task Lifecycle | Execute design → implement → review cycle |
-| `Coder` | Implementation | Write code in isolated worktrees |
+| `Design` | Implementation Planning | Explores codebase inline, creates detailed implementation plan |
+| `Specifier` | Feature Specification | Clarifies requirements inline, creates GitHub issue |
+| `Coder` | Implementation | Writes code in isolated worktrees, creates PR |
 
 **Review Agents** (specialized code analysis):
 
 | Sub-Agent | Specialty | Purpose |
 |-----------|-----------|---------|
-| `Review` | Review Orchestration | Coordinate all review sub-agents |
 | `SecurityReview` | Security Analysis | Expert vulnerability detection and security code review |
 | `PerformanceReview` | Performance | Optimization and bottleneck detection |
 | `ArchitectureReview` | Architecture | Design pattern analysis and code structure review |
@@ -114,7 +113,6 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 
 | Sub-Agent | Specialty | Purpose |
 |-----------|-----------|---------|
-| `Design` | Implementation Planning | Detailed implementation design with integration points |
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
 | `Commit` | Git Operations | Intelligent commit creation with safety checks |
@@ -128,7 +126,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 **How Sub-Agents Work:**
 - Specialized AI assistants with deep expertise in specific domains
 - Separate context windows for focused analysis
-- Can be invoked explicitly or automatically by orchestrator commands
+- Spawned by orchestration commands (`/plan`, `/swarm`, `/coordinate`, `/review`)
 - Restricted tool access appropriate to their domain
 
 **Invoking Sub-Agents:**
@@ -183,7 +181,7 @@ DevFlow agents automatically create and maintain project documentation in the `.
 ├── coordinator/                # Release coordination state
 │   ├── release-issue.md
 │   └── state.json
-├── design/                     # Implementation plans (from Swarm)
+├── design/                     # Implementation plans (from Design agent)
 │   └── {topic-slug}-{timestamp}.md
 ├── debug/                      # Debug sessions
 │   ├── debug-{timestamp}.md
@@ -214,7 +212,7 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
 - **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
 - **`/coordinate`** → `.docs/coordinator/state.json` + `release-issue.md`
-- **`/swarm`** (via Design) → `.docs/design/{topic}-{timestamp}.md`
+- **`/swarm`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
 - **`/review`** → `.docs/reviews/{branch}/` (9 review reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 

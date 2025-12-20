@@ -1,10 +1,10 @@
 ---
-description: Coordinate a product release - parse release issue, prioritize features, spawn parallel Swarm units, supervise progress
+description: Coordinate a product release - parse release issue, prioritize features, execute parallel feature lifecycles, supervise progress
 ---
 
 # Coordinator - Release Orchestrator
 
-Coordinate feature development for a product release. Parse a GitHub release issue containing the release plan, prioritize features, spawn Swarm units in parallel, and supervise their progress until all features are ready.
+Coordinate feature development for a product release. Parse a GitHub release issue containing the release plan, prioritize features, execute feature lifecycles (Design → Coder → Review) in parallel, and supervise their progress until all features are ready.
 
 **Does NOT handle merging or releasing** - that's a separate workflow.
 
@@ -140,7 +140,7 @@ From issue bodies and labels, identify:
 - #104 API documentation (P2) - requires #101, #102
 
 ### Parallelization
-- Max concurrent Swarms: 2-3 (based on complexity)
+- Max concurrent feature lifecycles: 2-3 (based on complexity)
 - Wave 1: 2 parallel
 - Wave 2: 1 (waiting on #101)
 - Wave 3: 1 (waiting on #102)
@@ -161,7 +161,7 @@ Present the plan for approval:
 | 2 | #102 | 1 | #101 |
 | 3 | #104 | 1 | #102 |
 
-### Estimated Swarm Invocations: ${TOTAL}
+### Estimated Feature Lifecycles: ${TOTAL}
 
 ### Skipped (already complete)
 - #100 (closed)
@@ -239,7 +239,7 @@ Create `.docs/coordinate/state.json`:
       "worktree": ".worktrees/feature-101",
       "branch": "${RELEASE_ID}/feature-101",
       "pr_number": null,
-      "swarm_status": null,
+      "lifecycle_status": null,
       "started_at": null,
       "completed_at": null,
       "error": null
@@ -262,61 +262,178 @@ For each wave in order:
 ```
 For wave in waves:
     1. Check all dependencies satisfied
-    2. Spawn Swarm units in parallel
+    2. Execute feature lifecycle (Design → Coder → Review) for each feature
     3. Monitor progress
     4. Collect results
     5. Update state
     6. Proceed to next wave (or handle failures)
 ```
 
-### Spawn Swarm Units (Parallel)
+### Execute Feature Lifecycle (Inline Swarm Logic)
 
-For each feature in current wave, spawn in a **single message**:
+For each feature in current wave, run the complete lifecycle:
+
+#### Step 1: Design Phase
+
+Spawn Design agents for all features in wave (parallel):
 
 ```
-Task tool with subagent_type="Swarm":
+Task tool with subagent_type="Design" (for each feature in wave):
 
-"Implement GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+"Create implementation design for GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
 TASK_ID: feature-${ISSUE_NUMBER}
-TASK_DESCRIPTION: ${ISSUE_BODY}
-WORKTREE_DIR: .worktrees/feature-${ISSUE_NUMBER}
-TASK_BRANCH: ${RELEASE_ID}/feature-${ISSUE_NUMBER}
-TARGET_BRANCH: ${RELEASE_BRANCH}
+Working directory: .worktrees/feature-${ISSUE_NUMBER}
+Target branch: ${RELEASE_BRANCH}
 
 Requirements from issue:
 ${ISSUE_BODY}
 
-Acceptance criteria:
-${EXTRACTED_CRITERIA}
+Explore the codebase, understand existing patterns, and create a detailed
+implementation plan. Save the design to: .docs/design/feature-${ISSUE_NUMBER}-design.md
 
-Complete the full lifecycle: Design → Implement → Review.
-Report back with: PR number, status, blocking issues."
+Be thorough - this plan will be executed by the Coder agent."
 ```
 
-### Track Active Swarms
+Wait for all Design agents to complete before proceeding.
+
+#### Step 2: Implementation Phase
+
+Spawn Coder agents for all features (parallel):
+
+```
+Task tool with subagent_type="Coder" (for each feature):
+
+"Implement GitHub issue #${ISSUE_NUMBER} according to the design document.
+
+TASK_ID: feature-${ISSUE_NUMBER}
+TASK_DESCRIPTION: ${ISSUE_TITLE}
+WORKTREE_DIR: .worktrees/feature-${ISSUE_NUMBER}
+TARGET_BRANCH: ${RELEASE_BRANCH}
+PLAN_FILE: .docs/design/feature-${ISSUE_NUMBER}-design.md
+
+Execute the plan:
+1. Implement changes according to design
+2. Write tests as specified
+3. Run tests and fix any failures
+4. Create atomic commits
+5. Push and create PR against ${RELEASE_BRANCH}
+
+Report back with: PR number, files changed, test results."
+```
+
+Wait for all Coder agents to complete before proceeding.
+
+#### Step 3: Review Phase
+
+For each feature's PR, spawn review agents (parallel):
+
+```bash
+# Setup review directory
+REVIEW_TIMESTAMP=$(date +%Y-%m-%d_%H%M)
+REVIEW_DIR=".docs/reviews/feature-${ISSUE_NUMBER}"
+mkdir -p "$REVIEW_DIR"
+
+# Get changed files to determine which reviews to run
+CHANGED_FILES=$(git diff --name-only ${RELEASE_BRANCH}...HEAD)
+HAS_TS=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | head -1)
+HAS_SQL=$(echo "$CHANGED_FILES" | grep -iE '\.(sql|prisma|drizzle)$' | head -1)
+HAS_DEPS=$(echo "$CHANGED_FILES" | grep -E '(package\.json|requirements\.txt|Cargo\.toml)' | head -1)
+```
+
+**Always run these 5 reviews (in parallel):**
+
+```
+Task tool with subagent_type="SecurityReview":
+"Review PR #${PR_NUMBER} for security issues.
+Save report to: ${REVIEW_DIR}/security-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+
+Task tool with subagent_type="ArchitectureReview":
+"Review PR #${PR_NUMBER} for architecture issues.
+Save report to: ${REVIEW_DIR}/architecture-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+
+Task tool with subagent_type="PerformanceReview":
+"Review PR #${PR_NUMBER} for performance issues.
+Save report to: ${REVIEW_DIR}/performance-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+
+Task tool with subagent_type="ComplexityReview":
+"Review PR #${PR_NUMBER} for complexity issues.
+Save report to: ${REVIEW_DIR}/complexity-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+
+Task tool with subagent_type="TestsReview":
+"Review PR #${PR_NUMBER} for test quality.
+Save report to: ${REVIEW_DIR}/tests-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+```
+
+**Conditionally run based on file types:**
+
+If TypeScript files changed:
+```
+Task tool with subagent_type="TypescriptReview":
+"Review PR #${PR_NUMBER} for TypeScript issues.
+Save report to: ${REVIEW_DIR}/typescript-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+```
+
+If database files changed:
+```
+Task tool with subagent_type="DatabaseReview":
+"Review PR #${PR_NUMBER} for database issues.
+Save report to: ${REVIEW_DIR}/database-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+```
+
+If dependency files changed:
+```
+Task tool with subagent_type="DependenciesReview":
+"Review PR #${PR_NUMBER} for dependency issues.
+Save report to: ${REVIEW_DIR}/dependencies-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+```
+
+#### Step 4: Aggregate Review Results
+
+```markdown
+| Condition | Status |
+|-----------|--------|
+| Any CRITICAL issues | ❌ BLOCKED |
+| Any HIGH issues | ⚠️ CHANGES_REQUESTED |
+| Only MEDIUM/LOW | ✅ APPROVED |
+```
+
+### Track Active Features
 
 ```markdown
 ## 🔄 Wave 1 Progress
 
-| Feature | Status | PR | Started | Duration |
-|---------|--------|-----|---------|----------|
-| #101 | 🔄 Implementing | - | 10:30 | 15m |
-| #103 | 🔄 In Review | #201 | 10:30 | 20m |
+| Feature | Design | Coder | Review | PR | Status |
+|---------|--------|-------|--------|-----|--------|
+| #101 | ✅ | 🔄 | ⏳ | - | Implementing |
+| #103 | ✅ | ✅ | 🔄 | #201 | In Review |
 ```
 
 ---
 
 ## Phase 5: Supervise Progress
 
-### Monitor Swarm Results
+### Monitor Feature Lifecycle Results
 
-As each Swarm completes, capture:
+As each feature lifecycle completes, capture:
 
 ```json
 {
   "feature": "#101",
   "status": "completed" | "failed" | "blocked",
+  "phases": {
+    "design": "completed",
+    "coder": "completed",
+    "review": "approved"
+  },
   "pr_number": 201,
   "files_touched": [...],
   "review_status": "approved" | "changes_requested",
@@ -327,7 +444,7 @@ As each Swarm completes, capture:
 
 ### Handle Completion
 
-When a Swarm succeeds:
+When a feature lifecycle succeeds:
 
 ```bash
 # Update state
@@ -348,12 +465,12 @@ EOF
 
 ### Handle Failures
 
-When a Swarm fails:
+When a feature lifecycle fails (Design, Coder, or Review phase):
 
 ```markdown
 ## ❌ Feature Failed: #${FEATURE_ISSUE}
 
-**Phase**: ${FAILED_PHASE}
+**Phase**: ${FAILED_PHASE} (Design | Coder | Review)
 **Error**: ${ERROR_MESSAGE}
 
 ### Impact Analysis
@@ -364,7 +481,7 @@ When a Swarm fails:
 
 ### Options
 
-1. **Retry** - Spawn new Swarm for this feature
+1. **Retry** - Re-run failed phase and continue lifecycle
 2. **Skip** - Continue with other features, handle this separately
 3. **Escalate** - Pause and get user input
 
@@ -416,7 +533,7 @@ Maintain and display:
 | #102 | Rate limit | 2 | 🔄 Implementing | - |
 | #104 | API docs | 3 | ⏳ Blocked | - |
 
-### Active Swarms: 1
+### Active Lifecycles: 1
 ### Blocked: 1 (waiting on #102)
 ### Failed: 0
 ```
@@ -551,24 +668,24 @@ EOF
 
 ### Stuck Detection
 
-If a Swarm takes too long:
+If a feature lifecycle takes too long:
 
 ```markdown
-## ⚠️ Swarm Possibly Stuck
+## ⚠️ Feature Lifecycle Possibly Stuck
 
 **Feature**: #101
-**Phase**: Implementation
+**Current Phase**: Coder (Implementation)
 **Duration**: 45m (expected: 20m)
 
 ### Options
-1. Check swarm status
+1. Check agent status
 2. Set timeout and move on
 3. Escalate to user
 ```
 
 ### Conflict Detection
 
-If multiple Swarms touch same files:
+If multiple features touch same files:
 
 ```markdown
 ## ⚠️ Potential Conflict Detected
@@ -586,12 +703,12 @@ If multiple Swarms touch same files:
 ```markdown
 ## 📊 Resource Usage
 
-- Active Swarms: 2/3 max
+- Active feature lifecycles: 2/3 max
 - Pending features: 2
 - Estimated remaining: 45m
 
 ### Throttling
-- Limiting concurrent swarms to prevent context overload
+- Limiting concurrent features to prevent context overload
 - Next batch will start when current completes
 ```
 
@@ -649,6 +766,24 @@ echo '{"status": "aborted", "reason": "${REASON}"}' > .docs/coordinate/state.jso
 
 echo "✅ Aborted and cleaned up"
 ```
+
+---
+
+## Architecture
+
+```
+/coordinate (command - runs in main context)
+├── Parses release issue for feature references
+├── For each wave of features:
+│   ├── spawns: Design agents (parallel per feature)
+│   ├── waits for completion
+│   ├── spawns: Coder agents (parallel per feature)
+│   ├── waits for completion
+│   └── spawns: review-* agents (parallel per feature/review type)
+└── Reports: PRs ready for review, issues identified
+```
+
+**Why command-level orchestration**: Commands run in the main context and have access to the Task tool for spawning agents. Agents cannot spawn other agents.
 
 ---
 

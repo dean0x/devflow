@@ -350,19 +350,21 @@ ${FAILED_LIST}
 
 ---
 
-## Agent Hierarchy
+## Architecture
 
 ```
-Planner (release planning orchestrator)
-├── spawns: Specifier (per feature, parallel)
-│   └── clarifies requirements, creates GitHub issue
+/plan (command - runs in main context)
+├── spawns: Specifier agents (per feature, parallel)
+│   └── does inline exploration, clarifies with user, creates GitHub issue
 └── creates: Release issue
-    └── ready for: Coordinator
-        └── spawns: Swarm (per feature)
-            ├── spawns: Design
-            ├── spawns: Coder
-            └── spawns: Review
+    └── ready for: /coordinate command
+        └── spawns: Swarm agents (per task)
+            ├── spawns: Design agent (inline exploration)
+            ├── spawns: Coder agent
+            └── spawns: review-* agents (parallel)
 ```
+
+**Why command-level orchestration**: Commands run in the main context and have access to the Task tool for spawning agents. Agents cannot spawn other agents.
 
 ---
 

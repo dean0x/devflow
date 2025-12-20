@@ -8,6 +8,8 @@ model: inherit
 
 Create a detailed, actionable implementation design for: **{FEATURE}**
 
+**You work inline** - use Read, Grep, Glob tools directly for exploration. No sub-agent spawning.
+
 ---
 
 ## Critical Philosophy
@@ -45,100 +47,82 @@ DESIGN_FILE=".docs/design/${TOPIC_SLUG}-${TIMESTAMP}.md"
 
 ---
 
-## Phase 1: Parallel Exploration (3 Explore Agents)
+## Phase 1: Inline Exploration
 
-Launch **in parallel** with `model="haiku"`:
+Do ALL exploration work directly using Read, Grep, Glob tools. Complete these three exploration tracks:
 
-### Explorer 1: Architecture & Patterns
+### Track 1: Architecture & Patterns
 
-```
-Task(subagent_type="Explore"):
+Use Glob and Read to find and analyze:
 
-"Analyze architecture and patterns for implementing: {FEATURE}
+1. **Similar features** - Search for similar implementations
+   ```
+   Glob: **/*.ts, **/*.py, **/*.go (filter by feature keywords)
+   Read: Examine found files for patterns
+   ```
 
-CRITICAL: Read actual code files. Never assume - verify by reading.
-
-Find and document:
-1. How similar features are currently implemented (find examples, READ them)
-2. Code patterns in use with file:line proof:
+2. **Code patterns** with file:line proof:
    - Error handling (Result types? Exceptions?)
    - Dependency injection (Yes/No?)
    - Validation patterns
    - Testing patterns
-3. File/directory structure conventions
-4. Naming conventions for similar components
 
-Thoroughness: very thorough
+3. **File/directory structure** conventions
 
-Report MUST include specific file:line references for EVERY pattern claimed.
-Format as markdown with ## headers for each category."
-```
+4. **Naming conventions** for similar components
 
-### Explorer 2: Integration Points
+**Document each pattern with specific file:line references.**
 
-```
-Task(subagent_type="Explore"):
+### Track 2: Integration Points
 
-"Find ALL integration points and dependencies for: {FEATURE}
+Use Grep to exhaustively search for:
 
-CRITICAL: Search exhaustively. Missing an integration point causes bugs.
+1. **Entry Points** - Where this feature gets invoked
+   ```
+   Grep: function names, route patterns, API endpoints
+   ```
 
-Find and document:
-1. Entry Points - Where this feature gets invoked
-2. Data Flow - What data goes in/out, where from/to
-3. Dependencies - What existing services/modules this uses
-4. Side Effects - What existing code needs to know about this
-5. Configuration - Env vars, settings, config files needed
-6. Database/Storage - Schema changes or new tables
-7. API/Routes - New or modified endpoints
-8. UI/Frontend - Components that call this
+2. **Data Flow** - What data goes in/out, where from/to
 
-Thoroughness: very thorough
+3. **Dependencies** - What existing services/modules this uses
 
-Report MUST include file:line for EVERY integration point.
-If unsure about something, list it anyway - false positives better than missing."
-```
+4. **Side Effects** - What existing code needs to know about this
 
-### Explorer 3: Reusable Code & Edge Cases
+5. **Configuration** - Env vars, settings, config files needed
 
-```
-Task(subagent_type="Explore"):
+6. **Database/Storage** - Schema changes or new tables
 
-"Find reusable code and edge cases for: {FEATURE}
+7. **API/Routes** - New or modified endpoints
 
-CRITICAL: Avoid duplication. Find existing code before planning new code.
+**List EVERY integration point with file:line. False positives better than missing.**
 
-Part 1 - Reusable Code:
-- Existing utilities, helpers, common functions - READ them
-- Similar implementations to reference or extend
-- Validation, error handling, logging patterns already in use
-- Test patterns, fixtures, mocking strategies
+### Track 3: Reusable Code & Edge Cases
 
-For each reusable component, document:
-- Location (file:line)
-- What it does
-- How to use it (parameters, return type)
-- Why reuse it
+Search for existing utilities before planning new code:
 
-Part 2 - Edge Cases to Handle:
-- Invalid input scenarios
-- Missing dependencies / external service down
-- Race conditions / concurrent requests
-- Boundary values (empty, very large, special chars)
-- Permission / authorization failures
-- State conflicts (modified between read/write)
-- Resource limits (memory, disk, connections)
+1. **Reusable Code**:
+   ```
+   Grep: utility, helper, common, shared, lib
+   ```
+   - Existing utilities, helpers, common functions
+   - Similar implementations to reference
+   - Validation, error handling, logging patterns
+   - Test patterns, fixtures, mocking strategies
 
-For each edge case, find how similar features handle it (file:line).
+2. **Edge Cases to Handle**:
+   - Invalid input scenarios
+   - Missing dependencies / external service down
+   - Race conditions / concurrent requests
+   - Boundary values (empty, very large, special chars)
+   - Permission / authorization failures
+   - State conflicts (modified between read/write)
+   - Resource limits (memory, disk, connections)
 
-Thoroughness: very thorough"
-```
+**For each edge case, find how similar features handle it (file:line).**
 
 ---
 
-## Phase 2: Synthesize & Clarify with User
-
-After ALL explorers complete:
+## Phase 2: Synthesize & Clarify
 
 ### 2.1 Synthesize Findings
 
@@ -173,29 +157,11 @@ AskUserQuestion:
 
 ---
 
-## Phase 3: Dual Planning (2 Plan Agents, Sequential)
+## Phase 3: Create Implementation Plan
 
-### Planner 1: Create Implementation Plan
+Based on exploration findings and user decisions, create a detailed plan:
 
-```
-Task(subagent_type="Plan"):
-
-"Create implementation plan for: {FEATURE}
-
-CRITICAL REQUIREMENTS:
-- Every step MUST reference specific files from exploration findings
-- Follow existing patterns exactly - don't introduce new ones
-- Include edge case handling in each step
-- Plan must be detailed enough for someone unfamiliar to execute
-
-Context from exploration:
-{Patterns found - with file:line references}
-{Integration points - complete list}
-{Reusable code - what to leverage}
-{Edge cases - how to handle}
-
-User decisions:
-{Decisions from Phase 2}
+### 3.1 Draft Implementation Plan
 
 For each implementation step provide:
 1. What to create/modify (specific file paths)
@@ -208,22 +174,10 @@ Also include:
 - Testing strategy (unit + integration)
 - Scope boundaries (in/out of scope)
 
-Evaluation priority: pattern alignment > philosophy > minimal disruption > testability"
-```
+### 3.2 Self-Review the Plan
 
-### Planner 2: Critical Review
+Critically review your own plan. Check for:
 
-```
-Task(subagent_type="Plan"):
-
-"Critically review this implementation plan for: {FEATURE}
-
-ROLE: You are a skeptical reviewer. Find problems.
-
-Original plan:
-{Planner 1's output}
-
-Check for these common failures:
 - [ ] Generic steps without file:line references (REJECT - must be specific)
 - [ ] Missing edge cases (invalid input, missing deps, race conditions, permissions)
 - [ ] Wrong order (dependencies not respected)
@@ -238,22 +192,11 @@ For each issue found:
 - Why it matters
 - How to fix it
 
-Output:
-1. Issues found (be harsh - better to catch now)
-2. Refined plan with fixes applied
-3. Remaining risks that cannot be eliminated
-4. Confidence level (High/Medium/Low) with reasoning"
-```
+Refine the plan based on self-review.
 
 ---
 
-## Phase 4: Synthesize & Persist
-
-### 4.1 Merge Plans
-
-Combine Planner 1 + Planner 2's refinements into final design.
-
-### 4.2 Write Design Document
+## Phase 4: Persist Design Document
 
 Save to `$DESIGN_FILE`:
 
@@ -262,7 +205,7 @@ Save to `$DESIGN_FILE`:
 
 **Created**: {TIMESTAMP}
 **Status**: Ready for implementation
-**Confidence**: {from Planner 2}
+**Confidence**: {High/Medium/Low}
 
 ---
 
@@ -333,7 +276,7 @@ Save to `$DESIGN_FILE`:
 
 ## Implementation Steps
 
-{Refined plan from Phase 3}
+{Refined plan}
 
 ### Step 1: {Action}
 
@@ -355,14 +298,12 @@ Save to `$DESIGN_FILE`:
 
 ## Edge Cases & Risks
 
-{From exploration + Planner 2 review}
-
 | Scenario | Handling | Risk Level |
 |----------|----------|------------|
 | {edge case} | {strategy} | {High/Med/Low} |
 
 **Remaining Risks**:
-{From Planner 2 - things that can't be eliminated}
+{Things that can't be eliminated}
 
 ---
 
@@ -394,7 +335,7 @@ Save to `$DESIGN_FILE`:
 
 ## Phase 5: Final Summary
 
-Present to orchestrating session:
+Report back:
 
 ```markdown
 ## Design Complete: {FEATURE}
@@ -414,13 +355,13 @@ Present to orchestrating session:
 - Estimated complexity: {from analysis}
 
 ### Key Decisions Made
-{Summary of user decisions from Phase 2}
+{Summary of user decisions}
 
 ### Risks Identified
-{Top risks from Planner 2 review}
+{Top risks}
 
 ### Ready to Implement
-Start with Step 1, or run `/implement` to execute the plan.
+Design document saved. Coder agent can execute the plan.
 ```
 
 ---
@@ -439,4 +380,4 @@ Before completing, verify:
 - [ ] **Risks surfaced** - Remaining risks documented with reasoning
 - [ ] **User decisions captured** - Clarifications incorporated
 
-**If any check fails**, iterate with additional exploration or planning.
+**If any check fails**, iterate with additional exploration.

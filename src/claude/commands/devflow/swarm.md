@@ -49,7 +49,7 @@ git worktree add -b "${TASK_BRANCH}" "${WORKTREE_DIR}" "${TARGET_BRANCH}"
 Orchestrate the complete task lifecycle by spawning specialized agents:
 
 ```
-DESIGN (Design agent) → IMPLEMENT (Coder agent) → REVIEW (Review agent) → REPORT
+DESIGN (Design agent) → IMPLEMENT (Coder agent) → REVIEW (review-* agents) → REPORT
 ```
 
 **Output**: A PR that's ready for merge (or issues that need addressing).
@@ -77,9 +77,9 @@ Be thorough - this plan will be executed by the Coder agent."
 ### Design Output Expected
 
 The Design agent will:
-1. Launch 3 parallel Explore agents (Architecture, Integration, Reusable Code)
-2. Synthesize findings and clarify ambiguities
-3. Launch 2 Plan agents (Create Plan + Critical Review)
+1. Explore architecture, integration points, and reusable code inline
+2. Synthesize findings and clarify ambiguities with user
+3. Create detailed implementation plan
 4. Persist design document
 
 **Wait for Design agent to complete before proceeding.**
@@ -157,31 +157,98 @@ echo "   URL: ${PR_URL}"
 
 ---
 
-## Phase 3: Review
+## Phase 3: Review (Inline Orchestration)
 
-Spawn the Review agent to validate the implementation.
+Run reviews by spawning review-* agents directly. Do NOT spawn a Review orchestrator.
+
+### Setup
+
+```bash
+BRANCH_SLUG=$(echo "${TASK_BRANCH}" | sed 's/\//-/g')
+REVIEW_TIMESTAMP=$(date +%Y-%m-%d_%H%M)
+REVIEW_DIR=".docs/reviews/${BRANCH_SLUG}"
+mkdir -p "$REVIEW_DIR"
+
+# Get changed files for review selection
+CHANGED_FILES=$(git diff --name-only ${TARGET_BRANCH}...HEAD)
+```
+
+### Determine Relevant Reviews
+
+```bash
+HAS_TS=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | head -1)
+HAS_SQL=$(echo "$CHANGED_FILES" | grep -iE '\.(sql|prisma|drizzle)$' | head -1)
+HAS_DEPS=$(echo "$CHANGED_FILES" | grep -E '(package\.json|requirements\.txt|Cargo\.toml)' | head -1)
+```
+
+### Spawn Review Agents (Parallel)
+
+**Always run these 5 reviews:**
 
 ```
-Task tool with subagent_type="Review":
+Task tool with subagent_type="SecurityReview":
+"Review PR #${PR_NUMBER} for security issues.
+Save report to: ${REVIEW_DIR}/security-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
 
-"Review PR #${PR_NUMBER} for task: ${TASK_DESCRIPTION}
+Task tool with subagent_type="ArchitectureReview":
+"Review PR #${PR_NUMBER} for architecture issues.
+Save report to: ${REVIEW_DIR}/architecture-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
 
-This PR implements ${TASK_ID}.
-The implementation follows the design at: .docs/design/${TASK_ID}-design.md
+Task tool with subagent_type="PerformanceReview":
+"Review PR #${PR_NUMBER} for performance issues.
+Save report to: ${REVIEW_DIR}/performance-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
 
-Run all relevant reviews and create PR line comments for issues found.
-Report back with: approval status, blocking issues, and recommendations."
+Task tool with subagent_type="ComplexityReview":
+"Review PR #${PR_NUMBER} for complexity issues.
+Save report to: ${REVIEW_DIR}/complexity-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+
+Task tool with subagent_type="TestsReview":
+"Review PR #${PR_NUMBER} for test quality.
+Save report to: ${REVIEW_DIR}/tests-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
 ```
 
-### Review Output Expected
+**Conditionally run based on file types:**
 
-The Review agent will:
-1. Run relevant reviews (Security, Architecture, Tests, etc.)
-2. Create PR line comments for issues
-3. Generate review summary
-4. Provide merge recommendation
+If TypeScript files changed:
+```
+Task tool with subagent_type="TypescriptReview":
+"Review PR #${PR_NUMBER} for TypeScript issues.
+Save report to: ${REVIEW_DIR}/typescript-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+```
 
-**Wait for Review agent to complete.**
+If database files changed:
+```
+Task tool with subagent_type="DatabaseReview":
+"Review PR #${PR_NUMBER} for database issues.
+Save report to: ${REVIEW_DIR}/database-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+```
+
+If dependency files changed:
+```
+Task tool with subagent_type="DependenciesReview":
+"Review PR #${PR_NUMBER} for dependency issues.
+Save report to: ${REVIEW_DIR}/dependencies-report.${REVIEW_TIMESTAMP}.md
+Create PR line comments for issues found."
+```
+
+### Aggregate Results
+
+After all reviews complete, read reports and determine status:
+
+```markdown
+| Condition | Status |
+|-----------|--------|
+| Any CRITICAL issues | ❌ BLOCKED |
+| Any HIGH issues | ⚠️ CHANGES_REQUESTED |
+| Only MEDIUM/LOW | ✅ APPROVED |
+```
 
 ### Handle Review Results
 
@@ -223,6 +290,7 @@ ${TASK_DESCRIPTION}
 | Commits | ${NUM_COMMITS} |
 | Files Changed | ${NUM_FILES} |
 | Review Status | ${REVIEW_STATUS} |
+| Reviews Run | ${NUM_REVIEWS} |
 
 ### Files Touched
 ${LIST_OF_FILES}
@@ -307,26 +375,11 @@ echo "✅ Cleanup complete"
 
 ---
 
-## Agent Hierarchy
-
-```
-Swarm (orchestrator)
-├── spawns: Design
-│   ├── spawns: Explore (3x parallel)
-│   └── spawns: Plan (2x sequential)
-├── spawns: Coder
-│   └── implements, tests, commits, creates PR
-└── spawns: Review
-    └── spawns: *Review agents (parallel)
-```
-
----
-
 ## Principles
 
 1. **Orchestrate, don't implement** - Spawn specialized agents for each phase
 2. **Single responsibility** - One task, one lifecycle
-3. **Leverage existing agents** - Design, Coder, Review handle complexity
+3. **Direct agent spawning** - Spawn worker agents directly, no orchestrator chains
 4. **Isolated execution** - Worktree prevents interference
 5. **Honest reporting** - Surface all issues, don't hide failures
 6. **Retry with limits** - Attempt recovery, but escalate if stuck

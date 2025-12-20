@@ -95,21 +95,23 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 ### Agent Persistence Rules
 
-**Persisting agents** (create files in `.docs/`):
+**Persisting agents/commands** (create files in `.docs/`):
 - `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
-- `Coordinator` → `.docs/coordinator/state.json` + `release-issue.md`
+- `/coordinate` → `.docs/coordinator/state.json` + `release-issue.md`
 - `Design` → `.docs/design/{topic-slug}-{timestamp}.md`
 - `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
 - `*Review` (9 types) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
-- `Review` → `.docs/reviews/{branch-slug}/review-summary-{timestamp}.md`
 - `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
-**Orchestration agents** (spawn other agents, may create worktrees):
-- `Planner` - Spawns Specifiers, creates release issue
-- `Coordinator` - Spawns GetIssue + Swarm agents
-- `Swarm` - Spawns Design → Coder → Review
-- `Specifier` - Spawns Explore + Plan, creates GitHub issue
+**Orchestration commands** (run in main context, spawn agents):
+- `/plan` - Spawns Specifier agents, creates release issue
+- `/coordinate` - Spawns Design → Coder → review-* agents per feature
+- `/swarm` - Spawns Design → Coder → review-* agents for single task
+
+**Worker agents** (do focused work, cannot spawn other agents):
+- `Design` - Explores codebase inline, creates implementation plan
+- `Specifier` - Clarifies requirements inline, creates GitHub issue
 
 **Non-persisting agents** (ephemeral, no files):
 - `Coder` - Implements code, creates commits and PR
