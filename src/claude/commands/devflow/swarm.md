@@ -1,20 +1,22 @@
 ---
-description: Execute a single task through the complete lifecycle - orchestrates Design, Coder, and Review agents
+description: Execute a single task through the complete lifecycle - orchestrates exploration, planning, implementation, and review with parallel agents
 ---
 
 # Swarm Command - Single Task Lifecycle Orchestrator
 
-Orchestrate a single task from design through implementation to review by spawning specialized agents for each phase.
+Orchestrate a single task from exploration through implementation to review by spawning multiple specialized agents in parallel where beneficial.
 
 ## Usage
 
 ```
 /swarm <task description>
+/swarm #42  (GitHub issue number)
 ```
 
 Example:
 ```
 /swarm Implement user authentication with JWT tokens
+/swarm #42
 ```
 
 For multi-task parallel execution, use `/coordinate` instead.
@@ -24,11 +26,10 @@ For multi-task parallel execution, use `/coordinate` instead.
 ## Input
 
 You receive:
-- `TASK_DESCRIPTION`: What to implement
-- `WORKTREE_DIR`: Isolated worktree path (e.g., `.worktrees/task-1`)
-- `TASK_BRANCH`: Branch name for this task (e.g., `swarm/release-1/task-1`)
-- `TARGET_BRANCH`: Branch to create PR against (e.g., `release/swarm-2025-01-15`)
-- `TASK_ID`: Identifier for this task (e.g., `task-1`)
+- `TASK_DESCRIPTION`: What to implement (or GitHub issue number)
+- `WORKTREE_DIR`: Isolated worktree path (optional, generated if not provided)
+- `TASK_BRANCH`: Branch name for this task (optional, generated if not provided)
+- `TARGET_BRANCH`: Branch to create PR against (default: current branch)
 
 If not provided, generate defaults:
 
@@ -46,104 +47,253 @@ git worktree add -b "${TASK_BRANCH}" "${WORKTREE_DIR}" "${TARGET_BRANCH}"
 
 ## Your Mission
 
-Orchestrate the complete task lifecycle by spawning specialized agents:
+Orchestrate the complete task lifecycle with parallel agents:
 
 ```
-DESIGN (Design agent) → IMPLEMENT (Coder agent) → REVIEW (review-* agents) → REPORT
+EXPLORE (parallel) → PLAN (parallel) → IMPLEMENT (parallel if possible) → REVIEW (parallel) → REPORT
 ```
 
 **Output**: A PR that's ready for merge (or issues that need addressing).
 
 ---
 
-## Phase 1: Design
+## Phase 1: Fetch Task Details (if issue number)
 
-Spawn the Design agent to create a detailed implementation plan.
+If input is a GitHub issue number:
 
 ```
-Task tool with subagent_type="Design":
+Task tool with subagent_type="GetIssue":
+"Fetch details for GitHub issue #${ISSUE_NUMBER}
 
-"Create implementation design for: ${TASK_DESCRIPTION}
-
-Working directory: ${WORKTREE_DIR}
-Target branch: ${TARGET_BRANCH}
-
-Explore the codebase, understand existing patterns, and create a detailed
-implementation plan. Save the design to: .docs/design/${TASK_ID}-design.md
-
-Be thorough - this plan will be executed by the Coder agent."
-```
-
-### Design Output Expected
-
-The Design agent will:
-1. Explore architecture, integration points, and reusable code inline
-2. Synthesize findings and clarify ambiguities with user
-3. Create detailed implementation plan
-4. Persist design document
-
-**Wait for Design agent to complete before proceeding.**
-
-### Verify Design
-
-```bash
-DESIGN_FILE=".docs/design/${TASK_ID}-design.md"
-if [ ! -f "$DESIGN_FILE" ]; then
-    echo "ERROR: Design document not created"
-    exit 1
-fi
-
-echo "✅ Design complete: $DESIGN_FILE"
+Return: title, description, acceptance criteria, labels, linked issues"
 ```
 
 ---
 
-## Phase 2: Implement
+## Phase 2: Explore (Parallel Agents)
 
-Spawn the Coder agent to execute the implementation plan.
+Spawn multiple Explore agents to understand different aspects.
+
+**Spawn in a single message (parallel execution):**
+
+```
+Task tool with subagent_type="Explore":
+"Explore ARCHITECTURE for: ${TASK_DESCRIPTION}
+
+Working directory: ${WORKTREE_DIR}
+
+Find:
+- Similar implementations in codebase
+- Architectural patterns used
+- Module/component structure
+- How similar features are organized
+
+Thoroughness: medium
+Report: architecture patterns with file:line references"
+
+Task tool with subagent_type="Explore":
+"Explore INTEGRATION POINTS for: ${TASK_DESCRIPTION}
+
+Working directory: ${WORKTREE_DIR}
+
+Find:
+- Entry points (routes, handlers, CLI)
+- Services this will interact with
+- Database models affected
+- Configuration needed
+
+Thoroughness: medium
+Report: integration points with file:line references"
+
+Task tool with subagent_type="Explore":
+"Explore REUSABLE CODE for: ${TASK_DESCRIPTION}
+
+Working directory: ${WORKTREE_DIR}
+
+Find:
+- Existing utilities to leverage
+- Helper functions
+- Validation patterns
+- Error handling patterns
+- Logging patterns
+
+Thoroughness: medium
+Report: reusable code with file:line references"
+
+Task tool with subagent_type="Explore":
+"Explore EDGE CASES for: ${TASK_DESCRIPTION}
+
+Working directory: ${WORKTREE_DIR}
+
+Find how similar features handle:
+- Invalid input scenarios
+- Missing dependencies / external service failures
+- Race conditions / concurrent requests
+- Permission / authorization failures
+- Resource limits
+
+Thoroughness: quick
+Report: edge case patterns with file:line references"
+```
+
+### Synthesize Exploration
+
+Combine findings into:
+- Patterns to follow (with file:line)
+- Integration points (with file:line)
+- Code to reuse (with file:line)
+- Edge cases to handle
+
+---
+
+## Phase 3: Plan (Parallel Agents)
+
+Spawn multiple Plan agents for different aspects.
+
+**Spawn in a single message (parallel execution):**
+
+```
+Task tool with subagent_type="Plan":
+"Plan IMPLEMENTATION STEPS for: ${TASK_DESCRIPTION}
+
+Based on exploration:
+${EXPLORATION_SUMMARY}
+
+Create detailed step-by-step implementation plan:
+- Files to create/modify
+- Order of changes
+- Dependencies between steps
+- What each step produces
+
+Output: Ordered implementation steps with file paths"
+
+Task tool with subagent_type="Plan":
+"Plan TESTING STRATEGY for: ${TASK_DESCRIPTION}
+
+Based on exploration:
+${EXPLORATION_SUMMARY}
+
+Design testing approach:
+- Unit tests needed
+- Integration tests needed
+- Edge cases to test
+- Test file locations
+
+Output: Testing plan with specific test cases"
+
+Task tool with subagent_type="Plan":
+"Analyze PARALLELIZATION for: ${TASK_DESCRIPTION}
+
+Based on exploration:
+${EXPLORATION_SUMMARY}
+
+Determine if work can be split:
+- Independent components that don't share state
+- Files that can be worked on simultaneously
+- Work that MUST be sequential (shared dependencies)
+
+Output:
+- PARALLELIZABLE: [list of independent work units]
+- SEQUENTIAL: [work that must be done in order]
+- REASONING: [why this split]"
+```
+
+### Synthesize Planning
+
+Combine into:
+- Implementation steps (ordered)
+- Testing strategy
+- Parallelization decision
+
+---
+
+## Phase 4: Implement (Parallel Coders if Beneficial)
+
+Based on the parallelization analysis, spawn Coder agents.
+
+### If Work is Parallelizable
+
+Spawn multiple Coder agents in a single message:
 
 ```
 Task tool with subagent_type="Coder":
+"Implement COMPONENT A: ${COMPONENT_A_DESCRIPTION}
 
-"Implement the task according to the design document.
-
-TASK_ID: ${TASK_ID}
-TASK_DESCRIPTION: ${TASK_DESCRIPTION}
+TASK_ID: ${TASK_ID}-component-a
 WORKTREE_DIR: ${WORKTREE_DIR}
 TARGET_BRANCH: ${TARGET_BRANCH}
-PLAN_FILE: .docs/design/${TASK_ID}-design.md
 
-The design document contains:
-- Files to modify/create
-- Implementation steps
-- Testing strategy
-- Patterns to follow
+Implementation steps:
+${COMPONENT_A_STEPS}
+
+Patterns to follow:
+${RELEVANT_PATTERNS}
+
+After implementation:
+- Write tests for this component
+- Run tests, fix failures
+- Create atomic commits
+- DO NOT create PR yet (coordinator will do that)
+
+Report: files changed, tests written, commit hashes"
+
+Task tool with subagent_type="Coder":
+"Implement COMPONENT B: ${COMPONENT_B_DESCRIPTION}
+
+TASK_ID: ${TASK_ID}-component-b
+WORKTREE_DIR: ${WORKTREE_DIR}
+TARGET_BRANCH: ${TARGET_BRANCH}
+
+Implementation steps:
+${COMPONENT_B_STEPS}
+
+Patterns to follow:
+${RELEVANT_PATTERNS}
+
+After implementation:
+- Write tests for this component
+- Run tests, fix failures
+- Create atomic commits
+- DO NOT create PR yet (coordinator will do that)
+
+Report: files changed, tests written, commit hashes"
+```
+
+### If Work Must Be Sequential
+
+Spawn a single Coder agent:
+
+```
+Task tool with subagent_type="Coder":
+"Implement: ${TASK_DESCRIPTION}
+
+TASK_ID: ${TASK_ID}
+WORKTREE_DIR: ${WORKTREE_DIR}
+TARGET_BRANCH: ${TARGET_BRANCH}
+PLAN: ${IMPLEMENTATION_PLAN}
+
+Implementation steps:
+${ORDERED_STEPS}
+
+Testing strategy:
+${TESTING_STRATEGY}
+
+Patterns to follow:
+${PATTERNS}
 
 Execute the plan:
-1. Implement changes according to design
+1. Implement changes step by step
 2. Write tests as specified
 3. Run tests and fix any failures
 4. Create atomic commits
 5. Push and create PR against ${TARGET_BRANCH}
 
-Report back with: PR number, files changed, test results."
+Report: PR number, files changed, test results"
 ```
-
-### Coder Output Expected
-
-The Coder agent will:
-1. Read the design document
-2. Implement changes step by step
-3. Write and run tests
-4. Create commits with descriptive messages
-5. Push branch and create PR
-
-**Wait for Coder agent to complete.**
 
 ### Verify Implementation
 
 ```bash
-# Check PR was created
 PR_NUMBER=$(gh pr list --head "${TASK_BRANCH}" --json number -q '.[0].number')
 if [ -z "$PR_NUMBER" ]; then
     echo "ERROR: No PR created"
@@ -151,15 +301,14 @@ if [ -z "$PR_NUMBER" ]; then
 fi
 
 PR_URL=$(gh pr view "$PR_NUMBER" --json url -q '.url')
-echo "✅ Implementation complete: PR #${PR_NUMBER}"
-echo "   URL: ${PR_URL}"
+echo "Implementation complete: PR #${PR_NUMBER}"
 ```
 
 ---
 
-## Phase 3: Review (Inline Orchestration)
+## Phase 5: Review (Parallel Agents)
 
-Run reviews by spawning review-* agents directly. Do NOT spawn a Review orchestrator.
+Spawn review agents in parallel.
 
 ### Setup
 
@@ -169,13 +318,8 @@ REVIEW_TIMESTAMP=$(date +%Y-%m-%d_%H%M)
 REVIEW_DIR=".docs/reviews/${BRANCH_SLUG}"
 mkdir -p "$REVIEW_DIR"
 
-# Get changed files for review selection
+# Determine which reviews to run
 CHANGED_FILES=$(git diff --name-only ${TARGET_BRANCH}...HEAD)
-```
-
-### Determine Relevant Reviews
-
-```bash
 HAS_TS=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | head -1)
 HAS_SQL=$(echo "$CHANGED_FILES" | grep -iE '\.(sql|prisma|drizzle)$' | head -1)
 HAS_DEPS=$(echo "$CHANGED_FILES" | grep -E '(package\.json|requirements\.txt|Cargo\.toml)' | head -1)
@@ -183,7 +327,7 @@ HAS_DEPS=$(echo "$CHANGED_FILES" | grep -E '(package\.json|requirements\.txt|Car
 
 ### Spawn Review Agents (Parallel)
 
-**Always run these 5 reviews:**
+**Always run these 5 reviews in a single message:**
 
 ```
 Task tool with subagent_type="SecurityReview":
@@ -212,9 +356,9 @@ Save report to: ${REVIEW_DIR}/tests-report.${REVIEW_TIMESTAMP}.md
 Create PR line comments for issues found."
 ```
 
-**Conditionally run based on file types:**
+**Conditionally add based on file types:**
 
-If TypeScript files changed:
+If TypeScript files changed, add:
 ```
 Task tool with subagent_type="TypescriptReview":
 "Review PR #${PR_NUMBER} for TypeScript issues.
@@ -222,7 +366,7 @@ Save report to: ${REVIEW_DIR}/typescript-report.${REVIEW_TIMESTAMP}.md
 Create PR line comments for issues found."
 ```
 
-If database files changed:
+If database files changed, add:
 ```
 Task tool with subagent_type="DatabaseReview":
 "Review PR #${PR_NUMBER} for database issues.
@@ -230,7 +374,7 @@ Save report to: ${REVIEW_DIR}/database-report.${REVIEW_TIMESTAMP}.md
 Create PR line comments for issues found."
 ```
 
-If dependency files changed:
+If dependency files changed, add:
 ```
 Task tool with subagent_type="DependenciesReview":
 "Review PR #${PR_NUMBER} for dependency issues.
@@ -238,16 +382,14 @@ Save report to: ${REVIEW_DIR}/dependencies-report.${REVIEW_TIMESTAMP}.md
 Create PR line comments for issues found."
 ```
 
-### Aggregate Results
-
-After all reviews complete, read reports and determine status:
+### Aggregate Review Results
 
 ```markdown
 | Condition | Status |
 |-----------|--------|
-| Any CRITICAL issues | ❌ BLOCKED |
-| Any HIGH issues | ⚠️ CHANGES_REQUESTED |
-| Only MEDIUM/LOW | ✅ APPROVED |
+| Any CRITICAL issues | BLOCKED |
+| Any HIGH issues | CHANGES_REQUESTED |
+| Only MEDIUM/LOW | APPROVED |
 ```
 
 ### Handle Review Results
@@ -270,12 +412,12 @@ If BLOCKED:
 
 ---
 
-## Phase 4: Report
+## Phase 6: Report
 
 Return results to user:
 
 ```markdown
-## 🔄 Swarm Task Complete: ${TASK_ID}
+## Swarm Task Complete: ${TASK_ID}
 
 ### Task
 ${TASK_DESCRIPTION}
@@ -286,11 +428,13 @@ ${TASK_DESCRIPTION}
 |--------|-------|
 | PR Number | #${PR_NUMBER} |
 | PR URL | ${PR_URL} |
-| Design Doc | .docs/design/${TASK_ID}-design.md |
+| Explore Agents | ${NUM_EXPLORERS} |
+| Plan Agents | ${NUM_PLANNERS} |
+| Coder Agents | ${NUM_CODERS} (${PARALLEL_OR_SEQUENTIAL}) |
+| Review Agents | ${NUM_REVIEWERS} |
 | Commits | ${NUM_COMMITS} |
 | Files Changed | ${NUM_FILES} |
 | Review Status | ${REVIEW_STATUS} |
-| Reviews Run | ${NUM_REVIEWS} |
 
 ### Files Touched
 ${LIST_OF_FILES}
@@ -305,40 +449,33 @@ ${BLOCKING_ISSUES}
 
 ## Error Handling
 
-### Design Failure
-
-If Design agent fails:
+### Exploration Failure
 
 ```markdown
-## ❌ Design Phase Failed
+## Exploration Failed
 
-**Task**: ${TASK_ID}
 **Error**: ${ERROR_MESSAGE}
 
 **Options**:
-1. Retry Design phase
-2. Escalate to user for manual design
-3. Skip task
+1. Retry exploration with different focus
+2. Proceed with limited context
+3. Escalate to user
 
 **Recommendation**: ${RECOMMENDATION}
 ```
 
 ### Implementation Failure
 
-If Coder agent fails:
-
 ```markdown
-## ❌ Implementation Failed
+## Implementation Failed
 
-**Task**: ${TASK_ID}
-**Phase**: Implementation (Coder agent)
+**Phase**: ${FAILED_PHASE}
 **Error**: ${ERROR_MESSAGE}
 
 **Options**:
 1. Spawn Debug agent to investigate
-2. Retry with Coder agent
+2. Retry with single Coder
 3. Escalate to user
-4. Skip task
 
 **Recommendation**: ${RECOMMENDATION}
 ```
@@ -346,40 +483,61 @@ If Coder agent fails:
 ### Review Issues Found
 
 ```markdown
-## ⚠️ Review Found Issues
+## Review Found Issues
 
-**Task**: ${TASK_ID}
 **PR**: #${PR_NUMBER}
-
-**Issues Found**:
-${LIST_OF_ISSUES}
+**Issues Found**: ${LIST_OF_ISSUES}
 
 **Next Steps**:
-Run `/resolve-comments #${PR_NUMBER}` to address feedback systematically.
+Run `/resolve-comments #${PR_NUMBER}` to address feedback.
 ```
 
 ---
 
 ## Cleanup (if standalone)
 
-If running as standalone (not part of orchestrator):
+After PR is merged:
 
 ```bash
-# After PR is merged, cleanup worktree
 git worktree remove "${WORKTREE_DIR}" --force
 git worktree prune
 git branch -d "${TASK_BRANCH}" 2>/dev/null
 
-echo "✅ Cleanup complete"
+echo "Cleanup complete"
+```
+
+---
+
+## Architecture
+
+```
+/swarm (command - runs in main context)
+├── spawns: GetIssue agent (if issue number provided)
+├── spawns: 4 Explore agents (parallel)
+│   ├── Architecture exploration
+│   ├── Integration points exploration
+│   ├── Reusable code exploration
+│   └── Edge cases exploration
+├── synthesizes exploration results
+├── spawns: 3 Plan agents (parallel)
+│   ├── Implementation steps
+│   ├── Testing strategy
+│   └── Parallelization analysis
+├── spawns: 1-N Coder agents (parallel if work is parallelizable)
+│   └── Each works on independent component
+├── creates PR (if parallel coders, merges their work first)
+├── spawns: 5-8 review-* agents (parallel)
+│   └── Security, Architecture, Performance, Complexity, Tests, [TypeScript, Database, Dependencies]
+└── reports results
 ```
 
 ---
 
 ## Principles
 
-1. **Orchestrate, don't implement** - Spawn specialized agents for each phase
-2. **Single responsibility** - One task, one lifecycle
-3. **Direct agent spawning** - Spawn worker agents directly, no orchestrator chains
-4. **Isolated execution** - Worktree prevents interference
+1. **Parallel by default** - Explore, plan, and review in parallel
+2. **Smart parallelization** - Split implementation when beneficial
+3. **Sequential when needed** - Respect dependencies between components
+4. **Comprehensive review** - All PRs get full review coverage
 5. **Honest reporting** - Surface all issues, don't hide failures
-6. **Retry with limits** - Attempt recovery, but escalate if stuck
+6. **Isolated execution** - Worktree prevents interference

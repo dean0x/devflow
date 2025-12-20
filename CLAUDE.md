@@ -95,32 +95,36 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 ### Agent Persistence Rules
 
-**Persisting agents/commands** (create files in `.docs/`):
+**Persisting commands** (create files in `.docs/`):
 - `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
 - `/coordinate` → `.docs/coordinator/state.json` + `release-issue.md`
-- `Design` → `.docs/design/{topic-slug}-{timestamp}.md`
+- `/swarm`, `/coordinate` (via Plan agents) → `.docs/design/{topic-slug}-{timestamp}.md`
 - `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
 - `*Review` (9 types) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
 - `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
-**Orchestration commands** (run in main context, spawn agents):
-- `/plan` - Spawns Specifier agents, creates release issue
-- `/coordinate` - Spawns Design → Coder → review-* agents per feature
-- `/swarm` - Spawns Design → Coder → review-* agents for single task
+**Orchestration commands** (run in main context, spawn native agents):
+- `/specify` - Spawns 3 Explore + 2 Plan agents, creates GitHub issue
+- `/plan` - Spawns 3 Explore + N Plan agents (one per feature), creates release issue
+- `/swarm` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
+- `/coordinate` - Spawns agents per wave: Explore → Plan → Coder (parallel if possible) → review-*
 
-**Worker agents** (do focused work, cannot spawn other agents):
-- `Design` - Explores codebase inline, creates implementation plan
-- `Specifier` - Clarifies requirements inline, creates GitHub issue
+**Native agents used** (built-in Claude Code agents):
+- `Explore` - Fast codebase exploration (patterns, integration, testing)
+- `Plan` - Implementation planning with trade-off analysis
+- `Coder` - Code implementation in isolated worktrees
+- `*Review` (9 types) - Specialized code analysis
 
-**Non-persisting agents** (ephemeral, no files):
-- `Coder` - Implements code, creates commits and PR
+**Utility agents** (focused tasks, no sub-spawning):
 - `Commit` - Creates git commit only
 - `GetIssue` - Fetches GitHub issue details
 - `PullRequest` - Creates GitHub PR only
 - `Devlog` - Read-only, analyzes project state for CatchUp
 - `Comment` - Creates PR comments only
 - `TechDebt` - Updates GitHub issue only
+- `Debug` - Systematic debugging with hypothesis testing
+- `CatchUp` - Context restoration from status logs
 
 ### Implementation Checklist
 

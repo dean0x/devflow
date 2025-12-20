@@ -269,45 +269,98 @@ For wave in waves:
     6. Proceed to next wave (or handle failures)
 ```
 
-### Execute Feature Lifecycle (Inline Swarm Logic)
+### Execute Feature Lifecycle (Parallel Agents)
 
-For each feature in current wave, run the complete lifecycle:
+For each feature in current wave, run the complete lifecycle with multiple agents.
 
-#### Step 1: Design Phase
+#### Step 1: Explore Phase (Parallel per Wave)
 
-Spawn Design agents for all features in wave (parallel):
+For all features in the wave, spawn Explore agents simultaneously:
 
 ```
-Task tool with subagent_type="Design" (for each feature in wave):
+Task tool with subagent_type="Explore" (for each feature):
+"Explore ARCHITECTURE for #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
-"Create implementation design for GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
-
-TASK_ID: feature-${ISSUE_NUMBER}
 Working directory: .worktrees/feature-${ISSUE_NUMBER}
-Target branch: ${RELEASE_BRANCH}
 
-Requirements from issue:
+Find:
+- Similar implementations in codebase
+- Architectural patterns to follow
+- Integration points
+- Reusable code
+
+Thoroughness: medium
+Report: patterns and integration points with file:line"
+
+Task tool with subagent_type="Explore" (for each feature):
+"Explore EDGE CASES for #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+
+Working directory: .worktrees/feature-${ISSUE_NUMBER}
+
+Find how similar features handle:
+- Error scenarios
+- Validation
+- Authorization
+- Resource limits
+
+Thoroughness: quick
+Report: edge case patterns with file:line"
+```
+
+#### Step 2: Plan Phase (Parallel per Wave)
+
+For all features in the wave, spawn Plan agents:
+
+```
+Task tool with subagent_type="Plan" (for each feature):
+"Plan IMPLEMENTATION for #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+
+Based on exploration findings and issue requirements:
 ${ISSUE_BODY}
 
-Explore the codebase, understand existing patterns, and create a detailed
-implementation plan. Save the design to: .docs/design/feature-${ISSUE_NUMBER}-design.md
+Create:
+- Step-by-step implementation plan
+- Files to create/modify
+- Testing strategy
+- Parallelization analysis (can work be split?)
 
-Be thorough - this plan will be executed by the Coder agent."
+Save plan to: .docs/design/feature-${ISSUE_NUMBER}-design.md"
 ```
 
-Wait for all Design agents to complete before proceeding.
+Wait for all Plan agents to complete before proceeding.
 
-#### Step 2: Implementation Phase
+#### Step 3: Implementation Phase
 
-Spawn Coder agents for all features (parallel):
+Based on the Plan agent's parallelization analysis, spawn Coder agents.
+
+**If work is parallelizable (multiple independent components):**
+
+```
+Task tool with subagent_type="Coder" (for component A):
+"Implement COMPONENT A of #${ISSUE_NUMBER}
+
+WORKTREE_DIR: .worktrees/feature-${ISSUE_NUMBER}
+Component: ${COMPONENT_A_DESCRIPTION}
+Steps: ${COMPONENT_A_STEPS}
+
+- Implement this component
+- Write tests
+- Create atomic commits
+- DO NOT create PR (coordinator will merge and create PR)
+
+Report: files changed, tests written, commit hashes"
+
+Task tool with subagent_type="Coder" (for component B):
+"Implement COMPONENT B of #${ISSUE_NUMBER}
+..."
+```
+
+**If work must be sequential:**
 
 ```
 Task tool with subagent_type="Coder" (for each feature):
+"Implement GitHub issue #${ISSUE_NUMBER}
 
-"Implement GitHub issue #${ISSUE_NUMBER} according to the design document.
-
-TASK_ID: feature-${ISSUE_NUMBER}
-TASK_DESCRIPTION: ${ISSUE_TITLE}
 WORKTREE_DIR: .worktrees/feature-${ISSUE_NUMBER}
 TARGET_BRANCH: ${RELEASE_BRANCH}
 PLAN_FILE: .docs/design/feature-${ISSUE_NUMBER}-design.md
@@ -319,12 +372,12 @@ Execute the plan:
 4. Create atomic commits
 5. Push and create PR against ${RELEASE_BRANCH}
 
-Report back with: PR number, files changed, test results."
+Report: PR number, files changed, test results."
 ```
 
 Wait for all Coder agents to complete before proceeding.
 
-#### Step 3: Review Phase
+#### Step 4: Review Phase
 
 For each feature's PR, spawn review agents (parallel):
 
@@ -396,7 +449,7 @@ Save report to: ${REVIEW_DIR}/dependencies-report.${REVIEW_TIMESTAMP}.md
 Create PR line comments for issues found."
 ```
 
-#### Step 4: Aggregate Review Results
+#### Step 5: Aggregate Review Results
 
 ```markdown
 | Condition | Status |
@@ -774,16 +827,23 @@ echo "✅ Aborted and cleaned up"
 ```
 /coordinate (command - runs in main context)
 ├── Parses release issue for feature references
+├── Creates worktrees for each feature
 ├── For each wave of features:
-│   ├── spawns: Design agents (parallel per feature)
-│   ├── waits for completion
-│   ├── spawns: Coder agents (parallel per feature)
-│   ├── waits for completion
-│   └── spawns: review-* agents (parallel per feature/review type)
+│   ├── spawns: 2 Explore agents per feature (parallel)
+│   │   ├── Architecture exploration
+│   │   └── Edge cases exploration
+│   ├── spawns: Plan agent per feature (parallel)
+│   │   └── Creates implementation plan with parallelization analysis
+│   ├── spawns: 1-N Coder agents per feature (parallel if work parallelizable)
+│   │   └── Each implements independent component
+│   └── spawns: 5-8 review-* agents per PR (parallel)
+│       └── Security, Architecture, Performance, Complexity, Tests, [conditional]
 └── Reports: PRs ready for review, issues identified
 ```
 
-**Why command-level orchestration**: Commands run in the main context and have access to the Task tool for spawning agents. Agents cannot spawn other agents.
+**Why parallel agents**: Multiple agents working on different aspects (patterns, integration, edge cases) produce more thorough results than a single agent trying to cover everything.
+
+**Why parallel Coders**: When work can be split into independent components, multiple Coders working in parallel complete faster than one Coder doing everything sequentially.
 
 ---
 

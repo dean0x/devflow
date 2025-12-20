@@ -83,23 +83,23 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 
-### 🤖 Sub-Agents
+### 🤖 Agents
 
-**Architecture Note**: Commands run in the main context and can spawn agents. Agents cannot spawn other agents - they do focused work inline.
+**Architecture**: Commands run in the main context and spawn multiple agents in parallel for optimal results. Orchestration happens at command level.
 
-**Worker Agents** (implementation and specification):
+**Native Agents** (built-in Claude Code agents, spawned by commands):
 
-| Sub-Agent | Specialty | Purpose |
-|-----------|-----------|---------|
-| `Design` | Implementation Planning | Explores codebase inline, creates detailed implementation plan |
-| `Specifier` | Feature Specification | Clarifies requirements inline, creates GitHub issue |
-| `Coder` | Implementation | Writes code in isolated worktrees, creates PR |
+| Agent | Specialty | Usage |
+|-------|-----------|-------|
+| `Explore` | Codebase Exploration | 3-4 spawned in parallel per task for patterns, integration, edge cases |
+| `Plan` | Implementation Planning | 1-3 spawned in parallel per task for architecture, testing, parallelization |
+| `Coder` | Implementation | 1-N spawned per task (parallel when work is parallelizable) |
 
 **Review Agents** (specialized code analysis):
 
-| Sub-Agent | Specialty | Purpose |
-|-----------|-----------|---------|
-| `SecurityReview` | Security Analysis | Expert vulnerability detection and security code review |
+| Agent | Specialty | Purpose |
+|-------|-----------|---------|
+| `SecurityReview` | Security | Vulnerability detection and security code review |
 | `PerformanceReview` | Performance | Optimization and bottleneck detection |
 | `ArchitectureReview` | Architecture | Design pattern analysis and code structure review |
 | `TestsReview` | Testing | Test quality, coverage, and effectiveness analysis |
@@ -111,8 +111,8 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 
 **Utility Agents** (focused tasks):
 
-| Sub-Agent | Specialty | Purpose |
-|-----------|-----------|---------|
+| Agent | Specialty | Purpose |
+|-------|-----------|---------|
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
 | `Commit` | Git Operations | Intelligent commit creation with safety checks |
@@ -123,11 +123,11 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `Comment` | PR Comments | Create summary comments for non-diff issues |
 | `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
 
-**How Sub-Agents Work:**
-- Specialized AI assistants with deep expertise in specific domains
-- Separate context windows for focused analysis
-- Spawned by orchestration commands (`/plan`, `/swarm`, `/coordinate`, `/review`)
-- Restricted tool access appropriate to their domain
+**How Commands Orchestrate Agents:**
+- `/specify` → 3 Explore + 2 Plan agents → GitHub issue
+- `/plan` → 3 Explore + N Plan agents → N feature issues + release issue
+- `/swarm` → 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
+- `/coordinate` → Per wave: Explore → Plan → Coder (parallel) → Review → PRs
 
 **Invoking Sub-Agents:**
 ```bash

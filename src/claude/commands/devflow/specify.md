@@ -1,12 +1,12 @@
 ---
-description: Specify a single feature through batched interactive clarification - automatically creates a well-defined GitHub issue ready for Swarm
+description: Specify a single feature through exploration, planning, and interactive clarification - creates a well-defined GitHub issue ready for Swarm
 ---
 
-# Specifier - Feature Specification Unit
+# Specify - Feature Specification Command
 
-Transform a rough feature idea into a well-defined, implementation-ready GitHub issue through batched interactive clarification.
+Transform a rough feature idea into a well-defined, implementation-ready GitHub issue through multi-agent exploration, planning, and user clarification.
 
-**Does NOT implement** - only specifies. Output feeds into Swarm for execution.
+**Does NOT implement** - only specifies. Output feeds into `/swarm` for execution.
 
 ## Usage
 
@@ -23,26 +23,23 @@ For multi-feature release planning, use `/plan` instead.
 ## Input
 
 You receive:
-- `FEATURE_IDEA`: Rough description of the feature (e.g., "User authentication with social login")
-- `REPO_CONTEXT`: Optional existing codebase context
+- `FEATURE_IDEA`: Rough description of the feature
 
 ## Your Mission
 
 Transform a vague feature idea into a precise specification:
 
 ```
-UNDERSTAND → EXPLORE → PLAN → CLARIFY → SPECIFY → CREATE ISSUE
+UNDERSTAND → EXPLORE (parallel) → PLAN (parallel) → CLARIFY → CREATE ISSUE
 ```
 
-**Output**: A GitHub issue with complete specification ready for Swarm.
+**Output**: A GitHub issue with complete specification ready for `/swarm`.
 
 ---
 
 ## Phase 1: Understand
 
-### Parse the Feature Idea
-
-Extract initial understanding:
+Parse the feature idea and extract initial understanding:
 
 ```markdown
 ## Initial Understanding
@@ -63,211 +60,193 @@ Extract initial understanding:
 
 ---
 
-## Phase 2: Explore (Inline)
+## Phase 2: Explore (Parallel Agents)
 
-Use Glob, Grep, and Read tools directly to understand existing patterns.
+Spawn multiple Explore agents in parallel to understand different aspects of the codebase.
 
-### 2.1 Find Related Features
+**Spawn in a single message (parallel execution):**
 
 ```
-Glob: **/*.ts, **/*.py, **/*.go
-Grep: keywords related to ${FEATURE_IDEA}
+Task tool with subagent_type="Explore":
+"Explore PATTERNS for: ${FEATURE_IDEA}
+
+Find existing patterns in the codebase:
+- How similar features are implemented
+- API patterns (routes, controllers, handlers)
+- Database patterns (models, schemas, migrations)
+- Naming conventions used
+
+Thoroughness: medium
+Report: patterns found with file:line references"
+
+Task tool with subagent_type="Explore":
+"Explore INTEGRATION POINTS for: ${FEATURE_IDEA}
+
+Find where this feature would connect:
+- Entry points (routes, event handlers, CLI commands)
+- Services/modules it would interact with
+- Shared utilities it could use
+- Configuration/environment variables needed
+
+Thoroughness: medium
+Report: integration points with file:line references"
+
+Task tool with subagent_type="Explore":
+"Explore TESTING PATTERNS for: ${FEATURE_IDEA}
+
+Find how testing is done:
+- Test file locations and naming
+- Testing frameworks and utilities used
+- Mocking patterns
+- Integration vs unit test separation
+
+Thoroughness: quick
+Report: testing patterns with file:line references"
 ```
 
-Search for:
-- Related existing functionality
-- Similar feature implementations
-- How the codebase handles similar concerns
+### Synthesize Exploration Results
 
-### 2.2 Identify Patterns
-
-Read files found to extract:
-
-1. **API patterns** in use
-   ```
-   Grep: route, endpoint, handler, controller
-   ```
-
-2. **Database models** that might be affected
-   ```
-   Grep: model, schema, entity, table
-   ```
-
-3. **Authentication/authorization patterns**
-   ```
-   Grep: auth, permission, role, token
-   ```
-
-4. **Testing patterns**
-   ```
-   Glob: **/*.test.*, **/*.spec.*
-   ```
-
-### 2.3 Synthesize Context
+After all Explore agents complete, combine their findings:
 
 ```markdown
 ## Codebase Context
 
-**Existing Related Features**:
-- [feature]: [how it relates] (file:line)
-
 **Patterns to Follow**:
-- API: [pattern] (file:line)
-- Database: [pattern] (file:line)
-- Auth: [pattern] (file:line)
-- Testing: [pattern] (file:line)
+| Pattern | Example | Location |
+|---------|---------|----------|
+| API routes | REST with Express | src/routes/users.ts:15 |
+| Database | Prisma ORM | src/models/user.ts:1 |
+| Auth | JWT middleware | src/middleware/auth.ts:20 |
 
 **Integration Points**:
-- [where this feature connects to existing code]
+- [where this connects] (file:line)
+
+**Reusable Code**:
+- [existing utilities to leverage] (file:line)
+
+**Testing Approach**:
+- [how to test this] (file:line examples)
 ```
 
 ---
 
-## Phase 3: Plan (Inline)
+## Phase 3: Plan (Parallel Agents)
 
-Based on exploration findings, think through the technical design.
+Spawn multiple Plan agents to think through different aspects.
 
-### 3.1 Technical Approach Analysis
+**Spawn in a single message (parallel execution):**
 
-Consider and document:
+```
+Task tool with subagent_type="Plan":
+"Plan ARCHITECTURE for: ${FEATURE_IDEA}
 
-1. **Architecture** - How does this fit into the existing system?
-2. **Data model** - What entities/tables are needed?
-3. **API design** - What endpoints/interfaces are required?
-4. **Integration** - How does this connect to existing code?
-5. **Edge cases** - What could go wrong?
-6. **Trade-offs** - What are the key design decisions?
+Based on codebase patterns found:
+${EXPLORATION_SUMMARY}
 
-### 3.2 Synthesize Technical Plan
+Design the high-level architecture:
+- Components/modules needed
+- Data flow
+- API design (endpoints, request/response)
+- How it fits into existing architecture
+
+Output: Architecture recommendation with trade-offs"
+
+Task tool with subagent_type="Plan":
+"Plan DATA MODEL for: ${FEATURE_IDEA}
+
+Based on existing database patterns:
+${EXPLORATION_SUMMARY}
+
+Design the data model:
+- New tables/collections needed
+- Fields and types
+- Relationships to existing models
+- Migrations required
+
+Output: Data model design with alternatives"
+```
+
+### Synthesize Planning Results
 
 ```markdown
 ## Technical Approach (Draft)
 
-**Recommended Architecture**:
+**Architecture**:
 ${ARCHITECTURE_SUMMARY}
 
 **Data Model**:
 ${DATA_MODEL_DRAFT}
 
 **API Design**:
-${API_DESIGN_DRAFT}
+${API_ENDPOINTS}
 
 **Key Trade-offs**:
 | Decision | Option A | Option B | Recommendation |
 |----------|----------|----------|----------------|
-| ${DECISION_1} | ${OPT_A} | ${OPT_B} | ${REC} |
+| ${DECISION} | ${OPT_A} | ${OPT_B} | ${REC} |
 
-**Open Questions for User**:
-- [questions that emerged from planning]
+**Open Questions**:
+- [questions for user clarification]
 ```
-
-This draft informs better questions during clarification.
 
 ---
 
 ## Phase 4: Clarify
 
-Use AskUserQuestion tool to clarify requirements interactively. Ask questions in batches of 2-4 related questions.
+Use AskUserQuestion to clarify requirements. Ask in batches of 2-4 related questions.
 
 ### 4.1 Feature Scope
 
 ```
 AskUserQuestion:
 
-Questions about: "${FEATURE_IDEA}"
-
 1. "What problem does this solve for users?"
-   - Options based on interpretation + "Other"
+   - Options based on interpretation
 
 2. "What's the minimum viable version (v1 scope)?"
-   - Options: "Full feature as described", "Core functionality only", "Phased rollout"
+   - Options: "Full feature", "Core only", "Phased"
 
 3. "What should be explicitly OUT of scope?"
-   - Multi-select options based on related features
+   - Multi-select common exclusions
 ```
 
-### 4.2 User Flows
-
-```
-AskUserQuestion:
-
-1. "Who are the primary users of this feature?"
-   - Options based on existing user types + "New user type"
-
-2. "What's the main user flow (happy path)?"
-   - Options showing different flow patterns
-
-3. "What triggers this feature?"
-   - Options: "User action", "System event", "Scheduled", "API call"
-```
-
-### 4.3 Technical Decisions
+### 4.2 Technical Decisions
 
 ```
 AskUserQuestion:
 
-1. "What's the preferred technical approach?"
-   - Options based on codebase patterns + alternatives
+1. "Preferred technical approach?"
+   - Options based on Plan agent recommendations
 
 2. "Data storage requirements?"
-   - Options: "New database table", "Extend existing model", "No persistence", "External service"
+   - Options: "New table", "Extend existing", "No persistence"
 
-3. "Authentication/authorization needs?"
-   - Options based on existing auth patterns
+3. "Performance requirements?"
+   - Options: "Real-time", "Fast (<1s)", "Async OK"
 ```
 
-### 4.4 Scale & Performance
-
-```
-AskUserQuestion:
-
-1. "Expected usage scale?"
-   - Options: "Low (< 100/day)", "Medium (100-10k/day)", "High (10k+/day)", "Unknown"
-
-2. "Performance requirements?"
-   - Options: "Real-time (<100ms)", "Fast (<1s)", "Async acceptable", "Background processing OK"
-
-3. "Caching strategy?"
-   - Options based on existing caching patterns
-```
-
-### 4.5 Edge Cases & Error Handling
+### 4.3 Edge Cases
 
 ```
 AskUserQuestion:
 
-1. "What happens when [primary dependency] fails?"
-   - Options: "Graceful degradation", "Full failure", "Retry with backoff", "Queue for later"
+1. "What happens when dependencies fail?"
+   - Options: "Graceful degradation", "Full failure", "Retry"
 
 2. "Rate limiting needed?"
-   - Options: "Yes - per user", "Yes - global", "No", "Defer to v2"
-
-3. "What are the critical error scenarios?"
-   - Multi-select common error types
-```
-
-### 4.6 Dependencies
-
-```
-AskUserQuestion:
-
-1. "Does this feature depend on other features?"
-   - Options: existing features + "None" + "New feature needed"
-
-2. "Will other features depend on this?"
-   - Options: "Yes - blocking other work", "Possibly - future features", "No - standalone"
+   - Options: "Per user", "Global", "No", "Defer"
 ```
 
 ---
 
-## Phase 5: Specify
+## Phase 5: Create Issue
 
-### Compile Specification
+Compile specification and create GitHub issue automatically.
 
-Based on all clarifications, compile the full specification:
+### Specification Template
 
 ```markdown
-# Feature Specification: ${FEATURE_TITLE}
+# Feature: ${FEATURE_TITLE}
 
 ## Overview
 ${ONE_PARAGRAPH_DESCRIPTION}
@@ -276,14 +255,7 @@ ${ONE_PARAGRAPH_DESCRIPTION}
 ${WHAT_PROBLEM_THIS_SOLVES}
 
 ## User Stories
-
-### Primary User: ${USER_TYPE}
 - As a ${USER_TYPE}, I want to ${ACTION} so that ${BENEFIT}
-
-### User Flow
-1. ${STEP_1}
-2. ${STEP_2}
-3. ${STEP_3}
 
 ## Technical Approach
 
@@ -305,52 +277,26 @@ ${WHERE_IT_CONNECTS}
 - ${FEATURE_1}
 - ${FEATURE_2}
 
-### Out of Scope (deferred)
+### Out of Scope
 - ${DEFERRED_1}
-- ${DEFERRED_2}
 
-## Scale & Performance
-
-- Expected load: ${SCALE}
-- Performance target: ${PERFORMANCE}
-- Caching: ${CACHING_STRATEGY}
-
-## Edge Cases & Error Handling
-
-| Scenario | Expected Behavior |
-|----------|-------------------|
-| ${EDGE_CASE_1} | ${BEHAVIOR_1} |
-| ${EDGE_CASE_2} | ${BEHAVIOR_2} |
-
-## Dependencies
-
-### Depends On
-- ${DEPENDENCY_1}
-
-### Blocks
-- ${BLOCKED_FEATURE_1}
+## Edge Cases
+| Scenario | Behavior |
+|----------|----------|
+| ${CASE} | ${HANDLING} |
 
 ## Acceptance Criteria
-
 - [ ] ${CRITERION_1}
 - [ ] ${CRITERION_2}
-- [ ] ${CRITERION_3}
 - [ ] Tests pass
 - [ ] Documentation updated
 
 ## Labels
 - Priority: ${PRIORITY}
 - Complexity: ${COMPLEXITY}
-- Type: feature
 ```
 
----
-
-## Phase 6: Create Issue
-
-After compiling the specification, **automatically create the GitHub issue** - no confirmation needed since user already clarified requirements through the Q&A process.
-
-### Create GitHub Issue
+### Create Issue
 
 ```bash
 gh issue create \
@@ -359,112 +305,68 @@ gh issue create \
 ${FULL_SPECIFICATION}
 
 ---
-🤖 Generated by DevFlow Specifier
+Generated by DevFlow /specify
 EOF
 )" \
   --label "feature" \
   --label "${PRIORITY_LABEL}" \
   --label "${COMPLEXITY_LABEL}"
-```
 
-### Capture Issue Number
-
-```bash
 ISSUE_NUMBER=$(gh issue list --limit 1 --json number -q '.[0].number')
 ISSUE_URL=$(gh issue view "$ISSUE_NUMBER" --json url -q '.url')
 
-echo "✅ Created issue #${ISSUE_NUMBER}"
-echo "   URL: ${ISSUE_URL}"
+echo "Created issue #${ISSUE_NUMBER}: ${ISSUE_URL}"
 ```
 
 ---
 
-## Phase 7: Report
-
-Return results:
+## Phase 6: Report
 
 ```markdown
-## ✅ Feature Specification Complete
+## Feature Specification Complete
 
 ### Feature
 ${FEATURE_TITLE}
 
 ### GitHub Issue
-- Number: #${ISSUE_NUMBER}
-- URL: ${ISSUE_URL}
+#${ISSUE_NUMBER} - ${ISSUE_URL}
 
-### Specification Summary
+### Summary
 - Scope: ${SCOPE_SUMMARY}
 - Complexity: ${COMPLEXITY}
 - Priority: ${PRIORITY}
-- Dependencies: ${DEPENDENCIES}
 
 ### Ready for Execution
-This issue is ready for Swarm execution:
 \`\`\`
 /swarm #${ISSUE_NUMBER}
-\`\`\`
-
-Or add to a release for coordinated execution:
-\`\`\`
-Reference #${ISSUE_NUMBER} in your release issue, then run /coordinate
 \`\`\`
 ```
 
 ---
 
-## Clarification Patterns
+## Architecture
 
-### When User Says "I don't know"
-
-```markdown
-That's fine! Let me suggest some options based on:
-- How similar features work in this codebase
-- Common patterns for this type of feature
-- Sensible defaults that can be changed later
-
-[Provide concrete suggestions with trade-offs]
 ```
-
-### When Requirements Conflict
-
-```markdown
-I notice a potential conflict:
-- ${REQUIREMENT_1} suggests ${IMPLICATION_1}
-- ${REQUIREMENT_2} suggests ${IMPLICATION_2}
-
-These might not work together because ${REASON}.
-
-Options:
-1. Prioritize ${REQUIREMENT_1} (trade-off: ${TRADEOFF})
-2. Prioritize ${REQUIREMENT_2} (trade-off: ${TRADEOFF})
-3. Find middle ground: ${COMPROMISE}
-```
-
-### When Scope Creeps
-
-```markdown
-This is growing beyond the original scope. Let's split it:
-
-**Core Feature (v1)**: ${CORE}
-- Can be delivered independently
-- Provides immediate value
-
-**Enhancement (v2)**: ${ENHANCEMENT}
-- Builds on v1
-- Can be a separate issue
-
-Should I create two issues instead?
+/specify (command - runs in main context)
+├── spawns: 3 Explore agents (parallel)
+│   ├── Patterns exploration
+│   ├── Integration points exploration
+│   └── Testing patterns exploration
+├── synthesizes exploration results
+├── spawns: 2 Plan agents (parallel)
+│   ├── Architecture planning
+│   └── Data model planning
+├── synthesizes planning results
+├── clarifies with user (AskUserQuestion)
+└── creates: GitHub issue
 ```
 
 ---
 
 ## Principles
 
-1. **Clarify, don't assume** - Ask when uncertain, don't guess
-2. **User is the authority** - They know their product best
-3. **Suggest, don't dictate** - Offer options with trade-offs
+1. **Parallel exploration** - Multiple agents explore different aspects simultaneously
+2. **Parallel planning** - Multiple agents plan different concerns
+3. **User drives decisions** - Clarify with user, don't assume
 4. **Scope ruthlessly** - Small, focused issues are better
-5. **Be concrete** - Vague specs lead to vague implementations
-6. **Document decisions** - Capture the "why" not just the "what"
-7. **Enable execution** - Output must be actionable by Swarm
+5. **Enable execution** - Output must be actionable by /swarm

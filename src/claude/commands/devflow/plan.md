@@ -1,12 +1,12 @@
 ---
-description: Plan a release from a rough feature list - spawns Specifiers in parallel, synthesizes dependencies, creates release issue ready for Coordinator
+description: Plan a release from a rough feature list - explores codebase, plans each feature, creates issues, synthesizes release plan
 ---
 
-# Planner - Release Planning Orchestrator
+# Plan - Release Planning Command
 
-Transform a rough feature list into a fully specified release plan. Spawns Specifiers for each feature in parallel, synthesizes dependencies, and creates a release issue ready for Coordinator execution.
+Transform a rough feature list into a fully specified release plan. Uses multiple Explore and Plan agents to understand context and design each feature, then creates GitHub issues for execution.
 
-**Does NOT implement or execute** - only plans. Output feeds into Coordinator for execution.
+**Does NOT implement** - only plans. Output feeds into `/coordinate` for execution.
 
 ## Usage
 
@@ -22,7 +22,7 @@ For single-feature specification, use `/specify` instead.
 ## Input
 
 You receive:
-- `FEATURE_LIST`: Rough list of features for the release (e.g., "Auth, rate limiting, dashboard redesign")
+- `FEATURE_LIST`: Rough list of features for the release
 - `RELEASE_NAME`: Optional name for this release
 
 ## Your Mission
@@ -30,7 +30,7 @@ You receive:
 Transform a rough feature list into a complete release plan:
 
 ```
-PARSE → SPECIFY (parallel) → SYNTHESIZE → CREATE RELEASE → REPORT
+PARSE → EXPLORE (parallel) → PLAN (parallel per feature) → CLARIFY → CREATE ISSUES → SYNTHESIZE → REPORT
 ```
 
 **Output**: A release issue with all feature issues created and dependencies mapped, ready for `/coordinate`.
@@ -57,18 +57,16 @@ Parse the input to identify individual features:
 - [features that might be related]
 
 **Initial Questions**:
-- [any immediate clarifications needed before specifying]
+- [any immediate clarifications needed]
 ```
 
 ### Quick Validation
-
-Use AskUserQuestion for any critical clarifications before spawning Specifiers:
 
 ```
 AskUserQuestion:
 
 1. "I identified these features from your list. Is this correct?"
-   - Options: "Yes, proceed", "Missing feature: [add]", "Remove: [which]", "Merge: [which]"
+   - Options: "Yes, proceed", "Missing feature", "Remove one", "Merge some"
 
 2. "Any features that MUST be completed before others?"
    - Options: known dependencies + "None" + "Let me specify"
@@ -76,60 +74,245 @@ AskUserQuestion:
 
 ---
 
-## Phase 2: Specify Features (Parallel)
+## Phase 2: Explore Codebase (Parallel)
 
-### Spawn Specifiers
+Spawn Explore agents to understand the codebase context for ALL features.
 
-For each feature, spawn a Specifier agent **in a single message** (parallel execution):
+**Spawn in a single message (parallel execution):**
 
 ```
-Task tool with subagent_type="Specifier" (for each feature):
+Task tool with subagent_type="Explore":
+"Explore PATTERNS for release features: ${FEATURE_LIST}
 
-"Specify feature: ${FEATURE_NAME}
+Find existing patterns in the codebase:
+- API patterns (routes, controllers, handlers)
+- Database patterns (models, schemas, migrations)
+- Authentication/authorization patterns
+- Error handling patterns
+- Naming conventions
 
-FEATURE_IDEA: ${FEATURE_DESCRIPTION}
-RELEASE_CONTEXT: Part of release "${RELEASE_NAME}" with features: ${ALL_FEATURES}
+Thoroughness: medium
+Report: patterns found with file:line references"
 
-Clarify requirements through batched questions, then automatically create the GitHub issue.
+Task tool with subagent_type="Explore":
+"Explore ARCHITECTURE for release features: ${FEATURE_LIST}
 
-Report back with: issue number, title, priority, complexity, dependencies."
+Find:
+- Module/component structure
+- How features are organized
+- Integration points between components
+- Configuration patterns
+
+Thoroughness: medium
+Report: architecture overview with file:line references"
+
+Task tool with subagent_type="Explore":
+"Explore TESTING PATTERNS for release features: ${FEATURE_LIST}
+
+Find:
+- Test file locations and naming
+- Testing frameworks used
+- Mocking patterns
+- Integration test setup
+
+Thoroughness: quick
+Report: testing patterns with file:line references"
 ```
 
-### Track Specifier Progress
+### Synthesize Exploration
 
 ```markdown
-## 🔄 Specification Progress
+## Codebase Context
 
-| Feature | Status | Issue | Priority | Complexity |
-|---------|--------|-------|----------|------------|
-| Auth | 🔄 Specifying | - | - | - |
-| Rate Limiting | 🔄 Specifying | - | - | - |
-| Dashboard | 🔄 Specifying | - | - | - |
+**Patterns to Follow**:
+| Pattern | Example | Location |
+|---------|---------|----------|
+| ${PATTERN} | ${EXAMPLE} | file:line |
+
+**Architecture**:
+- Module structure: ${STRUCTURE}
+- Integration points: ${POINTS}
+
+**Testing Approach**:
+- ${TESTING_SUMMARY}
 ```
 
-### Collect Results
+---
 
-As each Specifier completes, capture:
+## Phase 3: Plan Each Feature (Parallel)
+
+Spawn Plan agents for each feature simultaneously.
+
+**Spawn in a single message (one per feature):**
+
+```
+Task tool with subagent_type="Plan":
+"Plan feature: ${FEATURE_1}
+
+Codebase context:
+${EXPLORATION_SUMMARY}
+
+Design this feature:
+- Architecture: How it fits into the system
+- Data model: Tables/entities needed
+- API design: Endpoints required
+- Integration: How it connects to existing code
+- Dependencies: What it needs from other features
+- Complexity estimate: Low/Medium/High
+
+Output: Feature specification with technical approach"
+
+Task tool with subagent_type="Plan":
+"Plan feature: ${FEATURE_2}
+
+Codebase context:
+${EXPLORATION_SUMMARY}
+
+Design this feature:
+- Architecture: How it fits into the system
+- Data model: Tables/entities needed
+- API design: Endpoints required
+- Integration: How it connects to existing code
+- Dependencies: What it needs from other features
+- Complexity estimate: Low/Medium/High
+
+Output: Feature specification with technical approach"
+
+Task tool with subagent_type="Plan":
+"Plan feature: ${FEATURE_3}
+..."
+```
+
+### Collect Feature Plans
+
+For each feature, capture:
 
 ```json
 {
   "feature": "User Authentication",
-  "issue_number": 101,
-  "issue_url": "https://github.com/...",
-  "priority": "P0",
+  "architecture": "JWT with refresh tokens",
+  "data_model": ["User table", "Session table"],
+  "api_endpoints": ["/auth/login", "/auth/refresh"],
+  "dependencies": [],
+  "blocks": ["Rate Limiting"],
   "complexity": "High",
-  "depends_on": [],
-  "blocks": ["Rate Limiting", "API Docs"]
+  "priority": "P0"
 }
 ```
 
 ---
 
-## Phase 3: Synthesize
+## Phase 4: Clarify
+
+Use AskUserQuestion to validate plans and clarify requirements.
+
+### 4.1 Feature Priorities
+
+```
+AskUserQuestion:
+
+1. "What's the priority order for these features?"
+   - Options: Ranked list based on dependencies
+
+2. "Any features that could be deferred to v2?"
+   - Multi-select of features
+```
+
+### 4.2 Technical Decisions
+
+For each feature with multiple approaches:
+
+```
+AskUserQuestion:
+
+1. "For ${FEATURE}, which approach?"
+   - Options based on Plan agent recommendations
+```
+
+### 4.3 Scope Boundaries
+
+```
+AskUserQuestion:
+
+1. "What should be explicitly OUT of scope for this release?"
+   - Multi-select common exclusions
+```
+
+---
+
+## Phase 5: Create Feature Issues
+
+For each feature, create a GitHub issue.
+
+```bash
+for FEATURE in ${FEATURES[@]}; do
+    gh issue create \
+      --title "${FEATURE_TITLE}" \
+      --body "$(cat <<'EOF'
+# Feature: ${FEATURE_TITLE}
+
+## Overview
+${DESCRIPTION}
+
+## Technical Approach
+
+### Architecture
+${ARCHITECTURE}
+
+### Data Model
+${DATA_MODEL}
+
+### API Design
+${API_ENDPOINTS}
+
+### Integration Points
+${INTEGRATION}
+
+## Scope
+
+### In Scope
+${IN_SCOPE}
+
+### Out of Scope
+${OUT_SCOPE}
+
+## Dependencies
+- Depends on: ${DEPENDS_ON}
+- Blocks: ${BLOCKS}
+
+## Acceptance Criteria
+- [ ] ${CRITERIA}
+- [ ] Tests pass
+- [ ] Documentation updated
+
+## Labels
+- Priority: ${PRIORITY}
+- Complexity: ${COMPLEXITY}
+
+---
+Generated by DevFlow /plan
+EOF
+)" \
+      --label "feature" \
+      --label "${PRIORITY_LABEL}"
+done
+```
+
+### Capture Issue Numbers
+
+```bash
+# Collect created issue numbers
+FEATURE_ISSUES=()
+for ISSUE in $(gh issue list --limit ${NUM_FEATURES} --json number -q '.[].number'); do
+    FEATURE_ISSUES+=($ISSUE)
+done
+```
+
+---
+
+## Phase 6: Synthesize Release Plan
 
 ### Build Dependency Graph
-
-From all Specifier results, construct the dependency graph:
 
 ```markdown
 ## Dependency Analysis
@@ -145,9 +328,6 @@ From all Specifier results, construct the dependency graph:
 #103 (Dashboard) [P1, Medium]
   └── independent
 
-#104 (API Docs) [P2, Low]
-  └── depends on: #101, #102
-
 ### Execution Waves
 
 **Wave 1** (no dependencies):
@@ -155,43 +335,10 @@ From all Specifier results, construct the dependency graph:
 - #103 Dashboard Redesign (P1)
 
 **Wave 2** (after Wave 1):
-- #102 Rate Limiting (P1) - requires #101
-
-**Wave 3** (after Wave 2):
-- #104 API Documentation (P2) - requires #101, #102
+- #102 Rate Limiting (P1)
 ```
 
-### Detect Conflicts
-
-Check for issues:
-
-```markdown
-## Conflict Detection
-
-### Circular Dependencies
-${NONE_FOUND or LIST}
-
-### Priority Inversions
-${NONE_FOUND or "P2 #104 blocks P0 work - recommend reprioritizing"}
-
-### Scope Concerns
-${NONE_FOUND or "Combined scope may be too large for single release"}
-```
-
-### Resolve Conflicts (if any)
-
-```
-AskUserQuestion:
-
-1. "I found a potential issue: ${CONFLICT_DESCRIPTION}"
-   - Options: resolution choices with trade-offs
-```
-
----
-
-## Phase 4: Create Release Issue
-
-### Generate Release Issue
+### Create Release Issue
 
 ```bash
 RELEASE_TITLE="${RELEASE_NAME:-Release $(date +%Y-%m-%d)}"
@@ -211,7 +358,6 @@ ${RELEASE_DESCRIPTION}
 | #101 | User Authentication | P0 | High | None |
 | #102 | Rate Limiting | P1 | Medium | #101 |
 | #103 | Dashboard Redesign | P1 | Medium | None |
-| #104 | API Documentation | P2 | Low | #101, #102 |
 
 ## Execution Plan
 
@@ -222,15 +368,11 @@ ${RELEASE_DESCRIPTION}
 ### Wave 2 (After #101)
 - [ ] #102 Rate Limiting
 
-### Wave 3 (After #102)
-- [ ] #104 API Documentation
-
 ## Dependencies
 
 ```
-#101 ──┬──> #102 ──> #104
-       │
-#103   └──────────> #104
+#101 ──> #102
+#103 (independent)
 ```
 
 ## Ready for Execution
@@ -241,37 +383,27 @@ Run the Coordinator to execute this release:
 ```
 
 ---
-🤖 Generated by DevFlow Planner
+Generated by DevFlow /plan
 EOF
 )" \
   --label "release"
-```
 
-### Capture Release Issue
-
-```bash
 RELEASE_ISSUE=$(gh issue list --limit 1 --json number -q '.[0].number')
 RELEASE_URL=$(gh issue view "$RELEASE_ISSUE" --json url -q '.url')
-
-echo "✅ Created release issue #${RELEASE_ISSUE}"
-echo "   URL: ${RELEASE_URL}"
 ```
 
 ---
 
-## Phase 5: Report
-
-Return results:
+## Phase 7: Report
 
 ```markdown
-## 🎉 Release Planning Complete
+## Release Planning Complete
 
 ### Release
 ${RELEASE_TITLE}
 
 ### Release Issue
-- Number: #${RELEASE_ISSUE}
-- URL: ${RELEASE_URL}
+#${RELEASE_ISSUE} - ${RELEASE_URL}
 
 ### Features Specified
 
@@ -280,7 +412,6 @@ ${RELEASE_TITLE}
 | #101 | User Authentication | P0 | 1 |
 | #103 | Dashboard Redesign | P1 | 1 |
 | #102 | Rate Limiting | P1 | 2 |
-| #104 | API Documentation | P2 | 3 |
 
 ### Execution Summary
 - Total features: ${NUM_FEATURES}
@@ -288,64 +419,39 @@ ${RELEASE_TITLE}
 - Max parallelization: ${MAX_PARALLEL} features
 
 ### Ready for Execution
-
-Run the Coordinator to begin development:
 \`\`\`
 /coordinate #${RELEASE_ISSUE}
 \`\`\`
-
-This will:
-1. Create release branch
-2. Spawn Swarms for each feature
-3. Coordinate parallel execution
-4. Track progress
-5. Create PRs ready for review
 ```
 
 ---
 
 ## Error Handling
 
-### Specifier Failure
-
-If a Specifier fails:
+### Exploration Failure
 
 ```markdown
-## ⚠️ Specification Failed: ${FEATURE}
+## Exploration Failed
 
-**Error**: ${ERROR_MESSAGE}
+**Error**: ${ERROR}
 
-### Options
-
-1. **Retry** - Spawn new Specifier for this feature
-2. **Skip** - Continue without this feature, add to release later
-3. **Manual** - Create issue manually, add reference
-
-**Recommendation**: ${RECOMMENDATION}
+**Options**:
+1. Retry with different focus
+2. Proceed with limited context
+3. Escalate to user
 ```
 
-Ask user how to proceed.
-
-### Partial Completion
-
-If some features fail to specify:
+### Planning Failure
 
 ```markdown
-## ⚠️ Partial Release Planning
+## Planning Failed for: ${FEATURE}
 
-### Completed: ${COMPLETED}/${TOTAL}
-${COMPLETED_LIST}
+**Error**: ${ERROR}
 
-### Failed: ${FAILED}/${TOTAL}
-${FAILED_LIST}
-
-### Options
-
-1. **Create partial release** - Proceed with completed features
-2. **Retry failed** - Attempt to specify failed features again
-3. **Abort** - Cancel release planning
-
-**Recommendation**: Create partial release, address failed features separately
+**Options**:
+1. Retry planning
+2. Skip feature, add later
+3. Escalate to user
 ```
 
 ---
@@ -354,25 +460,26 @@ ${FAILED_LIST}
 
 ```
 /plan (command - runs in main context)
-├── spawns: Specifier agents (per feature, parallel)
-│   └── does inline exploration, clarifies with user, creates GitHub issue
-└── creates: Release issue
-    └── ready for: /coordinate command
-        └── spawns: Swarm agents (per task)
-            ├── spawns: Design agent (inline exploration)
-            ├── spawns: Coder agent
-            └── spawns: review-* agents (parallel)
+├── parses feature list from input
+├── spawns: 3 Explore agents (parallel)
+│   ├── Patterns exploration
+│   ├── Architecture exploration
+│   └── Testing patterns exploration
+├── synthesizes exploration results
+├── spawns: N Plan agents (parallel, one per feature)
+│   └── Each designs one feature
+├── clarifies with user (AskUserQuestion)
+├── creates: N GitHub issues (one per feature)
+├── creates: 1 Release issue with dependency graph
+└── reports results
 ```
-
-**Why command-level orchestration**: Commands run in the main context and have access to the Task tool for spawning agents. Agents cannot spawn other agents.
 
 ---
 
 ## Principles
 
-1. **Parallel by default** - Spawn all Specifiers at once
-2. **User drives decisions** - Specifiers clarify with user
-3. **Dependencies matter** - Map them accurately for Coordinator
-4. **Fail gracefully** - Partial success is still success
-5. **Enable execution** - Output must be actionable by Coordinator
-6. **Minimize friction** - Batch questions, auto-create issues
+1. **Parallel exploration** - Understand codebase once for all features
+2. **Parallel planning** - Plan all features simultaneously
+3. **User validation** - Confirm priorities and scope before creating issues
+4. **Dependency mapping** - Identify execution waves
+5. **Enable execution** - Output ready for /coordinate
