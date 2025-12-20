@@ -16,7 +16,7 @@ Transform a rough feature idea into a well-defined, implementation-ready GitHub 
 /specify Dashboard redesign with real-time updates
 ```
 
-For multi-feature release planning, use `/plan` instead.
+Specify handles one feature at a time. Run multiple `/specify` commands for multiple features.
 
 ---
 

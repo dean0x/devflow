@@ -23,7 +23,7 @@ Starting implementation...
 
 If no pending todos:
 ```
-No pending todos. Use /breakdown or /plan to create tasks.
+No pending todos. Use /breakdown or /specify to create tasks.
 ```
 
 ---

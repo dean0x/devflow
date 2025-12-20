@@ -97,8 +97,6 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 **Persisting commands** (create files in `.docs/`):
 - `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
-- `/coordinate` → `.docs/coordinator/state.json` + `release-issue.md`
-- `/swarm`, `/coordinate` (via Plan agents) → `.docs/design/{topic-slug}-{timestamp}.md`
 - `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
 - `*Review` (9 types) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
@@ -106,9 +104,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 **Orchestration commands** (run in main context, spawn native agents):
 - `/specify` - Spawns 3 Explore + 2 Plan agents, creates GitHub issue
-- `/plan` - Spawns 3 Explore + N Plan agents (one per feature), creates release issue
 - `/swarm` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
-- `/coordinate` - Spawns agents per wave: Explore → Plan → Coder (parallel if possible) → review-*
 
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)

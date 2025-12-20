@@ -19,7 +19,7 @@ Example:
 /swarm #42
 ```
 
-For multi-task parallel execution, use `/coordinate` instead.
+Swarm handles a single task end-to-end. For multiple independent tasks, run separate `/swarm` commands.
 
 ---
 

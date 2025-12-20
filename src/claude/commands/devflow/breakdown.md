@@ -98,7 +98,7 @@ Each task should be:
 **Total: ${count} tasks saved to todo list**
 
 💡 Run `/implement` to start working through these tasks
-💡 Run `/plan` if you want to triage before committing to tasks
+💡 Run `/specify` if you want detailed design for a specific feature
 ```
 
 ---
@@ -113,13 +113,13 @@ Each task should be:
 - Prioritize by dependencies
 
 ### NEVER:
-- Ask user for selection (use `/plan` for that)
+- Ask user for selection
 - Create vague or untestable tasks
 - Skip obvious implementation steps
 - Make tasks too large or complex
 - Forget to use TodoWrite
 
-### When to use `/breakdown` vs `/plan`:
+### When to use `/breakdown` vs `/specify`:
 
-- **`/breakdown`**: Fast capture, trust AI extraction, want all items
-- **`/plan`**: Deliberate triage, want to defer some to GitHub issues, need understanding before committing
+- **`/breakdown`**: Fast capture, trust AI extraction, want all items as todos
+- **`/specify`**: Detailed feature specification with technical design, creates GitHub issue
