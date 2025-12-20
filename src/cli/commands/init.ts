@@ -124,41 +124,24 @@ function renderCleanOutput(version: string): void {
 
 /**
  * Render detailed output for verbose mode.
- * Shows full installation details including paths, merge instructions, and skills.
+ * Shows full installation details including paths and skills.
  *
  * @param version - The DevFlow version string to display
  * @param scope - Installation scope ('user' for user-wide, 'local' for project-only)
  * @param claudeDir - Path to the Claude Code directory
  * @param devflowDir - Path to the DevFlow directory
- * @param settingsExists - Whether existing settings.json was preserved
- * @param claudeMdExists - Whether existing CLAUDE.md was preserved
  */
 function renderVerboseOutput(
   version: string,
   scope: 'user' | 'local',
   claudeDir: string,
-  devflowDir: string,
-  settingsExists: boolean,
-  claudeMdExists: boolean
+  devflowDir: string
 ): void {
   console.log(`\n✅ DevFlow v${version} installed!\n`);
 
   console.log(`📍 Installation scope: ${scope}`);
   console.log(`   Claude dir: ${claudeDir}`);
   console.log(`   DevFlow dir: ${devflowDir}\n`);
-
-  // Show manual merge instructions if needed
-  if (settingsExists || claudeMdExists) {
-    console.log('📝 Manual merge recommended:\n');
-    if (settingsExists) {
-      console.log('   Settings: Review settings.devflow.json and merge desired config into settings.json');
-      console.log('             Key setting: statusLine configuration for DevFlow statusline\n');
-    }
-    if (claudeMdExists) {
-      console.log('   Instructions: Review CLAUDE.devflow.md and adopt desired practices');
-      console.log("                 This contains DevFlow's recommended development patterns\n");
-    }
-  }
 
   console.log('Available commands:');
   for (const cmd of DEVFLOW_COMMANDS) {
@@ -391,7 +374,6 @@ export const initCommand = new Command('init')
 
       // Install settings.json - never override existing files (atomic operation)
       const settingsPath = path.join(claudeDir, 'settings.json');
-      const devflowSettingsPath = path.join(claudeDir, 'settings.devflow.json');
       const sourceSettingsPath = path.join(claudeSourceDir, 'settings.json');
 
       // Read template and replace ~ with actual home directory
@@ -401,7 +383,6 @@ export const initCommand = new Command('init')
         path.join(devflowDir, 'scripts', 'statusline.sh')
       );
 
-      let settingsExists = false;
       try {
         // Atomic exclusive create - fails if file already exists
         await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
@@ -410,11 +391,9 @@ export const initCommand = new Command('init')
         }
       } catch (error: unknown) {
         if (isNodeSystemError(error) && error.code === 'EEXIST') {
-          // Existing settings.json found - install as settings.devflow.json
-          settingsExists = true;
-          await fs.writeFile(devflowSettingsPath, settingsContent, 'utf-8');
+          // Existing settings.json found - skip, don't override
           if (verbose) {
-            console.log('⚠️  Existing settings.json preserved → DevFlow config: settings.devflow.json');
+            console.log('⚠️  Existing settings.json found, skipping');
           }
         } else {
           throw error;
@@ -423,10 +402,8 @@ export const initCommand = new Command('init')
 
       // Install CLAUDE.md - never override existing files (atomic operation)
       const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
-      const devflowClaudeMdPath = path.join(claudeDir, 'CLAUDE.devflow.md');
       const sourceClaudeMdPath = path.join(claudeSourceDir, 'CLAUDE.md');
 
-      let claudeMdExists = false;
       try {
         // Atomic exclusive create - fails if file already exists
         const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
@@ -436,11 +413,9 @@ export const initCommand = new Command('init')
         }
       } catch (error: unknown) {
         if (isNodeSystemError(error) && error.code === 'EEXIST') {
-          // Existing CLAUDE.md found - install as CLAUDE.devflow.md
-          claudeMdExists = true;
-          await fs.copyFile(sourceClaudeMdPath, devflowClaudeMdPath);
+          // Existing CLAUDE.md found - skip, don't override
           if (verbose) {
-            console.log('⚠️  Existing CLAUDE.md preserved → DevFlow guide: CLAUDE.devflow.md');
+            console.log('⚠️  Existing CLAUDE.md found, skipping');
           }
         } else {
           throw error;
@@ -719,7 +694,7 @@ Pipfile.lock
 
       // Render output based on verbose flag
       if (verbose) {
-        renderVerboseOutput(version, scope, claudeDir, devflowDir, settingsExists, claudeMdExists);
+        renderVerboseOutput(version, scope, claudeDir, devflowDir);
       } else {
         renderCleanOutput(version);
       }
