@@ -1,651 +1,393 @@
 ---
-description: Orchestrate parallel task implementation using worktrees - explore, plan, implement, review, and release multiple tasks concurrently
+description: Execute a single task through the complete lifecycle - Design, Implement, and Review in an isolated worktree
 ---
 
-# Swarm Command - Parallel Task Orchestration
+# Swarm Command - Single Task Lifecycle
 
-Execute multiple tasks in parallel using isolated git worktrees, with intelligent dependency detection and coordinated merging.
+Execute a single task from design through implementation to review. Works in an isolated worktree and produces a PR ready for merge.
 
 ## Usage
 
 ```
-/swarm task1 description, task2 description, task3 description
+/swarm <task description>
 ```
 
-Or with explicit task list:
+Or with explicit context:
 ```
-/swarm
-- Implement user authentication
-- Add rate limiting to API endpoints
-- Refactor database connection pooling
+/swarm Implement user authentication with JWT tokens
 ```
+
+For multi-task parallel execution, use `/swarm-orchestrator` instead.
 
 ---
+
+## Input
+
+You receive:
+- `TASK_DESCRIPTION`: What to implement
+- `WORKTREE_DIR`: Isolated worktree path (e.g., `.worktrees/task-1`)
+- `TASK_BRANCH`: Branch name for this task (e.g., `swarm/release-1/task-1`)
+- `TARGET_BRANCH`: Branch to create PR against (e.g., `release/swarm-2025-01-15`)
+- `TASK_ID`: Identifier for this task (e.g., `task-1`)
+
+If not provided, generate defaults:
+
+```bash
+TIMESTAMP=$(date +%Y-%m-%d_%H%M)
+TASK_ID="task-${TIMESTAMP}"
+TASK_BRANCH="swarm/${TASK_ID}"
+TARGET_BRANCH=$(git branch --show-current)
+WORKTREE_DIR=".worktrees/${TASK_ID}"
+
+# Create worktree
+mkdir -p .worktrees
+git worktree add -b "${TASK_BRANCH}" "${WORKTREE_DIR}" "${TARGET_BRANCH}"
+```
 
 ## Your Mission
 
-Orchestrate the complete swarm workflow:
+Execute the complete task lifecycle:
 
 ```
-SETUP → EXPLORE → PLAN → ANALYZE → IMPLEMENT → REVIEW → MERGE → RELEASE
+DESIGN → IMPLEMENT → REVIEW → REPORT
 ```
+
+**Output**: A PR that's ready for merge (or issues that need addressing).
 
 ---
 
-## Phase 1: Setup
+## Phase 1: Design
 
-### Parse Tasks
+Spawn the Design agent to create a detailed implementation plan.
 
-Extract task descriptions from user input:
+```
+Task tool with subagent_type="Design":
 
-```bash
-# Tasks should be provided as input
-# Parse into array
-TASKS=(
-    "Task 1 description"
-    "Task 2 description"
-    "Task 3 description"
-)
-NUM_TASKS=${#TASKS[@]}
+"Create implementation design for: ${TASK_DESCRIPTION}
 
-echo "=== SWARM: ${NUM_TASKS} TASKS ==="
-for i in "${!TASKS[@]}"; do
-    echo "  $((i+1)). ${TASKS[$i]}"
-done
+Working directory: ${WORKTREE_DIR}
+Target branch: ${TARGET_BRANCH}
+
+Explore the codebase, understand existing patterns, and create a detailed
+implementation plan. Save the design to: .docs/design/${TASK_ID}-design.md
+
+Be thorough - this plan will be executed in the next phase."
 ```
 
-### Create Release Infrastructure
+### Design Output Expected
+
+The Design agent will:
+1. Launch 3 parallel Explore agents (Architecture, Integration, Reusable Code)
+2. Synthesize findings and clarify ambiguities
+3. Launch 2 Plan agents (Create Plan + Critical Review)
+4. Persist design document
+
+**Wait for Design agent to complete before proceeding.**
+
+### Verify Design
 
 ```bash
-# Generate identifiers
-TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-SWARM_ID="${RELEASE_NAME:-swarm-${TIMESTAMP}}"
-RELEASE_BRANCH="release/${SWARM_ID}"
-
-# Determine base branch
-BASE_BRANCH="${BASE_BRANCH:-main}"
-if ! git show-ref --verify --quiet "refs/heads/${BASE_BRANCH}"; then
-    for branch in main master develop; do
-        if git show-ref --verify --quiet "refs/heads/${branch}"; then
-            BASE_BRANCH="${branch}"
-            break
-        fi
-    done
+# Ensure design document exists
+DESIGN_FILE=".docs/design/${TASK_ID}-design.md"
+if [ ! -f "$DESIGN_FILE" ]; then
+    echo "ERROR: Design document not created"
+    exit 1
 fi
 
-echo "=== SWARM ORCHESTRATOR ==="
-echo "Swarm ID: ${SWARM_ID}"
-echo "Release Branch: ${RELEASE_BRANCH}"
-echo "Base Branch: ${BASE_BRANCH}"
-echo "Tasks: ${#TASKS[@]}"
-
-# Create release branch from base
-git checkout "${BASE_BRANCH}"
-git pull origin "${BASE_BRANCH}" 2>/dev/null || true
-git checkout -b "${RELEASE_BRANCH}"
-git push -u origin "${RELEASE_BRANCH}"
-
-# Setup state directory
-mkdir -p .docs/swarm/plans
-mkdir -p .docs/swarm/explore
-mkdir -p .worktrees
-
-# Ensure worktrees directory is gitignored
-grep -q "^.worktrees/" .gitignore 2>/dev/null || echo ".worktrees/" >> .gitignore
+echo "✅ Design complete: $DESIGN_FILE"
 ```
-
-### Initialize State
-
-Create `.docs/swarm/state.json`:
-
-```json
-{
-  "swarm_id": "${SWARM_ID}",
-  "release_branch": "${RELEASE_BRANCH}",
-  "base_branch": "${BASE_BRANCH}",
-  "started_at": "$(date -Iseconds)",
-  "status": "setup",
-  "tasks": [
-    {
-      "id": "task-1",
-      "description": "${TASK_1_DESCRIPTION}",
-      "worktree": ".worktrees/task-1",
-      "branch": "swarm/${SWARM_ID}/task-1",
-      "phase": "pending",
-      "pr_number": null,
-      "files_touched": [],
-      "depends_on": [],
-      "merge_order": null,
-      "error": null
-    }
-  ],
-  "merge_sequence": [],
-  "conflicts": []
-}
-```
-
-### Create Worktrees
-
-For each task, create an isolated worktree:
-
-```bash
-for i in $(seq 1 ${NUM_TASKS}); do
-    TASK_ID="task-${i}"
-    WORKTREE_DIR=".worktrees/${TASK_ID}"
-    BRANCH_NAME="swarm/${SWARM_ID}/${TASK_ID}"
-
-    echo "Creating worktree for ${TASK_ID}..."
-    git worktree add -b "${BRANCH_NAME}" "${WORKTREE_DIR}" "${RELEASE_BRANCH}"
-
-    echo "✅ ${TASK_ID}: ${WORKTREE_DIR} on ${BRANCH_NAME}"
-done
-
-git worktree list
-```
-
-## Phase 2: Explore (Parallel)
-
-Launch Explore agents in parallel for all tasks:
-
-```
-For each task (PARALLEL):
-    Launch Explore agent:
-        - Working in: ${WORKTREE_DIR}
-        - Task: ${TASK_DESCRIPTION}
-        - Output: Understanding of where/how to implement
-```
-
-**Launch pattern:**
-
-```markdown
-Launch Task tool with subagent_type="Explore" for EACH task simultaneously:
-
-Task 1: "Explore codebase for implementing: ${TASK_1}.
-         Working directory context: ${WORKTREE_1}.
-         Find: relevant files, existing patterns, integration points.
-         Output: List of files to modify/create and patterns to follow."
-
-Task 2: "Explore codebase for implementing: ${TASK_2}..."
-
-Task 3: "Explore codebase for implementing: ${TASK_3}..."
-```
-
-**Collect results:**
-- Which files each task will touch
-- Patterns identified
-- Potential complications
-
-## Phase 3: Plan (Parallel)
-
-Launch Plan agents in parallel:
-
-```
-For each task (PARALLEL):
-    Launch Plan agent:
-        - Exploration findings from Phase 2
-        - Create detailed implementation plan
-        - Save to: .docs/swarm/plans/${TASK_ID}.md
-```
-
-**Plan output requirements:**
-
-Each plan must include:
-```markdown
-## Files to Modify
-- path/to/file1.ts
-- path/to/file2.ts
-
-## Files to Create
-- path/to/new-file.ts
-
-## Dependencies
-- Requires: [other task IDs if any]
-- Blocks: [task IDs that depend on this]
-
-## Estimated Complexity
-- Low/Medium/High
-```
-
-## Phase 4: Analyze Dependencies
-
-**CRITICAL PHASE**: Analyze all plans to determine execution order.
-
-### Extract File Touches
-
-```bash
-echo "=== ANALYZING TASK DEPENDENCIES ==="
-
-# For each plan, extract files touched
-for plan in .docs/swarm/plans/task-*.md; do
-    TASK_ID=$(basename "$plan" .md)
-    echo "Task: ${TASK_ID}"
-
-    # Extract file paths from plan
-    grep -E "^- (src/|lib/|tests/|\.)" "$plan" | sed 's/^- //' | sort -u
-    echo ""
-done
-```
-
-### Build Conflict Matrix
-
-```markdown
-## Conflict Analysis
-
-| Task | Files Touched | Conflicts With |
-|------|--------------|----------------|
-| task-1 | src/auth/*, src/utils/validate.ts | task-2 |
-| task-2 | src/api/*, src/utils/validate.ts | task-1 |
-| task-3 | src/ui/*, tests/* | (none) |
-
-## Detected Conflicts
-
-### Conflict 1: task-1 ↔ task-2
-**Shared file**: src/utils/validate.ts
-**Resolution**: Merge task-1 first (more foundational changes)
-
-## Merge Order
-
-Based on dependencies and conflicts:
-1. task-3 (independent, can merge anytime)
-2. task-1 (foundational, task-2 depends on it)
-3. task-2 (depends on task-1's changes)
-```
-
-### Dependency Rules
-
-1. **No conflicts** → Can implement and merge in parallel
-2. **Shared files** → Sequential merge, order by:
-   - Which is more foundational?
-   - Which was started first?
-   - User preference?
-3. **Explicit dependency** → Dependent task waits
-
-### Update State
-
-Update `.docs/swarm/state.json` with:
-- `files_touched` for each task
-- `depends_on` relationships
-- `merge_sequence` order
-- `conflicts` details
-
-## Phase 5: User Checkpoint
-
-**STOP for user approval before implementing.**
-
-Present analysis:
-
-```markdown
-## 🚦 SWARM READY FOR IMPLEMENTATION
-
-### Tasks
-| ID | Description | Complexity | Dependencies |
-|----|-------------|------------|--------------|
-| task-1 | ${DESC} | Medium | None |
-| task-2 | ${DESC} | High | task-1 |
-| task-3 | ${DESC} | Low | None |
-
-### Execution Plan
-- **Parallel Group 1**: task-1, task-3 (no conflicts)
-- **Sequential After**: task-2 (depends on task-1)
-
-### Conflicts Detected
-- task-1 and task-2 both touch `src/utils/validate.ts`
-- Resolution: task-1 merges first
-
-### Merge Order
-1. task-3 (independent)
-2. task-1 (foundational)
-3. task-2 (depends on task-1)
-
-### Plans
-- [task-1 plan](.docs/swarm/plans/task-1.md)
-- [task-2 plan](.docs/swarm/plans/task-2.md)
-- [task-3 plan](.docs/swarm/plans/task-3.md)
-
-**Proceed with implementation?** (yes/no/modify)
-```
-
-## Phase 6: Implement (Parallel where safe)
-
-Launch Coder agents based on dependency analysis:
-
-### Parallel Execution Groups
-
-```markdown
-Group 1 (parallel - no dependencies):
-    - Coder: task-1
-    - Coder: task-3
-
-Group 2 (after task-1 completes):
-    - Coder: task-2
-```
-
-### Launch Coders
-
-For each task in current group (PARALLEL):
-
-```markdown
-Launch Task tool with subagent_type="Coder":
-
-"Implement task in isolated worktree.
-
-TASK_ID: ${TASK_ID}
-TASK_DESCRIPTION: ${DESCRIPTION}
-WORKTREE_DIR: ${WORKTREE_DIR}
-TARGET_BRANCH: ${RELEASE_BRANCH}
-PLAN_FILE: .docs/swarm/plans/${TASK_ID}.md
-
-Complete the full cycle: implement → test → commit → create PR.
-Report back with PR number and files changed."
-```
-
-### Track Progress
-
-Update state as coders report:
-
-```json
-{
-  "id": "task-1",
-  "phase": "implementing" → "pr_created",
-  "pr_number": 101,
-  "files_touched": ["src/auth/handler.ts", "tests/auth.test.ts"]
-}
-```
-
-### Handle Failures
-
-If a Coder reports failure:
-
-1. **Test failure**:
-   - Log the error
-   - Optionally: Launch debug agent
-   - Update task status to "failed"
-   - Continue with other tasks
-
-2. **Blocked by dependency**:
-   - Update `depends_on`
-   - Reschedule after dependency completes
-
-3. **Unexpected scope**:
-   - Flag for user review
-   - Pause task
-
-## Phase 7: Review (Parallel)
-
-Launch code review for each PR:
-
-```markdown
-For each task with pr_number (PARALLEL):
-    Launch CodeReview agent:
-        - PR #${PR_NUMBER}
-        - Focus on: security, tests, architecture
-        - Output: Approve / Request Changes
-```
-
-### Review Results
-
-```markdown
-## PR Review Status
-
-| Task | PR | Review Result | Blocking Issues |
-|------|-----|--------------|-----------------|
-| task-1 | #101 | ✅ Approved | None |
-| task-2 | #102 | ⚠️ Changes Requested | Missing test |
-| task-3 | #103 | ✅ Approved | None |
-```
-
-### Handle Review Failures
-
-If review requests changes:
-1. Send feedback to Coder agent (resume)
-2. Coder addresses feedback
-3. Re-request review
-4. Repeat until approved
-
-## Phase 8: Merge (Sequential)
-
-Merge PRs in dependency order:
-
-```bash
-MERGE_ORDER=("task-3" "task-1" "task-2")
-
-for TASK_ID in "${MERGE_ORDER[@]}"; do
-    PR_NUMBER=$(get_pr_number "$TASK_ID")
-
-    echo "Merging ${TASK_ID} (PR #${PR_NUMBER})..."
-
-    # Merge PR
-    gh pr merge "${PR_NUMBER}" --squash --delete-branch
-
-    # Verify merge succeeded
-    if [ $? -eq 0 ]; then
-        echo "✅ ${TASK_ID} merged"
-
-        # Run integration tests on release branch
-        git checkout "${RELEASE_BRANCH}"
-        git pull origin "${RELEASE_BRANCH}"
-
-        # Run tests
-        npm test || {
-            echo "❌ Integration tests failed after merging ${TASK_ID}"
-            echo "Consider reverting: git revert HEAD"
-            exit 1
-        }
-
-        echo "✅ Integration tests pass"
-    else
-        echo "❌ Failed to merge ${TASK_ID}"
-        exit 1
-    fi
-done
-```
-
-### Conflict Resolution During Merge
-
-If merge conflict occurs:
-
-```markdown
-## ⚠️ MERGE CONFLICT
-
-**Task**: task-2 (PR #102)
-**Conflict with**: task-1's changes
-
-**Conflicting files**:
-- src/utils/validate.ts
-
-**Options**:
-1. Resolve manually in PR
-2. Rebase task-2 branch on release branch
-3. Ask user for resolution strategy
-
-**Recommended**: Rebase task-2 on updated release branch, re-run tests, update PR.
-```
-
-## Phase 9: Final Release PR
-
-Create PR from release branch to main:
-
-```bash
-gh pr create \
-    --base "${BASE_BRANCH}" \
-    --head "${RELEASE_BRANCH}" \
-    --title "Release: ${SWARM_ID}" \
-    --body "$(cat <<'EOF'
-## 🚀 Swarm Release: ${SWARM_ID}
-
-### Tasks Completed
-
-| Task | PR | Description |
-|------|-----|-------------|
-| task-1 | #101 | ${TASK_1_DESC} |
-| task-2 | #102 | ${TASK_2_DESC} |
-| task-3 | #103 | ${TASK_3_DESC} |
-
-### Changes Summary
-
-- Files changed: X
-- Lines added: Y
-- Lines removed: Z
-
-### Testing
-
-- ✅ All individual PRs passed tests
-- ✅ Integration tests pass on release branch
-- ✅ Code review completed for all PRs
-
-### Merge Order Used
-
-1. task-3 (independent)
-2. task-1 (foundational)
-3. task-2 (depended on task-1)
 
 ---
 
-🤖 Generated by DevFlow Swarm Orchestrator
+## Phase 2: Implement
+
+Execute the implementation plan in the worktree.
+
+### 2.1: Change to Worktree
+
+```bash
+cd "${WORKTREE_DIR}"
+git status
+```
+
+### 2.2: Read and Execute Plan
+
+Read the design document and implement each step:
+
+```bash
+cat ".docs/design/${TASK_ID}-design.md"
+```
+
+**Implementation Rules:**
+- Follow the plan step by step
+- Create/modify files as specified
+- Follow existing code patterns identified in design
+- Write tests for new functionality
+- Keep changes focused on the task
+
+### 2.3: Run Tests
+
+```bash
+# Run relevant tests
+npm test  # or appropriate test command
+
+# If tests fail, debug and fix before continuing
+```
+
+### 2.4: Commit Changes
+
+Create atomic, well-described commits:
+
+```bash
+# Stage changes
+git add -A
+
+# Create commit with descriptive message
+git commit -m "$(cat <<'EOF'
+feat: ${TASK_SUMMARY}
+
+${DETAILED_DESCRIPTION}
+
+Task: ${TASK_ID}
+Design: .docs/design/${TASK_ID}-design.md
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
 )"
 ```
 
-## Phase 10: Cleanup
-
-After final merge to main:
+### 2.5: Push and Create PR
 
 ```bash
-echo "=== CLEANUP ==="
+# Push branch
+git push -u origin "${TASK_BRANCH}"
 
-# Remove worktrees
-for worktree in .worktrees/*/; do
-    if [ -d "$worktree" ]; then
-        git worktree remove "$worktree" --force
-    fi
-done
+# Create PR against target branch
+gh pr create \
+    --base "${TARGET_BRANCH}" \
+    --head "${TASK_BRANCH}" \
+    --title "feat: ${TASK_SUMMARY}" \
+    --body "$(cat <<'EOF'
+## Summary
 
-git worktree prune
+${TASK_DESCRIPTION}
 
-# Delete swarm branches
-for branch in $(git branch --list "swarm/${SWARM_ID}/*" | tr -d ' '); do
-    git branch -D "$branch" 2>/dev/null
-done
+## Changes
 
-# Delete release branch (if merged)
-git branch -d "${RELEASE_BRANCH}" 2>/dev/null
+${LIST_OF_CHANGES}
 
-# Archive state
-mv .docs/swarm/state.json ".docs/swarm/archive/${SWARM_ID}-state.json"
+## Design Document
 
-echo "✅ Cleanup complete"
+See: `.docs/design/${TASK_ID}-design.md`
+
+## Testing
+
+- [ ] Unit tests pass
+- [ ] Integration tests pass
+- [ ] Manual testing completed
+
+---
+
+Task ID: ${TASK_ID}
+🤖 Generated by DevFlow Swarm
+EOF
+)"
+
+# Capture PR number
+PR_NUMBER=$(gh pr view --json number -q '.number')
+PR_URL=$(gh pr view --json url -q '.url')
+
+echo "✅ PR created: #${PR_NUMBER}"
+echo "   URL: ${PR_URL}"
 ```
 
-## Final Report
+---
+
+## Phase 3: Review
+
+Spawn the CodeReview agent to validate the implementation.
+
+```
+Task tool with subagent_type="CodeReview":
+
+"Review PR #${PR_NUMBER} for task: ${TASK_DESCRIPTION}
+
+This PR implements ${TASK_ID} as part of a swarm release.
+The implementation follows the design at: .docs/design/${TASK_ID}-design.md
+
+Run all relevant audits and create PR line comments for issues found.
+Report back with: approval status, blocking issues, and recommendations."
+```
+
+### Review Output Expected
+
+The CodeReview agent will:
+1. Run relevant audits (Security, Architecture, Tests, etc.)
+2. Create PR line comments for issues
+3. Generate review summary
+4. Provide merge recommendation
+
+**Wait for CodeReview agent to complete.**
+
+### Handle Review Results
 
 ```markdown
-## 🎉 SWARM COMPLETE: ${SWARM_ID}
+If APPROVED:
+    → Task complete, ready for merge
 
-### Summary
+If CHANGES_REQUESTED:
+    → Parse feedback
+    → Address blocking issues
+    → Re-run tests
+    → Update PR
+    → Request re-review (loop back to Phase 3)
+
+If BLOCKED:
+    → Report blocking issues to orchestrator
+    → Do not proceed
+```
+
+### Review Loop (if needed)
+
+If changes are requested:
+
+1. Read the review feedback
+2. Address each blocking issue
+3. Commit fixes:
+   ```bash
+   git add -A
+   git commit -m "fix: address review feedback for ${TASK_ID}"
+   git push
+   ```
+4. Re-spawn CodeReview agent
+5. Repeat until approved
+
+**Maximum review iterations**: 3 (after that, escalate to user)
+
+---
+
+## Phase 4: Report
+
+Return results to the user:
+
+```markdown
+## 🔄 Swarm Task Complete: ${TASK_ID}
+
+### Task
+${TASK_DESCRIPTION}
+
+### Status: ${STATUS}
 
 | Metric | Value |
 |--------|-------|
-| Tasks Completed | ${NUM_TASKS} |
-| PRs Merged | ${NUM_PRS} |
-| Total Commits | ${NUM_COMMITS} |
+| PR Number | #${PR_NUMBER} |
+| PR URL | ${PR_URL} |
+| Design Doc | .docs/design/${TASK_ID}-design.md |
+| Commits | ${NUM_COMMITS} |
 | Files Changed | ${NUM_FILES} |
-| Duration | ${DURATION} |
+| Review Status | ${REVIEW_STATUS} |
+| Review Iterations | ${NUM_REVIEWS} |
 
-### Tasks
+### Files Touched
+${LIST_OF_FILES}
 
-| Task | Status | PR | Merged |
-|------|--------|-----|--------|
-| task-1 | ✅ Complete | #101 | Yes |
-| task-2 | ✅ Complete | #102 | Yes |
-| task-3 | ✅ Complete | #103 | Yes |
+### Blocking Issues (if any)
+${BLOCKING_ISSUES}
 
-### Final PR
-
-- **Release PR**: #${RELEASE_PR}
-- **Target**: ${BASE_BRANCH}
-- **Status**: Ready for final review
-
-### Artifacts
-
-- State archive: `.docs/swarm/archive/${SWARM_ID}-state.json`
-- Plans: `.docs/swarm/plans/`
-
-### Next Steps
-
-1. Review final release PR
-2. Merge to main
-3. Tag release: `git tag v${VERSION}`
-4. Deploy
+### Ready for Merge: ${YES_NO}
 ```
 
-## Error Recovery
+---
 
-### Partial Failure
+## Error Handling
 
-If some tasks complete but others fail:
+### Design Failure
+
+If Design agent fails or times out:
 
 ```markdown
-## ⚠️ PARTIAL SWARM COMPLETION
+## ❌ Design Phase Failed
 
-### Completed Tasks
-- task-1: ✅ Merged
-- task-3: ✅ Merged
+**Task**: ${TASK_ID}
+**Error**: ${ERROR_MESSAGE}
 
-### Failed Tasks
-- task-2: ❌ Tests failing
-
-### Options
-
-1. **Proceed without task-2**
-   - Merge current release branch
-   - task-2 becomes separate follow-up
-
-2. **Pause and fix**
-   - Debug task-2
-   - Fix and retry
-   - Then merge all
-
-3. **Abort**
-   - Revert all changes
-   - Cleanup worktrees
-   - Start fresh
+**Options**:
+1. Retry Design phase
+2. Escalate to user for manual design
+3. Skip task
 
 **Recommendation**: ${RECOMMENDATION}
 ```
 
-### Full Abort
+### Implementation Failure
 
-```bash
-echo "=== ABORTING SWARM ==="
+If implementation fails (tests don't pass, build breaks):
 
-# Close all open PRs
-for TASK_ID in task-1 task-2 task-3; do
-    PR_NUMBER=$(gh pr list --head "swarm/${SWARM_ID}/${TASK_ID}" --json number -q '.[0].number')
-    if [ -n "$PR_NUMBER" ]; then
-        gh pr close "$PR_NUMBER"
-    fi
-done
+```markdown
+## ❌ Implementation Failed
 
-# Delete release branch
-git branch -D "${RELEASE_BRANCH}" 2>/dev/null
-git push origin --delete "${RELEASE_BRANCH}" 2>/dev/null
+**Task**: ${TASK_ID}
+**Phase**: Implementation
+**Error**: ${ERROR_MESSAGE}
 
-# Cleanup worktrees
-for worktree in .worktrees/*/; do
-    git worktree remove "$worktree" --force 2>/dev/null
-done
+**Debug Info**:
+- Last command: ${COMMAND}
+- Exit code: ${EXIT_CODE}
+- Output: ${OUTPUT}
 
-# Update state
-echo '{"status": "aborted"}' > .docs/swarm/state.json
+**Options**:
+1. Spawn Debug agent to investigate
+2. Retry implementation
+3. Escalate to user
+4. Skip task
 
-echo "✅ Swarm aborted and cleaned up"
+**Recommendation**: ${RECOMMENDATION}
 ```
 
-## Orchestration Principles
+### Review Rejection (after max iterations)
 
-1. **Maximize parallelism** - Run independent tasks concurrently
-2. **Fail fast** - Surface issues early, don't hide failures
-3. **State tracking** - Always know what's happening
-4. **User checkpoints** - Get approval before major phases
-5. **Clean recovery** - Can abort/retry at any point
-6. **Atomic merges** - Each PR is a clean unit
+```markdown
+## ⚠️ Review Not Passing
+
+**Task**: ${TASK_ID}
+**PR**: #${PR_NUMBER}
+**Review Iterations**: ${NUM_REVIEWS} (max reached)
+
+**Remaining Issues**:
+${LIST_OF_ISSUES}
+
+**Options**:
+1. Escalate to user for manual fixes
+2. Merge with known issues (not recommended)
+3. Abandon task
+
+**Recommendation**: Escalate to user
+```
+
+---
+
+## Cleanup (if standalone)
+
+If running as standalone (not part of orchestrator):
+
+```bash
+# After PR is merged, cleanup worktree
+git worktree remove "${WORKTREE_DIR}" --force
+git worktree prune
+git branch -d "${TASK_BRANCH}" 2>/dev/null
+
+echo "✅ Cleanup complete"
+```
+
+---
+
+## Principles
+
+1. **Single responsibility** - One task, one lifecycle
+2. **Leverage existing agents** - Design and CodeReview handle complexity
+3. **Isolated execution** - Worktree prevents interference
+4. **Complete lifecycle** - Design → Implement → Review
+5. **Honest reporting** - Surface all issues, don't hide failures
+6. **Retry with limits** - Attempt recovery, but escalate if stuck
