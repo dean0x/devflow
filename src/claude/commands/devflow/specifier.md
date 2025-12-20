@@ -31,7 +31,7 @@ You receive:
 Transform a vague feature idea into a precise specification:
 
 ```
-UNDERSTAND → EXPLORE → CLARIFY → SPECIFY → CREATE ISSUE
+UNDERSTAND → EXPLORE → PLAN → CLARIFY → SPECIFY → CREATE ISSUE
 ```
 
 **Output**: A GitHub issue with complete specification ready for Swarm.
@@ -105,11 +105,63 @@ Report back with: relevant files, patterns to follow, integration points."
 
 ---
 
-## Phase 3: Clarify
+## Phase 3: Plan
+
+### Technical Approach
+
+Spawn Plan agent to think through the technical design:
+
+```
+Task tool with subagent_type="Plan":
+
+"Plan the technical approach for: ${FEATURE_IDEA}
+
+Based on codebase context:
+${EXPLORE_FINDINGS}
+
+Consider:
+1. Architecture - How does this fit into the existing system?
+2. Data model - What entities/tables are needed?
+3. API design - What endpoints/interfaces are required?
+4. Integration - How does this connect to existing code?
+5. Edge cases - What could go wrong?
+6. Trade-offs - What are the key design decisions?
+
+Output a draft technical approach with alternatives where applicable."
+```
+
+### Synthesize Technical Plan
+
+```markdown
+## Technical Approach (Draft)
+
+**Recommended Architecture**:
+${ARCHITECTURE_SUMMARY}
+
+**Data Model**:
+${DATA_MODEL_DRAFT}
+
+**API Design**:
+${API_DESIGN_DRAFT}
+
+**Key Trade-offs**:
+| Decision | Option A | Option B | Recommendation |
+|----------|----------|----------|----------------|
+| ${DECISION_1} | ${OPT_A} | ${OPT_B} | ${REC} |
+
+**Open Questions for User**:
+- [questions that emerged from planning]
+```
+
+This draft informs better questions during clarification.
+
+---
+
+## Phase 4: Clarify
 
 Use AskUserQuestion tool to clarify requirements interactively. Ask questions in batches of 2-4 related questions.
 
-### 3.1 Feature Scope
+### 4.1 Feature Scope
 
 ```
 AskUserQuestion:
@@ -126,7 +178,7 @@ Questions about: "${FEATURE_IDEA}"
    - Multi-select options based on related features
 ```
 
-### 3.2 User Flows
+### 4.2 User Flows
 
 ```
 AskUserQuestion:
@@ -141,7 +193,7 @@ AskUserQuestion:
    - Options: "User action", "System event", "Scheduled", "API call"
 ```
 
-### 3.3 Technical Decisions
+### 4.3 Technical Decisions
 
 ```
 AskUserQuestion:
@@ -156,7 +208,7 @@ AskUserQuestion:
    - Options based on existing auth patterns
 ```
 
-### 3.4 Scale & Performance
+### 4.4 Scale & Performance
 
 ```
 AskUserQuestion:
@@ -171,7 +223,7 @@ AskUserQuestion:
    - Options based on existing caching patterns
 ```
 
-### 3.5 Edge Cases & Error Handling
+### 4.5 Edge Cases & Error Handling
 
 ```
 AskUserQuestion:
@@ -186,7 +238,7 @@ AskUserQuestion:
    - Multi-select common error types
 ```
 
-### 3.6 Dependencies
+### 4.6 Dependencies
 
 ```
 AskUserQuestion:
@@ -200,7 +252,7 @@ AskUserQuestion:
 
 ---
 
-## Phase 4: Specify
+## Phase 5: Specify
 
 ### Compile Specification
 
@@ -286,7 +338,7 @@ ${WHERE_IT_CONNECTS}
 
 ---
 
-## Phase 5: Create Issue
+## Phase 6: Create Issue
 
 After compiling the specification, **automatically create the GitHub issue** - no confirmation needed since user already clarified requirements through the Q&A process.
 
@@ -319,7 +371,7 @@ echo "   URL: ${ISSUE_URL}"
 
 ---
 
-## Phase 6: Report
+## Phase 7: Report
 
 Return results:
 
