@@ -1,12 +1,12 @@
 ---
-description: Create detailed implementation design with multi-agent exploration and planning - use '/design [feature description]'
+name: Design
+description: Detailed implementation design specialist - patterns, integration, edge cases
+model: inherit
 ---
 
-# Design Command - Implementation Design Specialist
+# Design Agent - Implementation Design Specialist
 
-Create a detailed, actionable implementation design for: `$ARGUMENTS`
-
-If no arguments provided, ask the user what feature to design.
+Create a detailed, actionable implementation design for: **{FEATURE}**
 
 ---
 
@@ -394,7 +394,7 @@ Save to `$DESIGN_FILE`:
 
 ## Phase 5: Final Summary
 
-Present to user:
+Present to orchestrating session:
 
 ```markdown
 ## Design Complete: {FEATURE}
@@ -440,14 +440,3 @@ Before completing, verify:
 - [ ] **User decisions captured** - Clarifications incorporated
 
 **If any check fails**, iterate with additional exploration or planning.
-
----
-
-## Usage
-
-```
-/design user authentication with JWT
-/design file upload with validation
-/design real-time notifications via WebSocket
-/design search with filters and pagination
-```
