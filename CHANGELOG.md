@@ -127,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tracks completion status
 
 #### Enhanced Audit System
-- **Three-category reporting** - All 9 audit agents refactored for clearer feedback
+- **Three-category reporting** - All 9 review agents refactored for clearer feedback
   - **🔴 Issues in Your Changes** - NEW vulnerabilities/problems introduced (BLOCKING)
   - **⚠️ Issues in Code You Touched** - Problems near your changes (SHOULD FIX)
   - **ℹ️ Pre-existing Issues** - Legacy problems unrelated to PR (INFORMATIONAL)
@@ -142,7 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Code Review Command Rewrite
 - **Completely rewritten `/code-review` command** - Better orchestration and synthesis
-  - Orchestrates all audit sub-agents in parallel for faster execution
+  - Orchestrates all review sub-agents in parallel for faster execution
   - Synthesizes findings from three-category reports
   - Generates actionable summary with clear priorities
   - Separates blocking issues from informational findings
@@ -304,12 +304,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Statusline path resolution** - Use absolute paths instead of tilde (~) for reliable execution
-- **Audit report organization** - Formalized structured storage for all audit reports
-  - Branch-specific directories: `.docs/audits/<branch-name>/`
+- **Audit report organization** - Formalized structured storage for all review reports
+  - Branch-specific directories: `.docs/reviews/<branch-name>/`
   - Timestamped reports for historical tracking
-  - Standardized naming: `<audit-type>-report.<timestamp>.md`
+  - Standardized naming: `<review-type>-report.<timestamp>.md`
   - Standalone directory for direct agent invocations
-  - Applied consistently across all 9 audit agents
+  - Applied consistently across all 9 review agents
 
 ### Added
 - **Release notes persistence** - Save comprehensive release notes to `.docs/releases/RELEASE_NOTES_v<version>.md`
@@ -373,10 +373,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Never overwrites without explicit permission
 
 #### TypeScript Auditor Sub-Agent
-- **audit-typescript** - Specialized TypeScript code quality and type safety auditor
+- **review-typescript** - Specialized TypeScript code quality and type safety auditor
   - Conditional execution: Runs only if .ts/.tsx files changed OR tsconfig.json exists
   - Built-in detection logic (gracefully skips non-TypeScript projects)
-  - Comprehensive audits: type safety config, `any` usage, type assertions, branded types
+  - Comprehensive reviews: type safety config, `any` usage, type assertions, branded types
   - Advanced patterns: discriminated unions, immutability, Result types
   - Code quality: naming conventions, dependency injection, pure functions
   - Severity-based reporting (CRITICAL/HIGH/MEDIUM/LOW) with file:line references
@@ -424,17 +424,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 13. Provide verification links and next steps
 
 ### Changed
-- **Pre-commit workflow** - Integrated audit-typescript into 5-agent review
+- **Pre-commit workflow** - Integrated review-typescript into 5-agent review
   - Conditionally executes for TypeScript projects
   - No manual configuration needed
-- **Pre-PR workflow** - Integrated audit-typescript into comprehensive review
+- **Pre-PR workflow** - Integrated review-typescript into comprehensive review
   - Automatic TypeScript detection and execution
-  - Preserves existing audit orchestration patterns
+  - Preserves existing review orchestration patterns
 
 ### Documentation
 - Added `/release` command to README commands table
 - Added `release` sub-agent to README sub-agents table
-- Added `audit-typescript` sub-agent to README sub-agents table
+- Added `review-typescript` sub-agent to README sub-agents table
 - Created "Creating a Release" workflow section in README
 - Documented smart CLAUDE.md installation behavior
 - Included release automation in integration examples
@@ -443,7 +443,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2025-10-16
 
 ### Added
-- **audit-documentation sub-agent** - Ensures documentation stays aligned with code
+- **review-documentation sub-agent** - Ensures documentation stays aligned with code
   - Validates README accuracy (installation, usage, examples)
   - Checks API documentation matches actual function signatures
   - Detects stale code comments and commented-out code
@@ -469,12 +469,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Pre-commit strategy** - Lightweight 5-agent review for fast feedback
-  - Core audits: Security, Performance, Architecture, Tests, Complexity
+  - Core reviews: Security, Performance, Architecture, Tests, Complexity
   - Typical execution: 30-60 seconds
-  - Additional audits available on explicit request
+  - Additional reviews available on explicit request
 - **Pre-pr strategy** - Comprehensive 7-8 agent review
-  - All core audits plus Dependencies and Documentation
-  - Conditional Database audit (only if DB files changed)
+  - All core reviews plus Dependencies and Documentation
+  - Conditional Database review (only if DB files changed)
   - Typical execution: 2-3 minutes
   - Thorough branch review before PR creation
 - **Path handling** - No longer assumes HOME environment variable
@@ -493,8 +493,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hardcoded path assumptions** - Proper fallbacks and environment overrides
 
 ### Documentation
-- Added audit-documentation to sub-agents table in README
-- Clarified audit strategies for pre-commit vs pre-pr
+- Added review-documentation to sub-agents table in README
+- Clarified review strategies for pre-commit vs pre-pr
 - Updated workflow examples with refined command usage
 
 ## [0.1.2] - 2025-10-05
@@ -545,13 +545,13 @@ DevFlow is an Agentic Development Toolkit designed to enhance Claude Code with i
 - `/debug [issue]` - Systematic debugging with issue-specific investigation
 
 #### Sub-Agents (Audit Specialists)
-- `audit-security` - Security vulnerability detection and analysis
-- `audit-performance` - Performance optimization and bottleneck detection
-- `audit-architecture` - Software architecture and design pattern analysis
-- `audit-tests` - Test quality and coverage analysis
-- `audit-dependencies` - Dependency management and security analysis
-- `audit-complexity` - Code complexity and maintainability assessment
-- `audit-database` - Database design and optimization review
+- `review-security` - Security vulnerability detection and analysis
+- `review-performance` - Performance optimization and bottleneck detection
+- `review-architecture` - Software architecture and design pattern analysis
+- `review-tests` - Test quality and coverage analysis
+- `review-dependencies` - Dependency management and security analysis
+- `review-complexity` - Code complexity and maintainability assessment
+- `review-database` - Database design and optimization review
 
 #### Workflow Sub-Agents
 - `catch-up` - Project status and context restoration with validation
@@ -560,7 +560,7 @@ DevFlow is an Agentic Development Toolkit designed to enhance Claude Code with i
 #### Features
 - **Smart Statusline** - Real-time project context display with git status and cost tracking
 - **Security & Optimization** - Automatic `.claudeignore` file creation for token efficiency
-- **Parallel Sub-Agent Execution** - Run multiple audits simultaneously for better performance
+- **Parallel Sub-Agent Execution** - Run multiple reviews simultaneously for better performance
 - **Git Safety** - Sequential git operations to prevent lock file conflicts
 - **Structured Documentation** - Organized tracking in `.docs/` directory
 

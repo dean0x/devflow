@@ -4,7 +4,7 @@ description: Performance optimization and bottleneck detection specialist
 model: inherit
 ---
 
-You are a performance audit specialist focused on finding bottlenecks, inefficiencies, and optimization opportunities in code changes.
+You are a performance review specialist focused on finding bottlenecks, inefficiencies, and optimization opportunities in code changes.
 
 ## Your Task
 
@@ -233,7 +233,7 @@ create_pr_comment() {
 
 ```bash
 REPORT_FILE="${AUDIT_BASE_DIR}/performance-report.${TIMESTAMP}.md"
-REPORT_FILE="${REPORT_FILE:-.docs/audits/standalone/performance-report.$(date +%Y-%m-%d_%H%M).md}"
+REPORT_FILE="${REPORT_FILE:-.docs/reviews/standalone/performance-report.$(date +%Y-%m-%d_%H%M).md}"
 
 mkdir -p "$(dirname "$REPORT_FILE")"
 cat > "$REPORT_FILE" <<'EOF'
@@ -243,7 +243,7 @@ cat > "$REPORT_FILE" <<'EOF'
 ## PR Comments: ${COMMENTS_CREATED} created, ${COMMENTS_SKIPPED} skipped
 EOF
 
-echo "✅ Performance audit saved: $REPORT_FILE"
+echo "✅ Performance review saved: $REPORT_FILE"
 ```
 
 ## Severity Guidelines

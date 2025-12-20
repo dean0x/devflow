@@ -64,20 +64,25 @@ interface CommandDefinition {
  * Used for displaying available commands in init output.
  */
 const DEVFLOW_COMMANDS: CommandDefinition[] = [
-  { name: '/catch-up', description: 'Get up to speed on project state' },
-  { name: '/brainstorm', description: 'Explore design decisions' },
-  { name: '/design', description: 'Create implementation plan' },
-  { name: '/plan', description: 'Triage issues from discussion' },
+  // Planning & Specification
+  { name: '/planner', description: 'Plan release from feature list' },
+  { name: '/specifier', description: 'Specify a feature interactively' },
   { name: '/breakdown', description: 'Break down tasks quickly' },
-  { name: '/get-issue', description: 'Fetch issue and create branch' },
+  // Execution & Orchestration
+  { name: '/coordinator', description: 'Coordinate a product release' },
+  { name: '/swarm', description: 'Execute single task lifecycle' },
   { name: '/implement', description: 'Interactive implementation' },
-  { name: '/code-review', description: 'Comprehensive code review' },
+  // Review & Quality
+  { name: '/review', description: 'Comprehensive code review' },
+  { name: '/debug', description: 'Systematic debugging' },
+  { name: '/resolve-comments', description: 'Address PR feedback' },
+  // Git & Release
   { name: '/commit', description: 'Smart atomic commits' },
   { name: '/pull-request', description: 'Create PR with description' },
   { name: '/release', description: 'Automated releases' },
+  // Session Management
+  { name: '/catch-up', description: 'Get up to speed on project state' },
   { name: '/devlog', description: 'Document session progress' },
-  { name: '/debug', description: 'Systematic debugging' },
-  { name: '/resolve-comments', description: 'Address PR feedback' },
 ];
 
 /**
@@ -88,10 +93,11 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'pattern-check', description: 'Architectural pattern validation' },
   { name: 'test-design', description: 'Test quality enforcement' },
   { name: 'code-smell', description: 'Anti-pattern detection' },
-  { name: 'research', description: 'Pre-implementation planning (auto)' },
+  { name: 'research', description: 'Pre-implementation exploration' },
   { name: 'debug', description: 'Systematic debugging (auto)' },
   { name: 'input-validation', description: 'Boundary validation' },
   { name: 'error-handling', description: 'Result type consistency' },
+  { name: 'worktree', description: 'Parallel development isolation' },
 ];
 
 /**
@@ -699,7 +705,7 @@ Pipfile.lock
         try {
           await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
-          await fs.mkdir(path.join(docsDir, 'audits', 'standalone'), { recursive: true });
+          await fs.mkdir(path.join(docsDir, 'reviews', 'standalone'), { recursive: true });
           await fs.mkdir(path.join(docsDir, 'releases'), { recursive: true });
           docsCreated = true;
         } catch (error) {

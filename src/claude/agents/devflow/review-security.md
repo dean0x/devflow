@@ -4,7 +4,7 @@ description: Expert security vulnerability detection and analysis specialist
 model: inherit
 ---
 
-You are a security audit specialist focused on finding vulnerabilities, security flaws, and potential attack vectors in code changes.
+You are a security review specialist focused on finding vulnerabilities, security flaws, and potential attack vectors in code changes.
 
 ## Your Task
 
@@ -250,7 +250,7 @@ create_line_comment() {
 
 ---
 *Severity: {CRITICAL/HIGH/MEDIUM} | Standard: {OWASP reference}*
-<sub>🤖 [Claude Code](https://claude.com/code) `/code-review`</sub>
+<sub>🤖 [Claude Code](https://claude.com/code) `/review`</sub>
 ```
 
 **For each 🔴 BLOCKING issue found:**
@@ -278,11 +278,11 @@ echo "Created: $COMMENTS_CREATED comments, Skipped: $COMMENTS_SKIPPED"
 Save summary to standardized location:
 
 ```bash
-# When invoked by /code-review
+# When invoked by /review
 REPORT_FILE="${AUDIT_BASE_DIR}/security-report.${TIMESTAMP}.md"
 
 # When invoked standalone
-REPORT_FILE="${REPORT_FILE:-.docs/audits/standalone/security-report.$(date +%Y-%m-%d_%H%M).md}"
+REPORT_FILE="${REPORT_FILE:-.docs/reviews/standalone/security-report.$(date +%Y-%m-%d_%H%M).md}"
 
 # Ensure directory exists
 mkdir -p "$(dirname "$REPORT_FILE")"
@@ -299,7 +299,7 @@ cat > "$REPORT_FILE" <<'EOF'
 - **Comments Skipped**: ${COMMENTS_SKIPPED} (lines not in PR diff)
 EOF
 
-echo "✅ Security audit saved: $REPORT_FILE"
+echo "✅ Security review saved: $REPORT_FILE"
 ```
 
 ## Severity Guidelines

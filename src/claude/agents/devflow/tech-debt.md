@@ -23,7 +23,7 @@ CURRENT_BRANCH=$(git branch --show-current)
 REPO_INFO=$(gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null || echo "")
 
 # Audit directory and timestamp from orchestrator
-AUDIT_BASE_DIR="${AUDIT_BASE_DIR:-.docs/audits/$(echo $CURRENT_BRANCH | sed 's/\//-/g')}"
+AUDIT_BASE_DIR="${AUDIT_BASE_DIR:-.docs/reviews/$(echo $CURRENT_BRANCH | sed 's/\//-/g')}"
 TIMESTAMP="${TIMESTAMP:-$(date +%Y-%m-%d_%H%M)}"
 
 echo "=== TECH DEBT AGENT ==="
@@ -54,7 +54,7 @@ if [ -z "$TECH_DEBT_ISSUE" ]; then
         --body "$(cat <<'EOF'
 # Tech Debt Backlog
 
-> Auto-maintained by `/code-review`. Items are added when pre-existing issues are found during code reviews.
+> Auto-maintained by `/review`. Items are added when pre-existing issues are found during code reviews.
 
 ## How This Works
 - Issues found in code you didn't change are logged here
@@ -92,7 +92,7 @@ echo "Current issue body length: $BODY_LENGTH characters"
 
 Parse existing items from the issue body. Items follow this format:
 ```
-- [ ] **[audit-type]** `file:line` - description
+- [ ] **[review-type]** `file:line` - description
   → [Review: date](path-to-doc)
 ```
 
@@ -135,7 +135,7 @@ EOF
         --body "$(cat <<EOF
 # Tech Debt Backlog
 
-> Auto-maintained by \`/code-review\`.
+> Auto-maintained by \`/review\`.
 
 ## Previous Archives
 - #${OLD_ISSUE_NUMBER} (archived)
@@ -169,7 +169,7 @@ fi
 
 ## Step 5: Read New Pre-existing Issues from Audit Reports
 
-Read all audit reports and extract ℹ️ pre-existing issues:
+Read all review reports and extract ℹ️ pre-existing issues:
 
 ```bash
 ls -1 "$AUDIT_BASE_DIR"/*-report.*.md 2>/dev/null
@@ -194,7 +194,7 @@ For each new_item:
     is_duplicate = false
 
     For each existing_item in current_issue:
-        # Fast path: file + audit type match
+        # Fast path: file + review type match
         if new_item.file == existing_item.file AND
            new_item.audit_type == existing_item.audit_type:
 
@@ -274,7 +274,7 @@ Construct updated issue body:
 
 **New Item Format:**
 ```markdown
-- [ ] **[{audit-type}]** `{file}:{line}` - {brief description}
+- [ ] **[{review-type}]** `{file}:{line}` - {brief description}
   → [Review: {date}]({relative-path-to-review-doc})
 ```
 
@@ -333,5 +333,5 @@ Return summary to orchestrator:
 2. **Conservative removal** - Only remove when confident it's fixed
 3. **Preserve history** - Archive instead of delete when full
 4. **Line tolerance** - Code shifts; check context, not exact line
-5. **Clear audit trail** - Link items to review docs
+5. **Clear review trail** - Link items to review docs
 6. **Minimal noise** - Keep issue focused and actionable

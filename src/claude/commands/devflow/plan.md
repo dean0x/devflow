@@ -361,7 +361,7 @@ Planner (release planning orchestrator)
         └── spawns: Swarm (per feature)
             ├── spawns: Design
             ├── spawns: Coder
-            └── spawns: CodeReview
+            └── spawns: Review
 ```
 
 ---

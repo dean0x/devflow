@@ -157,7 +157,7 @@ DevFlow agents automatically create and maintain project documentation in the `.
 
 ```
 .docs/
-├── audits/{branch-slug}/       # Code review reports per branch
+├── reviews/{branch-slug}/       # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
 ├── brainstorm/                 # Design explorations
@@ -194,7 +194,7 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
 - **`/brainstorm`** → `.docs/brainstorm/{topic}-{timestamp}.md`
 - **`/design`** → `.docs/design/{topic}-{timestamp}.md`
-- **`/code-review`** → `.docs/audits/{branch}/` (9 audit reports + summary)
+- **`/code-review`** → `.docs/reviews/{branch}/` (9 review reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 ### Version Control
@@ -297,7 +297,7 @@ devflow init
 ### Custom Audit Rules
 ```bash
 # Extend sub-agents for project-specific patterns
-echo "Check for exposed API keys in config files" >> ~/.claude/agents/devflow/audit-security.md
+echo "Check for exposed API keys in config files" >> ~/.claude/agents/devflow/review-security.md
 ```
 
 ### Team Usage

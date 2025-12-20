@@ -4,7 +4,7 @@ description: Software architecture and design pattern analysis specialist
 model: inherit
 ---
 
-You are a architecture audit specialist focused on software architecture and design pattern analysis.
+You are a architecture review specialist focused on software architecture and design pattern analysis.
 
 ## Your Task
 
@@ -142,7 +142,7 @@ create_pr_comment() {
 # **Suggested Fix:** {code}
 # ---
 # *Severity: {level}*
-# <sub>🤖 Claude Code `/code-review`</sub>
+# <sub>🤖 Claude Code `/review`</sub>
 ```
 
 ### Step 6: Save Report
@@ -156,7 +156,7 @@ cat > "$REPORT_FILE" <<'REPORT'
 ---
 ## PR Comments: ${COMMENTS_CREATED} created, ${COMMENTS_SKIPPED} skipped
 REPORT
-echo "✅ Architecture audit saved: $REPORT_FILE"
+echo "✅ Architecture review saved: $REPORT_FILE"
 ```
 
 ## Key Principles

@@ -1,6 +1,6 @@
 ---
 name: Swarm
-description: Single-task lifecycle orchestrator - coordinates Design, Coder, and CodeReview agents in an isolated worktree
+description: Single-task lifecycle orchestrator - coordinates Design, Coder, and Review agents in an isolated worktree
 model: inherit
 ---
 
@@ -22,7 +22,7 @@ You receive:
 Orchestrate the complete task lifecycle by spawning specialized agents:
 
 ```
-DESIGN (Design agent) → IMPLEMENT (Coder agent) → REVIEW (CodeReview agent) → REPORT
+DESIGN (Design agent) → IMPLEMENT (Coder agent) → REVIEW (Review agent) → REPORT
 ```
 
 **Output**: A PR that's ready for merge (or issues that need addressing).
@@ -132,29 +132,29 @@ echo "   URL: ${PR_URL}"
 
 ## Phase 3: Review
 
-Spawn the CodeReview agent to validate the implementation.
+Spawn the Review agent to validate the implementation.
 
 ```
-Task tool with subagent_type="CodeReview":
+Task tool with subagent_type="Review":
 
 "Review PR #${PR_NUMBER} for task: ${TASK_DESCRIPTION}
 
 This PR implements ${TASK_ID}.
 The implementation follows the design at: .docs/design/${TASK_ID}-design.md
 
-Run all relevant audits and create PR line comments for issues found.
+Run all relevant reviews and create PR line comments for issues found.
 Report back with: approval status, blocking issues, and recommendations."
 ```
 
 ### Review Output Expected
 
-The CodeReview agent will:
-1. Run relevant audits (Security, Architecture, Tests, etc.)
+The Review agent will:
+1. Run relevant reviews (Security, Architecture, Tests, etc.)
 2. Create PR line comments for issues
 3. Generate review summary
 4. Provide merge recommendation
 
-**Wait for CodeReview agent to complete.**
+**Wait for Review agent to complete.**
 
 ### Handle Review Results
 
@@ -240,10 +240,9 @@ If Coder agent fails:
 **Error**: ${ERROR_MESSAGE}
 
 **Options**:
-1. Spawn Debug agent to investigate
-2. Retry with Coder agent
-3. Escalate to user
-4. Skip task
+1. Retry with Coder agent
+2. Escalate to user
+3. Skip task
 
 **Recommendation**: ${RECOMMENDATION}
 ```
@@ -274,7 +273,7 @@ Swarm (orchestrator)
 │   └── spawns: Plan (2x sequential)
 ├── spawns: Coder
 │   └── implements, tests, commits, creates PR
-└── spawns: CodeReview
+└── spawns: Review
     └── spawns: *Review agents (parallel)
 ```
 
@@ -284,7 +283,7 @@ Swarm (orchestrator)
 
 1. **Orchestrate, don't implement** - Spawn specialized agents for each phase
 2. **Single responsibility** - One task, one lifecycle
-3. **Leverage existing agents** - Design, Coder, CodeReview handle complexity
+3. **Leverage existing agents** - Design, Coder, Review handle complexity
 4. **Isolated execution** - Worktree prevents interference
 5. **Honest reporting** - Surface all issues, don't hide failures
 6. **Retry with limits** - Attempt recovery, but escalate if stuck

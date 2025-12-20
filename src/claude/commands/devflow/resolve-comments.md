@@ -578,6 +578,6 @@ For comments that are just questions (no code changes needed):
 
 **Integration Points:**
 - After feedback: `/resolve-comments` (this command)
-- Before pushing changes: `/code-review` (optional)
+- Before pushing changes: `/review` (optional)
 - After changes: `/commit` (if manual commit preferred)
 - After addressing all: Request re-review via `gh pr review`

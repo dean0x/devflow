@@ -43,7 +43,7 @@ gh issue view "${ISSUE_NUMBER}" --json title,body,labels,milestone
 gh issue view "${ISSUE_NUMBER}" > .docs/coordinator/release-issue.md
 ```
 
-### Extract Feature Issues
+### Extract Feature Issue References
 
 Parse the release issue body to find referenced feature issues:
 
@@ -55,18 +55,37 @@ Look for patterns:
 - Fixes #123, Closes #123, Relates to #123
 ```
 
-**For each referenced issue:**
+### Fetch Feature Issues (Parallel)
 
-```bash
-# Fetch feature issue details
-gh issue view "${FEATURE_ISSUE}" --json number,title,body,labels,assignees,state
+Spawn GetIssue agents in parallel for each referenced issue:
 
-# Extract:
-# - Title (feature name)
-# - Body (requirements/acceptance criteria)
-# - Labels (priority, complexity, type)
-# - State (open/closed - skip closed)
 ```
+For each FEATURE_ISSUE_NUMBER found, spawn in a single message:
+
+Task tool with subagent_type="GetIssue":
+
+"Fetch issue details for release planning.
+
+ISSUE_INPUT: ${FEATURE_ISSUE_NUMBER}
+
+Return comprehensive issue details including:
+- Title, state, labels
+- Priority and complexity from labels
+- Description and acceptance criteria
+- Dependencies (depends on, blocked by)
+- What it blocks"
+```
+
+### Collect GetIssue Results
+
+From each GetIssue agent, extract:
+- Issue number and title
+- State (skip if closed)
+- Priority (P0/P1/P2/P3 from labels)
+- Complexity (High/Medium/Low from labels)
+- Dependencies (from issue body)
+- Blocks (from issue body)
+- Acceptance criteria
 
 ### Build Feature List
 
@@ -639,6 +658,24 @@ git worktree prune
 echo '{"status": "aborted", "reason": "${REASON}"}' > .docs/coordinator/state.json
 
 echo "✅ Aborted and cleaned up"
+```
+
+---
+
+## Agent Hierarchy
+
+```
+Coordinator (release orchestrator)
+├── spawns: GetIssue (per feature, parallel)
+│   └── fetches issue details for planning
+└── spawns: Swarm (per feature, parallel per wave)
+    ├── spawns: Design
+    │   ├── spawns: Explore (3x parallel)
+    │   └── spawns: Plan (2x sequential)
+    ├── spawns: Coder
+    │   └── implements, tests, commits, creates PR
+    └── spawns: Review
+        └── spawns: *Review agents (parallel)
 ```
 
 ---

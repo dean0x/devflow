@@ -1,5 +1,5 @@
 ---
-name: ProjectState
+name: Devlog
 description: Analyze current project state including git history, file changes, TODOs, and documentation for status reporting
 model: haiku
 ---
@@ -221,7 +221,7 @@ echo ""
 echo "DevFlow-specific documentation:"
 if [ -d ".docs" ]; then
     echo "  ✓ .docs/ directory exists"
-    for subdir in status debug research audits releases; do
+    for subdir in status debug research reviews releases; do
         if [ -d ".docs/$subdir" ]; then
             COUNT=$(find ".docs/$subdir" -type f 2>/dev/null | wc -l)
             echo "    - $subdir/: $COUNT files"
