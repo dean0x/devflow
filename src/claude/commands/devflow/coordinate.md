@@ -11,8 +11,8 @@ Coordinate feature development for a product release. Parse a GitHub release iss
 ## Usage
 
 ```
-/coordinator #42
-/coordinator https://github.com/org/repo/issues/42
+/coordinate #42
+/coordinate https://github.com/org/repo/issues/42
 ```
 
 The release issue should contain references to feature issues (e.g., `#101`, `#102`).
@@ -49,7 +49,7 @@ ISSUE_NUMBER=$(echo "${RELEASE_ISSUE}" | grep -oE '[0-9]+$' || echo "${RELEASE_I
 gh issue view "${ISSUE_NUMBER}" --json title,body,labels,milestone
 
 # Store for reference
-gh issue view "${ISSUE_NUMBER}" > .docs/coordinator/release-issue.md
+gh issue view "${ISSUE_NUMBER}" > .docs/coordinate/release-issue.md
 ```
 
 ### Extract Feature Issues
@@ -212,7 +212,7 @@ done
 
 ### Initialize State
 
-Create `.docs/coordinator/state.json`:
+Create `.docs/coordinate/state.json`:
 
 ```json
 {
@@ -515,7 +515,7 @@ All PRs target: `${RELEASE_BRANCH}`
 ## Artifacts
 
 - Release branch: `${RELEASE_BRANCH}`
-- State file: `.docs/coordinator/state.json`
+- State file: `.docs/coordinate/state.json`
 - Design docs: `.docs/design/feature-*-design.md`
 ```
 
@@ -645,7 +645,7 @@ done
 git worktree prune
 
 # Update state
-echo '{"status": "aborted", "reason": "${REASON}"}' > .docs/coordinator/state.json
+echo '{"status": "aborted", "reason": "${REASON}"}' > .docs/coordinate/state.json
 
 echo "✅ Aborted and cleaned up"
 ```

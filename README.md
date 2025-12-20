@@ -69,14 +69,14 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
-| `/brainstorm` | Explore design decisions and architectural approaches | Before implementation, evaluating options |
-| `/design` | Create detailed implementation plan with integration points | After brainstorming, ready for detailed design |
-| `/plan` | Triage issues - implement now, defer to GitHub issue, or skip | After code-review or discussion, deciding what to tackle |
+| `/plan` | Plan release from high-level feature list | Planning a product release with multiple features |
+| `/specify` | Specify a feature interactively with technical design | Before implementing a feature |
 | `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
-| `/get-issue` | Fetch GitHub issue details and create working branch | Starting work on a GitHub issue |
+| `/coordinate` | Orchestrate parallel feature development with worktrees | Executing a planned release |
+| `/swarm` | Execute single task lifecycle (design → implement → review) | Implementing one feature/task |
 | `/implement` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
 | `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
-| `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
+| `/review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
 | `/pull-request` | Create PR with comprehensive analysis and smart description | After commits, ready to create PR |
 | `/resolve-comments` | Systematically address PR review feedback | After PR feedback, need to resolve comments |
@@ -85,25 +85,45 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 
 ### 🤖 Sub-Agents
 
+**Orchestration Agents** (spawn other agents, manage workflows):
+
 | Sub-Agent | Specialty | Purpose |
 |-----------|-----------|---------|
+| `Planner` | Release Planning | Plan releases from feature list, spawn Specifiers |
+| `Specifier` | Feature Specification | Create detailed specs, spawn Design agents |
+| `Coordinator` | Release Orchestration | Orchestrate parallel feature development with worktrees |
+| `Swarm` | Task Lifecycle | Execute design → implement → review cycle |
+| `Coder` | Implementation | Write code in isolated worktrees |
+
+**Review Agents** (specialized code analysis):
+
+| Sub-Agent | Specialty | Purpose |
+|-----------|-----------|---------|
+| `Review` | Review Orchestration | Coordinate all review sub-agents |
 | `SecurityReview` | Security Analysis | Expert vulnerability detection and security code review |
 | `PerformanceReview` | Performance | Optimization and bottleneck detection |
 | `ArchitectureReview` | Architecture | Design pattern analysis and code structure review |
-| `TestsReview` | Testing | Test quality, coverage, and effectiveness analysis (surgical execution) |
+| `TestsReview` | Testing | Test quality, coverage, and effectiveness analysis |
 | `ComplexityReview` | Complexity | Code complexity and maintainability assessment |
 | `DependenciesReview` | Dependencies | Dependency management and security analysis |
 | `DatabaseReview` | Database | Database design and optimization review |
 | `DocumentationReview` | Documentation | Docs-code alignment, API accuracy, comment quality |
 | `TypescriptReview` | TypeScript | Type safety enforcement and TypeScript code quality |
-| `Brainstorm` | Design Decisions | Explore architectural approaches and evaluate trade-offs |
-| `Design` | Implementation Planning | Detailed implementation design with integration points and edge cases |
+
+**Utility Agents** (focused tasks):
+
+| Sub-Agent | Specialty | Purpose |
+|-----------|-----------|---------|
+| `Design` | Implementation Planning | Detailed implementation design with integration points |
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
+| `Devlog` | Project State | Analyze project state for status reports |
 | `Commit` | Git Operations | Intelligent commit creation with safety checks |
-| `GetIssue` | GitHub Issues | Fetch issue details and create working branches |
-| `PullRequest` | PR Creation | Analyze commits/changes and generate comprehensive PR descriptions |
+| `GetIssue` | GitHub Issues | Fetch issue details for planning |
+| `PullRequest` | PR Creation | Analyze commits/changes and generate PR descriptions |
 | `Release` | Release Automation | Project-agnostic release workflow with version management |
-| `Debug` | Debugging | Systematic debugging with hypothesis testing and issue tracking |
+| `Debug` | Debugging | Systematic debugging with hypothesis testing |
+| `Comment` | PR Comments | Create summary comments for non-diff issues |
+| `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
 
 **How Sub-Agents Work:**
 - Specialized AI assistants with deep expertise in specific domains
@@ -160,9 +180,10 @@ DevFlow agents automatically create and maintain project documentation in the `.
 ├── reviews/{branch-slug}/       # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── brainstorm/                 # Design explorations
-│   └── {topic-slug}-{timestamp}.md
-├── design/                     # Implementation plans
+├── coordinator/                # Release coordination state
+│   ├── release-issue.md
+│   └── state.json
+├── design/                     # Implementation plans (from Swarm)
 │   └── {topic-slug}-{timestamp}.md
 ├── debug/                      # Debug sessions
 │   ├── debug-{timestamp}.md
@@ -192,9 +213,9 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/catch-up`** → `.docs/CATCH_UP.md` (overwritten each run)
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
 - **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
-- **`/brainstorm`** → `.docs/brainstorm/{topic}-{timestamp}.md`
-- **`/design`** → `.docs/design/{topic}-{timestamp}.md`
-- **`/code-review`** → `.docs/reviews/{branch}/` (9 review reports + summary)
+- **`/coordinate`** → `.docs/coordinator/state.json` + `release-issue.md`
+- **`/swarm`** (via Design) → `.docs/design/{topic}-{timestamp}.md`
+- **`/review`** → `.docs/reviews/{branch}/` (9 review reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 ### Version Control
@@ -224,11 +245,11 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 2. **Plan your work** - `/plan` to triage issues, or `/breakdown` for quick task capture
 3. **Implement efficiently** - `/implement` flows through todos automatically
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
-5. `/code-review` - Review changes before committing
+5. `/review` - Review changes before committing
 6. `/commit` - Create intelligent atomic commits
 
 ### Creating Pull Requests
-1. `/code-review` - Comprehensive branch review
+1. `/review` - Comprehensive branch review
 2. `/commit` - Final commits with validation
 3. `/pull-request` - Create PR with smart description
 4. Wait for review feedback
@@ -237,12 +258,12 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 
 ### Ending a Session
 1. `/devlog` - Document decisions and state
-2. `/code-review` - Review branch before creating PR
+2. `/review` - Review branch before creating PR
 3. `/commit` - Final commits with validation
 4. `/pull-request` - Create PR if ready
 
 ### Creating a Release
-1. `/code-review` - Comprehensive branch review
+1. `/review` - Comprehensive branch review
 2. `/release` - Automated release workflow
    - Detects project type (Node.js, Rust, Python, Go, etc.)
    - Analyzes commits and suggests version bump
@@ -315,9 +336,11 @@ git commit -m "Session status: completed user auth feature"
 "Fix this error"          # debug skill activates and guides systematic approach
 
 # Manual command invocation for structured workflows
-/brainstorm user authentication  # Explore architectural approaches
-/design JWT token system         # Create detailed implementation plan
-/code-review                     # Review changes before committing
+/plan                            # Plan release from feature list
+/specify user authentication     # Create detailed feature spec
+/coordinate                      # Execute planned release in parallel
+/swarm                           # Run design → implement → review cycle
+/review                          # Review changes before committing
 /commit                          # Create atomic commits
 /release                         # Automated release workflow
 ```

@@ -11,12 +11,12 @@ Transform a rough feature idea into a well-defined, implementation-ready GitHub 
 ## Usage
 
 ```
-/specifier User authentication with social login
-/specifier Rate limiting for API endpoints
-/specifier Dashboard redesign with real-time updates
+/specify User authentication with social login
+/specify Rate limiting for API endpoints
+/specify Dashboard redesign with real-time updates
 ```
 
-For multi-feature release planning, use `/planner` instead.
+For multi-feature release planning, use `/plan` instead.
 
 ---
 
@@ -399,7 +399,7 @@ This issue is ready for Swarm execution:
 
 Or add to a release for coordinated execution:
 \`\`\`
-Reference #${ISSUE_NUMBER} in your release issue, then run /coordinator
+Reference #${ISSUE_NUMBER} in your release issue, then run /coordinate
 \`\`\`
 ```
 

@@ -65,11 +65,11 @@ interface CommandDefinition {
  */
 const DEVFLOW_COMMANDS: CommandDefinition[] = [
   // Planning & Specification
-  { name: '/planner', description: 'Plan release from feature list' },
-  { name: '/specifier', description: 'Specify a feature interactively' },
+  { name: '/plan', description: 'Plan release from feature list' },
+  { name: '/specify', description: 'Specify a feature interactively' },
   { name: '/breakdown', description: 'Break down tasks quickly' },
   // Execution & Orchestration
-  { name: '/coordinator', description: 'Coordinate a product release' },
+  { name: '/coordinate', description: 'Coordinate a product release' },
   { name: '/swarm', description: 'Execute single task lifecycle' },
   { name: '/implement', description: 'Interactive implementation' },
   // Review & Quality

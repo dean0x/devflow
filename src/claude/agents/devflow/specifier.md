@@ -389,7 +389,7 @@ This issue is ready for Swarm execution:
 
 Or add to a release for coordinated execution:
 \`\`\`
-Reference #${ISSUE_NUMBER} in your release issue, then run /coordinator
+Reference #${ISSUE_NUMBER} in your release issue, then run /coordinate
 \`\`\`
 ```
 

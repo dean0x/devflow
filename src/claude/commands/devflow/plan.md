@@ -11,11 +11,11 @@ Transform a rough feature list into a fully specified release plan. Spawns Speci
 ## Usage
 
 ```
-/planner Auth, rate limiting, dashboard redesign
-/planner "User auth with social login, API rate limiting, Admin dashboard"
+/plan Auth, rate limiting, dashboard redesign
+/plan "User auth with social login, API rate limiting, Admin dashboard"
 ```
 
-For single-feature specification, use `/specifier` instead.
+For single-feature specification, use `/specify` instead.
 
 ---
 
@@ -33,7 +33,7 @@ Transform a rough feature list into a complete release plan:
 PARSE → SPECIFY (parallel) → SYNTHESIZE → CREATE RELEASE → REPORT
 ```
 
-**Output**: A release issue with all feature issues created and dependencies mapped, ready for `/coordinator`.
+**Output**: A release issue with all feature issues created and dependencies mapped, ready for `/coordinate`.
 
 ---
 
@@ -237,7 +237,7 @@ ${RELEASE_DESCRIPTION}
 
 Run the Coordinator to execute this release:
 ```
-/coordinator #${RELEASE_ISSUE_NUMBER}
+/coordinate #${RELEASE_ISSUE_NUMBER}
 ```
 
 ---
@@ -291,7 +291,7 @@ ${RELEASE_TITLE}
 
 Run the Coordinator to begin development:
 \`\`\`
-/coordinator #${RELEASE_ISSUE}
+/coordinate #${RELEASE_ISSUE}
 \`\`\`
 
 This will:

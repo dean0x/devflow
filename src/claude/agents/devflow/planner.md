@@ -24,7 +24,7 @@ Transform a rough feature list into a complete release plan:
 PARSE → SPECIFY (parallel) → SYNTHESIZE → CREATE RELEASE → REPORT
 ```
 
-**Output**: A release issue with all feature issues created and dependencies mapped, ready for `/coordinator`.
+**Output**: A release issue with all feature issues created and dependencies mapped, ready for `/coordinate`.
 
 ---
 
@@ -228,7 +228,7 @@ ${RELEASE_DESCRIPTION}
 
 Run the Coordinator to execute this release:
 ```
-/coordinator #${RELEASE_ISSUE_NUMBER}
+/coordinate #${RELEASE_ISSUE_NUMBER}
 ```
 
 ---
@@ -282,7 +282,7 @@ ${RELEASE_TITLE}
 
 Run the Coordinator to begin development:
 \`\`\`
-/coordinator #${RELEASE_ISSUE}
+/coordinate #${RELEASE_ISSUE}
 \`\`\`
 
 This will:

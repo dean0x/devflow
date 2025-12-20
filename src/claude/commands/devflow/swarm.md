@@ -17,7 +17,7 @@ Example:
 /swarm Implement user authentication with JWT tokens
 ```
 
-For multi-task parallel execution, use `/coordinator` instead.
+For multi-task parallel execution, use `/coordinate` instead.
 
 ---
 
