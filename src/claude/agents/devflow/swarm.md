@@ -163,36 +163,16 @@ If APPROVED:
     → Task complete, ready for merge
 
 If CHANGES_REQUESTED:
-    → Spawn Coder agent to address feedback
-    → Re-run CodeReview
-    → Repeat until approved (max 3 iterations)
+    → Report issues found
+    → PR needs attention before merge
+    → User can run /resolve-comments to address feedback
 
 If BLOCKED:
-    → Report blocking issues to orchestrator
+    → Report blocking issues
     → Do not proceed
 ```
 
-### Review Loop (if needed)
-
-If changes are requested:
-
-```
-Task tool with subagent_type="Coder":
-
-"Address code review feedback for PR #${PR_NUMBER}.
-
-TASK_ID: ${TASK_ID}
-WORKTREE_DIR: ${WORKTREE_DIR}
-
-Review feedback:
-${REVIEW_FEEDBACK}
-
-Fix each blocking issue, run tests, and push updates."
-```
-
-Then re-spawn CodeReview agent.
-
-**Maximum review iterations**: 3 (after that, escalate to user)
+**Swarm does NOT auto-fix review issues.** Comment resolution is explicit via `/resolve-comments`.
 
 ---
 
@@ -216,7 +196,6 @@ ${TASK_DESCRIPTION}
 | Commits | ${NUM_COMMITS} |
 | Files Changed | ${NUM_FILES} |
 | Review Status | ${REVIEW_STATUS} |
-| Review Iterations | ${NUM_REVIEWS} |
 
 ### Files Touched
 ${LIST_OF_FILES}
@@ -269,24 +248,19 @@ If Coder agent fails:
 **Recommendation**: ${RECOMMENDATION}
 ```
 
-### Review Rejection (after max iterations)
+### Review Issues Found
 
 ```markdown
-## ⚠️ Review Not Passing
+## ⚠️ Review Found Issues
 
 **Task**: ${TASK_ID}
 **PR**: #${PR_NUMBER}
-**Review Iterations**: ${NUM_REVIEWS} (max reached)
 
-**Remaining Issues**:
+**Issues Found**:
 ${LIST_OF_ISSUES}
 
-**Options**:
-1. Escalate to user for manual fixes
-2. Merge with known issues (not recommended)
-3. Abandon task
-
-**Recommendation**: Escalate to user
+**Next Steps**:
+Run `/resolve-comments #${PR_NUMBER}` to address feedback systematically.
 ```
 
 ---
