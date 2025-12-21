@@ -1,5 +1,5 @@
 ---
-name: debug
+name: devflow-debug
 description: Auto-launch systematic debugging when errors, crashes, or failures occur. Use when encountering exceptions, failed tests, build errors, or unexpected behavior that needs investigation.
 allowed-tools: Task
 ---

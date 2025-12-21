@@ -1,5 +1,5 @@
 ---
-name: test-design
+name: devflow-test-design
 description: Automatically review test quality and design when writing or modifying tests. Use when tests require complex setup, have repetitive boilerplate, or when mocking becomes difficult. Enforces behavior testing over implementation testing.
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---

@@ -1,5 +1,5 @@
 ---
-name: research
+name: devflow-research
 description: Auto-launch pre-implementation research when unfamiliar features, libraries, or patterns are requested. Use when implementing new functionality that requires understanding approaches, integration strategies, or best practices.
 allowed-tools: Task
 ---

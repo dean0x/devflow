@@ -1,5 +1,5 @@
 ---
-name: error-handling
+name: devflow-error-handling
 description: Automatically enforce Result type pattern and consistent error handling throughout the codebase. Use when writing functions that can fail, handling errors, or reviewing error handling consistency.
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---

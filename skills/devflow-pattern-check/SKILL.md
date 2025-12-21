@@ -1,5 +1,5 @@
 ---
-name: pattern-check
+name: devflow-pattern-check
 description: Automatically validate architectural patterns and detect violations when code changes are made. Use when implementing new functionality, refactoring existing code, or when Result types, dependency injection, or immutability patterns might be violated.
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---
