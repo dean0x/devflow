@@ -1,6 +1,6 @@
 ---
 description: Automated release workflow with version management and publishing
-allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob
+allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion
 ---
 
 ## Your Task
@@ -11,50 +11,61 @@ Orchestrate a complete release workflow using the release sub-agent. This comman
 
 ### Step 1: Determine Release Type
 
-First, ask the user what type of release they want to create:
-
-```bash
-echo "🚀 DEVFLOW RELEASE AUTOMATION"
-echo ""
-echo "This will guide you through creating a new release."
-echo ""
-```
-
-Present options to the user:
+Use AskUserQuestion to get the release type:
 
 ```
-What type of release do you want to create?
-
-1. **patch** - Bug fixes and maintenance (0.1.2 → 0.1.3)
-2. **minor** - New features, backwards compatible (0.1.2 → 0.2.0)
-3. **major** - Breaking changes (0.1.2 → 1.0.0)
-4. **custom** - Specify exact version (e.g., 2.0.0-beta.1)
-5. **analyze** - Analyze changes and get recommendation first
-
-Please specify the release type (patch/minor/major/custom/analyze):
+AskUserQuestion:
+  question: "What type of release do you want to create?"
+  header: "Release"
+  options:
+    - label: "Analyze first (Recommended)"
+      description: "Analyze commits and get version bump recommendation before deciding"
+    - label: "Patch (x.x.N)"
+      description: "Bug fixes and maintenance only"
+    - label: "Minor (x.N.0)"
+      description: "New features, backwards compatible"
+    - label: "Major (N.0.0)"
+      description: "Breaking changes"
 ```
+
+If user selects "Other" for custom version, they can specify an exact version like `2.0.0-beta.1`.
 
 ### Step 2: Launch Release Agent
 
-Once the user provides input, launch the release sub-agent with the appropriate prompt:
+Based on user's choice, launch the release sub-agent:
 
-**If user chose "analyze"**:
+**If user chose "Analyze first"**:
 ```
-Invoke the release sub-agent with this prompt:
-
+Task tool with subagent_type="Release":
 "Analyze the current repository state and recent commits. Execute through Step 3 (Determine New Version) and provide a recommendation for the version bump type. Show:
 - Current version
 - Commits since last release
 - Breaking changes, features, and fixes detected
 - Recommended version bump with reasoning
 
-Stop and wait for user decision before proceeding with the release."
+Stop and return results - do not proceed with the release yet."
 ```
 
-**If user chose "patch", "minor", or "major"**:
-```
-Invoke the release sub-agent with this prompt:
+After analysis, use AskUserQuestion to confirm:
 
+```
+AskUserQuestion:
+  question: "Analysis complete. [SUMMARY]. Which version bump do you want?"
+  header: "Version"
+  options:
+    - label: "[Recommended bump] (Recommended)"
+      description: "Based on commit analysis"
+    - label: "Patch"
+      description: "Override to patch release"
+    - label: "Minor"
+      description: "Override to minor release"
+    - label: "Major"
+      description: "Override to major release"
+```
+
+**If user chose specific bump type (patch/minor/major) or custom version**:
+```
+Task tool with subagent_type="Release":
 "Create a {bump_type} release. Follow the complete release workflow:
 1. Detect project type and configuration
 2. Verify clean working directory
@@ -65,129 +76,114 @@ Invoke the release sub-agent with this prompt:
 7. Build project (if applicable)
 8. Run tests (if applicable)
 
-STOP before Step 8 (Commit Version Bump) and show me:
+STOP before Step 8 (Commit Version Bump) and return:
 - Current version → New version
 - Generated changelog entry
 - Files that will be modified
 - Build/test results
 
-Wait for my confirmation before proceeding with commit, push, publish, and tagging."
-```
-
-**If user chose "custom"**:
-```
-Ask user: "Please specify the exact version number (e.g., 2.0.0-beta.1):"
-
-Then invoke the release sub-agent with this prompt:
-
-"Create a release with custom version {specified_version}. Follow the complete release workflow:
-1. Detect project type and configuration
-2. Verify clean working directory
-3. Analyze recent changes since last release
-4. Use the specified version: {specified_version}
-5. Generate changelog entry from commits
-6. Update version files
-7. Build project (if applicable)
-8. Run tests (if applicable)
-
-STOP before Step 8 (Commit Version Bump) and show me:
-- Current version → New version
-- Generated changelog entry
-- Files that will be modified
-- Build/test results
-
-Wait for my confirmation before proceeding with commit, push, publish, and tagging."
+Do not commit, push, or publish yet."
 ```
 
 ### Step 3: Review and Confirm
 
-After the release agent completes the preparation phase and stops, present the summary to the user:
+After the release agent returns preparation results, use AskUserQuestion:
 
 ```
-📋 RELEASE READY FOR REVIEW
+AskUserQuestion:
+  question: "Release prepared: [current] → [new]. Changelog and [N] files ready. Build: ✅ Tests: ✅. Proceed with commit and push?"
+  header: "Confirm"
+  options:
+    - label: "Yes, commit and push"
+      description: "Commit version bump and push to remote"
+    - label: "No, abort release"
+      description: "Discard all changes and cancel release"
+```
 
-Current Version: {current_version}
-New Version: {new_version}
-Project Type: {project_type}
-
-📝 Changelog Entry:
-{generated_changelog}
-
-📄 Files to be Modified:
-- {version_file}
-- {changelog_file}
-
-✅ Build Status: {build_result}
-✅ Test Status: {test_result}
-
----
-
-The release agent will now:
-1. Commit version bump
-2. Push to remote
-3. Publish package (if applicable)
-4. Create git tag
-5. Create GitHub/GitLab release (if available)
-
-⚠️  WARNING: Steps 3-5 are PERMANENT and PUBLIC
-
-Do you want to proceed with the release? (yes/no):
+If user confirms, proceed. If not, provide rollback:
+```bash
+git checkout -- {version_files} {changelog_file}
+echo "Release aborted - changes discarded"
 ```
 
 ### Step 4: Complete Release (After Confirmation)
 
-If user confirms, continue with the release agent:
+If user confirmed, continue with the release agent:
 
 ```
-Invoke the release sub-agent again with this prompt:
-
+Task tool with subagent_type="Release":
 "Continue the release process from Step 8 (Commit Version Bump):
 8. Commit version bump
 9. Push to remote
-10. Publish package (if applicable) - STOP and ask for confirmation before publishing
-11. Create git tag
-12. Create GitHub/GitLab release
-13. Provide final summary
 
-Execute these steps sequentially. Before Step 10 (publishing to package registry), STOP and explicitly ask for confirmation as this is permanent and public."
+STOP before Step 10 (Publish) and return status.
+Do not publish to registry yet."
 ```
 
 ### Step 5: Publish Confirmation
 
-When the agent reaches the publish step, ask for explicit confirmation:
+Before publishing to any package registry, use AskUserQuestion:
 
 ```
-⚠️  FINAL CONFIRMATION REQUIRED
+AskUserQuestion:
+  question: "Pushed to remote. Publish [package]@[version] to [registry]? This is PERMANENT."
+  header: "Publish"
+  options:
+    - label: "Yes, publish to registry"
+      description: "Publish package publicly - cannot be undone"
+    - label: "No, skip publishing"
+      description: "Skip registry publish, still create git tag and GitHub release"
+```
 
-The package is ready to be published to the public registry.
+**If user confirms publish**:
+```
+Task tool with subagent_type="Release":
+"Continue the release:
+10. Publish package to registry
+11. Create git tag
+12. Create GitHub/GitLab release
+13. Return final summary with all links"
+```
 
-Project: {project_name}
-Version: {new_version}
-Registry: {registry_name}
-Command: {publish_command}
+**If user skips publish**:
+```
+Task tool with subagent_type="Release":
+"Skip publishing. Continue with:
+11. Create git tag
+12. Create GitHub/GitLab release
+13. Return final summary with all links
 
-This action is PERMANENT and IRREVERSIBLE.
-
-Do you want to publish to the public registry? (yes/no):
+Note: Package was NOT published to registry."
 ```
 
 ### Step 6: Final Summary
 
-After the release is complete, the agent will provide a final summary. Display it to the user and provide next steps:
+Display the release agent's final summary:
 
-```
-The release agent will show:
-- Release summary with all completed steps
-- Links to package registry
-- Links to GitHub/GitLab release
-- Links to tag and commits
-- Verification steps for the user
+```markdown
+## Release Complete
 
-Next steps for you:
-1. Verify package appears in registry
-2. Test installation in fresh environment
+| Step | Status |
+|------|--------|
+| Version bump | ✅ {old} → {new} |
+| Changelog | ✅ Updated |
+| Build | ✅ Passed |
+| Tests | ✅ Passed |
+| Commit | ✅ {commit_sha} |
+| Push | ✅ origin/{branch} |
+| Publish | ✅/⏭️ {registry_status} |
+| Git tag | ✅ v{version} |
+| Release | ✅ {release_url} |
+
+### Links
+- Package: {registry_url}
+- Release: {github_release_url}
+- Tag: {tag_url}
+
+### Next Steps
+1. Verify package in registry
+2. Test installation: `npx {package}@{version}` or equivalent
 3. Announce release to users/team
-4. Update documentation if needed
 ```
 
 ## Error Handling
@@ -196,10 +192,10 @@ If the release agent encounters an error at any step:
 
 1. **Before commit**: Changes can be rolled back easily
    ```bash
-   git checkout {version_files}
+   git checkout -- {version_files}
    ```
 
-2. **After commit, before push**: Can amend or reset
+2. **After commit, before push**: Can reset
    ```bash
    git reset --hard HEAD~1
    ```
@@ -207,7 +203,7 @@ If the release agent encounters an error at any step:
 3. **After push, before publish**: Can remove tag and revert
    ```bash
    git tag -d {tag}
-   git push origin :{tag}
+   git push origin :refs/tags/{tag}
    git revert HEAD
    ```
 
@@ -219,33 +215,16 @@ Always provide clear recovery instructions if something fails.
 
 ## Safety Features
 
+- ✅ Interactive confirmation at each critical step using AskUserQuestion
 - ✅ Verify clean working directory before starting
 - ✅ Show preview of all changes before committing
 - ✅ Require explicit confirmation before publishing
 - ✅ Provide rollback instructions at each step
-- ✅ Stop and ask before any permanent/public action
 - ✅ Generate proper semantic versioning
 - ✅ Run build and tests before releasing
 
 ## Quick Reference
 
 ```bash
-# Standard releases
-/release   # Interactive - asks for release type
-
-# With specific type (if supported in future)
-/release patch
-/release minor
-/release major
-
-# Analyze first
-/release analyze   # Show recommendations without releasing
+/release   # Interactive release workflow with confirmations
 ```
-
-## Notes
-
-- The release sub-agent handles all the technical details
-- This command provides the user interaction layer
-- Critical steps require explicit user confirmation
-- All actions are logged and can be audited
-- Works with any programming language/ecosystem
