@@ -293,8 +293,8 @@ export const initCommand = new Command('init')
       }
 
       // Get the root directory of the devflow package
-      // __dirname is dist/cli/commands/, so go up 3 levels to package root
-      const rootDir = path.resolve(__dirname, '../../..');
+      // __dirname is dist/commands/, so go up 2 levels to package root
+      const rootDir = path.resolve(__dirname, '../..');
 
       try {
         // DevFlow directories to copy
@@ -382,8 +382,8 @@ export const initCommand = new Command('init')
     // === EXTRAS: Things plugins can't handle ===
 
     // Get the root directory for templates
-    // __dirname is dist/cli/commands/, so go up 3 levels to package root
-    const rootDir = path.resolve(__dirname, '../../..');
+    // __dirname is dist/commands/, so go up 2 levels to package root
+    const rootDir = path.resolve(__dirname, '../..');
 
     // 1. Install settings.json with statusLine (plugins can't configure settings)
     const settingsPath = path.join(claudeDir, 'settings.json');
