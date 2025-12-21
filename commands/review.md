@@ -118,6 +118,7 @@ echo "Tests: $([ -n "$HAS_TESTS" ] && echo 'yes' || echo 'no')"
 | PerformanceReview | Always |
 | ArchitectureReview | Always |
 | ComplexityReview | Always |
+| ConsistencyReview | Always |
 | TestsReview | Always |
 | DependenciesReview | Dependencies changed |
 | DocumentationReview | Docs or significant code changed |
@@ -153,7 +154,7 @@ Save report to: ${REVIEW_DIR}/{type}-report.${TIMESTAMP}.md
 Report back: issues found, comments created, comments skipped"
 ```
 
-**Always run**: SecurityReview, PerformanceReview, ArchitectureReview, ComplexityReview, TestsReview (5 agents)
+**Always run**: SecurityReview, PerformanceReview, ArchitectureReview, ComplexityReview, ConsistencyReview, TestsReview (6 agents)
 
 **Conditionally run**: DependenciesReview, DocumentationReview, TypescriptReview, DatabaseReview
 
