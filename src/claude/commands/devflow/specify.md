@@ -1,12 +1,12 @@
 ---
-description: Specify a single feature through exploration, planning, and interactive clarification - creates a well-defined GitHub issue ready for Swarm
+description: Specify a single feature through requirements exploration and interactive clarification - creates a well-defined GitHub issue ready for Swarm
 ---
 
-# Specify - Feature Specification Command
+# Specify - Requirements Engineering Command
 
-Transform a rough feature idea into a well-defined, implementation-ready GitHub issue through multi-agent exploration, planning, and user clarification.
+Transform a rough feature idea into a well-defined, implementation-ready GitHub issue through multi-perspective requirements exploration and user clarification.
 
-**Does NOT implement** - only specifies. Output feeds into `/swarm` for execution.
+**Does NOT explore technical implementation** - that's `/swarm`'s job. This command focuses purely on requirements: what to build, why, for whom, and what success looks like.
 
 ## Usage
 
@@ -27,13 +27,13 @@ You receive:
 
 ## Your Mission
 
-Transform a vague feature idea into a precise specification:
+Transform a vague feature idea into precise requirements:
 
 ```
-UNDERSTAND → EXPLORE (parallel) → PLAN (parallel) → CLARIFY → CREATE ISSUE
+UNDERSTAND → EXPLORE REQUIREMENTS (parallel) → PLAN SCOPE (parallel) → CLARIFY → CREATE ISSUE
 ```
 
-**Output**: A GitHub issue with complete specification ready for `/swarm`.
+**Output**: A GitHub issue with complete requirements ready for `/swarm`.
 
 ---
 
@@ -47,253 +47,318 @@ Parse the feature idea and extract initial understanding:
 **Raw Input**: ${FEATURE_IDEA}
 
 **My Interpretation**:
-- Core functionality: [what I think this does]
-- Target users: [who uses this]
-- Key interactions: [how users interact]
+- Core value: [what problem this solves]
+- Target users: [who benefits]
+- Key behavior: [what it does, not how]
 
-**Assumptions I'm Making**:
-- [list assumptions that need validation]
+**Assumptions**:
+- [assumptions that need validation with user]
 
 **Unknowns**:
-- [list things I don't know yet]
+- [questions to explore]
 ```
 
 ---
 
-## Phase 2: Explore (Parallel Agents)
+## Phase 2: Explore Requirements (Parallel Agents)
 
-Spawn multiple Explore agents in parallel to understand different aspects of the codebase.
+Spawn multiple Explore agents to understand requirements from different perspectives.
 
 **Spawn in a single message (parallel execution):**
 
 ```
 Task tool with subagent_type="Explore":
-"Explore PATTERNS for: ${FEATURE_IDEA}
+"Explore USER PERSPECTIVE for: ${FEATURE_IDEA}
 
-Find existing patterns in the codebase:
-- How similar features are implemented
-- API patterns (routes, controllers, handlers)
-- Database patterns (models, schemas, migrations)
-- Naming conventions used
-
-Thoroughness: medium
-Report: patterns found with file:line references"
-
-Task tool with subagent_type="Explore":
-"Explore INTEGRATION POINTS for: ${FEATURE_IDEA}
-
-Find where this feature would connect:
-- Entry points (routes, event handlers, CLI commands)
-- Services/modules it would interact with
-- Shared utilities it could use
-- Configuration/environment variables needed
+Find user-facing context:
+- Who are the target users? What are their goals?
+- What existing user journeys does this touch?
+- What pain points or requests led to this feature?
+- Look for: user documentation, onboarding flows, support patterns, user-facing error messages
 
 Thoroughness: medium
-Report: integration points with file:line references"
+Report: user context and needs with references"
 
 Task tool with subagent_type="Explore":
-"Explore TESTING PATTERNS for: ${FEATURE_IDEA}
+"Explore SIMILAR FEATURES for: ${FEATURE_IDEA}
 
-Find how testing is done:
-- Test file locations and naming
-- Testing frameworks and utilities used
-- Mocking patterns
-- Integration vs unit test separation
+Find comparable features in the codebase:
+- What similar features exist? How do they behave?
+- What scope did similar features have?
+- What edge cases do similar features handle?
+- What was explicitly excluded from similar features?
+
+Thoroughness: medium
+Report: similar features with scope comparisons"
+
+Task tool with subagent_type="Explore":
+"Explore CONSTRAINTS for: ${FEATURE_IDEA}
+
+Find constraints that affect requirements:
+- What external dependencies exist? (APIs, services, data sources)
+- What business rules or policies apply?
+- What security or compliance requirements exist?
+- What performance expectations are set by similar features?
 
 Thoroughness: quick
-Report: testing patterns with file:line references"
+Report: constraints that shape requirements"
+
+Task tool with subagent_type="Explore":
+"Explore FAILURE MODES for: ${FEATURE_IDEA}
+
+Find how things can go wrong from user perspective:
+- What error states do users encounter in similar features?
+- What edge cases cause confusion or frustration?
+- What validation or feedback do users need?
+- What happens when external dependencies fail?
+
+Thoroughness: quick
+Report: failure scenarios users care about"
 ```
 
 ### Synthesize Exploration Results
 
-After all Explore agents complete, combine their findings:
-
 ```markdown
-## Codebase Context
+## Requirements Context
 
-**Patterns to Follow**:
-| Pattern | Example | Location |
-|---------|---------|----------|
-| API routes | REST with Express | src/routes/users.ts:15 |
-| Database | Prisma ORM | src/models/user.ts:1 |
-| Auth | JWT middleware | src/middleware/auth.ts:20 |
+**User Needs**:
+- Primary: [main user goal]
+- Secondary: [supporting needs]
 
-**Integration Points**:
-- [where this connects] (file:line)
+**Similar Features (Scope Reference)**:
+| Feature | Scope | Excluded |
+|---------|-------|----------|
+| ${SIMILAR_1} | ${SCOPE} | ${EXCLUDED} |
 
-**Reusable Code**:
-- [existing utilities to leverage] (file:line)
+**Constraints**:
+- [hard constraints that limit scope]
 
-**Testing Approach**:
-- [how to test this] (file:line examples)
+**User-Facing Failure Modes**:
+- [how users experience failures]
 ```
 
 ---
 
-## Phase 3: Plan (Parallel Agents)
+## Phase 3: Plan Scope (Parallel Agents)
 
-Spawn multiple Plan agents to think through different aspects.
+Spawn multiple Plan agents to define scope from different angles.
 
 **Spawn in a single message (parallel execution):**
 
 ```
 Task tool with subagent_type="Plan":
-"Plan ARCHITECTURE for: ${FEATURE_IDEA}
+"Plan USER STORIES for: ${FEATURE_IDEA}
 
-Based on codebase patterns found:
+Based on requirements context:
 ${EXPLORATION_SUMMARY}
 
-Design the high-level architecture:
-- Components/modules needed
-- Data flow
-- API design (endpoints, request/response)
-- How it fits into existing architecture
+Define user stories:
+- Who are the actors?
+- What actions do they take?
+- What outcomes do they expect?
+- What variations exist (happy path, edge cases)?
 
-Output: Architecture recommendation with trade-offs"
+Output: User stories in 'As a X, I want Y, so that Z' format"
 
 Task tool with subagent_type="Plan":
-"Plan DATA MODEL for: ${FEATURE_IDEA}
+"Plan SCOPE BOUNDARIES for: ${FEATURE_IDEA}
 
-Based on existing database patterns:
+Based on requirements context:
 ${EXPLORATION_SUMMARY}
 
-Design the data model:
-- New tables/collections needed
-- Fields and types
-- Relationships to existing models
-- Migrations required
+Define clear boundaries:
+- What's the minimum viable version (v1)?
+- What should be explicitly deferred to v2?
+- What's permanently out of scope?
+- What are the dependencies between scope items?
 
-Output: Data model design with alternatives"
+Output: Scope breakdown with reasoning"
+
+Task tool with subagent_type="Plan":
+"Plan ACCEPTANCE CRITERIA for: ${FEATURE_IDEA}
+
+Based on requirements context:
+${EXPLORATION_SUMMARY}
+
+Define success criteria:
+- How do we know this works? (testable assertions)
+- What does the user see/experience when successful?
+- What does the user see/experience when something fails?
+- What are the performance expectations?
+
+Output: Concrete, testable acceptance criteria"
 ```
 
 ### Synthesize Planning Results
 
 ```markdown
-## Technical Approach (Draft)
+## Requirements Draft
 
-**Architecture**:
-${ARCHITECTURE_SUMMARY}
+**User Stories**:
+${USER_STORIES}
 
-**Data Model**:
-${DATA_MODEL_DRAFT}
+**Scope**:
+- v1 (MVP): ${V1_SCOPE}
+- v2 (Deferred): ${V2_SCOPE}
+- Out of Scope: ${EXCLUDED}
 
-**API Design**:
-${API_ENDPOINTS}
-
-**Key Trade-offs**:
-| Decision | Option A | Option B | Recommendation |
-|----------|----------|----------|----------------|
-| ${DECISION} | ${OPT_A} | ${OPT_B} | ${REC} |
+**Acceptance Criteria**:
+${ACCEPTANCE_CRITERIA}
 
 **Open Questions**:
-- [questions for user clarification]
+- [questions requiring user input]
 ```
 
 ---
 
 ## Phase 4: Clarify
 
-Use AskUserQuestion to clarify requirements. Ask in batches of 2-4 related questions.
+Use AskUserQuestion to validate and refine requirements. Ask in batches of 2-4 related questions.
 
-### 4.1 Feature Scope
-
-```
-AskUserQuestion:
-
-1. "What problem does this solve for users?"
-   - Options based on interpretation
-
-2. "What's the minimum viable version (v1 scope)?"
-   - Options: "Full feature", "Core only", "Phased"
-
-3. "What should be explicitly OUT of scope?"
-   - Multi-select common exclusions
-```
-
-### 4.2 Technical Decisions
+### 4.1 Value & Priority
 
 ```
 AskUserQuestion:
+  questions:
+    - question: "What's the primary problem this solves?"
+      header: "Problem"
+      options:
+        - label: "[Interpreted problem 1]"
+          description: "Based on exploration findings"
+        - label: "[Interpreted problem 2]"
+          description: "Alternative interpretation"
+        - label: "[Different problem]"
+          description: "Something else entirely"
+      multiSelect: false
 
-1. "Preferred technical approach?"
-   - Options based on Plan agent recommendations
-
-2. "Data storage requirements?"
-   - Options: "New table", "Extend existing", "No persistence"
-
-3. "Performance requirements?"
-   - Options: "Real-time", "Fast (<1s)", "Async OK"
+    - question: "How urgent is this feature?"
+      header: "Priority"
+      options:
+        - label: "Critical - blocking users"
+          description: "Users can't accomplish their goals"
+        - label: "High - significant pain"
+          description: "Users work around it with difficulty"
+        - label: "Medium - improvement"
+          description: "Nice to have, not blocking"
+        - label: "Low - future consideration"
+          description: "Backlog for later"
+      multiSelect: false
 ```
 
-### 4.3 Edge Cases
+### 4.2 Scope Decisions
 
 ```
 AskUserQuestion:
+  questions:
+    - question: "What's the right scope for v1?"
+      header: "MVP Scope"
+      options:
+        - label: "[Minimal scope] (Recommended)"
+          description: "${MINIMAL_SCOPE_DESCRIPTION}"
+        - label: "[Medium scope]"
+          description: "${MEDIUM_SCOPE_DESCRIPTION}"
+        - label: "[Full scope]"
+          description: "${FULL_SCOPE_DESCRIPTION}"
+      multiSelect: false
 
-1. "What happens when dependencies fail?"
-   - Options: "Graceful degradation", "Full failure", "Retry"
+    - question: "Anything to explicitly exclude?"
+      header: "Exclusions"
+      options:
+        - label: "[Common exclusion 1]"
+          description: "Often deferred for this type of feature"
+        - label: "[Common exclusion 2]"
+          description: "Adds complexity without core value"
+        - label: "[Common exclusion 3]"
+          description: "Can be added later if needed"
+        - label: "Nothing specific"
+          description: "Proceed with recommended exclusions"
+      multiSelect: true
+```
 
-2. "Rate limiting needed?"
-   - Options: "Per user", "Global", "No", "Defer"
+### 4.3 Success Criteria
+
+```
+AskUserQuestion:
+  questions:
+    - question: "How should users experience success?"
+      header: "Success UX"
+      options:
+        - label: "[Success pattern 1]"
+          description: "Based on similar features"
+        - label: "[Success pattern 2]"
+          description: "Alternative approach"
+      multiSelect: false
+
+    - question: "How should failures be communicated?"
+      header: "Error UX"
+      options:
+        - label: "Inline validation"
+          description: "Immediate feedback as user interacts"
+        - label: "Summary after action"
+          description: "Show all issues after submission"
+        - label: "Silent retry then alert"
+          description: "Try to recover, only alert if persistent"
+      multiSelect: false
 ```
 
 ---
 
 ## Phase 5: Create Issue
 
-Compile specification and create GitHub issue automatically.
+Compile requirements and create GitHub issue.
 
-### Specification Template
+### Requirements Template
 
 ```markdown
 # Feature: ${FEATURE_TITLE}
-
-## Overview
-${ONE_PARAGRAPH_DESCRIPTION}
 
 ## Problem Statement
 ${WHAT_PROBLEM_THIS_SOLVES}
 
 ## User Stories
+
+### Primary
 - As a ${USER_TYPE}, I want to ${ACTION} so that ${BENEFIT}
 
-## Technical Approach
-
-### Architecture
-${TECHNICAL_APPROACH}
-
-### Data Model
-${DATABASE_CHANGES}
-
-### API Design
-${API_ENDPOINTS}
-
-### Integration Points
-${WHERE_IT_CONNECTS}
+### Secondary
+- As a ${USER_TYPE}, I want to ${ACTION} so that ${BENEFIT}
 
 ## Scope
 
-### In Scope (v1)
-- ${FEATURE_1}
-- ${FEATURE_2}
+### v1 (This Issue)
+- [ ] ${REQUIREMENT_1}
+- [ ] ${REQUIREMENT_2}
+- [ ] ${REQUIREMENT_3}
+
+### Deferred (v2+)
+- ${DEFERRED_1}
+- ${DEFERRED_2}
 
 ### Out of Scope
-- ${DEFERRED_1}
-
-## Edge Cases
-| Scenario | Behavior |
-|----------|----------|
-| ${CASE} | ${HANDLING} |
+- ${EXCLUDED_1}
 
 ## Acceptance Criteria
-- [ ] ${CRITERION_1}
-- [ ] ${CRITERION_2}
-- [ ] Tests pass
-- [ ] Documentation updated
 
-## Labels
-- Priority: ${PRIORITY}
-- Complexity: ${COMPLEXITY}
+### Happy Path
+- [ ] ${SUCCESS_CRITERION_1}
+- [ ] ${SUCCESS_CRITERION_2}
+
+### Error Handling
+- [ ] ${ERROR_CRITERION_1}
+- [ ] ${ERROR_CRITERION_2}
+
+### Edge Cases
+- [ ] ${EDGE_CASE_1}
+
+## Constraints
+- ${CONSTRAINT_1}
+- ${CONSTRAINT_2}
+
+## Priority
+${PRIORITY_LEVEL} - ${PRIORITY_REASONING}
+
+---
+Generated by DevFlow /specify
 ```
 
 ### Create Issue
@@ -303,14 +368,10 @@ gh issue create \
   --title "${FEATURE_TITLE}" \
   --body "$(cat <<'EOF'
 ${FULL_SPECIFICATION}
-
----
-Generated by DevFlow /specify
 EOF
 )" \
   --label "feature" \
-  --label "${PRIORITY_LABEL}" \
-  --label "${COMPLEXITY_LABEL}"
+  --label "${PRIORITY_LABEL}"
 
 ISSUE_NUMBER=$(gh issue list --limit 1 --json number -q '.[0].number')
 ISSUE_URL=$(gh issue view "$ISSUE_NUMBER" --json url -q '.url')
@@ -332,14 +393,17 @@ ${FEATURE_TITLE}
 #${ISSUE_NUMBER} - ${ISSUE_URL}
 
 ### Summary
-- Scope: ${SCOPE_SUMMARY}
-- Complexity: ${COMPLEXITY}
-- Priority: ${PRIORITY}
+| Aspect | Details |
+|--------|---------|
+| Problem | ${PROBLEM_SUMMARY} |
+| Scope | ${SCOPE_SIZE} items in v1 |
+| Priority | ${PRIORITY} |
+| Acceptance Criteria | ${NUM_CRITERIA} criteria defined |
 
-### Ready for Execution
-\`\`\`
+### Ready for Implementation
+```
 /swarm #${ISSUE_NUMBER}
-\`\`\`
+```
 ```
 
 ---
@@ -348,15 +412,17 @@ ${FEATURE_TITLE}
 
 ```
 /specify (command - runs in main context)
-├── spawns: 3 Explore agents (parallel)
-│   ├── Patterns exploration
-│   ├── Integration points exploration
-│   └── Testing patterns exploration
-├── synthesizes exploration results
-├── spawns: 2 Plan agents (parallel)
-│   ├── Architecture planning
-│   └── Data model planning
-├── synthesizes planning results
+├── spawns: 4 Explore agents (parallel) - REQUIREMENTS focus
+│   ├── User perspective (who, why, pain points)
+│   ├── Similar features (scope reference)
+│   ├── Constraints (business rules, dependencies)
+│   └── Failure modes (user-facing errors)
+├── synthesizes requirements context
+├── spawns: 3 Plan agents (parallel) - SCOPE focus
+│   ├── User stories (actors, actions, outcomes)
+│   ├── Scope boundaries (v1, v2, excluded)
+│   └── Acceptance criteria (success, failure, edge cases)
+├── synthesizes scope draft
 ├── clarifies with user (AskUserQuestion)
 └── creates: GitHub issue
 ```
@@ -365,8 +431,9 @@ ${FEATURE_TITLE}
 
 ## Principles
 
-1. **Parallel exploration** - Multiple agents explore different aspects simultaneously
-2. **Parallel planning** - Multiple agents plan different concerns
+1. **Requirements, not implementation** - Focus on what and why, not how
+2. **Multiple perspectives** - Explore requirements from user, scope, constraint, and failure angles
 3. **User drives decisions** - Clarify with user, don't assume
-4. **Scope ruthlessly** - Small, focused issues are better
-5. **Enable execution** - Output must be actionable by /swarm
+4. **Scope ruthlessly** - Small, focused issues ship faster
+5. **Testable criteria** - Every requirement must be verifiable
+6. **Enable /swarm** - Output must be actionable for implementation

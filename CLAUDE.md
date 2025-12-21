@@ -103,7 +103,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 **Orchestration commands** (run in main context, spawn native agents):
-- `/specify` - Spawns 3 Explore + 2 Plan agents, creates GitHub issue
+- `/specify` - Spawns 4 Explore + 3 Plan agents (requirements focus), creates GitHub issue
 - `/swarm` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
 
 **Native agents used** (built-in Claude Code agents):

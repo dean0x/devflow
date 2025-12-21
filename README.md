@@ -122,7 +122,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
 
 **How Commands Orchestrate Agents:**
-- `/specify` → 3 Explore + 2 Plan agents → GitHub issue
+- `/specify` → 4 Explore + 3 Plan agents (requirements focus) → GitHub issue
 - `/swarm` → 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
 
 **Invoking Sub-Agents:**
