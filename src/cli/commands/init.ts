@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { execSync } from 'child_process';
 import * as readline from 'readline';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
@@ -26,20 +27,29 @@ function isNodeSystemError(error: unknown): error is NodeSystemError {
 }
 
 /**
- * Prompt user for confirmation (async)
+ * Check if Claude CLI is available
  */
-async function promptUser(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-  });
+function isClaudeCliAvailable(): boolean {
+  try {
+    execSync('claude --version', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-    });
-  });
+/**
+ * Install plugin using Claude CLI
+ */
+function installPluginViaCli(scope: 'user' | 'local'): boolean {
+  try {
+    // Map our scope names to Claude CLI scope names
+    const cliScope = scope === 'local' ? 'project' : 'user';
+    execSync(`claude plugin install devflow --scope ${cliScope}`, { stdio: 'inherit' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -61,24 +71,18 @@ interface CommandDefinition {
 
 /**
  * DevFlow commands with user-friendly descriptions.
- * Used for displaying available commands in init output.
  */
 const DEVFLOW_COMMANDS: CommandDefinition[] = [
-  // Specification
   { name: '/specify', description: 'Specify a feature interactively' },
   { name: '/breakdown', description: 'Break down tasks quickly' },
-  // Execution
   { name: '/swarm', description: 'Execute single task lifecycle' },
   { name: '/implement', description: 'Interactive implementation' },
-  // Review & Quality
   { name: '/review', description: 'Comprehensive code review' },
   { name: '/debug', description: 'Systematic debugging' },
   { name: '/resolve-comments', description: 'Address PR feedback' },
-  // Git & Release
   { name: '/commit', description: 'Smart atomic commits' },
   { name: '/pull-request', description: 'Create PR with description' },
   { name: '/release', description: 'Automated releases' },
-  // Session Management
   { name: '/catch-up', description: 'Get up to speed on project state' },
   { name: '/devlog', description: 'Document session progress' },
 ];
@@ -100,17 +104,12 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
 
 /**
  * Render clean, minimal output for default (non-verbose) mode.
- * Shows only essential information: version, available commands, and docs link.
- *
- * @param version - The DevFlow version string to display
  */
-function renderCleanOutput(version: string): void {
-  console.log(`\n✓ DevFlow v${version} installed\n`);
+function renderCleanOutput(version: string, usedCli: boolean): void {
+  console.log(`\n✓ DevFlow v${version} installed${usedCli ? ' (via Claude CLI)' : ''}\n`);
   console.log('Commands available:');
 
-  // Calculate max command name length for alignment
   const maxLen = Math.max(...DEVFLOW_COMMANDS.map(c => c.name.length));
-
   for (const cmd of DEVFLOW_COMMANDS) {
     const padding = ' '.repeat(maxLen - cmd.name.length + 2);
     console.log(`  ${cmd.name}${padding}${cmd.description}`);
@@ -122,20 +121,15 @@ function renderCleanOutput(version: string): void {
 
 /**
  * Render detailed output for verbose mode.
- * Shows full installation details including paths and skills.
- *
- * @param version - The DevFlow version string to display
- * @param scope - Installation scope ('user' for user-wide, 'local' for project-only)
- * @param claudeDir - Path to the Claude Code directory
- * @param devflowDir - Path to the DevFlow directory
  */
 function renderVerboseOutput(
   version: string,
+  usedCli: boolean,
   scope: 'user' | 'local',
   claudeDir: string,
   devflowDir: string
 ): void {
-  console.log(`\n✅ DevFlow v${version} installed!\n`);
+  console.log(`\n✅ DevFlow v${version} installed${usedCli ? ' (via Claude CLI)' : ''}!\n`);
 
   console.log(`📍 Installation scope: ${scope}`);
   console.log(`   Claude dir: ${claudeDir}`);
@@ -158,7 +152,7 @@ function renderVerboseOutput(
 export const initCommand = new Command('init')
   .description('Initialize DevFlow for Claude Code')
   .option('--skip-docs', 'Skip creating .docs/ structure')
-  .option('--scope <type>', 'Installation scope: user (user-wide) or local (project-only)', /^(user|local)$/i)
+  .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
   .action(async (options: InitOptions) => {
     // Get package version
@@ -178,66 +172,63 @@ export const initCommand = new Command('init')
     }
 
     // Determine installation scope
-    let scope: 'user' | 'local' = 'user'; // Default to user for backwards compatibility
+    let scope: 'user' | 'local' = 'user';
 
     if (options.scope) {
       const normalizedScope = options.scope.toLowerCase();
-      // Runtime validation (Commander regex already validates, but be defensive)
       if (normalizedScope !== 'user' && normalizedScope !== 'local') {
         console.error('❌ Invalid scope. Use "user" or "local"\n');
         process.exit(1);
       }
       scope = normalizedScope;
+    } else if (!process.stdin.isTTY) {
+      // Non-interactive environment (CI/CD, scripts) - use default
+      if (verbose) {
+        console.log('📦 Non-interactive environment detected, using default scope: user');
+        console.log('   To specify scope in CI/CD, use: devflow init --scope <user|local>\n');
+      }
+      scope = 'user';
     } else {
-      // Check if running in interactive terminal (TTY)
-      if (!process.stdin.isTTY) {
-        // Non-interactive environment (CI/CD, scripts) - use default
-        if (verbose) {
-          console.log('📦 Non-interactive environment detected, using default scope: user');
-          console.log('   To specify scope in CI/CD, use: devflow init --scope <user|local>\n');
-        }
+      // Interactive prompt for scope
+      if (verbose) {
+        console.log('📦 Installation Scope:\n');
+        console.log('  user  - Install for all projects (user-wide)');
+        console.log('            └─ ~/.claude/ and ~/.devflow/');
+        console.log('  local - Install for current project only');
+        console.log('            └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
+      }
+
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const prompt = verbose
+        ? 'Choose scope (user/local) [user]: '
+        : 'Install scope - user (all projects) or local (this project only) [user]: ';
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(prompt, (input) => {
+          rl.close();
+          resolve(input.trim().toLowerCase() || 'user');
+        });
+      });
+
+      if (answer === 'local' || answer === 'l') {
+        scope = 'local';
+      } else if (answer === 'user' || answer === 'u' || answer === '') {
         scope = 'user';
       } else {
-        // Interactive prompt for scope
-        if (verbose) {
-          console.log('📦 Installation Scope:\n');
-          console.log('  user  - Install for all projects (user-wide)');
-          console.log('            └─ ~/.claude/ and ~/.devflow/');
-          console.log('  local - Install for current project only');
-          console.log('            └─ <git-root>/.claude/ and <git-root>/.devflow/\n');
-        }
+        console.error('❌ Invalid scope. Use "user" or "local"\n');
+        process.exit(1);
+      }
 
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout
-        });
-
-        const prompt = verbose
-          ? 'Choose scope (user/local) [user]: '
-          : 'Install scope - user (all projects) or local (this project only) [user]: ';
-
-        const answer = await new Promise<string>((resolve) => {
-          rl.question(prompt, (input) => {
-            rl.close();
-            resolve(input.trim().toLowerCase() || 'user');
-          });
-        });
-
-        if (answer === 'local' || answer === 'l') {
-          scope = 'local';
-        } else if (answer === 'user' || answer === 'u' || answer === '') {
-          scope = 'user';
-        } else {
-          console.error('❌ Invalid scope. Use "user" or "local"\n');
-          process.exit(1);
-        }
-        if (verbose) {
-          console.log();
-        }
+      if (verbose) {
+        console.log();
       }
     }
 
-    // Get installation paths with proper validation
+    // Get installation paths
     let claudeDir: string;
     let devflowDir: string;
     let gitRoot: string | null = null;
@@ -246,8 +237,6 @@ export const initCommand = new Command('init')
       const paths = await getInstallationPaths(scope);
       claudeDir = paths.claudeDir;
       devflowDir = paths.devflowDir;
-
-      // Cache git root for later use (already computed in getInstallationPaths for local scope)
       gitRoot = await getGitRoot();
 
       if (verbose) {
@@ -260,176 +249,189 @@ export const initCommand = new Command('init')
       process.exit(1);
     }
 
-    // Check for Claude Code (only for user scope)
-    if (scope === 'user') {
-      try {
-        await fs.access(claudeDir);
-      } catch {
-        console.error(`❌ Claude Code not detected at ${claudeDir}`);
-        console.error('   Install from: https://claude.com/claude-code');
-        console.error('   Or set CLAUDE_CODE_DIR if installed elsewhere\n');
-        process.exit(1);
-      }
+    // Try to install plugin via Claude CLI first
+    let usedCli = false;
+    const cliAvailable = isClaudeCliAvailable();
+
+    if (cliAvailable) {
       if (verbose) {
-        console.log('✓ Claude Code detected');
+        console.log('🔌 Installing plugin via Claude CLI...');
       }
-    } else {
-      // Local scope - create .claude directory if it doesn't exist
+      usedCli = installPluginViaCli(scope);
+      if (!usedCli && verbose) {
+        console.log('⚠️  Claude CLI install failed, falling back to manual copy');
+      }
+    } else if (verbose) {
+      console.log('ℹ️  Claude CLI not available, using manual installation');
+    }
+
+    // If CLI install failed or unavailable, do manual copy
+    if (!usedCli) {
+      // For local scope, ensure .claude directory exists
+      if (scope === 'local') {
+        try {
+          await fs.mkdir(claudeDir, { recursive: true });
+          if (verbose) {
+            console.log('✓ Local .claude directory ready');
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create ${claudeDir}:`, error);
+          process.exit(1);
+        }
+      } else {
+        // For user scope, check Claude Code exists
+        try {
+          await fs.access(claudeDir);
+          if (verbose) {
+            console.log('✓ Claude Code detected');
+          }
+        } catch {
+          console.error(`❌ Claude Code not detected at ${claudeDir}`);
+          console.error('   Install from: https://claude.com/claude-code\n');
+          process.exit(1);
+        }
+      }
+
+      // Get the root directory of the devflow package
+      const rootDir = path.resolve(__dirname, '../..');
+
       try {
-        await fs.mkdir(claudeDir, { recursive: true });
+        // DevFlow directories to copy
+        const devflowDirectories = [
+          {
+            target: path.join(claudeDir, 'commands', 'devflow'),
+            source: path.join(rootDir, 'commands'),
+            name: 'commands'
+          },
+          {
+            target: path.join(claudeDir, 'agents', 'devflow'),
+            source: path.join(rootDir, 'agents'),
+            name: 'agents'
+          },
+          {
+            target: path.join(claudeDir, 'skills'),
+            source: path.join(rootDir, 'skills'),
+            name: 'skills'
+          },
+          {
+            target: path.join(devflowDir, 'scripts'),
+            source: path.join(rootDir, 'scripts'),
+            name: 'scripts'
+          }
+        ];
+
+        // Clean old DevFlow files before installing
+        for (const dir of devflowDirectories) {
+          if (dir.name === 'skills') {
+            // Remove old devflow/ subdirectory if it exists
+            const oldSkillsDir = path.join(claudeDir, 'skills', 'devflow');
+            try {
+              await fs.rm(oldSkillsDir, { recursive: true, force: true });
+            } catch {
+              // Directory might not exist
+            }
+
+            // Remove individual skill directories
+            try {
+              const skillEntries = await fs.readdir(dir.source, { withFileTypes: true });
+              for (const entry of skillEntries) {
+                if (entry.isDirectory()) {
+                  const skillTarget = path.join(dir.target, entry.name);
+                  try {
+                    await fs.rm(skillTarget, { recursive: true, force: true });
+                  } catch {
+                    // Skill might not exist
+                  }
+                }
+              }
+            } catch {
+              // Source directory might not exist
+            }
+          } else {
+            try {
+              await fs.rm(dir.target, { recursive: true, force: true });
+            } catch {
+              // Directory might not exist on first install
+            }
+          }
+        }
+
+        // Install all DevFlow components
+        for (const dir of devflowDirectories) {
+          await fs.mkdir(dir.target, { recursive: true });
+          await copyDirectory(dir.source, dir.target);
+        }
+
+        // Make scripts executable
+        const scriptsDir = devflowDirectories.find(d => d.name === 'scripts')!.target;
+        const scripts = await fs.readdir(scriptsDir);
+        for (const script of scripts) {
+          await fs.chmod(path.join(scriptsDir, script), 0o755);
+        }
+
         if (verbose) {
-          console.log('✓ Local .claude directory ready');
+          console.log('✓ Components installed (commands, agents, skills, scripts)');
         }
       } catch (error) {
-        console.error(`❌ Failed to create ${claudeDir}:`, error);
+        console.error('❌ Installation failed:', error);
         process.exit(1);
       }
     }
 
-    // Get the root directory of the devflow package (plugin structure at root)
+    // === EXTRAS: Things plugins can't handle ===
+
+    // Get the root directory for templates
     const rootDir = path.resolve(__dirname, '../..');
 
+    // 1. Install settings.json with statusLine (plugins can't configure settings)
+    const settingsPath = path.join(claudeDir, 'settings.json');
+    const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
+
     try {
-      // DevFlow namespace directories (plugin structure - source at root level)
-      const devflowDirectories = [
-        {
-          target: path.join(claudeDir, 'commands', 'devflow'),
-          source: path.join(rootDir, 'commands'),
-          name: 'commands'
-        },
-        {
-          target: path.join(claudeDir, 'agents', 'devflow'),
-          source: path.join(rootDir, 'agents'),
-          name: 'agents'
-        },
-        {
-          target: path.join(claudeDir, 'skills'),
-          source: path.join(rootDir, 'skills'),
-          name: 'skills'
-        },
-        {
-          target: path.join(devflowDir, 'scripts'),
-          source: path.join(rootDir, 'scripts'),
-          name: 'scripts'
-        }
-      ];
-
-      // Clean old DevFlow files before installing
-      for (const dir of devflowDirectories) {
-        if (dir.name === 'skills') {
-          // Special handling for skills: clean old nested structure and individual skills
-          // Remove old devflow/ subdirectory if it exists (migration from old structure)
-          const oldSkillsDir = path.join(claudeDir, 'skills', 'devflow');
-          try {
-            await fs.rm(oldSkillsDir, { recursive: true, force: true });
-          } catch (e) {
-            // Directory might not exist
-          }
-
-          // Remove individual skill directories that we're about to reinstall
-          try {
-            const skillEntries = await fs.readdir(dir.source, { withFileTypes: true });
-            for (const entry of skillEntries) {
-              if (entry.isDirectory()) {
-                const skillTarget = path.join(dir.target, entry.name);
-                try {
-                  await fs.rm(skillTarget, { recursive: true, force: true });
-                } catch (e) {
-                  // Skill might not exist
-                }
-              }
-            }
-          } catch (e) {
-            // Source directory might not exist
-          }
-        } else {
-          // For other components (commands, agents, scripts), clean the entire directory
-          try {
-            await fs.rm(dir.target, { recursive: true, force: true });
-          } catch (e) {
-            // Directory might not exist on first install
-          }
-        }
-      }
-
-      // Install all DevFlow components
-      for (const dir of devflowDirectories) {
-        await fs.mkdir(dir.target, { recursive: true });
-        await copyDirectory(dir.source, dir.target);
-      }
-
-      // Make scripts executable
-      const scriptsDir = devflowDirectories.find(d => d.name === 'scripts')!.target;
-      const scripts = await fs.readdir(scriptsDir);
-      for (const script of scripts) {
-        await fs.chmod(path.join(scriptsDir, script), 0o755);
-      }
-
-      if (verbose) {
-        console.log('✓ Installing components... (commands, agents, skills, scripts)');
-      }
-
-      // Install settings.json - never override existing files (atomic operation)
-      const settingsPath = path.join(claudeDir, 'settings.json');
-      const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
-
-      // Read template and replace variable with actual path
       const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
       const settingsContent = settingsTemplate.replace(
         /\$\{DEVFLOW_DIR\}/g,
         devflowDir
       );
 
-      try {
-        // Atomic exclusive create - fails if file already exists
-        await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
+      // Only create if doesn't exist (atomic exclusive create)
+      await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
+      if (verbose) {
+        console.log('✓ StatusLine configured');
+      }
+    } catch (error: unknown) {
+      if (isNodeSystemError(error) && error.code === 'EEXIST') {
         if (verbose) {
-          console.log('✓ Settings configured');
+          console.log('⚠️  Existing settings.json found, skipping');
         }
-      } catch (error: unknown) {
-        if (isNodeSystemError(error) && error.code === 'EEXIST') {
-          // Existing settings.json found - skip, don't override
-          if (verbose) {
-            console.log('⚠️  Existing settings.json found, skipping');
-          }
-        } else {
-          throw error;
+      } else if (verbose) {
+        console.log('⚠️  Could not configure statusLine:', error);
+      }
+    }
+
+    // 2. Install CLAUDE.md (plugins can't install arbitrary files)
+    const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
+    const sourceClaudeMdPath = path.join(rootDir, 'src', 'claude', 'CLAUDE.md');
+
+    try {
+      const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
+      await fs.writeFile(claudeMdPath, content, { encoding: 'utf-8', flag: 'wx' });
+      if (verbose) {
+        console.log('✓ CLAUDE.md configured');
+      }
+    } catch (error: unknown) {
+      if (isNodeSystemError(error) && error.code === 'EEXIST') {
+        if (verbose) {
+          console.log('⚠️  Existing CLAUDE.md found, skipping');
         }
       }
+    }
 
-      // Install CLAUDE.md - never override existing files (atomic operation)
-      const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
-      const sourceClaudeMdPath = path.join(rootDir, 'src', 'claude', 'CLAUDE.md');
+    // 3. Create .claudeignore in git repository root
+    if (gitRoot) {
+      const claudeignorePath = path.join(gitRoot, '.claudeignore');
 
       try {
-        // Atomic exclusive create - fails if file already exists
-        const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
-        await fs.writeFile(claudeMdPath, content, { encoding: 'utf-8', flag: 'wx' });
-        if (verbose) {
-          console.log('✓ CLAUDE.md configured');
-        }
-      } catch (error: unknown) {
-        if (isNodeSystemError(error) && error.code === 'EEXIST') {
-          // Existing CLAUDE.md found - skip, don't override
-          if (verbose) {
-            console.log('⚠️  Existing CLAUDE.md found, skipping');
-          }
-        } else {
-          throw error;
-        }
-      }
-
-      // Create .claudeignore in git repository root
-      let claudeignoreCreated = false;
-      try {
-        // Use cached git root (already computed and validated earlier)
-        if (!gitRoot) {
-          throw new Error('Not in a git repository');
-        }
-
-        const claudeignorePath = path.join(gitRoot, '.claudeignore');
-
-        // Atomic exclusive create - only create if doesn't exist
         const claudeignoreContent = `# DevFlow .claudeignore - Protects against sensitive files and context pollution
 # Generated by DevFlow - Edit as needed for your project
 
@@ -620,84 +622,75 @@ poetry.lock
 Pipfile.lock
 `;
 
-        // Atomic exclusive create - fails if file already exists
         await fs.writeFile(claudeignorePath, claudeignoreContent, { encoding: 'utf-8', flag: 'wx' });
-        claudeignoreCreated = true;
-      } catch (error) {
-        // Not a git repository or other error - skip .claudeignore creation
+        if (verbose) {
+          console.log('✓ .claudeignore created');
+        }
+      } catch (error: unknown) {
+        if (isNodeSystemError(error) && error.code === 'EEXIST') {
+          // Already exists, skip
+        }
       }
+    }
 
-      if (claudeignoreCreated && verbose) {
-        console.log('✓ .claudeignore created');
-      }
+    // 4. For local scope, update .gitignore
+    if (scope === 'local' && gitRoot) {
+      try {
+        const gitignorePath = path.join(gitRoot, '.gitignore');
+        const entriesToAdd = ['.claude/', '.devflow/'];
 
-      // For local scope, update .gitignore to exclude .claude/ and .devflow/
-      if (scope === 'local' && gitRoot) {
+        let gitignoreContent = '';
         try {
-          const gitignorePath = path.join(gitRoot, '.gitignore');
-          const entriesToAdd = ['.claude/', '.devflow/'];
+          gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+        } catch {
+          // .gitignore doesn't exist
+        }
 
-          let gitignoreContent = '';
-          try {
-            gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-          } catch {
-            // .gitignore doesn't exist, will create it
+        const linesToAdd: string[] = [];
+        for (const entry of entriesToAdd) {
+          if (!gitignoreContent.split('\n').some(line => line.trim() === entry)) {
+            linesToAdd.push(entry);
           }
+        }
 
-          const linesToAdd: string[] = [];
-          for (const entry of entriesToAdd) {
-            // Check if entry already exists (exact match or pattern)
-            if (!gitignoreContent.split('\n').some(line => line.trim() === entry)) {
-              linesToAdd.push(entry);
-            }
-          }
+        if (linesToAdd.length > 0) {
+          const newContent = gitignoreContent
+            ? `${gitignoreContent.trimEnd()}\n\n# DevFlow local installation\n${linesToAdd.join('\n')}\n`
+            : `# DevFlow local installation\n${linesToAdd.join('\n')}\n`;
 
-          if (linesToAdd.length > 0) {
-            const newContent = gitignoreContent
-              ? `${gitignoreContent.trimEnd()}\n\n# DevFlow local scope installation\n${linesToAdd.join('\n')}\n`
-              : `# DevFlow local scope installation\n${linesToAdd.join('\n')}\n`;
-
-            await fs.writeFile(gitignorePath, newContent, 'utf-8');
-            if (verbose) {
-              console.log('✓ .gitignore updated (excluded .claude/ and .devflow/)');
-            }
-          }
-        } catch (error) {
+          await fs.writeFile(gitignorePath, newContent, 'utf-8');
           if (verbose) {
-            console.warn('⚠️  Could not update .gitignore:', error instanceof Error ? error.message : error);
+            console.log('✓ .gitignore updated (excluded .claude/ and .devflow/)');
           }
         }
-      }
-
-      // Offer to install project documentation structure
-      let docsCreated = false;
-      if (!options.skipDocs) {
-        const docsDir = path.join(process.cwd(), '.docs');
-
-        try {
-          await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });
-          await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
-          await fs.mkdir(path.join(docsDir, 'reviews', 'standalone'), { recursive: true });
-          await fs.mkdir(path.join(docsDir, 'releases'), { recursive: true });
-          docsCreated = true;
-        } catch (error) {
-          // .docs/ structure may already exist
+      } catch (error) {
+        if (verbose) {
+          console.warn('⚠️  Could not update .gitignore:', error instanceof Error ? error.message : error);
         }
       }
+    }
 
-      if (docsCreated && verbose) {
-        console.log('✓ .docs/ structure ready');
-      }
+    // 5. Create .docs/ structure
+    if (!options.skipDocs) {
+      const docsDir = path.join(process.cwd(), '.docs');
 
-      // Render output based on verbose flag
-      if (verbose) {
-        renderVerboseOutput(version, scope, claudeDir, devflowDir);
-      } else {
-        renderCleanOutput(version);
+      try {
+        await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });
+        await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
+        await fs.mkdir(path.join(docsDir, 'releases'), { recursive: true });
+        if (verbose) {
+          console.log('✓ .docs/ structure ready');
+        }
+      } catch {
+        // .docs/ structure may already exist
       }
-    } catch (error) {
-      console.error('❌ Installation failed:', error);
-      process.exit(1);
+    }
+
+    // Render final output
+    if (verbose) {
+      renderVerboseOutput(version, usedCli, scope, claudeDir, devflowDir);
+    } else {
+      renderCleanOutput(version, usedCli);
     }
   });
 
