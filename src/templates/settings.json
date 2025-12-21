@@ -1,0 +1,6 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "${DEVFLOW_DIR}/scripts/statusline.sh"
+  }
+}

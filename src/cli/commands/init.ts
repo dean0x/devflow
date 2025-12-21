@@ -286,31 +286,30 @@ export const initCommand = new Command('init')
       }
     }
 
-    // Get the root directory of the devflow package
+    // Get the root directory of the devflow package (plugin structure at root)
     const rootDir = path.resolve(__dirname, '../..');
-    const claudeSourceDir = path.join(rootDir, 'src', 'claude');
 
     try {
-      // DevFlow namespace directories (single source of truth)
+      // DevFlow namespace directories (plugin structure - source at root level)
       const devflowDirectories = [
         {
           target: path.join(claudeDir, 'commands', 'devflow'),
-          source: path.join(claudeSourceDir, 'commands', 'devflow'),
+          source: path.join(rootDir, 'commands'),
           name: 'commands'
         },
         {
           target: path.join(claudeDir, 'agents', 'devflow'),
-          source: path.join(claudeSourceDir, 'agents', 'devflow'),
+          source: path.join(rootDir, 'agents'),
           name: 'agents'
         },
         {
           target: path.join(claudeDir, 'skills'),
-          source: path.join(claudeSourceDir, 'skills', 'devflow'),
+          source: path.join(rootDir, 'skills'),
           name: 'skills'
         },
         {
           target: path.join(devflowDir, 'scripts'),
-          source: path.join(claudeSourceDir, 'scripts'),
+          source: path.join(rootDir, 'scripts'),
           name: 'scripts'
         }
       ];
@@ -372,13 +371,13 @@ export const initCommand = new Command('init')
 
       // Install settings.json - never override existing files (atomic operation)
       const settingsPath = path.join(claudeDir, 'settings.json');
-      const sourceSettingsPath = path.join(claudeSourceDir, 'settings.json');
+      const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
 
-      // Read template and replace ~ with actual home directory
+      // Read template and replace variable with actual path
       const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
       const settingsContent = settingsTemplate.replace(
-        /~\/\.devflow\/scripts\/statusline\.sh/g,
-        path.join(devflowDir, 'scripts', 'statusline.sh')
+        /\$\{DEVFLOW_DIR\}/g,
+        devflowDir
       );
 
       try {
@@ -400,7 +399,7 @@ export const initCommand = new Command('init')
 
       // Install CLAUDE.md - never override existing files (atomic operation)
       const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
-      const sourceClaudeMdPath = path.join(claudeSourceDir, 'CLAUDE.md');
+      const sourceClaudeMdPath = path.join(rootDir, 'src', 'claude', 'CLAUDE.md');
 
       try {
         // Atomic exclusive create - fails if file already exists

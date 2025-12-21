@@ -99,16 +99,17 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // Remove individual DevFlow skills (flat structure)
+      // Remove individual DevFlow skills (prefixed for easy identification)
       const skillsDir = path.join(claudeDir, 'skills');
       const devflowSkills = [
-        'pattern-check',
-        'test-design',
-        'code-smell',
-        'research',
-        'debug',
-        'input-validation',
-        'error-handling'
+        'devflow-pattern-check',
+        'devflow-test-design',
+        'devflow-code-smell',
+        'devflow-research',
+        'devflow-debug',
+        'devflow-input-validation',
+        'devflow-error-handling',
+        'devflow-worktree'
       ];
 
       let skillsRemoved = 0;
