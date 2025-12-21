@@ -189,7 +189,7 @@ Status and review commands create historical records:
 
 ### 4. Fail-Safe Defaults
 - Rollback preserves safety branches
-- Audits err on the side of flagging issues
+- Reviews err on the side of flagging issues
 - Status tracking captures comprehensive context
 - Agent reviews assume skepticism
 

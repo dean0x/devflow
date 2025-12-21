@@ -293,7 +293,8 @@ export const initCommand = new Command('init')
       }
 
       // Get the root directory of the devflow package
-      const rootDir = path.resolve(__dirname, '../..');
+      // __dirname is dist/cli/commands/, so go up 3 levels to package root
+      const rootDir = path.resolve(__dirname, '../../..');
 
       try {
         // DevFlow directories to copy
@@ -381,7 +382,8 @@ export const initCommand = new Command('init')
     // === EXTRAS: Things plugins can't handle ===
 
     // Get the root directory for templates
-    const rootDir = path.resolve(__dirname, '../..');
+    // __dirname is dist/cli/commands/, so go up 3 levels to package root
+    const rootDir = path.resolve(__dirname, '../../..');
 
     // 1. Install settings.json with statusLine (plugins can't configure settings)
     const settingsPath = path.join(claudeDir, 'settings.json');
@@ -401,9 +403,9 @@ export const initCommand = new Command('init')
       }
     } catch (error: unknown) {
       if (isNodeSystemError(error) && error.code === 'EEXIST') {
-        if (verbose) {
-          console.log('⚠️  Existing settings.json found, skipping');
-        }
+        console.log('⚠️  Existing settings.json found - statusLine not configured');
+        console.log('   To enable DevFlow statusLine, add to your settings.json:');
+        console.log(`   "statusLine": { "type": "command", "command": "${devflowDir}/scripts/statusline.sh" }\n`);
       } else if (verbose) {
         console.log('⚠️  Could not configure statusLine:', error);
       }
@@ -421,9 +423,8 @@ export const initCommand = new Command('init')
       }
     } catch (error: unknown) {
       if (isNodeSystemError(error) && error.code === 'EEXIST') {
-        if (verbose) {
-          console.log('⚠️  Existing CLAUDE.md found, skipping');
-        }
+        console.log('⚠️  Existing CLAUDE.md found - DevFlow instructions not added');
+        console.log('   Review DevFlow patterns at: https://github.com/dean0x/devflow\n');
       }
     }
 

@@ -6,7 +6,7 @@ allowed-tools: Task
 
 # Research Skill - Auto-Dispatcher
 
-**Purpose**: Detect when pre-implementation research is needed and auto-launch the Explore agent for codebase analysis.
+**Purpose**: Detect when pre-implementation research is needed and auto-launch the Explore agent for thorough analysis.
 
 ## When to Activate
 
@@ -51,7 +51,7 @@ I've detected this requires pre-implementation research.
 **Feature**: [what's being implemented]
 **Unknowns**: [what we need to explore]
 
-Launching Explore agent to analyze codebase patterns...
+Launching Explore agent to analyze approaches and patterns...
 ```
 
 Then launch the Explore agent using Task tool:
@@ -60,14 +60,14 @@ Then launch the Explore agent using Task tool:
 Task(
   subagent_type="Explore",
   description="Explore implementation approaches",
-  prompt="Explore the codebase to understand how to implement: [feature description].
+  prompt="Explore implementation approaches for: [feature description].
 
-  Find:
-  1. Similar existing implementations to reference
-  2. Patterns already in use (Result types, DI, error handling)
-  3. Libraries/frameworks available
-  4. Integration points for this feature
-  5. Testing patterns to follow
+  Focus on:
+  - What approaches exist for this problem?
+  - What are the trade-offs of each approach?
+  - What patterns are already in the codebase?
+  - What libraries/frameworks could help?
+  - What are the risks and edge cases?
 
   Thoroughness: very thorough
 
@@ -82,12 +82,12 @@ After agent completes, summarize key findings:
 ```markdown
 **Exploration Complete**
 
-**Existing Patterns**: [patterns found in codebase]
-**Similar Implementations**: [related features to reference]
-**Integration Points**: [where this connects]
-**Recommended Approach**: [suggested direction based on findings]
+**Approaches Found**: [list of options]
+**Codebase Patterns**: [relevant existing patterns]
+**Recommended Direction**: [suggested approach]
+**Trade-offs**: [key considerations]
 
-**Next Step**: Run `/design` to create detailed implementation plan.
+**Next Step**: Run `/design` to create detailed implementation plan for chosen approach.
 ```
 
 ## Examples
@@ -104,14 +104,14 @@ Skill: "We already use this pattern. See src/api/users.ts:45
 User: "Add OAuth authentication"
 Skill: "OAuth integration requires exploration of approaches.
 Launching Explore agent..."
-[Launches Explore agent for codebase analysis]
+[Launches Explore agent for approach exploration]
 ```
 
 **Example 3: Multiple Approaches - Launch Agent**
 ```
 User: "Add real-time updates to dashboard"
 Skill: "Multiple approaches possible (WebSockets, SSE, polling).
-Launching Explore agent to find existing patterns..."
+Launching Explore agent to explore options..."
 [Launches Explore agent]
 ```
 
@@ -130,8 +130,8 @@ If not found → Launch Explore agent
 ## Key Points
 
 - **Lightweight**: Skill does minimal checking
-- **Smart dispatch**: Shows existing patterns vs explores codebase
-- **Exploration focus**: Explore agent finds patterns, not detailed planning
+- **Smart dispatch**: Shows existing patterns vs explores new options
+- **Exploration focus**: Explore agent explores approaches, not detailed planning
 - **Autonomous**: Auto-launches when research needed
 - **Clean context**: Main session stays focused on implementation
 - **Next step guidance**: Suggests `/design` after exploration completes
