@@ -6,7 +6,7 @@ This document contains instructions for developers and AI agents working on the 
 
 When working on DevFlow code, understand that this toolkit is designed to enhance Claude Code with intelligent development workflows. Your modifications should:
 
-- Maintain brutal honesty in audit outputs
+- Maintain brutal honesty in review outputs
 - Preserve context across sessions
 - Enhance developer empowerment without replacing judgment
 - Ensure all commands are self-documenting
@@ -30,11 +30,12 @@ All generated documentation lives under `.docs/` in the project root:
 
 ```
 .docs/
-├── audits/{branch-slug}/              # Code review reports per branch
+├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── brainstorm/                        # Design explorations
-│   └── {topic-slug}-{timestamp}.md
+├── coordinator/                       # Release coordination state
+│   ├── release-issue.md
+│   └── state.json
 ├── design/                            # Implementation plans
 │   └── {topic-slug}-{timestamp}.md
 ├── debug/                             # Debug sessions
@@ -89,28 +90,37 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 # Use helpers
 TIMESTAMP=$(get_timestamp)
 BRANCH_SLUG=$(get_branch_slug)
-ensure_docs_dir "audits/$BRANCH_SLUG"
+ensure_docs_dir "reviews/$BRANCH_SLUG"
 ```
 
 ### Agent Persistence Rules
 
-**Persisting agents** (create files in `.docs/`):
-- `catch-up` → `.docs/CATCH_UP.md` (overwrite latest)
+**Persisting commands** (create files in `.docs/`):
+- `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
+- `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
-- `debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
-- `brainstorm` → `.docs/brainstorm/{topic-slug}-{timestamp}.md`
-- `design` → `.docs/design/{topic-slug}-{timestamp}.md`
-- `audit-*` (9 types) → `.docs/audits/{branch-slug}/{type}-report-{timestamp}.md`
-- `code-review` → `.docs/audits/{branch-slug}/review-summary-{timestamp}.md`
-- `release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
+- `*Review` (9 types) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
+- `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
-**Non-persisting agents** (ephemeral, no files):
-- `commit` - Creates git commit only
-- `get-issue` - Fetches GitHub issue, creates branch
-- `pull-request` - Creates GitHub PR only
-- `project-state` - Read-only, used by catch-up
-- `pr-comments` - Creates PR comments only
-- `tech-debt` - Updates GitHub issue only
+**Orchestration commands** (run in main context, spawn native agents):
+- `/specify` - Spawns 4 Explore + 3 Plan agents (requirements focus), creates GitHub issue
+- `/swarm` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
+
+**Native agents used** (built-in Claude Code agents):
+- `Explore` - Fast codebase exploration (patterns, integration, testing)
+- `Plan` - Implementation planning with trade-off analysis
+- `Coder` - Code implementation in isolated worktrees
+- `*Review` (9 types) - Specialized code analysis
+
+**Utility agents** (focused tasks, no sub-spawning):
+- `Commit` - Creates git commit only
+- `GetIssue` - Fetches GitHub issue details
+- `PullRequest` - Creates GitHub PR only
+- `Devlog` - Read-only, analyzes project state for CatchUp
+- `Comment` - Creates PR comments only
+- `TechDebt` - Updates GitHub issue only
+- `Debug` - Systematic debugging with hypothesis testing
+- `CatchUp` - Context restoration from status logs
 
 ### Implementation Checklist
 
@@ -137,7 +147,7 @@ When creating or modifying persisting agents:
 
 ```bash
 # 1. Modify command or agent in devflow repo
-vim devflow/src/claude/commands/devflow/code-review.md
+vim devflow/src/claude/commands/devflow/review.md
 
 # 2. Rebuild if CLI changes
 npm run build
@@ -146,7 +156,7 @@ npm run build
 node dist/cli.js init
 
 # 4. Test immediately
-/code-review
+/review
 
 # 5. Iterate until satisfied
 # 6. Commit using /commit
@@ -158,13 +168,13 @@ When creating or modifying commands, follow these principles:
 
 ### 1. Brutal Honesty
 Commands should expose the truth, not what developers want to hear:
-- Security audits find real vulnerabilities
-- Performance audits reveal actual bottlenecks
-- Architecture audits expose design flaws
+- Security reviews find real vulnerabilities
+- Performance reviews reveal actual bottlenecks
+- Architecture reviews expose design flaws
 - Agent reviews catch AI deception
 
 ### 2. Actionable Output
-Every audit provides:
+Every review provides:
 - **Specific problems** with file/line references
 - **Clear severity** levels (Critical/High/Medium/Low)
 - **Concrete fixes** with examples
@@ -179,7 +189,7 @@ Status and review commands create historical records:
 
 ### 4. Fail-Safe Defaults
 - Rollback preserves safety branches
-- Audits err on the side of flagging issues
+- Reviews err on the side of flagging issues
 - Status tracking captures comprehensive context
 - Agent reviews assume skepticism
 
@@ -576,7 +586,7 @@ Use conventional commits:
 ### Custom Project Rules
 Projects can extend DevFlow by:
 1. Adding custom `.docs/` templates
-2. Creating project-specific audit rules
+2. Creating project-specific review rules
 3. Extending `.claudeignore` patterns
 4. Adding team-specific workflows
 
@@ -609,7 +619,7 @@ Projects can extend DevFlow by:
 ## Maintenance Tasks
 
 ### Regular Updates
-1. Review and update audit patterns
+1. Review and update review patterns
 2. Optimize command performance
 3. Update dependencies
 4. Improve error messages
