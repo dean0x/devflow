@@ -4,19 +4,31 @@ A comprehensive collection of Claude Code commands and configurations designed t
 
 ## Installation
 
+### Option 1: Native Plugin (Recommended)
+
+Install directly as a Claude Code plugin:
+
 ```bash
-# Run with npx (recommended - no global install needed)
+# From GitHub
+/plugin install dean0x/devflow
+```
+
+That's it! DevFlow commands are immediately available as `/devflow:command-name` (or just `/command-name` if no conflicts).
+
+### Option 2: CLI Installer
+
+For more control over installation scope:
+
+```bash
+# Run with npx (no global install needed)
 npx devflow-kit init
 ```
 
-### Installation Scopes
-
-DevFlow supports two installation scopes:
+#### Installation Scopes (CLI only)
 
 **User Scope (Default)** - Install for all projects
 ```bash
 npx devflow-kit init --scope user
-# Or interactively: npx devflow-kit init (prompts for scope)
 ```
 - Installs to `~/.claude/` and `~/.devflow/`
 - Available across all projects
@@ -30,9 +42,8 @@ npx devflow-kit init --scope local
 - Only available in the current project
 - Recommended for team projects where DevFlow should be project-specific
 - Requires a git repository (run `git init` first)
-- Add `.claude/` and `.devflow/` to `.gitignore` (done automatically)
 
-That's it! DevFlow is now installed and ready to use in Claude Code.
+DevFlow is now installed and ready to use in Claude Code.
 
 ## What's Included
 
@@ -49,6 +60,7 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 | `debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
 | `input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
 | `error-handling` | Result type consistency and exception boundary enforcement | Error handling code written, functions that can fail |
+| `worktree` | Git worktree management for parallel development | Swarm operations, isolated working directories needed |
 
 **How Skills Work:**
 - **Proactive enforcement** - Catch issues during implementation, not after
