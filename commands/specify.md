@@ -22,8 +22,20 @@ Specify handles one feature at a time. Run multiple `/specify` commands for mult
 
 ## Input
 
-You receive:
-- `FEATURE_IDEA`: Rough description of the feature
+`$ARGUMENTS` contains whatever follows `/specify`:
+
+- `/specify User authentication with social login` → `$ARGUMENTS` = "User authentication with social login"
+- `/specify Rate limiting for API` → `$ARGUMENTS` = "Rate limiting for API"
+- `/specify` → `$ARGUMENTS` = "" (use conversation context)
+
+```bash
+FEATURE_IDEA="$ARGUMENTS"
+
+# If blank, infer from conversation context
+if [ -z "$FEATURE_IDEA" ]; then
+    echo "No feature specified - using conversation context"
+fi
+```
 
 ## Your Mission
 
@@ -118,23 +130,28 @@ Report: failure scenarios users care about"
 
 ### Synthesize Exploration Results
 
-```markdown
-## Requirements Context
+**WAIT** for all Phase 2 explorers to complete, then spawn Synthesize agent:
 
-**User Needs**:
-- Primary: [main user goal]
-- Secondary: [supporting needs]
+```
+Task(subagent_type="Synthesize"):
 
-**Similar Features (Scope Reference)**:
-| Feature | Scope | Excluded |
-|---------|-------|----------|
-| ${SIMILAR_1} | ${SCOPE} | ${EXCLUDED} |
+"Synthesize EXPLORATION outputs for requirements: ${FEATURE_IDEA}
 
-**Constraints**:
-- [hard constraints that limit scope]
+Mode: exploration
 
-**User-Facing Failure Modes**:
-- [how users experience failures]
+Explorer outputs:
+${USER_PERSPECTIVE_OUTPUT}
+${SIMILAR_FEATURES_OUTPUT}
+${CONSTRAINTS_OUTPUT}
+${FAILURE_MODES_OUTPUT}
+
+Combine into requirements context:
+- User needs (primary and secondary)
+- Similar features as scope reference
+- Hard constraints that limit scope
+- User-facing failure modes
+
+Output format: Requirements Context summary for planning phase"
 ```
 
 ---
@@ -191,22 +208,27 @@ Output: Concrete, testable acceptance criteria"
 
 ### Synthesize Planning Results
 
-```markdown
-## Requirements Draft
+**WAIT** for all Phase 3 planners to complete, then spawn Synthesize agent:
 
-**User Stories**:
-${USER_STORIES}
+```
+Task(subagent_type="Synthesize"):
 
-**Scope**:
-- v1 (MVP): ${V1_SCOPE}
-- v2 (Deferred): ${V2_SCOPE}
-- Out of Scope: ${EXCLUDED}
+"Synthesize PLANNING outputs for requirements: ${FEATURE_IDEA}
 
-**Acceptance Criteria**:
-${ACCEPTANCE_CRITERIA}
+Mode: planning
 
-**Open Questions**:
-- [questions requiring user input]
+Planner outputs:
+${USER_STORIES_OUTPUT}
+${SCOPE_BOUNDARIES_OUTPUT}
+${ACCEPTANCE_CRITERIA_OUTPUT}
+
+Combine into requirements draft:
+- User stories (primary and secondary)
+- Scope breakdown (v1 MVP, v2 deferred, out of scope)
+- Acceptance criteria (success, failure, edge cases)
+- Open questions requiring user input
+
+Output format: Requirements Draft ready for user clarification"
 ```
 
 ---
@@ -411,20 +433,36 @@ ${FEATURE_TITLE}
 ## Architecture
 
 ```
-/specify (command - runs in main context)
-├── spawns: 4 Explore agents (parallel) - REQUIREMENTS focus
-│   ├── User perspective (who, why, pain points)
-│   ├── Similar features (scope reference)
-│   ├── Constraints (business rules, dependencies)
-│   └── Failure modes (user-facing errors)
-├── synthesizes requirements context
-├── spawns: 3 Plan agents (parallel) - SCOPE focus
-│   ├── User stories (actors, actions, outcomes)
-│   ├── Scope boundaries (v1, v2, excluded)
-│   └── Acceptance criteria (success, failure, edge cases)
-├── synthesizes scope draft
-├── clarifies with user (AskUserQuestion)
-└── creates: GitHub issue
+/specify (orchestrator - spawns agents only)
+│
+├─ Phase 1: Understand
+│  └─ Parse input, identify unknowns
+│
+├─ Phase 2: Explore Requirements (PARALLEL)
+│  ├─ Explore: User perspective
+│  ├─ Explore: Similar features
+│  ├─ Explore: Constraints
+│  └─ Explore: Failure modes
+│
+├─ Phase 3: Synthesize Exploration
+│  └─ Synthesize agent (mode: exploration)
+│
+├─ Phase 4: Plan Scope (PARALLEL)
+│  ├─ Plan: User stories
+│  ├─ Plan: Scope boundaries
+│  └─ Plan: Acceptance criteria
+│
+├─ Phase 5: Synthesize Planning
+│  └─ Synthesize agent (mode: planning)
+│
+├─ Phase 6: Clarify
+│  └─ AskUserQuestion (batched)
+│
+├─ Phase 7: Create Issue
+│  └─ gh issue create
+│
+└─ Phase 8: Report
+   └─ Display issue details
 ```
 
 ---
