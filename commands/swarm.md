@@ -11,43 +11,59 @@ Orchestrate a single task from exploration through implementation to review by s
 ```
 /swarm <task description>
 /swarm #42  (GitHub issue number)
+/swarm      (use conversation context)
 ```
-
----
-
-## Input Validation
-
-**If no input provided**, ask the user:
-
-```
-What would you like to implement?
-
-Options:
-1. Describe the task (e.g., "Add user authentication with JWT")
-2. Provide a GitHub issue number (e.g., "#42")
-3. Cancel
-```
-
-**If input is empty or unclear**, do not proceed. Wait for valid input.
 
 ---
 
 ## Input
 
-You receive:
-- `TASK_DESCRIPTION`: What to implement (or GitHub issue number like `#42`)
+You receive one of:
+- **Explicit task**: `TASK_DESCRIPTION` provided by user
+- **Issue number**: `#42` - fetch details via GetIssue agent
+- **No input**: Derive task from conversation context
 
-**Validate input:**
-```bash
-if [ -z "${TASK_DESCRIPTION}" ]; then
-    echo "ERROR: No task provided"
-    echo "Usage: /swarm <task description>"
-    echo "       /swarm #42"
-    exit 1
-fi
+### Deriving Task from Conversation Context
+
+When `/swarm` is run without arguments:
+
+1. **Review conversation history** - The full conversation is available to you. Look for:
+   - Features or functionality discussed
+   - Problems the user wants solved
+   - Requirements or acceptance criteria mentioned
+   - Code changes requested
+   - Decisions made about implementation approach
+
+2. **Formulate task description** - Synthesize into a clear, actionable task
+
+3. **Confirm with user** before proceeding:
+
+```markdown
+## 🐝 Swarm Task Detected
+
+Based on our conversation, I understand the task as:
+
+**Task**: {synthesized task description}
+
+**Key Requirements**:
+- {requirement 1}
+- {requirement 2}
+- {requirement 3}
+
+**Scope**:
+- Files likely affected: {list}
+- Estimated complexity: {Low/Medium/High}
+
+Proceed with this task? (yes / no / let me clarify)
 ```
 
-Generate context:
+**Wait for user confirmation** before proceeding to Phase 1.
+
+---
+
+## Context
+
+Generate execution context:
 
 ```bash
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
