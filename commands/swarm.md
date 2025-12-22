@@ -18,17 +18,21 @@ Orchestrate a single task from exploration through implementation to review by s
 
 ## Input
 
-- **Explicit task**: `/swarm <description>` - use provided description
-- **Issue number**: `/swarm #42` - fetch via GetIssue agent
-- **No input**: `/swarm` - use conversation context
+`$ARGUMENTS` contains whatever follows `/swarm`:
+
+- `/swarm implement JWT auth` → `$ARGUMENTS` = "implement JWT auth"
+- `/swarm #42` → `$ARGUMENTS` = "#42" (GitHub issue)
+- `/swarm` → `$ARGUMENTS` = "" (use conversation context)
 
 ---
 
 ## Context
 
-Generate execution context:
-
 ```bash
+# Capture input
+TASK_INPUT="$ARGUMENTS"
+
+# Generate identifiers
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
 TASK_ID="task-${TIMESTAMP}"
 TASK_BRANCH="swarm/${TASK_ID}"
@@ -36,7 +40,7 @@ TARGET_BRANCH=$(git branch --show-current)
 WORKTREE_DIR=".worktrees/${TASK_ID}"
 
 echo "=== SWARM: ${TASK_ID} ==="
-echo "Task: ${TASK_DESCRIPTION}"
+echo "Input: ${TASK_INPUT:-'(from conversation context)'}"
 echo "Branch: ${TASK_BRANCH}"
 echo "Target: ${TARGET_BRANCH}"
 ```
