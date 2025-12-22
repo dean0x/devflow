@@ -160,9 +160,13 @@ Report back: issues found, comments created, comments skipped"
 
 ---
 
-## Phase 4: Create PR Comments
+## Phase 4: Synthesis (Parallel)
 
-**WAIT** for all Phase 3 review agents to complete, then spawn the Comment agent:
+**WAIT** for all Phase 3 review agents to complete, then spawn synthesis agents **in parallel**:
+
+**IMPORTANT:** Launch BOTH agents in a SINGLE message for parallel execution.
+
+### 4.1 Comment Agent (PR Comments)
 
 ```
 Task(subagent_type="Comment"):
@@ -181,11 +185,30 @@ TIMESTAMP: ${TIMESTAMP}
 Report back: inline comments created, comments skipped, summary created"
 ```
 
+### 4.2 TechDebt Agent (Debt Tracking)
+
+```
+Task(subagent_type="TechDebt"):
+
+"Update tech debt tracking with pre-existing issues from code review.
+
+REVIEW_DIR: ${REVIEW_DIR}
+TIMESTAMP: ${TIMESTAMP}
+
+1. Read all review reports from ${REVIEW_DIR}
+2. Extract ℹ️ pre-existing issues
+3. Find or create Tech Debt Backlog GitHub issue
+4. Add new pre-existing issues (deduplicated)
+5. Remove items that have been fixed
+
+Report back: issue number, items added, items removed"
+```
+
 ---
 
 ## Phase 5: Aggregate Results
 
-After Comment agent completes, read the reports:
+After synthesis agents complete, read the reports:
 
 ```bash
 ls -1 "$REVIEW_DIR"/*-report.${TIMESTAMP}.md
@@ -276,25 +299,7 @@ Create `${REVIEW_DIR}/review-summary.${TIMESTAMP}.md`:
 
 ---
 
-## Phase 8: Tech Debt (Optional)
-
-If there are ℹ️ pre-existing issues, spawn TechDebt agent:
-
-```
-Task(subagent_type="TechDebt"):
-
-"Update tech debt tracking with pre-existing issues from code review.
-
-REVIEW_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${TIMESTAMP}
-
-Add new pre-existing issues to Tech Debt Backlog GitHub issue.
-Remove any items that have been fixed."
-```
-
----
-
-## Phase 9: Final Report
+## Phase 8: Final Report
 
 Return summary to user:
 
@@ -320,6 +325,7 @@ Return summary to user:
 
 - Summary: `${REVIEW_DIR}/review-summary.${TIMESTAMP}.md`
 - Reports: `${REVIEW_DIR}/*-report.${TIMESTAMP}.md`
+- Tech Debt: Issue #{tech_debt_issue} ({n} added, {n} removed)
 
 ### 🎯 Next Steps
 
@@ -331,7 +337,8 @@ Return summary to user:
 ## Key Principles
 
 1. **Smart review selection** - Only run relevant reviews
-2. **Parallel execution** - All reviews run simultaneously
-3. **Direct PR comments** - Issues appear on specific lines
+2. **Parallel execution** - Reviews run simultaneously, then synthesis agents run simultaneously
+3. **Direct PR comments** - Issues appear on specific lines via inline comments
 4. **Honest recommendations** - Block if blocking issues exist
 5. **Full automation** - Handles commit/push/PR creation
+6. **Tech debt tracking** - Pre-existing issues tracked separately
