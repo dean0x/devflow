@@ -18,46 +18,9 @@ Orchestrate a single task from exploration through implementation to review by s
 
 ## Input
 
-You receive one of:
-- **Explicit task**: `TASK_DESCRIPTION` provided by user
-- **Issue number**: `#42` - fetch details via GetIssue agent
-- **No input**: Derive task from conversation context
-
-### Deriving Task from Conversation Context
-
-When `/swarm` is run without arguments:
-
-1. **Review conversation history** - The full conversation is available to you. Look for:
-   - Features or functionality discussed
-   - Problems the user wants solved
-   - Requirements or acceptance criteria mentioned
-   - Code changes requested
-   - Decisions made about implementation approach
-
-2. **Formulate task description** - Synthesize into a clear, actionable task
-
-3. **Confirm with user** before proceeding:
-
-```markdown
-## 🐝 Swarm Task Detected
-
-Based on our conversation, I understand the task as:
-
-**Task**: {synthesized task description}
-
-**Key Requirements**:
-- {requirement 1}
-- {requirement 2}
-- {requirement 3}
-
-**Scope**:
-- Files likely affected: {list}
-- Estimated complexity: {Low/Medium/High}
-
-Proceed with this task? (yes / no / let me clarify)
-```
-
-**Wait for user confirmation** before proceeding to Phase 1.
+- **Explicit task**: `/swarm <description>` - use provided description
+- **Issue number**: `/swarm #42` - fetch via GetIssue agent
+- **No input**: `/swarm` - use conversation context
 
 ---
 
