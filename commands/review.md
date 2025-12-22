@@ -160,9 +160,32 @@ Report back: issues found, comments created, comments skipped"
 
 ---
 
-## Phase 4: Aggregate Results
+## Phase 4: Create PR Comments
 
-After all reviews complete, read their reports:
+**WAIT** for all Phase 3 review agents to complete, then spawn the Comment agent:
+
+```
+Task(subagent_type="Comment"):
+
+"Create PR inline comments for code review findings.
+
+PR_NUMBER: ${PR_NUMBER}
+REVIEW_BASE_DIR: ${REVIEW_DIR}
+TIMESTAMP: ${TIMESTAMP}
+
+1. Read all review reports from ${REVIEW_DIR}
+2. Deduplicate similar issues
+3. Create inline comments on lines in the PR diff
+4. Consolidate skipped issues into ONE summary comment
+
+Report back: inline comments created, comments skipped, summary created"
+```
+
+---
+
+## Phase 5: Aggregate Results
+
+After Comment agent completes, read the reports:
 
 ```bash
 ls -1 "$REVIEW_DIR"/*-report.${TIMESTAMP}.md
@@ -183,7 +206,7 @@ From each report's "PR Comments" section:
 
 ---
 
-## Phase 5: Determine Recommendation
+## Phase 6: Determine Recommendation
 
 | Condition | Recommendation |
 |-----------|----------------|
@@ -194,7 +217,7 @@ From each report's "PR Comments" section:
 
 ---
 
-## Phase 6: Generate Summary
+## Phase 7: Generate Summary
 
 Create `${REVIEW_DIR}/review-summary.${TIMESTAMP}.md`:
 
@@ -253,7 +276,7 @@ Create `${REVIEW_DIR}/review-summary.${TIMESTAMP}.md`:
 
 ---
 
-## Phase 7: Tech Debt (Optional)
+## Phase 8: Tech Debt (Optional)
 
 If there are ℹ️ pre-existing issues, spawn TechDebt agent:
 
@@ -271,7 +294,7 @@ Remove any items that have been fixed."
 
 ---
 
-## Phase 8: Final Report
+## Phase 9: Final Report
 
 Return summary to user:
 
