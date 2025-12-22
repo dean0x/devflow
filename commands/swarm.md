@@ -15,10 +15,37 @@ Orchestrate a single task from exploration through implementation to review by s
 
 ---
 
+## Input Validation
+
+**If no input provided**, ask the user:
+
+```
+What would you like to implement?
+
+Options:
+1. Describe the task (e.g., "Add user authentication with JWT")
+2. Provide a GitHub issue number (e.g., "#42")
+3. Cancel
+```
+
+**If input is empty or unclear**, do not proceed. Wait for valid input.
+
+---
+
 ## Input
 
 You receive:
-- `TASK_DESCRIPTION`: What to implement (or GitHub issue number)
+- `TASK_DESCRIPTION`: What to implement (or GitHub issue number like `#42`)
+
+**Validate input:**
+```bash
+if [ -z "${TASK_DESCRIPTION}" ]; then
+    echo "ERROR: No task provided"
+    echo "Usage: /swarm <task description>"
+    echo "       /swarm #42"
+    exit 1
+fi
+```
 
 Generate context:
 
