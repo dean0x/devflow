@@ -16,9 +16,9 @@ When working on DevFlow code, understand that this toolkit is designed to enhanc
 DevFlow consists of four main components:
 
 1. **CLI Tool** (`src/cli/`) - TypeScript-based installer and manager
-2. **Claude Code Commands** (`src/claude/commands/`) - Markdown-based slash commands (user-invoked)
-3. **Skills** (`src/claude/skills/`) - Auto-activate quality enforcement (model-invoked)
-4. **Sub-Agents** (`src/claude/agents/`) - Specialized AI assistants for focused tasks
+2. **Claude Code Commands** (`commands/`) - Markdown-based slash commands (user-invoked)
+3. **Skills** (`skills/`) - Auto-activate quality enforcement (model-invoked)
+4. **Sub-Agents** (`agents/`) - Specialized AI assistants for focused tasks
 
 ## Documentation Framework
 
@@ -240,7 +240,7 @@ Brief description of what the command does.
 
 Skills are **model-invoked** capabilities that auto-activate based on context. They enforce quality without requiring manual invocation.
 
-1. Create skill directory in `src/claude/skills/devflow/skill-name/`
+1. Create skill directory in `skills/skill-name/`
 2. Create `SKILL.md` with YAML frontmatter:
 
 ```markdown
@@ -518,18 +518,17 @@ npx devflow-kit@latest init
 
 ### Source Structure
 ```
-src/
-├── cli/                      # CLI implementation
-│   ├── commands/               # CLI command implementations
-│   │   ├── init.ts              # Installation command
-│   │   └── uninstall.ts         # Uninstallation command
-│   └── cli.ts                  # CLI entry point
-└── claude/                   # Claude Code assets
-    ├── agents/devflow/         # Sub-agent definitions
-    ├── commands/devflow/       # Slash command definitions
-    ├── skills/devflow/         # Skill source (installed flat)
-    ├── scripts/                # Supporting scripts
-    └── settings.json           # Claude Code settings
+devflow/
+├── agents/                   # Sub-agent definitions
+├── commands/                 # Slash command definitions
+├── skills/                   # Skill source (installed flat to ~/.claude/skills/)
+├── scripts/                  # Supporting scripts
+└── src/
+    └── cli/                  # CLI implementation
+        ├── commands/           # CLI command implementations
+        │   ├── init.ts          # Installation command
+        │   └── uninstall.ts     # Uninstallation command
+        └── cli.ts              # CLI entry point
 ```
 
 ### Installation Paths

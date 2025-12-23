@@ -92,14 +92,14 @@ const DEVFLOW_COMMANDS: CommandDefinition[] = [
  * Displayed only in verbose mode to show auto-activating capabilities.
  */
 const DEVFLOW_SKILLS: CommandDefinition[] = [
-  { name: 'pattern-check', description: 'Architectural pattern validation' },
-  { name: 'test-design', description: 'Test quality enforcement' },
-  { name: 'code-smell', description: 'Anti-pattern detection' },
-  { name: 'research', description: 'Pre-implementation exploration' },
-  { name: 'debug', description: 'Systematic debugging (auto)' },
-  { name: 'input-validation', description: 'Boundary validation' },
-  { name: 'error-handling', description: 'Result type consistency' },
-  { name: 'worktree', description: 'Parallel development isolation' },
+  { name: 'devflow-pattern-check', description: 'Architectural pattern validation' },
+  { name: 'devflow-test-design', description: 'Test quality enforcement' },
+  { name: 'devflow-code-smell', description: 'Anti-pattern detection' },
+  { name: 'devflow-research', description: 'Pre-implementation exploration' },
+  { name: 'devflow-debug', description: 'Systematic debugging (auto)' },
+  { name: 'devflow-input-validation', description: 'Boundary validation' },
+  { name: 'devflow-error-handling', description: 'Result type consistency' },
+  { name: 'devflow-worktree', description: 'Parallel development isolation' },
 ];
 
 /**
@@ -142,10 +142,10 @@ function renderVerboseOutput(
 
   console.log('\nInstalled skills (auto-activate):');
   for (const skill of DEVFLOW_SKILLS) {
-    console.log(`  ${skill.name.padEnd(18)}${skill.description}`);
+    console.log(`  ${skill.name.padEnd(26)}${skill.description}`);
   }
 
-  console.log('\nNote: debug exists as both command (manual) and skill (auto)');
+  console.log('\nNote: devflow-debug skill auto-activates; /debug command for manual use');
   console.log('Docs: https://github.com/dean0x/devflow');
 }
 

@@ -1,6 +1,7 @@
 ---
 name: devflow-worktree
 description: Git worktree management for parallel development. Auto-activates during swarm operations when multiple tasks need isolated working directories. Provides patterns for creating, tracking, and cleaning up worktrees.
+allowed-tools: Bash, Read, Glob
 ---
 
 # Worktree Skill - Parallel Development Isolation
