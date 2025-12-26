@@ -70,6 +70,48 @@ DevFlow is now installed and ready to use in Claude Code.
 
 **IMPORTANT**: Skills are **automatically activated** by Claude based on context. They cannot be manually invoked like slash commands.
 
+### Skills Architecture
+
+DevFlow uses a **tiered skills system** where skills serve as shared knowledge libraries that agents can reference:
+
+**Tier 1: Foundation Skills** (shared patterns used by multiple agents)
+
+| Skill | Purpose | Used By |
+|-------|---------|---------|
+| `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, TypescriptReview, ArchitectureReview |
+| `devflow-review-methodology` | 6-step review process, 3-category issue classification | All Review agents |
+| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, DocumentationReview |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions | Commit, Coder, PullRequest, Release |
+| `devflow-security-patterns` | Security vulnerability patterns and OWASP mapping | SecurityReview |
+
+**Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
+
+| Skill | Purpose | Auto-Triggers When |
+|-------|---------|---------------------|
+| `devflow-test-design` | Test quality enforcement | Tests written or modified |
+| `devflow-code-smell` | Anti-pattern detection | Features implemented |
+| `devflow-research` | Pre-implementation planning | Unfamiliar features requested |
+| `devflow-debug` | Systematic debugging | Errors occur, tests fail |
+| `devflow-input-validation` | Boundary validation | API endpoints created |
+| `devflow-worktree` | Git worktree management | Swarm operations |
+
+**How Agents Use Skills:**
+
+Agents declare skills in their frontmatter to automatically load shared knowledge:
+```yaml
+---
+name: SecurityReview
+description: Security vulnerability detection
+model: inherit
+skills: devflow-review-methodology, devflow-security-patterns
+---
+```
+
+This creates a **shared library pattern** where:
+- Common methodology is defined once (in foundation skills)
+- Agents inherit and extend with their specialization
+- No duplication of review process or core patterns across agents
+
 **Dual-Mode Pattern**: The `debug` skill also exists as a slash command (`/debug`) for manual control:
 - **Skill mode** (auto): Activates when Claude detects errors or failures
 - **Command mode** (manual): Use `/debug` when you want explicit control over the debugging workflow

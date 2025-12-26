@@ -301,20 +301,63 @@ What passes validation
 - Common workflow that benefits from both auto and manual modes
 - Example: research (auto when unfamiliar, manual when user wants deep dive)
 
-### Current Skills
+### Skills Architecture
 
-**Philosophy Enforcers:**
-- `pattern-check` - Result types, DI, immutability, pure functions
-- `test-design` - Test quality red flags (complex setup, difficult mocking)
-- `code-smell` - Fake solutions, unlabeled workarounds, magic values
+DevFlow uses a **tiered skills system** where skills serve as shared knowledge libraries that agents can reference. This eliminates duplication and ensures consistent behavior across agents.
 
-**Workflow Automation:**
-- `research` - Pre-implementation planning and integration strategy
-- `debug` - Systematic debugging with hypothesis testing
+**Tier 1: Foundation Skills** (shared patterns used by multiple agents)
 
-**Safety Validators:**
-- `input-validation` - Boundary validation, SQL injection prevention
-- `error-handling` - Result type consistency, exception boundaries
+| Skill | Purpose | Used By |
+|-------|---------|---------|
+| `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, TypescriptReview, ArchitectureReview |
+| `devflow-review-methodology` | 6-step review process, 3-category issue classification | All Review agents (12 total) |
+| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, DocumentationReview, Debug |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Commit, Coder, PullRequest, Release |
+| `devflow-security-patterns` | Security vulnerability patterns, OWASP mapping, detection strategies | SecurityReview |
+
+**Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
+
+| Skill | Purpose | Auto-Triggers When |
+|-------|---------|---------------------|
+| `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior testing) | Tests written or modified |
+| `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features implemented, code reviewed |
+| `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested |
+| `devflow-debug` | Systematic debugging with hypothesis testing | Errors occur, tests fail |
+| `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
+| `devflow-worktree` | Git worktree management for parallel development | Swarm operations, isolated working directories |
+
+**How Agents Use Skills:**
+
+Agents declare skills in their frontmatter to automatically load shared knowledge:
+
+```yaml
+---
+name: SecurityReview
+description: Security vulnerability detection
+model: inherit
+skills: devflow-review-methodology, devflow-security-patterns
+---
+```
+
+**Benefits of Tiered Architecture:**
+- **No duplication** - Common methodology defined once in foundation skills
+- **Consistent behavior** - All review agents follow the same 6-step process
+- **Easy maintenance** - Update foundation skill, all agents inherit changes
+- **Clear dependencies** - Agent frontmatter shows what knowledge it uses
+
+### Creating New Skills
+
+When creating skills, decide which tier:
+
+**Foundation Skill** (Tier 1) - If multiple agents need the same knowledge:
+- Create in `skills/devflow-{name}/SKILL.md`
+- Document which agents should use it
+- Add `skills:` field to relevant agent frontmatters
+
+**Specialized Skill** (Tier 2) - If user-facing with context triggers:
+- Create in `skills/devflow-{name}/SKILL.md`
+- Focus on clear trigger conditions in description
+- Test auto-activation in various contexts
 
 ## CLI Development
 
