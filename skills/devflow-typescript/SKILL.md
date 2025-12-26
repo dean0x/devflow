@@ -1,6 +1,6 @@
 ---
 name: devflow-typescript
-description: TypeScript-specific patterns including type safety, generics, utility types, type guards, and common idioms. Load when working with TypeScript codebases.
+description: Automatically activate when working with .ts or .tsx files, or when TypeScript patterns are needed. Triggers on type safety questions, generic implementations, utility type usage, or type guard creation in TypeScript codebases.
 allowed-tools: Read, Grep, Glob
 ---
 

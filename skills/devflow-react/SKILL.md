@@ -1,6 +1,6 @@
 ---
 name: devflow-react
-description: React-specific patterns including hooks, components, state management, performance optimization, and common idioms. Load when working with React codebases.
+description: Automatically activate when working with React components, hooks, or .jsx/.tsx files containing JSX. Triggers on component creation, hook implementation, state management, or React performance optimization tasks.
 allowed-tools: Read, Grep, Glob
 ---
 

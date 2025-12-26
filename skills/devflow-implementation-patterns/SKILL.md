@@ -1,6 +1,6 @@
 ---
 name: devflow-implementation-patterns
-description: Common implementation patterns for CRUD operations, API endpoints, event handlers, configuration, and logging. Load when implementing new functionality that follows standard patterns.
+description: Automatically activate when implementing CRUD operations, API endpoints, event handlers, configuration systems, or logging. Triggers on feature implementation tasks involving database operations, REST/GraphQL APIs, pub/sub patterns, or service configuration.
 allowed-tools: Read, Grep, Glob
 ---
 
