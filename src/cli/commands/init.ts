@@ -98,6 +98,8 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'devflow-docs-framework', description: 'Documentation conventions' },
   { name: 'devflow-git-safety', description: 'Git operations & safety' },
   { name: 'devflow-security-patterns', description: 'Security vulnerability patterns' },
+  { name: 'devflow-implementation-patterns', description: 'CRUD, API, events, config' },
+  { name: 'devflow-codebase-navigation', description: 'Exploration & pattern discovery' },
   // Tier 2: Specialized Skills (user-facing, auto-activate)
   { name: 'devflow-test-design', description: 'Test quality enforcement' },
   { name: 'devflow-code-smell', description: 'Anti-pattern detection' },
@@ -105,6 +107,9 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'devflow-debug', description: 'Systematic debugging (auto)' },
   { name: 'devflow-input-validation', description: 'Boundary validation' },
   { name: 'devflow-worktree', description: 'Parallel development isolation' },
+  // Tier 3: Domain-Specific Skills
+  { name: 'devflow-typescript', description: 'TypeScript patterns & idioms' },
+  { name: 'devflow-react', description: 'React components & hooks' },
 ];
 
 /**

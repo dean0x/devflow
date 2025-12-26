@@ -154,6 +154,8 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-docs-framework',
           'devflow-git-safety',
           'devflow-security-patterns',
+          'devflow-implementation-patterns',
+          'devflow-codebase-navigation',
           // Tier 2: Specialized Skills
           'devflow-test-design',
           'devflow-code-smell',
@@ -161,6 +163,9 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-debug',
           'devflow-input-validation',
           'devflow-worktree',
+          // Tier 3: Domain-Specific Skills
+          'devflow-typescript',
+          'devflow-react',
           // Deprecated (for cleanup of old installs)
           'devflow-pattern-check',
           'devflow-error-handling'
