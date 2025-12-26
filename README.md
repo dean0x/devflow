@@ -53,14 +53,12 @@ DevFlow is now installed and ready to use in Claude Code.
 
 | Skill | Purpose | Auto-Triggers When |
 |-------|---------|---------------------|
-| `pattern-check` | Architectural pattern validation (Result types, DI, immutability) | Code changes are made, new functions added |
-| `test-design` | Test quality enforcement (setup complexity, mocking, behavior vs implementation) | Tests are written or modified |
-| `code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features are implemented, code is reviewed |
-| `research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
-| `debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
-| `input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
-| `error-handling` | Result type consistency and exception boundary enforcement | Error handling code written, functions that can fail |
-| `worktree` | Git worktree management for parallel development | Swarm operations, isolated working directories needed |
+| `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior vs implementation) | Tests are written or modified |
+| `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features are implemented, code is reviewed |
+| `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
+| `devflow-debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
+| `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
+| `devflow-worktree` | Git worktree management for parallel development | Swarm operations, isolated working directories needed |
 
 **How Skills Work:**
 - **Proactive enforcement** - Catch issues during implementation, not after
@@ -288,7 +286,7 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 3. Review recommended next actions
 
 ### During Development
-1. **Skills auto-activate** - `research` skill triggers for unfamiliar features, `pattern-check` validates architecture
+1. **Skills auto-activate** - `devflow-research` triggers for unfamiliar features, foundation skills validate patterns
 2. **Specify features** - `/specify` for detailed specs, or `/breakdown` for quick task capture
 3. **Execute tasks** - `/swarm` for full lifecycle, or `/implement` for incremental work
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation

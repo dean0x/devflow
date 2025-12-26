@@ -92,13 +92,18 @@ const DEVFLOW_COMMANDS: CommandDefinition[] = [
  * Displayed only in verbose mode to show auto-activating capabilities.
  */
 const DEVFLOW_SKILLS: CommandDefinition[] = [
-  { name: 'devflow-pattern-check', description: 'Architectural pattern validation' },
+  // Tier 1: Foundation Skills (shared by agents)
+  { name: 'devflow-core-patterns', description: 'Result types, DI, immutability' },
+  { name: 'devflow-review-methodology', description: '6-step review process' },
+  { name: 'devflow-docs-framework', description: 'Documentation conventions' },
+  { name: 'devflow-git-safety', description: 'Git operations & safety' },
+  { name: 'devflow-security-patterns', description: 'Security vulnerability patterns' },
+  // Tier 2: Specialized Skills (user-facing, auto-activate)
   { name: 'devflow-test-design', description: 'Test quality enforcement' },
   { name: 'devflow-code-smell', description: 'Anti-pattern detection' },
   { name: 'devflow-research', description: 'Pre-implementation exploration' },
   { name: 'devflow-debug', description: 'Systematic debugging (auto)' },
   { name: 'devflow-input-validation', description: 'Boundary validation' },
-  { name: 'devflow-error-handling', description: 'Result type consistency' },
   { name: 'devflow-worktree', description: 'Parallel development isolation' },
 ];
 

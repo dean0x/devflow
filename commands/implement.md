@@ -40,7 +40,7 @@ For each pending todo:
    - Read relevant files
    - Make changes following existing patterns
    - Update imports/dependencies if needed
-   - Skills auto-validate (pattern-check, test-design, error-handling, code-smell)
+   - Skills auto-validate (devflow-core-patterns, devflow-test-design, devflow-code-smell)
 
 4. **Ask for design decisions only when:**
    - Multiple architectural approaches exist (event-driven vs REST, GraphQL vs REST API)
@@ -92,9 +92,8 @@ Next: Run /review (if major changes) or /commit
 ## Quality Enforcement
 
 Skills auto-validate during implementation:
-- `pattern-check` - Result types, DI, immutability
-- `test-design` - Test quality and structure
-- `error-handling` - Error consistency
-- `code-smell` - Anti-pattern detection
+- `devflow-core-patterns` - Result types, DI, immutability
+- `devflow-test-design` - Test quality and structure
+- `devflow-code-smell` - Anti-pattern detection
 
 Trust skills to handle quality enforcement automatically.

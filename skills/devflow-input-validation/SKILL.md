@@ -473,10 +473,9 @@ Before declaring endpoint/integration complete:
 
 This skill works with:
 
-**pattern-check**: Ensures validation uses Result types
-**code-smell**: Catches fake/incomplete validation
-**test-design**: Validates boundary tests exist
-**error-handling**: Ensures validation errors handled consistently
+**devflow-core-patterns**: Ensures validation uses Result types
+**devflow-code-smell**: Catches fake/incomplete validation
+**devflow-test-design**: Validates boundary tests exist
 
 ## Security Principles
 

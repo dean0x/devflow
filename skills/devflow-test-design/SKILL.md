@@ -364,9 +364,8 @@ Tests pass design review when:
 ## Integration Points
 
 This skill works with:
-- **pattern-check**: Detects architectural issues causing test complexity
-- **code-smell**: Identifies workarounds in test code
-- **error-handling**: Ensures Result types simplify testing
+- **devflow-core-patterns**: Detects architectural issues causing test complexity
+- **devflow-code-smell**: Identifies workarounds in test code
 
 ## Example Scenario
 

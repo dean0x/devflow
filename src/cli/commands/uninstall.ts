@@ -148,14 +148,22 @@ export const uninstallCommand = new Command('uninstall')
         // Remove individual DevFlow skills
         const skillsDir = path.join(claudeDir, 'skills');
         const devflowSkills = [
-          'devflow-pattern-check',
+          // Tier 1: Foundation Skills
+          'devflow-core-patterns',
+          'devflow-review-methodology',
+          'devflow-docs-framework',
+          'devflow-git-safety',
+          'devflow-security-patterns',
+          // Tier 2: Specialized Skills
           'devflow-test-design',
           'devflow-code-smell',
           'devflow-research',
           'devflow-debug',
           'devflow-input-validation',
-          'devflow-error-handling',
-          'devflow-worktree'
+          'devflow-worktree',
+          // Deprecated (for cleanup of old installs)
+          'devflow-pattern-check',
+          'devflow-error-handling'
         ];
 
         let skillsRemoved = 0;
