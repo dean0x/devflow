@@ -76,11 +76,13 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, TypescriptReview, ArchitectureReview |
-| `devflow-review-methodology` | 6-step review process, 3-category issue classification | All Review agents |
-| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, DocumentationReview |
+| `devflow-core-patterns` | Result types, DI, immutability, pure functions | Coder, TypescriptReview, ArchitectureReview |
+| `devflow-review-methodology` | 6-step review process, 3-category classification | All Review agents |
+| `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp, DocumentationReview |
 | `devflow-git-safety` | Git operations, lock handling, commit conventions | Commit, Coder, PullRequest, Release |
-| `devflow-security-patterns` | Security vulnerability patterns and OWASP mapping | SecurityReview |
+| `devflow-security-patterns` | OWASP mapping, vulnerability patterns | SecurityReview |
+| `devflow-implementation-patterns` | CRUD, API, events, config, logging | Coder |
+| `devflow-codebase-navigation` | Exploration, pattern discovery, data flow | Coder |
 
 **Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
 
@@ -92,6 +94,13 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-debug` | Systematic debugging | Errors occur, tests fail |
 | `devflow-input-validation` | Boundary validation | API endpoints created |
 | `devflow-worktree` | Git worktree management | Swarm operations |
+
+**Tier 3: Domain-Specific Skills** (language and framework patterns)
+
+| Skill | Purpose | Used When |
+|-------|---------|-----------|
+| `devflow-typescript` | Type safety, generics, utility types, idioms | TypeScript codebases |
+| `devflow-react` | Components, hooks, state, performance | React codebases |
 
 **How Agents Use Skills:**
 

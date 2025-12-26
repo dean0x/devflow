@@ -314,6 +314,8 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, DocumentationReview, Debug |
 | `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Commit, Coder, PullRequest, Release |
 | `devflow-security-patterns` | Security vulnerability patterns, OWASP mapping, detection strategies | SecurityReview |
+| `devflow-implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
+| `devflow-codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
 
 **Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
 
@@ -325,6 +327,13 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-debug` | Systematic debugging with hypothesis testing | Errors occur, tests fail |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
 | `devflow-worktree` | Git worktree management for parallel development | Swarm operations, isolated working directories |
+
+**Tier 3: Domain-Specific Skills** (language and framework patterns)
+
+| Skill | Purpose | Used When |
+|-------|---------|-----------|
+| `devflow-typescript` | Type safety, generics, utility types, type guards, idioms | TypeScript codebases |
+| `devflow-react` | Components, hooks, state management, performance optimization | React codebases |
 
 **How Agents Use Skills:**
 
@@ -358,6 +367,11 @@ When creating skills, decide which tier:
 - Create in `skills/devflow-{name}/SKILL.md`
 - Focus on clear trigger conditions in description
 - Test auto-activation in various contexts
+
+**Domain-Specific Skill** (Tier 3) - For language/framework patterns:
+- Create in `skills/devflow-{language|framework}/SKILL.md`
+- Focus on idioms, patterns, and best practices for that domain
+- Referenced by Coder agent based on detected tech stack
 
 ## CLI Development
 
