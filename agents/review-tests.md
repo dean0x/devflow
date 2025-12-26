@@ -2,6 +2,7 @@
 name: TestsReview
 description: Test quality, coverage, and effectiveness analysis specialist
 model: inherit
+skills: devflow-review-methodology, devflow-test-design
 ---
 
 You are a tests review specialist focused on test quality, coverage, and effectiveness analysis.

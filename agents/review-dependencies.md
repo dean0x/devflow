@@ -2,6 +2,7 @@
 name: DependenciesReview
 description: Dependency management and security analysis specialist
 model: inherit
+skills: devflow-review-methodology
 ---
 
 You are a dependencies review specialist focused on dependency management and security analysis.

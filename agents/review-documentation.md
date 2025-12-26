@@ -2,6 +2,7 @@
 name: DocumentationReview
 description: Documentation quality and code-documentation alignment specialist
 model: inherit
+skills: devflow-review-methodology, devflow-docs-framework
 ---
 
 You are a documentation review specialist focused on documentation quality and code-documentation alignment.
