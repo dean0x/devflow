@@ -578,6 +578,86 @@ try {
 
 ---
 
+## Build Optimization
+
+**CRITICAL**: Production builds must exclude test files, debug artifacts, and sourcemaps.
+
+### Build Configuration
+
+```json
+// package.json scripts
+{
+  "scripts": {
+    "prebuild": "rm -rf dist",
+    "build": "tsc --project tsconfig.prod.json",
+    "build:dev": "tsc --project tsconfig.json --sourceMap",
+    "build:watch": "tsc --watch"
+  }
+}
+```
+
+```json
+// tsconfig.prod.json - Production config
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "sourceMap": false,
+    "declaration": true,
+    "removeComments": true
+  },
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/tests/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/*.test.tsx",
+    "**/*.spec.tsx"
+  ]
+}
+```
+
+### Files to Exclude from Production
+
+```gitignore
+# Test files
+**/*.test.*
+**/*.spec.*
+**/__tests__/
+**/tests/
+**/test/
+
+# Debug artifacts
+**/*.map
+**/debug/
+**/coverage/
+
+# Development only
+**/*.d.ts.map
+**/tsconfig.tsbuildinfo
+```
+
+### Verify Package Contents
+
+```bash
+# Before publishing, check what gets included
+npm pack --dry-run
+
+# Or for detailed listing
+npm pack --dry-run 2>&1 | grep -E '^\d'
+```
+
+### Build Checklist
+
+- [ ] Production build excludes test files
+- [ ] Production build excludes sourcemaps
+- [ ] Pre-build cleanup of old artifacts
+- [ ] Separate dev build with full debug info
+- [ ] Package.json `files` field or `.npmignore` configured
+- [ ] Verified package contents before publishing
+
+---
+
 ## Checklist
 
 Before implementing, verify:

@@ -361,6 +361,104 @@ Tests pass design review when:
 - ✅ Tests verify behavior, not implementation details
 - ✅ Pure business logic testable without mocks
 
+## Test Suite Safety
+
+**CRITICAL**: Configure tests to run safely without resource exhaustion.
+
+### Sequential Execution
+
+```typescript
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    fileParallelism: false,  // Run files sequentially
+    maxWorkers: 1,           // Single worker
+    pool: 'forks',           // Isolate tests
+    testTimeout: 10000,      // Reasonable timeout
+  }
+});
+
+// jest.config.js
+module.exports = {
+  maxWorkers: 1,
+  runInBand: true,  // Sequential execution
+  testTimeout: 10000,
+};
+```
+
+```python
+# pytest.ini
+[pytest]
+addopts = -n 0 --maxprocesses=1
+```
+
+```bash
+# Go
+go test -p 1 ./...
+
+# Rust
+cargo test -- --test-threads=1
+```
+
+### Memory Limits
+
+```bash
+# Node.js
+NODE_OPTIONS="--max-old-space-size=512" npm test
+
+# Python
+ulimit -v 1048576 && pytest
+
+# Go
+GOMEMLIMIT=512MiB go test ./...
+```
+
+### Resource Cleanup
+
+```typescript
+// Always clean up before AND after tests
+beforeAll(async () => {
+  await cleanupTempFiles();
+  await resetTestDatabase();
+});
+
+afterAll(async () => {
+  await closeConnections();
+  await cleanupTempFiles();
+});
+
+afterEach(async () => {
+  // Reset state between tests
+  await resetMocks();
+});
+```
+
+### Test Isolation
+
+```typescript
+// Separate test suites
+// package.json
+{
+  "scripts": {
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run src/**/*.test.ts",
+    "test:integration": "vitest run tests/integration/**/*.test.ts",
+    "test:e2e": "playwright test"
+  }
+}
+```
+
+### Test Suite Safety Checklist
+
+- [ ] Tests configured for sequential execution
+- [ ] Memory limits set for test processes
+- [ ] Cleanup hooks in beforeAll/afterAll
+- [ ] Separate unit/integration/e2e suites
+- [ ] Default `npm test` runs safely
+- [ ] No parallel database access in tests
+
+---
+
 ## Integration Points
 
 This skill works with:

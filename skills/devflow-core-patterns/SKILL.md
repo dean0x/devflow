@@ -1,6 +1,6 @@
 ---
 name: devflow-core-patterns
-description: Core engineering patterns and principles. Load when implementing new functionality, refactoring code, or when guidance on Result types, dependency injection, immutability, or error handling is needed. This is the foundation skill for all implementation work.
+description: Automatically activate when implementing new functionality, refactoring code, or when guidance on Result types, dependency injection, immutability, resource cleanup, naming conventions, or architecture documentation is needed. Foundation skill for all implementation work.
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---
 
@@ -313,6 +313,275 @@ function handleError(error: UserError): Response {
 
 ---
 
+## Pattern 7: Resource Cleanup
+
+**CRITICAL**: Always clean up resources using proper patterns.
+
+### Language-Specific Patterns
+
+```typescript
+// TypeScript/JavaScript: try/finally
+async function processFile(path: string): Promise<Result<Data, Error>> {
+  const handle = await fs.open(path);
+  try {
+    const content = await handle.readFile();
+    return Ok(parse(content));
+  } finally {
+    await handle.close();  // Always runs
+  }
+}
+
+// Using Disposable (TC39 proposal / Node 20+)
+async function withConnection<T>(
+  fn: (conn: DbConnection) => Promise<T>
+): Promise<T> {
+  const conn = await db.connect();
+  try {
+    return await fn(conn);
+  } finally {
+    await conn.release();
+  }
+}
+```
+
+```python
+# Python: context managers
+def process_file(path: str) -> Result[Data, Error]:
+    with open(path) as f:  # Automatically closes
+        content = f.read()
+        return Ok(parse(content))
+
+# Custom context manager
+@contextmanager
+def db_transaction(conn):
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+```
+
+```go
+// Go: defer
+func processFile(path string) (Data, error) {
+    f, err := os.Open(path)
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()  // Runs when function returns
+
+    return parse(f)
+}
+```
+
+```rust
+// Rust: RAII (Drop trait)
+fn process_file(path: &str) -> Result<Data, Error> {
+    let file = File::open(path)?;  // Dropped automatically
+    parse(&file)
+}
+```
+
+### Violations to Detect
+
+```typescript
+// VIOLATION: No cleanup
+async function processFile(path: string) {
+  const handle = await fs.open(path);
+  const content = await handle.readFile();  // If this throws, handle leaks
+  return parse(content);
+}
+
+// VIOLATION: Cleanup in wrong place
+async function processFile(path: string) {
+  const handle = await fs.open(path);
+  const content = await handle.readFile();
+  await handle.close();  // Never runs if readFile throws
+  return parse(content);
+}
+```
+
+---
+
+## Pattern 8: Architecture Documentation
+
+**CRITICAL**: Document architectural decisions directly in code.
+
+### Document Design Patterns
+
+```typescript
+/**
+ * UserService uses CQRS pattern
+ * - Commands: createUser, updateUser, deleteUser → go through EventBus
+ * - Queries: getUser, listUsers → direct repository access
+ *
+ * Rationale: Write operations need audit trail and event sourcing
+ * Trade-off: Slight complexity increase for read consistency
+ */
+class UserService { ... }
+```
+
+### Document Architectural Boundaries
+
+```typescript
+// ARCHITECTURE: This module MUST NOT import from ../infrastructure
+// All external calls go through injected ports (interfaces)
+
+// ARCHITECTURE: Repository methods return domain objects only
+// No ORM entities or database types leak through this boundary
+```
+
+### Document Pattern Violations with Justification
+
+```typescript
+// ARCHITECTURE EXCEPTION: Direct database access for health check
+// Justification: Health endpoint must work even if service layer is down
+// Approved by: Tech Lead, 2024-01-15
+async function healthCheck(): Promise<HealthStatus> {
+  const dbOk = await db.ping();
+  return { database: dbOk };
+}
+```
+
+### Document Future Refactoring
+
+```typescript
+// TODO(architecture): Migrate to event-driven pattern
+// Currently using direct service calls for backwards compatibility
+// Target: v3.0.0
+// Tracking: JIRA-1234
+```
+
+---
+
+## Pattern 9: Naming Conventions
+
+### Types and Classes: PascalCase
+
+```typescript
+class UserProfile { }
+interface OrderManager { }
+type TaskState = 'pending' | 'running';
+enum HttpStatus { Ok = 200, NotFound = 404 }
+```
+
+### Constants: SCREAMING_SNAKE_CASE
+
+```typescript
+const MAX_RETRY_ATTEMPTS = 3;
+const API_BASE_URL = 'https://api.example.com';
+const DEFAULT_TIMEOUT_MS = 5000;
+```
+
+### Functions and Variables: camelCase
+
+```typescript
+function calculateTotal(items: Item[]): number { }
+const userEmail = user.email;
+let isProcessing = false;
+```
+
+### Private Members: Prefix Convention
+
+```typescript
+class Service {
+  private readonly _db: Database;      // Underscore prefix (optional)
+  #internalState: State;               // Private field (preferred)
+}
+```
+
+### File Naming
+
+```
+// Components/Classes: PascalCase
+UserProfile.tsx
+OrderService.ts
+
+// Utilities/Modules: kebab-case or camelCase
+string-utils.ts
+dateHelpers.ts
+
+// Test files: Match source + suffix
+UserProfile.test.tsx
+OrderService.spec.ts
+```
+
+---
+
+## Pattern 10: Performance Awareness
+
+**CRITICAL**: Measure before optimizing. Optimize hot paths only.
+
+### Measure First
+
+```typescript
+// Use built-in timing
+console.time('operation');
+await heavyOperation();
+console.timeEnd('operation');
+
+// Or explicit measurement
+const start = performance.now();
+await heavyOperation();
+const duration = performance.now() - start;
+logger.info('Operation completed', { durationMs: duration });
+```
+
+### Common Optimizations
+
+```typescript
+// Avoid N+1 queries
+// BAD: Query per item
+for (const order of orders) {
+  order.customer = await db.customers.findById(order.customerId);
+}
+
+// GOOD: Batch query
+const customerIds = orders.map(o => o.customerId);
+const customers = await db.customers.findByIds(customerIds);
+const customerMap = new Map(customers.map(c => [c.id, c]));
+orders.forEach(o => o.customer = customerMap.get(o.customerId));
+```
+
+```typescript
+// Use appropriate data structures
+// BAD: Array lookup O(n)
+const user = users.find(u => u.id === targetId);
+
+// GOOD: Map lookup O(1)
+const userMap = new Map(users.map(u => [u.id, u]));
+const user = userMap.get(targetId);
+```
+
+```typescript
+// Lazy evaluation for expensive operations
+// BAD: Always compute
+function getReport(data: Data): Report {
+  const analysis = expensiveAnalysis(data);  // Always runs
+  return { data, analysis };
+}
+
+// GOOD: Compute on demand
+function getReport(data: Data): Report {
+  return {
+    data,
+    get analysis() { return expensiveAnalysis(data); }
+  };
+}
+```
+
+### When to Optimize
+
+1. **Profile first** - Identify actual bottlenecks
+2. **Hot paths only** - 90% of time spent in 10% of code
+3. **Benchmark changes** - Prove optimization works
+4. **Document trade-offs** - Complexity vs performance
+
+---
+
 ## Anti-Patterns to Block
 
 ### Critical - Stop Immediately
@@ -349,6 +618,10 @@ Before approving code:
 - [ ] Exhaustive pattern matching
 - [ ] No hardcoded magic values
 - [ ] No silent error swallowing
+- [ ] Resources cleaned up (try/finally, using, defer)
+- [ ] Architecture decisions documented in code
+- [ ] Naming conventions followed (PascalCase, camelCase, SCREAMING_SNAKE_CASE)
+- [ ] Performance-critical code measured before optimizing
 
 ---
 
