@@ -582,6 +582,17 @@ function getReport(data: Data): Report {
 
 ---
 
+## API Consistency Rules
+
+Enforce these strictly across the codebase:
+
+1. **Result type consistency** - If one method returns Result types, ALL related methods must
+2. **Dependency injection consistency** - If DI is used, apply it consistently throughout
+3. **Async pattern consistency** - Stick to ONE async pattern (don't mix callback/promise/async styles)
+4. **No global state** - NO global mutable state unless explicitly justified
+
+---
+
 ## Anti-Patterns to Block
 
 ### Critical - Stop Immediately

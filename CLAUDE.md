@@ -147,7 +147,7 @@ When creating or modifying persisting agents:
 
 ```bash
 # 1. Modify command or agent in devflow repo
-vim devflow/src/claude/commands/devflow/review.md
+vim commands/review.md
 
 # 2. Rebuild if CLI changes
 npm run build
@@ -197,7 +197,7 @@ Status and review commands create historical records:
 
 ### Command Structure
 
-1. Create command in `src/claude/commands/devflow/new-command.md`
+1. Create command in `commands/new-command.md`
 2. Follow this template:
 
 ```markdown
@@ -224,7 +224,7 @@ Brief description of what the command does.
 
 ### Sub-Agent Structure
 
-1. Create agent in `src/claude/agents/devflow/new-agent.md`
+1. Create agent in `agents/new-agent.md`
 2. Follow existing agent patterns:
    - Clear specialty definition
    - Restricted tool access
