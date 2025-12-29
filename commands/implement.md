@@ -2,27 +2,27 @@
 description: Execute a single task through the complete lifecycle - orchestrates exploration, planning, implementation, and review with parallel agents
 ---
 
-# Swarm Command - Single Task Lifecycle Orchestrator
+# Implement Command - Single Task Lifecycle Orchestrator
 
 Orchestrate a single task from exploration through implementation to review by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
 
 ## Usage
 
 ```
-/swarm <task description>
-/swarm #42  (GitHub issue number)
-/swarm      (use conversation context)
+/implement <task description>
+/implement #42  (GitHub issue number)
+/implement      (use conversation context)
 ```
 
 ---
 
 ## Input
 
-`$ARGUMENTS` contains whatever follows `/swarm`:
+`$ARGUMENTS` contains whatever follows `/implement`:
 
-- `/swarm implement JWT auth` → `$ARGUMENTS` = "implement JWT auth"
-- `/swarm #42` → `$ARGUMENTS` = "#42" (GitHub issue)
-- `/swarm` → `$ARGUMENTS` = "" (use conversation context)
+- `/implement implement JWT auth` → `$ARGUMENTS` = "implement JWT auth"
+- `/implement #42` → `$ARGUMENTS` = "#42" (GitHub issue)
+- `/implement` → `$ARGUMENTS` = "" (use conversation context)
 
 ---
 
@@ -35,11 +35,11 @@ TASK_INPUT="$ARGUMENTS"
 # Generate identifiers
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
 TASK_ID="task-${TIMESTAMP}"
-TASK_BRANCH="swarm/${TASK_ID}"
+TASK_BRANCH="implement/${TASK_ID}"
 TARGET_BRANCH=$(git branch --show-current)
 WORKTREE_DIR=".worktrees/${TASK_ID}"
 
-echo "=== SWARM: ${TASK_ID} ==="
+echo "=== IMPLEMENT: ${TASK_ID} ==="
 echo "Input: ${TASK_INPUT:-'(from conversation context)'}"
 echo "Branch: ${TASK_BRANCH}"
 echo "Target: ${TARGET_BRANCH}"
@@ -398,7 +398,7 @@ git worktree prune
 ## Architecture
 
 ```
-/swarm (orchestrator - spawns agents only)
+/implement (orchestrator - spawns agents only)
 │
 ├─ Phase 1: Setup
 │  └─ GetIssue agent (if issue number)

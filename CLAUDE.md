@@ -104,7 +104,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 **Orchestration commands** (run in main context, spawn native agents):
 - `/specify` - Spawns 4 Explore + 3 Plan agents (requirements focus), creates GitHub issue
-- `/swarm` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
+- `/implement` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
 
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)

@@ -1,12 +1,12 @@
 ---
-description: Specify a single feature through requirements exploration and interactive clarification - creates a well-defined GitHub issue ready for Swarm
+description: Specify a single feature through requirements exploration and interactive clarification - creates a well-defined GitHub issue ready for /implement
 ---
 
 # Specify - Requirements Engineering Command
 
 Transform a rough feature idea into a well-defined, implementation-ready GitHub issue through multi-perspective requirements exploration and user clarification.
 
-**Does NOT explore technical implementation** - that's `/swarm`'s job. This command focuses purely on requirements: what to build, why, for whom, and what success looks like.
+**Does NOT explore technical implementation** - that's `/implement`'s job. This command focuses purely on requirements: what to build, why, for whom, and what success looks like.
 
 ## Usage
 
@@ -45,7 +45,7 @@ Transform a vague feature idea into precise requirements:
 UNDERSTAND → EXPLORE REQUIREMENTS (parallel) → PLAN SCOPE (parallel) → CLARIFY → CREATE ISSUE
 ```
 
-**Output**: A GitHub issue with complete requirements ready for `/swarm`.
+**Output**: A GitHub issue with complete requirements ready for `/implement`.
 
 ---
 
@@ -424,7 +424,7 @@ ${FEATURE_TITLE}
 
 ### Ready for Implementation
 ```
-/swarm #${ISSUE_NUMBER}
+/implement #${ISSUE_NUMBER}
 ```
 ```
 
@@ -474,4 +474,4 @@ ${FEATURE_TITLE}
 3. **User drives decisions** - Clarify with user, don't assume
 4. **Scope ruthlessly** - Small, focused issues ship faster
 5. **Testable criteria** - Every requirement must be verifiable
-6. **Enable /swarm** - Output must be actionable for implementation
+6. **Enable /implement** - Output must be actionable for implementation

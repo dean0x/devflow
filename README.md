@@ -132,7 +132,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
 | `/specify` | Specify a feature interactively with technical design | Before implementing a feature |
 | `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
-| `/swarm` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
+| `/implement` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
 | `/run` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
 | `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
 | `/review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
@@ -184,7 +184,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 
 **How Commands Orchestrate Agents:**
 - `/specify` → 4 Explore + 3 Plan agents (requirements focus) → GitHub issue
-- `/swarm` → 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
+- `/implement` → 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
 
 **Invoking Sub-Agents:**
 ```bash
@@ -268,7 +268,7 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/catch-up`** → `.docs/CATCH_UP.md` (overwritten each run)
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
 - **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
-- **`/swarm`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
+- **`/implement`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
 - **`/review`** → `.docs/reviews/{branch}/` (9 review reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
@@ -297,7 +297,7 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 ### During Development
 1. **Skills auto-activate** - `devflow-research` triggers for unfamiliar features, foundation skills validate patterns
 2. **Specify features** - `/specify` for detailed specs, or `/breakdown` for quick task capture
-3. **Execute tasks** - `/swarm` for full lifecycle, or `/run` for incremental work
+3. **Execute tasks** - `/implement` for full lifecycle, or `/run` for incremental work
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
 5. `/review` - Review changes before committing
 6. `/commit` - Create intelligent atomic commits
@@ -392,7 +392,7 @@ git commit -m "Session status: completed user auth feature"
 # Manual command invocation for structured workflows
 /specify user authentication     # Create detailed feature spec
 /breakdown                       # Quick task breakdown from discussion
-/swarm                           # Run explore → plan → implement → review cycle
+/implement                       # Run explore → plan → implement → review cycle
 /review                          # Review changes before committing
 /commit                          # Create atomic commits
 /release                         # Automated release workflow
