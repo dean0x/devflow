@@ -11,7 +11,7 @@ allowed-tools: Bash, Read, Glob
 ## When to Activate
 
 Auto-activates when:
-- Swarm operations need isolated working directories
+- Parallel implementation needs isolated working directories
 - Multiple tasks must be worked on in parallel
 - Branch isolation required for clean PRs
 - Agent needs to work in a specific worktree context

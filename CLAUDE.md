@@ -326,7 +326,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested |
 | `devflow-debug` | Systematic debugging with hypothesis testing | Errors occur, tests fail |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
-| `devflow-worktree` | Git worktree management for parallel development | Swarm operations, isolated working directories |
+| `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories |
 
 **Tier 3: Domain-Specific Skills** (language and framework patterns)
 

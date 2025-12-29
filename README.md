@@ -58,7 +58,7 @@ DevFlow is now installed and ready to use in Claude Code.
 | `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
 | `devflow-debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
-| `devflow-worktree` | Git worktree management for parallel development | Swarm operations, isolated working directories needed |
+| `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories needed |
 
 **How Skills Work:**
 - **Proactive enforcement** - Catch issues during implementation, not after
@@ -93,7 +93,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-research` | Pre-implementation planning | Unfamiliar features requested |
 | `devflow-debug` | Systematic debugging | Errors occur, tests fail |
 | `devflow-input-validation` | Boundary validation | API endpoints created |
-| `devflow-worktree` | Git worktree management | Swarm operations |
+| `devflow-worktree` | Git worktree management | Parallel implementation |
 
 **Tier 3: Domain-Specific Skills** (language and framework patterns)
 

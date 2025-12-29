@@ -311,7 +311,7 @@ Generate summary with merge recommendation"
 Display agent outputs:
 
 ```markdown
-## 🐝 Swarm Complete: ${TASK_ID}
+## ✅ Implementation Complete: ${TASK_ID}
 
 ### Task
 ${TASK_DESCRIPTION}
@@ -370,7 +370,7 @@ If APPROVED: Ready to merge
 If any agent fails:
 
 ```markdown
-## ⚠️ Swarm Error
+## ⚠️ Implementation Error
 
 **Phase**: {phase}
 **Agent**: {agent type}
