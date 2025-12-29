@@ -76,7 +76,7 @@ const DEVFLOW_COMMANDS: CommandDefinition[] = [
   { name: '/specify', description: 'Specify a feature interactively' },
   { name: '/breakdown', description: 'Break down tasks quickly' },
   { name: '/swarm', description: 'Execute single task lifecycle' },
-  { name: '/implement', description: 'Interactive implementation' },
+  { name: '/run', description: 'Interactive implementation' },
   { name: '/review', description: 'Comprehensive code review' },
   { name: '/debug', description: 'Systematic debugging' },
   { name: '/resolve-comments', description: 'Address PR feedback' },

@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Trust agent judgment after safety checks pass
   - Only abort for genuine issues (secrets, credentials)
   - Faster workflow without back-and-forth
-- **`/implement` command** - Streamlined from 507 to ~100 lines
+- **`/run` command** - Streamlined from 507 to ~100 lines (renamed from `/implement`)
   - Removed over-engineered interactive triage
   - Focus on efficient task execution
   - Only stop for genuine design decisions
@@ -244,7 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic activation based on conversation context
 
 #### Smart Interactive Commands
-- **/implement command** - Orchestrator for guided feature implementation
+- **/run command** - Orchestrator for guided feature implementation (originally `/implement`)
   - Interactive workflow for planning, research, and execution
   - Integrates with project-state agent for context gathering
   - Guides through research, design, implementation, and testing phases

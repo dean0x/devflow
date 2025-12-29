@@ -97,7 +97,7 @@ Each task should be:
 
 **Total: ${count} tasks saved to todo list**
 
-💡 Run `/implement` to start working through these tasks
+💡 Run `/run` to start working through these tasks
 💡 Run `/specify` if you want detailed design for a specific feature
 ```
 

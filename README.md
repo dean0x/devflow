@@ -133,7 +133,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `/specify` | Specify a feature interactively with technical design | Before implementing a feature |
 | `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
 | `/swarm` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
-| `/implement` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
+| `/run` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
 | `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
 | `/review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
@@ -297,7 +297,7 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 ### During Development
 1. **Skills auto-activate** - `devflow-research` triggers for unfamiliar features, foundation skills validate patterns
 2. **Specify features** - `/specify` for detailed specs, or `/breakdown` for quick task capture
-3. **Execute tasks** - `/swarm` for full lifecycle, or `/implement` for incremental work
+3. **Execute tasks** - `/swarm` for full lifecycle, or `/run` for incremental work
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
 5. `/review` - Review changes before committing
 6. `/commit` - Create intelligent atomic commits
