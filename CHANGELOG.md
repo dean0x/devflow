@@ -17,11 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Gate 1: Validate scope and priorities after exploration
   - Gate 2: Confirm acceptance criteria before issue creation
   - No gate may be skipped - explicit user approval required
-- **`--managed-settings` flag** for `devflow init`
-  - Installs to system-level managed-settings.json (requires sudo)
-  - macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
-  - Linux: `/etc/claude-code/managed-settings.json`
-  - System-level settings have highest precedence in Claude Code
+- **`--override-settings` flag** for `devflow init`
+  - Override existing settings.json with DevFlow configuration
+  - Prompts for confirmation if settings.json exists
+  - No sudo required - writes to `~/.claude/settings.json`
 - **Security deny list** (126 blocked operations)
   - System destruction (rm -rf, dd, mkfs, shred)
   - Code execution (curl|bash, eval, exec)

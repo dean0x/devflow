@@ -242,7 +242,7 @@ DevFlow includes a comprehensive security deny list that blocks dangerous operat
 | Package globals | `npm -g`, `pip --system`, `apt install` |
 | Resource abuse | Fork bombs, crypto miners |
 
-Install with `sudo devflow init --managed-settings` to enable system-wide protection.
+Included automatically in DevFlow's settings.json template.
 
 **.claudeignore** (automatic):
 
@@ -376,25 +376,21 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 
 | Command | Purpose | Options |
 |---------|---------|---------|
-| `npx devflow-kit init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope<br>`--managed-settings` - Install system-level managed settings (requires sudo)<br>`--verbose` - Show detailed installation output<br>`--skip-docs` - Skip creating `.docs/` structure |
+| `npx devflow-kit init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope<br>`--override-settings` - Override existing settings.json<br>`--verbose` - Show detailed installation output<br>`--skip-docs` - Skip creating `.docs/` structure |
 | `npx devflow-kit uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only<br>`--keep-docs` - Keep `.docs/` directory |
 
-### Managed Settings Installation
+### Settings Override
 
-For system-wide security enforcement:
+If you have an existing `settings.json`, use `--override-settings` to replace it:
 
 ```bash
-sudo devflow init --managed-settings
+devflow init --override-settings
 ```
 
-This installs to Claude Code's system directories:
-- **macOS**: `/Library/Application Support/ClaudeCode/managed-settings.json`
-- **Linux**: `/etc/claude-code/managed-settings.json`
-
-System-level settings have **highest precedence** and include:
+DevFlow settings include:
 - Security deny list (126 blocked operations)
 - `ENABLE_TOOL_SEARCH` for deferred MCP tool loading (~85% token savings)
-- Smart statusline configuration
+- Smart statusline with context percentage
 
 **What `npx devflow-kit init` does:**
 

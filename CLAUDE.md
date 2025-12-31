@@ -638,19 +638,17 @@ devflow/
 
 **Note:** Skills are installed flat (directly under `skills/`) for Claude Code auto-discovery. Commands and agents use the `devflow/` subdirectory for namespacing.
 
-### Managed Settings (System-Level)
+### Settings Override
 
-The `--managed-settings` flag installs to Claude Code's system directories for highest precedence:
+The `--override-settings` flag replaces existing `~/.claude/settings.json`:
 
 ```bash
-sudo devflow init --managed-settings
+devflow init --override-settings
 ```
 
-**Paths:**
-- **macOS**: `/Library/Application Support/ClaudeCode/managed-settings.json`
-- **Linux**: `/etc/claude-code/managed-settings.json`
+If settings.json exists, prompts for confirmation before overwriting.
 
-**What's included in managed settings:**
+**What's included in DevFlow settings (`src/templates/settings.json`):**
 - `statusLine` - Smart statusline with context percentage
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `permissions.deny` - Security deny list (126 blocked operations)
@@ -667,8 +665,6 @@ sudo devflow init --managed-settings
 | Sensitive file reads | `.env`, SSH keys, AWS credentials |
 | Package globals | `npm -g`, `pip --system` |
 | Resource abuse | Fork bombs, crypto miners |
-
-The full deny list is in `src/templates/settings.json`.
 
 ### Statusline Script
 
