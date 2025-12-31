@@ -2,5 +2,8 @@
   "statusLine": {
     "type": "command",
     "command": "${DEVFLOW_DIR}/scripts/statusline.sh"
+  },
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
   }
 }
