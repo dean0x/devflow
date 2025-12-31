@@ -8,6 +8,26 @@ Transform a rough feature idea into a well-defined, implementation-ready GitHub 
 
 **Does NOT explore technical implementation** - that's `/implement`'s job. This command focuses purely on requirements: what to build, why, for whom, and what success looks like.
 
+## Iron Law
+
+> **NO EXPLORATION WITHOUT USER CONFIRMATION**
+>
+> Before spawning ANY agents, validate your understanding with the user. Exploring the
+> wrong problem wastes time and confuses scope. Get explicit confirmation that you
+> understand what they want BEFORE spending resources on exploration.
+
+---
+
+## Clarification Gates
+
+**MANDATORY**: This command has three clarification gates that MUST complete before proceeding:
+
+1. **Gate 0 (Before Exploration)**: Confirm understanding of the feature idea
+2. **Gate 1 (After Exploration)**: Validate scope and priorities
+3. **Gate 2 (Before Issue Creation)**: Confirm acceptance criteria
+
+No gate may be skipped. If user says "whatever you think", state your recommendation and get explicit approval.
+
 ## Usage
 
 ```
@@ -46,6 +66,57 @@ UNDERSTAND → EXPLORE REQUIREMENTS (parallel) → PLAN SCOPE (parallel) → CLA
 ```
 
 **Output**: A GitHub issue with complete requirements ready for `/implement`.
+
+---
+
+## Phase 0: Gate 0 - Confirm Understanding
+
+**BEFORE ANY EXPLORATION**, validate understanding with the user.
+
+### Present Interpretation
+
+```markdown
+## 🎯 Feature Request: ${FEATURE_IDEA}
+
+**My Interpretation**:
+- Core problem: [what problem this solves]
+- Target users: [who benefits]
+- Expected outcome: [what success looks like]
+
+**Key Assumptions**:
+- [assumption 1]
+- [assumption 2]
+```
+
+### Ask for Confirmation
+
+```
+AskUserQuestion:
+  questions:
+    - question: "Is this understanding correct?"
+      header: "Confirm"
+      options:
+        - label: "Yes, proceed with exploration"
+          description: "My interpretation captures the core intent"
+        - label: "Partially - needs refinement"
+          description: "Core idea is right but some details are off"
+        - label: "No - let me clarify"
+          description: "I'll provide more context"
+      multiSelect: false
+
+    - question: "What's the primary goal?"
+      header: "Focus"
+      options:
+        - label: "[Inferred goal 1]"
+          description: "Based on the feature description"
+        - label: "[Inferred goal 2]"
+          description: "Alternative interpretation"
+        - label: "[Something else]"
+          description: "Different primary goal"
+      multiSelect: false
+```
+
+**WAIT** for user confirmation before proceeding. If user selects "Partially" or "No", iterate until confirmed.
 
 ---
 
@@ -233,7 +304,9 @@ Output format: Requirements Draft ready for user clarification"
 
 ---
 
-## Phase 4: Clarify
+## Phase 4: Gate 1 - Validate Scope and Priorities
+
+**MANDATORY GATE** - Must complete before proceeding to issue creation.
 
 Use AskUserQuestion to validate and refine requirements. Ask in batches of 2-4 related questions.
 
@@ -297,7 +370,13 @@ AskUserQuestion:
       multiSelect: true
 ```
 
-### 4.3 Success Criteria
+---
+
+## Phase 5: Gate 2 - Confirm Acceptance Criteria
+
+**MANDATORY GATE** - Final confirmation before issue creation.
+
+### 5.1 Success Criteria
 
 ```
 AskUserQuestion:
@@ -323,9 +402,50 @@ AskUserQuestion:
       multiSelect: false
 ```
 
+### 5.2 Final Confirmation
+
+Present the complete specification summary:
+
+```markdown
+## 📋 Specification Summary
+
+**Feature**: ${FEATURE_TITLE}
+**Problem**: ${PROBLEM_STATEMENT}
+**Priority**: ${PRIORITY}
+
+**Scope (v1)**:
+- ${REQUIREMENT_1}
+- ${REQUIREMENT_2}
+- ${REQUIREMENT_3}
+
+**Acceptance Criteria**:
+- ${CRITERION_1}
+- ${CRITERION_2}
+
+**Explicitly Excluded**:
+- ${EXCLUSION_1}
+```
+
+```
+AskUserQuestion:
+  questions:
+    - question: "Ready to create this GitHub issue?"
+      header: "Confirm"
+      options:
+        - label: "Yes, create the issue"
+          description: "Specification is complete and accurate"
+        - label: "Needs changes"
+          description: "I'll specify what to adjust"
+        - label: "Cancel"
+          description: "Don't create an issue right now"
+      multiSelect: false
+```
+
+**WAIT** for explicit approval. If "Needs changes", iterate. If "Cancel", stop gracefully.
+
 ---
 
-## Phase 5: Create Issue
+## Phase 6: Create Issue
 
 Compile requirements and create GitHub issue.
 
@@ -435,6 +555,9 @@ ${FEATURE_TITLE}
 ```
 /specify (orchestrator - spawns agents only)
 │
+├─ Phase 0: GATE 0 - Confirm Understanding ⛔ MANDATORY
+│  └─ AskUserQuestion: Validate interpretation before exploration
+│
 ├─ Phase 1: Understand
 │  └─ Parse input, identify unknowns
 │
@@ -444,24 +567,21 @@ ${FEATURE_TITLE}
 │  ├─ Explore: Constraints
 │  └─ Explore: Failure modes
 │
-├─ Phase 3: Synthesize Exploration
-│  └─ Synthesize agent (mode: exploration)
-│
-├─ Phase 4: Plan Scope (PARALLEL)
+├─ Phase 3: Plan Scope (PARALLEL)
 │  ├─ Plan: User stories
 │  ├─ Plan: Scope boundaries
 │  └─ Plan: Acceptance criteria
 │
-├─ Phase 5: Synthesize Planning
-│  └─ Synthesize agent (mode: planning)
+├─ Phase 4: GATE 1 - Validate Scope ⛔ MANDATORY
+│  └─ AskUserQuestion: Confirm scope and priorities
 │
-├─ Phase 6: Clarify
-│  └─ AskUserQuestion (batched)
+├─ Phase 5: GATE 2 - Confirm Criteria ⛔ MANDATORY
+│  └─ AskUserQuestion: Final spec approval
 │
-├─ Phase 7: Create Issue
+├─ Phase 6: Create Issue
 │  └─ gh issue create
 │
-└─ Phase 8: Report
+└─ Phase 7: Report
    └─ Display issue details
 ```
 
@@ -469,9 +589,11 @@ ${FEATURE_TITLE}
 
 ## Principles
 
-1. **Requirements, not implementation** - Focus on what and why, not how
-2. **Multiple perspectives** - Explore requirements from user, scope, constraint, and failure angles
-3. **User drives decisions** - Clarify with user, don't assume
-4. **Scope ruthlessly** - Small, focused issues ship faster
-5. **Testable criteria** - Every requirement must be verifiable
-6. **Enable /implement** - Output must be actionable for implementation
+1. **Confirm before exploring** - Validate understanding with user BEFORE spawning agents
+2. **Requirements, not implementation** - Focus on what and why, not how
+3. **Multiple perspectives** - Explore requirements from user, scope, constraint, and failure angles
+4. **User drives decisions** - Three mandatory gates ensure user approval at key points
+5. **Scope ruthlessly** - Small, focused issues ship faster
+6. **Testable criteria** - Every requirement must be verifiable
+7. **Enable /implement** - Output must be actionable for implementation
+8. **No assumptions** - If user says "whatever you think", state recommendation and get explicit approval

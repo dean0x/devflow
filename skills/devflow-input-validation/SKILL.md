@@ -6,6 +6,14 @@ allowed-tools: Read, Grep, Glob, AskUserQuestion
 
 # Input Validation Skill
 
+## Iron Law
+
+> **ALL EXTERNAL DATA IS HOSTILE**
+>
+> Validate at boundaries, trust inside. Every piece of data from outside the system
+> (user input, API responses, environment variables) is potentially malicious until
+> validated with a schema. No exceptions. No "I trust this source." Validate everything.
+
 ## Purpose
 
 Enforce security-critical validation at all system boundaries:

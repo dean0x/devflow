@@ -6,6 +6,14 @@ allowed-tools: Read, Grep, Glob, AskUserQuestion
 
 # Test Design Skill
 
+## Iron Law
+
+> **COMPLEX TESTS INDICATE BAD DESIGN**
+>
+> If tests require >10 lines of setup, the production code is wrong. Fix the architecture,
+> not the tests. Complex mocking means tight coupling. Test helpers mean API problems.
+> Simple tests are a symptom of good design. STOP and refactor before writing complex tests.
+
 ## Purpose
 
 Enforce test quality standards that indicate good software design:

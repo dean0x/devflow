@@ -8,6 +8,14 @@ allowed-tools: Bash, Read, Glob
 
 **Purpose**: Manage git worktrees for parallel task execution. Enables multiple agents to work on different tasks simultaneously without conflicts.
 
+## Iron Law
+
+> **ONE TASK, ONE WORKTREE**
+>
+> Each task gets its own isolated directory. Never share worktrees between tasks.
+> Never work in the main repo when a worktree exists. Always use explicit paths
+> (`git -C`). Cross-contamination between tasks causes merge conflicts and confusion.
+
 ## When to Activate
 
 Auto-activates when:

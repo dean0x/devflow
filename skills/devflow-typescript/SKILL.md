@@ -8,6 +8,14 @@ allowed-tools: Read, Grep, Glob
 
 Reference for TypeScript-specific patterns, type safety, and idioms.
 
+## Iron Law
+
+> **UNKNOWN OVER ANY**
+>
+> Never use `any`. Use `unknown` with type guards instead. `any` disables TypeScript's
+> entire value proposition. If you need flexibility, use generics. If you need to handle
+> arbitrary data, use `unknown` and validate. `any` is giving up.
+
 ## When This Skill Activates
 
 - Working with TypeScript codebases

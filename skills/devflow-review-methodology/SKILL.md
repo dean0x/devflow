@@ -8,6 +8,13 @@ allowed-tools: Read, Grep, Glob, Bash
 
 The canonical review process for all DevFlow review agents. Ensures consistent, fair, and actionable code reviews.
 
+## Iron Law
+
+> **NEVER BLOCK FOR PRE-EXISTING ISSUES**
+>
+> Only issues in YOUR CHANGES can block a PR. Pre-existing issues are informational only.
+> If you didn't add it, you don't own it. Fair reviews focus on the diff, not the codebase.
+
 ## Core Philosophy
 
 1. **Focus on changed lines first** - Developer introduced these

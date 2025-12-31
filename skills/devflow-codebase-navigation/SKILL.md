@@ -8,6 +8,14 @@ allowed-tools: Read, Grep, Glob, Bash
 
 Systematic approach to exploring and understanding unfamiliar codebases efficiently.
 
+## Iron Law
+
+> **FIND PATTERNS BEFORE IMPLEMENTING**
+>
+> Understand existing code before writing new code. Spend 5-10 minutes finding similar
+> implementations. The codebase has conventions - discover them, don't invent new ones.
+> Inconsistent code is harder to maintain than imperfect-but-consistent code.
+
 ## When This Skill Activates
 
 - Starting work on unfamiliar codebase

@@ -8,6 +8,14 @@ allowed-tools: Read, Grep, Glob
 
 Reference for React-specific patterns, component design, hooks, and performance optimization.
 
+## Iron Law
+
+> **COMPOSITION OVER PROPS**
+>
+> Use children and compound components, not prop drilling. If a component has >5 props,
+> it's doing too much. Split it. If you're passing data through 3+ levels, use context
+> or composition. Props are for configuration, not data plumbing.
+
 ## When This Skill Activates
 
 - Working with React codebases

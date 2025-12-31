@@ -8,6 +8,14 @@ allowed-tools: Read, Grep, Glob
 
 Reference for common implementation patterns. Use these patterns to write consistent, maintainable code.
 
+## Iron Law
+
+> **FOLLOW EXISTING PATTERNS**
+>
+> Match the codebase style, don't invent new conventions. If the project uses Result types,
+> use Result types. If it uses exceptions, use exceptions. Consistency trumps personal
+> preference. The best pattern is the one already in use.
+
 ## When This Skill Activates
 
 - Implementing CRUD operations

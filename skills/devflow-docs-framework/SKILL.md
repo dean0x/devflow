@@ -8,6 +8,14 @@ allowed-tools: Read, Bash, Glob
 
 The canonical source for documentation conventions in DevFlow. All agents that persist artifacts must follow these standards.
 
+## Iron Law
+
+> **ALL ARTIFACTS FOLLOW NAMING CONVENTIONS**
+>
+> Timestamps are `YYYY-MM-DD_HHMM`. Branch slugs replace `/` with `-`. Topic slugs are
+> lowercase alphanumeric with dashes. No exceptions. Inconsistent naming breaks tooling,
+> searching, and automation. Follow the pattern or fix the pattern for everyone.
+
 ## Directory Structure
 
 All generated documentation lives under `.docs/` in the project root:

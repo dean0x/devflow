@@ -6,6 +6,14 @@ allowed-tools: Read, Grep, Glob
 
 # Code Smell Skill
 
+## Iron Law
+
+> **NO FAKE SOLUTIONS**
+>
+> Never hardcode data to simulate working functionality. If it doesn't work, it MUST
+> either: (1) fail honestly with an error, or (2) be clearly labeled as MOCK/TEMPORARY.
+> Pretending to work is deception. Deception compounds into production failures.
+
 ## Purpose
 
 Detect and prevent anti-patterns that indicate fake solutions or workarounds:

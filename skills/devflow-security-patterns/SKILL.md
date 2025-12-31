@@ -8,6 +8,14 @@ allowed-tools: Read, Grep, Glob
 
 Domain expertise for security vulnerability detection. Use alongside `devflow-review-methodology` for complete security reviews.
 
+## Iron Law
+
+> **ASSUME ALL INPUT IS MALICIOUS**
+>
+> Every user input, URL parameter, header, and cookie is an attack vector. Use parameterized
+> queries always. Escape output always. Validate schemas always. "This field is internal"
+> is not a defense. Defense in depth, not wishful thinking.
+
 ## Vulnerability Categories
 
 ### 1. Input Validation & Injection

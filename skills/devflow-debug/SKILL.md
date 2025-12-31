@@ -8,6 +8,14 @@ allowed-tools: Task
 
 **Purpose**: Detect when systematic debugging is needed and auto-launch the debug agent.
 
+## Iron Law
+
+> **NO FIXES WITHOUT ROOT CAUSE INVESTIGATION**
+>
+> Gather evidence BEFORE hypothesizing. "Just try this" is forbidden. Every fix must
+> be preceded by: (1) reproduction, (2) evidence gathering, (3) hypothesis formation.
+> Guessing at fixes wastes time and introduces new bugs.
+
 ## When to Activate
 
 Auto-activates when:

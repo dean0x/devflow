@@ -8,6 +8,14 @@ allowed-tools: Read, Grep, Glob, AskUserQuestion
 
 The canonical source of architectural patterns and principles. All implementation agents should reference this skill for consistent, high-quality code.
 
+## Iron Law
+
+> **NEVER THROW IN BUSINESS LOGIC**
+>
+> All operations that can fail MUST return Result types. Exceptions are allowed
+> ONLY at system boundaries (API handlers, database adapters). Any `throw` statement
+> in business logic is a violation. No exceptions.
+
 ## Philosophy
 
 1. **Type Safety First** - Use strict type checking, avoid dynamic types

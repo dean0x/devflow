@@ -8,6 +8,14 @@ allowed-tools: Task
 
 **Purpose**: Detect when pre-implementation research is needed and auto-launch the Explore agent for thorough analysis.
 
+## Iron Law
+
+> **NO IMPLEMENTATION WITHOUT EXPLORATION**
+>
+> For unfamiliar features, research BEFORE coding. Understand the approaches, trade-offs,
+> and existing patterns. "I'll figure it out as I go" leads to rework. Explore first,
+> implement second. The 30 minutes spent exploring saves hours of refactoring.
+
 ## When to Activate
 
 Auto-activates when:

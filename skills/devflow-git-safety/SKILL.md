@@ -8,6 +8,14 @@ allowed-tools: Bash, Read
 
 Safe git operations and best practices. Used by Commit, PullRequest, and Coder agents.
 
+## Iron Law
+
+> **NEVER RUN GIT COMMANDS IN PARALLEL**
+>
+> All git operations MUST be sequential. Parallel git commands cause `.git/index.lock`
+> conflicts. Use `&&` chains, never `&` backgrounding. Wait for each command to complete
+> before starting the next.
+
 ## Critical Safety Rules
 
 ### Lock File Handling
