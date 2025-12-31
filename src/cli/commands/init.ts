@@ -53,6 +53,24 @@ function installPluginViaCli(scope: 'user' | 'local'): boolean {
 }
 
 /**
+ * Get platform-specific path for managed-settings.json
+ * Claude Code uses system directories for enterprise/managed settings
+ */
+function getManagedSettingsPath(): { dir: string; file: string } {
+  const platform = process.platform;
+
+  if (platform === 'darwin') {
+    // macOS
+    const dir = '/Library/Application Support/ClaudeCode';
+    return { dir, file: path.join(dir, 'managed-settings.json') };
+  } else {
+    // Linux/WSL (and fallback for others)
+    const dir = '/etc/claude-code';
+    return { dir, file: path.join(dir, 'managed-settings.json') };
+  }
+}
+
+/**
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
@@ -397,8 +415,7 @@ export const initCommand = new Command('init')
     // __dirname is dist/commands/, so go up 2 levels to package root
     const rootDir = path.resolve(__dirname, '../..');
 
-    // 1. Install settings.json with statusLine and env settings (plugins can't configure settings)
-    const settingsPath = path.join(claudeDir, 'settings.json');
+    // 1. Install settings (plugins can't configure settings)
     const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
     const managedSettings = options.managedSettings ?? false;
 
@@ -409,61 +426,99 @@ export const initCommand = new Command('init')
         devflowDir
       );
 
-      // Check if settings.json already exists
-      let settingsExists = false;
-      try {
-        await fs.access(settingsPath);
-        settingsExists = true;
-      } catch {
-        settingsExists = false;
-      }
+      if (managedSettings) {
+        // Use system-level managed-settings.json (highest precedence in Claude Code)
+        const { dir: managedDir, file: managedPath } = getManagedSettingsPath();
 
-      if (settingsExists && managedSettings) {
-        // Prompt user before overwriting
-        if (process.stdin.isTTY) {
+        // Check if managed-settings.json already exists
+        let managedExists = false;
+        try {
+          await fs.access(managedPath);
+          managedExists = true;
+        } catch {
+          managedExists = false;
+        }
+
+        if (managedExists && process.stdin.isTTY) {
+          // Prompt before overwriting existing managed settings
           const rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
           });
 
           const answer = await new Promise<string>((resolve) => {
-            rl.question('⚠️  settings.json already exists. Overwrite with DevFlow managed settings? (y/N): ', (input) => {
+            rl.question(`⚠️  ${managedPath} already exists. Overwrite? (y/N): `, (input) => {
               rl.close();
               resolve(input.trim().toLowerCase());
             });
           });
 
-          if (answer === 'y' || answer === 'yes') {
-            await fs.writeFile(settingsPath, settingsContent, 'utf-8');
-            if (verbose) {
-              console.log('✓ Settings.json overwritten with DevFlow configuration');
-            } else {
-              console.log('✓ Settings.json updated');
-            }
+          if (answer !== 'y' && answer !== 'yes') {
+            console.log('ℹ️  Keeping existing managed-settings.json');
           } else {
-            console.log('ℹ️  Keeping existing settings.json');
+            try {
+              await fs.mkdir(managedDir, { recursive: true });
+              await fs.writeFile(managedPath, settingsContent, 'utf-8');
+              console.log(`✓ Managed settings updated: ${managedPath}`);
+            } catch (writeError: unknown) {
+              if (isNodeSystemError(writeError) && writeError.code === 'EACCES') {
+                console.log(`❌ Permission denied writing to ${managedPath}`);
+                console.log('   Run with sudo: sudo devflow init --managed-settings\n');
+              } else {
+                throw writeError;
+              }
+            }
           }
         } else {
-          // Non-interactive: don't overwrite without explicit consent
-          console.log('⚠️  settings.json exists. Run interactively with --managed-settings to overwrite.');
+          // No existing file or non-interactive: try to create
+          try {
+            await fs.mkdir(managedDir, { recursive: true });
+            await fs.writeFile(managedPath, settingsContent, 'utf-8');
+            console.log(`✓ Managed settings installed: ${managedPath}`);
+            if (verbose) {
+              console.log('  (System-level settings have highest precedence in Claude Code)');
+            }
+          } catch (writeError: unknown) {
+            if (isNodeSystemError(writeError) && writeError.code === 'EACCES') {
+              console.log(`❌ Permission denied writing to ${managedPath}`);
+              console.log('   Run with sudo: sudo devflow init --managed-settings\n');
+            } else {
+              throw writeError;
+            }
+          }
         }
-      } else if (settingsExists) {
-        // No --managed-settings flag: show manual instructions
-        console.log('⚠️  Existing settings.json found - DevFlow settings not configured');
-        console.log('   To enable DevFlow features, add to your settings.json:');
-        console.log(`   "statusLine": { "type": "command", "command": "${devflowDir}/scripts/statusline.sh" }`);
-        console.log('   "env": { "ENABLE_TOOL_SEARCH": "true" }\n');
-        console.log('   Or re-run with --managed-settings to let DevFlow manage settings.json\n');
       } else {
-        // No existing file: create it
-        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
-        if (verbose) {
-          console.log('✓ Settings.json configured (statusLine + ENABLE_TOOL_SEARCH)');
+        // Standard settings.json in user's .claude directory
+        const settingsPath = path.join(claudeDir, 'settings.json');
+
+        // Check if settings.json already exists
+        let settingsExists = false;
+        try {
+          await fs.access(settingsPath);
+          settingsExists = true;
+        } catch {
+          settingsExists = false;
+        }
+
+        if (settingsExists) {
+          // Show manual instructions (don't modify user's settings.json without flag)
+          console.log('⚠️  Existing settings.json found - DevFlow settings not configured');
+          console.log('   Option 1: Add to your settings.json manually:');
+          console.log(`     "statusLine": { "type": "command", "command": "${devflowDir}/scripts/statusline.sh" }`);
+          console.log('     "env": { "ENABLE_TOOL_SEARCH": "true" }');
+          console.log('   Option 2: Use system-level managed settings (recommended):');
+          console.log('     sudo devflow init --managed-settings\n');
+        } else {
+          // No existing file: create it
+          await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+          if (verbose) {
+            console.log('✓ Settings.json configured (statusLine + ENABLE_TOOL_SEARCH)');
+          }
         }
       }
     } catch (error: unknown) {
       if (verbose) {
-        console.log('⚠️  Could not configure settings.json:', error);
+        console.log('⚠️  Could not configure settings:', error);
       }
     }
 
