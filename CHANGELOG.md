@@ -5,6 +5,48 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Iron Laws** - Every skill now has a single, non-negotiable core principle
+  - 15 Iron Laws across all skills (e.g., "NEVER THROW IN BUSINESS LOGIC", "NO FAKE SOLUTIONS")
+  - Automatically enforced when skills activate
+  - Consistent format: `## Iron Law` section in each SKILL.md
+- **Clarification Gates** for `/specify` command
+  - Gate 0: Confirm understanding before exploration
+  - Gate 1: Validate scope and priorities after exploration
+  - Gate 2: Confirm acceptance criteria before issue creation
+  - No gate may be skipped - explicit user approval required
+- **`--managed-settings` flag** for `devflow init`
+  - Installs to system-level managed-settings.json (requires sudo)
+  - macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
+  - Linux: `/etc/claude-code/managed-settings.json`
+  - System-level settings have highest precedence in Claude Code
+- **Security deny list** (126 blocked operations)
+  - System destruction (rm -rf, dd, mkfs, shred)
+  - Code execution (curl|bash, eval, exec)
+  - Privilege escalation (sudo, su, doas, pkexec)
+  - Permission changes (chmod 777, chown root)
+  - System control (kill -9, reboot, shutdown)
+  - Data exfiltration (netcat, socat, telnet)
+  - Sensitive file reads (.env, SSH keys, AWS credentials)
+  - Package globals (npm -g, pip --system)
+  - Resource abuse (fork bombs, crypto miners)
+- **`ENABLE_TOOL_SEARCH`** environment variable in settings
+  - Deferred MCP tool loading until needed
+  - ~85% token reduction for conversations with many MCP tools
+- **Context usage percentage** in statusline
+  - Replaces binary "exceeds 200k" warning
+  - Color-coded: Green (<50%), Yellow (50-80%), Red (>80%)
+  - Calculated from `context_window.current_usage` data
+
+### Changed
+- `/specify` now requires explicit user confirmation at each gate
+- Statusline shows actual percentage instead of just large context warning
+- Settings template includes permissions.deny and env configuration
+
+---
+
 ## [0.9.0] - 2025-12-04
 
 ### Added

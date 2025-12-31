@@ -348,6 +348,47 @@ skills: devflow-review-methodology, devflow-security-patterns
 ---
 ```
 
+### Iron Laws
+
+Every skill has a single, non-negotiable **Iron Law** - a core principle that must never be violated. Iron Laws are enforced automatically when skills activate.
+
+| Skill | Iron Law |
+|-------|----------|
+| `devflow-core-patterns` | NEVER THROW IN BUSINESS LOGIC |
+| `devflow-review-methodology` | NEVER BLOCK FOR PRE-EXISTING ISSUES |
+| `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-debug` | NO FIXES WITHOUT ROOT CAUSE INVESTIGATION |
+| `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
+| `devflow-code-smell` | NO FAKE SOLUTIONS |
+| `devflow-research` | NO IMPLEMENTATION WITHOUT EXPLORATION |
+| `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
+| `devflow-docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
+| `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
+| `devflow-codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
+| `devflow-implementation-patterns` | FOLLOW EXISTING PATTERNS |
+| `devflow-react` | COMPOSITION OVER PROPS |
+| `devflow-typescript` | UNKNOWN OVER ANY |
+| `devflow-worktree` | ONE TASK, ONE WORKTREE |
+
+**Iron Law Format** in SKILL.md files:
+```markdown
+## Iron Law
+
+> **[CAPITALIZED PRINCIPLE NAME]**
+>
+> [Rationale explaining the principle and why violations are forbidden]
+```
+
+### Clarification Gates
+
+The `/specify` command uses **mandatory clarification gates** - checkpoints that require explicit user confirmation before proceeding:
+
+1. **Gate 0 (Before Exploration)**: Confirm understanding of feature idea
+2. **Gate 1 (After Exploration)**: Validate scope and priorities
+3. **Gate 2 (Before Issue Creation)**: Confirm acceptance criteria
+
+No gate may be skipped. If user says "whatever you think", state recommendation and get explicit approval.
+
 **Benefits of Tiered Architecture:**
 - **No duplication** - Common methodology defined once in foundation skills
 - **Consistent behavior** - All review agents follow the same 6-step process
@@ -596,6 +637,50 @@ devflow/
 - Settings: `~/.claude/settings.json`
 
 **Note:** Skills are installed flat (directly under `skills/`) for Claude Code auto-discovery. Commands and agents use the `devflow/` subdirectory for namespacing.
+
+### Managed Settings (System-Level)
+
+The `--managed-settings` flag installs to Claude Code's system directories for highest precedence:
+
+```bash
+sudo devflow init --managed-settings
+```
+
+**Paths:**
+- **macOS**: `/Library/Application Support/ClaudeCode/managed-settings.json`
+- **Linux**: `/etc/claude-code/managed-settings.json`
+
+**What's included in managed settings:**
+- `statusLine` - Smart statusline with context percentage
+- `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
+- `permissions.deny` - Security deny list (126 blocked operations)
+
+**Security Deny List Categories:**
+| Category | Examples |
+|----------|----------|
+| System destruction | `rm -rf /`, `dd`, `mkfs`, `shred` |
+| Code execution | `curl \| bash`, `eval`, `exec` |
+| Privilege escalation | `sudo`, `su`, `doas`, `pkexec` |
+| Permission changes | `chmod 777`, `chown root` |
+| System control | `kill -9`, `reboot`, `shutdown` |
+| Data exfiltration | `netcat`, `socat`, `telnet` |
+| Sensitive file reads | `.env`, SSH keys, AWS credentials |
+| Package globals | `npm -g`, `pip --system` |
+| Resource abuse | Fork bombs, crypto miners |
+
+The full deny list is in `src/templates/settings.json`.
+
+### Statusline Script
+
+The statusline (`scripts/statusline.sh`) displays real-time context:
+- Directory name and model
+- Git branch with dirty indicator (`*`)
+- **Context usage percentage** (color-coded):
+  - Green: < 50%
+  - Yellow: 50-80%
+  - Red: > 80%
+
+Data source: `context_window.current_usage` from Claude Code's JSON stdin.
 
 ## Testing Guidelines
 

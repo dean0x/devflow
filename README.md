@@ -60,6 +60,24 @@ DevFlow is now installed and ready to use in Claude Code.
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
 | `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories needed |
 
+**Iron Laws:**
+
+Every skill has a single, non-negotiable **Iron Law** - a core principle that must never be violated:
+
+| Skill | Iron Law |
+|-------|----------|
+| `devflow-core-patterns` | NEVER THROW IN BUSINESS LOGIC |
+| `devflow-code-smell` | NO FAKE SOLUTIONS |
+| `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
+| `devflow-debug` | NO FIXES WITHOUT ROOT CAUSE INVESTIGATION |
+| `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
+| `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
+| `devflow-typescript` | UNKNOWN OVER ANY |
+| `devflow-react` | COMPOSITION OVER PROPS |
+
+Iron Laws are enforced automatically when skills activate.
+
 **How Skills Work:**
 - **Proactive enforcement** - Catch issues during implementation, not after
 - **No manual invocation** - Model decides when skills are relevant
@@ -130,7 +148,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
-| `/specify` | Specify a feature interactively with technical design | Before implementing a feature |
+| `/specify` | Specify a feature with 3 clarification gates (understanding → scope → acceptance) | Before implementing a feature |
 | `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
 | `/implement` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
 | `/run` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
@@ -198,15 +216,37 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 ### 📊 Smart Statusline
 
 Real-time project context display showing:
-- Current model and session duration
-- Git branch and uncommitted changes indicator
-- Session cost tracking
-- Project context
+- Current directory and model name
+- Git branch with uncommitted changes indicator (`*`)
+- **Context usage percentage** with color coding:
+  - 🟢 Green: < 50% context used
+  - 🟡 Yellow: 50-80% context used
+  - 🔴 Red: > 80% context used
 - Zero configuration - works immediately after installation
 
 ### 🔒 Security & Token Optimization
 
-DevFlow automatically creates a comprehensive `.claudeignore` file at your git repository root to:
+**Permission Deny List** (with `--managed-settings`):
+
+DevFlow includes a comprehensive security deny list that blocks dangerous operations:
+
+| Category | Examples |
+|----------|----------|
+| System destruction | `rm -rf /`, `dd`, `mkfs`, `shred` |
+| Code execution | `curl \| bash`, `eval`, `exec` |
+| Privilege escalation | `sudo`, `su`, `doas`, `pkexec` |
+| Permission changes | `chmod 777`, `chown root` |
+| System control | `kill -9`, `reboot`, `shutdown` |
+| Data exfiltration | `netcat`, `socat`, `telnet`, `sftp` |
+| Sensitive file reads | `.env`, SSH keys, AWS credentials |
+| Package globals | `npm -g`, `pip --system`, `apt install` |
+| Resource abuse | Fork bombs, crypto miners |
+
+Install with `sudo devflow init --managed-settings` to enable system-wide protection.
+
+**.claudeignore** (automatic):
+
+DevFlow also creates a comprehensive `.claudeignore` file at your git repository root to:
 
 **Protect Sensitive Data:**
 - Environment files (`.env`, `.env.*`, `.envrc`)
@@ -336,8 +376,25 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 
 | Command | Purpose | Options |
 |---------|---------|---------|
-| `npx devflow-kit init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope (user: user-wide, local: project-only)<br>`--verbose` - Show detailed installation output<br>`--skip-docs` - Skip creating `.docs/` structure |
-| `npx devflow-kit uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only (default: auto-detect all)<br>`--keep-docs` - Keep `.docs/` directory |
+| `npx devflow-kit init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope<br>`--managed-settings` - Install system-level managed settings (requires sudo)<br>`--verbose` - Show detailed installation output<br>`--skip-docs` - Skip creating `.docs/` structure |
+| `npx devflow-kit uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only<br>`--keep-docs` - Keep `.docs/` directory |
+
+### Managed Settings Installation
+
+For system-wide security enforcement:
+
+```bash
+sudo devflow init --managed-settings
+```
+
+This installs to Claude Code's system directories:
+- **macOS**: `/Library/Application Support/ClaudeCode/managed-settings.json`
+- **Linux**: `/etc/claude-code/managed-settings.json`
+
+System-level settings have **highest precedence** and include:
+- Security deny list (126 blocked operations)
+- `ENABLE_TOOL_SEARCH` for deferred MCP tool loading (~85% token savings)
+- Smart statusline configuration
 
 **What `npx devflow-kit init` does:**
 
