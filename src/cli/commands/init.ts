@@ -59,6 +59,7 @@ interface InitOptions {
   skipDocs?: boolean;
   scope?: string;
   verbose?: boolean;
+  managedSettings?: boolean;
 }
 
 /**
@@ -164,6 +165,7 @@ export const initCommand = new Command('init')
   .option('--skip-docs', 'Skip creating .docs/ structure')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
+  .option('--managed-settings', 'Let DevFlow manage settings.json (will prompt before overwriting)')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -395,9 +397,10 @@ export const initCommand = new Command('init')
     // __dirname is dist/commands/, so go up 2 levels to package root
     const rootDir = path.resolve(__dirname, '../..');
 
-    // 1. Install settings.json with statusLine (plugins can't configure settings)
+    // 1. Install settings.json with statusLine and env settings (plugins can't configure settings)
     const settingsPath = path.join(claudeDir, 'settings.json');
     const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
+    const managedSettings = options.managedSettings ?? false;
 
     try {
       const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
@@ -406,18 +409,61 @@ export const initCommand = new Command('init')
         devflowDir
       );
 
-      // Only create if doesn't exist (atomic exclusive create)
-      await fs.writeFile(settingsPath, settingsContent, { encoding: 'utf-8', flag: 'wx' });
-      if (verbose) {
-        console.log('✓ StatusLine configured');
+      // Check if settings.json already exists
+      let settingsExists = false;
+      try {
+        await fs.access(settingsPath);
+        settingsExists = true;
+      } catch {
+        settingsExists = false;
+      }
+
+      if (settingsExists && managedSettings) {
+        // Prompt user before overwriting
+        if (process.stdin.isTTY) {
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+          });
+
+          const answer = await new Promise<string>((resolve) => {
+            rl.question('⚠️  settings.json already exists. Overwrite with DevFlow managed settings? (y/N): ', (input) => {
+              rl.close();
+              resolve(input.trim().toLowerCase());
+            });
+          });
+
+          if (answer === 'y' || answer === 'yes') {
+            await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+            if (verbose) {
+              console.log('✓ Settings.json overwritten with DevFlow configuration');
+            } else {
+              console.log('✓ Settings.json updated');
+            }
+          } else {
+            console.log('ℹ️  Keeping existing settings.json');
+          }
+        } else {
+          // Non-interactive: don't overwrite without explicit consent
+          console.log('⚠️  settings.json exists. Run interactively with --managed-settings to overwrite.');
+        }
+      } else if (settingsExists) {
+        // No --managed-settings flag: show manual instructions
+        console.log('⚠️  Existing settings.json found - DevFlow settings not configured');
+        console.log('   To enable DevFlow features, add to your settings.json:');
+        console.log(`   "statusLine": { "type": "command", "command": "${devflowDir}/scripts/statusline.sh" }`);
+        console.log('   "env": { "ENABLE_TOOL_SEARCH": "true" }\n');
+        console.log('   Or re-run with --managed-settings to let DevFlow manage settings.json\n');
+      } else {
+        // No existing file: create it
+        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+        if (verbose) {
+          console.log('✓ Settings.json configured (statusLine + ENABLE_TOOL_SEARCH)');
+        }
       }
     } catch (error: unknown) {
-      if (isNodeSystemError(error) && error.code === 'EEXIST') {
-        console.log('⚠️  Existing settings.json found - statusLine not configured');
-        console.log('   To enable DevFlow statusLine, add to your settings.json:');
-        console.log(`   "statusLine": { "type": "command", "command": "${devflowDir}/scripts/statusline.sh" }\n`);
-      } else if (verbose) {
-        console.log('⚠️  Could not configure statusLine:', error);
+      if (verbose) {
+        console.log('⚠️  Could not configure settings.json:', error);
       }
     }
 
