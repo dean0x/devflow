@@ -99,7 +99,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
 - `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
-- `*Review` (9 types) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
+- `*Review` (11 specialized + Summary) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
 - `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 **Orchestration commands** (run in main context, spawn native agents):
@@ -110,7 +110,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Explore` - Fast codebase exploration (patterns, integration, testing)
 - `Plan` - Implementation planning with trade-off analysis
 - `Coder` - Code implementation in isolated worktrees
-- `*Review` (9 types) - Specialized code analysis
+- `*Review` (11 specialized + Summary) - Specialized code analysis
 
 **Utility agents** (focused tasks, no sub-spawning):
 - `Commit` - Creates git commit only

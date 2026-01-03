@@ -319,7 +319,7 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
 - **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
 - **`/implement`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
-- **`/review`** → `.docs/reviews/{branch}/` (9 review reports + summary)
+- **`/review`** → `.docs/reviews/{branch}/` (up to 11 review reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 ### Version Control
@@ -488,16 +488,19 @@ npm run dev
 
 **Project Structure:**
 ```
-src/
-├── cli/                   # CLI source code (TypeScript)
-│   ├── commands/           # init.ts, uninstall.ts
-│   └── cli.ts             # CLI entry point
-└── claude/                # Claude Code configuration
-    ├── agents/devflow/     # Sub-agent definitions (.md)
-    ├── commands/devflow/   # Slash command definitions (.md)
-    ├── skills/devflow/     # Skill source (installed flat to ~/.claude/skills/)
-    ├── scripts/            # statusline.sh
-    └── settings.json       # Claude Code settings
+devflow/
+├── agents/                # Sub-agent definitions (.md)
+├── commands/              # Slash command definitions (.md)
+├── skills/                # Skill definitions (installed flat to ~/.claude/skills/)
+├── scripts/               # statusline.sh
+├── src/
+│   ├── cli/               # CLI source code (TypeScript)
+│   │   ├── commands/      # init.ts, uninstall.ts
+│   │   └── cli.ts         # CLI entry point
+│   ├── claude/            # CLAUDE.md template
+│   └── templates/         # settings.json template
+├── CLAUDE.md              # Developer guide
+└── README.md              # User documentation
 ```
 
 ## Support

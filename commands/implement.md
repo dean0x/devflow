@@ -131,6 +131,47 @@ Thoroughness: quick
 Find: Error scenarios, race conditions, permission failures"
 ```
 
+### Failure Tracking
+
+After collecting outputs, track success/failure status:
+
+```bash
+EXPLORER_STATUS=""
+FAILED_EXPLORATIONS=""
+
+# Check each explorer output
+if [ -z "$ARCHITECTURE_OUTPUT" ]; then
+  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}architecture,"
+else
+  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Architecture "
+fi
+
+if [ -z "$INTEGRATION_OUTPUT" ]; then
+  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}integration,"
+else
+  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Integration "
+fi
+
+if [ -z "$REUSABLE_CODE_OUTPUT" ]; then
+  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}reusable,"
+else
+  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Reusable "
+fi
+
+if [ -z "$EDGE_CASES_OUTPUT" ]; then
+  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}edge-cases,"
+else
+  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Edge Cases"
+fi
+
+echo "Explorer status: ${EXPLORER_STATUS}"
+if [ -n "$FAILED_EXPLORATIONS" ]; then
+  echo "⚠️ Failed explorations: ${FAILED_EXPLORATIONS}"
+fi
+```
+
+Pass failure context to Synthesize agent so it can flag gaps in coverage.
+
 ---
 
 ## Phase 3: Synthesize Exploration
@@ -150,7 +191,10 @@ ${INTEGRATION_OUTPUT}
 ${REUSABLE_CODE_OUTPUT}
 ${EDGE_CASES_OUTPUT}
 
-Combine into: patterns, integration points, reusable code, edge cases"
+Failed explorations: ${FAILED_EXPLORATIONS:-none}
+
+Combine into: patterns, integration points, reusable code, edge cases.
+If any explorations failed, note the gap in your synthesis and recommend whether re-exploration is needed."
 ```
 
 ---
