@@ -656,15 +656,22 @@ If settings.json exists, prompts for confirmation before overwriting.
 **Security Deny List Categories:**
 | Category | Examples |
 |----------|----------|
-| System destruction | `rm -rf /`, `dd`, `mkfs`, `shred` |
-| Code execution | `curl \| bash`, `eval`, `exec` |
-| Privilege escalation | `sudo`, `su`, `doas`, `pkexec` |
-| Permission changes | `chmod 777`, `chown root` |
-| System control | `kill -9`, `reboot`, `shutdown` |
-| Data exfiltration | `netcat`, `socat`, `telnet` |
-| Sensitive file reads | `.env`, SSH keys, AWS credentials |
-| Package globals | `npm -g`, `pip --system` |
-| Resource abuse | Fork bombs, crypto miners |
+| System destruction | `rm -rf /`, `dd`, `mkfs`, `shred`, `fdisk` |
+| Code injection | `curl \| bash`, `base64 -d \| sh`, `eval` |
+| Privilege escalation | `sudo`, `su`, `doas`, `pkexec`, `passwd` |
+| User management | `useradd`, `userdel`, `usermod`, `groupadd` |
+| Permission changes | `chmod 777 /`, `chown root` |
+| System control | `kill -9`, `reboot`, `shutdown`, `systemctl stop` |
+| Reverse shells | `nc -l`, `netcat`, `socat`, python/php/perl sockets |
+| Network scanning | `nmap`, `masscan` |
+| Firewall bypass | `ufw disable`, `iptables -F` |
+| Kernel modification | `insmod`, `rmmod`, `modprobe`, `sysctl -w` |
+| Container escapes | `docker --privileged`, `nsenter`, `--pid=host` |
+| Cloud metadata | `curl 169.254.169.254` (AWS/GCP metadata) |
+| Log tampering | `rm /var/log`, `history -c` |
+| Crypto miners | `xmrig`, `cgminer`, `ethminer`, `minerd` |
+| Sensitive files | `.env`, SSH keys, AWS/GCP credentials, `.pem` |
+| Package globals | `npm install -g`, `pip install --system` |
 
 ### Statusline Script
 
