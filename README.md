@@ -190,6 +190,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 
 | Agent | Specialty | Purpose |
 |-------|-----------|---------|
+| `Skimmer` | Codebase Orientation | Fast codebase overview using `skim` for 60-90% token reduction |
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
 | `Commit` | Git Operations | Intelligent commit creation with safety checks |
@@ -201,8 +202,17 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
 
 **How Commands Orchestrate Agents:**
-- `/specify` → 4 Explore + 3 Plan agents (requirements focus) → GitHub issue
-- `/implement` → 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
+- `/specify` → Skimmer + 4 Explore + 3 Plan agents (requirements focus) → GitHub issue
+- `/implement` → Skimmer + 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
+
+**Skimmer Integration:**
+
+Skimmer runs as the first exploration phase in both `/specify` and `/implement`, using the `skim` tool to:
+- Extract codebase structure with 60-90% token reduction
+- Identify relevant files and functions for the task
+- Provide oriented context to downstream Explore agents
+
+Requires `skim` tool: `npm install -g rskim` or `cargo install rskim`
 
 **Invoking Sub-Agents:**
 ```bash
