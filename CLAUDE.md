@@ -121,6 +121,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `TechDebt` - Updates GitHub issue only
 - `Debug` - Systematic debugging with hypothesis testing
 - `CatchUp` - Context restoration from status logs
+- `Skimmer` - Codebase orientation using skim for file/function discovery
 
 ### Implementation Checklist
 

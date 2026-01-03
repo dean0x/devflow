@@ -71,32 +71,62 @@ Return: title, description, acceptance criteria, labels, linked issues"
 
 ---
 
+## Phase 1.5: Orient
+
+Spawn Skimmer agent to get codebase overview before detailed exploration:
+
+```
+Task(subagent_type="Skimmer"):
+"Orient in codebase for: ${TASK_DESCRIPTION}
+Working directory: ${WORKTREE_DIR}
+
+Use skim to:
+1. Get project structure overview
+2. Identify relevant source directories
+3. Find files/functions related to the task
+4. Detect existing patterns
+
+Return: Codebase map with relevant files, key functions, integration points"
+```
+
+Capture orientation output:
+
+```bash
+CODEBASE_ORIENTATION="${SKIMMER_OUTPUT}"
+```
+
+---
+
 ## Phase 2: Explore (Parallel)
 
-Spawn 4 Explore agents **in a single message**:
+Spawn 4 Explore agents **in a single message**, passing Skimmer context:
 
 ```
 Task(subagent_type="Explore"):
 "Explore ARCHITECTURE for: ${TASK_DESCRIPTION}
 Working directory: ${WORKTREE_DIR}
+Codebase orientation: ${CODEBASE_ORIENTATION}
 Thoroughness: medium
 Find: Similar implementations, architectural patterns, module structure"
 
 Task(subagent_type="Explore"):
 "Explore INTEGRATION POINTS for: ${TASK_DESCRIPTION}
 Working directory: ${WORKTREE_DIR}
+Codebase orientation: ${CODEBASE_ORIENTATION}
 Thoroughness: medium
 Find: Entry points, services, database models, configuration"
 
 Task(subagent_type="Explore"):
 "Explore REUSABLE CODE for: ${TASK_DESCRIPTION}
 Working directory: ${WORKTREE_DIR}
+Codebase orientation: ${CODEBASE_ORIENTATION}
 Thoroughness: medium
 Find: Utilities, helpers, validation patterns, error handling"
 
 Task(subagent_type="Explore"):
 "Explore EDGE CASES for: ${TASK_DESCRIPTION}
 Working directory: ${WORKTREE_DIR}
+Codebase orientation: ${CODEBASE_ORIENTATION}
 Thoroughness: quick
 Find: Error scenarios, race conditions, permission failures"
 ```
@@ -326,6 +356,7 @@ ${TASK_DESCRIPTION}
 
 | Phase | Agents | Status |
 |-------|--------|--------|
+| Orient | 1 (Skimmer) | ✅ |
 | Explore | 4 | ✅ |
 | Plan | 3 | ✅ |
 | Implement | {n} ({parallel/sequential}) | ✅ |
@@ -403,7 +434,10 @@ git worktree prune
 ├─ Phase 1: Setup
 │  └─ GetIssue agent (if issue number)
 │
-├─ Phase 2: Explore (PARALLEL)
+├─ Phase 1.5: Orient
+│  └─ Skimmer agent (codebase overview via skim)
+│
+├─ Phase 2: Explore (PARALLEL, with Skimmer context)
 │  ├─ Explore: Architecture
 │  ├─ Explore: Integration
 │  ├─ Explore: Reusable code

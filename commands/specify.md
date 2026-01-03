@@ -120,6 +120,31 @@ AskUserQuestion:
 
 ---
 
+## Phase 0.5: Orient
+
+Spawn Skimmer agent to understand codebase context before exploration:
+
+```
+Task(subagent_type="Skimmer"):
+"Orient in codebase for requirements exploration: ${FEATURE_IDEA}
+
+Use skim to understand:
+1. Project structure and key directories
+2. Similar features that might exist
+3. Existing patterns and conventions
+4. Integration points relevant to this feature
+
+Return: Codebase context for requirements exploration (not implementation details)"
+```
+
+Capture orientation:
+
+```bash
+CODEBASE_CONTEXT="${SKIMMER_OUTPUT}"
+```
+
+---
+
 ## Phase 1: Understand
 
 Parse the feature idea and extract initial understanding:
@@ -152,6 +177,7 @@ Spawn multiple Explore agents to understand requirements from different perspect
 ```
 Task tool with subagent_type="Explore":
 "Explore USER PERSPECTIVE for: ${FEATURE_IDEA}
+Codebase context: ${CODEBASE_CONTEXT}
 
 Find user-facing context:
 - Who are the target users? What are their goals?
@@ -164,6 +190,7 @@ Report: user context and needs with references"
 
 Task tool with subagent_type="Explore":
 "Explore SIMILAR FEATURES for: ${FEATURE_IDEA}
+Codebase context: ${CODEBASE_CONTEXT}
 
 Find comparable features in the codebase:
 - What similar features exist? How do they behave?
@@ -176,6 +203,7 @@ Report: similar features with scope comparisons"
 
 Task tool with subagent_type="Explore":
 "Explore CONSTRAINTS for: ${FEATURE_IDEA}
+Codebase context: ${CODEBASE_CONTEXT}
 
 Find constraints that affect requirements:
 - What external dependencies exist? (APIs, services, data sources)
@@ -188,6 +216,7 @@ Report: constraints that shape requirements"
 
 Task tool with subagent_type="Explore":
 "Explore FAILURE MODES for: ${FEATURE_IDEA}
+Codebase context: ${CODEBASE_CONTEXT}
 
 Find how things can go wrong from user perspective:
 - What error states do users encounter in similar features?
@@ -558,10 +587,13 @@ ${FEATURE_TITLE}
 ├─ Phase 0: GATE 0 - Confirm Understanding ⛔ MANDATORY
 │  └─ AskUserQuestion: Validate interpretation before exploration
 │
+├─ Phase 0.5: Orient
+│  └─ Skimmer agent (codebase context via skim)
+│
 ├─ Phase 1: Understand
 │  └─ Parse input, identify unknowns
 │
-├─ Phase 2: Explore Requirements (PARALLEL)
+├─ Phase 2: Explore Requirements (PARALLEL, with Skimmer context)
 │  ├─ Explore: User perspective
 │  ├─ Explore: Similar features
 │  ├─ Explore: Constraints
