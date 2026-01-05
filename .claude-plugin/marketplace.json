@@ -1,0 +1,31 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "devflow",
+  "description": "DevFlow - Agentic Development Toolkit for Claude Code",
+  "owner": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "plugins": [
+    {
+      "name": "devflow",
+      "description": "Agentic Development Toolkit - Intelligent commands for specification, implementation, review, and release workflows",
+      "version": "0.9.0",
+      "author": {
+        "name": "DevFlow Contributors"
+      },
+      "source": ".",
+      "category": "development",
+      "homepage": "https://github.com/dean0x/devflow",
+      "keywords": [
+        "development",
+        "workflow",
+        "review",
+        "git",
+        "agents",
+        "agentic",
+        "claude-code"
+      ]
+    }
+  ]
+}

@@ -6,7 +6,7 @@ This document contains instructions for developers and AI agents working on the 
 
 When working on DevFlow code, understand that this toolkit is designed to enhance Claude Code with intelligent development workflows. Your modifications should:
 
-- Maintain brutal honesty in audit outputs
+- Maintain brutal honesty in review outputs
 - Preserve context across sessions
 - Enhance developer empowerment without replacing judgment
 - Ensure all commands are self-documenting
@@ -16,9 +16,9 @@ When working on DevFlow code, understand that this toolkit is designed to enhanc
 DevFlow consists of four main components:
 
 1. **CLI Tool** (`src/cli/`) - TypeScript-based installer and manager
-2. **Claude Code Commands** (`src/claude/commands/`) - Markdown-based slash commands (user-invoked)
-3. **Skills** (`src/claude/skills/`) - Auto-activate quality enforcement (model-invoked)
-4. **Sub-Agents** (`src/claude/agents/`) - Specialized AI assistants for focused tasks
+2. **Claude Code Commands** (`commands/`) - Markdown-based slash commands (user-invoked)
+3. **Skills** (`skills/`) - Auto-activate quality enforcement (model-invoked)
+4. **Sub-Agents** (`agents/`) - Specialized AI assistants for focused tasks
 
 ## Documentation Framework
 
@@ -30,11 +30,12 @@ All generated documentation lives under `.docs/` in the project root:
 
 ```
 .docs/
-├── audits/{branch-slug}/              # Code review reports per branch
+├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── brainstorm/                        # Design explorations
-│   └── {topic-slug}-{timestamp}.md
+├── coordinator/                       # Release coordination state
+│   ├── release-issue.md
+│   └── state.json
 ├── design/                            # Implementation plans
 │   └── {topic-slug}-{timestamp}.md
 ├── debug/                             # Debug sessions
@@ -89,28 +90,38 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 # Use helpers
 TIMESTAMP=$(get_timestamp)
 BRANCH_SLUG=$(get_branch_slug)
-ensure_docs_dir "audits/$BRANCH_SLUG"
+ensure_docs_dir "reviews/$BRANCH_SLUG"
 ```
 
 ### Agent Persistence Rules
 
-**Persisting agents** (create files in `.docs/`):
-- `catch-up` → `.docs/CATCH_UP.md` (overwrite latest)
+**Persisting commands** (create files in `.docs/`):
+- `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
+- `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
-- `debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
-- `brainstorm` → `.docs/brainstorm/{topic-slug}-{timestamp}.md`
-- `design` → `.docs/design/{topic-slug}-{timestamp}.md`
-- `audit-*` (9 types) → `.docs/audits/{branch-slug}/{type}-report-{timestamp}.md`
-- `code-review` → `.docs/audits/{branch-slug}/review-summary-{timestamp}.md`
-- `release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
+- `*Review` (11 specialized + Summary) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
+- `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
-**Non-persisting agents** (ephemeral, no files):
-- `commit` - Creates git commit only
-- `get-issue` - Fetches GitHub issue, creates branch
-- `pull-request` - Creates GitHub PR only
-- `project-state` - Read-only, used by catch-up
-- `pr-comments` - Creates PR comments only
-- `tech-debt` - Updates GitHub issue only
+**Orchestration commands** (run in main context, spawn native agents):
+- `/specify` - Spawns 4 Explore + 3 Plan agents (requirements focus), creates GitHub issue
+- `/implement` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
+
+**Native agents used** (built-in Claude Code agents):
+- `Explore` - Fast codebase exploration (patterns, integration, testing)
+- `Plan` - Implementation planning with trade-off analysis
+- `Coder` - Code implementation in isolated worktrees
+- `*Review` (11 specialized + Summary) - Specialized code analysis
+
+**Utility agents** (focused tasks, no sub-spawning):
+- `Commit` - Creates git commit only
+- `GetIssue` - Fetches GitHub issue details
+- `PullRequest` - Creates GitHub PR only
+- `Devlog` - Read-only, analyzes project state for CatchUp
+- `Comment` - Creates PR comments only
+- `TechDebt` - Updates GitHub issue only
+- `Debug` - Systematic debugging with hypothesis testing
+- `CatchUp` - Context restoration from status logs
+- `Skimmer` - Codebase orientation using skim for file/function discovery
 
 ### Implementation Checklist
 
@@ -137,7 +148,7 @@ When creating or modifying persisting agents:
 
 ```bash
 # 1. Modify command or agent in devflow repo
-vim devflow/src/claude/commands/devflow/code-review.md
+vim commands/review.md
 
 # 2. Rebuild if CLI changes
 npm run build
@@ -146,7 +157,7 @@ npm run build
 node dist/cli.js init
 
 # 4. Test immediately
-/code-review
+/review
 
 # 5. Iterate until satisfied
 # 6. Commit using /commit
@@ -158,13 +169,13 @@ When creating or modifying commands, follow these principles:
 
 ### 1. Brutal Honesty
 Commands should expose the truth, not what developers want to hear:
-- Security audits find real vulnerabilities
-- Performance audits reveal actual bottlenecks
-- Architecture audits expose design flaws
+- Security reviews find real vulnerabilities
+- Performance reviews reveal actual bottlenecks
+- Architecture reviews expose design flaws
 - Agent reviews catch AI deception
 
 ### 2. Actionable Output
-Every audit provides:
+Every review provides:
 - **Specific problems** with file/line references
 - **Clear severity** levels (Critical/High/Medium/Low)
 - **Concrete fixes** with examples
@@ -179,7 +190,7 @@ Status and review commands create historical records:
 
 ### 4. Fail-Safe Defaults
 - Rollback preserves safety branches
-- Audits err on the side of flagging issues
+- Reviews err on the side of flagging issues
 - Status tracking captures comprehensive context
 - Agent reviews assume skepticism
 
@@ -187,7 +198,7 @@ Status and review commands create historical records:
 
 ### Command Structure
 
-1. Create command in `src/claude/commands/devflow/new-command.md`
+1. Create command in `commands/new-command.md`
 2. Follow this template:
 
 ```markdown
@@ -214,7 +225,7 @@ Brief description of what the command does.
 
 ### Sub-Agent Structure
 
-1. Create agent in `src/claude/agents/devflow/new-agent.md`
+1. Create agent in `agents/new-agent.md`
 2. Follow existing agent patterns:
    - Clear specialty definition
    - Restricted tool access
@@ -230,7 +241,7 @@ Brief description of what the command does.
 
 Skills are **model-invoked** capabilities that auto-activate based on context. They enforce quality without requiring manual invocation.
 
-1. Create skill directory in `src/claude/skills/devflow/skill-name/`
+1. Create skill directory in `skills/skill-name/`
 2. Create `SKILL.md` with YAML frontmatter:
 
 ```markdown
@@ -291,20 +302,118 @@ What passes validation
 - Common workflow that benefits from both auto and manual modes
 - Example: research (auto when unfamiliar, manual when user wants deep dive)
 
-### Current Skills
+### Skills Architecture
 
-**Philosophy Enforcers:**
-- `pattern-check` - Result types, DI, immutability, pure functions
-- `test-design` - Test quality red flags (complex setup, difficult mocking)
-- `code-smell` - Fake solutions, unlabeled workarounds, magic values
+DevFlow uses a **tiered skills system** where skills serve as shared knowledge libraries that agents can reference. This eliminates duplication and ensures consistent behavior across agents.
 
-**Workflow Automation:**
-- `research` - Pre-implementation planning and integration strategy
-- `debug` - Systematic debugging with hypothesis testing
+**Tier 1: Foundation Skills** (shared patterns used by multiple agents)
 
-**Safety Validators:**
-- `input-validation` - Boundary validation, SQL injection prevention
-- `error-handling` - Result type consistency, exception boundaries
+| Skill | Purpose | Used By |
+|-------|---------|---------|
+| `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, TypescriptReview, ArchitectureReview |
+| `devflow-review-methodology` | 6-step review process, 3-category issue classification | All Review agents (12 total) |
+| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, DocumentationReview, Debug |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Commit, Coder, PullRequest, Release |
+| `devflow-security-patterns` | Security vulnerability patterns, OWASP mapping, detection strategies | SecurityReview |
+| `devflow-implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
+| `devflow-codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
+
+**Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
+
+| Skill | Purpose | Auto-Triggers When |
+|-------|---------|---------------------|
+| `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior testing) | Tests written or modified |
+| `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features implemented, code reviewed |
+| `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested |
+| `devflow-debug` | Systematic debugging with hypothesis testing | Errors occur, tests fail |
+| `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
+| `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories |
+
+**Tier 3: Domain-Specific Skills** (language and framework patterns)
+
+| Skill | Purpose | Used When |
+|-------|---------|-----------|
+| `devflow-typescript` | Type safety, generics, utility types, type guards, idioms | TypeScript codebases |
+| `devflow-react` | Components, hooks, state management, performance optimization | React codebases |
+
+**How Agents Use Skills:**
+
+Agents declare skills in their frontmatter to automatically load shared knowledge:
+
+```yaml
+---
+name: SecurityReview
+description: Security vulnerability detection
+model: inherit
+skills: devflow-review-methodology, devflow-security-patterns
+---
+```
+
+### Iron Laws
+
+Every skill has a single, non-negotiable **Iron Law** - a core principle that must never be violated. Iron Laws are enforced automatically when skills activate.
+
+| Skill | Iron Law |
+|-------|----------|
+| `devflow-core-patterns` | NEVER THROW IN BUSINESS LOGIC |
+| `devflow-review-methodology` | NEVER BLOCK FOR PRE-EXISTING ISSUES |
+| `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-debug` | NO FIXES WITHOUT ROOT CAUSE INVESTIGATION |
+| `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
+| `devflow-code-smell` | NO FAKE SOLUTIONS |
+| `devflow-research` | NO IMPLEMENTATION WITHOUT EXPLORATION |
+| `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
+| `devflow-docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
+| `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
+| `devflow-codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
+| `devflow-implementation-patterns` | FOLLOW EXISTING PATTERNS |
+| `devflow-react` | COMPOSITION OVER PROPS |
+| `devflow-typescript` | UNKNOWN OVER ANY |
+| `devflow-worktree` | ONE TASK, ONE WORKTREE |
+
+**Iron Law Format** in SKILL.md files:
+```markdown
+## Iron Law
+
+> **[CAPITALIZED PRINCIPLE NAME]**
+>
+> [Rationale explaining the principle and why violations are forbidden]
+```
+
+### Clarification Gates
+
+The `/specify` command uses **mandatory clarification gates** - checkpoints that require explicit user confirmation before proceeding:
+
+1. **Gate 0 (Before Exploration)**: Confirm understanding of feature idea
+2. **Gate 1 (After Exploration)**: Validate scope and priorities
+3. **Gate 2 (Before Issue Creation)**: Confirm acceptance criteria
+
+No gate may be skipped. If user says "whatever you think", state recommendation and get explicit approval.
+
+**Benefits of Tiered Architecture:**
+- **No duplication** - Common methodology defined once in foundation skills
+- **Consistent behavior** - All review agents follow the same 6-step process
+- **Easy maintenance** - Update foundation skill, all agents inherit changes
+- **Clear dependencies** - Agent frontmatter shows what knowledge it uses
+
+### Creating New Skills
+
+When creating skills, decide which tier:
+
+**Foundation Skill** (Tier 1) - If multiple agents need the same knowledge:
+- Create in `skills/devflow-{name}/SKILL.md`
+- Document which agents should use it
+- Add `skills:` field to relevant agent frontmatters
+
+**Specialized Skill** (Tier 2) - If user-facing with context triggers:
+- Create in `skills/devflow-{name}/SKILL.md`
+- Focus on clear trigger conditions in description
+- Test auto-activation in various contexts
+
+**Domain-Specific Skill** (Tier 3) - For language/framework patterns:
+- Create in `skills/devflow-{language|framework}/SKILL.md`
+- Focus on idioms, patterns, and best practices for that domain
+- Referenced by Coder agent based on detected tech stack
 
 ## CLI Development
 
@@ -508,18 +617,17 @@ npx devflow-kit@latest init
 
 ### Source Structure
 ```
-src/
-├── cli/                      # CLI implementation
-│   ├── commands/               # CLI command implementations
-│   │   ├── init.ts              # Installation command
-│   │   └── uninstall.ts         # Uninstallation command
-│   └── cli.ts                  # CLI entry point
-└── claude/                   # Claude Code assets
-    ├── agents/devflow/         # Sub-agent definitions
-    ├── commands/devflow/       # Slash command definitions
-    ├── skills/devflow/         # Skill source (installed flat)
-    ├── scripts/                # Supporting scripts
-    └── settings.json           # Claude Code settings
+devflow/
+├── agents/                   # Sub-agent definitions
+├── commands/                 # Slash command definitions
+├── skills/                   # Skill source (installed flat to ~/.claude/skills/)
+├── scripts/                  # Supporting scripts
+└── src/
+    └── cli/                  # CLI implementation
+        ├── commands/           # CLI command implementations
+        │   ├── init.ts          # Installation command
+        │   └── uninstall.ts     # Uninstallation command
+        └── cli.ts              # CLI entry point
 ```
 
 ### Installation Paths
@@ -530,6 +638,53 @@ src/
 - Settings: `~/.claude/settings.json`
 
 **Note:** Skills are installed flat (directly under `skills/`) for Claude Code auto-discovery. Commands and agents use the `devflow/` subdirectory for namespacing.
+
+### Settings Override
+
+The `--override-settings` flag replaces existing `~/.claude/settings.json`:
+
+```bash
+devflow init --override-settings
+```
+
+If settings.json exists, prompts for confirmation before overwriting.
+
+**What's included in DevFlow settings (`src/templates/settings.json`):**
+- `statusLine` - Smart statusline with context percentage
+- `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
+- `permissions.deny` - Security deny list (126 blocked operations)
+
+**Security Deny List Categories:**
+| Category | Examples |
+|----------|----------|
+| System destruction | `rm -rf /`, `dd`, `mkfs`, `shred`, `fdisk` |
+| Code injection | `curl \| bash`, `base64 -d \| sh`, `eval` |
+| Privilege escalation | `sudo`, `su`, `doas`, `pkexec`, `passwd` |
+| User management | `useradd`, `userdel`, `usermod`, `groupadd` |
+| Permission changes | `chmod 777 /`, `chown root` |
+| System control | `kill -9`, `reboot`, `shutdown`, `systemctl stop` |
+| Reverse shells | `nc -l`, `netcat`, `socat`, python/php/perl sockets |
+| Network scanning | `nmap`, `masscan` |
+| Firewall bypass | `ufw disable`, `iptables -F` |
+| Kernel modification | `insmod`, `rmmod`, `modprobe`, `sysctl -w` |
+| Container escapes | `docker --privileged`, `nsenter`, `--pid=host` |
+| Cloud metadata | `curl 169.254.169.254` (AWS/GCP metadata) |
+| Log tampering | `rm /var/log`, `history -c` |
+| Crypto miners | `xmrig`, `cgminer`, `ethminer`, `minerd` |
+| Sensitive files | `.env`, SSH keys, AWS/GCP credentials, `.pem` |
+| Package globals | `npm install -g`, `pip install --system` |
+
+### Statusline Script
+
+The statusline (`scripts/statusline.sh`) displays real-time context:
+- Directory name and model
+- Git branch with dirty indicator (`*`)
+- **Context usage percentage** (color-coded):
+  - Green: < 50%
+  - Yellow: 50-80%
+  - Red: > 80%
+
+Data source: `context_window.current_usage` from Claude Code's JSON stdin.
 
 ## Testing Guidelines
 
@@ -576,7 +731,7 @@ Use conventional commits:
 ### Custom Project Rules
 Projects can extend DevFlow by:
 1. Adding custom `.docs/` templates
-2. Creating project-specific audit rules
+2. Creating project-specific review rules
 3. Extending `.claudeignore` patterns
 4. Adding team-specific workflows
 
@@ -609,7 +764,7 @@ Projects can extend DevFlow by:
 ## Maintenance Tasks
 
 ### Regular Updates
-1. Review and update audit patterns
+1. Review and update review patterns
 2. Optimize command performance
 3. Update dependencies
 4. Improve error messages

@@ -4,19 +4,31 @@ A comprehensive collection of Claude Code commands and configurations designed t
 
 ## Installation
 
+### Option 1: Native Plugin (Recommended)
+
+Install directly as a Claude Code plugin:
+
 ```bash
-# Run with npx (recommended - no global install needed)
+# From GitHub
+/plugin install dean0x/devflow
+```
+
+That's it! DevFlow commands are immediately available as `/devflow:command-name` (or just `/command-name` if no conflicts).
+
+### Option 2: CLI Installer
+
+For more control over installation scope:
+
+```bash
+# Run with npx (no global install needed)
 npx devflow-kit init
 ```
 
-### Installation Scopes
-
-DevFlow supports two installation scopes:
+#### Installation Scopes (CLI only)
 
 **User Scope (Default)** - Install for all projects
 ```bash
 npx devflow-kit init --scope user
-# Or interactively: npx devflow-kit init (prompts for scope)
 ```
 - Installs to `~/.claude/` and `~/.devflow/`
 - Available across all projects
@@ -30,9 +42,8 @@ npx devflow-kit init --scope local
 - Only available in the current project
 - Recommended for team projects where DevFlow should be project-specific
 - Requires a git repository (run `git init` first)
-- Add `.claude/` and `.devflow/` to `.gitignore` (done automatically)
 
-That's it! DevFlow is now installed and ready to use in Claude Code.
+DevFlow is now installed and ready to use in Claude Code.
 
 ## What's Included
 
@@ -42,13 +53,30 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 
 | Skill | Purpose | Auto-Triggers When |
 |-------|---------|---------------------|
-| `pattern-check` | Architectural pattern validation (Result types, DI, immutability) | Code changes are made, new functions added |
-| `test-design` | Test quality enforcement (setup complexity, mocking, behavior vs implementation) | Tests are written or modified |
-| `code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features are implemented, code is reviewed |
-| `research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
-| `debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
-| `input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
-| `error-handling` | Result type consistency and exception boundary enforcement | Error handling code written, functions that can fail |
+| `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior vs implementation) | Tests are written or modified |
+| `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features are implemented, code is reviewed |
+| `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
+| `devflow-debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
+| `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
+| `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories needed |
+
+**Iron Laws:**
+
+Every skill has a single, non-negotiable **Iron Law** - a core principle that must never be violated:
+
+| Skill | Iron Law |
+|-------|----------|
+| `devflow-core-patterns` | NEVER THROW IN BUSINESS LOGIC |
+| `devflow-code-smell` | NO FAKE SOLUTIONS |
+| `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
+| `devflow-debug` | NO FIXES WITHOUT ROOT CAUSE INVESTIGATION |
+| `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
+| `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
+| `devflow-typescript` | UNKNOWN OVER ANY |
+| `devflow-react` | COMPOSITION OVER PROPS |
+
+Iron Laws are enforced automatically when skills activate.
 
 **How Skills Work:**
 - **Proactive enforcement** - Catch issues during implementation, not after
@@ -57,6 +85,57 @@ That's it! DevFlow is now installed and ready to use in Claude Code.
 - **Context-aware** - Activate based on what you're doing
 
 **IMPORTANT**: Skills are **automatically activated** by Claude based on context. They cannot be manually invoked like slash commands.
+
+### Skills Architecture
+
+DevFlow uses a **tiered skills system** where skills serve as shared knowledge libraries that agents can reference:
+
+**Tier 1: Foundation Skills** (shared patterns used by multiple agents)
+
+| Skill | Purpose | Used By |
+|-------|---------|---------|
+| `devflow-core-patterns` | Result types, DI, immutability, pure functions | Coder, TypescriptReview, ArchitectureReview |
+| `devflow-review-methodology` | 6-step review process, 3-category classification | All Review agents |
+| `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp, DocumentationReview |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions | Commit, Coder, PullRequest, Release |
+| `devflow-security-patterns` | OWASP mapping, vulnerability patterns | SecurityReview |
+| `devflow-implementation-patterns` | CRUD, API, events, config, logging | Coder |
+| `devflow-codebase-navigation` | Exploration, pattern discovery, data flow | Coder |
+
+**Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
+
+| Skill | Purpose | Auto-Triggers When |
+|-------|---------|---------------------|
+| `devflow-test-design` | Test quality enforcement | Tests written or modified |
+| `devflow-code-smell` | Anti-pattern detection | Features implemented |
+| `devflow-research` | Pre-implementation planning | Unfamiliar features requested |
+| `devflow-debug` | Systematic debugging | Errors occur, tests fail |
+| `devflow-input-validation` | Boundary validation | API endpoints created |
+| `devflow-worktree` | Git worktree management | Parallel implementation |
+
+**Tier 3: Domain-Specific Skills** (language and framework patterns)
+
+| Skill | Purpose | Used When |
+|-------|---------|-----------|
+| `devflow-typescript` | Type safety, generics, utility types, idioms | TypeScript codebases |
+| `devflow-react` | Components, hooks, state, performance | React codebases |
+
+**How Agents Use Skills:**
+
+Agents declare skills in their frontmatter to automatically load shared knowledge:
+```yaml
+---
+name: SecurityReview
+description: Security vulnerability detection
+model: inherit
+skills: devflow-review-methodology, devflow-security-patterns
+---
+```
+
+This creates a **shared library pattern** where:
+- Common methodology is defined once (in foundation skills)
+- Agents inherit and extend with their specialization
+- No duplication of review process or core patterns across agents
 
 **Dual-Mode Pattern**: The `debug` skill also exists as a slash command (`/debug`) for manual control:
 - **Skill mode** (auto): Activates when Claude detects errors or failures
@@ -69,52 +148,76 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
-| `/brainstorm` | Explore design decisions and architectural approaches | Before implementation, evaluating options |
-| `/design` | Create detailed implementation plan with integration points | After brainstorming, ready for detailed design |
-| `/plan` | Triage issues - implement now, defer to GitHub issue, or skip | After code-review or discussion, deciding what to tackle |
+| `/specify` | Specify a feature with 3 clarification gates (understanding → scope → acceptance) | Before implementing a feature |
 | `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
-| `/get-issue` | Fetch GitHub issue details and create working branch | Starting work on a GitHub issue |
-| `/implement` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
+| `/implement` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
+| `/run` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
 | `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
-| `/code-review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
+| `/review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
 | `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
 | `/pull-request` | Create PR with comprehensive analysis and smart description | After commits, ready to create PR |
 | `/resolve-comments` | Systematically address PR review feedback | After PR feedback, need to resolve comments |
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 
-### 🤖 Sub-Agents
+### 🤖 Agents
 
-| Sub-Agent | Specialty | Purpose |
-|-----------|-----------|---------|
-| `audit-security` | Security Analysis | Expert vulnerability detection and security code review |
-| `audit-performance` | Performance | Optimization and bottleneck detection |
-| `audit-architecture` | Architecture | Design pattern analysis and code structure review |
-| `audit-tests` | Testing | Test quality, coverage, and effectiveness analysis (surgical execution) |
-| `audit-complexity` | Complexity | Code complexity and maintainability assessment |
-| `audit-dependencies` | Dependencies | Dependency management and security analysis |
-| `audit-database` | Database | Database design and optimization review |
-| `audit-documentation` | Documentation | Docs-code alignment, API accuracy, comment quality |
-| `audit-typescript` | TypeScript | Type safety enforcement and TypeScript code quality |
-| `brainstorm` | Design Decisions | Explore architectural approaches and evaluate trade-offs |
-| `design` | Implementation Planning | Detailed implementation design with integration points and edge cases |
-| `catch-up` | Context Restoration | Project status and context restoration with validation |
-| `commit` | Git Operations | Intelligent commit creation with safety checks |
-| `get-issue` | GitHub Issues | Fetch issue details and create working branches |
-| `pull-request` | PR Creation | Analyze commits/changes and generate comprehensive PR descriptions |
-| `release` | Release Automation | Project-agnostic release workflow with version management |
-| `debug` | Debugging | Systematic debugging with hypothesis testing and issue tracking |
+**Architecture**: Commands run in the main context and spawn multiple agents in parallel for optimal results. Orchestration happens at command level.
 
-**How Sub-Agents Work:**
-- Specialized AI assistants with deep expertise in specific domains
-- Separate context windows for focused analysis
-- Can be invoked explicitly or automatically by orchestrator commands
-- Restricted tool access appropriate to their domain
+**Native Agents** (built-in Claude Code agents, spawned by commands):
+
+| Agent | Specialty | Usage |
+|-------|-----------|-------|
+| `Explore` | Codebase Exploration | 3-4 spawned in parallel per task for patterns, integration, edge cases |
+| `Plan` | Implementation Planning | 1-3 spawned in parallel per task for architecture, testing, parallelization |
+| `Coder` | Implementation | 1-N spawned per task (parallel when work is parallelizable) |
+
+**Review Agents** (specialized code analysis):
+
+| Agent | Specialty | Purpose |
+|-------|-----------|---------|
+| `SecurityReview` | Security | Vulnerability detection and security code review |
+| `PerformanceReview` | Performance | Optimization and bottleneck detection |
+| `ArchitectureReview` | Architecture | Design pattern analysis and code structure review |
+| `TestsReview` | Testing | Test quality, coverage, and effectiveness analysis |
+| `ComplexityReview` | Complexity | Code complexity and maintainability assessment |
+| `DependenciesReview` | Dependencies | Dependency management and security analysis |
+| `DatabaseReview` | Database | Database design and optimization review |
+| `DocumentationReview` | Documentation | Docs-code alignment, API accuracy, comment quality |
+| `TypescriptReview` | TypeScript | Type safety enforcement and TypeScript code quality |
+
+**Utility Agents** (focused tasks):
+
+| Agent | Specialty | Purpose |
+|-------|-----------|---------|
+| `Skimmer` | Codebase Orientation | Fast codebase overview using `skim` for 60-90% token reduction |
+| `CatchUp` | Context Restoration | Project status and context restoration with validation |
+| `Devlog` | Project State | Analyze project state for status reports |
+| `Commit` | Git Operations | Intelligent commit creation with safety checks |
+| `GetIssue` | GitHub Issues | Fetch issue details for planning |
+| `PullRequest` | PR Creation | Analyze commits/changes and generate PR descriptions |
+| `Release` | Release Automation | Project-agnostic release workflow with version management |
+| `Debug` | Debugging | Systematic debugging with hypothesis testing |
+| `Comment` | PR Comments | Create summary comments for non-diff issues |
+| `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
+
+**How Commands Orchestrate Agents:**
+- `/specify` → Skimmer + 4 Explore + 3 Plan agents (requirements focus) → GitHub issue
+- `/implement` → Skimmer + 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
+
+**Skimmer Integration:**
+
+Skimmer runs as the first exploration phase in both `/specify` and `/implement`, using the `skim` tool to:
+- Extract codebase structure with 60-90% token reduction
+- Identify relevant files and functions for the task
+- Provide oriented context to downstream Explore agents
+
+Requires `skim` tool: `npm install -g rskim` or `cargo install rskim`
 
 **Invoking Sub-Agents:**
 ```bash
 # Explicit invocation
-"Use the audit-security sub-agent to analyze this authentication code"
+"Use the SecurityReview sub-agent to analyze this authentication code"
 
 # Automatic delegation (Claude Code decides which sub-agent to use)
 "Review this code for security issues"
@@ -123,15 +226,37 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 ### 📊 Smart Statusline
 
 Real-time project context display showing:
-- Current model and session duration
-- Git branch and uncommitted changes indicator
-- Session cost tracking
-- Project context
+- Current directory and model name
+- Git branch with uncommitted changes indicator (`*`)
+- **Context usage percentage** with color coding:
+  - 🟢 Green: < 50% context used
+  - 🟡 Yellow: 50-80% context used
+  - 🔴 Red: > 80% context used
 - Zero configuration - works immediately after installation
 
 ### 🔒 Security & Token Optimization
 
-DevFlow automatically creates a comprehensive `.claudeignore` file at your git repository root to:
+**Permission Deny List** (with `--managed-settings`):
+
+DevFlow includes a comprehensive security deny list that blocks dangerous operations:
+
+| Category | Examples |
+|----------|----------|
+| System destruction | `rm -rf /`, `dd`, `mkfs`, `shred` |
+| Code execution | `curl \| bash`, `eval`, `exec` |
+| Privilege escalation | `sudo`, `su`, `doas`, `pkexec` |
+| Permission changes | `chmod 777`, `chown root` |
+| System control | `kill -9`, `reboot`, `shutdown` |
+| Data exfiltration | `netcat`, `socat`, `telnet`, `sftp` |
+| Sensitive file reads | `.env`, SSH keys, AWS credentials |
+| Package globals | `npm -g`, `pip --system`, `apt install` |
+| Resource abuse | Fork bombs, crypto miners |
+
+Included automatically in DevFlow's settings.json template.
+
+**.claudeignore** (automatic):
+
+DevFlow also creates a comprehensive `.claudeignore` file at your git repository root to:
 
 **Protect Sensitive Data:**
 - Environment files (`.env`, `.env.*`, `.envrc`)
@@ -157,12 +282,13 @@ DevFlow agents automatically create and maintain project documentation in the `.
 
 ```
 .docs/
-├── audits/{branch-slug}/       # Code review reports per branch
+├── reviews/{branch-slug}/       # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── brainstorm/                 # Design explorations
-│   └── {topic-slug}-{timestamp}.md
-├── design/                     # Implementation plans
+├── coordinator/                # Release coordination state
+│   ├── release-issue.md
+│   └── state.json
+├── design/                     # Implementation plans (from Design agent)
 │   └── {topic-slug}-{timestamp}.md
 ├── debug/                      # Debug sessions
 │   ├── debug-{timestamp}.md
@@ -192,9 +318,8 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/catch-up`** → `.docs/CATCH_UP.md` (overwritten each run)
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
 - **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
-- **`/brainstorm`** → `.docs/brainstorm/{topic}-{timestamp}.md`
-- **`/design`** → `.docs/design/{topic}-{timestamp}.md`
-- **`/code-review`** → `.docs/audits/{branch}/` (9 audit reports + summary)
+- **`/implement`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
+- **`/review`** → `.docs/reviews/{branch}/` (up to 11 review reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 ### Version Control
@@ -220,15 +345,15 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 3. Review recommended next actions
 
 ### During Development
-1. **Skills auto-activate** - `research` skill triggers for unfamiliar features, `pattern-check` validates architecture
-2. **Plan your work** - `/plan` to triage issues, or `/breakdown` for quick task capture
-3. **Implement efficiently** - `/implement` flows through todos automatically
+1. **Skills auto-activate** - `devflow-research` triggers for unfamiliar features, foundation skills validate patterns
+2. **Specify features** - `/specify` for detailed specs, or `/breakdown` for quick task capture
+3. **Execute tasks** - `/implement` for full lifecycle, or `/run` for incremental work
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
-5. `/code-review` - Review changes before committing
+5. `/review` - Review changes before committing
 6. `/commit` - Create intelligent atomic commits
 
 ### Creating Pull Requests
-1. `/code-review` - Comprehensive branch review
+1. `/review` - Comprehensive branch review
 2. `/commit` - Final commits with validation
 3. `/pull-request` - Create PR with smart description
 4. Wait for review feedback
@@ -237,12 +362,12 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 
 ### Ending a Session
 1. `/devlog` - Document decisions and state
-2. `/code-review` - Review branch before creating PR
+2. `/review` - Review branch before creating PR
 3. `/commit` - Final commits with validation
 4. `/pull-request` - Create PR if ready
 
 ### Creating a Release
-1. `/code-review` - Comprehensive branch review
+1. `/review` - Comprehensive branch review
 2. `/release` - Automated release workflow
    - Detects project type (Node.js, Rust, Python, Go, etc.)
    - Analyzes commits and suggests version bump
@@ -261,8 +386,21 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 
 | Command | Purpose | Options |
 |---------|---------|---------|
-| `npx devflow-kit init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope (user: user-wide, local: project-only)<br>`--verbose` - Show detailed installation output<br>`--skip-docs` - Skip creating `.docs/` structure |
-| `npx devflow-kit uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only (default: auto-detect all)<br>`--keep-docs` - Keep `.docs/` directory |
+| `npx devflow-kit init` | Initialize DevFlow for Claude Code | `--scope <user\|local>` - Installation scope<br>`--override-settings` - Override existing settings.json<br>`--verbose` - Show detailed installation output<br>`--skip-docs` - Skip creating `.docs/` structure |
+| `npx devflow-kit uninstall` | Remove DevFlow from Claude Code | `--scope <user\|local>` - Uninstall from specific scope only<br>`--keep-docs` - Keep `.docs/` directory |
+
+### Settings Override
+
+If you have an existing `settings.json`, use `--override-settings` to replace it:
+
+```bash
+devflow init --override-settings
+```
+
+DevFlow settings include:
+- Security deny list (126 blocked operations)
+- `ENABLE_TOOL_SEARCH` for deferred MCP tool loading (~85% token savings)
+- Smart statusline with context percentage
 
 **What `npx devflow-kit init` does:**
 
@@ -297,7 +435,7 @@ devflow init
 ### Custom Audit Rules
 ```bash
 # Extend sub-agents for project-specific patterns
-echo "Check for exposed API keys in config files" >> ~/.claude/agents/devflow/audit-security.md
+echo "Check for exposed API keys in config files" >> ~/.claude/agents/devflow/review-security.md
 ```
 
 ### Team Usage
@@ -315,9 +453,10 @@ git commit -m "Session status: completed user auth feature"
 "Fix this error"          # debug skill activates and guides systematic approach
 
 # Manual command invocation for structured workflows
-/brainstorm user authentication  # Explore architectural approaches
-/design JWT token system         # Create detailed implementation plan
-/code-review                     # Review changes before committing
+/specify user authentication     # Create detailed feature spec
+/breakdown                       # Quick task breakdown from discussion
+/implement                       # Run explore → plan → implement → review cycle
+/review                          # Review changes before committing
 /commit                          # Create atomic commits
 /release                         # Automated release workflow
 ```
@@ -349,16 +488,19 @@ npm run dev
 
 **Project Structure:**
 ```
-src/
-├── cli/                   # CLI source code (TypeScript)
-│   ├── commands/           # init.ts, uninstall.ts
-│   └── cli.ts             # CLI entry point
-└── claude/                # Claude Code configuration
-    ├── agents/devflow/     # Sub-agent definitions (.md)
-    ├── commands/devflow/   # Slash command definitions (.md)
-    ├── skills/devflow/     # Skill source (installed flat to ~/.claude/skills/)
-    ├── scripts/            # statusline.sh
-    └── settings.json       # Claude Code settings
+devflow/
+├── agents/                # Sub-agent definitions (.md)
+├── commands/              # Slash command definitions (.md)
+├── skills/                # Skill definitions (installed flat to ~/.claude/skills/)
+├── scripts/               # statusline.sh
+├── src/
+│   ├── cli/               # CLI source code (TypeScript)
+│   │   ├── commands/      # init.ts, uninstall.ts
+│   │   └── cli.ts         # CLI entry point
+│   ├── claude/            # CLAUDE.md template
+│   └── templates/         # settings.json template
+├── CLAUDE.md              # Developer guide
+└── README.md              # User documentation
 ```
 
 ## Support
