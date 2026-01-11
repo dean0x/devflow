@@ -1,6 +1,6 @@
 ---
 name: devflow-security-patterns
-description: Security vulnerability patterns and detection strategies. Load when reviewing code for security issues, implementing authentication/authorization, handling user input, or working with sensitive data. Used by SecurityReview agent.
+description: Security vulnerability patterns and detection strategies. Load when reviewing code for security issues, implementing authentication/authorization, handling user input, or working with sensitive data. Used by Reviewer agent (security focus).
 allowed-tools: Read, Grep, Glob
 ---
 
@@ -365,13 +365,3 @@ Map findings to OWASP Top 10 2021:
 | A09 | Logging Failures | Missing security logs, log injection |
 | A10 | SSRF | Unvalidated URLs in server requests |
 
----
-
-## Integration
-
-This skill provides domain expertise for:
-- **SecurityReview agent**: Use with `devflow-review-methodology`
-- **Coder agent**: Reference when implementing auth, input handling
-- **Code-smell skill**: Complements anti-pattern detection
-
-Load this skill when security analysis is needed.

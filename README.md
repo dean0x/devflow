@@ -75,6 +75,16 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 | `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
 | `devflow-typescript` | UNKNOWN OVER ANY |
 | `devflow-react` | COMPOSITION OVER PROPS |
+| `devflow-self-review` | FIX BEFORE RETURNING |
+| `devflow-architecture-patterns` | VIOLATIONS IN YOUR CHANGES ARE BLOCKING |
+| `devflow-performance-patterns` | MEASURE BEFORE OPTIMIZING |
+| `devflow-complexity-patterns` | COMPLEXITY IS THE ENEMY OF RELIABILITY |
+| `devflow-consistency-patterns` | FOLLOW EXISTING PATTERNS |
+| `devflow-tests-patterns` | TESTS MUST VALIDATE BEHAVIOR NOT IMPLEMENTATION |
+| `devflow-database-patterns` | MIGRATIONS MUST BE REVERSIBLE |
+| `devflow-documentation-patterns` | DOCS MUST MATCH CODE |
+| `devflow-dependencies-patterns` | NO VULNERABLE DEPENDENCIES IN PRODUCTION |
+| `devflow-regression-patterns` | PRESERVE EXISTING FUNCTIONALITY |
 
 Iron Laws are enforced automatically when skills activate.
 
@@ -94,13 +104,28 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `devflow-core-patterns` | Result types, DI, immutability, pure functions | Coder, TypescriptReview, ArchitectureReview |
-| `devflow-review-methodology` | 6-step review process, 3-category classification | All Review agents |
-| `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp, DocumentationReview |
+| `devflow-core-patterns` | Result types, DI, immutability, pure functions | Coder, Reviewer |
+| `devflow-review-methodology` | 6-step review process, 3-category classification | Reviewer |
+| `devflow-self-review` | 9-pillar self-review framework | Coder (via Stop hook) |
+| `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp |
 | `devflow-git-safety` | Git operations, lock handling, commit conventions | Commit, Coder, PullRequest, Release |
-| `devflow-security-patterns` | OWASP mapping, vulnerability patterns | SecurityReview |
 | `devflow-implementation-patterns` | CRUD, API, events, config, logging | Coder |
 | `devflow-codebase-navigation` | Exploration, pattern discovery, data flow | Coder |
+
+**Pattern Skills** (domain expertise for Reviewer focus areas)
+
+| Skill | Reviewer Focus | Purpose |
+|-------|----------------|---------|
+| `devflow-security-patterns` | `security` | Injection, auth, crypto vulnerabilities |
+| `devflow-architecture-patterns` | `architecture` | SOLID, coupling, layering, modularity |
+| `devflow-performance-patterns` | `performance` | Algorithms, N+1, memory, I/O, caching |
+| `devflow-complexity-patterns` | `complexity` | Cyclomatic complexity, readability |
+| `devflow-consistency-patterns` | `consistency` | Pattern violations, simplification |
+| `devflow-tests-patterns` | `tests` | Coverage, quality, brittleness |
+| `devflow-database-patterns` | `database` | Schema, queries, migrations |
+| `devflow-documentation-patterns` | `documentation` | Docs quality, alignment |
+| `devflow-dependencies-patterns` | `dependencies` | CVEs, versions, licenses |
+| `devflow-regression-patterns` | `regression` | Lost functionality, broken behavior |
 
 **Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
 
@@ -122,20 +147,24 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 
 **How Agents Use Skills:**
 
-Agents declare skills in their frontmatter to automatically load shared knowledge:
+The unified `Reviewer` agent loads ALL pattern skills and applies the relevant one based on the focus area specified in its invocation prompt:
 ```yaml
 ---
-name: SecurityReview
-description: Security vulnerability detection
-model: inherit
-skills: devflow-review-methodology, devflow-security-patterns
+name: Reviewer
+description: Universal code review agent with parameterized focus
+model: sonnet
+skills: devflow-review-methodology, devflow-security-patterns, devflow-architecture-patterns, ...
 ---
 ```
 
-This creates a **shared library pattern** where:
-- Common methodology is defined once (in foundation skills)
-- Agents inherit and extend with their specialization
-- No duplication of review process or core patterns across agents
+The `Coder` agent uses a Stop hook to run self-review before returning:
+```yaml
+hooks:
+  Stop:
+    - hooks:
+        - type: prompt
+          prompt: "Run self-review using devflow-self-review. Fix all P0/P1 issues..."
+```
 
 **Dual-Mode Pattern**: The `debug` skill also exists as a slash command (`/debug`) for manual control:
 - **Skill mode** (auto): Activates when Claude detects errors or failures
@@ -172,19 +201,13 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `Plan` | Implementation Planning | 1-3 spawned in parallel per task for architecture, testing, parallelization |
 | `Coder` | Implementation | 1-N spawned per task (parallel when work is parallelizable) |
 
-**Review Agents** (specialized code analysis):
+**Review Agent** (unified, parameterized):
 
-| Agent | Specialty | Purpose |
-|-------|-----------|---------|
-| `SecurityReview` | Security | Vulnerability detection and security code review |
-| `PerformanceReview` | Performance | Optimization and bottleneck detection |
-| `ArchitectureReview` | Architecture | Design pattern analysis and code structure review |
-| `TestsReview` | Testing | Test quality, coverage, and effectiveness analysis |
-| `ComplexityReview` | Complexity | Code complexity and maintainability assessment |
-| `DependenciesReview` | Dependencies | Dependency management and security analysis |
-| `DatabaseReview` | Database | Database design and optimization review |
-| `DocumentationReview` | Documentation | Docs-code alignment, API accuracy, comment quality |
-| `TypescriptReview` | TypeScript | Type safety enforcement and TypeScript code quality |
+| Agent | Purpose | Focus Areas |
+|-------|---------|-------------|
+| `Reviewer` | Universal code review with parameterized focus | security, architecture, performance, complexity, consistency, regression, tests, dependencies, documentation, typescript, database |
+
+The Reviewer agent is spawned multiple times in parallel, each with a different focus area specified in the prompt. This replaces the previous 11 individual review agents while maintaining the same specialized analysis.
 
 **Utility Agents** (focused tasks):
 
@@ -200,10 +223,13 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `Debug` | Debugging | Systematic debugging with hypothesis testing |
 | `Comment` | PR Comments | Create summary comments for non-diff issues |
 | `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
+| `Summary` | Review Synthesis | Aggregate review findings with merge recommendation |
+| `Synthesize` | Output Synthesis | Combine outputs from parallel agents into actionable summaries |
 
 **How Commands Orchestrate Agents:**
-- `/specify` → Skimmer + 4 Explore + 3 Plan agents (requirements focus) → GitHub issue
-- `/implement` → Skimmer + 4 Explore + 3 Plan + 1-N Coder + 5-8 Review agents → PR
+- `/specify` → Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize → GitHub issue
+- `/implement` → Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review) → `/review` → PR
+- `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Comment + TechDebt + Summary
 
 **Skimmer Integration:**
 
@@ -216,8 +242,8 @@ Requires `skim` tool: `npm install -g rskim` or `cargo install rskim`
 
 **Invoking Sub-Agents:**
 ```bash
-# Explicit invocation
-"Use the SecurityReview sub-agent to analyze this authentication code"
+# Explicit invocation with focus
+"Use the Reviewer agent with security focus to analyze this authentication code"
 
 # Automatic delegation (Claude Code decides which sub-agent to use)
 "Review this code for security issues"
@@ -319,7 +345,7 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
 - **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
 - **`/implement`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
-- **`/review`** → `.docs/reviews/{branch}/` (up to 11 review reports + summary)
+- **`/review`** → `.docs/reviews/{branch}/` (7-11 focus area reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 ### Version Control
@@ -434,8 +460,8 @@ devflow init
 
 ### Custom Audit Rules
 ```bash
-# Extend sub-agents for project-specific patterns
-echo "Check for exposed API keys in config files" >> ~/.claude/agents/devflow/review-security.md
+# Extend pattern skills for project-specific checks
+echo "Check for exposed API keys in config files" >> ~/.claude/skills/devflow-security-patterns/SKILL.md
 ```
 
 ### Team Usage
