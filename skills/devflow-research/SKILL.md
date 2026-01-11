@@ -95,7 +95,7 @@ After agent completes, summarize key findings:
 **Recommended Direction**: [suggested approach]
 **Trade-offs**: [key considerations]
 
-**Next Step**: Run `/design` to create detailed implementation plan for chosen approach.
+**Next Step**: Run `/implement` to execute the implementation lifecycle, or `/specify` for detailed requirements first.
 ```
 
 ## Examples
@@ -142,6 +142,6 @@ If not found → Launch Explore agent
 - **Exploration focus**: Explore agent explores approaches, not detailed planning
 - **Autonomous**: Auto-launches when research needed
 - **Clean context**: Main session stays focused on implementation
-- **Next step guidance**: Suggests `/design` after exploration completes
+- **Next step guidance**: Suggests `/implement` or `/specify` after exploration completes
 
-This ensures thorough exploration happens in separate context while main session remains clean. For detailed implementation planning, use `/design` after exploration.
+This ensures thorough exploration happens in separate context while main session remains clean. For detailed implementation, use `/implement` after exploration.

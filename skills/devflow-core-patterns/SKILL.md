@@ -642,14 +642,3 @@ Before approving code:
 - [ ] Naming conventions followed (PascalCase, camelCase, SCREAMING_SNAKE_CASE)
 - [ ] Performance-critical code measured before optimizing
 
----
-
-## Integration
-
-This skill is the foundation for:
-- **Coder agent**: Follow these patterns when implementing
-- **Review agents**: Check code against these patterns
-- **Debug agent**: Use these patterns to identify root causes
-- **Test design**: These patterns make testing trivial
-
-When implementing, if you're unsure about a pattern, consult this skill first.

@@ -1,6 +1,6 @@
 ---
 name: devflow-review-methodology
-description: Standard review process for all DevFlow review agents. Load when performing code reviews to ensure consistent 6-step process with 3-category issue classification. This is the shared methodology for SecurityReview, PerformanceReview, and all other review agents.
+description: Standard review process for all DevFlow review agents. Load when performing code reviews to ensure consistent 6-step process with 3-category issue classification. This is the shared methodology used by the unified Reviewer agent across all focus areas.
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
@@ -355,17 +355,17 @@ echo "Review saved: $REPORT_FILE"
 
 ## Integration
 
-This methodology is used by:
-- **SecurityReview**: Security-focused analysis
-- **PerformanceReview**: Performance-focused analysis
-- **ArchitectureReview**: Architecture-focused analysis
-- **TestsReview**: Test quality analysis
-- **ConsistencyReview**: Code consistency analysis
-- **ComplexityReview**: Complexity analysis
-- **RegressionReview**: Regression detection
-- **DependenciesReview**: Dependency analysis
-- **DocumentationReview**: Documentation analysis
-- **TypescriptReview**: TypeScript analysis
-- **DatabaseReview**: Database analysis
+This methodology is used by the **Reviewer** agent with different focus areas:
+- `security` - Security-focused analysis (uses devflow-security-patterns)
+- `performance` - Performance-focused analysis (uses devflow-performance-patterns)
+- `architecture` - Architecture-focused analysis (uses devflow-architecture-patterns)
+- `tests` - Test quality analysis (uses devflow-tests-patterns)
+- `consistency` - Code consistency analysis (uses devflow-consistency-patterns)
+- `complexity` - Complexity analysis (uses devflow-complexity-patterns)
+- `regression` - Regression detection (uses devflow-regression-patterns)
+- `dependencies` - Dependency analysis (uses devflow-dependencies-patterns)
+- `documentation` - Documentation analysis (uses devflow-documentation-patterns)
+- `typescript` - TypeScript analysis (uses devflow-typescript)
+- `database` - Database analysis (uses devflow-database-patterns)
 
-All review agents should load this skill and apply its methodology with their domain expertise.
+The Reviewer agent loads all pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.

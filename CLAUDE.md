@@ -99,18 +99,23 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
 - `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
-- `*Review` (11 specialized + Summary) → `.docs/reviews/{branch-slug}/{type}-report-{timestamp}.md`
+- `Reviewer` → `.docs/reviews/{branch-slug}/{focus}.md` (one file per focus area)
+- `Summary` → `.docs/reviews/{branch-slug}/SUMMARY.md`
 - `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
-**Orchestration commands** (run in main context, spawn native agents):
-- `/specify` - Spawns 4 Explore + 3 Plan agents (requirements focus), creates GitHub issue
-- `/implement` - Spawns 4 Explore + 3 Plan + 1-N Coder + 5-8 review-* agents
+**Orchestration commands** (run in main context, spawn agents):
+- `/specify` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize, creates GitHub issue
+- `/implement` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review), then calls `/review`
+- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Comment + TechDebt + Summary
 
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)
 - `Plan` - Implementation planning with trade-off analysis
-- `Coder` - Code implementation in isolated worktrees
-- `*Review` (11 specialized + Summary) - Specialized code analysis
+- `Coder` - Code implementation in isolated worktrees + self-review via Stop hook
+
+**Review agents**:
+- `Reviewer` - Universal parameterized reviewer (focus via prompt injection)
+- `Summary` - Aggregates review findings, determines merge recommendation
 
 **Utility agents** (focused tasks, no sub-spawning):
 - `Commit` - Creates git commit only
@@ -310,13 +315,28 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, TypescriptReview, ArchitectureReview |
-| `devflow-review-methodology` | 6-step review process, 3-category issue classification | All Review agents (12 total) |
-| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, DocumentationReview, Debug |
+| `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, Reviewer |
+| `devflow-review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
+| `devflow-self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Coder (via Stop hook) |
+| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, Debug |
 | `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Commit, Coder, PullRequest, Release |
-| `devflow-security-patterns` | Security vulnerability patterns, OWASP mapping, detection strategies | SecurityReview |
 | `devflow-implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
 | `devflow-codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
+
+**Tier 1b: Pattern Skills** (domain expertise for Reviewer agent focus areas)
+
+| Skill | Purpose | Reviewer Focus |
+|-------|---------|----------------|
+| `devflow-security-patterns` | Injection, auth, crypto, OWASP vulnerabilities | `security` |
+| `devflow-architecture-patterns` | SOLID violations, coupling, layering, modularity | `architecture` |
+| `devflow-performance-patterns` | Algorithms, N+1, memory, I/O, caching | `performance` |
+| `devflow-complexity-patterns` | Cyclomatic complexity, readability, maintainability | `complexity` |
+| `devflow-consistency-patterns` | Pattern violations, simplification, truncation | `consistency` |
+| `devflow-tests-patterns` | Coverage, quality, brittle tests, mocking | `tests` |
+| `devflow-database-patterns` | Schema, queries, migrations, indexes | `database` |
+| `devflow-documentation-patterns` | Docs quality, alignment, code-comment drift | `documentation` |
+| `devflow-dependencies-patterns` | CVEs, versions, licenses, supply chain | `dependencies` |
+| `devflow-regression-patterns` | Lost functionality, broken behavior, migrations | `regression` |
 
 **Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
 
@@ -342,34 +362,58 @@ Agents declare skills in their frontmatter to automatically load shared knowledg
 
 ```yaml
 ---
-name: SecurityReview
-description: Security vulnerability detection
-model: inherit
-skills: devflow-review-methodology, devflow-security-patterns
+name: Reviewer
+description: Universal code review agent with parameterized focus
+model: sonnet
+skills: devflow-review-methodology, devflow-security-patterns, devflow-architecture-patterns, ...
 ---
 ```
+
+The unified `Reviewer` agent loads ALL pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.
 
 ### Iron Laws
 
 Every skill has a single, non-negotiable **Iron Law** - a core principle that must never be violated. Iron Laws are enforced automatically when skills activate.
 
+**Foundation Skills:**
+
 | Skill | Iron Law |
 |-------|----------|
 | `devflow-core-patterns` | NEVER THROW IN BUSINESS LOGIC |
 | `devflow-review-methodology` | NEVER BLOCK FOR PRE-EXISTING ISSUES |
+| `devflow-self-review` | FIX BEFORE RETURNING |
 | `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
+| `devflow-implementation-patterns` | FOLLOW EXISTING PATTERNS |
+| `devflow-codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
+
+**Pattern Skills (Reviewer focus areas):**
+
+| Skill | Iron Law |
+|-------|----------|
+| `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
+| `devflow-architecture-patterns` | SEPARATION OF CONCERNS IS NON-NEGOTIABLE |
+| `devflow-performance-patterns` | MEASURE BEFORE OPTIMIZING |
+| `devflow-complexity-patterns` | IF YOU CAN'T UNDERSTAND IT IN 5 MINUTES, IT'S TOO COMPLEX |
+| `devflow-consistency-patterns` | MATCH EXISTING PATTERNS OR JUSTIFY DEVIATION |
+| `devflow-tests-patterns` | TESTS VALIDATE BEHAVIOR, NOT IMPLEMENTATION |
+| `devflow-database-patterns` | EVERY QUERY MUST HAVE AN EXECUTION PLAN |
+| `devflow-documentation-patterns` | DOCUMENTATION MUST MATCH REALITY |
+| `devflow-dependencies-patterns` | EVERY DEPENDENCY IS AN ATTACK SURFACE |
+| `devflow-regression-patterns` | WHAT WORKED BEFORE MUST WORK AFTER |
+
+**Specialized & Domain Skills:**
+
+| Skill | Iron Law |
+|-------|----------|
 | `devflow-debug` | NO FIXES WITHOUT ROOT CAUSE INVESTIGATION |
 | `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
 | `devflow-code-smell` | NO FAKE SOLUTIONS |
 | `devflow-research` | NO IMPLEMENTATION WITHOUT EXPLORATION |
 | `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
-| `devflow-docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
-| `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
-| `devflow-codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
-| `devflow-implementation-patterns` | FOLLOW EXISTING PATTERNS |
+| `devflow-worktree` | ONE TASK, ONE WORKTREE |
 | `devflow-react` | COMPOSITION OVER PROPS |
 | `devflow-typescript` | UNKNOWN OVER ANY |
-| `devflow-worktree` | ONE TASK, ONE WORKTREE |
 
 **Iron Law Format** in SKILL.md files:
 ```markdown

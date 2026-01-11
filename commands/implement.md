@@ -312,75 +312,30 @@ PR_URL=$(gh pr view --json url -q '.url')
 
 ---
 
-## Phase 8: Review (Parallel)
+## Phase 8: Code Review
 
-Setup:
+**Invoke the `/review` command** to run comprehensive review. This ensures review orchestration logic is not duplicated.
+
+The `/review` command will:
+1. Spawn Reviewer agents in parallel (7 always + conditional)
+2. Each Reviewer focuses on one area (security, architecture, performance, etc.)
+3. Create PR inline comments for blocking issues
+4. Track pre-existing issues in tech debt backlog
+5. Synthesize findings with merge recommendation
 
 ```bash
-BRANCH_SLUG=$(echo "${TASK_BRANCH}" | sed 's/\//-/g')
-REVIEW_TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-REVIEW_DIR=".docs/reviews/${BRANCH_SLUG}"
-mkdir -p "$REVIEW_DIR"
+# /review handles:
+# - Spawning Reviewer agents with focus areas
+# - Comment agent for PR comments
+# - TechDebt agent for backlog tracking
+# - Summary agent for recommendation
 ```
 
-Spawn 6 review agents **in a single message**:
-
-```
-Task(subagent_type="SecurityReview"):
-"Review PR #${PR_NUMBER}. Save: ${REVIEW_DIR}/security-report.${REVIEW_TIMESTAMP}.md"
-
-Task(subagent_type="ArchitectureReview"):
-"Review PR #${PR_NUMBER}. Save: ${REVIEW_DIR}/architecture-report.${REVIEW_TIMESTAMP}.md"
-
-Task(subagent_type="PerformanceReview"):
-"Review PR #${PR_NUMBER}. Save: ${REVIEW_DIR}/performance-report.${REVIEW_TIMESTAMP}.md"
-
-Task(subagent_type="ComplexityReview"):
-"Review PR #${PR_NUMBER}. Save: ${REVIEW_DIR}/complexity-report.${REVIEW_TIMESTAMP}.md"
-
-Task(subagent_type="ConsistencyReview"):
-"Review PR #${PR_NUMBER}. Save: ${REVIEW_DIR}/consistency-report.${REVIEW_TIMESTAMP}.md"
-
-Task(subagent_type="TestsReview"):
-"Review PR #${PR_NUMBER}. Save: ${REVIEW_DIR}/tests-report.${REVIEW_TIMESTAMP}.md"
-```
-
-**Conditionally add** (based on changed files):
-- `TypescriptReview` - if .ts/.tsx files
-- `DatabaseReview` - if SQL/migration files
-- `DependenciesReview` - if package.json/requirements.txt
+The review outputs are captured from the `/review` command's final report.
 
 ---
 
-## Phase 9: Review Synthesis (Parallel)
-
-**WAIT** for Phase 8, then spawn synthesis agents **in a single message**:
-
-```
-Task(subagent_type="Comment"):
-"Create PR comments for swarm task.
-PR_NUMBER: ${PR_NUMBER}
-REVIEW_BASE_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${REVIEW_TIMESTAMP}
-Create inline comments, consolidate skipped into summary"
-
-Task(subagent_type="TechDebt"):
-"Track tech debt for swarm task.
-REVIEW_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${REVIEW_TIMESTAMP}
-Add pre-existing issues to backlog"
-
-Task(subagent_type="Summary"):
-"Synthesize review findings for swarm task.
-PR_NUMBER: ${PR_NUMBER}
-REVIEW_BASE_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${REVIEW_TIMESTAMP}
-Generate summary with merge recommendation"
-```
-
----
-
-## Phase 10: Final Report
+## Phase 9: Final Report
 
 Display agent outputs:
 
@@ -403,9 +358,8 @@ ${TASK_DESCRIPTION}
 | Orient | 1 (Skimmer) | ✅ |
 | Explore | 4 | ✅ |
 | Plan | 3 | ✅ |
-| Implement | {n} ({parallel/sequential}) | ✅ |
-| Review | {n} | ✅ |
-| Synthesis | 3 | ✅ |
+| Implement | {n} ({parallel/sequential}) + self-review | ✅ |
+| Review | via /review command | ✅ |
 
 ---
 
@@ -500,25 +454,19 @@ git worktree prune
 │
 ├─ Phase 6: Implement
 │  └─ 1-N Coder agents (parallel if beneficial)
+│  └─ Each Coder runs self-review via Stop hook (9 pillars)
 │
 ├─ Phase 7: Create PR (if parallel coders)
 │  └─ PullRequest agent
 │
-├─ Phase 8: Review (PARALLEL)
-│  ├─ SecurityReview
-│  ├─ ArchitectureReview
-│  ├─ PerformanceReview
-│  ├─ ComplexityReview
-│  ├─ ConsistencyReview
-│  ├─ TestsReview
-│  └─ (conditional: TypeScript, Database, Dependencies)
+├─ Phase 8: Code Review
+│  └─ Invokes /review command (DRY - no duplication)
+│      ├─ Reviewer agents (7 focus areas + conditional)
+│      ├─ Comment agent
+│      ├─ TechDebt agent
+│      └─ Summary agent
 │
-├─ Phase 9: Review Synthesis (PARALLEL)
-│  ├─ Comment agent
-│  ├─ TechDebt agent
-│  └─ Summary agent
-│
-└─ Phase 10: Display agent outputs
+└─ Phase 9: Display agent outputs
 ```
 
 ---

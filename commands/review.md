@@ -110,25 +110,25 @@ echo "Documentation: $([ -n "$HAS_DOCS" ] && echo 'yes' || echo 'no')"
 echo "Tests: $([ -n "$HAS_TESTS" ] && echo 'yes' || echo 'no')"
 ```
 
-### Determine Audits to Run
+### Determine Review Focus Areas
 
-| Audit | Run When |
-|-------|----------|
-| SecurityReview | Always |
-| PerformanceReview | Always |
-| ArchitectureReview | Always |
-| ComplexityReview | Always |
-| ConsistencyReview | Always |
-| RegressionReview | Always |
-| TestsReview | Always |
-| DependenciesReview | Dependencies changed |
-| DocumentationReview | Docs or significant code changed |
-| TypescriptReview | .ts/.tsx files changed |
-| DatabaseReview | db/migration files changed |
+| Focus | Run When | Pattern Skill Applied |
+|-------|----------|----------------------|
+| security | Always | devflow-security-patterns |
+| architecture | Always | devflow-architecture-patterns |
+| performance | Always | devflow-performance-patterns |
+| complexity | Always | devflow-complexity-patterns |
+| consistency | Always | devflow-consistency-patterns |
+| regression | Always | devflow-regression-patterns |
+| tests | Always | devflow-tests-patterns |
+| dependencies | Dependencies changed | devflow-dependencies-patterns |
+| documentation | Docs or significant code changed | devflow-documentation-patterns |
+| typescript | .ts/.tsx files changed | devflow-typescript |
+| database | db/migration files changed | devflow-database-patterns |
 
 ---
 
-## Phase 3: Run Audits (Parallel)
+## Phase 3: Run Reviews (Parallel)
 
 Setup coordination:
 
@@ -139,25 +139,25 @@ REVIEW_DIR=".docs/reviews/${BRANCH_SLUG}"
 mkdir -p "$REVIEW_DIR"
 ```
 
-**Spawn review agents in parallel** using Task tool. For each review:
+**Spawn Reviewer agents in parallel** using Task tool. Each Reviewer is invoked with a specific focus via prompt injection:
 
 ```
-Task(subagent_type="{AuditType}Review"):
+Task(subagent_type="Reviewer"):
 
-"Analyze branch for {type} issues. Create PR line comments for issues found.
+"Review this code focusing exclusively on {FOCUS}.
+Apply patterns from devflow-{focus}-patterns skill.
+Follow the 6-step process from devflow-review-methodology.
 
 PR_NUMBER: ${PR_NUMBER}
 BASE_BRANCH: ${BASE_BRANCH}
 REVIEW_BASE_DIR: ${REVIEW_DIR}
 TIMESTAMP: ${TIMESTAMP}
 
-Save report to: ${REVIEW_DIR}/{type}-report.${TIMESTAMP}.md
-Report back: issues found, comments created, comments skipped"
+Output findings to: ${REVIEW_DIR}/{focus}.md
+Report back: issues found by category (blocking/should-fix/informational), merge recommendation"
 ```
 
-**Always run**: SecurityReview, PerformanceReview, ArchitectureReview, ComplexityReview, ConsistencyReview, RegressionReview, TestsReview (7 agents)
-
-**Conditionally run**: DependenciesReview, DocumentationReview, TypescriptReview, DatabaseReview
+Spawn one Reviewer per focus area from the table above. Always run the 7 "Always" focus areas; conditionally run the others based on changed file types.
 
 ---
 

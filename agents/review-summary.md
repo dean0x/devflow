@@ -148,7 +148,7 @@ Create `${REVIEW_BASE_DIR}/review-summary.${TIMESTAMP}.md`:
 {For each blocking issue:}
 
 ### [{SEVERITY}] {Issue Title}
-**Review**: {SecurityReview|PerformanceReview|etc.}
+**Review**: {Reviewer (security)|Reviewer (performance)|etc.}
 **Location**: `{file}:{line}`
 
 {Description of the issue}

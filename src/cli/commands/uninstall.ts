@@ -153,7 +153,6 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-review-methodology',
           'devflow-docs-framework',
           'devflow-git-safety',
-          'devflow-security-patterns',
           'devflow-implementation-patterns',
           'devflow-codebase-navigation',
           // Tier 2: Specialized Skills
@@ -163,9 +162,21 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-debug',
           'devflow-input-validation',
           'devflow-worktree',
+          'devflow-self-review',
           // Tier 3: Domain-Specific Skills
           'devflow-typescript',
           'devflow-react',
+          // Review Pattern Skills (used by Reviewer agent)
+          'devflow-architecture-patterns',
+          'devflow-complexity-patterns',
+          'devflow-consistency-patterns',
+          'devflow-database-patterns',
+          'devflow-dependencies-patterns',
+          'devflow-documentation-patterns',
+          'devflow-performance-patterns',
+          'devflow-regression-patterns',
+          'devflow-security-patterns',
+          'devflow-tests-patterns',
           // Deprecated (for cleanup of old installs)
           'devflow-pattern-check',
           'devflow-error-handling'

@@ -107,11 +107,11 @@ Before creating comments, deduplicate similar issues:
 **Deduplication example:**
 ```
 BEFORE:
-- SecurityReview: src/api.ts:45 - Missing validation
-- ArchitectureReview: src/api.ts:45 - Input not validated
+- Reviewer (security): src/api.ts:45 - Missing validation
+- Reviewer (architecture): src/api.ts:45 - Input not validated
 
 AFTER (merged):
-- src/api.ts:45 - Missing input validation (Security, Architecture)
+- src/api.ts:45 - Missing input validation (security, architecture)
 ```
 
 Create a deduplicated list of unique issues to comment on.
