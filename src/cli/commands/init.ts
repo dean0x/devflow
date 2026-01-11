@@ -98,7 +98,6 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'devflow-review-methodology', description: '6-step review process' },
   { name: 'devflow-docs-framework', description: 'Documentation conventions' },
   { name: 'devflow-git-safety', description: 'Git operations & safety' },
-  { name: 'devflow-security-patterns', description: 'Security vulnerability patterns' },
   { name: 'devflow-implementation-patterns', description: 'CRUD, API, events, config' },
   { name: 'devflow-codebase-navigation', description: 'Exploration & pattern discovery' },
   // Tier 2: Specialized Skills (user-facing, auto-activate)
@@ -108,9 +107,21 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'devflow-debug', description: 'Systematic debugging (auto)' },
   { name: 'devflow-input-validation', description: 'Boundary validation' },
   { name: 'devflow-worktree', description: 'Parallel development isolation' },
+  { name: 'devflow-self-review', description: '9-pillar self-review framework' },
   // Tier 3: Domain-Specific Skills
   { name: 'devflow-typescript', description: 'TypeScript patterns & idioms' },
   { name: 'devflow-react', description: 'React components & hooks' },
+  // Review Pattern Skills (used by Reviewer agent)
+  { name: 'devflow-architecture-patterns', description: 'Architecture & design patterns' },
+  { name: 'devflow-complexity-patterns', description: 'Complexity & maintainability' },
+  { name: 'devflow-consistency-patterns', description: 'Code consistency & style' },
+  { name: 'devflow-database-patterns', description: 'Database design & queries' },
+  { name: 'devflow-dependencies-patterns', description: 'Dependency management' },
+  { name: 'devflow-documentation-patterns', description: 'Documentation quality' },
+  { name: 'devflow-performance-patterns', description: 'Performance optimization' },
+  { name: 'devflow-regression-patterns', description: 'Regression detection' },
+  { name: 'devflow-security-patterns', description: 'Security vulnerabilities' },
+  { name: 'devflow-tests-patterns', description: 'Test quality & coverage' },
 ];
 
 /**
