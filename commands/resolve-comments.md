@@ -42,7 +42,7 @@ else
 
   if [ -z "$PR_NUMBER" ]; then
     echo "❌ No PR found for branch: $CURRENT_BRANCH"
-    echo "   Create PR first: /pull-request"
+    echo "   Create PR first using: gh pr create"
     echo "   Or specify PR number: /resolve-comments <number>"
     exit 1
   fi
@@ -566,7 +566,7 @@ For comments that are just questions (no code changes needed):
 
 ## Integration with Workflow
 
-**After /pull-request:**
+**After PR creation:**
 ```
 1. Team reviews PR
 2. Feedback comes in
@@ -579,5 +579,5 @@ For comments that are just questions (no code changes needed):
 **Integration Points:**
 - After feedback: `/resolve-comments` (this command)
 - Before pushing changes: `/review` (optional)
-- After changes: `/commit` (if manual commit preferred)
+- After changes: Apply `devflow-commit` patterns (if manual commit preferred)
 - After addressing all: Request re-review via `gh pr review`

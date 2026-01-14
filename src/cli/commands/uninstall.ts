@@ -159,7 +159,8 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-test-design',
           'devflow-code-smell',
           'devflow-research',
-          'devflow-debug',
+          'devflow-commit',
+          'devflow-pull-request',
           'devflow-input-validation',
           'devflow-worktree',
           'devflow-self-review',
@@ -179,7 +180,8 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-tests-patterns',
           // Deprecated (for cleanup of old installs)
           'devflow-pattern-check',
-          'devflow-error-handling'
+          'devflow-error-handling',
+          'devflow-debug'
         ];
 
         let skillsRemoved = 0;

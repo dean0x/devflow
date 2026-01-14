@@ -418,9 +418,9 @@ git commit -m "message"
 ## Integration
 
 This skill is used by:
-- **Commit agent**: Safe commit creation
-- **PullRequest agent**: Safe push and PR creation
 - **Coder agent**: Safe commits in worktrees
 - **Release agent**: Safe tagging and pushing
+- **devflow-commit skill**: Atomic commit patterns
+- **devflow-pull-request skill**: PR creation patterns
 
 Load this skill when performing any git operations.

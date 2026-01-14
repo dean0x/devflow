@@ -69,7 +69,7 @@ After all todos completed:
 
 Files modified: {list}
 
-Next: Run /review (if major changes) or /commit
+Next: Run /review (if major changes) or commit using devflow-commit patterns
 ```
 
 ---

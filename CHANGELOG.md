@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`devflow-commit` skill** - Atomic commit patterns, message format, safety scanning
+  - Iron Law: ATOMIC COMMITS OR NO COMMITS
+  - Auto-triggers when staging files or creating commits
+- **`devflow-pull-request` skill** - PR quality, descriptions, size assessment
+  - Iron Law: HONEST DESCRIPTIONS OR NO PR
+  - Auto-triggers when creating PRs or generating descriptions
 - **Iron Laws** - Every skill now has a single, non-negotiable core principle
   - 15 Iron Laws across all skills (e.g., "NEVER THROW IN BUSINESS LOGIC", "NO FAKE SOLUTIONS")
   - Automatically enforced when skills activate
@@ -43,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/specify` now requires explicit user confirmation at each gate
 - Statusline shows actual percentage instead of just large context warning
 - Settings template includes permissions.deny and env configuration
+- Commit and PR patterns now auto-activate via skills instead of requiring explicit commands
+
+### Removed
+- **`/commit` command** - Replaced by `devflow-commit` skill (use `git commit` directly)
+- **`/debug` command** - Removed entirely (Claude Code's built-in debugging is sufficient)
+- **`/pull-request` command** - Replaced by `devflow-pull-request` skill (use `gh pr create` directly)
+- **`Commit` agent** - Patterns moved to `devflow-commit` skill
+- **`Debug` agent** - Removed entirely
+- **`PullRequest` agent** - Patterns moved to `devflow-pull-request` skill
+- **`devflow-debug` skill** - Removed entirely
 
 ---
 

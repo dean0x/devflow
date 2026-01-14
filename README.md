@@ -56,7 +56,8 @@ DevFlow is now installed and ready to use in Claude Code.
 | `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior vs implementation) | Tests are written or modified |
 | `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features are implemented, code is reviewed |
 | `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
-| `devflow-debug` | Systematic debugging with hypothesis testing and root cause analysis | Errors occur, tests fail, performance issues detected |
+| `devflow-commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
+| `devflow-pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
 | `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories needed |
 
@@ -69,7 +70,8 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 | `devflow-core-patterns` | NEVER THROW IN BUSINESS LOGIC |
 | `devflow-code-smell` | NO FAKE SOLUTIONS |
 | `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
-| `devflow-debug` | NO FIXES WITHOUT ROOT CAUSE INVESTIGATION |
+| `devflow-commit` | ATOMIC COMMITS OR NO COMMITS |
+| `devflow-pull-request` | HONEST DESCRIPTIONS OR NO PR |
 | `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
 | `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
 | `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
@@ -108,7 +110,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-review-methodology` | 6-step review process, 3-category classification | Reviewer |
 | `devflow-self-review` | 9-pillar self-review framework | Coder (via Stop hook) |
 | `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp |
-| `devflow-git-safety` | Git operations, lock handling, commit conventions | Commit, Coder, PullRequest, Release |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions | Coder, Release |
 | `devflow-implementation-patterns` | CRUD, API, events, config, logging | Coder |
 | `devflow-codebase-navigation` | Exploration, pattern discovery, data flow | Coder |
 
@@ -134,7 +136,8 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-test-design` | Test quality enforcement | Tests written or modified |
 | `devflow-code-smell` | Anti-pattern detection | Features implemented |
 | `devflow-research` | Pre-implementation planning | Unfamiliar features requested |
-| `devflow-debug` | Systematic debugging | Errors occur, tests fail |
+| `devflow-commit` | Atomic commit patterns | Staging files, creating commits |
+| `devflow-pull-request` | PR quality & descriptions | Creating PRs |
 | `devflow-input-validation` | Boundary validation | API endpoints created |
 | `devflow-worktree` | Git worktree management | Parallel implementation |
 
@@ -166,12 +169,6 @@ hooks:
           prompt: "Run self-review using devflow-self-review. Fix all P0/P1 issues..."
 ```
 
-**Dual-Mode Pattern**: The `debug` skill also exists as a slash command (`/debug`) for manual control:
-- **Skill mode** (auto): Activates when Claude detects errors or failures
-- **Command mode** (manual): Use `/debug` when you want explicit control over the debugging workflow
-
-This gives you the best of both worlds: automatic assistance when needed, manual control when preferred.
-
 ### 📊 Slash Commands (User-Invoked)
 
 | Command | Purpose | When to Use |
@@ -181,10 +178,7 @@ This gives you the best of both worlds: automatic assistance when needed, manual
 | `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
 | `/implement` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
 | `/run` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
-| `/debug` | Systematic debugging workflow with hypothesis testing | When errors occur, tests fail, or investigating issues |
 | `/review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
-| `/commit` | Intelligent atomic commit creation with safety checks | When ready to commit |
-| `/pull-request` | Create PR with comprehensive analysis and smart description | After commits, ready to create PR |
 | `/resolve-comments` | Systematically address PR review feedback | After PR feedback, need to resolve comments |
 | `/release` | Automated release workflow with version management and publishing | Creating a new release |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
@@ -216,11 +210,8 @@ The Reviewer agent is spawned multiple times in parallel, each with a different 
 | `Skimmer` | Codebase Orientation | Fast codebase overview using `skim` for 60-90% token reduction |
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
-| `Commit` | Git Operations | Intelligent commit creation with safety checks |
 | `GetIssue` | GitHub Issues | Fetch issue details for planning |
-| `PullRequest` | PR Creation | Analyze commits/changes and generate PR descriptions |
 | `Release` | Release Automation | Project-agnostic release workflow with version management |
-| `Debug` | Debugging | Systematic debugging with hypothesis testing |
 | `Comment` | PR Comments | Create summary comments for non-diff issues |
 | `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
 | `Summary` | Review Synthesis | Aggregate review findings with merge recommendation |
@@ -316,9 +307,6 @@ DevFlow agents automatically create and maintain project documentation in the `.
 │   └── state.json
 ├── design/                     # Implementation plans (from Design agent)
 │   └── {topic-slug}-{timestamp}.md
-├── debug/                      # Debug sessions
-│   ├── debug-{timestamp}.md
-│   └── KNOWLEDGE_BASE.md
 ├── releases/                   # Release notes
 │   └── RELEASE_NOTES_v{version}.md
 ├── status/                     # Development logs
@@ -343,7 +331,6 @@ DevFlow agents automatically create and maintain project documentation in the `.
 
 - **`/catch-up`** → `.docs/CATCH_UP.md` (overwritten each run)
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
-- **`/debug`** → `.docs/debug/debug-{timestamp}.md` + KNOWLEDGE_BASE
 - **`/implement`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
 - **`/review`** → `.docs/reviews/{branch}/` (7-11 focus area reports + summary)
 - **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
@@ -355,13 +342,10 @@ DevFlow agents automatically create and maintain project documentation in the `.
 # Exclude ephemeral catch-up summaries
 .docs/CATCH_UP.md
 
-# Optional: Exclude debug sessions (team preference)
-.docs/debug/
-
 # Keep everything else for project history
 ```
 
-The `.docs/` structure provides a searchable history of decisions, designs, and debugging sessions.
+The `.docs/` structure provides a searchable history of decisions, designs, and review sessions.
 
 ## Development Workflow
 
@@ -376,12 +360,12 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 3. **Execute tasks** - `/implement` for full lifecycle, or `/run` for incremental work
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
 5. `/review` - Review changes before committing
-6. `/commit` - Create intelligent atomic commits
+6. **Commit changes** - `devflow-commit` skill enforces atomic commits and message format
 
 ### Creating Pull Requests
 1. `/review` - Comprehensive branch review
-2. `/commit` - Final commits with validation
-3. `/pull-request` - Create PR with smart description
+2. **Commit changes** - `devflow-commit` skill enforces quality
+3. **Create PR** - `devflow-pull-request` skill ensures comprehensive descriptions
 4. Wait for review feedback
 5. `/resolve-comments` - Address feedback systematically
 6. Repeat steps 4-5 until approved
@@ -389,8 +373,8 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 ### Ending a Session
 1. `/devlog` - Document decisions and state
 2. `/review` - Review branch before creating PR
-3. `/commit` - Final commits with validation
-4. `/pull-request` - Create PR if ready
+3. **Commit changes** - `devflow-commit` skill enforces quality
+4. **Create PR** - `devflow-pull-request` skill ensures comprehensive descriptions
 
 ### Creating a Release
 1. `/review` - Comprehensive branch review
@@ -403,10 +387,10 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 3. Verify package in registry
 
 ### When Things Go Wrong
-1. **Skills auto-activate** - `debug` skill triggers on errors/failures with systematic approach
+1. **Investigate systematically** - Follow root cause analysis approach
 2. Check git log and recent commits
 3. Revert changes using git
-4. Document lessons learned in `.docs/debug/`
+4. Document lessons learned
 
 ## CLI Commands
 
@@ -476,14 +460,13 @@ git commit -m "Session status: completed user auth feature"
 ```bash
 # Skills auto-activate during development
 "Add JWT authentication"  # research skill triggers for unfamiliar features
-"Fix this error"          # debug skill activates and guides systematic approach
+"Fix this error"          # systematic debugging approach guides investigation
 
 # Manual command invocation for structured workflows
 /specify user authentication     # Create detailed feature spec
 /breakdown                       # Quick task breakdown from discussion
 /implement                       # Run explore → plan → implement → review cycle
 /review                          # Review changes before committing
-/commit                          # Create atomic commits
 /release                         # Automated release workflow
 ```
 

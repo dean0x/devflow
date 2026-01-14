@@ -287,20 +287,24 @@ Create PR against ${TARGET_BRANCH} when complete"
 
 ## Phase 7: Create PR (if parallel implementation)
 
-If multiple Coders were used, spawn PullRequest agent to create unified PR:
+If multiple Coders were used, apply `devflow-pull-request` skill patterns to create unified PR:
 
-```
-Task(subagent_type="PullRequest"):
+```bash
+# Apply devflow-pull-request patterns for comprehensive PR
+# 1. Analyze all commits from parallel coders
+# 2. Generate title following conventional format
+# 3. Create description with all required sections
+# 4. Run gh pr create
 
-"Create PR for swarm task: ${TASK_DESCRIPTION}
+cd "${WORKTREE_DIR}"
+git push -u origin "${TASK_BRANCH}"
 
-TASK_BRANCH: ${TASK_BRANCH}
-TARGET_BRANCH: ${TARGET_BRANCH}
-WORKTREE_DIR: ${WORKTREE_DIR}
-
-Commits from: ${CODER_COMMITS}
-
-Create comprehensive PR description"
+# Create PR using devflow-pull-request patterns
+gh pr create \
+  --base "${TARGET_BRANCH}" \
+  --head "${TASK_BRANCH}" \
+  --title "${PR_TITLE}" \
+  --body "${PR_DESCRIPTION}"
 ```
 
 Capture PR info:
@@ -407,7 +411,7 @@ If any agent fails:
 
 **Options**:
 1. Retry phase
-2. Spawn Debug agent to investigate
+2. Investigate the error systematically
 3. Escalate to user
 ```
 
@@ -457,7 +461,7 @@ git worktree prune
 │  └─ Each Coder runs self-review via Stop hook (9 pillars)
 │
 ├─ Phase 7: Create PR (if parallel coders)
-│  └─ PullRequest agent
+│  └─ Apply devflow-pull-request patterns
 │
 ├─ Phase 8: Code Review
 │  └─ Invokes /review command (DRY - no duplication)

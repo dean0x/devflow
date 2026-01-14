@@ -25,9 +25,6 @@ All generated documentation lives under `.docs/` in the project root:
 ├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── debug/                              # Debug sessions
-│   ├── debug-{timestamp}.md
-│   └── KNOWLEDGE_BASE.md
 ├── releases/                           # Release notes
 │   └── RELEASE_NOTES_v{version}.md
 ├── status/                             # Development logs
@@ -80,7 +77,6 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 | Special indexes | `UPPERCASE.md` | `CATCH_UP.md`, `INDEX.md`, `KNOWLEDGE_BASE.md` |
 | Reports | `{type}-report.{timestamp}.md` | `security-report.2025-12-26_1430.md` |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
-| Debug sessions | `debug-{timestamp}.md` | `debug-2025-12-26_1430.md` |
 | Release notes | `RELEASE_NOTES_v{version}.md` | `RELEASE_NOTES_v1.2.0.md` |
 
 ---
@@ -114,15 +110,12 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 | Agent | Output Location | Behavior |
 |-------|-----------------|----------|
 | CatchUp | `.docs/CATCH_UP.md` | Overwrites (latest summary) |
-| Debug | `.docs/debug/debug-{timestamp}.md` | Creates new + appends to `KNOWLEDGE_BASE.md` |
 | Devlog | `.docs/status/{timestamp}.md` | Creates new + updates `INDEX.md` |
 | *Review | `.docs/reviews/{branch-slug}/{type}-report.{timestamp}.md` | Creates new |
 | Release | `.docs/releases/RELEASE_NOTES_v{version}.md` | Creates new |
 
 ### Agents That Don't Persist
 
-- Commit (only creates git commits)
-- PullRequest (only creates GitHub PR)
 - GetIssue (read-only)
 - Comment (only creates PR comments)
 - Coder (commits to git, no .docs/ output)

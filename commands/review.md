@@ -46,11 +46,11 @@ echo "Branch: $CURRENT_BRANCH ($COMMITS_AHEAD commits ahead of $BASE_BRANCH)"
 ```bash
 if [ -n "$(git status --porcelain)" ]; then
     echo "⚠️ Uncommitted changes detected"
-    # SPAWN: Commit agent
+    # Apply devflow-commit patterns to create atomic commits
 fi
 ```
 
-**If uncommitted changes**: Spawn Commit agent first, wait for completion.
+**If uncommitted changes**: Apply `devflow-commit` skill patterns to create atomic commits before review.
 
 ### Ensure Branch Pushed
 
@@ -67,11 +67,11 @@ fi
 PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
 if [ -z "$PR_NUMBER" ]; then
     echo "⚠️ No PR exists"
-    # SPAWN: PullRequest agent
+    # Apply devflow-pull-request patterns to create PR
 fi
 ```
 
-**If no PR**: Spawn PullRequest agent, wait for completion.
+**If no PR**: Apply `devflow-pull-request` skill patterns to create PR with comprehensive description.
 
 ### Capture PR Context
 
