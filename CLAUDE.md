@@ -94,8 +94,8 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Summary` → `.docs/reviews/{branch-slug}/SUMMARY.md`
 **Orchestration commands** (run in main context, spawn agents):
 - `/specify` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize, creates GitHub issue
-- `/implement` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review), then calls `/review`
-- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Comment + TechDebt + Summary
+- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review), then calls `/review`
+- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Git (manage-debt) + Summary
 
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)
@@ -106,11 +106,11 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Reviewer` - Universal parameterized reviewer (focus via prompt injection)
 - `Summary` - Aggregates review findings, determines merge recommendation
 
+**GitHub operations agent** (unified parameterized agent):
+- `Git` - Handles all git/GitHub operations via operations: `fetch-issue`, `comment-pr`, `manage-debt`, `create-release`
+
 **Utility agents** (focused tasks, no sub-spawning):
-- `GetIssue` - Fetches GitHub issue details
 - `Devlog` - Read-only, analyzes project state for CatchUp
-- `Comment` - Creates PR comments only
-- `TechDebt` - Updates GitHub issue only
 - `CatchUp` - Context restoration from status logs
 - `Skimmer` - Codebase orientation using skim for file/function discovery
 
@@ -305,7 +305,8 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
 | `devflow-self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Coder (via Stop hook) |
 | `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp |
-| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder, Git |
+| `devflow-github-patterns` | GitHub API patterns (rate limiting, PR comments, issue management, releases) | Git |
 | `devflow-implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
 | `devflow-codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
 
@@ -370,6 +371,7 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 | `devflow-review-methodology` | NEVER BLOCK FOR PRE-EXISTING ISSUES |
 | `devflow-self-review` | FIX BEFORE RETURNING |
 | `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-github-patterns` | RESPECT RATE LIMITS OR FAIL GRACEFULLY |
 | `devflow-docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
 | `devflow-implementation-patterns` | FOLLOW EXISTING PATTERNS |
 | `devflow-codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |

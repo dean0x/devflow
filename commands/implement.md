@@ -59,14 +59,18 @@ echo "Worktree: ${WORKTREE_DIR}"
 
 ### Fetch Issue Details (if issue number)
 
-If input is a GitHub issue number, spawn GetIssue agent:
+If input is a GitHub issue number, spawn Git agent:
 
 ```
-Task(subagent_type="GetIssue"):
+Task(subagent_type="Git"):
 
-"Fetch details for GitHub issue #${ISSUE_NUMBER}
+"OPERATION: fetch-issue
 
-Return: title, description, acceptance criteria, labels, linked issues"
+Fetch details for GitHub issue.
+
+ISSUE_INPUT: ${ISSUE_NUMBER}
+
+Return: title, description, acceptance criteria, labels, linked issues, suggested branch name"
 ```
 
 ---
@@ -330,8 +334,8 @@ The `/review` command will:
 ```bash
 # /review handles:
 # - Spawning Reviewer agents with focus areas
-# - Comment agent for PR comments
-# - TechDebt agent for backlog tracking
+# - Git agent (comment-pr) for PR comments
+# - Git agent (manage-debt) for backlog tracking
 # - Summary agent for recommendation
 ```
 
@@ -375,13 +379,13 @@ ${TASK_DESCRIPTION}
 
 ---
 
-### 💬 Comments (from Comment agent)
+### 💬 Comments (from Git agent)
 - Inline: {n} created
 - Skipped: {n}
 
 ---
 
-### 📋 Tech Debt (from TechDebt agent)
+### 📋 Tech Debt (from Git agent)
 - Issue: #{issue}
 - Added: {n}
 
@@ -434,7 +438,7 @@ git worktree prune
 /implement (orchestrator - spawns agents only)
 │
 ├─ Phase 1: Setup
-│  └─ GetIssue agent (if issue number)
+│  └─ Git agent (operation: fetch-issue) - if issue number
 │
 ├─ Phase 1.5: Orient
 │  └─ Skimmer agent (codebase overview via skim)
@@ -466,8 +470,8 @@ git worktree prune
 ├─ Phase 8: Code Review
 │  └─ Invokes /review command (DRY - no duplication)
 │      ├─ Reviewer agents (7 focus areas + conditional)
-│      ├─ Comment agent
-│      ├─ TechDebt agent
+│      ├─ Git agent (operation: comment-pr)
+│      ├─ Git agent (operation: manage-debt)
 │      └─ Summary agent
 │
 └─ Phase 9: Display agent outputs

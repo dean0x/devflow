@@ -74,6 +74,7 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 | `devflow-pull-request` | HONEST DESCRIPTIONS OR NO PR |
 | `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
 | `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-github-patterns` | RESPECT RATE LIMITS OR FAIL GRACEFULLY |
 | `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
 | `devflow-typescript` | UNKNOWN OVER ANY |
 | `devflow-react` | COMPOSITION OVER PROPS |
@@ -110,7 +111,8 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-review-methodology` | 6-step review process, 3-category classification | Reviewer |
 | `devflow-self-review` | 9-pillar self-review framework | Coder (via Stop hook) |
 | `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp |
-| `devflow-git-safety` | Git operations, lock handling, commit conventions | Coder |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions | Coder, Git |
+| `devflow-github-patterns` | GitHub API, rate limiting, PR comments, issues, releases | Git |
 | `devflow-implementation-patterns` | CRUD, API, events, config, logging | Coder |
 | `devflow-codebase-navigation` | Exploration, pattern discovery, data flow | Coder |
 
@@ -199,6 +201,14 @@ hooks:
 
 The Reviewer agent is spawned multiple times in parallel, each with a different focus area specified in the prompt. This replaces the previous 11 individual review agents while maintaining the same specialized analysis.
 
+**GitHub Operations Agent** (unified, parameterized):
+
+| Agent | Purpose | Operations |
+|-------|---------|------------|
+| `Git` | All git/GitHub operations | `fetch-issue`, `comment-pr`, `manage-debt`, `create-release` |
+
+The Git agent handles all GitHub API interactions including fetching issues, creating PR comments, managing tech debt backlog, and creating releases.
+
 **Utility Agents** (focused tasks):
 
 | Agent | Specialty | Purpose |
@@ -206,16 +216,13 @@ The Reviewer agent is spawned multiple times in parallel, each with a different 
 | `Skimmer` | Codebase Orientation | Fast codebase overview using `skim` for 60-90% token reduction |
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
-| `GetIssue` | GitHub Issues | Fetch issue details for planning |
-| `Comment` | PR Comments | Create summary comments for non-diff issues |
-| `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
 | `Summary` | Review Synthesis | Aggregate review findings with merge recommendation |
 | `Synthesize` | Output Synthesis | Combine outputs from parallel agents into actionable summaries |
 
 **How Commands Orchestrate Agents:**
 - `/specify` → Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize → GitHub issue
-- `/implement` → Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review) → `/review` → PR
-- `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Comment + TechDebt + Summary
+- `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review) → `/review` → PR
+- `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Git (comment-pr) + Git (manage-debt) + Summary
 
 **Skimmer Integration:**
 

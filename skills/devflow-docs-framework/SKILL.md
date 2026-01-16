@@ -112,8 +112,8 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 ### Agents That Don't Persist
 
-- GetIssue (read-only)
-- Comment (only creates PR comments)
+- Git (fetch-issue operation: read-only)
+- Git (comment-pr operation: only creates PR comments)
 - Coder (commits to git, no .docs/ output)
 
 ---

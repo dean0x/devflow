@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`devflow-github-patterns` skill** - Foundation skill for GitHub API interactions
+  - Rate limiting patterns (1-2s delays, 60s wait if <10 remaining)
+  - Comment deduplication algorithms
+  - Line-in-diff validation for PR comments
+  - Issue data parsing (acceptance criteria, dependencies)
+  - Branch name generation from issues
+  - Tech debt management patterns (archive on overflow)
+  - Iron Law: RESPECT RATE LIMITS OR FAIL GRACEFULLY
+- **Unified `Git` agent** - Single parameterized agent for all git/GitHub operations
+  - `fetch-issue` operation: Fetches GitHub issue details with acceptance criteria and suggested branch name
+  - `comment-pr` operation: Creates PR inline comments with deduplication and rate limiting
+  - `manage-debt` operation: Updates tech debt backlog issue with semantic deduplication
+  - `create-release` operation: Creates GitHub release with version tag
+  - Replaces: GetIssue, Comment, TechDebt agents
 - **`devflow-commit` skill** - Atomic commit patterns, message format, safety scanning
   - Iron Law: ATOMIC COMMITS OR NO COMMITS
   - Auto-triggers when staging files or creating commits
@@ -64,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PullRequest` agent** - Patterns moved to `devflow-pull-request` skill
 - **`Release` agent** - Removed (release process documented in CLAUDE.md)
 - **`devflow-debug` skill** - Removed entirely
+- **`GetIssue` agent** - Replaced by Git agent (operation: fetch-issue)
+- **`Comment` agent** - Replaced by Git agent (operation: comment-pr)
+- **`TechDebt` agent** - Replaced by Git agent (operation: manage-debt)
 
 ---
 

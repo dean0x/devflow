@@ -91,6 +91,7 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'devflow-review-methodology', description: '6-step review process' },
   { name: 'devflow-docs-framework', description: 'Documentation conventions' },
   { name: 'devflow-git-safety', description: 'Git operations & safety' },
+  { name: 'devflow-github-patterns', description: 'GitHub API, rate limits, issues' },
   { name: 'devflow-implementation-patterns', description: 'CRUD, API, events, config' },
   { name: 'devflow-codebase-navigation', description: 'Exploration & pattern discovery' },
   // Tier 2: Specialized Skills (user-facing, auto-activate)
