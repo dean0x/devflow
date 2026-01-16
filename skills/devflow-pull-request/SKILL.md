@@ -189,8 +189,12 @@ EOF
 - [ ] Size assessed and split recommended if needed
 - [ ] No hidden limitations or risks
 
-## Integration
+## Related Skills
 
-This skill works with:
-- **devflow-commit**: Atomic commits feeding into PR
-- **devflow-git-safety**: Safe push and branch operations
+| Skill | Use For |
+|-------|---------|
+| `devflow-git-safety` | Lock handling, sequential ops, sensitive file detection |
+| `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
+| `devflow-commit` | Commit message format, atomic grouping |
+| `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
+| `devflow-worktree` | Parallel development, task isolation |

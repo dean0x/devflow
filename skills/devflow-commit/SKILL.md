@@ -100,34 +100,9 @@ git add docs/auth.md && git commit -m "docs(auth): document login flow"
 - **Mixed concerns**: Feature + refactor + fix in one commit - VIOLATION
 - **Blind staging**: `git add .` without review - VIOLATION
 
-## Safety Patterns
+## Safety Checks
 
-### Never Commit These
-
-**Sensitive Files**:
-```
-.env, .env.local, .env.*.local
-*.key, *.pem, *.p12, *.pfx
-*secret*, *password*, *credential*
-id_rsa, id_dsa
-.aws/credentials, .npmrc, .pypirc
-```
-
-**Temporary Files**:
-```
-*.tmp, *.temp, *.log, *.swp, *.swo, *~
-.DS_Store, Thumbs.db
-*.bak, *.orig, *.rej
-```
-
-### Content Scanning
-
-Before committing, scan for:
-- API keys: `api[_-]key.*=.*['"][a-zA-Z0-9]{20,}['"]`
-- Passwords: `password.*=.*['"][^'"]{8,}['"]`
-- Private keys: `BEGIN.*PRIVATE KEY`
-
-If detected: **STOP** and warn user.
+Before staging files, apply sensitive file detection and content scanning patterns from `devflow-git-safety` skill.
 
 ## Pre-Commit Checklist
 
@@ -140,10 +115,12 @@ Before every commit:
 - [ ] Related files grouped together
 - [ ] Co-author attribution included
 
-## Integration with Git Safety
+## Related Skills
 
-This skill works with `devflow-git-safety`:
-- **devflow-git-safety**: Lock handling, sequential operations, protected branches
-- **devflow-commit**: Atomic grouping, message format, content validation
-
-Load both skills when performing commit operations.
+| Skill | Use For |
+|-------|---------|
+| `devflow-git-safety` | Lock handling, sequential ops, sensitive file detection |
+| `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
+| `devflow-commit` | Commit message format, atomic grouping |
+| `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
+| `devflow-worktree` | Parallel development, task isolation |

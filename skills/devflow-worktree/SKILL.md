@@ -346,28 +346,7 @@ echo "Worktree recreated: $WORKTREE_DIR"
 
 ### Lock File Handling
 
-```bash
-# Before any git operation in worktree
-WORKTREE_DIR=".worktrees/task-1"
-LOCK_FILE="${WORKTREE_DIR}/.git/index.lock"
-
-wait_for_lock() {
-    local max_wait=10
-    local waited=0
-    while [ -f "$LOCK_FILE" ]; do
-        if [ $waited -ge $max_wait ]; then
-            echo "ERROR: Lock file persists after ${max_wait}s"
-            rm -f "$LOCK_FILE"  # Force remove stale lock
-            return 0
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
-}
-
-wait_for_lock
-git -C "$WORKTREE_DIR" status
-```
+For worktree lock files, use the same lock handling patterns from `devflow-git-safety` skill, but check `${WORKTREE_DIR}/.git/index.lock` instead of the main repo lock.
 
 ## Key Principles
 
@@ -388,3 +367,13 @@ git -C "$WORKTREE_DIR" status
 | Remove worktree | `git worktree remove .worktrees/task-1 --force` |
 | Prune stale | `git worktree prune` |
 | Check health | `git -C .worktrees/task-1 status` |
+
+## Related Skills
+
+| Skill | Use For |
+|-------|---------|
+| `devflow-git-safety` | Lock handling, sequential ops, sensitive file detection |
+| `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
+| `devflow-commit` | Commit message format, atomic grouping |
+| `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
+| `devflow-worktree` | Parallel development, task isolation |

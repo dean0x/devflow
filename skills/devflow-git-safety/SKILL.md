@@ -135,54 +135,9 @@ check_for_secrets() {
 
 ---
 
-## Commit Message Format
+## Commit Patterns
 
-### Structure
-
-```
-<type>(<scope>): <short summary>
-
-<optional body explaining what and why>
-
-<optional footer with references>
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>
-```
-
-### Types
-
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation changes |
-| `style` | Code style/formatting |
-| `refactor` | Code refactoring |
-| `test` | Adding/updating tests |
-| `chore` | Build, deps, tooling |
-| `perf` | Performance improvements |
-
-### Using HEREDOC for Messages
-
-```bash
-git commit -m "$(cat <<'EOF'
-feat(auth): add JWT token validation
-
-Implement token validation middleware with:
-- Signature verification
-- Expiration checking
-- Role-based access control
-
-Closes #123
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>
-EOF
-)"
-```
+For commit message format, types, and atomic grouping patterns, see `devflow-commit` skill.
 
 ---
 
@@ -253,32 +208,6 @@ git checkout -b release/v1.2.0
 
 # Hotfixes
 git checkout -b hotfix/critical-fix
-```
-
----
-
-## Atomic Commits
-
-### Grouping Strategy
-
-1. **By Feature**: Changes within same directory/module
-2. **By Type**: Source, tests, docs, config separately
-3. **By Relationship**: Files that change together
-
-### Example
-
-```bash
-# Commit 1: Source code
-git add src/auth/*.ts
-git commit -m "feat(auth): implement login handler"
-
-# Commit 2: Tests
-git add tests/auth/*.ts
-git commit -m "test(auth): add login handler tests"
-
-# Commit 3: Documentation
-git add docs/auth.md
-git commit -m "docs(auth): document login flow"
 ```
 
 ---
@@ -420,7 +349,15 @@ git commit -m "message"
 This skill is used by:
 - **Coder agent**: Safe commits in worktrees
 - **Release agent**: Safe tagging and pushing
-- **devflow-commit skill**: Atomic commit patterns
-- **devflow-pull-request skill**: PR creation patterns
 
 Load this skill when performing any git operations.
+
+## Related Skills
+
+| Skill | Use For |
+|-------|---------|
+| `devflow-git-safety` | Lock handling, sequential ops, sensitive file detection |
+| `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
+| `devflow-commit` | Commit message format, atomic grouping |
+| `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
+| `devflow-worktree` | Parallel development, task isolation |

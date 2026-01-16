@@ -299,3 +299,13 @@ gh release create "v${VERSION}" \
 5. **Actionable** - Every comment includes a suggested fix
 6. **Clear attribution** - Always include Claude Code footer
 7. **Conservative cleanup** - Only remove items when confident they're fixed
+
+## Related Skills
+
+| Skill | Use For |
+|-------|---------|
+| `devflow-git-safety` | Lock handling, sequential ops, sensitive file detection |
+| `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
+| `devflow-commit` | Commit message format, atomic grouping |
+| `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
+| `devflow-worktree` | Parallel development, task isolation |
