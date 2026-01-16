@@ -1,10 +1,10 @@
 ---
-description: Execute a single task through the complete lifecycle - orchestrates exploration, planning, implementation, and review with parallel agents
+description: Execute a single task through the complete lifecycle - orchestrates exploration, planning, implementation, and simplification with parallel agents
 ---
 
 # Implement Command - Single Task Lifecycle Orchestrator
 
-Orchestrate a single task from exploration through implementation to review by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
+Orchestrate a single task from exploration through implementation and simplification by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
 
 ## Usage
 
@@ -289,7 +289,28 @@ Create PR against ${TARGET_BRANCH} when complete"
 
 ---
 
-## Phase 7: Create PR (if parallel implementation)
+## Phase 7: Simplify
+
+After Coder completes, spawn Simplifier agent to refine the implementation:
+
+```
+Task(subagent_type="Simplifier"):
+"Simplify recently implemented code in: ${WORKTREE_DIR}
+
+Task: ${TASK_DESCRIPTION}
+
+Focus on:
+1. Code modified by Coder in this session
+2. Apply project standards from CLAUDE.md
+3. Enhance clarity without changing functionality
+4. Reduce unnecessary complexity
+
+Preserve all functionality - only improve how code is written, not what it does."
+```
+
+---
+
+## Phase 8: Create PR (if parallel implementation)
 
 If multiple Coders were used, apply `devflow-pull-request` skill patterns to create unified PR:
 
@@ -320,29 +341,6 @@ PR_URL=$(gh pr view --json url -q '.url')
 
 ---
 
-## Phase 8: Code Review
-
-**Invoke the `/review` command** to run comprehensive review. This ensures review orchestration logic is not duplicated.
-
-The `/review` command will:
-1. Spawn Reviewer agents in parallel (7 always + conditional)
-2. Each Reviewer focuses on one area (security, architecture, performance, etc.)
-3. Create PR inline comments for blocking issues
-4. Track pre-existing issues in tech debt backlog
-5. Synthesize findings with merge recommendation
-
-```bash
-# /review handles:
-# - Spawning Reviewer agents with focus areas
-# - Git agent (comment-pr) for PR comments
-# - Git agent (manage-debt) for backlog tracking
-# - Summary agent for recommendation
-```
-
-The review outputs are captured from the `/review` command's final report.
-
----
-
 ## Phase 9: Final Report
 
 Display agent outputs:
@@ -355,7 +353,7 @@ ${TASK_DESCRIPTION}
 
 ---
 
-### 🚦 Status: {from Summary agent}
+### 🚦 Status: IMPLEMENTED
 
 ---
 
@@ -367,11 +365,11 @@ ${TASK_DESCRIPTION}
 | Explore | 4 | ✅ |
 | Plan | 3 | ✅ |
 | Implement | {n} ({parallel/sequential}) + self-review | ✅ |
-| Review | via /review command | ✅ |
+| Simplify | 1 (Simplifier) | ✅ |
 
 ---
 
-### 📝 PR (from PullRequest/Coder agent)
+### 📝 PR (from Coder agent)
 - Number: #${PR_NUMBER}
 - URL: ${PR_URL}
 - Files: {n} changed
@@ -379,23 +377,15 @@ ${TASK_DESCRIPTION}
 
 ---
 
-### 💬 Comments (from Git agent)
-- Inline: {n} created
-- Skipped: {n}
+### ✨ Simplification (from Simplifier agent)
+{Summary of refinements applied}
 
 ---
 
-### 📋 Tech Debt (from Git agent)
-- Issue: #{issue}
-- Added: {n}
-
----
-
-### 🎯 Next Steps (from Summary agent)
-{Based on recommendation}
-
-If BLOCKED: Fix issues, address PR comments directly
-If APPROVED: Ready to merge
+### 🎯 Next Steps
+1. Run `/review` for comprehensive code review
+2. Address any issues found
+3. Merge when ready
 ```
 
 ---
@@ -464,15 +454,11 @@ git worktree prune
 │  └─ 1-N Coder agents (parallel if beneficial)
 │  └─ Each Coder runs self-review via Stop hook (9 pillars)
 │
-├─ Phase 7: Create PR (if parallel coders)
-│  └─ Apply devflow-pull-request patterns
+├─ Phase 7: Simplify
+│  └─ Simplifier agent (refines code clarity and consistency)
 │
-├─ Phase 8: Code Review
-│  └─ Invokes /review command (DRY - no duplication)
-│      ├─ Reviewer agents (7 focus areas + conditional)
-│      ├─ Git agent (operation: comment-pr)
-│      ├─ Git agent (operation: manage-debt)
-│      └─ Summary agent
+├─ Phase 8: Create PR (if parallel coders)
+│  └─ Apply devflow-pull-request patterns
 │
 └─ Phase 9: Display agent outputs
 ```
@@ -482,8 +468,8 @@ git worktree prune
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, never does work itself
-2. **Parallel by default** - Explore, plan, review, synthesis all parallel
+2. **Parallel by default** - Explore, plan, synthesis all parallel
 3. **Agent ownership** - Each agent owns its output completely
-4. **Consistent patterns** - Same synthesis agents as `/review`
-5. **Clean handoffs** - Each phase passes structured data to next
-6. **Honest reporting** - Display agent outputs directly
+4. **Clean handoffs** - Each phase passes structured data to next
+5. **Honest reporting** - Display agent outputs directly
+6. **Simplification pass** - Code refined for clarity before PR
