@@ -390,7 +390,7 @@ ${TASK_DESCRIPTION}
 ### 🎯 Next Steps (from Summary agent)
 {Based on recommendation}
 
-If BLOCKED: Fix issues, run `/resolve-comments`
+If BLOCKED: Fix issues, address PR comments directly
 If APPROVED: Ready to merge
 ```
 

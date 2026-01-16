@@ -110,7 +110,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-review-methodology` | 6-step review process, 3-category classification | Reviewer |
 | `devflow-self-review` | 9-pillar self-review framework | Coder (via Stop hook) |
 | `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp |
-| `devflow-git-safety` | Git operations, lock handling, commit conventions | Coder, Release |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions | Coder |
 | `devflow-implementation-patterns` | CRUD, API, events, config, logging | Coder |
 | `devflow-codebase-navigation` | Exploration, pattern discovery, data flow | Coder |
 
@@ -175,12 +175,8 @@ hooks:
 |---------|---------|-------------|
 | `/catch-up` | Smart summaries for starting new sessions with status validation | Starting a session |
 | `/specify` | Specify a feature with 3 clarification gates (understanding → scope → acceptance) | Before implementing a feature |
-| `/breakdown` | Quickly break down discussion into actionable tasks | After planning discussion, quick task capture |
 | `/implement` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
-| `/run` | Streamlined todo implementation, only stopping for design decisions | After planning, ready to implement todos |
 | `/review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
-| `/resolve-comments` | Systematically address PR review feedback | After PR feedback, need to resolve comments |
-| `/release` | Automated release workflow with version management and publishing | Creating a new release |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 
 ### 🤖 Agents
@@ -211,7 +207,6 @@ The Reviewer agent is spawned multiple times in parallel, each with a different 
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
 | `GetIssue` | GitHub Issues | Fetch issue details for planning |
-| `Release` | Release Automation | Project-agnostic release workflow with version management |
 | `Comment` | PR Comments | Create summary comments for non-diff issues |
 | `TechDebt` | Tech Debt | Manage tech debt backlog GitHub issue |
 | `Summary` | Review Synthesis | Aggregate review findings with merge recommendation |
@@ -302,13 +297,8 @@ DevFlow agents automatically create and maintain project documentation in the `.
 ├── reviews/{branch-slug}/       # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── coordinator/                # Release coordination state
-│   ├── release-issue.md
-│   └── state.json
 ├── design/                     # Implementation plans (from Design agent)
 │   └── {topic-slug}-{timestamp}.md
-├── releases/                   # Release notes
-│   └── RELEASE_NOTES_v{version}.md
 ├── status/                     # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
@@ -333,7 +323,6 @@ DevFlow agents automatically create and maintain project documentation in the `.
 - **`/devlog`** → `.docs/status/{timestamp}.md` + compact version + INDEX
 - **`/implement`** → `.docs/design/{topic}-{timestamp}.md` (via Design agent)
 - **`/review`** → `.docs/reviews/{branch}/` (7-11 focus area reports + summary)
-- **`/release`** → `.docs/releases/RELEASE_NOTES_v{version}.md`
 
 ### Version Control
 
@@ -356,8 +345,8 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 
 ### During Development
 1. **Skills auto-activate** - `devflow-research` triggers for unfamiliar features, foundation skills validate patterns
-2. **Specify features** - `/specify` for detailed specs, or `/breakdown` for quick task capture
-3. **Execute tasks** - `/implement` for full lifecycle, or `/run` for incremental work
+2. **Specify features** - `/specify` for detailed specs with clarification gates
+3. **Execute tasks** - `/implement` for full lifecycle (explore → plan → implement → review)
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
 5. `/review` - Review changes before committing
 6. **Commit changes** - `devflow-commit` skill enforces atomic commits and message format
@@ -367,7 +356,7 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 2. **Commit changes** - `devflow-commit` skill enforces quality
 3. **Create PR** - `devflow-pull-request` skill ensures comprehensive descriptions
 4. Wait for review feedback
-5. `/resolve-comments` - Address feedback systematically
+5. Address PR comments directly
 6. Repeat steps 4-5 until approved
 
 ### Ending a Session
@@ -375,16 +364,6 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 2. `/review` - Review branch before creating PR
 3. **Commit changes** - `devflow-commit` skill enforces quality
 4. **Create PR** - `devflow-pull-request` skill ensures comprehensive descriptions
-
-### Creating a Release
-1. `/review` - Comprehensive branch review
-2. `/release` - Automated release workflow
-   - Detects project type (Node.js, Rust, Python, Go, etc.)
-   - Analyzes commits and suggests version bump
-   - Generates changelog from git history
-   - Builds and tests before publishing
-   - Creates git tags and platform releases
-3. Verify package in registry
 
 ### When Things Go Wrong
 1. **Investigate systematically** - Follow root cause analysis approach
@@ -464,10 +443,8 @@ git commit -m "Session status: completed user auth feature"
 
 # Manual command invocation for structured workflows
 /specify user authentication     # Create detailed feature spec
-/breakdown                       # Quick task breakdown from discussion
 /implement                       # Run explore → plan → implement → review cycle
 /review                          # Review changes before committing
-/release                         # Automated release workflow
 ```
 
 ## Philosophy

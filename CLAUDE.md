@@ -33,13 +33,8 @@ All generated documentation lives under `.docs/` in the project root:
 ├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── coordinator/                       # Release coordination state
-│   ├── release-issue.md
-│   └── state.json
 ├── design/                            # Implementation plans
 │   └── {topic-slug}-{timestamp}.md
-├── releases/                          # Release notes
-│   └── RELEASE_NOTES_v{version}.md
 ├── status/                            # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
@@ -97,8 +92,6 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
 - `Reviewer` → `.docs/reviews/{branch-slug}/{focus}.md` (one file per focus area)
 - `Summary` → `.docs/reviews/{branch-slug}/SUMMARY.md`
-- `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
-
 **Orchestration commands** (run in main context, spawn agents):
 - `/specify` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize, creates GitHub issue
 - `/implement` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review), then calls `/review`
@@ -312,7 +305,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
 | `devflow-self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Coder (via Stop hook) |
 | `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp |
-| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder, Release |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder |
 | `devflow-implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
 | `devflow-codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
 

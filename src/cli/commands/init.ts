@@ -75,12 +75,8 @@ interface CommandDefinition {
  */
 const DEVFLOW_COMMANDS: CommandDefinition[] = [
   { name: '/specify', description: 'Specify a feature interactively' },
-  { name: '/breakdown', description: 'Break down tasks quickly' },
   { name: '/implement', description: 'Execute single task lifecycle' },
-  { name: '/run', description: 'Interactive implementation' },
   { name: '/review', description: 'Comprehensive code review' },
-  { name: '/resolve-comments', description: 'Address PR feedback' },
-  { name: '/release', description: 'Automated releases' },
   { name: '/catch-up', description: 'Get up to speed on project state' },
   { name: '/devlog', description: 'Document session progress' },
 ];

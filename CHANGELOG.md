@@ -55,9 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/commit` command** - Replaced by `devflow-commit` skill (use `git commit` directly)
 - **`/debug` command** - Removed entirely (Claude Code's built-in debugging is sufficient)
 - **`/pull-request` command** - Replaced by `devflow-pull-request` skill (use `gh pr create` directly)
+- **`/breakdown` command** - Removed (use natural conversation or TodoWrite directly)
+- **`/release` command** - Removed (use manual release process documented in CLAUDE.md)
+- **`/resolve-comments` command** - Removed (address PR comments directly)
+- **`/run` command** - Removed (use `/implement` for full lifecycle)
 - **`Commit` agent** - Patterns moved to `devflow-commit` skill
 - **`Debug` agent** - Removed entirely
 - **`PullRequest` agent** - Patterns moved to `devflow-pull-request` skill
+- **`Release` agent** - Removed (release process documented in CLAUDE.md)
 - **`devflow-debug` skill** - Removed entirely
 
 ---

@@ -25,8 +25,6 @@ All generated documentation lives under `.docs/` in the project root:
 ├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── releases/                           # Release notes
-│   └── RELEASE_NOTES_v{version}.md
 ├── status/                             # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
@@ -77,7 +75,6 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 | Special indexes | `UPPERCASE.md` | `CATCH_UP.md`, `INDEX.md`, `KNOWLEDGE_BASE.md` |
 | Reports | `{type}-report.{timestamp}.md` | `security-report.2025-12-26_1430.md` |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
-| Release notes | `RELEASE_NOTES_v{version}.md` | `RELEASE_NOTES_v1.2.0.md` |
 
 ---
 
@@ -112,7 +109,6 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 | CatchUp | `.docs/CATCH_UP.md` | Overwrites (latest summary) |
 | Devlog | `.docs/status/{timestamp}.md` | Creates new + updates `INDEX.md` |
 | *Review | `.docs/reviews/{branch-slug}/{type}-report.{timestamp}.md` | Creates new |
-| Release | `.docs/releases/RELEASE_NOTES_v{version}.md` | Creates new |
 
 ### Agents That Don't Persist
 
@@ -255,6 +251,5 @@ This framework is used by:
 - **Debug**: Creates debug sessions and knowledge base
 - **CatchUp**: Reads status logs, creates summary
 - **Review agents**: Creates review reports
-- **Release**: Creates release notes
 
 All persisting agents should load this skill to ensure consistent documentation.
