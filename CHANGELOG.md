@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Statusline shows actual percentage instead of just large context warning
 - Settings template includes permissions.deny and env configuration
 - Commit and PR patterns now auto-activate via skills instead of requiring explicit commands
+- **Git skills deduplication** - Removed ~80 lines of duplicated content across git-related skills
+  - `devflow-git-safety`: Canonical source for lock handling, sequential ops, sensitive file detection
+  - `devflow-commit`: Canonical source for commit message format, atomic grouping
+  - `devflow-worktree`: Simplified lock handling with cross-reference
+  - All 5 git skills now have Related Skills table for discoverability
 
 ### Removed
 - **`/commit` command** - Replaced by `devflow-commit` skill (use `git commit` directly)
