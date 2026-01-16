@@ -209,12 +209,14 @@ TIMESTAMP: ${TIMESTAMP}
 Report back: issue number, items added, items removed"
 ```
 
-### 4.3 Summary Agent (Aggregation + Recommendation)
+### 4.3 Synthesizer Agent (Aggregation + Recommendation)
 
 ```
-Task(subagent_type="Summary"):
+Task(subagent_type="Synthesizer"):
 
-"Synthesize all review findings into comprehensive summary.
+"Mode: review
+
+Synthesize all review findings into comprehensive summary.
 
 PR_NUMBER: ${PR_NUMBER}
 REVIEW_BASE_DIR: ${REVIEW_DIR}
@@ -238,7 +240,7 @@ Report back: recommendation, issue counts, summary file path"
 |-------|--------|
 | Git (comment-pr) | Inline comments created, skipped count, summary comment |
 | Git (manage-debt) | Issue number, items added/removed |
-| Summary | Recommendation, issue counts, summary file |
+| Synthesizer | Recommendation, issue counts, summary file |
 
 ---
 
@@ -253,11 +255,11 @@ Display results from all agents:
 
 ---
 
-### 🚦 Recommendation: {from Summary agent}
+### 🚦 Recommendation: {from Synthesizer agent}
 
 ---
 
-### 📊 Results (from Summary agent)
+### 📊 Results (from Synthesizer agent)
 
 | Metric | Count |
 |--------|-------|
@@ -293,7 +295,7 @@ Display results from all agents:
 
 ### 🎯 Next Steps
 
-{From Summary agent recommendation}
+{From Synthesizer agent recommendation}
 ```
 
 ---
@@ -306,5 +308,5 @@ Display results from all agents:
    - Review agents → Find issues
    - Git agent (comment-pr) → Create PR comments
    - Git agent (manage-debt) → Track pre-existing issues
-   - Summary agent → Aggregate, recommend, report
+   - Synthesizer agent → Aggregate, recommend, report
 4. **Full automation** - Handles commit/push/PR creation via agents

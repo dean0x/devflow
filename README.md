@@ -216,13 +216,12 @@ The Git agent handles all GitHub API interactions including fetching issues, cre
 | `Skimmer` | Codebase Orientation | Fast codebase overview using `skim` for 60-90% token reduction |
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
-| `Summary` | Review Synthesis | Aggregate review findings with merge recommendation |
-| `Synthesize` | Output Synthesis | Combine outputs from parallel agents into actionable summaries |
+| `Synthesizer` | Output Synthesis | Combine outputs from parallel agents (modes: exploration, planning, review) |
 
 **How Commands Orchestrate Agents:**
-- `/specify` → Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize → GitHub issue
-- `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review) → `/review` → PR
-- `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Git (comment-pr) + Git (manage-debt) + Summary
+- `/specify` → Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer → GitHub issue
+- `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder (with self-review) → `/review` → PR
+- `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
 
 **Skimmer Integration:**
 

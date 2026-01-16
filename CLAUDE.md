@@ -91,11 +91,11 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
 - `Reviewer` → `.docs/reviews/{branch-slug}/{focus}.md` (one file per focus area)
-- `Summary` → `.docs/reviews/{branch-slug}/SUMMARY.md`
+- `Synthesizer` → `.docs/reviews/{branch-slug}/review-summary.{timestamp}.md` (review mode)
 **Orchestration commands** (run in main context, spawn agents):
-- `/specify` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize, creates GitHub issue
-- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review), then calls `/review`
-- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Git (manage-debt) + Summary
+- `/specify` - Spawns Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer, creates GitHub issue
+- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder (with self-review), then calls `/review`
+- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
 
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)
@@ -104,7 +104,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 **Review agents**:
 - `Reviewer` - Universal parameterized reviewer (focus via prompt injection)
-- `Summary` - Aggregates review findings, determines merge recommendation
+- `Synthesizer` - Combines outputs from multiple agents (modes: exploration, planning, review)
 
 **GitHub operations agent** (unified parameterized agent):
 - `Git` - Handles all git/GitHub operations via operations: `fetch-issue`, `comment-pr`, `manage-debt`, `create-release`

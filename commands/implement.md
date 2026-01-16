@@ -180,10 +180,10 @@ Pass failure context to Synthesize agent so it can flag gaps in coverage.
 
 ## Phase 3: Synthesize Exploration
 
-**WAIT** for Phase 2, then spawn Synthesize agent:
+**WAIT** for Phase 2, then spawn Synthesizer agent:
 
 ```
-Task(subagent_type="Synthesize"):
+Task(subagent_type="Synthesizer"):
 
 "Synthesize EXPLORATION outputs for: ${TASK_DESCRIPTION}
 
@@ -228,10 +228,10 @@ Output: PARALLELIZABLE vs SEQUENTIAL work units"
 
 ## Phase 5: Synthesize Planning
 
-**WAIT** for Phase 4, then spawn Synthesize agent:
+**WAIT** for Phase 4, then spawn Synthesizer agent:
 
 ```
-Task(subagent_type="Synthesize"):
+Task(subagent_type="Synthesizer"):
 
 "Synthesize PLANNING outputs for: ${TASK_DESCRIPTION}
 
@@ -440,7 +440,7 @@ git worktree prune
 │  └─ Explore: Edge cases
 │
 ├─ Phase 3: Synthesize Exploration
-│  └─ Synthesize agent (mode: exploration)
+│  └─ Synthesizer agent (mode: exploration)
 │
 ├─ Phase 4: Plan (PARALLEL)
 │  ├─ Plan: Implementation steps
@@ -448,7 +448,7 @@ git worktree prune
 │  └─ Plan: Parallelization
 │
 ├─ Phase 5: Synthesize Planning
-│  └─ Synthesize agent (mode: planning)
+│  └─ Synthesizer agent (mode: planning)
 │
 ├─ Phase 6: Implement
 │  └─ 1-N Coder agents (parallel if beneficial)
