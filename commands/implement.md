@@ -97,10 +97,15 @@ Combine into: execution plan with parallel/sequential decision"
 
 ### Phase 6: Implement
 
-Based on synthesis, spawn Coder agent(s):
+Based on Phase 5 synthesis (which includes the Parallelization planner's decision):
 
-- **PARALLEL** (independent components): Multiple Coders in single message, each with `CREATE_PR: false`
-- **SEQUENTIAL** (dependent work): Single Coder with full execution plan, `CREATE_PR: true`
+**Decision criteria** (from Parallelization planner):
+- **PARALLELIZABLE**: Work units have no shared state, different files/modules, can run independently
+- **SEQUENTIAL**: Work units have dependencies, shared state, or must execute in order
+
+**Spawning pattern**:
+- **PARALLEL**: Multiple Coders in single message, each with subset of steps, `CREATE_PR: false`
+- **SEQUENTIAL**: Single Coder with full execution plan, `CREATE_PR: true`
 
 Each Coder receives: task description, task-id, worktree path, target branch, steps/plan.
 
