@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`devflow-github-patterns` skill** - Foundation skill for GitHub API interactions
+  - Rate limiting patterns (1-2s delays, 60s wait if <10 remaining)
+  - Comment deduplication algorithms
+  - Line-in-diff validation for PR comments
+  - Issue data parsing (acceptance criteria, dependencies)
+  - Branch name generation from issues
+  - Tech debt management patterns (archive on overflow)
+  - Iron Law: RESPECT RATE LIMITS OR FAIL GRACEFULLY
+- **Unified `Git` agent** - Single parameterized agent for all git/GitHub operations
+  - `fetch-issue` operation: Fetches GitHub issue details with acceptance criteria and suggested branch name
+  - `comment-pr` operation: Creates PR inline comments with deduplication and rate limiting
+  - `manage-debt` operation: Updates tech debt backlog issue with semantic deduplication
+  - `create-release` operation: Creates GitHub release with version tag
+  - Replaces: GetIssue, Comment, TechDebt agents
+- **`devflow-commit` skill** - Atomic commit patterns, message format, safety scanning
+  - Iron Law: ATOMIC COMMITS OR NO COMMITS
+  - Auto-triggers when staging files or creating commits
+- **`devflow-pull-request` skill** - PR quality, descriptions, size assessment
+  - Iron Law: HONEST DESCRIPTIONS OR NO PR
+  - Auto-triggers when creating PRs or generating descriptions
 - **Iron Laws** - Every skill now has a single, non-negotiable core principle
   - 15 Iron Laws across all skills (e.g., "NEVER THROW IN BUSINESS LOGIC", "NO FAKE SOLUTIONS")
   - Automatically enforced when skills activate
@@ -43,6 +63,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/specify` now requires explicit user confirmation at each gate
 - Statusline shows actual percentage instead of just large context warning
 - Settings template includes permissions.deny and env configuration
+- Commit and PR patterns now auto-activate via skills instead of requiring explicit commands
+- **Git skills deduplication** - Removed ~80 lines of duplicated content across git-related skills
+  - `devflow-git-safety`: Canonical source for lock handling, sequential ops, sensitive file detection
+  - `devflow-commit`: Canonical source for commit message format, atomic grouping
+  - `devflow-worktree`: Simplified lock handling with cross-reference
+  - All 5 git skills now have Related Skills table for discoverability
+
+### Removed
+- **`/commit` command** - Replaced by `devflow-commit` skill (use `git commit` directly)
+- **`/debug` command** - Removed entirely (Claude Code's built-in debugging is sufficient)
+- **`/pull-request` command** - Replaced by `devflow-pull-request` skill (use `gh pr create` directly)
+- **`/breakdown` command** - Removed (use natural conversation or TodoWrite directly)
+- **`/release` command** - Removed (use manual release process documented in CLAUDE.md)
+- **`/resolve-comments` command** - Removed (address PR comments directly)
+- **`/run` command** - Removed (use `/implement` for full lifecycle)
+- **`Commit` agent** - Patterns moved to `devflow-commit` skill
+- **`Debug` agent** - Removed entirely
+- **`PullRequest` agent** - Patterns moved to `devflow-pull-request` skill
+- **`Release` agent** - Removed (release process documented in CLAUDE.md)
+- **`devflow-debug` skill** - Removed entirely
+- **`GetIssue` agent** - Replaced by Git agent (operation: fetch-issue)
+- **`Comment` agent** - Replaced by Git agent (operation: comment-pr)
+- **`TechDebt` agent** - Replaced by Git agent (operation: manage-debt)
 
 ---
 

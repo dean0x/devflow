@@ -46,11 +46,11 @@ echo "Branch: $CURRENT_BRANCH ($COMMITS_AHEAD commits ahead of $BASE_BRANCH)"
 ```bash
 if [ -n "$(git status --porcelain)" ]; then
     echo "⚠️ Uncommitted changes detected"
-    # SPAWN: Commit agent
+    # Apply devflow-commit patterns to create atomic commits
 fi
 ```
 
-**If uncommitted changes**: Spawn Commit agent first, wait for completion.
+**If uncommitted changes**: Apply `devflow-commit` skill patterns to create atomic commits before review.
 
 ### Ensure Branch Pushed
 
@@ -67,11 +67,11 @@ fi
 PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
 if [ -z "$PR_NUMBER" ]; then
     echo "⚠️ No PR exists"
-    # SPAWN: PullRequest agent
+    # Apply devflow-pull-request patterns to create PR
 fi
 ```
 
-**If no PR**: Spawn PullRequest agent, wait for completion.
+**If no PR**: Apply `devflow-pull-request` skill patterns to create PR with comprehensive description.
 
 ### Capture PR Context
 
@@ -167,12 +167,14 @@ Spawn one Reviewer per focus area from the table above. Always run the 7 "Always
 
 **IMPORTANT:** Launch ALL THREE agents in a SINGLE message for parallel execution.
 
-### 4.1 Comment Agent (PR Comments)
+### 4.1 Git Agent (PR Comments)
 
 ```
-Task(subagent_type="Comment"):
+Task(subagent_type="Git"):
 
-"Create PR inline comments for code review findings.
+"OPERATION: comment-pr
+
+Create PR inline comments for code review findings.
 
 PR_NUMBER: ${PR_NUMBER}
 REVIEW_BASE_DIR: ${REVIEW_DIR}
@@ -186,12 +188,14 @@ TIMESTAMP: ${TIMESTAMP}
 Report back: inline comments created, comments skipped, summary created"
 ```
 
-### 4.2 TechDebt Agent (Debt Tracking)
+### 4.2 Git Agent (Debt Tracking)
 
 ```
-Task(subagent_type="TechDebt"):
+Task(subagent_type="Git"):
 
-"Update tech debt tracking with pre-existing issues from code review.
+"OPERATION: manage-debt
+
+Update tech debt tracking with pre-existing issues from code review.
 
 REVIEW_DIR: ${REVIEW_DIR}
 TIMESTAMP: ${TIMESTAMP}
@@ -205,12 +209,14 @@ TIMESTAMP: ${TIMESTAMP}
 Report back: issue number, items added, items removed"
 ```
 
-### 4.3 Summary Agent (Aggregation + Recommendation)
+### 4.3 Synthesizer Agent (Aggregation + Recommendation)
 
 ```
-Task(subagent_type="Summary"):
+Task(subagent_type="Synthesizer"):
 
-"Synthesize all review findings into comprehensive summary.
+"Mode: review
+
+Synthesize all review findings into comprehensive summary.
 
 PR_NUMBER: ${PR_NUMBER}
 REVIEW_BASE_DIR: ${REVIEW_DIR}
@@ -232,9 +238,9 @@ Report back: recommendation, issue counts, summary file path"
 
 | Agent | Output |
 |-------|--------|
-| Comment | Inline comments created, skipped count, summary comment |
-| TechDebt | Issue number, items added/removed |
-| Summary | Recommendation, issue counts, summary file |
+| Git (comment-pr) | Inline comments created, skipped count, summary comment |
+| Git (manage-debt) | Issue number, items added/removed |
+| Synthesizer | Recommendation, issue counts, summary file |
 
 ---
 
@@ -249,11 +255,11 @@ Display results from all agents:
 
 ---
 
-### 🚦 Recommendation: {from Summary agent}
+### 🚦 Recommendation: {from Synthesizer agent}
 
 ---
 
-### 📊 Results (from Summary agent)
+### 📊 Results (from Synthesizer agent)
 
 | Metric | Count |
 |--------|-------|
@@ -264,7 +270,7 @@ Display results from all agents:
 
 ---
 
-### 💬 PR Comments (from Comment agent)
+### 💬 PR Comments (from Git agent)
 
 - Inline comments: {n} created
 - Summary comment: {created/not needed}
@@ -272,7 +278,7 @@ Display results from all agents:
 
 ---
 
-### 📋 Tech Debt (from TechDebt agent)
+### 📋 Tech Debt (from Git agent)
 
 - Issue: #{issue_number}
 - Added: {n} new items
@@ -289,7 +295,7 @@ Display results from all agents:
 
 ### 🎯 Next Steps
 
-{From Summary agent recommendation}
+{From Synthesizer agent recommendation}
 ```
 
 ---
@@ -300,7 +306,7 @@ Display results from all agents:
 2. **Parallel execution** - Reviews parallel, then synthesis agents parallel
 3. **Agent responsibilities**:
    - Review agents → Find issues
-   - Comment agent → Create PR comments
-   - TechDebt agent → Track pre-existing issues
-   - Summary agent → Aggregate, recommend, report
+   - Git agent (comment-pr) → Create PR comments
+   - Git agent (manage-debt) → Track pre-existing issues
+   - Synthesizer agent → Aggregate, recommend, report
 4. **Full automation** - Handles commit/push/PR creation via agents

@@ -75,15 +75,8 @@ interface CommandDefinition {
  */
 const DEVFLOW_COMMANDS: CommandDefinition[] = [
   { name: '/specify', description: 'Specify a feature interactively' },
-  { name: '/breakdown', description: 'Break down tasks quickly' },
   { name: '/implement', description: 'Execute single task lifecycle' },
-  { name: '/run', description: 'Interactive implementation' },
   { name: '/review', description: 'Comprehensive code review' },
-  { name: '/debug', description: 'Systematic debugging' },
-  { name: '/resolve-comments', description: 'Address PR feedback' },
-  { name: '/commit', description: 'Smart atomic commits' },
-  { name: '/pull-request', description: 'Create PR with description' },
-  { name: '/release', description: 'Automated releases' },
   { name: '/catch-up', description: 'Get up to speed on project state' },
   { name: '/devlog', description: 'Document session progress' },
 ];
@@ -98,13 +91,15 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'devflow-review-methodology', description: '6-step review process' },
   { name: 'devflow-docs-framework', description: 'Documentation conventions' },
   { name: 'devflow-git-safety', description: 'Git operations & safety' },
+  { name: 'devflow-github-patterns', description: 'GitHub API, rate limits, issues' },
   { name: 'devflow-implementation-patterns', description: 'CRUD, API, events, config' },
   { name: 'devflow-codebase-navigation', description: 'Exploration & pattern discovery' },
   // Tier 2: Specialized Skills (user-facing, auto-activate)
   { name: 'devflow-test-design', description: 'Test quality enforcement' },
   { name: 'devflow-code-smell', description: 'Anti-pattern detection' },
   { name: 'devflow-research', description: 'Pre-implementation exploration' },
-  { name: 'devflow-debug', description: 'Systematic debugging (auto)' },
+  { name: 'devflow-commit', description: 'Atomic commits & message format' },
+  { name: 'devflow-pull-request', description: 'PR quality & descriptions' },
   { name: 'devflow-input-validation', description: 'Boundary validation' },
   { name: 'devflow-worktree', description: 'Parallel development isolation' },
   { name: 'devflow-self-review', description: '9-pillar self-review framework' },
@@ -167,7 +162,7 @@ function renderVerboseOutput(
     console.log(`  ${skill.name.padEnd(26)}${skill.description}`);
   }
 
-  console.log('\nNote: devflow-debug skill auto-activates; /debug command for manual use');
+  console.log('\nNote: Skills auto-activate based on context (commits, PRs, tests, etc.)');
   console.log('Docs: https://github.com/dean0x/devflow');
 }
 

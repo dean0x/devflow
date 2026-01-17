@@ -230,10 +230,10 @@ Report: failure scenarios users care about"
 
 ### Synthesize Exploration Results
 
-**WAIT** for all Phase 2 explorers to complete, then spawn Synthesize agent:
+**WAIT** for all Phase 2 explorers to complete, then spawn Synthesizer agent:
 
 ```
-Task(subagent_type="Synthesize"):
+Task(subagent_type="Synthesizer"):
 
 "Synthesize EXPLORATION outputs for requirements: ${FEATURE_IDEA}
 
@@ -308,10 +308,10 @@ Output: Concrete, testable acceptance criteria"
 
 ### Synthesize Planning Results
 
-**WAIT** for all Phase 3 planners to complete, then spawn Synthesize agent:
+**WAIT** for all Phase 3 planners to complete, then spawn Synthesizer agent:
 
 ```
-Task(subagent_type="Synthesize"):
+Task(subagent_type="Synthesizer"):
 
 "Synthesize PLANNING outputs for requirements: ${FEATURE_IDEA}
 

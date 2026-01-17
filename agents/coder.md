@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation agent that works in an isolated worktree. Explores, plans, implements, tests, and commits a single task.
 model: inherit
-skills: devflow-core-patterns, devflow-git-safety, devflow-worktree, devflow-self-review, devflow-implementation-patterns, devflow-codebase-navigation
+skills: devflow-core-patterns, devflow-git-safety, devflow-worktree, devflow-self-review, devflow-implementation-patterns, devflow-codebase-navigation, devflow-commit, devflow-pull-request
 hooks:
   Stop:
     - hooks:
@@ -28,10 +28,11 @@ You are an autonomous coding agent responsible for implementing a single task in
 - `devflow-self-review`: 9-pillar self-review framework (runs via Stop hook)
 - `devflow-implementation-patterns`: CRUD, APIs, events, config patterns
 - `devflow-codebase-navigation`: Exploration and pattern discovery
+- `devflow-commit`: Atomic commit patterns, message format, safety scanning
+- `devflow-pull-request`: PR quality, descriptions, size assessment
 
 **Auto-activating skills** (trigger based on context):
 - `devflow-test-design`: When writing or modifying tests
-- `devflow-debug`: When errors or test failures occur
 - `devflow-typescript`: When working with .ts/.tsx files
 - `devflow-react`: When working with React components/hooks
 

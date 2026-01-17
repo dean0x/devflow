@@ -33,16 +33,8 @@ All generated documentation lives under `.docs/` in the project root:
 ├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── {type}-report-{timestamp}.md
 │   └── review-summary-{timestamp}.md
-├── coordinator/                       # Release coordination state
-│   ├── release-issue.md
-│   └── state.json
 ├── design/                            # Implementation plans
 │   └── {topic-slug}-{timestamp}.md
-├── debug/                             # Debug sessions
-│   ├── debug-{timestamp}.md
-│   └── KNOWLEDGE_BASE.md
-├── releases/                          # Release notes
-│   └── RELEASE_NOTES_v{version}.md
 ├── status/                            # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
@@ -97,16 +89,13 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 **Persisting commands** (create files in `.docs/`):
 - `CatchUp` → `.docs/CATCH_UP.md` (overwrite latest)
-- `Debug` → `.docs/debug/debug-{timestamp}.md` + `KNOWLEDGE_BASE.md`
 - `devlog` → `.docs/status/{timestamp}.md` + `compact/` + `INDEX.md`
 - `Reviewer` → `.docs/reviews/{branch-slug}/{focus}.md` (one file per focus area)
-- `Summary` → `.docs/reviews/{branch-slug}/SUMMARY.md`
-- `Release` → `.docs/releases/RELEASE_NOTES_v{version}.md`
-
+- `Synthesizer` → `.docs/reviews/{branch-slug}/review-summary.{timestamp}.md` (review mode)
 **Orchestration commands** (run in main context, spawn agents):
-- `/specify` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize, creates GitHub issue
-- `/implement` - Spawns Skimmer + 4 Explore + Synthesize + 3 Plan + Synthesize + 1-N Coder (with self-review), then calls `/review`
-- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Comment + TechDebt + Summary
+- `/specify` - Spawns Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer, creates GitHub issue
+- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder (with self-review) + Simplifier, creates PR
+- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
 
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)
@@ -115,18 +104,16 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 **Review agents**:
 - `Reviewer` - Universal parameterized reviewer (focus via prompt injection)
-- `Summary` - Aggregates review findings, determines merge recommendation
+- `Synthesizer` - Combines outputs from multiple agents (modes: exploration, planning, review)
+
+**GitHub operations agent** (unified parameterized agent):
+- `Git` - Handles all git/GitHub operations via operations: `fetch-issue`, `comment-pr`, `manage-debt`, `create-release`
 
 **Utility agents** (focused tasks, no sub-spawning):
-- `Commit` - Creates git commit only
-- `GetIssue` - Fetches GitHub issue details
-- `PullRequest` - Creates GitHub PR only
 - `Devlog` - Read-only, analyzes project state for CatchUp
-- `Comment` - Creates PR comments only
-- `TechDebt` - Updates GitHub issue only
-- `Debug` - Systematic debugging with hypothesis testing
 - `CatchUp` - Context restoration from status logs
 - `Skimmer` - Codebase orientation using skim for file/function discovery
+- `Simplifier` - Post-implementation code refinement for clarity and consistency
 
 ### Implementation Checklist
 
@@ -165,7 +152,7 @@ node dist/cli.js init
 /review
 
 # 5. Iterate until satisfied
-# 6. Commit using /commit
+# 6. Commit changes
 ```
 
 ## Command Design Principles
@@ -318,8 +305,9 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, Reviewer |
 | `devflow-review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
 | `devflow-self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Coder (via Stop hook) |
-| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp, Debug |
-| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Commit, Coder, PullRequest, Release |
+| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp |
+| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder, Git |
+| `devflow-github-patterns` | GitHub API patterns (rate limiting, PR comments, issue management, releases) | Git |
 | `devflow-implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
 | `devflow-codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
 
@@ -345,7 +333,8 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior testing) | Tests written or modified |
 | `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features implemented, code reviewed |
 | `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested |
-| `devflow-debug` | Systematic debugging with hypothesis testing | Errors occur, tests fail |
+| `devflow-commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
+| `devflow-pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
 | `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories |
 
@@ -383,6 +372,7 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 | `devflow-review-methodology` | NEVER BLOCK FOR PRE-EXISTING ISSUES |
 | `devflow-self-review` | FIX BEFORE RETURNING |
 | `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `devflow-github-patterns` | RESPECT RATE LIMITS OR FAIL GRACEFULLY |
 | `devflow-docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
 | `devflow-implementation-patterns` | FOLLOW EXISTING PATTERNS |
 | `devflow-codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
@@ -406,10 +396,11 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 
 | Skill | Iron Law |
 |-------|----------|
-| `devflow-debug` | NO FIXES WITHOUT ROOT CAUSE INVESTIGATION |
 | `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
 | `devflow-code-smell` | NO FAKE SOLUTIONS |
 | `devflow-research` | NO IMPLEMENTATION WITHOUT EXPLORATION |
+| `devflow-commit` | ATOMIC COMMITS OR NO COMMITS |
+| `devflow-pull-request` | HONEST DESCRIPTIONS OR NO PR |
 | `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
 | `devflow-worktree` | ONE TASK, ONE WORKTREE |
 | `devflow-react` | COMPOSITION OVER PROPS |
