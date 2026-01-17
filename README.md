@@ -157,7 +157,7 @@ The unified `Reviewer` agent loads ALL pattern skills and applies the relevant o
 ---
 name: Reviewer
 description: Universal code review agent with parameterized focus
-model: sonnet
+model: inherit
 skills: devflow-review-methodology, devflow-security-patterns, devflow-architecture-patterns, ...
 ---
 ```

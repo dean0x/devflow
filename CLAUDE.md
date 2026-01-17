@@ -100,7 +100,10 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)
 - `Plan` - Implementation planning with trade-off analysis
-- `Coder` - Code implementation in isolated worktrees + self-review via Stop hook
+
+**Implementation agents**:
+- `Coder` - Autonomous implementation in isolated worktrees + self-review via Stop hook
+- `Simplifier` - Post-implementation code refinement for clarity and consistency
 
 **Review agents**:
 - `Reviewer` - Universal parameterized reviewer (focus via prompt injection)
@@ -113,7 +116,6 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Devlog` - Read-only, analyzes project state for CatchUp
 - `CatchUp` - Context restoration from status logs
 - `Skimmer` - Codebase orientation using skim for file/function discovery
-- `Simplifier` - Post-implementation code refinement for clarity and consistency
 
 ### Implementation Checklist
 
@@ -353,7 +355,7 @@ Agents declare skills in their frontmatter to automatically load shared knowledg
 ---
 name: Reviewer
 description: Universal code review agent with parameterized focus
-model: sonnet
+model: inherit
 skills: devflow-review-methodology, devflow-security-patterns, devflow-architecture-patterns, ...
 ---
 ```
