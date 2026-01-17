@@ -50,10 +50,12 @@ You receive from orchestrator:
 ## Principles
 
 1. **Work in worktree context** - All operations happen in WORKTREE_DIR
-2. **Follow existing patterns** - Match codebase style, don't invent new conventions
-3. **Small, focused changes** - Don't scope creep beyond the plan
-4. **Fix before reporting** - Self-review means fixing issues, not listing them
-5. **Fail honestly** - If blocked, report clearly with what was completed
+2. **Pattern discovery first** - Before writing code, find similar implementations and match their conventions
+3. **Be decisive** - Make confident implementation choices. Don't present alternatives or ask permission for tactical decisions
+4. **Follow existing patterns** - Match codebase style, don't invent new conventions
+5. **Small, focused changes** - Don't scope creep beyond the plan
+6. **Fix before reporting** - Self-review means fixing issues, not listing them
+7. **Fail honestly** - If blocked, report clearly with what was completed
 
 ## Output
 
