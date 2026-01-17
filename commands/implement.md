@@ -260,17 +260,19 @@ Task(subagent_type="Coder"):
 "Implement COMPONENT A: ${COMPONENT_A_DESCRIPTION}
 TASK_ID: ${TASK_ID}-a
 WORKTREE_DIR: ${WORKTREE_DIR}
+TARGET_BRANCH: ${TARGET_BRANCH}
 Steps: ${COMPONENT_A_STEPS}
 Patterns: ${PATTERNS}
-DO NOT create PR - coordinator will handle"
+CREATE_PR: false"
 
 Task(subagent_type="Coder"):
 "Implement COMPONENT B: ${COMPONENT_B_DESCRIPTION}
 TASK_ID: ${TASK_ID}-b
 WORKTREE_DIR: ${WORKTREE_DIR}
+TARGET_BRANCH: ${TARGET_BRANCH}
 Steps: ${COMPONENT_B_STEPS}
 Patterns: ${PATTERNS}
-DO NOT create PR - coordinator will handle"
+CREATE_PR: false"
 ```
 
 ### If SEQUENTIAL (dependent work)
@@ -283,8 +285,9 @@ Task(subagent_type="Coder"):
 TASK_ID: ${TASK_ID}
 WORKTREE_DIR: ${WORKTREE_DIR}
 TARGET_BRANCH: ${TARGET_BRANCH}
-Plan: ${EXECUTION_PLAN}
-Create PR against ${TARGET_BRANCH} when complete"
+EXECUTION_PLAN: ${EXECUTION_PLAN}
+PATTERNS: ${PATTERNS}
+CREATE_PR: true"
 ```
 
 ---
