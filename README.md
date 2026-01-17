@@ -219,10 +219,11 @@ The Git agent handles all GitHub API interactions including fetching issues, cre
 | `Synthesizer` | Output Synthesis | Combine outputs from parallel agents (modes: exploration, planning, review) |
 | `Simplifier` | Code Refinement | Post-implementation code clarity and consistency improvements |
 | `Scrutinizer` | Self-Review | Final quality gate using 9-pillar framework, fixes P0/P1 issues |
+| `Shepherd` | Alignment Validation | Validates implementation matches request/plan, catches scope issues |
 
 **How Commands Orchestrate Agents:**
 - `/specify` → Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer → GitHub issue
-- `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder + Simplifier + Scrutinizer → PR
+- `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder + Simplifier + Scrutinizer + Shepherd → PR
 - `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
 
 **Skimmer Integration:**

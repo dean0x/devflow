@@ -134,11 +134,27 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 
 If Scrutinizer returns BLOCKED, report to user and halt.
 
-### Phase 9: Create PR
+### Phase 9: Alignment Check
+
+After Scrutinizer passes, spawn Shepherd to validate alignment:
+
+```
+Task(subagent_type="Shepherd"):
+"WORKTREE_DIR: {worktree}
+ORIGINAL_REQUEST: {task description or issue content}
+EXECUTION_PLAN: {synthesized plan from Phase 5}
+FILES_CHANGED: {list of files from Coder output}
+ACCEPTANCE_CRITERIA: {extracted criteria if available}
+Validate alignment, fix misalignments, report status"
+```
+
+If Shepherd returns BLOCKED, report to user for decision.
+
+### Phase 10: Create PR
 
 If multiple Coders were used, create unified PR using `devflow-pull-request` skill patterns. Push branch and run `gh pr create` with comprehensive description.
 
-### Phase 10: Report
+### Phase 11: Report
 
 Display completion summary with phase status, PR info, and next steps.
 
@@ -179,10 +195,13 @@ Display completion summary with phase status, PR info, and next steps.
 ├─ Phase 8: Self-Review
 │  └─ Scrutinizer agent (final quality gate, fixes P0/P1)
 │
-├─ Phase 9: Create PR (if parallel coders)
+├─ Phase 9: Alignment Check
+│  └─ Shepherd agent (validates alignment with request/plan)
+│
+├─ Phase 10: Create PR (if parallel coders)
 │  └─ Apply devflow-pull-request patterns
 │
-└─ Phase 10: Display agent outputs
+└─ Phase 11: Display agent outputs
 ```
 
 ## Principles
