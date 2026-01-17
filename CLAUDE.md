@@ -94,7 +94,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Synthesizer` → `.docs/reviews/{branch-slug}/review-summary.{timestamp}.md` (review mode)
 **Orchestration commands** (run in main context, spawn agents):
 - `/specify` - Spawns Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer, creates GitHub issue
-- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder (with self-review), then calls `/review`
+- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder (with self-review) + Simplifier, creates PR
 - `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
 
 **Native agents used** (built-in Claude Code agents):
@@ -113,6 +113,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Devlog` - Read-only, analyzes project state for CatchUp
 - `CatchUp` - Context restoration from status logs
 - `Skimmer` - Codebase orientation using skim for file/function discovery
+- `Simplifier` - Post-implementation code refinement for clarity and consistency
 
 ### Implementation Checklist
 
