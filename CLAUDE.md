@@ -94,7 +94,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Synthesizer` → `.docs/reviews/{branch-slug}/review-summary.{timestamp}.md` (review mode)
 **Orchestration commands** (run in main context, spawn agents):
 - `/specify` - Spawns Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer, creates GitHub issue
-- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder (with self-review) + Simplifier, creates PR
+- `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder + Simplifier + Scrutinizer, creates PR
 - `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
 
 **Native agents used** (built-in Claude Code agents):
@@ -102,7 +102,8 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Plan` - Implementation planning with trade-off analysis
 
 **Implementation agents**:
-- `Coder` - Autonomous implementation in isolated worktrees + self-review via Stop hook
+- `Coder` - Autonomous implementation in isolated worktrees
+- `Scrutinizer` - Self-review agent that evaluates and fixes P0/P1 issues (runs in fresh context after Coder)
 - `Simplifier` - Post-implementation code refinement for clarity and consistency
 
 **Review agents**:
@@ -306,7 +307,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 |-------|---------|---------|
 | `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, Reviewer |
 | `devflow-review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
-| `devflow-self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Coder (via Stop hook) |
+| `devflow-self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Scrutinizer |
 | `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp |
 | `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder, Git |
 | `devflow-github-patterns` | GitHub API patterns (rate limiting, PR comments, issue management, releases) | Git |

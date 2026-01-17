@@ -111,7 +111,7 @@ Each Coder receives: task description, task-id, worktree path, target branch, st
 
 ### Phase 7: Simplify
 
-After Coder completes, spawn Simplifier:
+After Coder completes, spawn Simplifier to polish the code:
 
 ```
 Task(subagent_type="Simplifier"):
@@ -120,11 +120,25 @@ Task: {task description}
 Focus on code modified by Coder, apply project standards, enhance clarity"
 ```
 
-### Phase 8: Create PR
+### Phase 8: Self-Review
+
+After Simplifier completes, spawn Scrutinizer as final quality gate:
+
+```
+Task(subagent_type="Scrutinizer"):
+"WORKTREE_DIR: {worktree}
+TASK_DESCRIPTION: {task description}
+FILES_CHANGED: {list of files from Coder output}
+Evaluate 9 pillars, fix P0/P1 issues, report status"
+```
+
+If Scrutinizer returns BLOCKED, report to user and halt.
+
+### Phase 9: Create PR
 
 If multiple Coders were used, create unified PR using `devflow-pull-request` skill patterns. Push branch and run `gh pr create` with comprehensive description.
 
-### Phase 9: Report
+### Phase 10: Report
 
 Display completion summary with phase status, PR info, and next steps.
 
@@ -158,15 +172,17 @@ Display completion summary with phase status, PR info, and next steps.
 │
 ├─ Phase 6: Implement
 │  └─ 1-N Coder agents (parallel if beneficial)
-│  └─ Each Coder runs self-review via Stop hook (9 pillars)
 │
 ├─ Phase 7: Simplify
 │  └─ Simplifier agent (refines code clarity and consistency)
 │
-├─ Phase 8: Create PR (if parallel coders)
+├─ Phase 8: Self-Review
+│  └─ Scrutinizer agent (final quality gate, fixes P0/P1)
+│
+├─ Phase 9: Create PR (if parallel coders)
 │  └─ Apply devflow-pull-request patterns
 │
-└─ Phase 9: Display agent outputs
+└─ Phase 10: Display agent outputs
 ```
 
 ## Principles

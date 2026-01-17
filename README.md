@@ -109,7 +109,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 |-------|---------|---------|
 | `devflow-core-patterns` | Result types, DI, immutability, pure functions | Coder, Reviewer |
 | `devflow-review-methodology` | 6-step review process, 3-category classification | Reviewer |
-| `devflow-self-review` | 9-pillar self-review framework | Coder (via Stop hook) |
+| `devflow-self-review` | 9-pillar self-review framework | Scrutinizer |
 | `devflow-docs-framework` | .docs/ structure, naming, templates | Devlog, CatchUp |
 | `devflow-git-safety` | Git operations, lock handling, commit conventions | Coder, Git |
 | `devflow-github-patterns` | GitHub API, rate limiting, PR comments, issues, releases | Git |
@@ -162,13 +162,13 @@ skills: devflow-review-methodology, devflow-security-patterns, devflow-architect
 ---
 ```
 
-The `Coder` agent uses a Stop hook to run self-review before returning:
+The `Scrutinizer` agent runs self-review in a fresh context after Coder completes:
 ```yaml
-hooks:
-  Stop:
-    - hooks:
-        - type: prompt
-          prompt: "Run self-review using devflow-self-review. Fix all P0/P1 issues..."
+---
+name: Scrutinizer
+description: Self-review agent that evaluates and fixes P0/P1 issues
+skills: devflow-self-review, devflow-core-patterns
+---
 ```
 
 ### 📊 Slash Commands (User-Invoked)
@@ -218,10 +218,11 @@ The Git agent handles all GitHub API interactions including fetching issues, cre
 | `Devlog` | Project State | Analyze project state for status reports |
 | `Synthesizer` | Output Synthesis | Combine outputs from parallel agents (modes: exploration, planning, review) |
 | `Simplifier` | Code Refinement | Post-implementation code clarity and consistency improvements |
+| `Scrutinizer` | Self-Review | Final quality gate using 9-pillar framework, fixes P0/P1 issues |
 
 **How Commands Orchestrate Agents:**
 - `/specify` → Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer → GitHub issue
-- `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder (with self-review) + Simplifier → PR
+- `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder + Simplifier + Scrutinizer → PR
 - `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
 
 **Skimmer Integration:**

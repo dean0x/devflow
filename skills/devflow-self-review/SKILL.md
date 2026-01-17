@@ -1,12 +1,12 @@
 ---
 name: devflow-self-review
-description: Self-review framework for Coder agent. Evaluate implementation against 9 pillars before returning. Fix P0/P1 issues immediately. Used via Stop hook to ensure quality before handoff.
+description: Self-review framework for Scrutinizer agent. Evaluate implementation against 9 pillars. Fix P0/P1 issues immediately. Ensures quality before handoff to Simplifier.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
 # Self-Review Framework
 
-Systematic self-review process for the Coder agent. Evaluate your implementation against 9 pillars before returning. **Fix issues, don't just report them.**
+Systematic self-review process for the Scrutinizer agent. Evaluate implementation against 9 pillars in a fresh context. **Fix issues, don't just report them.**
 
 Based on [Google Engineering Practices](https://google.github.io/eng-practices/review/reviewer/looking-for.html) and [Microsoft Engineering Playbook](https://microsoft.github.io/code-with-engineering-playbook/code-reviews/process-guidance/reviewer-guidance/).
 
@@ -482,7 +482,6 @@ START
 ## Integration
 
 This skill is used by:
-- **Coder agent**: Via Stop hook before returning implementation
-- **Stop hook prompt**: "Run self-review using devflow-self-review. Fix all P0/P1 issues. Return when PASS."
+- **Scrutinizer agent**: Dedicated self-review agent that runs in fresh context after Coder completes
 
-The self-review ensures implementations meet quality standards before external review, reducing review cycles and catching issues early.
+The self-review ensures implementations meet quality standards before external review, reducing review cycles and catching issues early. Running in a separate agent context guarantees adequate resources for thorough evaluation and fixes.
