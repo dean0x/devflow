@@ -60,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Calculated from `context_window.current_usage` data
 
 ### Changed
+- **Lean agent and command redesign** - Major refactoring reducing 3,653 lines to 844 (-77%)
+  - Commands: `/implement` (479→182), `/specify` (631→179), `/devlog` (408→113), `/review` (312→136)
+  - Agents: Coder, Synthesizer, Reviewer, Git, Devlog, CatchUp, Skimmer, Simplifier
+  - Removed embedded bash scripts, verbose templates, redundant explanations
+  - Preserved all workflows, agent invocations, and architecture
+- **Agent model assignments** - Simplified to inherit vs haiku
+  - `inherit`: Coder, Reviewer, Simplifier, Skimmer (use orchestrator's model)
+  - `haiku`: Synthesizer, Git, Devlog, CatchUp (fast, simple operations)
 - `/specify` now requires explicit user confirmation at each gate
 - Statusline shows actual percentage instead of just large context warning
 - Settings template includes permissions.deny and env configuration

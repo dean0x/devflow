@@ -2,9 +2,9 @@
 description: Execute a single task through the complete lifecycle - orchestrates exploration, planning, implementation, and simplification with parallel agents
 ---
 
-# Implement Command - Single Task Lifecycle Orchestrator
+# Implement Command
 
-Orchestrate a single task from exploration through implementation and simplification by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
+Orchestrate a single task from exploration through implementation by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
 
 ## Usage
 
@@ -14,413 +14,119 @@ Orchestrate a single task from exploration through implementation and simplifica
 /implement      (use conversation context)
 ```
 
----
-
 ## Input
 
 `$ARGUMENTS` contains whatever follows `/implement`:
+- Task description: "implement JWT auth"
+- GitHub issue: "#42"
+- Empty: use conversation context
 
-- `/implement implement JWT auth` → `$ARGUMENTS` = "implement JWT auth"
-- `/implement #42` → `$ARGUMENTS` = "#42" (GitHub issue)
-- `/implement` → `$ARGUMENTS` = "" (use conversation context)
+## Phases
 
----
+### Phase 1: Setup
 
-## Context
-
-```bash
-# Capture input
-TASK_INPUT="$ARGUMENTS"
-
-# Generate identifiers
-TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-TASK_ID="task-${TIMESTAMP}"
-TASK_BRANCH="implement/${TASK_ID}"
-TARGET_BRANCH=$(git branch --show-current)
-WORKTREE_DIR=".worktrees/${TASK_ID}"
-
-echo "=== IMPLEMENT: ${TASK_ID} ==="
-echo "Input: ${TASK_INPUT:-'(from conversation context)'}"
-echo "Branch: ${TASK_BRANCH}"
-echo "Target: ${TARGET_BRANCH}"
-```
-
----
-
-## Phase 1: Setup
-
-### Create Worktree
-
-```bash
-mkdir -p .worktrees
-git worktree add -b "${TASK_BRANCH}" "${WORKTREE_DIR}" "${TARGET_BRANCH}"
-echo "Worktree: ${WORKTREE_DIR}"
-```
-
-### Fetch Issue Details (if issue number)
+Create worktree at `.worktrees/{task-id}` branching from current branch.
 
 If input is a GitHub issue number, spawn Git agent:
 
 ```
 Task(subagent_type="Git"):
-
 "OPERATION: fetch-issue
-
-Fetch details for GitHub issue.
-
-ISSUE_INPUT: ${ISSUE_NUMBER}
-
-Return: title, description, acceptance criteria, labels, linked issues, suggested branch name"
+ISSUE_INPUT: {issue number}
+Return: title, description, acceptance criteria, labels"
 ```
 
----
+### Phase 1.5: Orient
 
-## Phase 1.5: Orient
-
-Spawn Skimmer agent to get codebase overview before detailed exploration:
+Spawn Skimmer agent for codebase overview:
 
 ```
 Task(subagent_type="Skimmer"):
-"Orient in codebase for: ${TASK_DESCRIPTION}
-Working directory: ${WORKTREE_DIR}
-
-Use skim to:
-1. Get project structure overview
-2. Identify relevant source directories
-3. Find files/functions related to the task
-4. Detect existing patterns
-
-Return: Codebase map with relevant files, key functions, integration points"
+"Orient in codebase for: {task description}
+Working directory: {worktree}
+Use skim to identify relevant files, functions, integration points"
 ```
 
-Capture orientation output:
+### Phase 2: Explore (Parallel)
 
-```bash
-CODEBASE_ORIENTATION="${SKIMMER_OUTPUT}"
-```
+Spawn 4 Explore agents **in a single message**, each with worktree path and Skimmer context:
 
----
+| Focus | Thoroughness | Find |
+|-------|-------------|------|
+| Architecture | medium | Similar implementations, patterns, module structure |
+| Integration | medium | Entry points, services, database models, configuration |
+| Reusable code | medium | Utilities, helpers, validation patterns, error handling |
+| Edge cases | quick | Error scenarios, race conditions, permission failures |
 
-## Phase 2: Explore (Parallel)
+Track success/failure of each explorer for synthesis context.
 
-Spawn 4 Explore agents **in a single message**, passing Skimmer context:
+### Phase 3: Synthesize Exploration
 
-```
-Task(subagent_type="Explore"):
-"Explore ARCHITECTURE for: ${TASK_DESCRIPTION}
-Working directory: ${WORKTREE_DIR}
-Codebase orientation: ${CODEBASE_ORIENTATION}
-Thoroughness: medium
-Find: Similar implementations, architectural patterns, module structure"
-
-Task(subagent_type="Explore"):
-"Explore INTEGRATION POINTS for: ${TASK_DESCRIPTION}
-Working directory: ${WORKTREE_DIR}
-Codebase orientation: ${CODEBASE_ORIENTATION}
-Thoroughness: medium
-Find: Entry points, services, database models, configuration"
-
-Task(subagent_type="Explore"):
-"Explore REUSABLE CODE for: ${TASK_DESCRIPTION}
-Working directory: ${WORKTREE_DIR}
-Codebase orientation: ${CODEBASE_ORIENTATION}
-Thoroughness: medium
-Find: Utilities, helpers, validation patterns, error handling"
-
-Task(subagent_type="Explore"):
-"Explore EDGE CASES for: ${TASK_DESCRIPTION}
-Working directory: ${WORKTREE_DIR}
-Codebase orientation: ${CODEBASE_ORIENTATION}
-Thoroughness: quick
-Find: Error scenarios, race conditions, permission failures"
-```
-
-### Failure Tracking
-
-After collecting outputs, track success/failure status:
-
-```bash
-EXPLORER_STATUS=""
-FAILED_EXPLORATIONS=""
-
-# Check each explorer output
-if [ -z "$ARCHITECTURE_OUTPUT" ]; then
-  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}architecture,"
-else
-  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Architecture "
-fi
-
-if [ -z "$INTEGRATION_OUTPUT" ]; then
-  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}integration,"
-else
-  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Integration "
-fi
-
-if [ -z "$REUSABLE_CODE_OUTPUT" ]; then
-  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}reusable,"
-else
-  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Reusable "
-fi
-
-if [ -z "$EDGE_CASES_OUTPUT" ]; then
-  FAILED_EXPLORATIONS="${FAILED_EXPLORATIONS}edge-cases,"
-else
-  EXPLORER_STATUS="${EXPLORER_STATUS}✅ Edge Cases"
-fi
-
-echo "Explorer status: ${EXPLORER_STATUS}"
-if [ -n "$FAILED_EXPLORATIONS" ]; then
-  echo "⚠️ Failed explorations: ${FAILED_EXPLORATIONS}"
-fi
-```
-
-Pass failure context to Synthesize agent so it can flag gaps in coverage.
-
----
-
-## Phase 3: Synthesize Exploration
-
-**WAIT** for Phase 2, then spawn Synthesizer agent:
+**WAIT** for Phase 2, then spawn Synthesizer:
 
 ```
 Task(subagent_type="Synthesizer"):
-
-"Synthesize EXPLORATION outputs for: ${TASK_DESCRIPTION}
-
+"Synthesize EXPLORATION outputs for: {task}
 Mode: exploration
-
-Explorer outputs:
-${ARCHITECTURE_OUTPUT}
-${INTEGRATION_OUTPUT}
-${REUSABLE_CODE_OUTPUT}
-${EDGE_CASES_OUTPUT}
-
-Failed explorations: ${FAILED_EXPLORATIONS:-none}
-
-Combine into: patterns, integration points, reusable code, edge cases.
-If any explorations failed, note the gap in your synthesis and recommend whether re-exploration is needed."
+Explorer outputs: {all 4 outputs}
+Failed explorations: {any failures}
+Combine into: patterns, integration points, reusable code, edge cases"
 ```
 
----
+### Phase 4: Plan (Parallel)
 
-## Phase 4: Plan (Parallel)
+Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 
-Spawn 3 Plan agents **in a single message**:
+| Focus | Output |
+|-------|--------|
+| Implementation steps | Ordered steps with files and dependencies |
+| Testing strategy | Unit tests, integration tests, edge case tests |
+| Parallelization | PARALLELIZABLE vs SEQUENTIAL work units |
 
-```
-Task(subagent_type="Plan"):
-"Plan IMPLEMENTATION STEPS for: ${TASK_DESCRIPTION}
-Exploration summary: ${EXPLORATION_SYNTHESIS}
-Output: Ordered steps with files and dependencies"
+### Phase 5: Synthesize Planning
 
-Task(subagent_type="Plan"):
-"Plan TESTING STRATEGY for: ${TASK_DESCRIPTION}
-Exploration summary: ${EXPLORATION_SYNTHESIS}
-Output: Unit tests, integration tests, edge case tests"
-
-Task(subagent_type="Plan"):
-"Analyze PARALLELIZATION for: ${TASK_DESCRIPTION}
-Exploration summary: ${EXPLORATION_SYNTHESIS}
-Output: PARALLELIZABLE vs SEQUENTIAL work units"
-```
-
----
-
-## Phase 5: Synthesize Planning
-
-**WAIT** for Phase 4, then spawn Synthesizer agent:
+**WAIT** for Phase 4, then spawn Synthesizer:
 
 ```
 Task(subagent_type="Synthesizer"):
-
-"Synthesize PLANNING outputs for: ${TASK_DESCRIPTION}
-
+"Synthesize PLANNING outputs for: {task}
 Mode: planning
-
-Planner outputs:
-${IMPLEMENTATION_STEPS}
-${TESTING_STRATEGY}
-${PARALLELIZATION_ANALYSIS}
-
+Planner outputs: {all 3 outputs}
 Combine into: execution plan with parallel/sequential decision"
 ```
 
----
+### Phase 6: Implement
 
-## Phase 6: Implement
+Based on Phase 5 synthesis (which includes the Parallelization planner's decision):
 
-Based on synthesis, spawn Coder agent(s).
+**Decision criteria** (from Parallelization planner):
+- **PARALLELIZABLE**: Work units have no shared state, different files/modules, can run independently
+- **SEQUENTIAL**: Work units have dependencies, shared state, or must execute in order
 
-### If PARALLEL (multiple independent components)
+**Spawning pattern**:
+- **PARALLEL**: Multiple Coders in single message, each with subset of steps, `CREATE_PR: false`
+- **SEQUENTIAL**: Single Coder with full execution plan, `CREATE_PR: true`
 
-Spawn multiple Coder agents **in a single message**:
+Each Coder receives: task description, task-id, worktree path, target branch, steps/plan.
 
-```
-Task(subagent_type="Coder"):
-"Implement COMPONENT A: ${COMPONENT_A_DESCRIPTION}
-TASK_ID: ${TASK_ID}-a
-WORKTREE_DIR: ${WORKTREE_DIR}
-Steps: ${COMPONENT_A_STEPS}
-Patterns: ${PATTERNS}
-DO NOT create PR - coordinator will handle"
+### Phase 7: Simplify
 
-Task(subagent_type="Coder"):
-"Implement COMPONENT B: ${COMPONENT_B_DESCRIPTION}
-TASK_ID: ${TASK_ID}-b
-WORKTREE_DIR: ${WORKTREE_DIR}
-Steps: ${COMPONENT_B_STEPS}
-Patterns: ${PATTERNS}
-DO NOT create PR - coordinator will handle"
-```
-
-### If SEQUENTIAL (dependent work)
-
-Spawn single Coder agent:
-
-```
-Task(subagent_type="Coder"):
-"Implement: ${TASK_DESCRIPTION}
-TASK_ID: ${TASK_ID}
-WORKTREE_DIR: ${WORKTREE_DIR}
-TARGET_BRANCH: ${TARGET_BRANCH}
-Plan: ${EXECUTION_PLAN}
-Create PR against ${TARGET_BRANCH} when complete"
-```
-
----
-
-## Phase 7: Simplify
-
-After Coder completes, spawn Simplifier agent to refine the implementation:
+After Coder completes, spawn Simplifier:
 
 ```
 Task(subagent_type="Simplifier"):
-"Simplify recently implemented code in: ${WORKTREE_DIR}
-
-Task: ${TASK_DESCRIPTION}
-
-Focus on:
-1. Code modified by Coder in this session
-2. Apply project standards from CLAUDE.md
-3. Enhance clarity without changing functionality
-4. Reduce unnecessary complexity
-
-Preserve all functionality - only improve how code is written, not what it does."
+"Simplify recently implemented code in: {worktree}
+Task: {task description}
+Focus on code modified by Coder, apply project standards, enhance clarity"
 ```
 
----
+### Phase 8: Create PR
 
-## Phase 8: Create PR (if parallel implementation)
+If multiple Coders were used, create unified PR using `devflow-pull-request` skill patterns. Push branch and run `gh pr create` with comprehensive description.
 
-If multiple Coders were used, apply `devflow-pull-request` skill patterns to create unified PR:
+### Phase 9: Report
 
-```bash
-# Apply devflow-pull-request patterns for comprehensive PR
-# 1. Analyze all commits from parallel coders
-# 2. Generate title following conventional format
-# 3. Create description with all required sections
-# 4. Run gh pr create
-
-cd "${WORKTREE_DIR}"
-git push -u origin "${TASK_BRANCH}"
-
-# Create PR using devflow-pull-request patterns
-gh pr create \
-  --base "${TARGET_BRANCH}" \
-  --head "${TASK_BRANCH}" \
-  --title "${PR_TITLE}" \
-  --body "${PR_DESCRIPTION}"
-```
-
-Capture PR info:
-
-```bash
-PR_NUMBER=$(gh pr view --json number -q '.number')
-PR_URL=$(gh pr view --json url -q '.url')
-```
-
----
-
-## Phase 9: Final Report
-
-Display agent outputs:
-
-```markdown
-## ✅ Implementation Complete: ${TASK_ID}
-
-### Task
-${TASK_DESCRIPTION}
-
----
-
-### 🚦 Status: IMPLEMENTED
-
----
-
-### 📊 Execution Summary
-
-| Phase | Agents | Status |
-|-------|--------|--------|
-| Orient | 1 (Skimmer) | ✅ |
-| Explore | 4 | ✅ |
-| Plan | 3 | ✅ |
-| Implement | {n} ({parallel/sequential}) + self-review | ✅ |
-| Simplify | 1 (Simplifier) | ✅ |
-
----
-
-### 📝 PR (from Coder agent)
-- Number: #${PR_NUMBER}
-- URL: ${PR_URL}
-- Files: {n} changed
-- Commits: {n}
-
----
-
-### ✨ Simplification (from Simplifier agent)
-{Summary of refinements applied}
-
----
-
-### 🎯 Next Steps
-1. Run `/review` for comprehensive code review
-2. Address any issues found
-3. Merge when ready
-```
-
----
-
-## Error Handling
-
-### Agent Failure
-
-If any agent fails:
-
-```markdown
-## ⚠️ Implementation Error
-
-**Phase**: {phase}
-**Agent**: {agent type}
-**Error**: {error message}
-
-**Options**:
-1. Retry phase
-2. Investigate the error systematically
-3. Escalate to user
-```
-
----
-
-## Cleanup
-
-After task complete (manual or hook):
-
-```bash
-git worktree remove "${WORKTREE_DIR}" --force
-git worktree prune
-```
-
----
+Display completion summary with phase status, PR info, and next steps.
 
 ## Architecture
 
@@ -463,13 +169,19 @@ git worktree prune
 └─ Phase 9: Display agent outputs
 ```
 
----
-
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, never does work itself
-2. **Parallel by default** - Explore, plan, synthesis all parallel
+2. **Parallel by default** - Explore, plan in parallel; sequential phases wait
 3. **Agent ownership** - Each agent owns its output completely
 4. **Clean handoffs** - Each phase passes structured data to next
 5. **Honest reporting** - Display agent outputs directly
 6. **Simplification pass** - Code refined for clarity before PR
+
+## Error Handling
+
+If any agent fails, report the phase, agent type, and error. Offer options: retry phase, investigate systematically, or escalate to user.
+
+## Cleanup
+
+After task complete, remove worktree with `git worktree remove --force` and prune.
