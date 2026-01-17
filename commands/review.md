@@ -2,311 +2,135 @@
 description: Comprehensive branch review using specialized sub-agents for PR readiness
 ---
 
-# Code Review - Full Branch Review Orchestrator
+# Review Command
 
-Run a comprehensive review of the current branch. You handle the full workflow: pre-flight checks, review selection, parallel execution, and synthesis.
+Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments and tech debt tracking.
 
-## Your Task
+## Usage
 
-Run a complete code review:
-1. **Pre-flight**: Ensure committed, pushed, PR exists
-2. **Analyze**: Detect file types to determine relevant reviews
-3. **Review**: Spawn review agents in parallel
-4. **Synthesize**: Aggregate results, determine merge recommendation
-5. **Report**: Create summary and manage tech debt
-
----
-
-## Phase 1: Pre-Flight Checks
-
-### Check Branch State
-
-```bash
-CURRENT_BRANCH=$(git branch --show-current)
-if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
-    echo "ERROR: Must be on a feature branch"
-    exit 1
-fi
-
-# Get base branch
-BASE_BRANCH=""
-for branch in main master develop; do
-    git show-ref --verify --quiet refs/heads/$branch && BASE_BRANCH=$branch && break
-done
-
-# Check commits ahead
-COMMITS_AHEAD=$(git rev-list --count $BASE_BRANCH..HEAD 2>/dev/null || echo "0")
-[ "$COMMITS_AHEAD" -eq 0 ] && echo "ERROR: No commits to review" && exit 1
-
-echo "Branch: $CURRENT_BRANCH ($COMMITS_AHEAD commits ahead of $BASE_BRANCH)"
+```
+/review           (review current branch)
+/review #42       (review specific PR)
 ```
 
-### Handle Uncommitted Changes
+## Pre-Flight Checks
 
-```bash
-if [ -n "$(git status --porcelain)" ]; then
-    echo "⚠️ Uncommitted changes detected"
-    # Apply devflow-commit patterns to create atomic commits
-fi
-```
+Before spawning review agents, ensure:
+1. On a feature branch (not main/master)
+2. Has commits ahead of base branch
+3. Uncommitted changes → apply `devflow-commit` patterns first
+4. Branch pushed to remote
+5. PR exists → if not, apply `devflow-pull-request` patterns
 
-**If uncommitted changes**: Apply `devflow-commit` skill patterns to create atomic commits before review.
+## Phases
 
-### Ensure Branch Pushed
+### Phase 1: Analyze Changed Files
 
-```bash
-if ! git ls-remote --exit-code --heads origin "$CURRENT_BRANCH" >/dev/null 2>&1; then
-    echo "Pushing branch to remote..."
-    git push -u origin "$CURRENT_BRANCH"
-fi
-```
+Detect file types in diff to determine conditional reviews:
 
-### Ensure PR Exists
+| Condition | Adds Review |
+|-----------|-------------|
+| .ts/.tsx files | typescript |
+| DB/migration files | database |
+| Dependency files changed | dependencies |
+| Docs or significant code | documentation |
 
-```bash
-PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
-if [ -z "$PR_NUMBER" ]; then
-    echo "⚠️ No PR exists"
-    # Apply devflow-pull-request patterns to create PR
-fi
-```
+### Phase 2: Run Reviews (Parallel)
 
-**If no PR**: Apply `devflow-pull-request` skill patterns to create PR with comprehensive description.
+Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add up to 4 more:
 
-### Capture PR Context
+| Focus | Always | Pattern Skill |
+|-------|--------|---------------|
+| security | ✓ | devflow-security-patterns |
+| architecture | ✓ | devflow-architecture-patterns |
+| performance | ✓ | devflow-performance-patterns |
+| complexity | ✓ | devflow-complexity-patterns |
+| consistency | ✓ | devflow-consistency-patterns |
+| regression | ✓ | devflow-regression-patterns |
+| tests | ✓ | devflow-tests-patterns |
+| typescript | conditional | devflow-typescript |
+| database | conditional | devflow-database-patterns |
+| dependencies | conditional | devflow-dependencies-patterns |
+| documentation | conditional | devflow-documentation-patterns |
 
-```bash
-PR_NUMBER=$(gh pr view --json number -q '.number')
-PR_URL=$(gh pr view --json url -q '.url')
-echo "PR: #$PR_NUMBER - $PR_URL"
-```
-
----
-
-## Phase 2: Analyze Changed Files
-
-Determine which reviews to run based on file types:
-
-```bash
-# Get changed files
-CHANGED_FILES=$(git diff --name-only $BASE_BRANCH...HEAD)
-
-# Detect file types
-HAS_TS=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | head -1)
-HAS_JS=$(echo "$CHANGED_FILES" | grep -E '\.(js|jsx)$' | head -1)
-HAS_PY=$(echo "$CHANGED_FILES" | grep -E '\.py$' | head -1)
-HAS_SQL=$(echo "$CHANGED_FILES" | grep -iE '\.(sql|prisma|drizzle)$' | head -1)
-HAS_MIGRATIONS=$(echo "$CHANGED_FILES" | grep -iE '(migration|schema)' | head -1)
-HAS_DEPS=$(echo "$CHANGED_FILES" | grep -E '(package\.json|requirements\.txt|Cargo\.toml|go\.mod)' | head -1)
-HAS_DOCS=$(echo "$CHANGED_FILES" | grep -E '\.(md|rst|txt)$' | head -1)
-HAS_TESTS=$(echo "$CHANGED_FILES" | grep -E '\.(test|spec)\.' | head -1)
-
-echo "=== FILE ANALYSIS ==="
-echo "TypeScript/JS: $([ -n "$HAS_TS$HAS_JS" ] && echo 'yes' || echo 'no')"
-echo "Python: $([ -n "$HAS_PY" ] && echo 'yes' || echo 'no')"
-echo "Database: $([ -n "$HAS_SQL$HAS_MIGRATIONS" ] && echo 'yes' || echo 'no')"
-echo "Dependencies: $([ -n "$HAS_DEPS" ] && echo 'yes' || echo 'no')"
-echo "Documentation: $([ -n "$HAS_DOCS" ] && echo 'yes' || echo 'no')"
-echo "Tests: $([ -n "$HAS_TESTS" ] && echo 'yes' || echo 'no')"
-```
-
-### Determine Review Focus Areas
-
-| Focus | Run When | Pattern Skill Applied |
-|-------|----------|----------------------|
-| security | Always | devflow-security-patterns |
-| architecture | Always | devflow-architecture-patterns |
-| performance | Always | devflow-performance-patterns |
-| complexity | Always | devflow-complexity-patterns |
-| consistency | Always | devflow-consistency-patterns |
-| regression | Always | devflow-regression-patterns |
-| tests | Always | devflow-tests-patterns |
-| dependencies | Dependencies changed | devflow-dependencies-patterns |
-| documentation | Docs or significant code changed | devflow-documentation-patterns |
-| typescript | .ts/.tsx files changed | devflow-typescript |
-| database | db/migration files changed | devflow-database-patterns |
-
----
-
-## Phase 3: Run Reviews (Parallel)
-
-Setup coordination:
-
-```bash
-BRANCH_SLUG=$(echo "$CURRENT_BRANCH" | sed 's/\//-/g')
-TIMESTAMP=$(date +%Y-%m-%d_%H%M)
-REVIEW_DIR=".docs/reviews/${BRANCH_SLUG}"
-mkdir -p "$REVIEW_DIR"
-```
-
-**Spawn Reviewer agents in parallel** using Task tool. Each Reviewer is invoked with a specific focus via prompt injection:
-
+Each Reviewer invocation:
 ```
 Task(subagent_type="Reviewer"):
-
-"Review this code focusing exclusively on {FOCUS}.
-Apply patterns from devflow-{focus}-patterns skill.
-Follow the 6-step process from devflow-review-methodology.
-
-PR_NUMBER: ${PR_NUMBER}
-BASE_BRANCH: ${BASE_BRANCH}
-REVIEW_BASE_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${TIMESTAMP}
-
-Output findings to: ${REVIEW_DIR}/{focus}.md
-Report back: issues found by category (blocking/should-fix/informational), merge recommendation"
+"Review focusing on {focus}. Apply devflow-{focus}-patterns.
+Follow 6-step process from devflow-review-methodology.
+PR: #{pr_number}, Base: {base_branch}
+Output to: .docs/reviews/{branch-slug}/{focus}.md"
 ```
 
-Spawn one Reviewer per focus area from the table above. Always run the 7 "Always" focus areas; conditionally run the others based on changed file types.
+### Phase 3: Synthesis (Parallel)
 
----
+**WAIT** for Phase 2, then spawn 3 agents **in a single message**:
 
-## Phase 4: Synthesis (Parallel)
-
-**WAIT** for all Phase 3 review agents to complete, then spawn synthesis agents **in parallel**:
-
-**IMPORTANT:** Launch ALL THREE agents in a SINGLE message for parallel execution.
-
-### 4.1 Git Agent (PR Comments)
-
+**Git Agent (PR Comments)**:
 ```
 Task(subagent_type="Git"):
-
 "OPERATION: comment-pr
-
-Create PR inline comments for code review findings.
-
-PR_NUMBER: ${PR_NUMBER}
-REVIEW_BASE_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${TIMESTAMP}
-
-1. Read all review reports from ${REVIEW_DIR}
-2. Deduplicate similar issues
-3. Create inline comments on lines in the PR diff
-4. Consolidate skipped issues into ONE summary comment
-
-Report back: inline comments created, comments skipped, summary created"
+Read reviews from .docs/reviews/{branch-slug}/
+Create inline PR comments, deduplicate, consolidate skipped into summary"
 ```
 
-### 4.2 Git Agent (Debt Tracking)
-
+**Git Agent (Debt Tracking)**:
 ```
 Task(subagent_type="Git"):
-
 "OPERATION: manage-debt
-
-Update tech debt tracking with pre-existing issues from code review.
-
-REVIEW_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${TIMESTAMP}
-
-1. Read all review reports from ${REVIEW_DIR}
-2. Extract ℹ️ pre-existing issues
-3. Find or create Tech Debt Backlog GitHub issue
-4. Add new pre-existing issues (deduplicated)
-5. Remove items that have been fixed
-
-Report back: issue number, items added, items removed"
+Extract pre-existing issues from reviews
+Update Tech Debt Backlog issue (add new, remove fixed)"
 ```
 
-### 4.3 Synthesizer Agent (Aggregation + Recommendation)
-
+**Synthesizer Agent**:
 ```
 Task(subagent_type="Synthesizer"):
-
 "Mode: review
-
-Synthesize all review findings into comprehensive summary.
-
-PR_NUMBER: ${PR_NUMBER}
-REVIEW_BASE_DIR: ${REVIEW_DIR}
-TIMESTAMP: ${TIMESTAMP}
-
-1. Read all review reports from ${REVIEW_DIR}
-2. Extract and categorize issues (🔴/⚠️/ℹ️)
-3. Determine merge recommendation
-4. Generate summary report file
-
-Report back: recommendation, issue counts, summary file path"
+Aggregate findings, determine merge recommendation
+Output: .docs/reviews/{branch-slug}/review-summary.{timestamp}.md"
 ```
 
----
-
-## Phase 5: Collect Results
-
-**WAIT** for all Phase 4 agents to complete. Collect their outputs:
-
-| Agent | Output |
-|-------|--------|
-| Git (comment-pr) | Inline comments created, skipped count, summary comment |
-| Git (manage-debt) | Issue number, items added/removed |
-| Synthesizer | Recommendation, issue counts, summary file |
-
----
-
-## Phase 6: Final Report
+### Phase 4: Report
 
 Display results from all agents:
+- Merge recommendation (from Synthesizer)
+- Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
+- PR comments created/skipped (from Git)
+- Tech debt items added/removed (from Git)
+- Artifact paths
 
-```markdown
-## 🔍 Code Review Complete
+## Architecture
 
-**PR**: #${PR_NUMBER} - ${PR_URL}
-
----
-
-### 🚦 Recommendation: {from Synthesizer agent}
-
----
-
-### 📊 Results (from Synthesizer agent)
-
-| Metric | Count |
-|--------|-------|
-| Reviews Run | {n} |
-| 🔴 Blocking Issues | {n} |
-| ⚠️ Should-Fix Issues | {n} |
-| ℹ️ Pre-existing Issues | {n} |
-
----
-
-### 💬 PR Comments (from Git agent)
-
-- Inline comments: {n} created
-- Summary comment: {created/not needed}
-- Skipped: {n} (lines not in diff)
-
----
-
-### 📋 Tech Debt (from Git agent)
-
-- Issue: #{issue_number}
-- Added: {n} new items
-- Removed: {n} fixed items
-
----
-
-### 📁 Artifacts
-
-- Summary: `${REVIEW_DIR}/review-summary.${TIMESTAMP}.md`
-- Reports: `${REVIEW_DIR}/*-report.${TIMESTAMP}.md`
-
----
-
-### 🎯 Next Steps
-
-{From Synthesizer agent recommendation}
+```
+/review (orchestrator - spawns agents only)
+│
+├─ Pre-flight: Ensure committed, pushed, PR exists
+│
+├─ Phase 1: Analyze changed files
+│  └─ Detect file types for conditional reviews
+│
+├─ Phase 2: Reviews (PARALLEL)
+│  ├─ Reviewer: security
+│  ├─ Reviewer: architecture
+│  ├─ Reviewer: performance
+│  ├─ Reviewer: complexity
+│  ├─ Reviewer: consistency
+│  ├─ Reviewer: regression
+│  ├─ Reviewer: tests
+│  └─ Reviewer: [conditional: typescript, database, deps, docs]
+│
+├─ Phase 3: Synthesis (PARALLEL)
+│  ├─ Git agent (comment-pr)
+│  ├─ Git agent (manage-debt)
+│  └─ Synthesizer agent (mode: review)
+│
+└─ Phase 4: Display results
 ```
 
----
+## Principles
 
-## Key Principles
-
-1. **Orchestration only** - Command spawns agents, doesn't do work itself
+1. **Orchestration only** - Command spawns agents, doesn't review itself
 2. **Parallel execution** - Reviews parallel, then synthesis agents parallel
-3. **Agent responsibilities**:
-   - Review agents → Find issues
-   - Git agent (comment-pr) → Create PR comments
-   - Git agent (manage-debt) → Track pre-existing issues
-   - Synthesizer agent → Aggregate, recommend, report
-4. **Full automation** - Handles commit/push/PR creation via agents
+3. **Clear ownership** - Each agent owns its output completely
+4. **Full automation** - Handles commit/push/PR creation via skill patterns
+5. **Honest reporting** - Display agent outputs directly
