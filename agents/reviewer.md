@@ -1,7 +1,7 @@
 ---
 name: Reviewer
 description: Universal code review agent with parameterized focus. Applies specialized pattern skills based on focus area.
-model: sonnet
+model: inherit
 skills: devflow-review-methodology, devflow-security-patterns, devflow-architecture-patterns, devflow-performance-patterns, devflow-complexity-patterns, devflow-consistency-patterns, devflow-tests-patterns, devflow-database-patterns, devflow-documentation-patterns, devflow-dependencies-patterns, devflow-regression-patterns, devflow-typescript
 ---
 

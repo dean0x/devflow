@@ -1,7 +1,7 @@
 ---
 name: CatchUp
 description: Review recent status updates to get up to speed on project state
-model: inherit
+model: haiku
 skills: devflow-docs-framework
 ---
 
