@@ -347,7 +347,7 @@ git commit -m "message"
 ## Integration
 
 This skill is used by:
-- **Coder agent**: Safe commits in worktrees
+- **Coder agent**: Safe commits on feature branches
 - **Release agent**: Safe tagging and pushing
 
 Load this skill when performing any git operations.
@@ -360,4 +360,3 @@ Load this skill when performing any git operations.
 | `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
 | `devflow-commit` | Commit message format, atomic grouping |
 | `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
-| `devflow-worktree` | Parallel development, task isolation |

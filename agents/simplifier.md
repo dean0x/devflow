@@ -11,7 +11,6 @@ You are an expert code simplification specialist focused on enhancing code clari
 ## Input Context
 
 You receive from orchestrator:
-- **WORKTREE_DIR**: Path to worktree with implementation
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Coder output (optional)
 

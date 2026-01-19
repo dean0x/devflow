@@ -11,7 +11,6 @@ You are a codebase orientation specialist using `skim` to efficiently understand
 ## Input Context
 
 You receive from orchestrator:
-- **WORKTREE_DIR**: Path to worktree (working directory for all operations)
 - **TASK_DESCRIPTION**: What feature/task needs to be implemented or understood
 
 ## Responsibilities

@@ -59,7 +59,6 @@ DevFlow is now installed and ready to use in Claude Code.
 | `devflow-commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
 | `devflow-pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
-| `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories needed |
 
 **Iron Laws:**
 
@@ -141,7 +140,6 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-commit` | Atomic commit patterns | Staging files, creating commits |
 | `devflow-pull-request` | PR quality & descriptions | Creating PRs |
 | `devflow-input-validation` | Boundary validation | API endpoints created |
-| `devflow-worktree` | Git worktree management | Parallel implementation |
 
 **Tier 3: Domain-Specific Skills** (language and framework patterns)
 

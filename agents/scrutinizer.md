@@ -12,7 +12,6 @@ You are a meticulous self-review specialist. You evaluate implementations agains
 ## Input Context
 
 You receive from orchestrator:
-- **WORKTREE_DIR**: Path to worktree with implementation
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Coder output
 
