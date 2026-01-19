@@ -2,7 +2,7 @@
 
 # Claude Code Status Line Script
 # Receives JSON input via stdin with session context
-# Displays: directory, git branch, model, context usage
+# Displays: directory, git branch, diff stats, model, context usage
 
 # Read JSON input
 INPUT=$(cat)
@@ -29,20 +29,36 @@ DIR_NAME=$(basename "$CWD")
 GIT_BRANCH=$(cd "$CWD" 2>/dev/null && git branch --show-current 2>/dev/null || echo "")
 if [ -z "$GIT_BRANCH" ]; then
     GIT_INFO=""
+    DIFF_STATS=""
 else
     # Check if there are uncommitted changes
     if [ -n "$(cd "$CWD" 2>/dev/null && git status --porcelain 2>/dev/null)" ]; then
-        GIT_INFO="  \033[1;33m$GIT_BRANCH*\033[0m"
+        GIT_INFO="  \033[33m$GIT_BRANCH*\033[0m"
+
+        # Get diff stats (staged + unstaged)
+        DIFF_OUTPUT=$(cd "$CWD" 2>/dev/null && git diff --shortstat HEAD 2>/dev/null)
+        if [ -n "$DIFF_OUTPUT" ]; then
+            FILES_CHANGED=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
+            ADDITIONS=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+            DELETIONS=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+            [ -z "$FILES_CHANGED" ] && FILES_CHANGED=0
+            [ -z "$ADDITIONS" ] && ADDITIONS=0
+            [ -z "$DELETIONS" ] && DELETIONS=0
+            DIFF_STATS="  ${FILES_CHANGED} \033[32m+$ADDITIONS\033[0m \033[31m-$DELETIONS\033[0m"
+        else
+            DIFF_STATS=""
+        fi
     else
-        GIT_INFO="  \033[1;32m$GIT_BRANCH\033[0m"
+        GIT_INFO="  \033[32m$GIT_BRANCH\033[0m"
+        DIFF_STATS=""
     fi
 fi
 
-# Build status line with colors
-STATUS_LINE="\033[1;34m$DIR_NAME\033[0m$GIT_INFO"
+# Build status line with colors (regular, not bold)
+STATUS_LINE="\033[34m$DIR_NAME\033[0m$GIT_INFO$DIFF_STATS"
 
 # Add model name
-STATUS_LINE="$STATUS_LINE  \033[1;36m$MODEL\033[0m"
+STATUS_LINE="$STATUS_LINE  \033[36m$MODEL\033[0m"
 
 # Calculate and display context usage
 if [ "$USAGE" != "null" ] && [ "$CONTEXT_SIZE" != "0" ] && [ -n "$CONTEXT_SIZE" ]; then
@@ -64,13 +80,13 @@ if [ "$USAGE" != "null" ] && [ "$CONTEXT_SIZE" != "0" ] && [ -n "$CONTEXT_SIZE" 
         # Color based on usage: green < 50%, yellow 50-80%, red > 80%
         if [ "$PERCENT" -gt 80 ]; then
             # Red - high usage
-            STATUS_LINE="$STATUS_LINE  \033[1;91m${PERCENT}%\033[0m"
+            STATUS_LINE="$STATUS_LINE  \033[91m${PERCENT}%\033[0m"
         elif [ "$PERCENT" -gt 50 ]; then
             # Yellow - moderate usage
-            STATUS_LINE="$STATUS_LINE  \033[1;33m${PERCENT}%\033[0m"
+            STATUS_LINE="$STATUS_LINE  \033[33m${PERCENT}%\033[0m"
         else
             # Green - low usage
-            STATUS_LINE="$STATUS_LINE  \033[1;32m${PERCENT}%\033[0m"
+            STATUS_LINE="$STATUS_LINE  \033[32m${PERCENT}%\033[0m"
         fi
     fi
 fi

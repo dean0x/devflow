@@ -19,10 +19,43 @@ The orchestrator provides:
 
 | Operation | Purpose | Key Parameters |
 |-----------|---------|----------------|
+| `setup-task` | Create feature branch and fetch issue | `TASK_ID`, `BASE_BRANCH`, `ISSUE_INPUT` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
 | `comment-pr` | Create PR inline comments for review findings | `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP` |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP` |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT` |
+
+---
+
+## Operation: setup-task
+
+Set up task environment: create feature branch and optionally fetch issue.
+
+**Input:**
+- `TASK_ID`: Unique task identifier (becomes branch name)
+- `BASE_BRANCH`: Branch to create from (track this for PR target)
+- `ISSUE_INPUT` (optional): Issue number to fetch
+
+**Process:**
+1. Record current branch as BASE_BRANCH for later PR targeting
+2. Create and checkout feature branch: `git checkout -b {TASK_ID}`
+3. If ISSUE_INPUT provided, fetch issue details via GitHub API
+4. Return setup summary with BASE_BRANCH recorded
+
+**Output:**
+```markdown
+## Task Setup: {TASK_ID}
+
+### Branch
+- **Feature branch**: {TASK_ID}
+- **Base branch**: {BASE_BRANCH} (PR target)
+
+### Issue (if fetched)
+- **Number**: #{number}
+- **Title**: {title}
+- **Description**: {description}
+- **Acceptance Criteria**: {criteria}
+```
 
 ---
 

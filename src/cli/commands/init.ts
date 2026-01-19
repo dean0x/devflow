@@ -101,7 +101,6 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   { name: 'devflow-commit', description: 'Atomic commits & message format' },
   { name: 'devflow-pull-request', description: 'PR quality & descriptions' },
   { name: 'devflow-input-validation', description: 'Boundary validation' },
-  { name: 'devflow-worktree', description: 'Parallel development isolation' },
   { name: 'devflow-self-review', description: '9-pillar self-review framework' },
   // Tier 3: Domain-Specific Skills
   { name: 'devflow-typescript', description: 'TypeScript patterns & idioms' },

@@ -12,7 +12,6 @@ You are an alignment validation specialist. You ensure implementations match the
 ## Input Context
 
 You receive from orchestrator:
-- **WORKTREE_DIR**: Path to worktree with implementation
 - **ORIGINAL_REQUEST**: Task description or GitHub issue content
 - **EXECUTION_PLAN**: Synthesized plan from planning phase
 - **FILES_CHANGED**: List of modified files from Coder output

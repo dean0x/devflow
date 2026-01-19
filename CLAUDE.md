@@ -102,7 +102,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Plan` - Implementation planning with trade-off analysis
 
 **Implementation agents**:
-- `Coder` - Autonomous implementation in isolated worktrees
+- `Coder` - Autonomous implementation on feature branches
 - `Scrutinizer` - Self-review agent that evaluates and fixes P0/P1 issues (runs in fresh context after Coder)
 - `Simplifier` - Post-implementation code refinement for clarity and consistency
 - `Shepherd` - Validates implementation alignment with request/plan, fixes misalignments
@@ -112,7 +112,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Synthesizer` - Combines outputs from multiple agents (modes: exploration, planning, review)
 
 **GitHub operations agent** (unified parameterized agent):
-- `Git` - Handles all git/GitHub operations via operations: `fetch-issue`, `comment-pr`, `manage-debt`, `create-release`
+- `Git` - Handles all git/GitHub operations via operations: `setup-task`, `fetch-issue`, `comment-pr`, `manage-debt`, `create-release`
 
 **Utility agents** (focused tasks, no sub-spawning):
 - `Devlog` - Read-only, analyzes project state for CatchUp
@@ -340,7 +340,6 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `devflow-commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
 | `devflow-pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
-| `devflow-worktree` | Git worktree management for parallel development | Parallel implementation, isolated working directories |
 
 **Tier 3: Domain-Specific Skills** (language and framework patterns)
 
@@ -406,7 +405,6 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 | `devflow-commit` | ATOMIC COMMITS OR NO COMMITS |
 | `devflow-pull-request` | HONEST DESCRIPTIONS OR NO PR |
 | `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
-| `devflow-worktree` | ONE TASK, ONE WORKTREE |
 | `devflow-react` | COMPOSITION OVER PROPS |
 | `devflow-typescript` | UNKNOWN OVER ANY |
 
@@ -502,7 +500,7 @@ frontmatter (name, description, model, skills, hooks)
 | Engineering patterns (Result types, DI) | Skills | Shared across agents |
 | Git safety, commit conventions | Skills | Consistent enforcement |
 | Review methodology | Skills | Reusable across review types |
-| Worktree setup | Orchestrator | Agent receives ready worktree |
+| Branch setup | Orchestrator | Agent receives ready feature branch |
 | Codebase exploration | Explore agents | Dedicated agents do exploration |
 | Implementation planning | Plan agents | Dedicated agents do planning |
 | Task identity + responsibilities | Agent | Core agent definition |
@@ -515,7 +513,7 @@ frontmatter (name, description, model, skills, hooks)
 
 2. **Embedding bash scripts** - Agents know how to code. Don't over-specify implementation details.
 
-3. **Re-doing orchestrator work** - If orchestrator creates worktree, agent shouldn't document worktree creation.
+3. **Re-doing orchestrator work** - If orchestrator creates feature branch, agent shouldn't document branch creation.
 
 4. **Verbose phase documentation** - A worker agent implements; it doesn't need exploration and planning phases.
 

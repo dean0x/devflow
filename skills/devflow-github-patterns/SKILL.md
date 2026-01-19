@@ -308,4 +308,3 @@ gh release create "v${VERSION}" \
 | `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
 | `devflow-commit` | Commit message format, atomic grouping |
 | `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
-| `devflow-worktree` | Parallel development, task isolation |

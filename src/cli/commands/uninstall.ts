@@ -162,7 +162,6 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-commit',
           'devflow-pull-request',
           'devflow-input-validation',
-          'devflow-worktree',
           'devflow-self-review',
           // Tier 3: Domain-Specific Skills
           'devflow-typescript',
