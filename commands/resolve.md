@@ -105,10 +105,9 @@ If any issues were deferred, spawn Git agent:
 ```
 Task(subagent_type="Git"):
 "OPERATION: manage-debt
-DEFERRED_ISSUES: [
-  {id, file, line, type, description, risk_factor}
-]
-Add to Tech Debt Backlog with risk justification from Resolver"
+REVIEW_DIR: .docs/reviews/{branch-slug}/
+TIMESTAMP: {timestamp}
+Note: Deferred issues from resolution are already in resolution-summary.{timestamp}.md"
 ```
 
 ### Phase 8: Report

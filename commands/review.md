@@ -4,7 +4,7 @@ description: Comprehensive branch review using specialized sub-agents for PR rea
 
 # Review Command
 
-Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments and tech debt tracking.
+Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
 
 ## Usage
 
@@ -74,14 +74,6 @@ Read reviews from .docs/reviews/{branch-slug}/
 Create inline PR comments, deduplicate, consolidate skipped into summary"
 ```
 
-**Git Agent (Debt Tracking)**:
-```
-Task(subagent_type="Git"):
-"OPERATION: manage-debt
-Extract pre-existing issues from reviews
-Update Tech Debt Backlog issue (add new, remove fixed)"
-```
-
 **Synthesizer Agent**:
 ```
 Task(subagent_type="Synthesizer"):
@@ -96,7 +88,6 @@ Display results from all agents:
 - Merge recommendation (from Synthesizer)
 - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
 - PR comments created/skipped (from Git)
-- Tech debt items added/removed (from Git)
 - Artifact paths
 
 ## Architecture
@@ -121,7 +112,6 @@ Display results from all agents:
 │
 ├─ Phase 3: Synthesis (PARALLEL)
 │  ├─ Git agent (comment-pr)
-│  ├─ Git agent (manage-debt)
 │  └─ Synthesizer agent (mode: review)
 │
 └─ Phase 4: Display results

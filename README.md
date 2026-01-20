@@ -177,6 +177,7 @@ skills: devflow-self-review, devflow-core-patterns
 | `/specify` | Specify a feature with 3 clarification gates (understanding → scope → acceptance) | Before implementing a feature |
 | `/implement` | Execute single task lifecycle (explore → plan → implement → review) | Implementing one feature/task |
 | `/review` | Comprehensive code review using specialized sub-agents | Before committing or creating PR |
+| `/resolve` | Process review issues - validate, assess risk, fix low-risk, defer high-risk to tech debt | After `/review` |
 | `/devlog` | Development log for comprehensive session documentation | Ending a session |
 
 ### 🤖 Agents
@@ -214,6 +215,7 @@ The Git agent handles all GitHub API interactions including fetching issues, cre
 | `Skimmer` | Codebase Orientation | Fast codebase overview using `skim` for 60-90% token reduction |
 | `CatchUp` | Context Restoration | Project status and context restoration with validation |
 | `Devlog` | Project State | Analyze project state for status reports |
+| `Resolver` | Issue Resolution | Validates review issues, assesses risk, implements low-risk fixes |
 | `Synthesizer` | Output Synthesis | Combine outputs from parallel agents (modes: exploration, planning, review) |
 | `Simplifier` | Code Refinement | Post-implementation code clarity and consistency improvements |
 | `Scrutinizer` | Self-Review | Final quality gate using 9-pillar framework, fixes P0/P1 issues |
@@ -222,7 +224,7 @@ The Git agent handles all GitHub API interactions including fetching issues, cre
 **How Commands Orchestrate Agents:**
 - `/specify` → Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer → GitHub issue
 - `/implement` → Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder + Simplifier + Scrutinizer + Shepherd → PR
-- `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
+- `/review` → 7-11 Reviewer agents (parallel, different focus areas) + Git (comment-pr) + Synthesizer
 
 **Skimmer Integration:**
 
