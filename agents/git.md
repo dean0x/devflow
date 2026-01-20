@@ -2,7 +2,7 @@
 name: Git
 description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
 model: haiku
-skills: devflow-github-patterns, devflow-git-safety
+skills: devflow-github-patterns, devflow-git-safety, devflow-commit, devflow-pull-request
 ---
 
 # Git Agent
@@ -19,11 +19,83 @@ The orchestrator provides:
 
 | Operation | Purpose | Key Parameters |
 |-----------|---------|----------------|
+| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | - |
+| `validate-branch` | Pre-flight for /resolve: check branch state | - |
 | `setup-task` | Create feature branch and fetch issue | `TASK_ID`, `BASE_BRANCH`, `ISSUE_INPUT` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
 | `comment-pr` | Create PR inline comments for review findings | `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP` |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP` |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT` |
+
+---
+
+## Operation: ensure-pr-ready
+
+Pre-flight checks and fixes for `/review`. Ensures branch is ready for code review.
+
+**Input:** None (uses current branch)
+
+**Process:**
+1. Verify on feature branch (not main/master/develop) - error if not
+2. Check for uncommitted changes - if any, create atomic commit using `devflow-commit` patterns
+3. Check if branch pushed to remote - if not, push with `-u` flag
+4. Check if PR exists - if not, create PR using `devflow-pull-request` patterns
+5. Get base branch from PR
+6. Derive branch-slug (replace `/` with `-`)
+
+**Output:**
+```markdown
+## Pre-Flight: Ready for Review
+
+### Branch
+- **Current**: {branch}
+- **Base**: {base_branch}
+- **Branch Slug**: {branch-slug}
+- **PR**: #{number}
+
+### Actions Taken
+- Committed: {yes/no} ({message} if yes)
+- Pushed: {yes/no}
+- PR Created: {yes/no}
+
+### Status: READY | BLOCKED
+{BLOCKED reason if applicable}
+```
+
+---
+
+## Operation: validate-branch
+
+Pre-flight validation for `/resolve`. Checks branch state without modifications.
+
+**Input:** None (uses current branch)
+
+**Process:**
+1. Verify on feature branch (not main/master/develop) - error if not
+2. Verify working directory is clean - error if uncommitted changes
+3. Get current branch name
+4. Derive branch-slug (replace `/` with `-`)
+5. Check if reviews exist at `.docs/reviews/{branch-slug}/`
+6. If PR# context provided, fetch PR details
+
+**Output:**
+```markdown
+## Pre-Flight: Validation
+
+### Branch
+- **Current**: {branch}
+- **Branch Slug**: {branch-slug}
+- **PR**: #{number} (if exists)
+- **Base**: {base_branch}
+
+### Checks
+- Feature branch: {PASS/FAIL}
+- Clean working directory: {PASS/FAIL}
+- Reviews exist: {PASS/FAIL} ({n} reports found)
+
+### Status: READY | BLOCKED
+{BLOCKED reason if applicable}
+```
 
 ---
 

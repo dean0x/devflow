@@ -13,32 +13,24 @@ Process issues from code review reports: validate them (false positive check), a
 /resolve #42       (resolve issues for specific PR)
 ```
 
-## Pre-Flight Checks
-
-Before spawning resolver agents, ensure:
-1. Review reports exist at `.docs/reviews/{branch-slug}/`
-2. On a feature branch (not main/master)
-3. Working directory is clean (no uncommitted changes)
-
-If no reviews found, error with suggestion to run `/review` first.
-
 ## Phases
 
-### Phase 1: Locate Reviews
+### Phase 0: Pre-Flight (Git Agent)
 
-**If PR# provided:**
-1. Fetch PR details to get branch name
-2. Derive branch-slug (replace `/` with `-`)
-3. Look for `.docs/reviews/{branch-slug}/`
+Spawn Git agent to validate branch state:
 
-**If empty:**
-1. Use current branch name
-2. Derive branch-slug
-3. Look for `.docs/reviews/{branch-slug}/`
+```
+Task(subagent_type="Git", run_in_background=false):
+"OPERATION: validate-branch
+Check feature branch, clean working directory, reviews exist.
+Return: branch, branch-slug, PR#, review count"
+```
 
-**Error if:** No review reports found. Suggest `/review` first.
+**If BLOCKED:** Stop and report the blocker to user. If no reviews found, suggest `/review` first.
 
-### Phase 2: Parse Issues
+**Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` for use in subsequent phases.
+
+### Phase 1: Parse Issues
 
 Read all review reports from `.docs/reviews/{branch-slug}/*.md` and extract:
 
@@ -59,7 +51,7 @@ Read all review reports from `.docs/reviews/{branch-slug}/*.md` and extract:
 - `description`: Problem statement
 - `suggested_fix`: From review report
 
-### Phase 3: Analyze Dependencies
+### Phase 2: Analyze Dependencies
 
 Group issues by relationship:
 
@@ -69,14 +61,14 @@ Group issues by relationship:
 
 Build dependency graph to determine execution order.
 
-### Phase 4: Plan Batches
+### Phase 3: Plan Batches
 
 Create execution plan:
 - **Independent batches** - Mark for PARALLEL execution
 - **Dependent batches** - Mark for SEQUENTIAL execution
 - **Max 5 issues per batch** - Keep batches manageable
 
-### Phase 5: Resolve (Parallel where possible)
+### Phase 4: Resolve (Parallel where possible)
 
 Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
 
@@ -90,7 +82,7 @@ Validate, decide FIX vs TECH_DEBT, implement fixes"
 
 For dependent batches, spawn sequentially and wait for completion before spawning dependents.
 
-### Phase 6: Collect Results
+### Phase 5: Collect Results
 
 Aggregate from all Resolvers:
 - **Fixed**: Issues resolved with commits
@@ -98,7 +90,7 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-### Phase 7: Manage Tech Debt
+### Phase 6: Manage Tech Debt
 
 If any issues were deferred, spawn Git agent:
 
@@ -110,7 +102,7 @@ TIMESTAMP: {timestamp}
 Note: Deferred issues from resolution are already in resolution-summary.{timestamp}.md"
 ```
 
-### Phase 8: Report
+### Phase 7: Report
 
 **Write the resolution summary** to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md` using Write tool, then display:
 
@@ -144,32 +136,30 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 ```
 /resolve (orchestrator - spawns agents only)
 │
-├─ Pre-flight: Ensure reviews exist, clean working directory
+├─ Phase 0: Pre-flight
+│  └─ Git agent (validate-branch)
 │
-├─ Phase 1: Locate review reports
-│  └─ Find .docs/reviews/{branch-slug}/
-│
-├─ Phase 2: Parse issues
+├─ Phase 1: Parse issues
 │  └─ Extract Blocking + Should-Fix (skip Pre-existing)
 │
-├─ Phase 3: Analyze dependencies
+├─ Phase 2: Analyze dependencies
 │  └─ Build dependency graph
 │
-├─ Phase 4: Plan batches
+├─ Phase 3: Plan batches
 │  └─ Group issues, determine parallel vs sequential
 │
-├─ Phase 5: Resolve (PARALLEL where independent)
+├─ Phase 4: Resolve (PARALLEL where independent)
 │  ├─ Resolver: Batch 1 (file-a issues)
 │  ├─ Resolver: Batch 2 (file-b issues)
 │  └─ Resolver: Batch 3 (waits if depends on 1 or 2)
 │
-├─ Phase 6: Collect results
+├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred, blocked
 │
-├─ Phase 7: Git agent (manage-debt)
+├─ Phase 6: Git agent (manage-debt)
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 8: Display resolution summary
+└─ Phase 7: Display resolution summary
 ```
 
 ## Edge Cases
@@ -184,16 +174,16 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, doesn't resolve itself
-2. **Parallel execution** - Run independent batches in parallel
-3. **Conservative risk** - When Resolvers are unsure, defer to tech debt
-4. **Honest reporting** - Display agent outputs directly
-5. **Complete tracking** - Every issue gets a decision recorded
-6. **Clean state** - Leave working directory clean after resolution
+1. **Orchestration only** - Command spawns agents, doesn't do git/resolve work itself
+2. **Git agent for git work** - All git operations go through Git agent
+3. **Parallel execution** - Run independent batches in parallel
+4. **Conservative risk** - When Resolvers are unsure, defer to tech debt
+5. **Honest reporting** - Display agent outputs directly
+6. **Complete tracking** - Every issue gets a decision recorded
 
 ## Output Artifact
 
-Written by orchestrator in Phase 8 to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md`:
+Written by orchestrator in Phase 7 to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md`:
 
 ```markdown
 # Resolution Summary
