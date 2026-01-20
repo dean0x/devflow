@@ -112,7 +112,7 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 
 ### Phase 8: Report
 
-Display resolution summary:
+**Write the resolution summary** to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md` using Write tool, then display:
 
 ```
 ## Resolution Summary
@@ -193,7 +193,7 @@ Display resolution summary:
 
 ## Output Artifact
 
-Save resolution summary to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md`:
+Written by orchestrator in Phase 8 to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md`:
 
 ```markdown
 # Resolution Summary

@@ -53,13 +53,13 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | dependencies | conditional | devflow-dependencies-patterns |
 | documentation | conditional | devflow-documentation-patterns |
 
-Each Reviewer invocation:
+Each Reviewer invocation (all in one message, **NOT background**):
 ```
-Task(subagent_type="Reviewer"):
+Task(subagent_type="Reviewer", run_in_background=false):
 "Review focusing on {focus}. Apply devflow-{focus}-patterns.
 Follow 6-step process from devflow-review-methodology.
 PR: #{pr_number}, Base: {base_branch}
-Output to: .docs/reviews/{branch-slug}/{focus}.md"
+IMPORTANT: Write report to .docs/reviews/{branch-slug}/{focus}.md using Write tool"
 ```
 
 ### Phase 3: Synthesis (Parallel)
@@ -68,7 +68,7 @@ Output to: .docs/reviews/{branch-slug}/{focus}.md"
 
 **Git Agent (PR Comments)**:
 ```
-Task(subagent_type="Git"):
+Task(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
 Read reviews from .docs/reviews/{branch-slug}/
 Create inline PR comments, deduplicate, consolidate skipped into summary"
@@ -76,7 +76,7 @@ Create inline PR comments, deduplicate, consolidate skipped into summary"
 
 **Synthesizer Agent**:
 ```
-Task(subagent_type="Synthesizer"):
+Task(subagent_type="Synthesizer", run_in_background=false):
 "Mode: review
 Aggregate findings, determine merge recommendation
 Output: .docs/reviews/{branch-slug}/review-summary.{timestamp}.md"
@@ -120,7 +120,7 @@ Display results from all agents:
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, doesn't review itself
-2. **Parallel execution** - Reviews parallel, then synthesis agents parallel
+2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
 3. **Clear ownership** - Each agent owns its output completely
 4. **Full automation** - Handles commit/push/PR creation via skill patterns
 5. **Honest reporting** - Display agent outputs directly

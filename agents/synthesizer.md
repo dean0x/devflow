@@ -118,7 +118,12 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 | No blocking issues | APPROVED |
 
 **Output:**
-Save to `${REVIEW_BASE_DIR}/review-summary.${TIMESTAMP}.md`:
+**CRITICAL**: Write the summary to disk using the Write tool:
+1. Create directory: `mkdir -p ${REVIEW_BASE_DIR}`
+2. Write to `${REVIEW_BASE_DIR}/review-summary.${TIMESTAMP}.md` using Write tool
+3. Confirm file written in final message
+
+Report format:
 
 ```markdown
 # Code Review Summary
