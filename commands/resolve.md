@@ -90,7 +90,18 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-### Phase 6: Manage Tech Debt
+### Phase 6: Simplify
+
+If any fixes were made, spawn Simplifier agent to refine the changed code:
+
+```
+Task(subagent_type="Simplifier", run_in_background=false):
+"TASK_DESCRIPTION: Issue resolution fixes
+FILES_CHANGED: {list of files modified by Resolvers}
+Simplify and refine the fixes for clarity and consistency"
+```
+
+### Phase 7: Manage Tech Debt
 
 If any issues were deferred, spawn Git agent:
 
@@ -102,7 +113,7 @@ TIMESTAMP: {timestamp}
 Note: Deferred issues from resolution are already in resolution-summary.{timestamp}.md"
 ```
 
-### Phase 7: Report
+### Phase 8: Report
 
 **Write the resolution summary** to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md` using Write tool, then display:
 
@@ -156,10 +167,13 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 ├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred, blocked
 │
-├─ Phase 6: Git agent (manage-debt)
+├─ Phase 6: Simplify
+│  └─ Simplifier agent (refine fixes)
+│
+├─ Phase 7: Git agent (manage-debt)
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 7: Display resolution summary
+└─ Phase 8: Display resolution summary
 ```
 
 ## Edge Cases
@@ -183,7 +197,7 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 
 ## Output Artifact
 
-Written by orchestrator in Phase 7 to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md`:
+Written by orchestrator in Phase 8 to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md`:
 
 ```markdown
 # Resolution Summary
