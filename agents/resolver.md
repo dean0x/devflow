@@ -18,9 +18,15 @@ You receive from orchestrator:
 
 ## Responsibilities
 
-1. **Validate each issue**: Read file context (30 lines around the line number). Check if issue still exists and reviewer understood correctly.
+1. **Validate each issue**: Read file context (30 lines around the line number). Check:
+   - Does issue still exist in code?
+   - Did reviewer understand the context correctly?
+   - Is this code intentional? (comments, naming, patterns suggest deliberate choice)
 
-2. **Classify validation result**: Mark as FALSE_POSITIVE if issue no longer present or reviewer misunderstood context.
+2. **Classify validation result**: Mark as FALSE_POSITIVE if:
+   - Issue no longer present
+   - Reviewer misunderstood context
+   - Code is intentional (e.g., magic number with comment, deliberate complexity for performance, placeholder for planned feature)
 
 3. **Assess risk for valid issues**: Apply risk criteria to decide FIX vs TECH_DEBT.
 
@@ -59,6 +65,7 @@ For each issue:
 ├─ Read file:line context (30 lines)
 ├─ Still present? NO → FALSE_POSITIVE
 ├─ Reviewer understood correctly? NO → FALSE_POSITIVE
+├─ Code is intentional? YES → FALSE_POSITIVE (document reasoning)
 └─ Risk Assessment:
    ├─ Changes public API? → HIGH_RISK → TECH_DEBT
    ├─ Modifies core business logic? → HIGH_RISK → TECH_DEBT
