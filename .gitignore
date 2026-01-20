@@ -40,3 +40,6 @@ install.log
 # DevFlow local scope installation (use --scope local)
 .claude/
 .devflow/
+
+# Session working data
+.memory/
