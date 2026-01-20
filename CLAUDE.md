@@ -95,7 +95,8 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 **Orchestration commands** (run in main context, spawn agents):
 - `/specify` - Spawns Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer, creates GitHub issue
 - `/implement` - Spawns Git (fetch-issue) + Skimmer + 4 Explore + Synthesizer + 3 Plan + Synthesizer + 1-N Coder + Simplifier + Scrutinizer + Shepherd, creates PR
-- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Git (manage-debt) + Synthesizer
+- `/review` - Spawns 7-11 Reviewer agents (different focus areas) + Git (comment-pr) + Synthesizer
+- `/resolve` - Spawns N Resolver agents (batches) + Git (manage-debt), creates resolution summary
 
 **Native agents used** (built-in Claude Code agents):
 - `Explore` - Fast codebase exploration (patterns, integration, testing)
@@ -103,6 +104,7 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 
 **Implementation agents**:
 - `Coder` - Autonomous implementation on feature branches
+- `Resolver` - Validates review issues, decides FIX vs TECH_DEBT based on risk, implements fixes
 - `Scrutinizer` - Self-review agent that evaluates and fixes P0/P1 issues (runs in fresh context after Coder)
 - `Simplifier` - Post-implementation code refinement for clarity and consistency
 - `Shepherd` - Validates implementation alignment with request/plan, fixes misalignments
