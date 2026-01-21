@@ -51,7 +51,12 @@ The orchestrator provides:
 
 ## Output
 
-Save to `{output_path}`:
+**CRITICAL**: You MUST write the report to disk using the Write tool:
+1. Create directory: `mkdir -p` on the parent directory of `{output_path}`
+2. Write the report file to `{output_path}` using the Write tool
+3. Confirm the file was written in your final message
+
+Report format for `{output_path}`:
 
 ```markdown
 # {Focus} Review Report
