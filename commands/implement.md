@@ -41,7 +41,11 @@ Create feature branch and fetch issue if specified.
 Return the branch setup summary."
 ```
 
-Store the `BASE_BRANCH` from Git agent output for Phase 10.
+**Capture from Git agent output** (used throughout flow):
+- `BASE_BRANCH`: Branch this feature was created from (for PR target)
+- `ISSUE_NUMBER`: GitHub issue number (if provided)
+- `ISSUE_CONTENT`: Full issue body including description (if provided)
+- `ACCEPTANCE_CRITERIA`: Extracted acceptance criteria from issue (if provided)
 
 ### Phase 1.5: Orient
 
