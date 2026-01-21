@@ -41,7 +41,11 @@ Create feature branch and fetch issue if specified.
 Return the branch setup summary."
 ```
 
-Store the `BASE_BRANCH` from Git agent output for Phase 10.
+**Capture from Git agent output** (used throughout flow):
+- `BASE_BRANCH`: Branch this feature was created from (for PR target)
+- `ISSUE_NUMBER`: GitHub issue number (if provided)
+- `ISSUE_CONTENT`: Full issue body including description (if provided)
+- `ACCEPTANCE_CRITERIA`: Extracted acceptance criteria from issue (if provided)
 
 ### Phase 1.5: Orient
 
@@ -90,7 +94,21 @@ Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 |-------|--------|
 | Implementation steps | Ordered steps with files and dependencies |
 | Testing strategy | Unit tests, integration tests, edge case tests |
-| Parallelization | PARALLELIZABLE vs SEQUENTIAL work units |
+| Execution strategy | SINGLE_CODER vs SEQUENTIAL_CODERS vs PARALLEL_CODERS decision |
+
+**Execution Strategy planner analyzes 3 axes:**
+
+| Axis | Signals | Decision Impact |
+|------|---------|-----------------|
+| **Artifact Independence** | Shared contracts? Integration points? | If coupled → SINGLE_CODER |
+| **Context Capacity** | File count, module breadth, pattern complexity | HIGH/CRITICAL → SEQUENTIAL_CODERS |
+| **Domain Specialization** | Tech stack detected (backend, frontend, tests) | Determines DOMAIN hints for Coders |
+
+**Context Risk Levels:**
+- **LOW**: <10 files, single module → SINGLE_CODER
+- **MEDIUM**: 10-20 files, 2-3 modules → Consider SEQUENTIAL_CODERS
+- **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODERS (2-3 phases)
+- **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODERS (more phases)
 
 ### Phase 5: Synthesize Planning
 
@@ -104,22 +122,113 @@ Task(subagent_type="Synthesizer"):
 "Synthesize PLANNING outputs for: {task}
 Mode: planning
 Planner outputs: {all 3 outputs}
-Combine into: execution plan with parallel/sequential decision"
+Combine into: execution plan with strategy decision (SINGLE_CODER | SEQUENTIAL_CODERS | PARALLEL_CODERS)"
 ```
+
+**Synthesizer returns:**
+- Execution strategy type and reasoning
+- Context risk level
+- Subtask breakdown with DOMAIN hints (if not SINGLE_CODER)
+- Implementation plan with dependencies
 
 ### Phase 6: Implement
 
-Based on Phase 5 synthesis (which includes the Parallelization planner's decision):
+Based on Phase 5 synthesis, use the three-strategy framework:
 
-**Decision criteria** (from Parallelization planner):
-- **PARALLELIZABLE**: Work units have no shared state, different files/modules, can run independently
-- **SEQUENTIAL**: Work units have dependencies, shared state, or must execute in order
+**Strategy Selection** (from Execution Strategy planner):
 
-**Spawning pattern**:
-- **PARALLEL**: Multiple Coders in single message, each with subset of steps, `CREATE_PR: false`
-- **SEQUENTIAL**: Single Coder with full execution plan, `CREATE_PR: true`
+| Strategy | When | Frequency |
+|----------|------|-----------|
+| **SINGLE_CODER** | Default. Coherent A→Z implementation | ~80% |
+| **SEQUENTIAL_CODERS** | Context overflow risk, layered dependencies | ~15% |
+| **PARALLEL_CODERS** | True artifact independence (rare) | ~5% |
 
-Each Coder receives: task description, task-id, BASE_BRANCH, steps/plan.
+---
+
+**SINGLE_CODER** (default):
+
+```
+Task(subagent_type="Coder"):
+"TASK_ID: {task-id}
+TASK_DESCRIPTION: {description}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {full plan from synthesis}
+PATTERNS: {patterns from exploration}
+CREATE_PR: true
+DOMAIN: {detected domain or 'fullstack'}"
+```
+
+---
+
+**SEQUENTIAL_CODERS** (for HIGH/CRITICAL context risk):
+
+Spawn Coders one at a time, passing handoff summaries between phases:
+
+**Phase 1 Coder:**
+```
+Task(subagent_type="Coder"):
+"TASK_ID: {task-id}
+TASK_DESCRIPTION: {phase 1 description}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {phase 1 steps}
+PATTERNS: {patterns from exploration}
+CREATE_PR: false
+DOMAIN: {phase 1 domain, e.g., 'backend'}
+HANDOFF_REQUIRED: true"
+```
+
+**Phase 2+ Coders** (after prior phase completes):
+```
+Task(subagent_type="Coder"):
+"TASK_ID: {task-id}
+TASK_DESCRIPTION: {phase N description}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {phase N steps}
+PATTERNS: {patterns from exploration}
+CREATE_PR: {true if last phase, false otherwise}
+DOMAIN: {phase N domain, e.g., 'frontend'}
+PRIOR_PHASE_SUMMARY: {summary from previous Coder}
+FILES_FROM_PRIOR_PHASE: {list of files created}
+HANDOFF_REQUIRED: {true if not last phase}"
+```
+
+**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary. The receiving Coder MUST:
+1. Check git log to see commits from previous phases
+2. Read actual files created - do not trust summary alone
+3. Identify patterns from actual code (naming, error handling, testing)
+4. Reference handoff summary to validate understanding
+
+---
+
+**PARALLEL_CODERS** (rare - truly independent artifacts):
+
+Spawn multiple Coders **in a single message**, each with independent subtask:
+
+```
+Task(subagent_type="Coder"):  # Coder 1
+"TASK_ID: {task-id}-part1
+TASK_DESCRIPTION: {independent subtask 1}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {subtask 1 steps}
+PATTERNS: {patterns}
+CREATE_PR: false
+DOMAIN: {subtask 1 domain}"
+
+Task(subagent_type="Coder"):  # Coder 2 (same message)
+"TASK_ID: {task-id}-part2
+TASK_DESCRIPTION: {independent subtask 2}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {subtask 2 steps}
+PATTERNS: {patterns}
+CREATE_PR: false
+DOMAIN: {subtask 2 domain}"
+```
+
+**Independence criteria** (all must be true for PARALLEL_CODERS):
+- No shared contracts or interfaces
+- No integration points between subtasks
+- Different files/modules with no imports between them
+- Each subtask is self-contained
 
 ### Phase 7: Simplify
 
@@ -163,7 +272,9 @@ If Shepherd returns BLOCKED, report to user for decision.
 
 ### Phase 10: Create PR
 
-If multiple Coders were used, create unified PR using `devflow-pull-request` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+**For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow-pull-request` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+
+**For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
 ### Phase 11: Report
 
@@ -192,13 +303,15 @@ Display completion summary with phase status, PR info, and next steps.
 ├─ Phase 4: Plan (PARALLEL)
 │  ├─ Plan: Implementation steps
 │  ├─ Plan: Testing strategy
-│  └─ Plan: Parallelization
+│  └─ Plan: Execution strategy (3-strategy decision)
 │
 ├─ Phase 5: Synthesize Planning
-│  └─ Synthesizer agent (mode: planning)
+│  └─ Synthesizer agent (mode: planning) → returns strategy + DOMAIN hints
 │
-├─ Phase 6: Implement
-│  └─ 1-N Coder agents (parallel if beneficial)
+├─ Phase 6: Implement (3-strategy framework)
+│  ├─ SINGLE_CODER (80%): One Coder, full plan, CREATE_PR: true
+│  ├─ SEQUENTIAL_CODERS (15%): N Coders with handoff summaries
+│  └─ PARALLEL_CODERS (5%): N Coders in single message (rare)
 │
 ├─ Phase 7: Simplify
 │  └─ Simplifier agent (refines code clarity and consistency)
@@ -209,8 +322,10 @@ Display completion summary with phase status, PR info, and next steps.
 ├─ Phase 9: Alignment Check
 │  └─ Shepherd agent (validates alignment with request/plan)
 │
-├─ Phase 10: Create PR (if parallel coders)
-│  └─ Apply devflow-pull-request patterns, target BASE_BRANCH
+├─ Phase 10: Create PR (if needed)
+│  └─ SINGLE_CODER: handled by Coder
+│  └─ SEQUENTIAL: handled by last Coder
+│  └─ PARALLEL: orchestrator creates unified PR
 │
 └─ Phase 11: Display agent outputs
 ```
@@ -218,12 +333,13 @@ Display completion summary with phase status, PR info, and next steps.
 ## Principles
 
 1. **Orchestration only** - Command spawns agents, never does work itself
-2. **Parallel by default** - Explore, plan in parallel; sequential phases wait
-3. **Agent ownership** - Each agent owns its output completely
-4. **Clean handoffs** - Each phase passes structured data to next
-5. **Honest reporting** - Display agent outputs directly
-6. **Simplification pass** - Code refined for clarity before PR
-7. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Task tool with X, not do X's work yourself
+2. **Coherence-first** - Single Coder produces more consistent code (default ~80% of tasks)
+3. **Parallel exploration** - Explore and plan phases run in parallel; sequential phases wait
+4. **Agent ownership** - Each agent owns its output completely
+5. **Clean handoffs** - Each phase passes structured data to next; sequential Coders pass implementation summaries
+6. **Honest reporting** - Display agent outputs directly
+7. **Simplification pass** - Code refined for clarity before PR
+8. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Task tool with X, not do X's work yourself
 
 ## Error Handling
 
