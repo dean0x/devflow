@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: inherit
-skills: devflow-core-patterns, devflow-git-safety, devflow-implementation-patterns, devflow-commit, devflow-typescript, devflow-react, devflow-test-design, devflow-codebase-navigation
+skills: devflow-core-patterns, devflow-git-safety, devflow-implementation-patterns, devflow-commit, devflow-typescript, devflow-react, devflow-test-design, devflow-codebase-navigation, devflow-code-smell, devflow-input-validation
 ---
 
 # Coder Agent

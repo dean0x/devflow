@@ -97,7 +97,6 @@ const DEVFLOW_SKILLS: CommandDefinition[] = [
   // Tier 2: Specialized Skills (user-facing, auto-activate)
   { name: 'devflow-test-design', description: 'Test quality enforcement' },
   { name: 'devflow-code-smell', description: 'Anti-pattern detection' },
-  { name: 'devflow-research', description: 'Pre-implementation exploration' },
   { name: 'devflow-commit', description: 'Atomic commits & message format' },
   { name: 'devflow-pull-request', description: 'PR quality & descriptions' },
   { name: 'devflow-input-validation', description: 'Boundary validation' },

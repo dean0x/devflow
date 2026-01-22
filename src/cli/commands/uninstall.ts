@@ -158,7 +158,6 @@ export const uninstallCommand = new Command('uninstall')
           // Tier 2: Specialized Skills
           'devflow-test-design',
           'devflow-code-smell',
-          'devflow-research',
           'devflow-commit',
           'devflow-pull-request',
           'devflow-input-validation',

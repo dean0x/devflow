@@ -338,7 +338,6 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 |-------|---------|---------------------|
 | `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior testing) | Tests written or modified |
 | `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features implemented, code reviewed |
-| `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested |
 | `devflow-commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
 | `devflow-pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
@@ -403,7 +402,6 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 |-------|----------|
 | `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
 | `devflow-code-smell` | NO FAKE SOLUTIONS |
-| `devflow-research` | NO IMPLEMENTATION WITHOUT EXPLORATION |
 | `devflow-commit` | ATOMIC COMMITS OR NO COMMITS |
 | `devflow-pull-request` | HONEST DESCRIPTIONS OR NO PR |
 | `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
