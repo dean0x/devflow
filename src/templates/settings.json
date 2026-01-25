@@ -1,10 +1,20 @@
 {
+  "model": "opus",
   "statusLine": {
     "type": "command",
     "command": "${DEVFLOW_DIR}/scripts/statusline.sh"
   },
   "env": {
     "ENABLE_TOOL_SEARCH": "true"
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
   },
   "permissions": {
     "deny": [
