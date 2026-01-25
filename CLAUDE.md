@@ -107,7 +107,8 @@ ensure_docs_dir "reviews/$BRANCH_SLUG"
 - `Resolver` - Validates review issues, decides FIX vs TECH_DEBT based on risk, implements fixes
 - `Scrutinizer` - Self-review agent that evaluates and fixes P0/P1 issues (runs in fresh context after Coder)
 - `Simplifier` - Post-implementation code refinement for clarity and consistency
-- `Shepherd` - Validates implementation alignment with request/plan, fixes misalignments
+- `Shepherd` - Validates implementation alignment with request/plan, reports misalignments for Coder to fix
+- `Validator` - Runs build/typecheck/lint/test commands, reports pass/fail with structured failure details
 
 **Review agents**:
 - `Reviewer` - Universal parameterized reviewer (focus via prompt injection)
