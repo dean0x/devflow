@@ -230,9 +230,39 @@ DOMAIN: {subtask 2 domain}"
 - Different files/modules with no imports between them
 - Each subtask is self-contained
 
+### Phase 6.5: Validate
+
+After Coder completes, spawn Validator to verify correctness:
+
+```
+Task(subagent_type="Validator", model="haiku"):
+"FILES_CHANGED: {list of files from Coder output}
+VALIDATION_SCOPE: full
+Run build, typecheck, lint, test. Report pass/fail with failure details."
+```
+
+**If FAIL:**
+1. Extract failure details from Validator output
+2. Increment `validation_retry_count`
+3. If `validation_retry_count <= 2`:
+   - Spawn Coder with fix context:
+   ```
+   Task(subagent_type="Coder"):
+   "TASK_ID: {task-id}
+   TASK_DESCRIPTION: Fix validation failures
+   OPERATION: validation-fix
+   VALIDATION_FAILURES: {parsed failures from Validator}
+   SCOPE: Fix only the listed failures, no other changes
+   CREATE_PR: false"
+   ```
+   - Loop back to Phase 6.5 (re-validate)
+4. If `validation_retry_count > 2`: Report failures to user and halt
+
+**If PASS:** Continue to Phase 7
+
 ### Phase 7: Simplify
 
-After Coder completes, spawn Simplifier to polish the code:
+After validation passes, spawn Simplifier to polish the code:
 
 ```
 Task(subagent_type="Simplifier"):
@@ -255,9 +285,24 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 
 If Scrutinizer returns BLOCKED, report to user and halt.
 
+### Phase 8.5: Re-Validate (if Scrutinizer made changes)
+
+If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
+
+```
+Task(subagent_type="Validator", model="haiku"):
+"FILES_CHANGED: {files modified by Scrutinizer}
+VALIDATION_SCOPE: changed-only
+Verify Scrutinizer's fixes didn't break anything."
+```
+
+**If FAIL:** Report to user - Scrutinizer broke tests, needs manual intervention.
+
+**If PASS:** Continue to Phase 9
+
 ### Phase 9: Alignment Check
 
-After Scrutinizer passes, spawn Shepherd to validate alignment:
+After Scrutinizer passes (and re-validation if needed), spawn Shepherd to validate alignment:
 
 ```
 Task(subagent_type="Shepherd"):
@@ -265,10 +310,34 @@ Task(subagent_type="Shepherd"):
 EXECUTION_PLAN: {synthesized plan from Phase 5}
 FILES_CHANGED: {list of files from Coder output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
-Validate alignment, fix misalignments, report status"
+Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
-If Shepherd returns BLOCKED, report to user for decision.
+**If ALIGNED:** Continue to Phase 10
+
+**If MISALIGNED:**
+1. Extract misalignment details from Shepherd output
+2. Increment `alignment_fix_count`
+3. If `alignment_fix_count <= 2`:
+   - Spawn Coder to fix misalignments:
+   ```
+   Task(subagent_type="Coder"):
+   "TASK_ID: {task-id}
+   TASK_DESCRIPTION: Fix alignment issues
+   OPERATION: alignment-fix
+   MISALIGNMENTS: {structured misalignments from Shepherd}
+   SCOPE: Fix only the listed misalignments, no other changes
+   CREATE_PR: false"
+   ```
+   - Spawn Validator to verify fix didn't break tests:
+   ```
+   Task(subagent_type="Validator", model="haiku"):
+   "FILES_CHANGED: {files modified by fix Coder}
+   VALIDATION_SCOPE: changed-only"
+   ```
+   - If Validator FAIL: Report to user
+   - If Validator PASS: Loop back to Phase 9 (re-check alignment)
+4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
 ### Phase 10: Create PR
 
@@ -313,14 +382,22 @@ Display completion summary with phase status, PR info, and next steps.
 │  ├─ SEQUENTIAL_CODERS (15%): N Coders with handoff summaries
 │  └─ PARALLEL_CODERS (5%): N Coders in single message (rare)
 │
+├─ Phase 6.5: Validate
+│  └─ Validator agent (build, typecheck, lint, test)
+│  └─ If FAIL: Coder fix loop (max 2 retries) → re-validate
+│
 ├─ Phase 7: Simplify
 │  └─ Simplifier agent (refines code clarity and consistency)
 │
 ├─ Phase 8: Self-Review
 │  └─ Scrutinizer agent (final quality gate, fixes P0/P1)
 │
+├─ Phase 8.5: Re-Validate (if Scrutinizer made changes)
+│  └─ Validator agent (verify Scrutinizer fixes)
+│
 ├─ Phase 9: Alignment Check
-│  └─ Shepherd agent (validates alignment with request/plan)
+│  └─ Shepherd agent (validates alignment - reports only, no fixes)
+│  └─ If MISALIGNED: Coder fix loop (max 2 iterations) → Validator → re-check
 │
 ├─ Phase 10: Create PR (if needed)
 │  └─ SINGLE_CODER: handled by Coder
@@ -340,6 +417,9 @@ Display completion summary with phase status, PR info, and next steps.
 6. **Honest reporting** - Display agent outputs directly
 7. **Simplification pass** - Code refined for clarity before PR
 8. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Task tool with X, not do X's work yourself
+9. **Validator owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validator agent
+10. **Coder owns fixes** - Never implement fixes in main session; spawn Coder for validation failures and alignment fixes
+11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
 
 ## Error Handling
 
