@@ -55,7 +55,6 @@ DevFlow is now installed and ready to use in Claude Code.
 |-------|---------|---------------------|
 | `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior vs implementation) | Tests are written or modified |
 | `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features are implemented, code is reviewed |
-| `devflow-research` | Pre-implementation planning, documentation study, integration strategy | Unfamiliar features requested, architectural decisions needed |
 | `devflow-commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
 | `devflow-pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
 | `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
@@ -136,7 +135,6 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 |-------|---------|---------------------|
 | `devflow-test-design` | Test quality enforcement | Tests written or modified |
 | `devflow-code-smell` | Anti-pattern detection | Features implemented |
-| `devflow-research` | Pre-implementation planning | Unfamiliar features requested |
 | `devflow-commit` | Atomic commit patterns | Staging files, creating commits |
 | `devflow-pull-request` | PR quality & descriptions | Creating PRs |
 | `devflow-input-validation` | Boundary validation | API endpoints created |
@@ -353,7 +351,7 @@ The `.docs/` structure provides a searchable history of decisions, designs, and 
 3. Review recommended next actions
 
 ### During Development
-1. **Skills auto-activate** - `devflow-research` triggers for unfamiliar features, foundation skills validate patterns
+1. **Skills auto-activate** - Foundation skills validate patterns during implementation
 2. **Specify features** - `/specify` for detailed specs with clarification gates
 3. **Execute tasks** - `/implement` for full lifecycle (explore → plan → implement → review)
 4. **Code with confidence** - Skills catch anti-patterns and violations during implementation
