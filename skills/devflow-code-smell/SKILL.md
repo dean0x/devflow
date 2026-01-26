@@ -1,6 +1,7 @@
 ---
 name: devflow-code-smell
 description: Automatically detect anti-patterns, fake solutions, and workarounds when implementing functionality. Use when adding new features, reviewing code changes, or when suspicious patterns appear. Enforces honest, production-ready solutions.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

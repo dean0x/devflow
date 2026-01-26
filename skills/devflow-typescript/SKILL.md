@@ -1,6 +1,7 @@
 ---
 name: devflow-typescript
 description: Automatically activate when working with .ts or .tsx files, or when TypeScript patterns are needed. Triggers on type safety questions, generic implementations, utility type usage, or type guard creation in TypeScript codebases.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

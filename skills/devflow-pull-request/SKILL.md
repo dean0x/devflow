@@ -1,7 +1,7 @@
 ---
 name: devflow-pull-request
 description: PR quality patterns, description generation, and review preparation. Auto-activate when creating PRs, generating descriptions, or analyzing branch changes for review.
-disable-model-invocation: true
+user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---
 

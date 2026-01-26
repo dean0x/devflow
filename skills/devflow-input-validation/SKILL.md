@@ -1,6 +1,7 @@
 ---
 name: devflow-input-validation
 description: Automatically enforce input validation at system boundaries when handling user input, API endpoints, or external data. Use when creating API routes, processing form data, or integrating with external services. Enforces parse-don't-validate pattern.
+user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---
 
