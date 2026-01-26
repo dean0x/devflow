@@ -1,6 +1,7 @@
 ---
 name: devflow-self-review
 description: Self-review framework for Scrutinizer agent. Evaluate implementation against 9 pillars. Fix P0/P1 issues immediately. Ensures quality before handoff to Simplifier.
+user-invocable: false
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

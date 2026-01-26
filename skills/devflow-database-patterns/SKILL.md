@@ -1,6 +1,7 @@
 ---
 name: devflow-database-patterns
 description: Database design and optimization review. Load when reviewing migrations, schema changes, query patterns, or database-related code. Used by Reviewer agent with database focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: devflow-react
 description: Automatically activate when working with React components, hooks, or .jsx/.tsx files containing JSX. Triggers on component creation, hook implementation, state management, or React performance optimization tasks.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

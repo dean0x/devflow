@@ -1,6 +1,7 @@
 ---
 name: devflow-github-patterns
 description: GitHub API patterns for PR comments, issue management, and release workflows. Load when performing git/GitHub operations via gh CLI.
+user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---
 

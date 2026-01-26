@@ -1,6 +1,7 @@
 ---
 name: devflow-implementation-patterns
 description: Automatically activate when implementing CRUD operations, API endpoints, event handlers, configuration systems, or logging. Triggers on feature implementation tasks involving database operations, REST/GraphQL APIs, pub/sub patterns, or service configuration.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: devflow-complexity-patterns
 description: Code complexity and maintainability analysis. Load when reviewing code for cyclomatic complexity, readability issues, or maintainability concerns. Used by Reviewer agent with complexity focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

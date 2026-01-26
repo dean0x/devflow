@@ -1,6 +1,7 @@
 ---
 name: devflow-commit
 description: Commit best practices, atomic grouping, and message conventions. Auto-activate when staging files, creating commits, or generating commit messages. Ensures clean, safe, atomic git history.
+user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---
 

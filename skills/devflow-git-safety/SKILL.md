@@ -1,6 +1,7 @@
 ---
 name: devflow-git-safety
 description: Git safety patterns and best practices. Load when performing git operations, creating commits, managing branches, or working with git history. Prevents common git mistakes and ensures clean history.
+user-invocable: false
 allowed-tools: Bash, Read
 ---
 

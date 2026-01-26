@@ -1,6 +1,7 @@
 ---
 name: devflow-performance-patterns
 description: Performance optimization and bottleneck detection. Load when reviewing code for algorithmic complexity, memory issues, I/O inefficiencies, or caching concerns. Used by Reviewer agent with performance focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

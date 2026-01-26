@@ -1,6 +1,7 @@
 ---
 name: devflow-docs-framework
 description: Documentation conventions for DevFlow artifacts. Load when creating status logs, debug sessions, review reports, or any persistent documentation in .docs/ directory. Ensures consistent naming, structure, and organization.
+user-invocable: false
 allowed-tools: Read, Bash, Glob
 ---
 

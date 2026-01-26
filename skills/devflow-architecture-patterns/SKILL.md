@@ -1,6 +1,7 @@
 ---
 name: devflow-architecture-patterns
 description: Software architecture and design pattern analysis. Load when reviewing code structure, SOLID violations, coupling issues, or module boundaries. Used by Reviewer agent with architecture focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: devflow-dependencies-patterns
 description: Dependency management and security analysis. Load when reviewing package.json changes, dependency updates, or assessing supply chain risks. Used by Reviewer agent with dependencies focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
