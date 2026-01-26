@@ -1,6 +1,7 @@
 ---
 name: devflow-codebase-navigation
 description: Automatically activate when exploring unfamiliar codebases, searching for entry points, tracing data flow, or discovering existing patterns. Triggers when asked to understand, explore, or find code in a codebase before implementation.
+user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

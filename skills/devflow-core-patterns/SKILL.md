@@ -1,6 +1,7 @@
 ---
 name: devflow-core-patterns
 description: Automatically activate when implementing new functionality, refactoring code, or when guidance on Result types, dependency injection, immutability, resource cleanup, naming conventions, or architecture documentation is needed. Foundation skill for all implementation work.
+user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---
 

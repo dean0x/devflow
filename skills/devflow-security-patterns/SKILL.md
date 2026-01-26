@@ -1,6 +1,7 @@
 ---
 name: devflow-security-patterns
 description: Security vulnerability patterns and detection strategies. Load when reviewing code for security issues, implementing authentication/authorization, handling user input, or working with sensitive data. Used by Reviewer agent (security focus).
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: devflow-regression-patterns
 description: Functionality regression and intent validation analysis. Load when reviewing for lost functionality, broken behavior, or incomplete migrations. Used by Reviewer agent with regression focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

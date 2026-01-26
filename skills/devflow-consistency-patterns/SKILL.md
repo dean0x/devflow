@@ -1,6 +1,7 @@
 ---
 name: devflow-consistency-patterns
 description: Code consistency, pattern adherence, and unnecessary simplification detection. Load when reviewing code for style violations, content truncation, or feature regressions. Used by Reviewer agent with consistency focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

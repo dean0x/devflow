@@ -1,6 +1,7 @@
 ---
 name: devflow-documentation-patterns
 description: Documentation quality and code-documentation alignment. Load when reviewing code comments, API docs, READMEs, or checking for documentation drift. Used by Reviewer agent with documentation focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: devflow-tests-patterns
 description: Test quality, coverage, and effectiveness analysis. Load when reviewing test code for coverage gaps, brittle tests, or poor test design. Used by Reviewer agent with tests focus.
+user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 

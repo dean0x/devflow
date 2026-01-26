@@ -1,6 +1,7 @@
 ---
 name: devflow-review-methodology
 description: Standard review process for all DevFlow review agents. Load when performing code reviews to ensure consistent 6-step process with 3-category issue classification. This is the shared methodology used by the unified Reviewer agent across all focus areas.
+user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
