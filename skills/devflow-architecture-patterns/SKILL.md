@@ -1,6 +1,6 @@
 ---
 name: devflow-architecture-patterns
-description: Software architecture and design pattern analysis. Load when reviewing code structure, SOLID violations, coupling issues, or module boundaries. Used by Reviewer agent with architecture focus.
+description: Architecture analysis for Reviewer agent. Loaded when focus=architecture. Detects SOLID violations, coupling, layering issues.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
@@ -14,416 +14,129 @@ Domain expertise for software architecture and design pattern analysis. Use alon
 > **SEPARATION OF CONCERNS IS NON-NEGOTIABLE**
 >
 > Every module has one reason to change. Every layer has clear boundaries. Every dependency
-> points in one direction. Violations compound into unmaintainable systems. A shortcut today
-> becomes technical debt tomorrow. There are no exceptions.
+> points in one direction. Violations compound into unmaintainable systems.
+
+---
 
 ## Architecture Categories
 
 ### 1. SOLID Violations
 
-**Single Responsibility Principle (SRP)**
+**Single Responsibility (SRP)**: One class, one reason to change.
 ```typescript
-// VIOLATION: Class handles HTTP, validation, DB, and email
+// VIOLATION: Handles HTTP, validation, DB, email
 class UserController {
   async createUser(req, res) {
-    // Validates input
-    if (!req.body.email.includes('@')) throw new Error('Invalid email');
-
-    // Hashes password
-    const hash = await bcrypt.hash(req.body.password, 12);
-
-    // Saves to database
-    const user = await db.users.create({ ...req.body, password: hash });
-
-    // Sends welcome email
-    await sendEmail(user.email, 'Welcome!', template);
-
+    if (!req.body.email.includes('@')) throw new Error('Invalid');
+    const user = await db.users.create(req.body);
+    await sendEmail(user.email, 'Welcome!');
     res.json(user);
   }
 }
-
-// CORRECT: Separate concerns
-class UserController {
-  constructor(
-    private userService: UserService,
-    private validator: UserValidator
-  ) {}
-
-  async createUser(req, res) {
-    const data = this.validator.validateCreateUser(req.body);
-    const user = await this.userService.create(data);
-    res.json(user);
-  }
-}
+// CORRECT: Separate concerns via injected services
 ```
 
-**Open/Closed Principle (OCP)**
+**Open/Closed (OCP)**: Extend without modifying.
 ```typescript
-// VIOLATION: Modify existing code to add new types
-function calculateDiscount(type: string, amount: number) {
-  if (type === 'regular') return amount * 0.1;
-  if (type === 'premium') return amount * 0.2;
-  if (type === 'vip') return amount * 0.3;  // Adding new type = modifying
-  return 0;
-}
+// VIOLATION: Adding type = modifying
+if (type === 'regular') return amount * 0.1;
+if (type === 'premium') return amount * 0.2;
 
-// CORRECT: Extend without modifying
-interface DiscountStrategy {
-  calculate(amount: number): number;
-}
-
-class RegularDiscount implements DiscountStrategy {
-  calculate(amount: number) { return amount * 0.1; }
-}
-
-class PremiumDiscount implements DiscountStrategy {
-  calculate(amount: number) { return amount * 0.2; }
-}
-
-// Adding VIP = new class, no modification to existing code
+// CORRECT: Strategy pattern
+interface DiscountStrategy { calculate(amount: number): number; }
 ```
 
-**Liskov Substitution Principle (LSP)**
+**Liskov Substitution (LSP)**: Subtypes must be substitutable.
 ```typescript
-// VIOLATION: Subclass breaks parent contract
-class Rectangle {
-  setWidth(w: number) { this.width = w; }
-  setHeight(h: number) { this.height = h; }
-  area() { return this.width * this.height; }
-}
+// VIOLATION: Subclass breaks contract
+class Square extends Rectangle { setWidth(w) { this.width = this.height = w; } }
 
-class Square extends Rectangle {
-  setWidth(w: number) {
-    this.width = w;
-    this.height = w;  // Breaks expectation!
-  }
-}
-
-// CORRECT: Use composition or proper abstraction
-interface Shape {
-  area(): number;
-}
-
-class Rectangle implements Shape { /* ... */ }
-class Square implements Shape { /* ... */ }
+// CORRECT: Use composition/proper abstraction
+interface Shape { area(): number; }
 ```
 
-**Interface Segregation Principle (ISP)**
+**Interface Segregation (ISP)**: No forced unused implementations.
 ```typescript
-// VIOLATION: Fat interface forces unnecessary implementations
-interface Worker {
-  work(): void;
-  eat(): void;
-  sleep(): void;
-}
-
-class Robot implements Worker {
-  work() { /* OK */ }
-  eat() { throw new Error('Robots do not eat'); }  // Forced to implement
-  sleep() { throw new Error('Robots do not sleep'); }
-}
+// VIOLATION: Robot forced to implement eat()
+interface Worker { work(); eat(); sleep(); }
 
 // CORRECT: Segregated interfaces
 interface Workable { work(): void; }
-interface Eatable { eat(): void; }
-interface Sleepable { sleep(): void; }
-
-class Robot implements Workable {
-  work() { /* OK */ }
-}
 ```
 
-**Dependency Inversion Principle (DIP)**
+**Dependency Inversion (DIP)**: Depend on abstractions.
 ```typescript
-// VIOLATION: High-level depends on low-level
-class OrderService {
-  private db = new PostgresDatabase();  // Concrete dependency
+// VIOLATION: Concrete dependency
+class OrderService { private db = new PostgresDatabase(); }
 
-  async createOrder(data: OrderData) {
-    return this.db.insert('orders', data);
-  }
-}
-
-// CORRECT: Depend on abstractions
-interface OrderRepository {
-  create(data: OrderData): Promise<Order>;
-}
-
-class OrderService {
-  constructor(private repository: OrderRepository) {}
-
-  async createOrder(data: OrderData) {
-    return this.repository.create(data);
-  }
-}
+// CORRECT: Inject interface
+class OrderService { constructor(private repo: OrderRepository) {} }
 ```
 
 ### 2. Coupling Issues
 
-**Tight Coupling**
+**Tight Coupling**: Direct instantiation creates coupling.
 ```typescript
-// VIOLATION: Direct instantiation creates coupling
+// VIOLATION
 class ReportGenerator {
-  generate() {
-    const data = new DatabaseService().query('SELECT...');
-    const formatted = new FormattingService().format(data);
-    new EmailService().send('admin@example.com', formatted);
-  }
+  generate() { new DatabaseService().query('SELECT...'); }
 }
-
-// CORRECT: Inject dependencies
-class ReportGenerator {
-  constructor(
-    private dataSource: DataSource,
-    private formatter: Formatter,
-    private notifier: Notifier
-  ) {}
-
-  generate() {
-    const data = this.dataSource.fetch();
-    const formatted = this.formatter.format(data);
-    this.notifier.notify(formatted);
-  }
-}
+// CORRECT: Inject dependencies via constructor
 ```
 
-**Circular Dependencies**
-```typescript
-// VIOLATION: A imports B, B imports A
-// user.service.ts
-import { OrderService } from './order.service';
-class UserService {
-  constructor(private orders: OrderService) {}
-}
+**Circular Dependencies**: A imports B, B imports A. Extract shared concern or use events.
 
-// order.service.ts
-import { UserService } from './user.service';
-class OrderService {
-  constructor(private users: UserService) {}
-}
-
-// CORRECT: Extract shared concern or use events
-// user-order.events.ts
-interface UserOrderEvents {
-  onOrderCreated(userId: string, orderId: string): void;
-}
-
-// Or extract to third module both depend on
-```
-
-**Feature Envy**
-```typescript
-// VIOLATION: Method uses another class's data excessively
-class OrderPrinter {
-  print(order: Order) {
-    console.log(`Customer: ${order.customer.name}`);
-    console.log(`Address: ${order.customer.address.street}, ${order.customer.address.city}`);
-    console.log(`Phone: ${order.customer.phone}`);
-    console.log(`Items: ${order.items.length}`);
-    // Most access is to order.customer, not order
-  }
-}
-
-// CORRECT: Move behavior to the class with the data
-class Customer {
-  formatForPrint(): string {
-    return `${this.name}\n${this.address.format()}\n${this.phone}`;
-  }
-}
-```
+**Feature Envy**: Method uses another class's data excessively. Move behavior to data owner.
 
 ### 3. Layering Violations
 
-**Skipping Layers**
+**Skipping Layers**: Controller directly accessing database.
 ```typescript
-// VIOLATION: Controller directly accesses database
-class UserController {
-  async getUser(req, res) {
-    const user = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
-    res.json(user);
-  }
-}
+// VIOLATION: Controller -> DB (skips service)
+const user = await db.query('SELECT...', [req.params.id]);
 
-// CORRECT: Proper layering
-// Controller -> Service -> Repository -> Database
-class UserController {
-  constructor(private userService: UserService) {}
-
-  async getUser(req, res) {
-    const user = await this.userService.findById(req.params.id);
-    res.json(user);
-  }
-}
+// CORRECT: Controller -> Service -> Repository
+const user = await this.userService.findById(req.params.id);
 ```
 
-**Leaky Abstractions**
+**Leaky Abstractions**: Infrastructure details in domain.
 ```typescript
-// VIOLATION: Domain leaks infrastructure details
-interface User {
-  id: string;
-  name: string;
-  _mongoId: ObjectId;  // Infrastructure leak!
-  __v: number;         // Infrastructure leak!
-}
+// VIOLATION: Domain exposes MongoDB internals
+interface User { id: string; _mongoId: ObjectId; __v: number; }
 
-// CORRECT: Clean domain model
-interface User {
-  id: string;
-  name: string;
-  email: string;
-}
-
-// Map in repository layer
-class MongoUserRepository {
-  toDomain(doc: MongoDocument): User {
-    return { id: doc._id.toString(), name: doc.name, email: doc.email };
-  }
-}
+// CORRECT: Clean domain, map in repository
+interface User { id: string; name: string; }
 ```
 
-**Wrong Direction Dependencies**
-```typescript
-// VIOLATION: Domain depends on infrastructure
-// domain/user.ts
-import { PostgresClient } from '../infrastructure/postgres';
-
-class User {
-  save() {
-    PostgresClient.insert(this);  // Domain knows about DB!
-  }
-}
-
-// CORRECT: Infrastructure depends on domain
-// domain/user.ts
-interface UserRepository {
-  save(user: User): Promise<void>;
-}
-
-// infrastructure/postgres-user-repository.ts
-import { User, UserRepository } from '../domain/user';
-
-class PostgresUserRepository implements UserRepository {
-  async save(user: User) { /* ... */ }
-}
-```
+**Wrong Direction**: Domain must not import infrastructure. Infrastructure implements domain interfaces.
 
 ### 4. Modularity Issues
 
-**God Class**
-```typescript
-// VIOLATION: Class does everything
-class ApplicationManager {
-  // User management
-  createUser() {}
-  deleteUser() {}
-  updateUser() {}
+**God Class**: Class does everything. Split into bounded contexts.
 
-  // Order management
-  createOrder() {}
-  cancelOrder() {}
-  shipOrder() {}
+**Inappropriate Intimacy**: Class knows internals of another. Use "tell, don't ask."
 
-  // Reporting
-  generateReport() {}
-  exportToPdf() {}
+---
 
-  // Email
-  sendWelcomeEmail() {}
-  sendOrderConfirmation() {}
+## Extended References
 
-  // 1000+ more lines...
-}
+For detailed examples and detection patterns:
 
-// CORRECT: Separate bounded contexts
-class UserService { /* user operations */ }
-class OrderService { /* order operations */ }
-class ReportService { /* reporting */ }
-class EmailService { /* email sending */ }
-```
-
-**Inappropriate Intimacy**
-```typescript
-// VIOLATION: Class knows too much about another's internals
-class Order {
-  calculateTotal() {
-    let total = 0;
-    for (const item of this.items) {
-      // Reaches deep into Product internals
-      total += item.product._pricing._basePrice *
-               item.product._pricing._taxRate *
-               (1 - item.product._pricing._discountPercent);
-    }
-    return total;
-  }
-}
-
-// CORRECT: Ask, don't tell
-class Product {
-  getPrice(): number {
-    return this.pricing.calculate();
-  }
-}
-
-class Order {
-  calculateTotal() {
-    return this.items.reduce((sum, item) => sum + item.product.getPrice(), 0);
-  }
-}
-```
+- `references/solid.md` - Extended SOLID violation examples with full fixes
+- `references/coupling.md` - Circular dependencies, feature envy, tight coupling
+- `references/layering.md` - Layer skipping, leaky abstractions, wrong direction
+- `references/detection.md` - Grep patterns and bash commands for automated detection
 
 ---
 
 ## Severity Guidelines
 
-**CRITICAL** - Fundamental architecture broken:
-- Circular dependencies between modules
-- Domain layer depends on infrastructure
-- No separation between HTTP and business logic
-- God classes with 1000+ lines
-
-**HIGH** - Significant architecture issues:
-- SOLID violations in core business logic
-- Tight coupling between services
-- Leaky abstractions exposing infrastructure
-- Feature envy across module boundaries
-
-**MEDIUM** - Moderate architecture concerns:
-- Some dependencies not injected
-- Minor layering violations
-- Inconsistent abstraction levels
-- Missing interfaces for testability
-
-**LOW** - Minor architecture improvements:
-- Naming doesn't reflect domain
-- Minor code organization issues
-- Could benefit from more abstraction
-- Documentation missing for architecture decisions
-
----
-
-## Detection Patterns
-
-Search for these patterns in code:
-
-```bash
-# God classes (large files)
-find . -name "*.ts" -exec wc -l {} \; | sort -rn | head -20
-
-# Direct database access in controllers
-grep -rn "db\.\|prisma\.\|mongoose\." --include="*controller*.ts"
-
-# Circular imports (look for patterns)
-grep -rn "import.*from.*service" --include="*service*.ts" | grep -v node_modules
-
-# Concrete instantiation (new keyword in services)
-grep -rn "new [A-Z].*Service\|new [A-Z].*Repository" --include="*.ts"
-
-# Infrastructure in domain
-grep -rn "import.*postgres\|import.*mongo\|import.*redis" --include="*/domain/*.ts"
-
-# Missing dependency injection
-grep -rn "class.*{" -A5 --include="*.ts" | grep -B5 "private.*= new"
-```
+| Severity | Examples |
+|----------|----------|
+| **CRITICAL** | Circular dependencies, domain depends on infrastructure, god classes 1000+ lines |
+| **HIGH** | SOLID violations in core logic, tight coupling between services, leaky abstractions |
+| **MEDIUM** | Dependencies not injected, minor layering violations, missing interfaces |
+| **LOW** | Naming issues, minor organization, missing architecture docs |
 
 ---
 
@@ -431,11 +144,10 @@ grep -rn "class.*{" -A5 --include="*.ts" | grep -B5 "private.*= new"
 
 | Principle | Violation Sign | Fix Pattern |
 |-----------|----------------|-------------|
-| SRP | Class has multiple reasons to change | Extract classes |
-| OCP | Adding feature requires modifying existing code | Use strategy/plugin pattern |
-| LSP | Subclass throws "not supported" | Use composition over inheritance |
-| ISP | Implementing unused interface methods | Split interfaces |
-| DIP | `new ConcreteClass()` in business logic | Inject via constructor |
+| SRP | Multiple reasons to change | Extract classes |
+| OCP | Modifying to add features | Strategy/plugin pattern |
+| LSP | Subclass throws "not supported" | Composition over inheritance |
+| ISP | Unused interface methods | Split interfaces |
+| DIP | `new ConcreteClass()` in business | Inject via constructor |
 | DRY | Copy-paste code blocks | Extract to shared module |
 | YAGNI | Premature abstractions | Remove until needed |
-
