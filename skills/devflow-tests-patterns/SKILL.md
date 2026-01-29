@@ -1,6 +1,6 @@
 ---
 name: devflow-tests-patterns
-description: Test quality, coverage, and effectiveness analysis. Load when reviewing test code for coverage gaps, brittle tests, or poor test design. Used by Reviewer agent with tests focus.
+description: Test quality analysis for Reviewer agent. Loaded when focus=tests. Detects coverage gaps, brittle tests, poor test design.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
@@ -17,381 +17,124 @@ Domain expertise for test quality and effectiveness analysis. Use alongside `dev
 > breaks tests without changing behavior, the tests are wrong. Mock boundaries, not internals.
 > Test the contract, not the code. If tests are hard to write, the design is wrong.
 
+---
+
 ## Test Categories
 
 ### 1. Coverage Issues
 
-**Untested New Code**
+**Untested New Code**: New functions/branches without corresponding tests.
+
 ```typescript
-// NEW CODE without tests
+// VIOLATION: New discount logic with no tests
 export function calculateDiscount(price: number, type: CustomerType): number {
   if (type === 'premium') return price * 0.2;
   if (type === 'vip') return price * 0.3;
   return price * 0.1;
 }
 
-// REQUIRED: Tests for each branch
+// REQUIRED: Test each branch
 describe('calculateDiscount', () => {
   it('returns 10% for regular customers', () => {
     expect(calculateDiscount(100, 'regular')).toBe(10);
   });
-
-  it('returns 20% for premium customers', () => {
-    expect(calculateDiscount(100, 'premium')).toBe(20);
-  });
-
-  it('returns 30% for VIP customers', () => {
-    expect(calculateDiscount(100, 'vip')).toBe(30);
-  });
+  it('returns 20% for premium customers', () => { /* ... */ });
+  it('returns 30% for VIP customers', () => { /* ... */ });
 });
 ```
 
-**Missing Edge Cases**
-```typescript
-// CODE
-function divide(a: number, b: number): number {
-  return a / b;
-}
-
-// INCOMPLETE TESTS
-describe('divide', () => {
-  it('divides two numbers', () => {
-    expect(divide(10, 2)).toBe(5);  // Happy path only
-  });
-});
-
-// COMPLETE TESTS
-describe('divide', () => {
-  it('divides two positive numbers', () => {
-    expect(divide(10, 2)).toBe(5);
-  });
-
-  it('handles division by zero', () => {
-    expect(divide(10, 0)).toBe(Infinity);
-  });
-
-  it('handles negative numbers', () => {
-    expect(divide(-10, 2)).toBe(-5);
-  });
-
-  it('handles decimal results', () => {
-    expect(divide(10, 3)).toBeCloseTo(3.333, 2);
-  });
-});
-```
-
-**No Error Path Tests**
-```typescript
-// CODE
-async function fetchUser(id: string): Promise<User> {
-  const response = await api.get(`/users/${id}`);
-  if (!response.ok) throw new ApiError(response.status);
-  return response.json();
-}
-
-// INCOMPLETE: Only tests success
-describe('fetchUser', () => {
-  it('returns user data', async () => {
-    api.get.mockResolvedValue({ ok: true, json: () => mockUser });
-    const user = await fetchUser('123');
-    expect(user).toEqual(mockUser);
-  });
-});
-
-// COMPLETE: Tests error paths
-describe('fetchUser', () => {
-  it('returns user data on success', async () => { /* ... */ });
-
-  it('throws ApiError on 404', async () => {
-    api.get.mockResolvedValue({ ok: false, status: 404 });
-    await expect(fetchUser('123')).rejects.toThrow(ApiError);
-  });
-
-  it('throws ApiError on 500', async () => {
-    api.get.mockResolvedValue({ ok: false, status: 500 });
-    await expect(fetchUser('123')).rejects.toThrow(ApiError);
-  });
-
-  it('handles network errors', async () => {
-    api.get.mockRejectedValue(new Error('Network error'));
-    await expect(fetchUser('123')).rejects.toThrow('Network error');
-  });
-});
-```
+**Missing edge cases** and **error paths** - see `references/violations.md`.
 
 ### 2. Test Quality Issues
 
 **Brittle Tests (Implementation Coupling)**
+
 ```typescript
-// BRITTLE: Tests implementation details
-describe('UserService', () => {
-  it('creates user', async () => {
-    const service = new UserService(mockRepo);
-    await service.create({ name: 'John' });
-
-    // Testing HOW, not WHAT
-    expect(mockRepo.beginTransaction).toHaveBeenCalled();
-    expect(mockRepo.insert).toHaveBeenCalledWith('users', { name: 'John' });
-    expect(mockRepo.commit).toHaveBeenCalled();
-  });
+// VIOLATION: Testing HOW, not WHAT
+it('creates user', async () => {
+  await service.create({ name: 'John' });
+  expect(mockRepo.beginTransaction).toHaveBeenCalled();
+  expect(mockRepo.insert).toHaveBeenCalledWith('users', { name: 'John' });
 });
 
-// ROBUST: Tests behavior/outcome
-describe('UserService', () => {
-  it('creates user and returns it', async () => {
-    const service = new UserService(mockRepo);
-    const user = await service.create({ name: 'John' });
-
-    // Testing WHAT the behavior is
-    expect(user.name).toBe('John');
-    expect(user.id).toBeDefined();
-  });
-
-  it('persists user to repository', async () => {
-    const service = new UserService(mockRepo);
-    await service.create({ name: 'John' });
-
-    const saved = await mockRepo.findByName('John');
-    expect(saved).toBeDefined();
-  });
-});
-```
-
-**Unclear Test Names**
-```typescript
-// UNCLEAR: What does this test?
-describe('User', () => {
-  it('test1', () => { /* ... */ });
-  it('should work', () => { /* ... */ });
-  it('handles edge case', () => { /* ... */ });
-});
-
-// CLEAR: Describes behavior
-describe('User', () => {
-  it('validates email format on creation', () => { /* ... */ });
-  it('rejects passwords shorter than 8 characters', () => { /* ... */ });
-  it('hashes password before storing', () => { /* ... */ });
-});
-
-// PATTERN: "it [action] when [condition]" or "it [expected behavior]"
-```
-
-**Missing Arrange-Act-Assert**
-```typescript
-// MESSY: Mixed setup, action, assertion
-it('processes order', async () => {
-  const user = await createUser();
+// CORRECT: Testing behavior/outcome
+it('creates user and returns it', async () => {
+  const user = await service.create({ name: 'John' });
+  expect(user.name).toBe('John');
   expect(user.id).toBeDefined();
-  const order = await createOrder(user.id, [{ product: 'A', qty: 2 }]);
-  expect(order.status).toBe('pending');
-  await processOrder(order.id);
-  const updated = await getOrder(order.id);
-  expect(updated.status).toBe('processed');
-  expect(updated.processedAt).toBeDefined();
-});
-
-// CLEAN: Clear AAA structure
-it('marks order as processed with timestamp', async () => {
-  // Arrange
-  const user = await createUser();
-  const order = await createOrder(user.id, [{ product: 'A', qty: 2 }]);
-
-  // Act
-  await processOrder(order.id);
-
-  // Assert
-  const updated = await getOrder(order.id);
-  expect(updated.status).toBe('processed');
-  expect(updated.processedAt).toBeDefined();
 });
 ```
+
+**Unclear test names** and **missing AAA structure** - see `references/violations.md`.
 
 ### 3. Test Design Issues
 
-**Slow Tests**
+**Slow Tests**: Real delays instead of mocked timers.
+
 ```typescript
-// SLOW: Real delays
-it('retries on failure', async () => {
-  api.mockRejectedValueOnce(new Error('fail'));
-  api.mockResolvedValue({ data: 'ok' });
+// VIOLATION: Waits real time
+const result = await fetchWithRetry();  // 1000ms delay
 
-  const result = await fetchWithRetry();  // Waits real 1000ms
-
-  expect(result).toBe('ok');
-}, 5000);
-
-// FAST: Mock timers
-it('retries on failure', async () => {
-  jest.useFakeTimers();
-  api.mockRejectedValueOnce(new Error('fail'));
-  api.mockResolvedValue({ data: 'ok' });
-
-  const promise = fetchWithRetry();
-  jest.advanceTimersByTime(1000);
-  const result = await promise;
-
-  expect(result).toBe('ok');
-});
+// CORRECT: Mock timers
+jest.useFakeTimers();
+const promise = fetchWithRetry();
+jest.advanceTimersByTime(1000);
 ```
 
-**Flaky Tests**
-```typescript
-// FLAKY: Depends on timing
-it('updates in real-time', async () => {
-  subscribe(callback);
-  emit('update', { value: 1 });
-
-  // Race condition: callback might not have fired yet
-  expect(callback).toHaveBeenCalled();
-});
-
-// STABLE: Explicit waiting
-it('updates in real-time', async () => {
-  const received = new Promise(resolve => {
-    subscribe(data => resolve(data));
-  });
-
-  emit('update', { value: 1 });
-
-  const data = await received;
-  expect(data.value).toBe(1);
-});
-```
-
-**Poor Assertions**
-```typescript
-// WEAK: Doesn't verify much
-it('returns users', async () => {
-  const users = await getUsers();
-  expect(users).toBeDefined();  // Could be empty array, wrong shape, etc.
-});
-
-// STRONG: Specific assertions
-it('returns array of users with required fields', async () => {
-  const users = await getUsers();
-
-  expect(users).toHaveLength(3);
-  expect(users[0]).toMatchObject({
-    id: expect.any(String),
-    email: expect.stringContaining('@'),
-    createdAt: expect.any(Date),
-  });
-});
-```
+**Flaky tests** and **poor assertions** - see `references/violations.md`.
 
 ### 4. Mocking Issues
 
-**Over-Mocking**
+**Over-Mocking**: Testing mocks instead of behavior.
+
 ```typescript
-// OVER-MOCKED: Tests nothing real
-it('creates user', async () => {
-  const mockValidator = { validate: jest.fn().mockReturnValue(true) };
-  const mockHasher = { hash: jest.fn().mockReturnValue('hashed') };
-  const mockRepo = { create: jest.fn().mockResolvedValue({ id: '1' }) };
-  const mockEvents = { emit: jest.fn() };
+// VIOLATION: Everything mocked, nothing tested
+const mockValidator = { validate: jest.fn().mockReturnValue(true) };
+const mockHasher = { hash: jest.fn().mockReturnValue('hashed') };
+// ... creates service with all mocks, verifies mock calls
 
-  const service = new UserService(mockValidator, mockHasher, mockRepo, mockEvents);
-  await service.create({ email: 'test@test.com', password: 'pass' });
-
-  // What did we actually test? Just that mocks were called.
-});
-
-// BETTER: Use real implementations where possible
-it('creates user with hashed password', async () => {
-  const repo = new InMemoryUserRepo();
-  const service = new UserService(
-    new RealValidator(),
-    new RealHasher(),
-    repo,
-    new FakeEvents()
-  );
-
-  await service.create({ email: 'test@test.com', password: 'password123' });
-
-  const saved = await repo.findByEmail('test@test.com');
-  expect(saved.password).not.toBe('password123');  // Actually hashed
-  expect(await bcrypt.compare('password123', saved.password)).toBe(true);
-});
+// CORRECT: Use real implementations where feasible
+const repo = new InMemoryUserRepo();
+const service = new UserService(new RealValidator(), new RealHasher(), repo);
+const saved = await repo.findByEmail('test@example.com');
+expect(await bcrypt.compare('password', saved.password)).toBe(true);
 ```
 
-**Mocking What You Don't Own**
-```typescript
-// PROBLEM: Mocking third-party library internals
-jest.mock('axios');
-axios.get.mockResolvedValue({ data: mockResponse });
+**Mocking third-party internals** - see `references/violations.md`.
 
-// BETTER: Wrap in your own interface
-interface HttpClient {
-  get<T>(url: string): Promise<T>;
-}
+---
 
-class AxiosHttpClient implements HttpClient { /* ... */ }
-class MockHttpClient implements HttpClient { /* ... */ }
+## Extended References
 
-// Test with MockHttpClient, production uses AxiosHttpClient
-```
+For comprehensive examples and detection patterns:
+
+| Reference | Contents |
+|-----------|----------|
+| `references/violations.md` | Full violation examples for all categories |
+| `references/patterns.md` | Correct test patterns and organization |
+| `references/detection.md` | Bash commands for automated detection |
 
 ---
 
 ## Severity Guidelines
 
-**CRITICAL** - Tests provide false confidence:
-- Tests pass but don't verify behavior
-- Tests mock everything, test nothing
-- Critical paths have no tests
-- Tests test implementation, will break on refactor
-
-**HIGH** - Significant test quality issues:
-- Missing error path coverage
-- Flaky tests that sometimes fail
-- Tests are extremely slow (>10s)
-- Test names don't describe behavior
-
-**MEDIUM** - Moderate test concerns:
-- Some edge cases missing
-- Could use better assertions
-- Test structure unclear
-- Minor coverage gaps
-
-**LOW** - Minor improvements:
-- Test organization could improve
-- Could add a few more cases
-- Naming could be clearer
+| Severity | Criteria |
+|----------|----------|
+| **CRITICAL** | Tests pass but don't verify behavior; critical paths untested; tests mock everything |
+| **HIGH** | Missing error path coverage; flaky tests; extremely slow (>10s); unclear names |
+| **MEDIUM** | Some edge cases missing; weak assertions; unclear structure |
+| **LOW** | Organization could improve; naming could be clearer |
 
 ---
 
-## Detection Patterns
+## Review Checklist
 
-Search for these patterns in code:
-
-```bash
-# Tests without assertions
-grep -rn "it\(.*=>" --include="*.test.ts" -A20 | grep -B20 "expect" | grep -L "expect"
-
-# Weak assertions
-grep -rn "toBeDefined\|toBeTruthy\|not.toBeNull" --include="*.test.ts"
-
-# Implementation testing (checking mock calls)
-grep -rn "toHaveBeenCalledWith\|toHaveBeenCalled" --include="*.test.ts" | wc -l
-
-# Missing error tests
-grep -rn "throw\|reject\|Error" --include="*.ts" | grep -v test | wc -l
-# Compare with:
-grep -rn "rejects.toThrow\|toThrow" --include="*.test.ts" | wc -l
-
-# Slow tests (long timeouts)
-grep -rn "}, [0-9][0-9][0-9][0-9][0-9])" --include="*.test.ts"
-```
-
----
-
-## Test Coverage Guidelines
-
-| Code Type | Required Coverage | Test Type |
-|-----------|-------------------|-----------|
-| Business logic | 90%+ | Unit tests |
-| API endpoints | 80%+ | Integration tests |
-| UI components | 70%+ | Component tests |
-| Utilities | 100% | Unit tests |
-| Error paths | 100% | Unit tests |
-
+- [ ] New code has corresponding tests
+- [ ] All branches covered (happy path + errors + edge cases)
+- [ ] Tests verify behavior, not implementation
+- [ ] Test names describe expected behavior
+- [ ] Tests follow Arrange-Act-Assert structure
+- [ ] No real delays (use mocked timers)
+- [ ] Assertions are specific and meaningful
+- [ ] Mocking limited to boundaries (not internals)
+- [ ] No flaky patterns (race conditions, timing dependencies)

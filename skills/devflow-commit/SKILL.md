@@ -1,6 +1,6 @@
 ---
 name: devflow-commit
-description: Commit best practices, atomic grouping, and message conventions. Auto-activate when staging files, creating commits, or generating commit messages. Ensures clean, safe, atomic git history.
+description: Atomic commit patterns. Use when user asks to "commit", "stage files", "create commit message", or runs git add/commit operations.
 user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---
@@ -124,3 +124,13 @@ Before every commit:
 | `devflow-github-patterns` | GitHub API, rate limits, PR comments, releases |
 | `devflow-commit` | Commit message format, atomic grouping |
 | `devflow-pull-request` | PR descriptions, size assessment, breaking changes |
+
+---
+
+## Extended References
+
+See `references/examples.md` for extended commit grouping examples including:
+- Multi-commit feature implementation flows
+- Bug fix and refactoring patterns
+- Breaking change documentation
+- PR creation workflow

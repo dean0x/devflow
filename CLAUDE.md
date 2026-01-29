@@ -241,47 +241,73 @@ Brief description of what the command does.
 Skills are **model-invoked** capabilities that auto-activate based on context. They enforce quality without requiring manual invocation.
 
 1. Create skill directory in `skills/skill-name/`
-2. Create `SKILL.md` with YAML frontmatter:
+2. Create `SKILL.md` with YAML frontmatter (~120-150 lines):
 
 ```markdown
 ---
 name: skill-name
-description: When and why to use this skill (critical for auto-activation)
+description: Brief description with trigger phrases (<180 chars for auto-activate skills)
+user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---
 
 # Skill Name
 
-## Purpose
-What this skill enforces and why
+## Iron Law
+
+> **[PRINCIPLE NAME]**
+>
+> [Non-negotiable core principle]
 
 ## When This Skill Activates
-Be specific about trigger conditions
 
-## Pattern Validation Process
-Detailed checks and enforcement logic
+- Trigger condition 1
+- Trigger condition 2
 
-## Violation Report Format
-How to report issues found
+## Pattern Categories
+
+### Category 1
+Brief description, 1-2 inline examples
+
+### Category 2
+Brief description, 1-2 inline examples
+
+---
+
+## Extended References
+
+For additional examples and detection patterns:
+- `references/violations.md` - Extended violation examples
+- `references/patterns.md` - Extended correct patterns
+
+---
 
 ## Success Criteria
-What passes validation
+
+- [ ] Checklist item 1
+- [ ] Checklist item 2
 ```
 
-3. Follow existing skill patterns:
+3. Create `references/` subdirectory with extended content:
+   - `violations.md` - Extended ❌ code violations
+   - `patterns.md` - Extended ✅ correct patterns
+   - `detection.md` - Grep/regex detection patterns
+
+4. Follow existing skill patterns:
    - **Focused enforcement** - One skill, one responsibility
    - **Clear activation triggers** - Specific context patterns
    - **Actionable reports** - File/line references, severity, fixes
    - **Read-only tools** - Most skills should not modify code
    - **Philosophy alignment** - Enforce project principles
+   - **Progressive disclosure** - Keep SKILL.md lean, extended examples in references/
 
-4. Test skill activation:
+5. Test skill activation:
    - Write code that should trigger the skill
    - Verify skill activates automatically
    - Check violation reports are clear
    - Ensure fixes are actionable
 
-5. Document in README.md for users
+6. Document in README.md for users
 
 ### Skill vs Command Decision
 
@@ -434,22 +460,62 @@ No gate may be skipped. If user says "whatever you think", state recommendation 
 - **Easy maintenance** - Update foundation skill, all agents inherit changes
 - **Clear dependencies** - Agent frontmatter shows what knowledge it uses
 
+### Skill File Structure (Progressive Disclosure)
+
+Each skill uses a **progressive disclosure** pattern to keep main files lean while providing extended references:
+
+```
+skill-name/
+├── SKILL.md              # Essential content (~120-150 lines)
+└── references/           # Extended material (loaded on demand)
+    ├── violations.md     # Extended ❌ code violations
+    ├── patterns.md       # Extended ✅ correct patterns
+    ├── detection.md      # Grep/regex patterns for finding issues
+    └── [topic].md        # Additional topic-specific references
+```
+
+**What Stays in SKILL.md** (Essential - always loaded):
+- Frontmatter (name, description, allowed-tools)
+- Iron Law (non-negotiable principle)
+- When This Activates (trigger conditions)
+- Core categories with brief descriptions
+- 1-2 representative examples per category
+- Severity guidelines table
+- Pointer to references/
+
+**What Goes in references/** (Deferred - loaded when needed):
+- Extended code violations beyond first 1-2 per category
+- Extended correct patterns beyond first 1-2 per category
+- Language-specific variations (Python/Go/Rust versions)
+- Detection grep/regex patterns
+- Full report templates
+- Checklists and severity tables
+- Edge cases and advanced scenarios
+
+**Target Metrics**:
+- SKILL.md: ~120-150 lines
+- Code examples in SKILL.md: 15-25% of content
+- Token cost per activation: ~5KB (down from ~15KB)
+
 ### Creating New Skills
 
 When creating skills, decide which tier:
 
 **Foundation Skill** (Tier 1) - If multiple agents need the same knowledge:
 - Create in `skills/devflow-{name}/SKILL.md`
+- Create `references/` subdirectory with extended examples
 - Document which agents should use it
 - Add `skills:` field to relevant agent frontmatters
 
 **Specialized Skill** (Tier 2) - If user-facing with context triggers:
 - Create in `skills/devflow-{name}/SKILL.md`
+- Create `references/` subdirectory with extended examples
 - Focus on clear trigger conditions in description
 - Test auto-activation in various contexts
 
 **Domain-Specific Skill** (Tier 3) - For language/framework patterns:
 - Create in `skills/devflow-{language|framework}/SKILL.md`
+- Create `references/` subdirectory with extended examples
 - Focus on idioms, patterns, and best practices for that domain
 - Referenced by Coder agent based on detected tech stack
 
