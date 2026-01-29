@@ -130,7 +130,7 @@ All persisting agents should load this skill to ensure consistent documentation.
 
 ## Extended References
 
-For detailed templates and extended examples:
+For detailed patterns and violation examples:
 
-- **[templates.md](./references/templates.md)** - Full document templates (status logs, debug sessions, index files)
-- **[examples.md](./references/examples.md)** - Extended naming examples, edge cases, full helper implementation
+- **[patterns.md](./references/patterns.md)** - Full templates, helper functions, naming examples, edge cases
+- **[violations.md](./references/violations.md)** - Common violations with detection patterns and fixes

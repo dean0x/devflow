@@ -158,8 +158,5 @@ Before implementing, verify:
 ## Extended References
 
 For full implementation examples:
-- `references/crud.md` - CRUD operation patterns
-- `references/api.md` - API endpoint patterns
-- `references/events.md` - Event handling patterns
-- `references/config.md` - Configuration patterns
-- `references/logging.md` - Structured logging patterns
+- `references/violations.md` - Extended violation examples (CRUD, API, Events, Config, Logging)
+- `references/patterns.md` - Extended correct patterns (CRUD, API, Events, Config, Logging)
