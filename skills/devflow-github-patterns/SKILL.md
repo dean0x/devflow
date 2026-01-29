@@ -136,7 +136,7 @@ gh release create "v${VERSION}" \
 
 ---
 
-## References
+## Extended References
 
 For extended patterns and examples, see:
 

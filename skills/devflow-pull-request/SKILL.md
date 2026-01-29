@@ -71,7 +71,11 @@ Every PR description MUST include these sections:
 
 ---
 
-> **Reference**: Full templates, detection patterns, and bash examples in `references/templates.md`
+## Extended References
+
+For detailed templates and examples:
+
+- `references/templates.md` - Full PR description template, key change detection, split recommendations, pre-flight scripts
 
 ---
 

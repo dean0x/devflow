@@ -128,7 +128,7 @@ function calculateDiscount(price: number, userLevel: number): number {
 
 ---
 
-## References
+## Extended References
 
 For extended examples and templates:
 - [Extended violation examples](references/violations.md) - Full code examples for each category

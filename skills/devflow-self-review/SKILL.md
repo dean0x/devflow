@@ -131,7 +131,7 @@ Status: READY / BLOCKED
 
 ---
 
-## References
+## Extended References
 
 For detailed checklists, examples, and red flags for each pillar:
 - See `references/pillars.md`

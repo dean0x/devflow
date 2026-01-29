@@ -93,7 +93,7 @@ npm view loadsh  # Check downloads, repo, maintainers
 
 ---
 
-## Reference Documentation
+## Extended References
 
 For extended examples and detection commands, see:
 - `references/violations.md` - Extended violation examples by category

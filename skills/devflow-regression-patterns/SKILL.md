@@ -109,7 +109,7 @@ git diff main...HEAD | grep "^\+.*TODO"
 
 ---
 
-## References
+## Extended References
 
 For extended examples and detection techniques:
 

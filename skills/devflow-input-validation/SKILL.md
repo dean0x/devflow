@@ -128,7 +128,7 @@ async function getUserByEmail(email: unknown): Promise<Result<User, Error>> {
 
 ---
 
-## References
+## Extended References
 
 For extended examples and detection patterns, see:
 - `references/violations.md` - Extended violation examples

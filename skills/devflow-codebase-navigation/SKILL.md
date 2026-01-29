@@ -140,7 +140,7 @@ ls src/utils/* src/lib/* 2>/dev/null | head -10
 
 ---
 
-## References
+## Extended References
 
 For extended commands and patterns, see:
 - `references/commands.md` - Full bash/grep command reference

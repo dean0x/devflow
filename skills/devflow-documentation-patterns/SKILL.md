@@ -89,7 +89,7 @@ for (let i = 0; i < MAX_RETRIES; i++) { /* ... */ }
 
 ---
 
-## References
+## Extended References
 
 For extended examples and detection commands:
 

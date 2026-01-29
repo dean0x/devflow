@@ -86,7 +86,7 @@ Create report with all three issue sections, summary counts, and merge recommend
 
 ---
 
-## References
+## Extended References
 
 For detailed implementation:
 

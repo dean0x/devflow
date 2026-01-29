@@ -105,7 +105,7 @@ function processPayment(amount: number) { }
 
 ---
 
-## References
+## Extended References
 
 For extended examples and detection commands, see:
 

@@ -111,7 +111,7 @@ if (canModerate(user)) { }
 
 ---
 
-## Reference Documentation
+## Extended References
 
 For extended examples and detection techniques:
 

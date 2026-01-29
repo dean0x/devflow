@@ -128,7 +128,7 @@ All persisting agents should load this skill to ensure consistent documentation.
 
 ---
 
-## References
+## Extended References
 
 For detailed templates and extended examples:
 

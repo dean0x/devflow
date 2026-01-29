@@ -106,7 +106,7 @@ expect(cart.getTotal()).toBe(10);
 
 ---
 
-## References
+## Extended References
 
 For extended examples and templates:
 - **violations.md** - Extended violation examples with root cause analysis

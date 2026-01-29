@@ -116,7 +116,7 @@ See `references/commands.md` for extended recovery and stash workflows.
 | `devflow-pull-request` | PR descriptions, size assessment |
 | `devflow-github-patterns` | GitHub API, rate limits, releases |
 
-## References
+## Extended References
 
 - `references/commands.md` - Extended command examples, recovery workflows, stash handling
 - `references/detection.md` - Sensitive file detection patterns and functions
