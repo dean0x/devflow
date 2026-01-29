@@ -49,23 +49,23 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
-| security | ✓ | devflow-security-patterns |
-| architecture | ✓ | devflow-architecture-patterns |
-| performance | ✓ | devflow-performance-patterns |
-| complexity | ✓ | devflow-complexity-patterns |
-| consistency | ✓ | devflow-consistency-patterns |
-| regression | ✓ | devflow-regression-patterns |
-| tests | ✓ | devflow-tests-patterns |
-| typescript | conditional | devflow-typescript |
-| database | conditional | devflow-database-patterns |
-| dependencies | conditional | devflow-dependencies-patterns |
-| documentation | conditional | devflow-documentation-patterns |
+| security | ✓ | security-patterns |
+| architecture | ✓ | architecture-patterns |
+| performance | ✓ | performance-patterns |
+| complexity | ✓ | complexity-patterns |
+| consistency | ✓ | consistency-patterns |
+| regression | ✓ | regression-patterns |
+| tests | ✓ | tests-patterns |
+| typescript | conditional | typescript |
+| database | conditional | database-patterns |
+| dependencies | conditional | dependencies-patterns |
+| documentation | conditional | documentation-patterns |
 
 Each Reviewer invocation (all in one message, **NOT background**):
 ```
 Task(subagent_type="Reviewer", run_in_background=false):
-"Review focusing on {focus}. Apply devflow-{focus}-patterns.
-Follow 6-step process from devflow-review-methodology.
+"Review focusing on {focus}. Apply {focus}-patterns.
+Follow 6-step process from review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 IMPORTANT: Write report to .docs/reviews/{branch-slug}/{focus}.md using Write tool"
 ```

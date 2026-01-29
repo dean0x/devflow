@@ -335,46 +335,46 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `devflow-core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, Reviewer |
-| `devflow-review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
-| `devflow-self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Scrutinizer |
-| `devflow-docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp |
-| `devflow-git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder, Git |
-| `devflow-github-patterns` | GitHub API patterns (rate limiting, PR comments, issue management, releases) | Git |
-| `devflow-implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
-| `devflow-codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
+| `core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, Reviewer |
+| `review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
+| `self-review` | 9-pillar self-review framework (Design, Functionality, Security, Complexity, Error Handling, Tests, Naming, Consistency, Documentation) | Scrutinizer |
+| `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp |
+| `git-safety` | Git operations, lock handling, commit conventions, sensitive file detection | Coder, Git |
+| `github-patterns` | GitHub API patterns (rate limiting, PR comments, issue management, releases) | Git |
+| `implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
+| `codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
 
 **Tier 1b: Pattern Skills** (domain expertise for Reviewer agent focus areas)
 
 | Skill | Purpose | Reviewer Focus |
 |-------|---------|----------------|
-| `devflow-security-patterns` | Injection, auth, crypto, OWASP vulnerabilities | `security` |
-| `devflow-architecture-patterns` | SOLID violations, coupling, layering, modularity | `architecture` |
-| `devflow-performance-patterns` | Algorithms, N+1, memory, I/O, caching | `performance` |
-| `devflow-complexity-patterns` | Cyclomatic complexity, readability, maintainability | `complexity` |
-| `devflow-consistency-patterns` | Pattern violations, simplification, truncation | `consistency` |
-| `devflow-tests-patterns` | Coverage, quality, brittle tests, mocking | `tests` |
-| `devflow-database-patterns` | Schema, queries, migrations, indexes | `database` |
-| `devflow-documentation-patterns` | Docs quality, alignment, code-comment drift | `documentation` |
-| `devflow-dependencies-patterns` | CVEs, versions, licenses, supply chain | `dependencies` |
-| `devflow-regression-patterns` | Lost functionality, broken behavior, migrations | `regression` |
+| `security-patterns` | Injection, auth, crypto, OWASP vulnerabilities | `security` |
+| `architecture-patterns` | SOLID violations, coupling, layering, modularity | `architecture` |
+| `performance-patterns` | Algorithms, N+1, memory, I/O, caching | `performance` |
+| `complexity-patterns` | Cyclomatic complexity, readability, maintainability | `complexity` |
+| `consistency-patterns` | Pattern violations, simplification, truncation | `consistency` |
+| `tests-patterns` | Coverage, quality, brittle tests, mocking | `tests` |
+| `database-patterns` | Schema, queries, migrations, indexes | `database` |
+| `documentation-patterns` | Docs quality, alignment, code-comment drift | `documentation` |
+| `dependencies-patterns` | CVEs, versions, licenses, supply chain | `dependencies` |
+| `regression-patterns` | Lost functionality, broken behavior, migrations | `regression` |
 
 **Tier 2: Specialized Skills** (user-facing, auto-activate based on context)
 
 | Skill | Purpose | Auto-Triggers When |
 |-------|---------|---------------------|
-| `devflow-test-design` | Test quality enforcement (setup complexity, mocking, behavior testing) | Tests written or modified |
-| `devflow-code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features implemented, code reviewed |
-| `devflow-commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
-| `devflow-pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
-| `devflow-input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
+| `test-design` | Test quality enforcement (setup complexity, mocking, behavior testing) | Tests written or modified |
+| `code-smell` | Anti-pattern detection (fake solutions, unlabeled workarounds, magic values) | Features implemented, code reviewed |
+| `commit` | Atomic commit patterns, message format, safety scanning | Staging files, creating commits |
+| `pull-request` | PR quality, descriptions, size assessment, breaking change detection | Creating PRs, generating descriptions |
+| `input-validation` | Boundary validation enforcement (parse-don't-validate, SQL injection prevention) | API endpoints created, external data handled |
 
 **Tier 3: Domain-Specific Skills** (language and framework patterns)
 
 | Skill | Purpose | Used When |
 |-------|---------|-----------|
-| `devflow-typescript` | Type safety, generics, utility types, type guards, idioms | TypeScript codebases |
-| `devflow-react` | Components, hooks, state management, performance optimization | React codebases |
+| `typescript` | Type safety, generics, utility types, type guards, idioms | TypeScript codebases |
+| `react` | Components, hooks, state management, performance optimization | React codebases |
 
 **How Agents Use Skills:**
 
@@ -385,7 +385,7 @@ Agents declare skills in their frontmatter to automatically load shared knowledg
 name: Reviewer
 description: Universal code review agent with parameterized focus
 model: inherit
-skills: devflow-review-methodology, devflow-security-patterns, devflow-architecture-patterns, ...
+skills: review-methodology, security-patterns, architecture-patterns, ...
 ---
 ```
 
@@ -399,41 +399,41 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 
 | Skill | Iron Law |
 |-------|----------|
-| `devflow-core-patterns` | NEVER THROW IN BUSINESS LOGIC |
-| `devflow-review-methodology` | NEVER BLOCK FOR PRE-EXISTING ISSUES |
-| `devflow-self-review` | FIX BEFORE RETURNING |
-| `devflow-git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
-| `devflow-github-patterns` | RESPECT RATE LIMITS OR FAIL GRACEFULLY |
-| `devflow-docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
-| `devflow-implementation-patterns` | FOLLOW EXISTING PATTERNS |
-| `devflow-codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
+| `core-patterns` | NEVER THROW IN BUSINESS LOGIC |
+| `review-methodology` | NEVER BLOCK FOR PRE-EXISTING ISSUES |
+| `self-review` | FIX BEFORE RETURNING |
+| `git-safety` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `github-patterns` | RESPECT RATE LIMITS OR FAIL GRACEFULLY |
+| `docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
+| `implementation-patterns` | FOLLOW EXISTING PATTERNS |
+| `codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
 
 **Pattern Skills (Reviewer focus areas):**
 
 | Skill | Iron Law |
 |-------|----------|
-| `devflow-security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
-| `devflow-architecture-patterns` | SEPARATION OF CONCERNS IS NON-NEGOTIABLE |
-| `devflow-performance-patterns` | MEASURE BEFORE OPTIMIZING |
-| `devflow-complexity-patterns` | IF YOU CAN'T UNDERSTAND IT IN 5 MINUTES, IT'S TOO COMPLEX |
-| `devflow-consistency-patterns` | MATCH EXISTING PATTERNS OR JUSTIFY DEVIATION |
-| `devflow-tests-patterns` | TESTS VALIDATE BEHAVIOR, NOT IMPLEMENTATION |
-| `devflow-database-patterns` | EVERY QUERY MUST HAVE AN EXECUTION PLAN |
-| `devflow-documentation-patterns` | DOCUMENTATION MUST MATCH REALITY |
-| `devflow-dependencies-patterns` | EVERY DEPENDENCY IS AN ATTACK SURFACE |
-| `devflow-regression-patterns` | WHAT WORKED BEFORE MUST WORK AFTER |
+| `security-patterns` | ASSUME ALL INPUT IS MALICIOUS |
+| `architecture-patterns` | SEPARATION OF CONCERNS IS NON-NEGOTIABLE |
+| `performance-patterns` | MEASURE BEFORE OPTIMIZING |
+| `complexity-patterns` | IF YOU CAN'T UNDERSTAND IT IN 5 MINUTES, IT'S TOO COMPLEX |
+| `consistency-patterns` | MATCH EXISTING PATTERNS OR JUSTIFY DEVIATION |
+| `tests-patterns` | TESTS VALIDATE BEHAVIOR, NOT IMPLEMENTATION |
+| `database-patterns` | EVERY QUERY MUST HAVE AN EXECUTION PLAN |
+| `documentation-patterns` | DOCUMENTATION MUST MATCH REALITY |
+| `dependencies-patterns` | EVERY DEPENDENCY IS AN ATTACK SURFACE |
+| `regression-patterns` | WHAT WORKED BEFORE MUST WORK AFTER |
 
 **Specialized & Domain Skills:**
 
 | Skill | Iron Law |
 |-------|----------|
-| `devflow-test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
-| `devflow-code-smell` | NO FAKE SOLUTIONS |
-| `devflow-commit` | ATOMIC COMMITS OR NO COMMITS |
-| `devflow-pull-request` | HONEST DESCRIPTIONS OR NO PR |
-| `devflow-input-validation` | ALL EXTERNAL DATA IS HOSTILE |
-| `devflow-react` | COMPOSITION OVER PROPS |
-| `devflow-typescript` | UNKNOWN OVER ANY |
+| `test-design` | COMPLEX TESTS INDICATE BAD DESIGN |
+| `code-smell` | NO FAKE SOLUTIONS |
+| `commit` | ATOMIC COMMITS OR NO COMMITS |
+| `pull-request` | HONEST DESCRIPTIONS OR NO PR |
+| `input-validation` | ALL EXTERNAL DATA IS HOSTILE |
+| `react` | COMPOSITION OVER PROPS |
+| `typescript` | UNKNOWN OVER ANY |
 
 **Iron Law Format** in SKILL.md files:
 ```markdown
@@ -502,19 +502,19 @@ skill-name/
 When creating skills, decide which tier:
 
 **Foundation Skill** (Tier 1) - If multiple agents need the same knowledge:
-- Create in `skills/devflow-{name}/SKILL.md`
+- Create in `skills/{name}/SKILL.md`
 - Create `references/` subdirectory with extended examples
 - Document which agents should use it
 - Add `skills:` field to relevant agent frontmatters
 
 **Specialized Skill** (Tier 2) - If user-facing with context triggers:
-- Create in `skills/devflow-{name}/SKILL.md`
+- Create in `skills/{name}/SKILL.md`
 - Create `references/` subdirectory with extended examples
 - Focus on clear trigger conditions in description
 - Test auto-activation in various contexts
 
 **Domain-Specific Skill** (Tier 3) - For language/framework patterns:
-- Create in `skills/devflow-{language|framework}/SKILL.md`
+- Create in `skills/{language|framework}/SKILL.md`
 - Create `references/` subdirectory with extended examples
 - Focus on idioms, patterns, and best practices for that domain
 - Referenced by Coder agent based on detected tech stack

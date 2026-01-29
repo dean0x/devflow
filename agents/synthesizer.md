@@ -2,7 +2,7 @@
 name: Synthesizer
 description: Combines outputs from multiple agents into actionable summaries (modes: exploration, planning, review)
 model: haiku
-skills: devflow-review-methodology
+skills: review-methodology
 ---
 
 # Synthesizer Agent
@@ -129,7 +129,7 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 
 **Process:**
 1. Read all review reports from `${REVIEW_BASE_DIR}/*-report.*.md`
-2. Categorize issues into 3 buckets (from devflow-review-methodology)
+2. Categorize issues into 3 buckets (from review-methodology)
 3. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
 4. Determine merge recommendation based on blocking issues
 

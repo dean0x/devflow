@@ -2,7 +2,7 @@
 name: Git
 description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
 model: haiku
-skills: devflow-github-patterns, devflow-git-safety, devflow-commit, devflow-pull-request
+skills: github-patterns, git-safety, commit, pull-request
 ---
 
 # Git Agent
@@ -37,9 +37,9 @@ Pre-flight checks and fixes for `/review`. Ensures branch is ready for code revi
 
 **Process:**
 1. Verify on feature branch (not main/master/develop) - error if not
-2. Check for uncommitted changes - if any, create atomic commit using `devflow-commit` patterns
+2. Check for uncommitted changes - if any, create atomic commit using `commit` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
-4. Check if PR exists - if not, create PR using `devflow-pull-request` patterns
+4. Check if PR exists - if not, create PR using `pull-request` patterns
 5. Get base branch from PR
 6. Derive branch-slug (replace `/` with `-`)
 
@@ -200,7 +200,7 @@ Update tech debt backlog with pre-existing issues from code review.
 
 **Process:**
 1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
-2. Check issue body size; archive if > 60000 chars (per devflow-github-patterns)
+2. Check issue body size; archive if > 60000 chars (per github-patterns)
 3. Extract pre-existing issues (Category 3) from review reports
 4. Deduplicate against existing items using semantic matching
 5. Remove items that have been fixed (verify in codebase)

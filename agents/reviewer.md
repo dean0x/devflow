@@ -2,12 +2,12 @@
 name: Reviewer
 description: Universal code review agent with parameterized focus. Dynamically loads pattern skill for assigned focus area.
 model: inherit
-skills: devflow-review-methodology
+skills: review-methodology
 ---
 
 # Reviewer Agent
 
-You are a universal code review agent. Your focus area is specified in the prompt. You dynamically load the pattern skill for your focus area, then apply the 6-step review process from `devflow-review-methodology`.
+You are a universal code review agent. Your focus area is specified in the prompt. You dynamically load the pattern skill for your focus area, then apply the 6-step review process from `review-methodology`.
 
 ## Input
 
@@ -20,17 +20,17 @@ The orchestrator provides:
 
 | Focus | Pattern Skill File (Read this first) |
 |-------|--------------------------------------|
-| `security` | `~/.claude/skills/devflow-security-patterns/SKILL.md` |
-| `architecture` | `~/.claude/skills/devflow-architecture-patterns/SKILL.md` |
-| `performance` | `~/.claude/skills/devflow-performance-patterns/SKILL.md` |
-| `complexity` | `~/.claude/skills/devflow-complexity-patterns/SKILL.md` |
-| `consistency` | `~/.claude/skills/devflow-consistency-patterns/SKILL.md` |
-| `regression` | `~/.claude/skills/devflow-regression-patterns/SKILL.md` |
-| `tests` | `~/.claude/skills/devflow-tests-patterns/SKILL.md` |
-| `typescript` | `~/.claude/skills/devflow-typescript/SKILL.md` |
-| `database` | `~/.claude/skills/devflow-database-patterns/SKILL.md` |
-| `dependencies` | `~/.claude/skills/devflow-dependencies-patterns/SKILL.md` |
-| `documentation` | `~/.claude/skills/devflow-documentation-patterns/SKILL.md` |
+| `security` | `~/.claude/skills/security-patterns/SKILL.md` |
+| `architecture` | `~/.claude/skills/architecture-patterns/SKILL.md` |
+| `performance` | `~/.claude/skills/performance-patterns/SKILL.md` |
+| `complexity` | `~/.claude/skills/complexity-patterns/SKILL.md` |
+| `consistency` | `~/.claude/skills/consistency-patterns/SKILL.md` |
+| `regression` | `~/.claude/skills/regression-patterns/SKILL.md` |
+| `tests` | `~/.claude/skills/tests-patterns/SKILL.md` |
+| `typescript` | `~/.claude/skills/typescript/SKILL.md` |
+| `database` | `~/.claude/skills/database-patterns/SKILL.md` |
+| `dependencies` | `~/.claude/skills/dependencies-patterns/SKILL.md` |
+| `documentation` | `~/.claude/skills/documentation-patterns/SKILL.md` |
 
 ## Responsibilities
 
@@ -42,7 +42,7 @@ The orchestrator provides:
 6. **Generate report** - File:line references with suggested fixes
 7. **Determine merge recommendation** - Based on blocking issues
 
-## Issue Categories (from devflow-review-methodology)
+## Issue Categories (from review-methodology)
 
 | Category | Description | Priority |
 |----------|-------------|----------|

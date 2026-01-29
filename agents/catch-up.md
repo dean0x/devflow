@@ -2,7 +2,7 @@
 name: CatchUp
 description: Review recent status updates to get up to speed on project state
 model: haiku
-skills: devflow-docs-framework
+skills: docs-framework
 ---
 
 # CatchUp Agent

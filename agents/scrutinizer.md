@@ -2,7 +2,7 @@
 name: Scrutinizer
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Coder completes.
 model: inherit
-skills: devflow-self-review, devflow-core-patterns
+skills: self-review, core-patterns
 ---
 
 # Scrutinizer Agent
