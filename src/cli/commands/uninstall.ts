@@ -153,6 +153,7 @@ export const uninstallCommand = new Command('uninstall')
           'review-methodology',
           'docs-framework',
           'git-safety',
+          'github-patterns',
           'implementation-patterns',
           'codebase-navigation',
           // Tier 2: Specialized Skills
