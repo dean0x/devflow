@@ -1,0 +1,13 @@
+{
+  "name": "devflow-implement",
+  "description": "Complete task implementation workflow - orchestrates exploration, planning, coding, validation, and PR creation",
+  "author": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "version": "0.9.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": ["implementation", "coding", "workflow", "agents", "agentic", "pr"]
+}

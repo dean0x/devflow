@@ -9,10 +9,7 @@
   },
   "files": [
     "dist/",
-    ".claude-plugin/",
-    "commands/",
-    "agents/",
-    "skills/",
+    "plugins/",
     "scripts/",
     "src/templates/",
     "src/claude/CLAUDE.md",

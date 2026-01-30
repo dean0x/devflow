@@ -1,37 +1,51 @@
 # DevFlow - Agentic Development Toolkit
 
-A collection of Claude Code commands designed to enhance developer workflows with structured processes for specification, implementation, and review.
+A collection of Claude Code plugins designed to enhance developer workflows with structured processes for specification, implementation, and review.
 
 ## Installation
 
-### Option 1: Native Plugin (Recommended)
-
-```bash
-/plugin install dean0x/devflow
-```
-
-Commands are immediately available as `/devflow:command-name` (or just `/command-name` if no conflicts).
-
-### Option 2: CLI Installer
+### Option 1: Install All Plugins
 
 ```bash
 npx devflow-kit init
 ```
 
-**Scopes:**
+### Option 2: Install Specific Plugins
+
+```bash
+# List available plugins
+npx devflow-kit list
+
+# Install specific plugin(s)
+npx devflow-kit init --plugin=implement
+npx devflow-kit init --plugin=implement,review
+```
+
+### Option 3: Native Plugin (When Available)
+
+```bash
+/plugin install dean0x/devflow-implement
+/plugin install dean0x/devflow-review
+```
+
+### Scopes
+
 - `--scope user` (default) - Install for all projects (`~/.claude/`)
 - `--scope local` - Install for current project only (`.claude/`)
 
-## Commands
+## Plugins
 
-| Command | Purpose |
-|---------|---------|
-| `/specify` | Define a feature through guided clarification before implementation |
-| `/implement` | Execute a task through the complete lifecycle (explore → plan → implement → validate) |
-| `/review` | Comprehensive code review with multiple focus areas |
-| `/resolve` | Process review issues - fix low-risk, defer high-risk to tech debt |
-| `/catch-up` | Get oriented at the start of a session |
-| `/devlog` | Document session state before ending |
+| Plugin | Command | Description |
+|--------|---------|-------------|
+| `devflow-specify` | `/specify` | Interactive feature specification with clarification gates |
+| `devflow-implement` | `/implement` | Complete task lifecycle (explore → plan → implement → validate) |
+| `devflow-review` | `/review` | Comprehensive code review with multiple focus areas |
+| `devflow-resolve` | `/resolve` | Process review issues - fix or defer to tech debt |
+| `devflow-catch-up` | `/catch-up` | Context restoration from status logs |
+| `devflow-devlog` | `/devlog` | Development session logging |
+| `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
+
+## Commands
 
 ### /specify
 
@@ -98,6 +112,20 @@ Documents session state before ending:
 - Notes current progress
 - Creates searchable history in `.docs/status/`
 
+## Auto-Activating Skills
+
+The `devflow-core-skills` plugin provides quality enforcement skills that activate automatically:
+
+| Skill | Triggers When |
+|-------|---------------|
+| `commit` | Staging files, creating commits |
+| `pull-request` | Creating PRs |
+| `test-design` | Writing or modifying tests |
+| `code-smell` | Implementing features |
+| `input-validation` | Creating API endpoints |
+| `typescript` | Working in TypeScript codebases |
+| `react` | Working with React components |
+
 ## Documentation Structure
 
 DevFlow creates project documentation in `.docs/`:
@@ -136,16 +164,31 @@ DevFlow creates project documentation in `.docs/`:
 /devlog      # Document decisions and state for next session
 ```
 
-## CLI Options
+## CLI Reference
 
-| Command | Options |
-|---------|---------|
-| `npx devflow-kit init` | `--scope <user\|local>`, `--override-settings`, `--verbose`, `--skip-docs` |
-| `npx devflow-kit uninstall` | `--scope <user\|local>`, `--keep-docs` |
+| Command | Description |
+|---------|-------------|
+| `npx devflow-kit init` | Install all plugins |
+| `npx devflow-kit init --plugin=<names>` | Install specific plugin(s) |
+| `npx devflow-kit list` | List available plugins |
+| `npx devflow-kit uninstall` | Remove DevFlow |
 
-### Settings Override
+### Init Options
 
-DevFlow includes optimized settings (security deny list, token optimization). Use `--override-settings` to replace existing `settings.json`.
+| Option | Description |
+|--------|-------------|
+| `--plugin <names>` | Comma-separated plugin names (e.g., `implement,review`) |
+| `--scope <user\|local>` | Installation scope (default: user) |
+| `--override-settings` | Replace existing settings.json |
+| `--verbose` | Show detailed output |
+| `--skip-docs` | Skip creating .docs/ structure |
+
+### Uninstall Options
+
+| Option | Description |
+|--------|-------------|
+| `--scope <user\|local>` | Uninstall scope (default: user) |
+| `--keep-docs` | Preserve .docs/ directory |
 
 ## Building from Source
 

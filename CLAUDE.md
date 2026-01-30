@@ -13,12 +13,19 @@ When working on DevFlow code, understand that this toolkit is designed to enhanc
 
 ## Architecture Overview
 
-DevFlow consists of four main components:
+DevFlow is organized as a plugin marketplace with 7 self-contained plugins:
 
-1. **CLI Tool** (`src/cli/`) - TypeScript-based installer and manager
-2. **Claude Code Commands** (`commands/`) - Markdown-based slash commands (user-invoked)
-3. **Skills** (`skills/`) - Auto-activate quality enforcement (model-invoked)
-4. **Sub-Agents** (`agents/`) - Specialized AI assistants for focused tasks
+1. **CLI Tool** (`src/cli/`) - TypeScript-based installer with plugin selection
+2. **Plugins** (`plugins/`) - Self-contained packages with commands, agents, and skills
+   - `devflow-specify` - Feature specification workflow
+   - `devflow-implement` - Complete task implementation lifecycle
+   - `devflow-review` - Comprehensive code review
+   - `devflow-resolve` - Review issue resolution
+   - `devflow-catch-up` - Context restoration
+   - `devflow-devlog` - Session logging
+   - `devflow-core-skills` - Auto-activating quality enforcement
+
+Each plugin follows the official Claude plugins format with `.claude-plugin/plugin.json`, `commands/`, `agents/`, and `skills/` directories.
 
 ## Documentation Framework
 
@@ -146,14 +153,16 @@ When creating or modifying persisting agents:
 ### Development Loop
 
 ```bash
-# 1. Modify command or agent in devflow repo
-vim commands/review.md
+# 1. Modify command or agent in plugin directory
+vim plugins/devflow-review/commands/review.md
 
 # 2. Rebuild if CLI changes
 npm run build
 
 # 3. Reinstall to global context for testing
 node dist/cli.js init
+# Or install just the plugin you're working on:
+node dist/cli.js init --plugin=review
 
 # 4. Test immediately
 /review
@@ -197,8 +206,9 @@ Status and review commands create historical records:
 
 ### Command Structure
 
-1. Create command in `commands/new-command.md`
-2. Follow this template:
+1. Decide which plugin the command belongs to (or create a new plugin)
+2. Create command in `plugins/devflow-{plugin}/commands/new-command.md`
+3. Follow this template:
 
 ```markdown
 # Command: /new-command
@@ -216,23 +226,26 @@ Brief description of what the command does.
 [Description of expected output]
 ```
 
-3. Test locally before committing
-4. Update README.md with user-facing documentation
-5. Add to init.ts command list if needed
+4. Test locally before committing
+5. Update plugin README.md with user-facing documentation
+6. Update DEVFLOW_PLUGINS in `src/cli/commands/init.ts` if creating a new plugin
 
 ## Adding New Sub-Agents
 
 ### Sub-Agent Structure
 
-1. Create agent in `agents/new-agent.md`
-2. Follow existing agent patterns:
+1. Decide which plugin the agent belongs to
+2. Create agent in `plugins/devflow-{plugin}/agents/new-agent.md`
+3. Follow existing agent patterns:
    - Clear specialty definition
    - Restricted tool access
    - Focused analysis scope
    - Specific output format
 
-3. Test with explicit invocation
-4. Document in README.md for users
+4. Test with explicit invocation
+5. Document in plugin README.md
+
+**Note:** Agents are duplicated across plugins for self-containment. If an agent is shared between plugins, copy it to each plugin that needs it.
 
 ## Adding New Skills
 
@@ -240,8 +253,9 @@ Brief description of what the command does.
 
 Skills are **model-invoked** capabilities that auto-activate based on context. They enforce quality without requiring manual invocation.
 
-1. Create skill directory in `skills/skill-name/`
-2. Create `SKILL.md` with YAML frontmatter (~120-150 lines):
+1. Decide which plugin the skill belongs to
+2. Create skill directory in `plugins/devflow-{plugin}/skills/skill-name/`
+3. Create `SKILL.md` with YAML frontmatter (~120-150 lines):
 
 ```markdown
 ---
@@ -804,26 +818,56 @@ npx devflow-kit@latest init
 ### Source Structure
 ```
 devflow/
-├── agents/                   # Sub-agent definitions
-├── commands/                 # Slash command definitions
-├── skills/                   # Skill source (installed flat to ~/.claude/skills/)
-├── scripts/                  # Supporting scripts
+├── plugins/                          # Plugin marketplace
+│   ├── devflow-specify/              # Feature specification plugin
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json           # Plugin manifest
+│   │   ├── commands/
+│   │   │   └── specify.md
+│   │   ├── agents/
+│   │   │   ├── skimmer.md
+│   │   │   └── synthesizer.md
+│   │   └── README.md
+│   ├── devflow-implement/            # Implementation plugin
+│   ├── devflow-review/               # Review plugin
+│   ├── devflow-resolve/              # Resolution plugin
+│   ├── devflow-catch-up/             # Context restoration plugin
+│   ├── devflow-devlog/               # Logging plugin
+│   ├── devflow-core-skills/          # Auto-activate skills plugin
+│   └── marketplace.json              # Plugin registry
+├── scripts/                          # Supporting scripts
 └── src/
-    └── cli/                  # CLI implementation
-        ├── commands/           # CLI command implementations
-        │   ├── init.ts          # Installation command
-        │   └── uninstall.ts     # Uninstallation command
-        └── cli.ts              # CLI entry point
+    └── cli/                          # CLI implementation
+        ├── commands/
+        │   ├── init.ts               # Plugin installation
+        │   ├── list.ts               # List available plugins
+        │   └── uninstall.ts          # Plugin removal
+        └── cli.ts                    # CLI entry point
+```
+
+### Plugin Structure
+Each plugin follows the official Claude plugins format:
+```
+devflow-{name}/
+├── .claude-plugin/
+│   └── plugin.json           # Plugin manifest (name, version, description)
+├── commands/                 # Slash commands (if any)
+├── agents/                   # Sub-agents (if any)
+├── skills/                   # Skills (if any)
+└── README.md                 # Plugin documentation
 ```
 
 ### Installation Paths
 - Commands: `~/.claude/commands/devflow/`
 - Agents: `~/.claude/agents/devflow/`
-- Skills: `~/.claude/skills/` (flat structure - no devflow/ subdirectory)
+- Skills: `~/.claude/skills/` (flat structure for auto-discovery)
 - Scripts: `~/.devflow/scripts/`
 - Settings: `~/.claude/settings.json`
 
 **Note:** Skills are installed flat (directly under `skills/`) for Claude Code auto-discovery. Commands and agents use the `devflow/` subdirectory for namespacing.
+
+### Plugin Duplication
+Plugins are self-contained. Shared components (agents, skills) are duplicated across plugins that need them. This trade-off prioritizes user flexibility over maintenance overhead.
 
 ### Settings Override
 
@@ -838,7 +882,9 @@ If settings.json exists, prompts for confirmation before overwriting.
 **What's included in DevFlow settings (`src/templates/settings.json`):**
 - `statusLine` - Smart statusline with context percentage
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
-- `permissions.deny` - Security deny list (126 blocked operations)
+- `env.ENABLE_LSP_TOOL` - Language Server Protocol support for code intelligence
+- `extraKnownMarketplaces` - DevFlow plugin marketplace (`dean0x/devflow`)
+- `permissions.deny` - Security deny list (126 blocked operations) + sensitive file patterns
 
 **Security Deny List Categories:**
 | Category | Examples |

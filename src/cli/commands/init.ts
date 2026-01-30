@@ -34,62 +34,74 @@ interface InitOptions {
   scope?: string;
   verbose?: boolean;
   overrideSettings?: boolean;
+  plugin?: string;
+  list?: boolean;
 }
 
 /**
- * Command definition with name and user-friendly description
+ * Plugin definition with metadata
  */
-interface CommandDefinition {
+interface PluginDefinition {
   name: string;
   description: string;
+  commands: string[];
+  agents: string[];
+  skills: string[];
 }
 
 /**
- * DevFlow commands with user-friendly descriptions.
+ * Available DevFlow plugins
  */
-const DEVFLOW_COMMANDS: CommandDefinition[] = [
-  { name: '/specify', description: 'Specify a feature interactively' },
-  { name: '/implement', description: 'Execute single task lifecycle' },
-  { name: '/review', description: 'Comprehensive code review' },
-  { name: '/resolve', description: 'Process and fix review issues' },
-  { name: '/catch-up', description: 'Get up to speed on project state' },
-  { name: '/devlog', description: 'Document session progress' },
-];
-
-/**
- * DevFlow skills with descriptions.
- * Displayed only in verbose mode to show auto-activating capabilities.
- */
-const DEVFLOW_SKILLS: CommandDefinition[] = [
-  // Tier 1: Foundation Skills (shared by agents)
-  { name: 'core-patterns', description: 'Result types, DI, immutability' },
-  { name: 'review-methodology', description: '6-step review process' },
-  { name: 'docs-framework', description: 'Documentation conventions' },
-  { name: 'git-safety', description: 'Git operations & safety' },
-  { name: 'github-patterns', description: 'GitHub API, rate limits, issues' },
-  { name: 'implementation-patterns', description: 'CRUD, API, events, config' },
-  { name: 'codebase-navigation', description: 'Exploration & pattern discovery' },
-  // Tier 2: Specialized Skills (user-facing, auto-activate)
-  { name: 'test-design', description: 'Test quality enforcement' },
-  { name: 'code-smell', description: 'Anti-pattern detection' },
-  { name: 'commit', description: 'Atomic commits & message format' },
-  { name: 'pull-request', description: 'PR quality & descriptions' },
-  { name: 'input-validation', description: 'Boundary validation' },
-  { name: 'self-review', description: '9-pillar self-review framework' },
-  // Tier 3: Domain-Specific Skills
-  { name: 'typescript', description: 'TypeScript patterns & idioms' },
-  { name: 'react', description: 'React components & hooks' },
-  // Review Pattern Skills (used by Reviewer agent)
-  { name: 'architecture-patterns', description: 'Architecture & design patterns' },
-  { name: 'complexity-patterns', description: 'Complexity & maintainability' },
-  { name: 'consistency-patterns', description: 'Code consistency & style' },
-  { name: 'database-patterns', description: 'Database design & queries' },
-  { name: 'dependencies-patterns', description: 'Dependency management' },
-  { name: 'documentation-patterns', description: 'Documentation quality' },
-  { name: 'performance-patterns', description: 'Performance optimization' },
-  { name: 'regression-patterns', description: 'Regression detection' },
-  { name: 'security-patterns', description: 'Security vulnerabilities' },
-  { name: 'tests-patterns', description: 'Test quality & coverage' },
+const DEVFLOW_PLUGINS: PluginDefinition[] = [
+  {
+    name: 'devflow-specify',
+    description: 'Interactive feature specification',
+    commands: ['/specify'],
+    agents: ['skimmer', 'synthesizer'],
+    skills: [],
+  },
+  {
+    name: 'devflow-implement',
+    description: 'Complete task implementation workflow',
+    commands: ['/implement'],
+    agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
+    skills: ['core-patterns', 'git-safety', 'commit', 'pull-request', 'implementation-patterns', 'codebase-navigation', 'test-design', 'code-smell', 'input-validation', 'self-review', 'typescript', 'react'],
+  },
+  {
+    name: 'devflow-review',
+    description: 'Comprehensive code review',
+    commands: ['/review'],
+    agents: ['git', 'reviewer', 'synthesizer'],
+    skills: ['review-methodology', 'security-patterns', 'architecture-patterns', 'performance-patterns', 'complexity-patterns', 'consistency-patterns', 'regression-patterns', 'tests-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns'],
+  },
+  {
+    name: 'devflow-resolve',
+    description: 'Process and fix review issues',
+    commands: ['/resolve'],
+    agents: ['git', 'resolver', 'simplifier'],
+    skills: ['core-patterns', 'git-safety', 'commit', 'implementation-patterns', 'security-patterns'],
+  },
+  {
+    name: 'devflow-catch-up',
+    description: 'Context restoration from status logs',
+    commands: ['/catch-up'],
+    agents: ['catch-up'],
+    skills: ['docs-framework'],
+  },
+  {
+    name: 'devflow-devlog',
+    description: 'Development session logging',
+    commands: ['/devlog'],
+    agents: ['devlog'],
+    skills: ['docs-framework'],
+  },
+  {
+    name: 'devflow-core-skills',
+    description: 'Auto-activating quality enforcement',
+    commands: [],
+    agents: [],
+    skills: ['commit', 'pull-request', 'test-design', 'code-smell', 'input-validation', 'typescript', 'react'],
+  },
 ];
 
 export const initCommand = new Command('init')
@@ -98,6 +110,8 @@ export const initCommand = new Command('init')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
   .option('--override-settings', 'Override existing settings.json with DevFlow configuration')
+  .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,review)')
+  .option('--list', 'List available plugins')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -113,6 +127,40 @@ export const initCommand = new Command('init')
 
     // Start the CLI flow
     p.intro(color.bgCyan(color.black(` DevFlow v${version} `)));
+
+    // Handle --list option
+    if (options.list) {
+      const maxNameLen = Math.max(...DEVFLOW_PLUGINS.map(p => p.name.length));
+      const pluginList = DEVFLOW_PLUGINS
+        .map(plugin => {
+          const cmds = plugin.commands.length > 0 ? plugin.commands.join(', ') : '(skills only)';
+          return `${color.cyan(plugin.name.padEnd(maxNameLen + 2))}${color.dim(plugin.description)}\n${' '.repeat(maxNameLen + 2)}${color.yellow(cmds)}`;
+        })
+        .join('\n\n');
+
+      p.note(pluginList, 'Available plugins');
+      p.outro(color.dim('Install with: npx devflow-kit init --plugin=<name>'));
+      return;
+    }
+
+    // Parse plugin selection
+    let selectedPlugins: string[] = [];
+    if (options.plugin) {
+      selectedPlugins = options.plugin.split(',').map(p => {
+        const trimmed = p.trim();
+        // Allow shorthand (e.g., "implement" -> "devflow-implement")
+        return trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
+      });
+
+      // Validate plugin names
+      const validNames = DEVFLOW_PLUGINS.map(p => p.name);
+      const invalidPlugins = selectedPlugins.filter(p => !validNames.includes(p));
+      if (invalidPlugins.length > 0) {
+        p.log.error(`Unknown plugin(s): ${invalidPlugins.join(', ')}`);
+        p.log.info(`Valid plugins: ${validNames.join(', ')}`);
+        process.exit(1);
+      }
+    }
 
     // Determine installation scope
     let scope: 'user' | 'local' = 'user';
@@ -188,56 +236,115 @@ export const initCommand = new Command('init')
 
     // Get the root directory of the devflow package
     const rootDir = path.resolve(__dirname, '../..');
+    const pluginsDir = path.join(rootDir, 'plugins');
+
+    // Determine which plugins to install
+    const pluginsToInstall = selectedPlugins.length > 0
+      ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
+      : DEVFLOW_PLUGINS;
 
     try {
-      // DevFlow directories to copy
-      const devflowDirectories = [
-        { target: path.join(claudeDir, 'commands', 'devflow'), source: path.join(rootDir, 'commands'), name: 'commands' },
-        { target: path.join(claudeDir, 'agents', 'devflow'), source: path.join(rootDir, 'agents'), name: 'agents' },
-        { target: path.join(claudeDir, 'skills'), source: path.join(rootDir, 'skills'), name: 'skills' },
-        { target: path.join(devflowDir, 'scripts'), source: path.join(rootDir, 'scripts'), name: 'scripts' }
-      ];
-
-      // Clean old DevFlow files before installing
-      for (const dir of devflowDirectories) {
-        if (dir.name === 'skills') {
-          // Remove old devflow/ subdirectory if it exists
-          const oldSkillsDir = path.join(claudeDir, 'skills', 'devflow');
+      // Clean old DevFlow files before installing (only for full install)
+      if (selectedPlugins.length === 0) {
+        // Remove old monolithic structure if present
+        const oldDirs = [
+          path.join(claudeDir, 'commands', 'devflow'),
+          path.join(claudeDir, 'agents', 'devflow'),
+        ];
+        for (const dir of oldDirs) {
           try {
-            await fs.rm(oldSkillsDir, { recursive: true, force: true });
+            await fs.rm(dir, { recursive: true, force: true });
           } catch { /* ignore */ }
+        }
 
-          // Remove individual skill directories
+        // Clean old skill directories that will be replaced
+        const allSkills = new Set<string>();
+        for (const plugin of DEVFLOW_PLUGINS) {
+          for (const skill of plugin.skills) {
+            allSkills.add(skill);
+          }
+        }
+        for (const skill of allSkills) {
           try {
-            const skillEntries = await fs.readdir(dir.source, { withFileTypes: true });
-            for (const entry of skillEntries) {
-              if (entry.isDirectory()) {
-                const skillTarget = path.join(dir.target, entry.name);
-                try {
-                  await fs.rm(skillTarget, { recursive: true, force: true });
-                } catch { /* ignore */ }
-              }
-            }
-          } catch { /* ignore */ }
-        } else {
-          try {
-            await fs.rm(dir.target, { recursive: true, force: true });
+            await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
           } catch { /* ignore */ }
         }
       }
 
-      // Install all DevFlow components
-      for (const dir of devflowDirectories) {
-        await fs.mkdir(dir.target, { recursive: true });
-        await copyDirectory(dir.source, dir.target);
+      // Install each selected plugin
+      const installedCommands: string[] = [];
+      const installedSkills = new Set<string>();
+
+      for (const plugin of pluginsToInstall) {
+        const pluginSourceDir = path.join(pluginsDir, plugin.name);
+
+        // Install commands
+        const commandsSource = path.join(pluginSourceDir, 'commands');
+        const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+        try {
+          const files = await fs.readdir(commandsSource);
+          if (files.length > 0) {
+            await fs.mkdir(commandsTarget, { recursive: true });
+            for (const file of files) {
+              await fs.copyFile(
+                path.join(commandsSource, file),
+                path.join(commandsTarget, file)
+              );
+            }
+            installedCommands.push(...plugin.commands);
+          }
+        } catch { /* no commands directory */ }
+
+        // Install agents
+        const agentsSource = path.join(pluginSourceDir, 'agents');
+        const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+        try {
+          const files = await fs.readdir(agentsSource);
+          if (files.length > 0) {
+            await fs.mkdir(agentsTarget, { recursive: true });
+            for (const file of files) {
+              await fs.copyFile(
+                path.join(agentsSource, file),
+                path.join(agentsTarget, file)
+              );
+            }
+          }
+        } catch { /* no agents directory */ }
+
+        // Install skills (flat structure for auto-discovery)
+        const skillsSource = path.join(pluginSourceDir, 'skills');
+        try {
+          const skillDirs = await fs.readdir(skillsSource, { withFileTypes: true });
+          for (const skillDir of skillDirs) {
+            if (skillDir.isDirectory()) {
+              const skillTarget = path.join(claudeDir, 'skills', skillDir.name);
+              await copyDirectory(
+                path.join(skillsSource, skillDir.name),
+                skillTarget
+              );
+              installedSkills.add(skillDir.name);
+            }
+          }
+        } catch { /* no skills directory */ }
       }
 
-      // Make scripts executable
-      const scriptsDir = devflowDirectories.find(d => d.name === 'scripts')!.target;
-      const scripts = await fs.readdir(scriptsDir);
-      for (const script of scripts) {
-        await fs.chmod(path.join(scriptsDir, script), 0o755);
-      }
+      // Install scripts (always from root scripts/ directory)
+      const scriptsSource = path.join(rootDir, 'scripts');
+      const scriptsTarget = path.join(devflowDir, 'scripts');
+      try {
+        await fs.mkdir(scriptsTarget, { recursive: true });
+        await copyDirectory(scriptsSource, scriptsTarget);
+
+        // Make scripts executable
+        const scripts = await fs.readdir(scriptsTarget);
+        for (const script of scripts) {
+          const scriptPath = path.join(scriptsTarget, script);
+          const stat = await fs.stat(scriptPath);
+          if (stat.isFile()) {
+            await fs.chmod(scriptPath, 0o755);
+          }
+        }
+      } catch { /* scripts may not exist */ }
 
       s.stop('Components installed');
     } catch (error) {
@@ -386,21 +493,26 @@ export const initCommand = new Command('init')
       } catch { /* may already exist */ }
     }
 
-    // Show available commands
-    const maxLen = Math.max(...DEVFLOW_COMMANDS.map(c => c.name.length));
-    const commandsList = DEVFLOW_COMMANDS
-      .map(cmd => `${color.cyan(cmd.name.padEnd(maxLen + 2))}${color.dim(cmd.description)}`)
-      .join('\n');
+    // Show installed plugins and commands
+    const pluginsToShow = selectedPlugins.length > 0
+      ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
+      : DEVFLOW_PLUGINS;
 
-    p.note(commandsList, 'Available commands');
+    const installedCommands = pluginsToShow.flatMap(p => p.commands).filter(c => c.length > 0);
+    if (installedCommands.length > 0) {
+      const commandsNote = installedCommands
+        .map(cmd => color.cyan(cmd))
+        .join('  ');
+      p.note(commandsNote, 'Available commands');
+    }
 
-    // Verbose mode: show skills
+    // Verbose mode: show details
     if (verbose) {
-      const skillsList = DEVFLOW_SKILLS
-        .map(skill => `${color.yellow(skill.name.padEnd(28))}${color.dim(skill.description)}`)
+      const pluginsList = pluginsToShow
+        .map(plugin => `${color.yellow(plugin.name.padEnd(24))}${color.dim(plugin.description)}`)
         .join('\n');
 
-      p.note(skillsList, 'Installed skills (auto-activate)');
+      p.note(pluginsList, 'Installed plugins');
 
       p.log.info(`Scope: ${scope}`);
       p.log.info(`Claude dir: ${claudeDir}`);
