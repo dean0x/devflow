@@ -2,7 +2,7 @@
 name: Shepherd
 description: Validates implementation aligns with original request and plan. Catches missed requirements, scope creep, and intent drift. Reports misalignments for Coder to fix.
 model: inherit
-skills: devflow-core-patterns
+skills: core-patterns
 ---
 
 # Shepherd Agent

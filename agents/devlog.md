@@ -2,7 +2,7 @@
 name: Devlog
 description: Analyze current project state including git history, file changes, TODOs, and documentation for status reporting
 model: haiku
-skills: devflow-docs-framework
+skills: docs-framework
 ---
 
 # Devlog Agent

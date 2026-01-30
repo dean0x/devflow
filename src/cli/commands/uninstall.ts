@@ -149,23 +149,49 @@ export const uninstallCommand = new Command('uninstall')
         const skillsDir = path.join(claudeDir, 'skills');
         const devflowSkills = [
           // Tier 1: Foundation Skills
+          'core-patterns',
+          'review-methodology',
+          'docs-framework',
+          'git-safety',
+          'implementation-patterns',
+          'codebase-navigation',
+          // Tier 2: Specialized Skills
+          'test-design',
+          'code-smell',
+          'commit',
+          'pull-request',
+          'input-validation',
+          'self-review',
+          // Tier 3: Domain-Specific Skills
+          'typescript',
+          'react',
+          // Review Pattern Skills (used by Reviewer agent)
+          'architecture-patterns',
+          'complexity-patterns',
+          'consistency-patterns',
+          'database-patterns',
+          'dependencies-patterns',
+          'documentation-patterns',
+          'performance-patterns',
+          'regression-patterns',
+          'security-patterns',
+          'tests-patterns',
+          // Deprecated (for cleanup of old installs)
           'devflow-core-patterns',
           'devflow-review-methodology',
           'devflow-docs-framework',
           'devflow-git-safety',
+          'devflow-github-patterns',
           'devflow-implementation-patterns',
           'devflow-codebase-navigation',
-          // Tier 2: Specialized Skills
           'devflow-test-design',
           'devflow-code-smell',
           'devflow-commit',
           'devflow-pull-request',
           'devflow-input-validation',
           'devflow-self-review',
-          // Tier 3: Domain-Specific Skills
           'devflow-typescript',
           'devflow-react',
-          // Review Pattern Skills (used by Reviewer agent)
           'devflow-architecture-patterns',
           'devflow-complexity-patterns',
           'devflow-consistency-patterns',
@@ -176,7 +202,6 @@ export const uninstallCommand = new Command('uninstall')
           'devflow-regression-patterns',
           'devflow-security-patterns',
           'devflow-tests-patterns',
-          // Deprecated (for cleanup of old installs)
           'devflow-pattern-check',
           'devflow-error-handling',
           'devflow-debug'
