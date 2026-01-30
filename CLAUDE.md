@@ -818,7 +818,9 @@ npx devflow-kit@latest init
 ### Source Structure
 ```
 devflow/
-├── plugins/                          # Plugin marketplace
+├── .claude-plugin/                   # Marketplace registry (repo root)
+│   └── marketplace.json              # Plugin registry for dean0x/devflow
+├── plugins/                          # Plugin collection
 │   ├── devflow-specify/              # Feature specification plugin
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json           # Plugin manifest
@@ -833,8 +835,7 @@ devflow/
 │   ├── devflow-resolve/              # Resolution plugin
 │   ├── devflow-catch-up/             # Context restoration plugin
 │   ├── devflow-devlog/               # Logging plugin
-│   ├── devflow-core-skills/          # Auto-activate skills plugin
-│   └── marketplace.json              # Plugin registry
+│   └── devflow-core-skills/          # Auto-activate skills plugin
 ├── scripts/                          # Supporting scripts
 └── src/
     └── cli/                          # CLI implementation
