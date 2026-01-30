@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
@@ -103,6 +104,51 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['commit', 'pull-request', 'test-design', 'code-smell', 'input-validation', 'typescript', 'react'],
   },
 ];
+
+/**
+ * Check if Claude CLI is available in the system PATH
+ */
+function isClaudeCliAvailable(): boolean {
+  try {
+    execSync('claude --version', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Add DevFlow marketplace to Claude CLI
+ * @returns true if successful, false otherwise
+ */
+function addMarketplaceViaCli(): boolean {
+  try {
+    // Marketplace add is idempotent - safe to call multiple times
+    execSync('claude plugin marketplace add dean0x/devflow', { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Install a plugin via Claude CLI
+ * @param pluginName - Name of the plugin to install (e.g., 'devflow-implement')
+ * @param scope - Installation scope: 'user' or 'local'
+ * @returns true if successful, false otherwise
+ */
+function installPluginViaCli(pluginName: string, scope: 'user' | 'local'): boolean {
+  try {
+    // Claude CLI uses 'project' for local scope
+    const cliScope = scope === 'local' ? 'project' : 'user';
+    execSync(`claude plugin install ${pluginName}@dean0x-devflow --scope ${cliScope}`, {
+      stdio: 'pipe',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export const initCommand = new Command('init')
   .description('Initialize DevFlow for Claude Code')
@@ -243,114 +289,148 @@ export const initCommand = new Command('init')
       ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
       : DEVFLOW_PLUGINS;
 
-    try {
-      // Clean old DevFlow files before installing (only for full install)
-      if (selectedPlugins.length === 0) {
-        // Remove old monolithic structure if present
-        const oldDirs = [
-          path.join(claudeDir, 'commands', 'devflow'),
-          path.join(claudeDir, 'agents', 'devflow'),
-        ];
-        for (const dir of oldDirs) {
-          try {
-            await fs.rm(dir, { recursive: true, force: true });
-          } catch { /* ignore */ }
-        }
+    // Try native Claude CLI installation first, fall back to manual copy
+    const cliAvailable = isClaudeCliAvailable();
+    let usedNativeCli = false;
 
-        // Clean old skill directories that will be replaced
-        const allSkills = new Set<string>();
-        for (const plugin of DEVFLOW_PLUGINS) {
-          for (const skill of plugin.skills) {
-            allSkills.add(skill);
+    if (cliAvailable) {
+      s.message('Adding DevFlow marketplace...');
+      const marketplaceAdded = addMarketplaceViaCli();
+
+      if (marketplaceAdded) {
+        s.message('Installing plugins via Claude CLI...');
+        let allInstalled = true;
+
+        for (const plugin of pluginsToInstall) {
+          const installed = installPluginViaCli(plugin.name, scope);
+          if (!installed) {
+            allInstalled = false;
+            break;
           }
         }
-        for (const skill of allSkills) {
-          try {
-            await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
-          } catch { /* ignore */ }
+
+        if (allInstalled) {
+          usedNativeCli = true;
+          s.stop('Plugins installed via Claude CLI');
         }
       }
+    }
 
-      // Install each selected plugin
-      const installedCommands: string[] = [];
-      const installedSkills = new Set<string>();
-
-      for (const plugin of pluginsToInstall) {
-        const pluginSourceDir = path.join(pluginsDir, plugin.name);
-
-        // Install commands
-        const commandsSource = path.join(pluginSourceDir, 'commands');
-        const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
-        try {
-          const files = await fs.readdir(commandsSource);
-          if (files.length > 0) {
-            await fs.mkdir(commandsTarget, { recursive: true });
-            for (const file of files) {
-              await fs.copyFile(
-                path.join(commandsSource, file),
-                path.join(commandsTarget, file)
-              );
-            }
-            installedCommands.push(...plugin.commands);
-          }
-        } catch { /* no commands directory */ }
-
-        // Install agents
-        const agentsSource = path.join(pluginSourceDir, 'agents');
-        const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
-        try {
-          const files = await fs.readdir(agentsSource);
-          if (files.length > 0) {
-            await fs.mkdir(agentsTarget, { recursive: true });
-            for (const file of files) {
-              await fs.copyFile(
-                path.join(agentsSource, file),
-                path.join(agentsTarget, file)
-              );
-            }
-          }
-        } catch { /* no agents directory */ }
-
-        // Install skills (flat structure for auto-discovery)
-        const skillsSource = path.join(pluginSourceDir, 'skills');
-        try {
-          const skillDirs = await fs.readdir(skillsSource, { withFileTypes: true });
-          for (const skillDir of skillDirs) {
-            if (skillDir.isDirectory()) {
-              const skillTarget = path.join(claudeDir, 'skills', skillDir.name);
-              await copyDirectory(
-                path.join(skillsSource, skillDir.name),
-                skillTarget
-              );
-              installedSkills.add(skillDir.name);
-            }
-          }
-        } catch { /* no skills directory */ }
+    // Fall back to manual installation if CLI failed or unavailable
+    if (!usedNativeCli) {
+      if (cliAvailable && verbose) {
+        p.log.warn('Claude CLI installation failed, falling back to manual copy');
       }
 
-      // Install scripts (always from root scripts/ directory)
-      const scriptsSource = path.join(rootDir, 'scripts');
-      const scriptsTarget = path.join(devflowDir, 'scripts');
       try {
-        await fs.mkdir(scriptsTarget, { recursive: true });
-        await copyDirectory(scriptsSource, scriptsTarget);
+        // Clean old DevFlow files before installing (only for full install)
+        if (selectedPlugins.length === 0) {
+          // Remove old monolithic structure if present
+          const oldDirs = [
+            path.join(claudeDir, 'commands', 'devflow'),
+            path.join(claudeDir, 'agents', 'devflow'),
+          ];
+          for (const dir of oldDirs) {
+            try {
+              await fs.rm(dir, { recursive: true, force: true });
+            } catch { /* ignore */ }
+          }
 
-        // Make scripts executable
-        const scripts = await fs.readdir(scriptsTarget);
-        for (const script of scripts) {
-          const scriptPath = path.join(scriptsTarget, script);
-          const stat = await fs.stat(scriptPath);
-          if (stat.isFile()) {
-            await fs.chmod(scriptPath, 0o755);
+          // Clean old skill directories that will be replaced
+          const allSkills = new Set<string>();
+          for (const plugin of DEVFLOW_PLUGINS) {
+            for (const skill of plugin.skills) {
+              allSkills.add(skill);
+            }
+          }
+          for (const skill of allSkills) {
+            try {
+              await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
+            } catch { /* ignore */ }
           }
         }
-      } catch { /* scripts may not exist */ }
 
-      s.stop('Components installed');
-    } catch (error) {
-      s.stop('Installation failed');
-      p.log.error(`${error}`);
-      process.exit(1);
+        // Install each selected plugin
+        const installedCommands: string[] = [];
+        const installedSkills = new Set<string>();
+
+        for (const plugin of pluginsToInstall) {
+          const pluginSourceDir = path.join(pluginsDir, plugin.name);
+
+          // Install commands
+          const commandsSource = path.join(pluginSourceDir, 'commands');
+          const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
+          try {
+            const files = await fs.readdir(commandsSource);
+            if (files.length > 0) {
+              await fs.mkdir(commandsTarget, { recursive: true });
+              for (const file of files) {
+                await fs.copyFile(
+                  path.join(commandsSource, file),
+                  path.join(commandsTarget, file)
+                );
+              }
+              installedCommands.push(...plugin.commands);
+            }
+          } catch { /* no commands directory */ }
+
+          // Install agents
+          const agentsSource = path.join(pluginSourceDir, 'agents');
+          const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+          try {
+            const files = await fs.readdir(agentsSource);
+            if (files.length > 0) {
+              await fs.mkdir(agentsTarget, { recursive: true });
+              for (const file of files) {
+                await fs.copyFile(
+                  path.join(agentsSource, file),
+                  path.join(agentsTarget, file)
+                );
+              }
+            }
+          } catch { /* no agents directory */ }
+
+          // Install skills (flat structure for auto-discovery)
+          const skillsSource = path.join(pluginSourceDir, 'skills');
+          try {
+            const skillDirs = await fs.readdir(skillsSource, { withFileTypes: true });
+            for (const skillDir of skillDirs) {
+              if (skillDir.isDirectory()) {
+                const skillTarget = path.join(claudeDir, 'skills', skillDir.name);
+                await copyDirectory(
+                  path.join(skillsSource, skillDir.name),
+                  skillTarget
+                );
+                installedSkills.add(skillDir.name);
+              }
+            }
+          } catch { /* no skills directory */ }
+        }
+
+        // Install scripts (always from root scripts/ directory)
+        const scriptsSource = path.join(rootDir, 'scripts');
+        const scriptsTarget = path.join(devflowDir, 'scripts');
+        try {
+          await fs.mkdir(scriptsTarget, { recursive: true });
+          await copyDirectory(scriptsSource, scriptsTarget);
+
+          // Make scripts executable
+          const scripts = await fs.readdir(scriptsTarget);
+          for (const script of scripts) {
+            const scriptPath = path.join(scriptsTarget, script);
+            const stat = await fs.stat(scriptPath);
+            if (stat.isFile()) {
+              await fs.chmod(scriptPath, 0o755);
+            }
+          }
+        } catch { /* scripts may not exist */ }
+
+        s.stop('Components installed via file copy');
+      } catch (error) {
+        s.stop('Installation failed');
+        p.log.error(`${error}`);
+        process.exit(1);
+      }
     }
 
     // === EXTRAS: Things plugins can't handle ===
@@ -491,6 +571,15 @@ export const initCommand = new Command('init')
           p.log.success('.docs/ structure ready');
         }
       } catch { /* may already exist */ }
+    }
+
+    // Show installation method
+    if (usedNativeCli) {
+      p.log.success('Installed via Claude plugin system');
+    } else {
+      if (!cliAvailable) {
+        p.log.info('Installed via file copy (Claude CLI not available)');
+      }
     }
 
     // Show installed plugins and commands
