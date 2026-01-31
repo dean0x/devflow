@@ -5,12 +5,16 @@
     "command": "${DEVFLOW_DIR}/scripts/statusline.sh"
   },
   "env": {
-    "ENABLE_TOOL_SEARCH": "true"
+    "ENABLE_TOOL_SEARCH": "true",
+    "ENABLE_LSP_TOOL": "true"
   },
-  "sandbox": {
-    "enabled": true,
-    "autoAllowBashIfSandboxed": true,
-    "allowUnsandboxedCommands": false
+  "extraKnownMarketplaces": {
+    "devflow": {
+      "source": {
+        "source": "github",
+        "repo": "dean0x/devflow"
+      }
+    }
   },
   "attribution": {
     "commit": "",

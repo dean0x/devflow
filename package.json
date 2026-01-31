@@ -9,10 +9,8 @@
   },
   "files": [
     "dist/",
-    ".claude-plugin/",
-    "commands/",
-    "agents/",
-    "skills/",
+    "plugins/",
+    "shared/",
     "scripts/",
     "src/templates/",
     "src/claude/CLAUDE.md",
@@ -21,7 +19,9 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:cli && npm run build:plugins",
+    "build:cli": "tsc",
+    "build:plugins": "npx tsx scripts/build-plugins.ts",
     "dev": "tsc --watch",
     "cli": "node dist/cli.js",
     "prepublishOnly": "npm run build",
@@ -57,6 +57,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }
 }

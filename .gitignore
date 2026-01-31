@@ -4,6 +4,9 @@
 node_modules/
 dist/
 *.log
+
+# Generated plugin skills (copied from shared/skills/ at build time)
+plugins/*/skills/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -43,3 +46,4 @@ install.log
 
 # Session working data
 .memory/
+src/claude/CLAUDE.legacy.md

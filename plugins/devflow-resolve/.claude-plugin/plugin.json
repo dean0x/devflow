@@ -1,0 +1,21 @@
+{
+  "name": "devflow-resolve",
+  "description": "Process and fix code review issues with risk assessment - decides FIX vs TECH_DEBT based on impact",
+  "author": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "version": "0.9.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": ["issues", "fixes", "tech-debt", "resolution", "review"],
+  "skills": [
+    "commit",
+    "core-patterns",
+    "git-safety",
+    "github-patterns",
+    "implementation-patterns",
+    "security-patterns"
+  ]
+}

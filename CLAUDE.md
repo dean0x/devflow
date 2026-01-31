@@ -13,12 +13,22 @@ When working on DevFlow code, understand that this toolkit is designed to enhanc
 
 ## Architecture Overview
 
-DevFlow consists of four main components:
+DevFlow is organized as a plugin marketplace with 7 self-contained plugins:
 
-1. **CLI Tool** (`src/cli/`) - TypeScript-based installer and manager
-2. **Claude Code Commands** (`commands/`) - Markdown-based slash commands (user-invoked)
-3. **Skills** (`skills/`) - Auto-activate quality enforcement (model-invoked)
-4. **Sub-Agents** (`agents/`) - Specialized AI assistants for focused tasks
+1. **CLI Tool** (`src/cli/`) - TypeScript-based installer with plugin selection
+2. **Shared Skills** (`shared/skills/`) - Single source of truth for all 25 skills
+3. **Plugins** (`plugins/`) - Self-contained packages with commands, agents, and skills
+   - `devflow-specify` - Feature specification workflow
+   - `devflow-implement` - Complete task implementation lifecycle
+   - `devflow-review` - Comprehensive code review
+   - `devflow-resolve` - Review issue resolution
+   - `devflow-catch-up` - Context restoration
+   - `devflow-devlog` - Session logging
+   - `devflow-core-skills` - Auto-activating quality enforcement
+
+Each plugin follows the official Claude plugins format with `.claude-plugin/plugin.json`, `commands/`, `agents/`, and `skills/` directories.
+
+**Build-Time Skill Distribution**: Skills are stored once in `shared/skills/` and copied to each plugin at build time based on the `skills` array in each plugin's `plugin.json`. This eliminates duplication in git while maintaining self-contained plugins for distribution.
 
 ## Documentation Framework
 
@@ -146,21 +156,29 @@ When creating or modifying persisting agents:
 ### Development Loop
 
 ```bash
-# 1. Modify command or agent in devflow repo
-vim commands/review.md
+# 1. Modify command, agent, or skill
+vim plugins/devflow-review/commands/review.md  # Commands/agents in plugins
+vim shared/skills/security-patterns/SKILL.md   # Skills in shared/
 
-# 2. Rebuild if CLI changes
+# 2. Build (compiles CLI + distributes skills to plugins)
 npm run build
 
 # 3. Reinstall to global context for testing
 node dist/cli.js init
+# Or install just the plugin you're working on:
+node dist/cli.js init --plugin=review
 
 # 4. Test immediately
 /review
 
 # 5. Iterate until satisfied
-# 6. Commit changes
+# 6. Commit changes (skills are in shared/, not plugins/)
 ```
+
+**Build scripts**:
+- `npm run build` - Full build (CLI + skill distribution)
+- `npm run build:cli` - TypeScript compilation only
+- `npm run build:plugins` - Skill distribution only
 
 ## Command Design Principles
 
@@ -197,8 +215,9 @@ Status and review commands create historical records:
 
 ### Command Structure
 
-1. Create command in `commands/new-command.md`
-2. Follow this template:
+1. Decide which plugin the command belongs to (or create a new plugin)
+2. Create command in `plugins/devflow-{plugin}/commands/new-command.md`
+3. Follow this template:
 
 ```markdown
 # Command: /new-command
@@ -216,23 +235,26 @@ Brief description of what the command does.
 [Description of expected output]
 ```
 
-3. Test locally before committing
-4. Update README.md with user-facing documentation
-5. Add to init.ts command list if needed
+4. Test locally before committing
+5. Update plugin README.md with user-facing documentation
+6. Update DEVFLOW_PLUGINS in `src/cli/commands/init.ts` if creating a new plugin
 
 ## Adding New Sub-Agents
 
 ### Sub-Agent Structure
 
-1. Create agent in `agents/new-agent.md`
-2. Follow existing agent patterns:
+1. Decide which plugin the agent belongs to
+2. Create agent in `plugins/devflow-{plugin}/agents/new-agent.md`
+3. Follow existing agent patterns:
    - Clear specialty definition
    - Restricted tool access
    - Focused analysis scope
    - Specific output format
 
-3. Test with explicit invocation
-4. Document in README.md for users
+4. Test with explicit invocation
+5. Document in plugin README.md
+
+**Note:** Agents are duplicated across plugins for self-containment. If an agent is shared between plugins, copy it to each plugin that needs it.
 
 ## Adding New Skills
 
@@ -240,7 +262,9 @@ Brief description of what the command does.
 
 Skills are **model-invoked** capabilities that auto-activate based on context. They enforce quality without requiring manual invocation.
 
-1. Create skill directory in `skills/skill-name/`
+**All skills are created in `shared/skills/`** (single source of truth), then added to plugin manifests.
+
+1. Create skill directory in `shared/skills/skill-name/`
 2. Create `SKILL.md` with YAML frontmatter (~120-150 lines):
 
 ```markdown
@@ -293,7 +317,12 @@ For additional examples and detection patterns:
    - `patterns.md` - Extended ✅ correct patterns
    - `detection.md` - Grep/regex detection patterns
 
-4. Follow existing skill patterns:
+4. Add skill to plugin manifests that need it:
+   - Edit `plugins/devflow-{plugin}/.claude-plugin/plugin.json`
+   - Add skill name to the `skills` array
+   - Run `npm run build` to distribute
+
+5. Follow existing skill patterns:
    - **Focused enforcement** - One skill, one responsibility
    - **Clear activation triggers** - Specific context patterns
    - **Actionable reports** - File/line references, severity, fixes
@@ -301,13 +330,13 @@ For additional examples and detection patterns:
    - **Philosophy alignment** - Enforce project principles
    - **Progressive disclosure** - Keep SKILL.md lean, extended examples in references/
 
-5. Test skill activation:
+6. Test skill activation:
    - Write code that should trigger the skill
    - Verify skill activates automatically
    - Check violation reports are clear
    - Ensure fixes are actionable
 
-6. Document in README.md for users
+7. Document in README.md for users
 
 ### Skill vs Command Decision
 
@@ -499,24 +528,31 @@ skill-name/
 
 ### Creating New Skills
 
+**IMPORTANT**: All skills live in `shared/skills/` (single source of truth). They are copied to plugins at build time.
+
 When creating skills, decide which tier:
 
 **Foundation Skill** (Tier 1) - If multiple agents need the same knowledge:
-- Create in `skills/{name}/SKILL.md`
+- Create in `shared/skills/{name}/SKILL.md`
 - Create `references/` subdirectory with extended examples
 - Document which agents should use it
-- Add `skills:` field to relevant agent frontmatters
+- Add skill name to `skills` array in relevant `plugins/devflow-*/plugin.json` files
+- Run `npm run build` to distribute
 
 **Specialized Skill** (Tier 2) - If user-facing with context triggers:
-- Create in `skills/{name}/SKILL.md`
+- Create in `shared/skills/{name}/SKILL.md`
 - Create `references/` subdirectory with extended examples
 - Focus on clear trigger conditions in description
+- Add to `plugins/devflow-core-skills/plugin.json` skills array
+- Run `npm run build` to distribute
 - Test auto-activation in various contexts
 
 **Domain-Specific Skill** (Tier 3) - For language/framework patterns:
-- Create in `skills/{language|framework}/SKILL.md`
+- Create in `shared/skills/{language|framework}/SKILL.md`
 - Create `references/` subdirectory with extended examples
 - Focus on idioms, patterns, and best practices for that domain
+- Add to relevant plugin manifests
+- Run `npm run build` to distribute
 - Referenced by Coder agent based on detected tech stack
 
 ## Agent Design Guidelines
@@ -804,26 +840,98 @@ npx devflow-kit@latest init
 ### Source Structure
 ```
 devflow/
-├── agents/                   # Sub-agent definitions
-├── commands/                 # Slash command definitions
-├── skills/                   # Skill source (installed flat to ~/.claude/skills/)
-├── scripts/                  # Supporting scripts
+├── .claude-plugin/                   # Marketplace registry (repo root)
+│   └── marketplace.json              # Plugin registry for dean0x/devflow
+├── shared/
+│   └── skills/                       # SINGLE SOURCE OF TRUTH (25 unique skills)
+│       ├── commit/                   # Each skill is a directory
+│       │   ├── SKILL.md              # Main skill definition
+│       │   └── references/           # Extended examples
+│       ├── core-patterns/
+│       ├── github-patterns/
+│       └── ...
+├── plugins/                          # Plugin collection
+│   ├── devflow-specify/              # Feature specification plugin
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json           # Plugin manifest (includes skills array)
+│   │   ├── commands/
+│   │   │   └── specify.md
+│   │   ├── agents/
+│   │   │   ├── skimmer.md
+│   │   │   └── synthesizer.md
+│   │   ├── skills/                   # GENERATED at build time (gitignored)
+│   │   └── README.md
+│   ├── devflow-implement/            # Implementation plugin
+│   ├── devflow-review/               # Review plugin
+│   ├── devflow-resolve/              # Resolution plugin
+│   ├── devflow-catch-up/             # Context restoration plugin
+│   ├── devflow-devlog/               # Logging plugin
+│   └── devflow-core-skills/          # Auto-activate skills plugin
+├── scripts/
+│   └── build-plugins.ts              # Skill distribution script
 └── src/
-    └── cli/                  # CLI implementation
-        ├── commands/           # CLI command implementations
-        │   ├── init.ts          # Installation command
-        │   └── uninstall.ts     # Uninstallation command
-        └── cli.ts              # CLI entry point
+    └── cli/                          # CLI implementation
+        ├── commands/
+        │   ├── init.ts               # Plugin installation
+        │   ├── list.ts               # List available plugins
+        │   └── uninstall.ts          # Plugin removal
+        └── cli.ts                    # CLI entry point
 ```
+
+### Plugin Structure
+Each plugin follows the official Claude plugins format:
+```
+devflow-{name}/
+├── .claude-plugin/
+│   └── plugin.json           # Plugin manifest (includes skills array)
+├── commands/                 # Slash commands (if any)
+├── agents/                   # Sub-agents (if any)
+├── skills/                   # GENERATED - copied from shared/skills/ at build time
+└── README.md                 # Plugin documentation
+```
+
+**Plugin manifest example** (`plugin.json`):
+```json
+{
+  "name": "devflow-implement",
+  "description": "Complete task implementation workflow",
+  "version": "0.9.0",
+  "skills": ["commit", "core-patterns", "git-safety", "github-patterns", ...]
+}
+```
+
+The `skills` array declares which skills this plugin needs. `npm run build` copies them from `shared/skills/`.
 
 ### Installation Paths
 - Commands: `~/.claude/commands/devflow/`
 - Agents: `~/.claude/agents/devflow/`
-- Skills: `~/.claude/skills/` (flat structure - no devflow/ subdirectory)
+- Skills: `~/.claude/skills/` (flat structure for auto-discovery)
 - Scripts: `~/.devflow/scripts/`
 - Settings: `~/.claude/settings.json`
 
 **Note:** Skills are installed flat (directly under `skills/`) for Claude Code auto-discovery. Commands and agents use the `devflow/` subdirectory for namespacing.
+
+### Build-Time Skill Distribution
+
+Skills are **not duplicated** in the git repository. Instead:
+
+1. **Single source of truth**: All 25 skills live in `shared/skills/`
+2. **Manifest declares needs**: Each plugin's `plugin.json` has a `skills` array
+3. **Build copies skills**: `npm run build:plugins` copies skills to each plugin
+4. **Git ignores generated**: `plugins/*/skills/` is in `.gitignore`
+5. **npm includes generated**: `npm pack` includes the built skills for distribution
+
+**Why this architecture**:
+- **Fix once, fixed everywhere** - No skill drift between plugins
+- **Smaller git repo** - ~1.3MB less tracked content
+- **Clear ownership** - `shared/skills/` is the canonical location
+- **Self-contained distribution** - After build, plugins work independently
+
+**Adding a skill to a plugin**:
+1. Ensure skill exists in `shared/skills/{skill-name}/`
+2. Add skill name to `plugins/devflow-{plugin}/.claude-plugin/plugin.json` skills array
+3. Run `npm run build`
+4. Verify with `ls plugins/devflow-{plugin}/skills/`
 
 ### Settings Override
 
@@ -838,7 +946,9 @@ If settings.json exists, prompts for confirmation before overwriting.
 **What's included in DevFlow settings (`src/templates/settings.json`):**
 - `statusLine` - Smart statusline with context percentage
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
-- `permissions.deny` - Security deny list (126 blocked operations)
+- `env.ENABLE_LSP_TOOL` - Language Server Protocol support for code intelligence
+- `extraKnownMarketplaces` - DevFlow plugin marketplace (`dean0x/devflow`)
+- `permissions.deny` - Security deny list (126 blocked operations) + sensitive file patterns
 
 **Security Deny List Categories:**
 | Category | Examples |
