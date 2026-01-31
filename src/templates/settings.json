@@ -16,11 +16,6 @@
       }
     }
   },
-  "sandbox": {
-    "enabled": true,
-    "autoAllowBashIfSandboxed": true,
-    "allowUnsandboxedCommands": false
-  },
   "attribution": {
     "commit": "",
     "pr": ""
