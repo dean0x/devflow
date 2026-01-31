@@ -9,5 +9,6 @@
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
-  "keywords": ["specification", "requirements", "planning", "issues", "github"]
+  "keywords": ["specification", "requirements", "planning", "issues", "github"],
+  "skills": []
 }

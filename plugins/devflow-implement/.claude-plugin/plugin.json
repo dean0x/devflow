@@ -9,5 +9,20 @@
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
-  "keywords": ["implementation", "coding", "workflow", "agents", "agentic", "pr"]
+  "keywords": ["implementation", "coding", "workflow", "agents", "agentic", "pr"],
+  "skills": [
+    "code-smell",
+    "codebase-navigation",
+    "commit",
+    "core-patterns",
+    "git-safety",
+    "github-patterns",
+    "implementation-patterns",
+    "input-validation",
+    "pull-request",
+    "react",
+    "self-review",
+    "test-design",
+    "typescript"
+  ]
 }

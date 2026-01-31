@@ -9,5 +9,19 @@
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
-  "keywords": ["review", "code-quality", "security", "architecture", "pr-review"]
+  "keywords": ["review", "code-quality", "security", "architecture", "pr-review"],
+  "skills": [
+    "architecture-patterns",
+    "complexity-patterns",
+    "consistency-patterns",
+    "database-patterns",
+    "dependencies-patterns",
+    "documentation-patterns",
+    "github-patterns",
+    "performance-patterns",
+    "regression-patterns",
+    "review-methodology",
+    "security-patterns",
+    "tests-patterns"
+  ]
 }

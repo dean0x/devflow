@@ -9,5 +9,6 @@
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
-  "keywords": ["skills", "quality", "patterns", "auto-activate", "enforcement"]
+  "keywords": ["skills", "quality", "patterns", "auto-activate", "enforcement"],
+  "skills": ["code-smell", "commit", "input-validation", "pull-request", "react", "test-design", "typescript"]
 }
