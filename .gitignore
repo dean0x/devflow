@@ -7,6 +7,19 @@ dist/
 
 # Generated plugin skills (copied from shared/skills/ at build time)
 plugins/*/skills/
+
+# Generated shared agents (copied from shared/agents/ at build time)
+# Note: plugin-specific agents (catch-up.md, devlog.md) are committed in their plugins
+plugins/*/agents/git.md
+plugins/*/agents/synthesizer.md
+plugins/*/agents/skimmer.md
+plugins/*/agents/simplifier.md
+plugins/*/agents/coder.md
+plugins/*/agents/reviewer.md
+plugins/*/agents/resolver.md
+plugins/*/agents/shepherd.md
+plugins/*/agents/scrutinizer.md
+plugins/*/agents/validator.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

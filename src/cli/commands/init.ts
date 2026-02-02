@@ -55,6 +55,13 @@ interface PluginDefinition {
  */
 const DEVFLOW_PLUGINS: PluginDefinition[] = [
   {
+    name: 'devflow-core-skills',
+    description: 'Auto-activating quality enforcement (foundation layer)',
+    commands: [],
+    agents: [],
+    skills: ['code-smell', 'commit', 'core-patterns', 'docs-framework', 'git-safety', 'github-patterns', 'input-validation', 'pull-request', 'react', 'test-design', 'typescript'],
+  },
+  {
     name: 'devflow-specify',
     description: 'Interactive feature specification',
     commands: ['/specify'],
@@ -66,44 +73,62 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
-    skills: ['core-patterns', 'git-safety', 'github-patterns', 'commit', 'pull-request', 'implementation-patterns', 'codebase-navigation', 'test-design', 'code-smell', 'input-validation', 'self-review', 'typescript', 'react'],
+    skills: ['codebase-navigation', 'implementation-patterns', 'self-review'],
   },
   {
     name: 'devflow-review',
     description: 'Comprehensive code review',
     commands: ['/review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['review-methodology', 'github-patterns', 'security-patterns', 'architecture-patterns', 'performance-patterns', 'complexity-patterns', 'consistency-patterns', 'regression-patterns', 'tests-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns'],
+    skills: ['review-methodology', 'security-patterns', 'architecture-patterns', 'performance-patterns', 'complexity-patterns', 'consistency-patterns', 'regression-patterns', 'tests-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns'],
   },
   {
     name: 'devflow-resolve',
     description: 'Process and fix review issues',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['core-patterns', 'git-safety', 'github-patterns', 'commit', 'implementation-patterns', 'security-patterns'],
+    skills: ['implementation-patterns', 'security-patterns'],
   },
   {
     name: 'devflow-catch-up',
     description: 'Context restoration from status logs',
     commands: ['/catch-up'],
     agents: ['catch-up'],
-    skills: ['docs-framework'],
+    skills: [],
   },
   {
     name: 'devflow-devlog',
     description: 'Development session logging',
     commands: ['/devlog'],
     agents: ['devlog'],
-    skills: ['docs-framework'],
-  },
-  {
-    name: 'devflow-core-skills',
-    description: 'Auto-activating quality enforcement',
-    commands: [],
-    agents: [],
-    skills: ['commit', 'pull-request', 'test-design', 'code-smell', 'input-validation', 'typescript', 'react'],
+    skills: [],
   },
 ];
+
+/**
+ * Build maps of unique assets to their source plugin (first plugin that declares them)
+ * This ensures each skill/agent is copied only once during installation
+ */
+function buildAssetMaps(plugins: PluginDefinition[]): {
+  skillsMap: Map<string, string>;
+  agentsMap: Map<string, string>;
+} {
+  const skillsMap = new Map<string, string>();
+  const agentsMap = new Map<string, string>();
+  for (const plugin of plugins) {
+    for (const skill of plugin.skills) {
+      if (!skillsMap.has(skill)) {
+        skillsMap.set(skill, plugin.name);
+      }
+    }
+    for (const agent of plugin.agents) {
+      if (!agentsMap.has(agent)) {
+        agentsMap.set(agent, plugin.name);
+      }
+    }
+  }
+  return { skillsMap, agentsMap };
+}
 
 /**
  * Check if Claude CLI is available in the system PATH
@@ -285,9 +310,18 @@ export const initCommand = new Command('init')
     const pluginsDir = path.join(rootDir, 'plugins');
 
     // Determine which plugins to install
-    const pluginsToInstall = selectedPlugins.length > 0
+    let pluginsToInstall = selectedPlugins.length > 0
       ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
       : DEVFLOW_PLUGINS;
+
+    // Auto-include core-skills when any DevFlow plugin is selected
+    const coreSkillsPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
+    if (pluginsToInstall.length > 0 && coreSkillsPlugin && !pluginsToInstall.includes(coreSkillsPlugin)) {
+      pluginsToInstall = [coreSkillsPlugin, ...pluginsToInstall];
+    }
+
+    // Build deduplication maps (each asset copied from first plugin that declares it)
+    const { skillsMap, agentsMap } = buildAssetMaps(pluginsToInstall);
 
     // Try native Claude CLI installation first, fall back to manual copy
     const cliAvailable = isClaudeCliAvailable();
@@ -350,9 +384,10 @@ export const initCommand = new Command('init')
           }
         }
 
-        // Install each selected plugin
+        // Install each selected plugin (with deduplication)
         const installedCommands: string[] = [];
         const installedSkills = new Set<string>();
+        const installedAgents = new Set<string>();
 
         for (const plugin of pluginsToInstall) {
           const pluginSourceDir = path.join(pluginsDir, plugin.name);
@@ -374,7 +409,7 @@ export const initCommand = new Command('init')
             }
           } catch { /* no commands directory */ }
 
-          // Install agents
+          // Install agents (deduplicated - only copy if this plugin is the source)
           const agentsSource = path.join(pluginSourceDir, 'agents');
           const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
           try {
@@ -382,26 +417,34 @@ export const initCommand = new Command('init')
             if (files.length > 0) {
               await fs.mkdir(agentsTarget, { recursive: true });
               for (const file of files) {
-                await fs.copyFile(
-                  path.join(agentsSource, file),
-                  path.join(agentsTarget, file)
-                );
+                const agentName = path.basename(file, '.md');
+                // Only copy if this plugin is the source for this agent (deduplication)
+                if (agentsMap.get(agentName) === plugin.name) {
+                  await fs.copyFile(
+                    path.join(agentsSource, file),
+                    path.join(agentsTarget, file)
+                  );
+                  installedAgents.add(agentName);
+                }
               }
             }
           } catch { /* no agents directory */ }
 
-          // Install skills (flat structure for auto-discovery)
+          // Install skills (deduplicated - only copy if this plugin is the source)
           const skillsSource = path.join(pluginSourceDir, 'skills');
           try {
             const skillDirs = await fs.readdir(skillsSource, { withFileTypes: true });
             for (const skillDir of skillDirs) {
               if (skillDir.isDirectory()) {
-                const skillTarget = path.join(claudeDir, 'skills', skillDir.name);
-                await copyDirectory(
-                  path.join(skillsSource, skillDir.name),
-                  skillTarget
-                );
-                installedSkills.add(skillDir.name);
+                // Only copy if this plugin is the source for this skill (deduplication)
+                if (skillsMap.get(skillDir.name) === plugin.name) {
+                  const skillTarget = path.join(claudeDir, 'skills', skillDir.name);
+                  await copyDirectory(
+                    path.join(skillsSource, skillDir.name),
+                    skillTarget
+                  );
+                  installedSkills.add(skillDir.name);
+                }
               }
             }
           } catch { /* no skills directory */ }
@@ -606,6 +649,12 @@ export const initCommand = new Command('init')
       p.log.info(`Scope: ${scope}`);
       p.log.info(`Claude dir: ${claudeDir}`);
       p.log.info(`DevFlow dir: ${devflowDir}`);
+
+      // Show deduplication stats
+      const totalSkillDeclarations = pluginsToInstall.reduce((sum, p) => sum + p.skills.length, 0);
+      const totalAgentDeclarations = pluginsToInstall.reduce((sum, p) => sum + p.agents.length, 0);
+      p.log.info(`Deduplication: ${skillsMap.size} unique skills (from ${totalSkillDeclarations} declarations)`);
+      p.log.info(`Deduplication: ${agentsMap.size} unique agents (from ${totalAgentDeclarations} declarations)`);
     }
 
     p.outro(color.green('Ready! Run any command in Claude Code to get started.'));

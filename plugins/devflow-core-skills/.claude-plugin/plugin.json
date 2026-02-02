@@ -1,6 +1,6 @@
 {
   "name": "devflow-core-skills",
-  "description": "Auto-activating quality enforcement skills - commit patterns, PR quality, test design, code smell detection",
+  "description": "Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins",
   "author": {
     "name": "DevFlow Contributors",
     "email": "dean@keren.dev"
@@ -9,6 +9,19 @@
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
-  "keywords": ["skills", "quality", "patterns", "auto-activate", "enforcement"],
-  "skills": ["code-smell", "commit", "input-validation", "pull-request", "react", "test-design", "typescript"]
+  "keywords": ["skills", "quality", "patterns", "auto-activate", "enforcement", "foundation"],
+  "agents": [],
+  "skills": [
+    "code-smell",
+    "commit",
+    "core-patterns",
+    "docs-framework",
+    "git-safety",
+    "github-patterns",
+    "input-validation",
+    "pull-request",
+    "react",
+    "test-design",
+    "typescript"
+  ]
 }
