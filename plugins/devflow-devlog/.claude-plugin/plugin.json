@@ -10,5 +10,6 @@
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
   "keywords": ["logging", "status", "documentation", "progress"],
-  "skills": ["docs-framework"]
+  "agents": [],
+  "skills": []
 }

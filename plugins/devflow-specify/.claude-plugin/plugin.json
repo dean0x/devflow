@@ -10,5 +10,6 @@
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
   "keywords": ["specification", "requirements", "planning", "issues", "github"],
+  "agents": ["skimmer", "synthesizer"],
   "skills": []
 }

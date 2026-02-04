@@ -10,11 +10,8 @@
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
   "keywords": ["issues", "fixes", "tech-debt", "resolution", "review"],
+  "agents": ["git", "resolver", "simplifier"],
   "skills": [
-    "commit",
-    "core-patterns",
-    "git-safety",
-    "github-patterns",
     "implementation-patterns",
     "security-patterns"
   ]

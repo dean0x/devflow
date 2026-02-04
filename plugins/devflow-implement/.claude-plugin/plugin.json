@@ -10,19 +10,10 @@
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
   "keywords": ["implementation", "coding", "workflow", "agents", "agentic", "pr"],
+  "agents": ["git", "skimmer", "synthesizer", "coder", "simplifier", "scrutinizer", "shepherd", "validator"],
   "skills": [
-    "code-smell",
     "codebase-navigation",
-    "commit",
-    "core-patterns",
-    "git-safety",
-    "github-patterns",
     "implementation-patterns",
-    "input-validation",
-    "pull-request",
-    "react",
-    "self-review",
-    "test-design",
-    "typescript"
+    "self-review"
   ]
 }
