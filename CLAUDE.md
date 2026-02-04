@@ -17,7 +17,8 @@ DevFlow is organized as a plugin marketplace with 7 self-contained plugins:
 
 1. **CLI Tool** (`src/cli/`) - TypeScript-based installer with plugin selection
 2. **Shared Skills** (`shared/skills/`) - Single source of truth for all 25 skills
-3. **Plugins** (`plugins/`) - Self-contained packages with commands, agents, and skills
+3. **Shared Agents** (`shared/agents/`) - Single source of truth for 10 reusable agents
+4. **Plugins** (`plugins/`) - Self-contained packages with commands, agents, and skills
    - `devflow-specify` - Feature specification workflow
    - `devflow-implement` - Complete task implementation lifecycle
    - `devflow-review` - Comprehensive code review
@@ -28,7 +29,7 @@ DevFlow is organized as a plugin marketplace with 7 self-contained plugins:
 
 Each plugin follows the official Claude plugins format with `.claude-plugin/plugin.json`, `commands/`, `agents/`, and `skills/` directories.
 
-**Build-Time Skill Distribution**: Skills are stored once in `shared/skills/` and copied to each plugin at build time based on the `skills` array in each plugin's `plugin.json`. This eliminates duplication in git while maintaining self-contained plugins for distribution.
+**Build-Time Asset Distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/` respectively, then copied to each plugin at build time based on the `skills` and `agents` arrays in each plugin's `plugin.json`. This eliminates duplication in git while maintaining self-contained plugins for distribution.
 
 ## Documentation Framework
 
@@ -243,18 +244,25 @@ Brief description of what the command does.
 
 ### Sub-Agent Structure
 
-1. Decide which plugin the agent belongs to
-2. Create agent in `plugins/devflow-{plugin}/agents/new-agent.md`
-3. Follow existing agent patterns:
+**For shared agents** (used by multiple plugins):
+1. Create agent in `shared/agents/new-agent.md`
+2. Follow existing agent patterns:
    - Clear specialty definition
    - Restricted tool access
    - Focused analysis scope
    - Specific output format
+3. Add agent name to `agents` array in each plugin's `plugin.json` that needs it
+4. Run `npm run build` to distribute
+5. Test with explicit invocation
+6. Document in relevant plugin README.md files
 
-4. Test with explicit invocation
-5. Document in plugin README.md
+**For plugin-specific agents** (tightly coupled to one workflow):
+1. Create agent directly in `plugins/devflow-{plugin}/agents/new-agent.md`
+2. Do NOT add to `plugin.json` agents array (committed agents don't need distribution)
+3. Test with explicit invocation
+4. Document in plugin README.md
 
-**Note:** Agents are duplicated across plugins for self-containment. If an agent is shared between plugins, copy it to each plugin that needs it.
+**Note:** Shared agents live in `shared/agents/` and are distributed at build time. Only create plugin-specific agents when tightly coupled to a single workflow (e.g., `devlog.md`, `catch-up.md`).
 
 ## Adding New Skills
 
@@ -843,23 +851,25 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json              # Plugin registry for dean0x/devflow
 ├── shared/
-│   └── skills/                       # SINGLE SOURCE OF TRUTH (25 unique skills)
-│       ├── commit/                   # Each skill is a directory
-│       │   ├── SKILL.md              # Main skill definition
-│       │   └── references/           # Extended examples
-│       ├── core-patterns/
-│       ├── github-patterns/
-│       └── ...
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (25 unique skills)
+│   │   ├── commit/                   # Each skill is a directory
+│   │   │   ├── SKILL.md              # Main skill definition
+│   │   │   └── references/           # Extended examples
+│   │   ├── core-patterns/
+│   │   └── ...
+│   └── agents/                       # SINGLE SOURCE OF TRUTH (10 shared agents)
+│       ├── git.md                    # Git/GitHub operations agent
+│       ├── synthesizer.md            # Multi-agent output combiner
+│       ├── coder.md                  # Implementation agent
+│       └── ...                       # + 7 more shared agents
 ├── plugins/                          # Plugin collection
 │   ├── devflow-specify/              # Feature specification plugin
 │   │   ├── .claude-plugin/
-│   │   │   └── plugin.json           # Plugin manifest (includes skills array)
+│   │   │   └── plugin.json           # Plugin manifest (includes skills + agents arrays)
 │   │   ├── commands/
 │   │   │   └── specify.md
-│   │   ├── agents/
-│   │   │   ├── skimmer.md
-│   │   │   └── synthesizer.md
-│   │   ├── skills/                   # GENERATED at build time (gitignored)
+│   │   ├── agents/                   # GENERATED shared agents (gitignored)
+│   │   ├── skills/                   # GENERATED skills (gitignored)
 │   │   └── README.md
 │   ├── devflow-implement/            # Implementation plugin
 │   ├── devflow-review/               # Review plugin
@@ -868,7 +878,7 @@ devflow/
 │   ├── devflow-devlog/               # Logging plugin
 │   └── devflow-core-skills/          # Auto-activate skills plugin
 ├── scripts/
-│   └── build-plugins.ts              # Skill distribution script
+│   └── build-plugins.ts              # Skill and agent distribution script
 └── src/
     └── cli/                          # CLI implementation
         ├── commands/
@@ -883,9 +893,9 @@ Each plugin follows the official Claude plugins format:
 ```
 devflow-{name}/
 ├── .claude-plugin/
-│   └── plugin.json           # Plugin manifest (includes skills array)
+│   └── plugin.json           # Plugin manifest (includes skills + agents arrays)
 ├── commands/                 # Slash commands (if any)
-├── agents/                   # Sub-agents (if any)
+├── agents/                   # GENERATED shared agents + committed plugin-specific agents
 ├── skills/                   # GENERATED - copied from shared/skills/ at build time
 └── README.md                 # Plugin documentation
 ```
@@ -896,11 +906,12 @@ devflow-{name}/
   "name": "devflow-implement",
   "description": "Complete task implementation workflow",
   "version": "0.9.0",
-  "skills": ["commit", "core-patterns", "git-safety", "github-patterns", ...]
+  "agents": ["git", "coder", "synthesizer", "..."],
+  "skills": ["codebase-navigation", "implementation-patterns", "self-review"]
 }
 ```
 
-The `skills` array declares which skills this plugin needs. `npm run build` copies them from `shared/skills/`.
+The `skills` and `agents` arrays declare which shared assets this plugin needs. `npm run build` copies them from `shared/skills/` and `shared/agents/`.
 
 ### Installation Paths
 - Commands: `~/.claude/commands/devflow/`
@@ -911,20 +922,20 @@ The `skills` array declares which skills this plugin needs. `npm run build` copi
 
 **Note:** Skills are installed flat (directly under `skills/`) for Claude Code auto-discovery. Commands and agents use the `devflow/` subdirectory for namespacing.
 
-### Build-Time Skill Distribution
+### Build-Time Asset Distribution
 
-Skills are **not duplicated** in the git repository. Instead:
+Skills and agents are **not duplicated** in the git repository. Instead:
 
-1. **Single source of truth**: All 25 skills live in `shared/skills/`
-2. **Manifest declares needs**: Each plugin's `plugin.json` has a `skills` array
-3. **Build copies skills**: `npm run build:plugins` copies skills to each plugin
-4. **Git ignores generated**: `plugins/*/skills/` is in `.gitignore`
-5. **npm includes generated**: `npm pack` includes the built skills for distribution
+1. **Single source of truth**: All 25 skills live in `shared/skills/`, all 10 shared agents live in `shared/agents/`
+2. **Manifest declares needs**: Each plugin's `plugin.json` has `skills` and `agents` arrays
+3. **Build copies assets**: `npm run build:plugins` copies skills and agents to each plugin
+4. **Git ignores generated**: `plugins/*/skills/` and shared agent files are in `.gitignore`
+5. **npm includes generated**: `npm pack` includes the built assets for distribution
 
 **Why this architecture**:
-- **Fix once, fixed everywhere** - No skill drift between plugins
-- **Smaller git repo** - ~1.3MB less tracked content
-- **Clear ownership** - `shared/skills/` is the canonical location
+- **Fix once, fixed everywhere** - No skill/agent drift between plugins
+- **Smaller git repo** - Eliminates ~15K lines of duplicated content
+- **Clear ownership** - `shared/` directories are the canonical locations
 - **Self-contained distribution** - After build, plugins work independently
 
 **Adding a skill to a plugin**:
@@ -932,6 +943,16 @@ Skills are **not duplicated** in the git repository. Instead:
 2. Add skill name to `plugins/devflow-{plugin}/.claude-plugin/plugin.json` skills array
 3. Run `npm run build`
 4. Verify with `ls plugins/devflow-{plugin}/skills/`
+
+**Adding an agent to a plugin**:
+1. Ensure agent exists in `shared/agents/{agent-name}.md`
+2. Add agent name to `plugins/devflow-{plugin}/.claude-plugin/plugin.json` agents array
+3. Run `npm run build`
+4. Verify with `ls plugins/devflow-{plugin}/agents/`
+
+**Shared vs Plugin-Specific Agents**:
+- **Shared agents** (10): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `shepherd`, `scrutinizer`, `validator` - used across multiple plugins
+- **Plugin-specific agents** (2): `devlog` (devflow-devlog), `catch-up` (devflow-catch-up) - tightly coupled to specific workflows, committed directly in their plugins
 
 ### Settings Override
 
