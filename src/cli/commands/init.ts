@@ -90,6 +90,13 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['implementation-patterns', 'security-patterns'],
   },
   {
+    name: 'devflow-self-review',
+    description: 'Self-review workflow (Simplifier + Scrutinizer)',
+    commands: ['/self-review'],
+    agents: ['simplifier', 'scrutinizer', 'validator'],
+    skills: ['self-review', 'core-patterns'],
+  },
+  {
     name: 'devflow-catch-up',
     description: 'Context restoration from status logs',
     commands: ['/catch-up'],

@@ -50,6 +50,13 @@
       "keywords": ["logging", "status", "documentation"]
     },
     {
+      "name": "devflow-self-review",
+      "source": "./plugins/devflow-self-review",
+      "description": "Self-review workflow: Simplifier + Scrutinizer for code quality",
+      "version": "0.9.0",
+      "keywords": ["self-review", "quality", "simplifier", "scrutinizer"]
+    },
+    {
       "name": "devflow-core-skills",
       "source": "./plugins/devflow-core-skills",
       "description": "Auto-activating quality enforcement skills",
