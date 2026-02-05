@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: inherit
-skills: core-patterns, git-safety, implementation-patterns, commit, typescript, react, test-design, codebase-navigation, code-smell, input-validation
+skills: core-patterns, git-safety, implementation-patterns, commit, typescript, react, test-design, codebase-navigation, code-smell, input-validation, accessibility, frontend-design
 ---
 
 # Coder Agent
@@ -34,9 +34,9 @@ You receive from orchestrator:
 2. **Reference handoff** (if PRIOR_PHASE_SUMMARY provided): Use summary to validate your understanding of prior work, not as the sole source of truth. The actual code is authoritative.
 
 3. **Load domain skills**: Based on DOMAIN hint, apply relevant patterns:
-   - `backend`: typescript, implementation-patterns
-   - `frontend`: react, typescript
-   - `tests`: test-design
+   - `backend`: typescript, implementation-patterns, input-validation
+   - `frontend`: react, typescript, accessibility, frontend-design
+   - `tests`: test-design, typescript
    - `fullstack`: all of the above
 
 4. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.

@@ -12,7 +12,9 @@
   "keywords": ["implementation", "coding", "workflow", "agents", "agentic", "pr"],
   "agents": ["git", "skimmer", "synthesizer", "coder", "simplifier", "scrutinizer", "shepherd", "validator"],
   "skills": [
+    "accessibility",
     "codebase-navigation",
+    "frontend-design",
     "implementation-patterns",
     "self-review"
   ]

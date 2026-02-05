@@ -3,6 +3,14 @@ name: react
 description: React patterns. Use when user works with React components, asks about "hooks", "state management", "JSX", or performance optimization.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
+activation:
+  file-patterns:
+    - "**/*.tsx"
+    - "**/*.jsx"
+  exclude:
+    - "node_modules/**"
+    - "**/*.test.*"
+    - "**/*.spec.*"
 ---
 
 # React Patterns
@@ -112,6 +120,119 @@ const MemoItem = memo(({ user }: { user: User }) => <li>{user.name}</li>);
 
 ---
 
+## Async Parallelization
+
+```tsx
+// CORRECT: Independent fetches run in parallel
+async function loadDashboard(userId: string) {
+  const [user, orders, preferences] = await Promise.all([
+    fetchUser(userId),
+    fetchOrders(userId),
+    fetchPreferences(userId),
+  ]);
+  return { user, orders, preferences };
+}
+
+// VIOLATION: Sequential fetches (3x slower)
+async function loadDashboardSlow(userId: string) {
+  const user = await fetchUser(userId);
+  const orders = await fetchOrders(userId);
+  const preferences = await fetchPreferences(userId);
+  return { user, orders, preferences };
+}
+```
+
+---
+
+## Bundle Size
+
+```tsx
+// CORRECT: Direct imports (tree-shakable)
+import { Button } from '@/components/Button';
+import { Card } from '@/components/Card';
+
+// VIOLATION: Barrel imports (imports entire library)
+import { Button, Card } from '@/components';
+
+// CORRECT: Dynamic import for heavy components
+const Chart = lazy(() => import('./Chart'));
+const Editor = lazy(() => import('./Editor'));
+
+function Dashboard() {
+  return (
+    <Suspense fallback={<Skeleton />}>
+      {showChart && <Chart data={data} />}
+    </Suspense>
+  );
+}
+```
+
+---
+
+## Re-render Optimization
+
+```tsx
+// CORRECT: Primitive deps (stable references)
+useEffect(() => {
+  fetchData(userId, isActive);
+}, [userId, isActive]); // primitives don't cause unnecessary runs
+
+// VIOLATION: Object/array deps (new reference every render)
+useEffect(() => {
+  fetchData(options);
+}, [options]); // { page: 1 } !== { page: 1 }
+
+// CORRECT: Stable callback with useCallback
+const handleClick = useCallback((id: string) => {
+  setSelected(id);
+}, []); // no deps = stable reference
+
+// VIOLATION: Inline function (new reference every render)
+<List onItemClick={(id) => setSelected(id)} />
+```
+
+---
+
+## Image Optimization
+
+```tsx
+// CORRECT: Optimized image with all attributes
+<img
+  src={url}
+  alt={description}
+  width={400}
+  height={300}
+  loading="lazy"
+  decoding="async"
+  style={{ aspectRatio: '4/3' }}
+/>
+
+// VIOLATION: Unoptimized image
+<img src={url} />  // No dimensions, no lazy loading, layout shift
+```
+
+---
+
+## Data Structure Performance
+
+```tsx
+// CORRECT: Set for O(1) membership checks
+const selectedIds = new Set(selected);
+const isSelected = (id: string) => selectedIds.has(id);
+
+// VIOLATION: Array.includes is O(n)
+const isSelected = (id: string) => selected.includes(id);
+
+// CORRECT: Map for key-value lookups
+const usersById = new Map(users.map(u => [u.id, u]));
+const getUser = (id: string) => usersById.get(id);
+
+// VIOLATION: Array.find is O(n)
+const getUser = (id: string) => users.find(u => u.id === id);
+```
+
+---
+
 ## Anti-Patterns
 
 ```tsx
@@ -147,3 +268,9 @@ useEffect(() => { setState(value); }, [value]);
 - [ ] Keys on list items (not index)
 - [ ] Loading/error states handled
 - [ ] Accessibility (aria-*, role)
+- [ ] Independent fetches parallelized with Promise.all
+- [ ] No barrel imports (direct imports for tree-shaking)
+- [ ] Large components lazy-loaded
+- [ ] Object/array deps avoided in useEffect (use primitives)
+- [ ] Set/Map used for lookups instead of Array.includes/find
+- [ ] Images have dimensions, lazy loading, and aspect-ratio

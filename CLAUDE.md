@@ -281,6 +281,13 @@ name: skill-name
 description: Brief description with trigger phrases (<180 chars for auto-activate skills)
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
+activation:
+  file-patterns:
+    - "**/*.tsx"
+    - "**/*.jsx"
+  exclude:
+    - "node_modules/**"
+    - "**/*.test.*"
 ---
 
 # Skill Name
@@ -512,13 +519,50 @@ skill-name/
 ```
 
 **What Stays in SKILL.md** (Essential - always loaded):
-- Frontmatter (name, description, allowed-tools)
+- Frontmatter (name, description, allowed-tools, activation)
 - Iron Law (non-negotiable principle)
 - When This Activates (trigger conditions)
 - Core categories with brief descriptions
 - 1-2 representative examples per category
 - Severity guidelines table
 - Pointer to references/
+
+### Glob Pattern Activation Schema
+
+Skills can declare file patterns for context-aware activation:
+
+```yaml
+---
+name: react
+description: React patterns...
+user-invocable: false
+allowed-tools: Read, Grep, Glob
+activation:
+  file-patterns:
+    - "**/*.tsx"
+    - "**/*.jsx"
+  exclude:
+    - "node_modules/**"
+    - "**/*.test.*"
+---
+```
+
+| Field | Description |
+|-------|-------------|
+| `file-patterns` | Glob patterns that trigger skill activation |
+| `exclude` | Patterns to ignore (always exclude node_modules) |
+
+**Standard Patterns by Skill:**
+
+| Skill | file-patterns | exclude |
+|-------|---------------|---------|
+| `react` | `**/*.tsx`, `**/*.jsx` | `node_modules/**`, `**/*.test.*` |
+| `typescript` | `**/*.ts`, `**/*.tsx` | `node_modules/**`, `**/*.d.ts` |
+| `accessibility` | `**/*.tsx`, `**/*.jsx`, `**/*.css` | `node_modules/**` |
+| `frontend-design` | `**/*.tsx`, `**/*.jsx`, `**/*.css`, `**/*.scss` | `node_modules/**` |
+| `test-design` | `**/*.test.*`, `**/*.spec.*`, `**/test/**` | `node_modules/**` |
+
+**Note:** Glob patterns are currently metadata hints. They document activation intent and future-proof skills for potential Claude Code support of conditional skill loading.
 
 **What Goes in references/** (Deferred - loaded when needed):
 - Extended code violations beyond first 1-2 per category

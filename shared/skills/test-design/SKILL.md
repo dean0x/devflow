@@ -3,6 +3,15 @@ name: test-design
 description: Test quality enforcement. Use when user asks to "write tests", "fix failing test", or tests have complex setup, mocking, or boilerplate.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
+activation:
+  file-patterns:
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/__tests__/**"
+  exclude:
+    - "node_modules/**"
 ---
 
 # Test Design Skill

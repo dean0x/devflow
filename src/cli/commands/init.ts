@@ -59,7 +59,7 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement (foundation layer)',
     commands: [],
     agents: [],
-    skills: ['code-smell', 'commit', 'core-patterns', 'docs-framework', 'git-safety', 'github-patterns', 'input-validation', 'pull-request', 'react', 'test-design', 'typescript'],
+    skills: ['accessibility', 'code-smell', 'commit', 'core-patterns', 'docs-framework', 'frontend-design', 'git-safety', 'github-patterns', 'input-validation', 'pull-request', 'react', 'test-design', 'typescript'],
   },
   {
     name: 'devflow-specify',
@@ -73,14 +73,14 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
-    skills: ['codebase-navigation', 'implementation-patterns', 'self-review'],
+    skills: ['accessibility', 'codebase-navigation', 'frontend-design', 'implementation-patterns', 'self-review'],
   },
   {
     name: 'devflow-review',
     description: 'Comprehensive code review',
     commands: ['/review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['review-methodology', 'security-patterns', 'architecture-patterns', 'performance-patterns', 'complexity-patterns', 'consistency-patterns', 'regression-patterns', 'tests-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns'],
+    skills: ['accessibility', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'frontend-design', 'performance-patterns', 'react', 'regression-patterns', 'review-methodology', 'security-patterns', 'tests-patterns'],
   },
   {
     name: 'devflow-resolve',
