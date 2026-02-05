@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`accessibility` skill** - WCAG 2.1 AA patterns for keyboard navigation, ARIA, contrast
+  - Iron Law: EVERY INTERACTION MUST BE POSSIBLE WITHOUT A MOUSE
+  - Auto-triggers when creating UI components, forms, or interactive elements
+- **`frontend-design` skill** - Intentional visual design patterns (Anthropic's 4 Dimensions)
+  - Iron Law: AESTHETICS MUST HAVE INTENT
+  - AI slop detection (purple-pink gradients, Inter without rationale, everything centered)
+  - Auto-triggers when working with CSS, styling, or visual design
+- **Enhanced `react` skill** - Added 5 new categories from Vercel best practices
+  - Async Parallelization (Promise.all for independent fetches)
+  - Bundle Size (no barrel imports, lazy loading)
+  - Re-render Optimization (primitive deps, stable callbacks)
+  - Image Optimization (dimensions, lazy loading, aspect-ratio)
+  - Data Structure Performance (Set/Map for O(1) lookups)
+- **Conditional frontend reviews** in `/review` command
+  - `react` review (if .tsx/.jsx files changed)
+  - `accessibility` review (if .tsx/.jsx files changed)
+  - `frontend-design` review (if .tsx/.jsx/.css/.scss files changed)
+- **Glob pattern activation schema** for skills
+  - Skills can declare `activation.file-patterns` and `activation.exclude` in frontmatter
+  - Future-proofs for conditional skill loading
 - **`devflow-github-patterns` skill** - Foundation skill for GitHub API interactions
   - Rate limiting patterns (1-2s delays, 60s wait if <10 remaining)
   - Comment deduplication algorithms

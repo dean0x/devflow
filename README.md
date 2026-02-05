@@ -125,6 +125,8 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 | `input-validation` | Creating API endpoints |
 | `typescript` | Working in TypeScript codebases |
 | `react` | Working with React components |
+| `accessibility` | Creating UI components, forms, interactive elements |
+| `frontend-design` | Working with CSS, styling, visual design |
 
 ## Documentation Structure
 
