@@ -39,6 +39,9 @@ Detect file types in diff to determine conditional reviews:
 | Condition | Adds Review |
 |-----------|-------------|
 | .ts/.tsx files | typescript |
+| .tsx/.jsx files | react |
+| .tsx/.jsx files | accessibility |
+| .tsx/.jsx/.css/.scss files | frontend-design |
 | DB/migration files | database |
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
@@ -57,6 +60,9 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | regression | ✓ | regression-patterns |
 | tests | ✓ | tests-patterns |
 | typescript | conditional | typescript |
+| react | conditional | react |
+| accessibility | conditional | accessibility |
+| frontend-design | conditional | frontend-design |
 | database | conditional | database-patterns |
 | dependencies | conditional | dependencies-patterns |
 | documentation | conditional | documentation-patterns |
@@ -117,7 +123,7 @@ Display results from all agents:
 │  ├─ Reviewer: consistency
 │  ├─ Reviewer: regression
 │  ├─ Reviewer: tests
-│  └─ Reviewer: [conditional: typescript, database, deps, docs]
+│  └─ Reviewer: [conditional: typescript, react, a11y, design, database, deps, docs]
 │
 ├─ Phase 3: Synthesis (PARALLEL)
 │  ├─ Git agent (comment-pr)

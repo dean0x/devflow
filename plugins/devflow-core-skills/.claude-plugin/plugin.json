@@ -12,10 +12,12 @@
   "keywords": ["skills", "quality", "patterns", "auto-activate", "enforcement", "foundation"],
   "agents": [],
   "skills": [
+    "accessibility",
     "code-smell",
     "commit",
     "core-patterns",
     "docs-framework",
+    "frontend-design",
     "git-safety",
     "github-patterns",
     "input-validation",

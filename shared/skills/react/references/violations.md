@@ -2,6 +2,161 @@
 
 Extended violation patterns for React reviews. Reference from main SKILL.md.
 
+## Vercel Performance Violations
+
+### Sequential Fetches
+
+```tsx
+// VIOLATION: Sequential fetches (waterfall)
+async function loadDashboard(userId: string) {
+  const user = await fetchUser(userId);
+  const orders = await fetchOrders(userId);  // Waits for user
+  const prefs = await fetchPreferences(userId);  // Waits for orders
+  return { user, orders, prefs };
+}
+// Total time: T(user) + T(orders) + T(prefs)
+// Should be: max(T(user), T(orders), T(prefs))
+
+// VIOLATION: Sequential in useEffect
+useEffect(() => {
+  async function load() {
+    setUser(await fetchUser(id));
+    setOrders(await fetchOrders(id));  // Sequential
+    setStats(await fetchStats(id));     // Sequential
+  }
+  load();
+}, [id]);
+```
+
+### Barrel Import Anti-Patterns
+
+```tsx
+// VIOLATION: Barrel import pulls entire library
+import { Button } from '@/components';
+import { formatDate, formatCurrency, formatNumber } from '@/utils';
+import { IconHome, IconUser } from '@/icons';
+
+// VIOLATION: Named imports from large packages
+import { debounce } from 'lodash';  // Imports entire lodash
+import { Button, Input, Select } from 'antd';  // Large bundle
+
+// VIOLATION: Not lazy loading heavy dependencies
+import Editor from '@monaco-editor/react';  // 2MB+ bundle
+import { Chart } from 'chart.js';  // Heavy charting library
+
+function Dashboard() {
+  const [showChart, setShowChart] = useState(false);
+  return (
+    <div>
+      {showChart && <Chart />}  {/* Loaded even when not shown */}
+    </div>
+  );
+}
+```
+
+### Re-render Causing Patterns
+
+```tsx
+// VIOLATION: Object literal in deps (new ref every render)
+useEffect(() => {
+  fetchData(config);
+}, [{ page: 1, limit: 10 }]);  // Always "changed"
+
+// VIOLATION: Array in deps
+useEffect(() => {
+  updateFilters(filters);
+}, [[filter1, filter2, filter3]]);  // New array every render
+
+// VIOLATION: Inline callback to memoized child
+const MemoChild = memo(Child);
+
+function Parent() {
+  return (
+    <MemoChild
+      onClick={() => console.log('clicked')}  // New fn = re-render
+      style={{ color: 'blue' }}  // New object = re-render
+    />
+  );
+}
+
+// VIOLATION: Computed value in render without memo
+function FilteredList({ items, filter }: Props) {
+  const filtered = items.filter(i => i.includes(filter));  // Every render
+  return <List items={filtered} />;
+}
+```
+
+### Unoptimized Images
+
+```tsx
+// VIOLATION: No dimensions (causes layout shift)
+<img src={url} alt={alt} />
+
+// VIOLATION: No lazy loading (loads all images immediately)
+{images.map(img => <img src={img.src} alt={img.alt} />)}
+
+// VIOLATION: No aspect ratio (jumps on load)
+<img
+  src={url}
+  width={400}
+  height={300}
+  // Missing: style={{ aspectRatio: '4/3' }}
+/>
+
+// VIOLATION: Eager loading below fold
+<img
+  src={heroImage}
+  alt="Hero"
+  loading="eager"  // Should be lazy for non-critical images
+/>
+```
+
+### Inefficient Data Structures
+
+```tsx
+// VIOLATION: Array.includes for frequent checks (O(n))
+function SelectableList({ items, selected }: Props) {
+  return (
+    <ul>
+      {items.map(item => (
+        <li className={selected.includes(item.id) ? 'selected' : ''}>
+          {/* O(n) check on every item render */}
+          {item.name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// VIOLATION: Array.find for lookups (O(n))
+function UserDisplay({ userId, users }: Props) {
+  const user = users.find(u => u.id === userId);  // O(n) every render
+  return <span>{user?.name}</span>;
+}
+
+// VIOLATION: Filter + map in render (double iteration)
+function ActiveUsers({ users }: Props) {
+  return (
+    <ul>
+      {users
+        .filter(u => u.active)
+        .map(u => <li key={u.id}>{u.name}</li>)
+      }
+    </ul>
+  );
+}
+
+// VIOLATION: Recreating Set every render
+function Tags({ tags, selected }: Props) {
+  const selectedSet = new Set(selected);  // Created every render
+  return tags.map(tag => (
+    <Tag selected={selectedSet.has(tag)} />
+  ));
+}
+```
+
+---
+
 ## Component Violations
 
 ### Prop Drilling

@@ -31,6 +31,9 @@ The orchestrator provides:
 | `database` | `~/.claude/skills/database-patterns/SKILL.md` |
 | `dependencies` | `~/.claude/skills/dependencies-patterns/SKILL.md` |
 | `documentation` | `~/.claude/skills/documentation-patterns/SKILL.md` |
+| `react` | `~/.claude/skills/react/SKILL.md` |
+| `accessibility` | `~/.claude/skills/accessibility/SKILL.md` |
+| `frontend-design` | `~/.claude/skills/frontend-design/SKILL.md` |
 
 ## Responsibilities
 
@@ -111,3 +114,6 @@ Report format for `{output_path}`:
 | database | If migration/schema files changed |
 | documentation | If docs changed |
 | dependencies | If package.json/lock files changed |
+| react | If .tsx/.jsx files changed |
+| accessibility | If .tsx/.jsx files changed |
+| frontend-design | If .tsx/.jsx/.css/.scss files changed |

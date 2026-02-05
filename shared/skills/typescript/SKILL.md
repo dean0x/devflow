@@ -3,6 +3,13 @@ name: typescript
 description: TypeScript patterns. Use when user works with .ts/.tsx files, asks about "generics", "type guards", "utility types", or type safety.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
+activation:
+  file-patterns:
+    - "**/*.ts"
+    - "**/*.tsx"
+  exclude:
+    - "node_modules/**"
+    - "**/*.d.ts"
 ---
 
 # TypeScript Patterns

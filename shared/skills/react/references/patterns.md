@@ -2,6 +2,328 @@
 
 Extended correct patterns for React development. Reference from main SKILL.md.
 
+---
+
+## Vercel Performance Patterns
+
+### Async Parallelization
+
+```tsx
+// CORRECT: Parallel independent fetches with named destructuring
+async function loadUserDashboard(userId: string) {
+  const [
+    { data: user },
+    { data: orders },
+    { data: notifications },
+    { data: preferences },
+  ] = await Promise.all([
+    fetchUser(userId),
+    fetchOrders(userId),
+    fetchNotifications(userId),
+    fetchPreferences(userId),
+  ]);
+
+  return {
+    user,
+    orders,
+    notifications,
+    preferences,
+  };
+}
+
+// CORRECT: Partial parallelization when some deps exist
+async function loadOrderDetails(orderId: string) {
+  // First: fetch order (needed for customer ID)
+  const order = await fetchOrder(orderId);
+
+  // Then: parallel fetch using order data
+  const [customer, products, shipping] = await Promise.all([
+    fetchCustomer(order.customerId),
+    fetchProducts(order.productIds),
+    fetchShippingStatus(order.trackingId),
+  ]);
+
+  return { order, customer, products, shipping };
+}
+```
+
+### Bundle Optimization
+
+```tsx
+// CORRECT: Direct component imports (tree-shakable)
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+
+// CORRECT: Direct icon imports
+import { ChevronDown } from 'lucide-react/dist/esm/icons/chevron-down';
+import { Search } from 'lucide-react/dist/esm/icons/search';
+
+// CORRECT: Route-based code splitting
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+
+function App() {
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <Routes>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/analytics" element={<Analytics />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+// CORRECT: Conditional lazy loading
+function Editor({ showPreview }: { showPreview: boolean }) {
+  const [Preview, setPreview] = useState<ComponentType | null>(null);
+
+  useEffect(() => {
+    if (showPreview && !Preview) {
+      import('./Preview').then((mod) => setPreview(() => mod.default));
+    }
+  }, [showPreview, Preview]);
+
+  return (
+    <div>
+      <EditorPane />
+      {Preview && <Preview />}
+    </div>
+  );
+}
+```
+
+### Re-render Prevention
+
+```tsx
+// CORRECT: Extract primitives from objects for deps
+function UserOrders({ user }: { user: User }) {
+  const userId = user.id;
+  const isActive = user.status === 'active';
+
+  useEffect(() => {
+    if (isActive) {
+      fetchOrders(userId);
+    }
+  }, [userId, isActive]); // primitives = stable deps
+}
+
+// CORRECT: Stable callback references
+function DataTable({ items, onSelect }: Props) {
+  const handleRowClick = useCallback((item: Item) => {
+    onSelect(item.id);
+  }, [onSelect]);
+
+  return (
+    <table>
+      {items.map((item) => (
+        <MemoizedRow
+          key={item.id}
+          item={item}
+          onClick={handleRowClick}
+        />
+      ))}
+    </table>
+  );
+}
+
+const MemoizedRow = memo(function Row({
+  item,
+  onClick,
+}: {
+  item: Item;
+  onClick: (item: Item) => void;
+}) {
+  return (
+    <tr onClick={() => onClick(item)}>
+      <td>{item.name}</td>
+    </tr>
+  );
+});
+
+// CORRECT: Memoize derived collections
+function FilteredList({ items, filter }: Props) {
+  const filteredItems = useMemo(
+    () => items.filter((item) => item.name.includes(filter)),
+    [items, filter]
+  );
+
+  // Also memoize the Set for O(1) lookups
+  const itemIds = useMemo(
+    () => new Set(filteredItems.map((i) => i.id)),
+    [filteredItems]
+  );
+
+  const isVisible = useCallback(
+    (id: string) => itemIds.has(id),
+    [itemIds]
+  );
+
+  return <List items={filteredItems} isVisible={isVisible} />;
+}
+```
+
+### Image Optimization
+
+```tsx
+// CORRECT: Fully optimized image component
+interface OptimizedImageProps {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  priority?: boolean;
+}
+
+function OptimizedImage({
+  src,
+  alt,
+  width,
+  height,
+  priority = false,
+}: OptimizedImageProps) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      width={width}
+      height={height}
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
+      style={{
+        aspectRatio: `${width}/${height}`,
+        objectFit: 'cover',
+      }}
+    />
+  );
+}
+
+// CORRECT: Responsive images with srcset
+function ResponsiveImage({ src, alt }: { src: string; alt: string }) {
+  return (
+    <img
+      src={`${src}?w=800`}
+      srcSet={`
+        ${src}?w=400 400w,
+        ${src}?w=800 800w,
+        ${src}?w=1200 1200w
+      `}
+      sizes="(max-width: 400px) 400px, (max-width: 800px) 800px, 1200px"
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+    />
+  );
+}
+
+// CORRECT: Image with blur placeholder
+function ImageWithPlaceholder({ src, alt, width, height }: Props) {
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width,
+        height,
+        backgroundColor: '#f0f0f0',
+      }}
+    >
+      <img
+        src={src}
+        alt={alt}
+        width={width}
+        height={height}
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        style={{
+          opacity: loaded ? 1 : 0,
+          transition: 'opacity 0.3s',
+        }}
+      />
+    </div>
+  );
+}
+```
+
+### Data Structure Performance
+
+```tsx
+// CORRECT: Map for complex key-value operations
+function useUsersMap(users: User[]) {
+  return useMemo(() => {
+    const byId = new Map<string, User>();
+    const byEmail = new Map<string, User>();
+
+    for (const user of users) {
+      byId.set(user.id, user);
+      byEmail.set(user.email.toLowerCase(), user);
+    }
+
+    return {
+      getById: (id: string) => byId.get(id),
+      getByEmail: (email: string) => byEmail.get(email.toLowerCase()),
+      has: (id: string) => byId.has(id),
+    };
+  }, [users]);
+}
+
+// CORRECT: Set for selection state
+function useSelection<T extends string>() {
+  const [selected, setSelected] = useState<Set<T>>(() => new Set());
+
+  const toggle = useCallback((id: T) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const isSelected = useCallback(
+    (id: T) => selected.has(id),
+    [selected]
+  );
+
+  const selectAll = useCallback((ids: T[]) => {
+    setSelected(new Set(ids));
+  }, []);
+
+  const clear = useCallback(() => {
+    setSelected(new Set());
+  }, []);
+
+  return { selected, toggle, isSelected, selectAll, clear };
+}
+
+// CORRECT: Efficient list filtering with index
+function useFilteredList<T extends { id: string }>(
+  items: T[],
+  filterFn: (item: T) => boolean
+) {
+  return useMemo(() => {
+    const filtered = items.filter(filterFn);
+    const indexById = new Map(filtered.map((item, i) => [item.id, i]));
+
+    return {
+      items: filtered,
+      count: filtered.length,
+      indexOf: (id: string) => indexById.get(id) ?? -1,
+      includes: (id: string) => indexById.has(id),
+    };
+  }, [items, filterFn]);
+}
+```
+
+---
+
 ## Component Patterns
 
 ### Composition with Compound Components
