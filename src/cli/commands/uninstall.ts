@@ -156,6 +156,7 @@ export const uninstallCommand = new Command('uninstall')
           'github-patterns',
           'implementation-patterns',
           'codebase-navigation',
+          'agent-teams',
           // Tier 2: Specialized Skills
           'test-design',
           'code-smell',
@@ -166,6 +167,8 @@ export const uninstallCommand = new Command('uninstall')
           // Tier 3: Domain-Specific Skills
           'typescript',
           'react',
+          'accessibility',
+          'frontend-design',
           // Review Pattern Skills (used by Reviewer agent)
           'architecture-patterns',
           'complexity-patterns',
