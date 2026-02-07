@@ -48,6 +48,8 @@ interface PluginDefinition {
   commands: string[];
   agents: string[];
   skills: string[];
+  /** Optional plugins are not installed by default — require explicit --plugin flag */
+  optional?: boolean;
 }
 
 /**
@@ -116,6 +118,14 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/devlog'],
     agents: ['devlog'],
     skills: [],
+  },
+  {
+    name: 'devflow-audit-claude',
+    description: 'Audit CLAUDE.md files against Anthropic best practices',
+    commands: ['/audit-claude'],
+    agents: [],
+    skills: [],
+    optional: true,
   },
 ];
 
@@ -219,7 +229,8 @@ export const initCommand = new Command('init')
       const pluginList = DEVFLOW_PLUGINS
         .map(plugin => {
           const cmds = plugin.commands.length > 0 ? plugin.commands.join(', ') : '(skills only)';
-          return `${color.cyan(plugin.name.padEnd(maxNameLen + 2))}${color.dim(plugin.description)}\n${' '.repeat(maxNameLen + 2)}${color.yellow(cmds)}`;
+          const optionalTag = plugin.optional ? color.dim(' (optional)') : '';
+          return `${color.cyan(plugin.name.padEnd(maxNameLen + 2))}${color.dim(plugin.description)}${optionalTag}\n${' '.repeat(maxNameLen + 2)}${color.yellow(cmds)}`;
         })
         .join('\n\n');
 
@@ -323,10 +334,10 @@ export const initCommand = new Command('init')
     const rootDir = path.resolve(__dirname, '../..');
     const pluginsDir = path.join(rootDir, 'plugins');
 
-    // Determine which plugins to install
+    // Determine which plugins to install (exclude optional plugins from default install)
     let pluginsToInstall = selectedPlugins.length > 0
       ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
-      : DEVFLOW_PLUGINS;
+      : DEVFLOW_PLUGINS.filter(p => !p.optional);
 
     // Auto-include core-skills when any DevFlow plugin is selected
     const coreSkillsPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
