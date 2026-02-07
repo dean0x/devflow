@@ -1,10 +1,10 @@
 ---
-description: Comprehensive branch review using specialized sub-agents for PR readiness
+description: Comprehensive branch review using agent teams for adversarial peer review with debate and consensus
 ---
 
 # Review Command
 
-Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
+Run a comprehensive code review of the current branch by spawning a review team where agents debate findings, then synthesize consensus results into PR comments.
 
 ## Usage
 
@@ -36,8 +36,8 @@ Return: branch, base_branch, branch-slug, PR#"
 
 Detect file types in diff to determine conditional reviews:
 
-| Condition | Adds Review |
-|-----------|-------------|
+| Condition | Adds Perspective |
+|-----------|-----------------|
 | .ts/.tsx files | typescript |
 | .tsx/.jsx files | react |
 | .tsx/.jsx files | accessibility |
@@ -46,96 +46,180 @@ Detect file types in diff to determine conditional reviews:
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
 
-### Phase 2: Run Reviews (Parallel)
+### Phase 2: Spawn Review Team
 
-Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add up to 4 more:
+Create an agent team for adversarial review. Always include 4 core perspectives; conditionally add more based on Phase 1 analysis.
 
-| Focus | Always | Pattern Skill |
-|-------|--------|---------------|
-| security | ✓ | security-patterns |
-| architecture | ✓ | architecture-patterns |
-| performance | ✓ | performance-patterns |
-| complexity | ✓ | complexity-patterns |
-| consistency | ✓ | consistency-patterns |
-| regression | ✓ | regression-patterns |
-| tests | ✓ | tests-patterns |
-| typescript | conditional | typescript |
-| react | conditional | react |
-| accessibility | conditional | accessibility |
-| frontend-design | conditional | frontend-design |
-| database | conditional | database-patterns |
-| dependencies | conditional | dependencies-patterns |
-| documentation | conditional | documentation-patterns |
+**Core perspectives (always):**
+- **Security**: vulnerabilities, injection, auth, crypto issues
+- **Architecture**: SOLID violations, coupling, layering, modularity
+- **Performance**: queries, algorithms, caching, I/O bottlenecks
+- **Quality**: complexity, tests, consistency, regression, naming
 
-Each Reviewer invocation (all in one message, **NOT background**):
+**Conditional perspectives (based on changed files):**
+- **TypeScript**: type safety, generics, utility types (if .ts/.tsx changed)
+- **React**: hooks, state, rendering, composition (if .tsx/.jsx changed)
+- **Accessibility**: ARIA, keyboard nav, focus management (if .tsx/.jsx changed)
+- **Frontend Design**: visual consistency, spacing, typography (if .tsx/.jsx/.css changed)
+- **Database**: schema, queries, migrations, indexes (if DB files changed)
+- **Dependencies**: CVEs, versions, licenses, supply chain (if package files changed)
+- **Documentation**: doc drift, missing docs, stale comments (if docs or significant code changed)
+
 ```
-Task(subagent_type="Reviewer", run_in_background=false):
-"Review focusing on {focus}. Apply {focus}-patterns.
-Follow 6-step process from review-methodology.
-PR: #{pr_number}, Base: {base_branch}
-IMPORTANT: Write report to .docs/reviews/{branch-slug}/{focus}.md using Write tool"
+Create a team named "review-{branch_slug}" to review PR #{pr_number}.
+
+Spawn review teammates:
+
+- "Security Reviewer"
+  Focus: Apply security-patterns skill. Check for injection, auth bypass, crypto
+  misuse, OWASP vulnerabilities. PR: #{pr_number}, Base: {base_branch}
+
+- "Architecture Reviewer"
+  Focus: Apply architecture-patterns skill. Check for SOLID violations, coupling,
+  layering issues, modularity problems. PR: #{pr_number}, Base: {base_branch}
+
+- "Performance Reviewer"
+  Focus: Apply performance-patterns skill. Check for N+1 queries, memory leaks,
+  algorithm issues, I/O bottlenecks. PR: #{pr_number}, Base: {base_branch}
+
+- "Quality Reviewer"
+  Focus: Apply complexity-patterns, consistency-patterns, tests-patterns,
+  regression-patterns skills. Check for complexity, test gaps, pattern violations,
+  regressions. PR: #{pr_number}, Base: {base_branch}
+
+[Add conditional perspectives based on Phase 1]
+
+Each reviewer:
+1. Run git diff {base_branch}...HEAD to see changes
+2. Follow 6-step review process from review-methodology
+3. Classify issues: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+4. Include file:line references for every finding
+5. Write report to .docs/reviews/{branch_slug}/{focus}.md
 ```
 
-### Phase 3: Synthesis (Parallel)
+### Phase 3: Debate Round
 
-**WAIT** for Phase 2, then spawn 3 agents **in a single message**:
+After all reviewers complete initial analysis, lead initiates adversarial debate:
+
+```
+Lead broadcast:
+"All reviewers: Share your top 3-5 findings. Then challenge findings
+from other reviewers you disagree with. Provide counter-evidence with
+file:line references.
+
+Rules:
+- Security: challenge architecture claims that affect attack surface
+- Architecture: challenge performance suggestions that break separation
+- Performance: challenge complexity assessments with benchmarking context
+- Quality: validate whether tests cover security and performance concerns
+
+Max 2 exchange rounds. Then submit final findings with confidence:
+- HIGH: Unchallenged or survived challenge with evidence
+- MEDIUM: Majority agreed, dissent noted
+- LOW: Genuinely split, both perspectives included"
+```
+
+Reviewers message each other directly:
+- Challenge findings they disagree with
+- Validate findings that align with their perspective
+- Update or withdraw findings based on peer evidence
+- Escalate unresolvable disagreements to lead
+
+### Phase 4: Synthesis and PR Comments
+
+**WAIT** for debate to complete, then lead produces outputs.
+
+Spawn 2 agents **in a single message**:
 
 **Git Agent (PR Comments)**:
 ```
 Task(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
-Read reviews from .docs/reviews/{branch-slug}/
-Create inline PR comments, deduplicate, consolidate skipped into summary"
+Read reviews from .docs/reviews/{branch_slug}/
+Create inline PR comments. Deduplicate overlapping findings.
+Consolidate skipped findings into summary comment.
+Include confidence levels from debate consensus."
 ```
 
-**Synthesizer Agent**:
-```
-Task(subagent_type="Synthesizer", run_in_background=false):
-"Mode: review
-Aggregate findings, determine merge recommendation
-Output: .docs/reviews/{branch-slug}/review-summary.{timestamp}.md"
+**Lead synthesizes review summary** (written to `.docs/reviews/{branch_slug}/review-summary.{timestamp}.md`):
+
+```markdown
+## Review Summary: {branch}
+
+### Merge Recommendation
+{APPROVE / REQUEST_CHANGES / BLOCK}
+
+### Consensus Findings (HIGH confidence)
+{Findings all reviewers agreed on or that survived challenge}
+
+### Majority Findings (MEDIUM confidence)
+{Findings most agreed on, with dissenting view noted}
+
+### Split Findings (LOW confidence)
+{Genuinely contested, both perspectives with evidence}
+
+### Issue Counts
+- 🔴 Blocking: {count}
+- ⚠️ Should-fix: {count}
+- ℹ️ Pre-existing: {count}
+
+### Debate Summary
+{Key exchanges that changed findings}
 ```
 
-### Phase 4: Report
+### Phase 5: Cleanup and Report
 
-Display results from all agents:
-- Merge recommendation (from Synthesizer)
+Lead shuts down all review teammates and calls cleanup.
+
+Display results:
+- Merge recommendation with confidence level
 - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
-- PR comments created/skipped (from Git)
+- PR comments created/skipped (from Git agent)
+- Key debate highlights
 - Artifact paths
 
 ## Architecture
 
 ```
-/review (orchestrator - spawns agents only)
+/review (orchestrator - creates team, coordinates debate)
 │
 ├─ Phase 0: Pre-flight
 │  └─ Git agent (ensure-pr-ready)
 │
 ├─ Phase 1: Analyze changed files
-│  └─ Detect file types for conditional reviews
+│  └─ Detect file types for conditional perspectives
 │
-├─ Phase 2: Reviews (PARALLEL)
-│  ├─ Reviewer: security
-│  ├─ Reviewer: architecture
-│  ├─ Reviewer: performance
-│  ├─ Reviewer: complexity
-│  ├─ Reviewer: consistency
-│  ├─ Reviewer: regression
-│  ├─ Reviewer: tests
-│  └─ Reviewer: [conditional: typescript, react, a11y, design, database, deps, docs]
+├─ Phase 2: Spawn review team
+│  ├─ Security Reviewer (teammate)
+│  ├─ Architecture Reviewer (teammate)
+│  ├─ Performance Reviewer (teammate)
+│  ├─ Quality Reviewer (teammate)
+│  └─ [Conditional: TypeScript, React, A11y, Design, DB, Deps, Docs]
 │
-├─ Phase 3: Synthesis (PARALLEL)
-│  ├─ Git agent (comment-pr)
-│  └─ Synthesizer agent (mode: review)
+├─ Phase 3: Debate round
+│  └─ Reviewers challenge each other (max 2 rounds)
 │
-└─ Phase 4: Display results
+├─ Phase 4: Synthesis
+│  ├─ Git agent (comment-pr with consensus findings)
+│  └─ Lead writes review-summary with confidence levels
+│
+└─ Phase 5: Cleanup and display results
 ```
 
 ## Principles
 
-1. **Orchestration only** - Command spawns agents, doesn't do git/review work itself
-2. **Parallel, not background** - Multiple agents in one message, but `run_in_background=false` so phases complete before proceeding
-3. **Git agent for git work** - All git operations go through Git agent
-4. **Clear ownership** - Each agent owns its output completely
-5. **Honest reporting** - Display agent outputs directly
+1. **Adversarial review** - Reviewers challenge each other's findings, not just report independently
+2. **Consensus confidence** - Findings classified by agreement level (HIGH/MEDIUM/LOW)
+3. **Orchestration only** - Command spawns team, coordinates debate, doesn't do review work itself
+4. **Git agent for git work** - All git operations go through Git agent
+5. **Bounded debate** - Max 2 exchange rounds, then converge
+6. **Honest reporting** - Report disagreements with evidence, don't paper over conflicts
+7. **Cleanup always** - Team resources released even on failure
+
+## Fallback
+
+If Agent Teams is unavailable (feature not enabled), fall back to parallel subagent mode:
+1. Spawn Reviewer subagents in parallel (one per focus, same message)
+2. Spawn Synthesizer subagent to aggregate findings
+3. Skip debate round (not possible without peer messaging)
+4. Note in report: "Review run without peer debate (Agent Teams not available)"

@@ -38,9 +38,11 @@ npx devflow-kit init --plugin=implement,review
 | Plugin | Command | Description |
 |--------|---------|-------------|
 | `devflow-specify` | `/specify` | Interactive feature specification with clarification gates |
-| `devflow-implement` | `/implement` | Complete task lifecycle (explore → plan → implement → validate) |
-| `devflow-review` | `/review` | Comprehensive code review with multiple focus areas |
+| `devflow-implement` | `/implement` | Complete task lifecycle with team-based exploration and planning |
+| `devflow-review` | `/review` | Adversarial code review with team debate and consensus |
 | `devflow-resolve` | `/resolve` | Process review issues - fix or defer to tech debt |
+| `devflow-debug` | `/debug` | Competing hypothesis debugging with agent teams |
+| `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
 | `devflow-catch-up` | `/catch-up` | Context restoration from status logs |
 | `devflow-devlog` | `/devlog` | Development session logging |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
@@ -61,30 +63,36 @@ Creates a GitHub issue with well-defined requirements ready for `/implement`.
 
 Executes a single task through the complete development lifecycle:
 
-1. **Exploration** - Understand the codebase and find relevant patterns
-2. **Planning** - Design the implementation approach
+1. **Exploration** - Agent team explores codebase with debate on findings
+2. **Planning** - Agent team designs approach with adversarial challenge
 3. **Implementation** - Write the code on a feature branch
 4. **Validation** - Run build, typecheck, lint, and tests
 5. **Refinement** - Simplify and review for quality
-6. **Alignment Check** - Verify implementation matches the original request
+6. **Alignment Check** - Shepherd↔Coder direct dialogue validates alignment
 
 Creates a PR when complete.
 
 ### /review
 
-Performs comprehensive code review across multiple focus areas:
+Performs adversarial code review where reviewers debate findings:
 
-- Security vulnerabilities
-- Architecture and design patterns
-- Performance issues
-- Code complexity
-- Test coverage and quality
-- Database patterns
-- Documentation alignment
-- Dependency risks
-- Regression detection
+- Security, Architecture, Performance, and Quality perspectives
+- Conditional: TypeScript, React, Accessibility, Database, Dependencies, Documentation
+- Reviewers challenge each other's findings with evidence
+- Findings classified by consensus: HIGH / MEDIUM / LOW confidence
 
-Provides actionable feedback with severity levels and specific fixes.
+Provides actionable feedback with severity levels, confidence, and specific fixes.
+
+### /debug
+
+Investigates bugs using competing hypotheses with an agent team:
+
+1. **Hypothesis Generation** - Identify 3-5 plausible explanations
+2. **Parallel Investigation** - Each agent investigates one hypothesis
+3. **Adversarial Debate** - Agents try to disprove each other's theories
+4. **Convergence** - Root cause is the hypothesis that survives scrutiny
+
+Produces a root cause analysis report with confidence level.
 
 ### /resolve
 
@@ -155,9 +163,15 @@ DevFlow creates project documentation in `.docs/`:
 /implement   # Execute the full lifecycle
 ```
 
+### Debugging an Issue
+```bash
+/debug "login fails after session timeout"
+/debug #42   # Investigate from GitHub issue
+```
+
 ### Before Creating a PR
 ```bash
-/review      # Comprehensive review across all focus areas
+/review      # Adversarial review with team debate
 /resolve     # Fix low-risk issues, defer high-risk to backlog
 ```
 

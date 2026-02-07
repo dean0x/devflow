@@ -13,6 +13,7 @@
   "agents": ["git", "skimmer", "synthesizer", "coder", "simplifier", "scrutinizer", "shepherd", "validator"],
   "skills": [
     "accessibility",
+    "agent-teams",
     "codebase-navigation",
     "frontend-design",
     "implementation-patterns",

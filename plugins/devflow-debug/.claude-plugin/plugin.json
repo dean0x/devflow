@@ -1,0 +1,18 @@
+{
+  "name": "devflow-debug",
+  "description": "Debugging workflows with competing hypothesis investigation using agent teams",
+  "author": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "version": "0.9.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": ["debugging", "hypotheses", "investigation", "agent-teams"],
+  "agents": ["git"],
+  "skills": [
+    "agent-teams",
+    "git-safety"
+  ]
+}

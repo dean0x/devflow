@@ -90,6 +90,13 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['implementation-patterns', 'security-patterns'],
   },
   {
+    name: 'devflow-debug',
+    description: 'Debugging with competing hypotheses',
+    commands: ['/debug'],
+    agents: ['git'],
+    skills: ['agent-teams', 'git-safety'],
+  },
+  {
     name: 'devflow-self-review',
     description: 'Self-review workflow (Simplifier + Scrutinizer)',
     commands: ['/self-review'],

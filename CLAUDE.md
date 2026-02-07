@@ -13,16 +13,18 @@ When working on DevFlow code, understand that this toolkit is designed to enhanc
 
 ## Architecture Overview
 
-DevFlow is organized as a plugin marketplace with 7 self-contained plugins:
+DevFlow is organized as a plugin marketplace with 9 self-contained plugins:
 
 1. **CLI Tool** (`src/cli/`) - TypeScript-based installer with plugin selection
-2. **Shared Skills** (`shared/skills/`) - Single source of truth for all 25 skills
+2. **Shared Skills** (`shared/skills/`) - Single source of truth for all 28 skills
 3. **Shared Agents** (`shared/agents/`) - Single source of truth for 10 reusable agents
 4. **Plugins** (`plugins/`) - Self-contained packages with commands, agents, and skills
    - `devflow-specify` - Feature specification workflow
-   - `devflow-implement` - Complete task implementation lifecycle
-   - `devflow-review` - Comprehensive code review
+   - `devflow-implement` - Complete task implementation lifecycle (with Agent Teams)
+   - `devflow-review` - Comprehensive code review (with Agent Teams)
    - `devflow-resolve` - Review issue resolution
+   - `devflow-debug` - Competing hypothesis debugging (with Agent Teams)
+   - `devflow-self-review` - Self-review workflow
    - `devflow-catch-up` - Context restoration
    - `devflow-devlog` - Session logging
    - `devflow-core-skills` - Auto-activating quality enforcement
@@ -387,6 +389,7 @@ DevFlow uses a **tiered skills system** where skills serve as shared knowledge l
 | `github-patterns` | GitHub API patterns (rate limiting, PR comments, issue management, releases) | Git |
 | `implementation-patterns` | Common implementation patterns (CRUD, API endpoints, events, config, logging) | Coder |
 | `codebase-navigation` | Codebase exploration, entry points, data flow tracing, pattern discovery | Coder |
+| `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /review, /implement, /debug |
 
 **Tier 1b: Pattern Skills** (domain expertise for Reviewer agent focus areas)
 
@@ -451,6 +454,7 @@ Every skill has a single, non-negotiable **Iron Law** - a core principle that mu
 | `docs-framework` | ALL ARTIFACTS FOLLOW NAMING CONVENTIONS |
 | `implementation-patterns` | FOLLOW EXISTING PATTERNS |
 | `codebase-navigation` | FIND PATTERNS BEFORE IMPLEMENTING |
+| `agent-teams` | TEAMMATES CHALLENGE EACH OTHER |
 
 **Pattern Skills (Reviewer focus areas):**
 
@@ -915,9 +919,11 @@ devflow/
 │   │   ├── agents/                   # GENERATED shared agents (gitignored)
 │   │   ├── skills/                   # GENERATED skills (gitignored)
 │   │   └── README.md
-│   ├── devflow-implement/            # Implementation plugin
-│   ├── devflow-review/               # Review plugin
+│   ├── devflow-implement/            # Implementation plugin (Agent Teams)
+│   ├── devflow-review/               # Review plugin (Agent Teams)
 │   ├── devflow-resolve/              # Resolution plugin
+│   ├── devflow-debug/                # Debugging plugin (Agent Teams)
+│   ├── devflow-self-review/          # Self-review plugin
 │   ├── devflow-catch-up/             # Context restoration plugin
 │   ├── devflow-devlog/               # Logging plugin
 │   └── devflow-core-skills/          # Auto-activate skills plugin
@@ -970,7 +976,7 @@ The `skills` and `agents` arrays declare which shared assets this plugin needs. 
 
 Skills and agents are **not duplicated** in the git repository. Instead:
 
-1. **Single source of truth**: All 25 skills live in `shared/skills/`, all 10 shared agents live in `shared/agents/`
+1. **Single source of truth**: All 28 skills live in `shared/skills/`, all 10 shared agents live in `shared/agents/`
 2. **Manifest declares needs**: Each plugin's `plugin.json` has `skills` and `agents` arrays
 3. **Build copies assets**: `npm run build:plugins` copies skills and agents to each plugin
 4. **Git ignores generated**: `plugins/*/skills/` and shared agent files are in `.gitignore`
@@ -1012,6 +1018,7 @@ If settings.json exists, prompts for confirmation before overwriting.
 - `statusLine` - Smart statusline with context percentage
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support for code intelligence
+- `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Enable Agent Teams for peer-to-peer agent collaboration
 - `extraKnownMarketplaces` - DevFlow plugin marketplace (`dean0x/devflow`)
 - `permissions.deny` - Security deny list (126 blocked operations) + sensitive file patterns
 

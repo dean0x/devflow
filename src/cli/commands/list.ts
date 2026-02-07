@@ -36,6 +36,11 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/resolve'],
   },
   {
+    name: 'devflow-debug',
+    description: 'Competing hypothesis debugging',
+    commands: ['/debug'],
+  },
+  {
     name: 'devflow-catch-up',
     description: 'Context restoration from status logs',
     commands: ['/catch-up'],

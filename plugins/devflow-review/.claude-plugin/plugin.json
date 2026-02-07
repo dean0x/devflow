@@ -13,6 +13,7 @@
   "agents": ["git", "reviewer", "synthesizer"],
   "skills": [
     "accessibility",
+    "agent-teams",
     "architecture-patterns",
     "complexity-patterns",
     "consistency-patterns",

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agent Teams integration** - Peer-to-peer agent collaboration across workflows
+  - `/review` uses adversarial review team with debate round and consensus findings
+  - `/implement` uses exploration and planning teams with debate, Shepherd↔Coder direct dialogue
+  - New `/debug` command for competing hypothesis investigation with agent teams
+  - `agent-teams` foundation skill with team spawning, challenge protocol, consensus formation
+  - `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enabled in default settings
+  - Graceful fallback to parallel subagents when Agent Teams is unavailable
+- **`devflow-debug` plugin** - New plugin for bug investigation
+  - `/debug` command spawns 3-5 hypothesis investigators
+  - Adversarial debate where agents actively disprove each other's theories
+  - Root cause analysis report with confidence levels
 - **`accessibility` skill** - WCAG 2.1 AA patterns for keyboard navigation, ARIA, contrast
   - Iron Law: EVERY INTERACTION MUST BE POSSIBLE WITHOUT A MOUSE
   - Auto-triggers when creating UI components, forms, or interactive elements
