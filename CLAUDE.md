@@ -19,10 +19,10 @@ DevFlow is organized as a plugin marketplace with 9 self-contained plugins:
 2. **Shared Skills** (`shared/skills/`) - Single source of truth for all 28 skills
 3. **Shared Agents** (`shared/agents/`) - Single source of truth for 10 reusable agents
 4. **Plugins** (`plugins/`) - Self-contained packages with commands, agents, and skills
-   - `devflow-specify` - Feature specification workflow
+   - `devflow-specify` - Feature specification workflow (with Agent Teams)
    - `devflow-implement` - Complete task implementation lifecycle (with Agent Teams)
    - `devflow-review` - Comprehensive code review (with Agent Teams)
-   - `devflow-resolve` - Review issue resolution
+   - `devflow-resolve` - Review issue resolution (with Agent Teams)
    - `devflow-debug` - Competing hypothesis debugging (with Agent Teams)
    - `devflow-self-review` - Self-review workflow
    - `devflow-catch-up` - Context restoration

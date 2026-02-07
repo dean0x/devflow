@@ -57,16 +57,42 @@ Find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
 ```
 
-### Phase 3: Explore Requirements (Parallel)
+### Phase 3: Explore Requirements (Agent Teams)
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context:
+Create an agent team for collaborative requirements exploration:
 
-| Focus | Thoroughness | Find |
-|-------|-------------|------|
-| User perspective | medium | Target users, goals, pain points, user journeys |
-| Similar features | medium | Comparable features, scope patterns, edge cases |
-| Constraints | quick | Dependencies, business rules, security, performance |
-| Failure modes | quick | Error states, edge cases, validation needs |
+```
+Create a team named "spec-explore-{feature-slug}" to explore requirements for: {feature}
+
+Spawn exploration teammates (with Skimmer context):
+
+- "User Perspective Explorer"
+  Focus: Target users, goals, pain points, user journeys.
+  Skimmer context: {skimmer output}
+
+- "Similar Features Explorer"
+  Focus: Comparable features in codebase, scope patterns, precedents.
+  Skimmer context: {skimmer output}
+
+- "Constraints Explorer"
+  Focus: Dependencies, business rules, security requirements, performance limits.
+  Skimmer context: {skimmer output}
+
+- "Failure Mode Explorer"
+  Focus: Error states, edge cases, validation needs, what could go wrong.
+  Skimmer context: {skimmer output}
+
+After initial exploration, teammates debate:
+- Constraints challenges user perspective: "This requirement conflicts with X constraint"
+- Failure modes challenges similar features: "That pattern failed in Y scenario"
+- Similar features validates user perspective: "This UX pattern works well in Z"
+
+Max 2 debate rounds, then submit consensus requirements findings.
+```
+
+**Exploration team output**: Consensus findings on user needs, similar features, constraints, failure modes.
+
+Shut down exploration team and clean up. **CRITICAL**: Verify TeamDelete completed before creating planning team.
 
 ### Phase 4: Synthesize Exploration
 
@@ -76,18 +102,44 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context:
 Task(subagent_type="Synthesizer"):
 "Synthesize EXPLORATION outputs for: {feature}
 Mode: exploration
+Explorer consensus: {team exploration consensus output}
 Combine into: user needs, similar features, constraints, failure modes"
 ```
 
-### Phase 5: Plan Scope (Parallel)
+### Phase 5: Plan Scope (Agent Teams)
 
-Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
+Create an agent team for collaborative scope planning:
 
-| Focus | Output |
-|-------|--------|
-| User stories | Actors, actions, outcomes in "As X, I want Y, so that Z" format |
-| Scope boundaries | v1 MVP, v2 deferred, out of scope, dependencies |
-| Acceptance criteria | Success/failure/edge case criteria (testable) |
+```
+Create a team named "spec-plan-{feature-slug}" to plan scope for: {feature}
+
+Context from exploration: {synthesis output from Phase 4}
+
+Spawn planning teammates:
+
+- "User Stories Planner"
+  Focus: Actors, actions, outcomes in "As X, I want Y, so that Z" format.
+  Exploration context: {synthesis}
+
+- "Scope Boundaries Planner"
+  Focus: v1 MVP, v2 deferred, out of scope, dependencies.
+  Exploration context: {synthesis}
+
+- "Acceptance Criteria Planner"
+  Focus: Success/failure/edge case criteria (testable).
+  Exploration context: {synthesis}
+
+After initial planning, teammates debate:
+- Scope challenges user stories: "This story is too broad for v1"
+- Acceptance challenges scope: "These boundaries leave this edge case uncovered"
+- User stories challenges acceptance: "This criterion is untestable"
+
+Max 2 debate rounds, then submit consensus scope plan.
+```
+
+**Planning team output**: Consensus on user stories, scope boundaries, acceptance criteria.
+
+Shut down planning team and clean up. Verify TeamDelete completed.
 
 ### Phase 6: Synthesize Planning
 
@@ -97,6 +149,7 @@ Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 Task(subagent_type="Synthesizer"):
 "Synthesize PLANNING outputs for: {feature}
 Mode: planning
+Planner consensus: {team planning consensus output}
 Combine into: user stories, scope breakdown, acceptance criteria, open questions"
 ```
 
@@ -127,7 +180,7 @@ Report issue number and URL.
 ## Architecture
 
 ```
-/specify (orchestrator - spawns agents only)
+/specify (orchestrator - spawns teams and agents)
 │
 ├─ Phase 1: GATE 0 - Confirm Understanding ⛔ MANDATORY
 │  └─ AskUserQuestion: Validate interpretation
@@ -135,19 +188,21 @@ Report issue number and URL.
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase context via skim)
 │
-├─ Phase 3: Explore Requirements (PARALLEL)
-│  ├─ Explore: User perspective
-│  ├─ Explore: Similar features
-│  ├─ Explore: Constraints
-│  └─ Explore: Failure modes
+├─ Phase 3: Explore Requirements (Agent Teams)
+│  ├─ User Perspective Explorer (teammate)
+│  ├─ Similar Features Explorer (teammate)
+│  ├─ Constraints Explorer (teammate)
+│  ├─ Failure Mode Explorer (teammate)
+│  └─ Debate → consensus requirements findings
 │
 ├─ Phase 4: Synthesize Exploration
 │  └─ Synthesizer agent (mode: exploration)
 │
-├─ Phase 5: Plan Scope (PARALLEL)
-│  ├─ Plan: User stories
-│  ├─ Plan: Scope boundaries
-│  └─ Plan: Acceptance criteria
+├─ Phase 5: Plan Scope (Agent Teams)
+│  ├─ User Stories Planner (teammate)
+│  ├─ Scope Boundaries Planner (teammate)
+│  ├─ Acceptance Criteria Planner (teammate)
+│  └─ Debate → consensus scope plan
 │
 ├─ Phase 6: Synthesize Planning
 │  └─ Synthesizer agent (mode: planning)
@@ -173,6 +228,13 @@ Report issue number and URL.
 5. **Scope ruthlessly** - Small, focused issues ship faster
 6. **Testable criteria** - Every requirement must be verifiable
 7. **Enable /implement** - Output must be actionable for implementation
+
+## Fallback
+
+If Agent Teams is unavailable (feature not enabled):
+- Phase 3: Fall back to 4 parallel Explore subagents (user perspective, similar features, constraints, failure modes)
+- Phase 5: Fall back to 3 parallel Plan subagents (user stories, scope boundaries, acceptance criteria)
+- Note in report: "Specification run without team debate (Agent Teams not available)"
 
 ## Error Handling
 

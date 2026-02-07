@@ -37,8 +37,32 @@ Size team to task complexity. Assign distinct, non-overlapping perspectives.
 | Full review | 4-5 | Core perspectives covered |
 | Debug investigation | 3-5 | One per hypothesis |
 | Implementation | 2-4 | Domain-separated work units |
+| Specification | 3-4 | Debate requirements before user gates |
+| Resolution | 2-4 | Cross-validate fixes across batches |
 
-Use `model: haiku` for validation-only teammates to control costs.
+**Model guidance**: Explorers/Reviewers inherit parent model. Validators use `model: haiku`.
+
+### Detection and Fallback
+
+Attempt `TeamCreate`. If it fails or the tool is unavailable, fall back to parallel subagents:
+
+```
+try TeamCreate → success → proceed with team workflow
+                → failure → fall back to parallel Task() calls
+```
+
+Always document which mode was used in the final report.
+
+### Task List Coordination
+
+Use `TaskCreate` to give each teammate a trackable work unit. Lead checks `TaskList` for structured progress visibility beyond ad-hoc messages:
+
+```
+1. Lead creates tasks for each teammate's work unit
+2. Teammates claim tasks via TaskUpdate (owner: self)
+3. Teammates mark tasks completed when done
+4. Lead checks TaskList before proceeding to next phase
+```
 
 ### Challenge Protocol
 
@@ -60,8 +84,22 @@ Use `model: haiku` for validation-only teammates to control costs.
 
 Lead MUST always handle cleanup:
 1. Ensure all teammates have completed or been shut down
-2. Call cleanup to release resources
+2. Call `TeamDelete` to release resources
 3. Verify no orphaned sessions remain
+4. **CRITICAL**: Confirm cleanup completed before creating next team
+
+---
+
+## Limitations
+
+| Limitation | Impact | Guidance |
+|-----------|--------|----------|
+| One team per session | Cannot run two teams concurrently | Shut down and verify cleanup before creating next team |
+| No nested teams | Teammates cannot spawn sub-teams | Keep hierarchy flat; only lead creates teams |
+| No session resumption | Teammate state lost if interrupted | Start fresh; don't rely on teammate state persistence |
+| Shutdown can be slow | Cleanup may take several seconds | Wait for confirmation; don't race to create next team |
+| Task status may lag | Task list updates aren't instant | Use direct messages for time-sensitive coordination |
+| Permissions inherited | Teammates get lead's permissions at spawn | Cannot escalate permissions mid-session |
 
 ---
 
@@ -74,11 +112,13 @@ Lead MUST always handle cleanup:
 | Unlimited debate | Cap at 2 exchanges per topic, then escalate |
 | Lead does analysis work | Lead coordinates only; teammates do analysis |
 | Ignoring minority opinion | Report dissent with evidence in final output |
+| Creating team before prior cleanup | Wait for TeamDelete confirmation, then create |
+| Messaging-only coordination | Use task list for structured progress tracking |
 
 ---
 
 ## Extended References
 
-- `references/team-patterns.md` - Team structures for review, implement, debug workflows
+- `references/team-patterns.md` - Team structures for review, implement, debug, specify, resolve workflows
 - `references/communication.md` - Message protocols, broadcast patterns, debate formats
 - `references/cleanup.md` - Session management, orphan detection, resource cleanup

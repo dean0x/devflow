@@ -11,5 +11,5 @@
   "license": "MIT",
   "keywords": ["specification", "requirements", "planning", "issues", "github"],
   "agents": ["skimmer", "synthesizer"],
-  "skills": []
+  "skills": ["agent-teams"]
 }
