@@ -8,6 +8,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps } from '../plugins.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -37,111 +38,6 @@ interface InitOptions {
   overrideSettings?: boolean;
   plugin?: string;
   list?: boolean;
-}
-
-/**
- * Plugin definition with metadata
- */
-interface PluginDefinition {
-  name: string;
-  description: string;
-  commands: string[];
-  agents: string[];
-  skills: string[];
-}
-
-/**
- * Available DevFlow plugins
- */
-const DEVFLOW_PLUGINS: PluginDefinition[] = [
-  {
-    name: 'devflow-core-skills',
-    description: 'Auto-activating quality enforcement (foundation layer)',
-    commands: [],
-    agents: [],
-    skills: ['accessibility', 'code-smell', 'commit', 'core-patterns', 'docs-framework', 'frontend-design', 'git-safety', 'github-patterns', 'input-validation', 'pull-request', 'react', 'test-design', 'typescript'],
-  },
-  {
-    name: 'devflow-specify',
-    description: 'Interactive feature specification',
-    commands: ['/specify'],
-    agents: ['skimmer', 'synthesizer'],
-    skills: [],
-  },
-  {
-    name: 'devflow-implement',
-    description: 'Complete task implementation workflow',
-    commands: ['/implement'],
-    agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
-    skills: ['accessibility', 'codebase-navigation', 'frontend-design', 'implementation-patterns', 'self-review'],
-  },
-  {
-    name: 'devflow-review',
-    description: 'Comprehensive code review',
-    commands: ['/review'],
-    agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['accessibility', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'frontend-design', 'performance-patterns', 'react', 'regression-patterns', 'review-methodology', 'security-patterns', 'tests-patterns'],
-  },
-  {
-    name: 'devflow-resolve',
-    description: 'Process and fix review issues',
-    commands: ['/resolve'],
-    agents: ['git', 'resolver', 'simplifier'],
-    skills: ['implementation-patterns', 'security-patterns'],
-  },
-  {
-    name: 'devflow-debug',
-    description: 'Debugging with competing hypotheses',
-    commands: ['/debug'],
-    agents: ['git'],
-    skills: ['agent-teams', 'git-safety'],
-  },
-  {
-    name: 'devflow-self-review',
-    description: 'Self-review workflow (Simplifier + Scrutinizer)',
-    commands: ['/self-review'],
-    agents: ['simplifier', 'scrutinizer', 'validator'],
-    skills: ['self-review', 'core-patterns'],
-  },
-  {
-    name: 'devflow-catch-up',
-    description: 'Context restoration from status logs',
-    commands: ['/catch-up'],
-    agents: ['catch-up'],
-    skills: [],
-  },
-  {
-    name: 'devflow-devlog',
-    description: 'Development session logging',
-    commands: ['/devlog'],
-    agents: ['devlog'],
-    skills: [],
-  },
-];
-
-/**
- * Build maps of unique assets to their source plugin (first plugin that declares them)
- * This ensures each skill/agent is copied only once during installation
- */
-function buildAssetMaps(plugins: PluginDefinition[]): {
-  skillsMap: Map<string, string>;
-  agentsMap: Map<string, string>;
-} {
-  const skillsMap = new Map<string, string>();
-  const agentsMap = new Map<string, string>();
-  for (const plugin of plugins) {
-    for (const skill of plugin.skills) {
-      if (!skillsMap.has(skill)) {
-        skillsMap.set(skill, plugin.name);
-      }
-    }
-    for (const agent of plugin.agents) {
-      if (!agentsMap.has(agent)) {
-        agentsMap.set(agent, plugin.name);
-      }
-    }
-  }
-  return { skillsMap, agentsMap };
 }
 
 /**
@@ -219,7 +115,8 @@ export const initCommand = new Command('init')
       const pluginList = DEVFLOW_PLUGINS
         .map(plugin => {
           const cmds = plugin.commands.length > 0 ? plugin.commands.join(', ') : '(skills only)';
-          return `${color.cyan(plugin.name.padEnd(maxNameLen + 2))}${color.dim(plugin.description)}\n${' '.repeat(maxNameLen + 2)}${color.yellow(cmds)}`;
+          const optionalTag = plugin.optional ? color.dim(' (optional)') : '';
+          return `${color.cyan(plugin.name.padEnd(maxNameLen + 2))}${color.dim(plugin.description)}${optionalTag}\n${' '.repeat(maxNameLen + 2)}${color.yellow(cmds)}`;
         })
         .join('\n\n');
 
@@ -323,10 +220,10 @@ export const initCommand = new Command('init')
     const rootDir = path.resolve(__dirname, '../..');
     const pluginsDir = path.join(rootDir, 'plugins');
 
-    // Determine which plugins to install
+    // Determine which plugins to install (exclude optional plugins from default install)
     let pluginsToInstall = selectedPlugins.length > 0
       ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
-      : DEVFLOW_PLUGINS;
+      : DEVFLOW_PLUGINS.filter(p => !p.optional);
 
     // Auto-include core-skills when any DevFlow plugin is selected
     const coreSkillsPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
@@ -639,10 +536,8 @@ export const initCommand = new Command('init')
       }
     }
 
-    // Show installed plugins and commands
-    const pluginsToShow = selectedPlugins.length > 0
-      ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
-      : DEVFLOW_PLUGINS;
+    // Show installed plugins and commands (match what was actually installed)
+    const pluginsToShow = pluginsToInstall;
 
     const installedCommands = pluginsToShow.flatMap(p => p.commands).filter(c => c.length > 0);
     if (installedCommands.length > 0) {
