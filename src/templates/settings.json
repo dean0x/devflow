@@ -4,6 +4,7 @@
     "type": "command",
     "command": "${DEVFLOW_DIR}/scripts/statusline.sh"
   },
+  "teammateMode": "auto",
   "env": {
     "ENABLE_TOOL_SEARCH": "true",
     "ENABLE_LSP_TOOL": "true",

@@ -68,7 +68,45 @@ Create execution plan:
 - **Dependent batches** - Mark for SEQUENTIAL execution
 - **Max 5 issues per batch** - Keep batches manageable
 
-### Phase 4: Resolve (Parallel where possible)
+### Phase 4: Resolve (Agent Teams with cross-validation)
+
+**With Agent Teams:**
+
+Create a resolution team for cross-validated fixes:
+
+```
+Create a team named "resolve-{branch-slug}" to resolve review issues.
+
+Spawn resolver teammates (one per independent batch):
+
+- "Resolver Batch 1"
+  ISSUES: [{batch 1 issues}]
+  BRANCH: {branch-slug}
+  BATCH_ID: batch-1
+  Validate each issue, decide FIX vs TECH_DEBT, implement fixes.
+
+- "Resolver Batch 2"
+  ISSUES: [{batch 2 issues}]
+  BRANCH: {branch-slug}
+  BATCH_ID: batch-2
+  Validate each issue, decide FIX vs TECH_DEBT, implement fixes.
+
+(Additional resolvers for additional batches)
+
+After initial fixes complete, cross-validation debate:
+Lead broadcasts: "Review each other's fixes. Does my fix in file-a conflict with your fix in file-b? Did either of us introduce a regression?"
+- Resolver A: "My fix changes the interface used by Resolver B's files"
+- Resolver B: "Confirmed — need to update my import after A's change"
+- Resolvers coordinate the fix or escalate conflict to lead
+
+Max 2 debate rounds, then submit consensus resolution.
+```
+
+Shut down resolution team and clean up.
+
+For dependent batches that cannot run in parallel, spawn sequentially within the team and wait for completion before spawning dependents.
+
+**Without Agent Teams (fallback):**
 
 Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
 
@@ -145,7 +183,7 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 ## Architecture
 
 ```
-/resolve (orchestrator - spawns agents only)
+/resolve (orchestrator - spawns teams and agents)
 │
 ├─ Phase 0: Pre-flight
 │  └─ Git agent (validate-branch)
@@ -159,10 +197,11 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 ├─ Phase 3: Plan batches
 │  └─ Group issues, determine parallel vs sequential
 │
-├─ Phase 4: Resolve (PARALLEL where independent)
-│  ├─ Resolver: Batch 1 (file-a issues)
-│  ├─ Resolver: Batch 2 (file-b issues)
-│  └─ Resolver: Batch 3 (waits if depends on 1 or 2)
+├─ Phase 4: Resolve (Agent Teams with cross-validation)
+│  ├─ Resolver: Batch 1 (teammate)
+│  ├─ Resolver: Batch 2 (teammate)
+│  ├─ Resolver: Batch 3 (teammate, waits if depends on 1 or 2)
+│  └─ Cross-validation debate → consensus on conflicts
 │
 ├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred, blocked

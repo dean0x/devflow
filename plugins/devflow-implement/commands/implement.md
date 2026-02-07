@@ -92,7 +92,7 @@ Max 2 debate rounds, then submit consensus exploration findings.
 
 **Exploration team output**: Consensus findings on patterns, integration points, reusable code, edge cases.
 
-Shut down exploration team and clean up.
+Shut down exploration team and clean up. **CRITICAL**: Verify team cleanup completed (TeamDelete confirmed) before creating the planning team in Phase 4. One team per session — racing to create the next team before cleanup finishes will fail silently.
 
 ### Phase 3: Synthesize Exploration
 
@@ -153,7 +153,7 @@ Max 2 debate rounds, then submit consensus plan.
 - **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODERS (2-3 phases)
 - **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODERS (more phases)
 
-Shut down planning team and clean up.
+Shut down planning team and clean up. **CRITICAL**: Verify team cleanup completed (TeamDelete confirmed) before creating the alignment team in Phase 9. One team per session — racing to create the next team before cleanup finishes will fail silently.
 
 ### Phase 5: Synthesize Planning
 
@@ -374,7 +374,7 @@ Rules:
 4. Max 2 exchanges before escalating to lead
 ```
 
-After dialogue completes, shut down alignment team.
+After dialogue completes, shut down alignment team and verify cleanup (TeamDelete confirmed).
 
 **Without Agent Teams (fallback):**
 
