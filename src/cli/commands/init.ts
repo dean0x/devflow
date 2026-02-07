@@ -68,28 +68,28 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Interactive feature specification',
     commands: ['/specify'],
     agents: ['skimmer', 'synthesizer'],
-    skills: [],
+    skills: ['agent-teams'],
   },
   {
     name: 'devflow-implement',
     description: 'Complete task implementation workflow',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
-    skills: ['accessibility', 'codebase-navigation', 'frontend-design', 'implementation-patterns', 'self-review'],
+    skills: ['accessibility', 'agent-teams', 'codebase-navigation', 'frontend-design', 'implementation-patterns', 'self-review'],
   },
   {
     name: 'devflow-review',
     description: 'Comprehensive code review',
     commands: ['/review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['accessibility', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'frontend-design', 'performance-patterns', 'react', 'regression-patterns', 'review-methodology', 'security-patterns', 'tests-patterns'],
+    skills: ['accessibility', 'agent-teams', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'frontend-design', 'performance-patterns', 'react', 'regression-patterns', 'review-methodology', 'security-patterns', 'tests-patterns'],
   },
   {
     name: 'devflow-resolve',
     description: 'Process and fix review issues',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['implementation-patterns', 'security-patterns'],
+    skills: ['agent-teams', 'implementation-patterns', 'security-patterns'],
   },
   {
     name: 'devflow-debug',
@@ -123,7 +123,7 @@ const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-audit-claude',
     description: 'Audit CLAUDE.md files against Anthropic best practices',
     commands: ['/audit-claude'],
-    agents: [],
+    agents: ['claude-md-auditor'],
     skills: [],
     optional: true,
   },
@@ -650,10 +650,8 @@ export const initCommand = new Command('init')
       }
     }
 
-    // Show installed plugins and commands
-    const pluginsToShow = selectedPlugins.length > 0
-      ? DEVFLOW_PLUGINS.filter(p => selectedPlugins.includes(p.name))
-      : DEVFLOW_PLUGINS;
+    // Show installed plugins and commands (match what was actually installed)
+    const pluginsToShow = pluginsToInstall;
 
     const installedCommands = pluginsToShow.flatMap(p => p.commands).filter(c => c.length > 0);
     if (installedCommands.length > 0) {
