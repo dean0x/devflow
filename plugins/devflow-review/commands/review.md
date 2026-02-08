@@ -68,41 +68,76 @@ Create an agent team for adversarial review. Always include 4 core perspectives;
 ```
 Create a team named "review-{branch_slug}" to review PR #{pr_number}.
 
-Spawn review teammates:
+Spawn review teammates with self-contained prompts:
 
-- "Security Reviewer"
-  Focus: Apply security-patterns skill. Check for injection, auth bypass, crypto
-  misuse, OWASP vulnerabilities. PR: #{pr_number}, Base: {base_branch}
+- Name: "security-reviewer"
+  Prompt: |
+    You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
+    1. Read your skill: `Read ~/.claude/skills/security-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+    3. Get the diff: `git diff {base_branch}...HEAD`
+    4. Apply the 6-step review process from review-methodology
+    5. Focus: injection, auth bypass, crypto misuse, OWASP vulnerabilities
+    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    7. Include file:line references for every finding
+    8. Write your report: `Write to .docs/reviews/{branch_slug}/security.md`
+    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Security review done")
 
-- "Architecture Reviewer"
-  Focus: Apply architecture-patterns skill. Check for SOLID violations, coupling,
-  layering issues, modularity problems. PR: #{pr_number}, Base: {base_branch}
+- Name: "architecture-reviewer"
+  Prompt: |
+    You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
+    1. Read your skill: `Read ~/.claude/skills/architecture-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+    3. Get the diff: `git diff {base_branch}...HEAD`
+    4. Apply the 6-step review process from review-methodology
+    5. Focus: SOLID violations, coupling, layering issues, modularity problems
+    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    7. Include file:line references for every finding
+    8. Write your report: `Write to .docs/reviews/{branch_slug}/architecture.md`
+    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Architecture review done")
 
-- "Performance Reviewer"
-  Focus: Apply performance-patterns skill. Check for N+1 queries, memory leaks,
-  algorithm issues, I/O bottlenecks. PR: #{pr_number}, Base: {base_branch}
+- Name: "performance-reviewer"
+  Prompt: |
+    You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
+    1. Read your skill: `Read ~/.claude/skills/performance-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+    3. Get the diff: `git diff {base_branch}...HEAD`
+    4. Apply the 6-step review process from review-methodology
+    5. Focus: N+1 queries, memory leaks, algorithm issues, I/O bottlenecks
+    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    7. Include file:line references for every finding
+    8. Write your report: `Write to .docs/reviews/{branch_slug}/performance.md`
+    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Performance review done")
 
-- "Quality Reviewer"
-  Focus: Apply complexity-patterns, consistency-patterns, tests-patterns,
-  regression-patterns skills. Check for complexity, test gaps, pattern violations,
-  regressions. PR: #{pr_number}, Base: {base_branch}
+- Name: "quality-reviewer"
+  Prompt: |
+    You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
+    1. Read your skills:
+       - `Read ~/.claude/skills/complexity-patterns/SKILL.md`
+       - `Read ~/.claude/skills/consistency-patterns/SKILL.md`
+       - `Read ~/.claude/skills/tests-patterns/SKILL.md`
+       - `Read ~/.claude/skills/regression-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+    3. Get the diff: `git diff {base_branch}...HEAD`
+    4. Apply the 6-step review process from review-methodology
+    5. Focus: complexity, test gaps, pattern violations, regressions, naming
+    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    7. Include file:line references for every finding
+    8. Write your report: `Write to .docs/reviews/{branch_slug}/quality.md`
+    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Quality review done")
 
-[Add conditional perspectives based on Phase 1]
-
-Each reviewer:
-1. Run git diff {base_branch}...HEAD to see changes
-2. Follow 6-step review process from review-methodology
-3. Classify issues: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-4. Include file:line references for every finding
-5. Write report to .docs/reviews/{branch_slug}/{focus}.md
+[Add conditional perspectives based on Phase 1 — follow same pattern:
+ explicit skill path, diff command, output path, SendMessage for completion]
 ```
 
 ### Phase 3: Debate Round
 
 After all reviewers complete initial analysis, lead initiates adversarial debate:
 
+Lead initiates debate via broadcast:
+
 ```
-Lead broadcast:
+SendMessage(type: "broadcast", summary: "Debate: share and challenge findings"):
 "All reviewers: Share your top 3-5 findings. Then challenge findings
 from other reviewers you disagree with. Provide counter-evidence with
 file:line references.
@@ -119,11 +154,11 @@ Max 2 exchange rounds. Then submit final findings with confidence:
 - LOW: Genuinely split, both perspectives included"
 ```
 
-Reviewers message each other directly:
-- Challenge findings they disagree with
-- Validate findings that align with their perspective
+Reviewers message each other directly using SendMessage:
+- `SendMessage(type: "message", recipient: "{reviewer-name}", summary: "Challenge: {topic}")` to challenge a specific finding
+- `SendMessage(type: "message", recipient: "{reviewer-name}", summary: "Validate: {topic}")` to validate alignment
+- `SendMessage(type: "message", recipient: "team-lead", summary: "Escalation: {topic}")` for unresolvable disagreements
 - Update or withdraw findings based on peer evidence
-- Escalate unresolvable disagreements to lead
 
 ### Phase 4: Synthesis and PR Comments
 
@@ -169,7 +204,16 @@ Include confidence levels from debate consensus."
 
 ### Phase 5: Cleanup and Report
 
-Lead shuts down all review teammates and calls cleanup.
+Shut down all review teammates explicitly:
+
+```
+For each teammate in [security-reviewer, architecture-reviewer, performance-reviewer, quality-reviewer, ...conditional]:
+  SendMessage(type: "shutdown_request", recipient: "{name}", content: "Review complete")
+  Wait for shutdown_response (approve: true)
+
+TeamDelete
+Verify TeamDelete succeeded. If failed, retry once after 5s. If retry fails, HALT.
+```
 
 Display results:
 - Merge recommendation with confidence level

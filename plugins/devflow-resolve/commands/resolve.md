@@ -77,32 +77,68 @@ Create a resolution team for cross-validated fixes:
 ```
 Create a team named "resolve-{branch-slug}" to resolve review issues.
 
-Spawn resolver teammates (one per independent batch):
+Spawn resolver teammates with self-contained prompts (one per independent batch):
 
-- "Resolver Batch 1"
-  ISSUES: [{batch 1 issues}]
-  BRANCH: {branch-slug}
-  BATCH_ID: batch-1
-  Validate each issue, decide FIX vs TECH_DEBT, implement fixes.
+- Name: "resolver-batch-1"
+  Prompt: |
+    You are resolving review issues on branch {branch} (PR #{pr_number}).
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    2. Your issues to resolve:
+       {batch 1 issues — full structured list with id, file, line, severity, type, description, suggested_fix}
+    3. For each issue:
+       a. Read the code context around file:line
+       b. Validate: is this a real issue or false positive?
+       c. If real: assess risk (LOW → FIX now, HIGH → defer to TECH_DEBT)
+       d. If FIX: implement the fix, commit with descriptive message
+       e. If TECH_DEBT: document why it's deferred
+    4. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Batch 1: {n} fixed, {n} deferred, {n} false positive")
 
-- "Resolver Batch 2"
-  ISSUES: [{batch 2 issues}]
-  BRANCH: {branch-slug}
-  BATCH_ID: batch-2
-  Validate each issue, decide FIX vs TECH_DEBT, implement fixes.
+- Name: "resolver-batch-2"
+  Prompt: |
+    You are resolving review issues on branch {branch} (PR #{pr_number}).
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    2. Your issues to resolve:
+       {batch 2 issues — full structured list with id, file, line, severity, type, description, suggested_fix}
+    3. For each issue:
+       a. Read the code context around file:line
+       b. Validate: is this a real issue or false positive?
+       c. If real: assess risk (LOW → FIX now, HIGH → defer to TECH_DEBT)
+       d. If FIX: implement the fix, commit with descriptive message
+       e. If TECH_DEBT: document why it's deferred
+    4. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Batch 2: {n} fixed, {n} deferred, {n} false positive")
 
-(Additional resolvers for additional batches)
+(Additional resolvers for additional batches — same pattern)
 
-After initial fixes complete, cross-validation debate:
-Lead broadcasts: "Review each other's fixes. Does my fix in file-a conflict with your fix in file-b? Did either of us introduce a regression?"
-- Resolver A: "My fix changes the interface used by Resolver B's files"
-- Resolver B: "Confirmed — need to update my import after A's change"
-- Resolvers coordinate the fix or escalate conflict to lead
+After initial fixes complete, lead initiates cross-validation debate:
+SendMessage(type: "broadcast", summary: "Cross-validate: check for conflicts between fixes"):
+"Review each other's fixes. Does my fix in file-a conflict with your fix in file-b?
+Did either of us introduce a regression?"
+
+Resolvers cross-validate using direct messages:
+- SendMessage(type: "message", recipient: "resolver-batch-2", summary: "Conflict: interface change in file-a")
+  "My fix changes the interface used by your files — check imports"
+- SendMessage(type: "message", recipient: "resolver-batch-1", summary: "Confirmed: updating import")
+  "Confirmed — updating my import after your change"
+- SendMessage(type: "message", recipient: "team-lead", summary: "Escalation: conflicting fixes")
+  for unresolvable conflicts
 
 Max 2 debate rounds, then submit consensus resolution.
 ```
 
-Shut down resolution team and clean up.
+Shut down resolution team explicitly:
+
+```
+For each teammate in [resolver-batch-1, resolver-batch-2, ...]:
+  SendMessage(type: "shutdown_request", recipient: "{name}", content: "Resolution complete")
+  Wait for shutdown_response (approve: true)
+
+TeamDelete
+Verify TeamDelete succeeded. If failed, retry once after 5s. If retry fails, HALT.
+```
 
 For dependent batches that cannot run in parallel, spawn sequentially within the team and wait for completion before spawning dependents.
 

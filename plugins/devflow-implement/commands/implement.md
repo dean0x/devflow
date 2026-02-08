@@ -64,35 +64,84 @@ Create an agent team for collaborative codebase exploration:
 ```
 Create a team named "explore-{task-id}" to explore the codebase for: {task description}
 
-Spawn exploration teammates (with Skimmer context):
+Spawn exploration teammates with self-contained prompts:
 
-- "Architecture Explorer"
-  Focus: Find similar implementations, established patterns, module structure.
-  Skimmer context: {skimmer output}
+- Name: "architecture-explorer"
+  Prompt: |
+    You are exploring a codebase for task: {task description}
+    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    2. Skimmer context (files/patterns already identified):
+       {skimmer output}
+    3. Your deliverable: Find similar implementations, established patterns,
+       module structure, and architectural conventions relevant to this task.
+    4. Document findings with file:path references.
+    5. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Architecture exploration done")
 
-- "Integration Explorer"
-  Focus: Find entry points, services, database models, configuration.
-  Skimmer context: {skimmer output}
+- Name: "integration-explorer"
+  Prompt: |
+    You are exploring a codebase for task: {task description}
+    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    2. Skimmer context (files/patterns already identified):
+       {skimmer output}
+    3. Your deliverable: Find entry points, services, database models,
+       configuration, and integration points relevant to this task.
+    4. Document findings with file:path references.
+    5. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Integration exploration done")
 
-- "Reusable Code Explorer"
-  Focus: Find utilities, helpers, validation patterns, error handling to reuse.
-  Skimmer context: {skimmer output}
+- Name: "reusable-code-explorer"
+  Prompt: |
+    You are exploring a codebase for task: {task description}
+    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    2. Skimmer context (files/patterns already identified):
+       {skimmer output}
+    3. Your deliverable: Find utilities, helpers, validation patterns,
+       and error handling that can be reused for this task.
+    4. Document findings with file:path references.
+    5. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Reusable code exploration done")
 
-- "Edge Case Explorer"
-  Focus: Find error scenarios, race conditions, permission failures, boundary cases.
-  Skimmer context: {skimmer output}
+- Name: "edge-case-explorer"
+  Prompt: |
+    You are exploring a codebase for task: {task description}
+    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    2. Skimmer context (files/patterns already identified):
+       {skimmer output}
+    3. Your deliverable: Find error scenarios, race conditions, permission
+       failures, and boundary cases relevant to this task.
+    4. Document findings with file:path references.
+    5. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Edge case exploration done")
 
-After initial exploration, teammates debate:
+After initial exploration, lead initiates debate:
+SendMessage(type: "broadcast", summary: "Debate: challenge exploration findings"):
 - Architecture challenges edge cases: "This boundary isn't handled by existing patterns"
 - Integration challenges reusable code: "That helper doesn't cover our integration point"
 - Edge cases challenges architecture: "This pattern fails under concurrent access"
+Teammates use SendMessage(type: "message", recipient: "{name}") for direct challenges.
 
 Max 2 debate rounds, then submit consensus exploration findings.
 ```
 
 **Exploration team output**: Consensus findings on patterns, integration points, reusable code, edge cases.
 
-Shut down exploration team and clean up. **CRITICAL**: Verify team cleanup completed (TeamDelete confirmed) before creating the planning team in Phase 4. One team per session — racing to create the next team before cleanup finishes will fail silently.
+**Team Shutdown Protocol** (must complete before Phase 4):
+
+```
+Step 1: Shutdown each teammate
+  SendMessage(type: "shutdown_request", recipient: "architecture-explorer", content: "Exploration complete")
+  SendMessage(type: "shutdown_request", recipient: "integration-explorer", content: "Exploration complete")
+  SendMessage(type: "shutdown_request", recipient: "reusable-code-explorer", content: "Exploration complete")
+  SendMessage(type: "shutdown_request", recipient: "edge-case-explorer", content: "Exploration complete")
+  Wait for each shutdown_response (approve: true)
+
+Step 2: TeamDelete
+
+Step 3: GATE — Verify TeamDelete succeeded
+  If failed → retry once after 5s
+  If retry failed → HALT and report: "Exploration team cleanup failed. Cannot create planning team."
+```
 
 ### Phase 3: Synthesize Exploration
 
@@ -114,27 +163,48 @@ Create an agent team for collaborative implementation planning:
 ```
 Create a team named "plan-{task-id}" to plan implementation of: {task description}
 
-Context from exploration: {synthesis output from Phase 3}
+Spawn planning teammates with self-contained prompts:
 
-Spawn planning teammates:
+- Name: "implementation-planner"
+  Prompt: |
+    You are planning implementation for task: {task description}
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    2. Exploration synthesis (what we know about the codebase):
+       {synthesis output from Phase 3}
+    3. Your deliverable: Step-by-step coding approach with specific files
+       to create/modify, dependencies between steps, and execution order.
+    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Implementation plan ready")
 
-- "Implementation Planner"
-  Focus: Step-by-step coding approach with files, dependencies, and order.
-  Exploration context: {synthesis}
+- Name: "testing-planner"
+  Prompt: |
+    You are planning the test strategy for task: {task description}
+    1. Read your skill: `Read ~/.claude/skills/test-design/SKILL.md`
+    2. Exploration synthesis (what we know about the codebase):
+       {synthesis output from Phase 3}
+    3. Your deliverable: Test strategy — unit tests, integration tests,
+       edge case coverage, testing patterns to follow from the codebase.
+    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Test plan ready")
 
-- "Testing Planner"
-  Focus: Test strategy - unit tests, integration tests, edge case coverage.
-  Exploration context: {synthesis}
+- Name: "risk-planner"
+  Prompt: |
+    You are assessing risk and execution strategy for task: {task description}
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    2. Exploration synthesis (what we know about the codebase):
+       {synthesis output from Phase 3}
+    3. Your deliverable: Risk assessment, rollback strategy, and execution
+       strategy decision (SINGLE_CODER vs SEQUENTIAL_CODERS vs PARALLEL_CODERS)
+       based on artifact independence, context capacity, and domain specialization.
+    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Risk assessment ready")
 
-- "Risk & Execution Planner"
-  Focus: Potential issues, rollback strategy, and execution strategy decision
-  (SINGLE_CODER vs SEQUENTIAL_CODERS vs PARALLEL_CODERS).
-  Exploration context: {synthesis}
-
-After initial planning, teammates debate:
+After initial planning, lead initiates debate:
+SendMessage(type: "broadcast", summary: "Debate: challenge implementation plans"):
 - Testing challenges implementation: "This approach is untestable without major refactoring"
 - Risk challenges both: "Rollback is impossible with this migration strategy"
 - Implementation challenges testing: "Full coverage here adds 3x complexity for minimal value"
+Teammates use SendMessage(type: "message", recipient: "{name}") for direct challenges.
 
 Max 2 debate rounds, then submit consensus plan.
 ```
@@ -153,7 +223,21 @@ Max 2 debate rounds, then submit consensus plan.
 - **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODERS (2-3 phases)
 - **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODERS (more phases)
 
-Shut down planning team and clean up. **CRITICAL**: Verify team cleanup completed (TeamDelete confirmed) before creating the alignment team in Phase 9. One team per session — racing to create the next team before cleanup finishes will fail silently.
+**Team Shutdown Protocol** (must complete before Phase 6):
+
+```
+Step 1: Shutdown each teammate
+  SendMessage(type: "shutdown_request", recipient: "implementation-planner", content: "Planning complete")
+  SendMessage(type: "shutdown_request", recipient: "testing-planner", content: "Planning complete")
+  SendMessage(type: "shutdown_request", recipient: "risk-planner", content: "Planning complete")
+  Wait for each shutdown_response (approve: true)
+
+Step 2: TeamDelete
+
+Step 3: GATE — Verify TeamDelete succeeded
+  If failed → retry once after 5s
+  If retry failed → HALT and report: "Planning team cleanup failed. Cannot proceed to implementation."
+```
 
 ### Phase 5: Synthesize Planning
 
@@ -354,27 +438,61 @@ Create a mini-team for alignment validation:
 ```
 Create a team named "align-{task-id}" for alignment check.
 
-Spawn teammates:
-- "Shepherd"
-  Context: Validate implementation aligns with original request.
-  ORIGINAL_REQUEST: {task description or issue content}
-  EXECUTION_PLAN: {synthesized plan from Phase 5}
-  FILES_CHANGED: {list of files from Coder output}
-  ACCEPTANCE_CRITERIA: {extracted criteria if available}
+Spawn teammates with self-contained prompts:
 
-- "Coder"
-  Context: Respond to alignment concerns and fix issues.
-  TASK_ID: {task-id}
-  SCOPE: Fix only misalignments identified by Shepherd
+- Name: "shepherd"
+  Prompt: |
+    You are validating that the implementation aligns with the original request.
+    ORIGINAL_REQUEST: {task description or issue content}
+    EXECUTION_PLAN: {synthesized plan from Phase 5}
+    FILES_CHANGED: {list of files from Coder output}
+    ACCEPTANCE_CRITERIA: {extracted criteria if available}
 
-Rules:
-1. Shepherd analyzes alignment, sends findings to Coder
-2. Coder responds with fix or clarification
-3. Shepherd validates response
-4. Max 2 exchanges before escalating to lead
+    Steps:
+    1. Read each file in FILES_CHANGED
+    2. Compare implementation against ORIGINAL_REQUEST and ACCEPTANCE_CRITERIA
+    3. Identify misalignments: missed requirements, scope creep, intent drift
+    4. Send findings to Coder:
+       SendMessage(type: "message", recipient: "alignment-coder",
+         summary: "Alignment findings: {n} issues")
+    5. After Coder responds, validate the fix
+    6. Max 2 exchanges. Then report to lead:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Alignment: ALIGNED|MISALIGNED")
+
+- Name: "alignment-coder"
+  Prompt: |
+    You are fixing alignment issues identified by the Shepherd.
+    TASK_ID: {task-id}
+    ORIGINAL_REQUEST: {task description or issue content}
+    FILES_CHANGED: {list of files from Coder output}
+
+    Steps:
+    1. Wait for Shepherd's findings via message
+    2. For each misalignment: fix the code or explain why it's correct
+    3. Reply to Shepherd:
+       SendMessage(type: "message", recipient: "shepherd",
+         summary: "Fixes applied: {n} issues")
+    4. SCOPE: Fix only misalignments identified by Shepherd — no other changes
+    5. Max 2 exchanges. Then report to lead:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Alignment fixes complete")
 ```
 
-After dialogue completes, shut down alignment team and verify cleanup (TeamDelete confirmed).
+**Team Shutdown Protocol** (must complete before Phase 10):
+
+```
+Step 1: Shutdown each teammate
+  SendMessage(type: "shutdown_request", recipient: "shepherd", content: "Alignment complete")
+  SendMessage(type: "shutdown_request", recipient: "alignment-coder", content: "Alignment complete")
+  Wait for each shutdown_response (approve: true)
+
+Step 2: TeamDelete
+
+Step 3: GATE — Verify TeamDelete succeeded
+  If failed → retry once after 5s
+  If retry failed → HALT and report: "Alignment team cleanup failed."
+```
 
 **Without Agent Teams (fallback):**
 

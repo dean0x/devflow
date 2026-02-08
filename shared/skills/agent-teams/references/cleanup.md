@@ -69,3 +69,36 @@ After cleanup, verify:
 - Tasks requiring sequential dependency (no parallelism benefit)
 - Cost-sensitive operations where subagent is sufficient
 - Tasks where debate adds no value (e.g., formatting, simple fixes)
+
+---
+
+## Sequential Team Transition Protocol
+
+Commands that create multiple teams (e.g., `/implement`, `/specify`) MUST follow this 4-step protocol between teams. Skipping steps causes silent failures due to the one-team-per-session constraint.
+
+```
+Step 1: SHUTDOWN — Send shutdown_request to each teammate by name
+  SendMessage(type: "shutdown_request", recipient: "{name}", content: "Phase complete")
+  Wait for each shutdown_response (approve: true)
+
+Step 2: DELETE — Remove team resources
+  TeamDelete
+
+Step 3: VERIFY — Confirm cleanup succeeded
+  If TeamDelete returned success → proceed
+  If TeamDelete failed → retry once after 5s
+  If retry fails → HALT and report to user:
+    "Team cleanup failed for {team-name}. Cannot create next team."
+
+Step 4: CREATE — Only now create the next team
+  TeamCreate(team_name: "{next-team-name}")
+```
+
+### Failure Modes
+
+| Failure | Action |
+|---------|--------|
+| Teammate ignores shutdown_request | Wait 30s, then proceed to TeamDelete (force cleanup) |
+| TeamDelete fails | Retry once after 5s delay |
+| TeamDelete retry fails | HALT execution, report to user |
+| TeamCreate fails after successful delete | Retry once; if fails, fall back to parallel Task() subagents |
