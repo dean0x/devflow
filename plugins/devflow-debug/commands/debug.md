@@ -46,23 +46,57 @@ Create an agent team with one investigator per hypothesis:
 ```
 Create a team named "debug-{bug-slug}" to investigate: {bug_description}
 
-Spawn teammates:
-- "Investigator A: {hypothesis A description}"
-  Focus: {specific code area, mechanism, or condition to investigate}
+Spawn investigator teammates with self-contained prompts:
 
-- "Investigator B: {hypothesis B description}"
-  Focus: {specific code area, mechanism, or condition to investigate}
+- Name: "investigator-a"
+  Prompt: |
+    You are investigating a bug: {bug_description}
+    Your hypothesis: {hypothesis A description}
+    Focus area: {specific code area, mechanism, or condition}
 
-- "Investigator C: {hypothesis C description}"
-  Focus: {specific code area, mechanism, or condition to investigate}
+    Steps:
+    1. Read relevant code files in your focus area
+    2. Trace data flow related to your hypothesis
+    3. Collect evidence FOR your hypothesis (with file:line references)
+    4. Collect evidence AGAINST your hypothesis (with file:line references)
+    5. Document all findings
+    6. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Hypothesis A: initial findings ready")
 
-(Add more if bug complexity warrants 4-5 hypotheses)
+- Name: "investigator-b"
+  Prompt: |
+    You are investigating a bug: {bug_description}
+    Your hypothesis: {hypothesis B description}
+    Focus area: {specific code area, mechanism, or condition}
 
-Each investigator:
-1. Read relevant code files
-2. Trace data flow related to their hypothesis
-3. Look for evidence that CONFIRMS or DISPROVES the hypothesis
-4. Document findings with file:line references
+    Steps:
+    1. Read relevant code files in your focus area
+    2. Trace data flow related to your hypothesis
+    3. Collect evidence FOR your hypothesis (with file:line references)
+    4. Collect evidence AGAINST your hypothesis (with file:line references)
+    5. Document all findings
+    6. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Hypothesis B: initial findings ready")
+
+- Name: "investigator-c"
+  Prompt: |
+    You are investigating a bug: {bug_description}
+    Your hypothesis: {hypothesis C description}
+    Focus area: {specific code area, mechanism, or condition}
+
+    Steps:
+    1. Read relevant code files in your focus area
+    2. Trace data flow related to your hypothesis
+    3. Collect evidence FOR your hypothesis (with file:line references)
+    4. Collect evidence AGAINST your hypothesis (with file:line references)
+    5. Document all findings
+    6. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Hypothesis C: initial findings ready")
+
+(Add more investigators if bug complexity warrants 4-5 hypotheses — same pattern)
 ```
 
 ### Phase 3: Investigation
@@ -76,9 +110,10 @@ Teammates investigate in parallel:
 
 ### Phase 4: Adversarial Debate
 
-Lead broadcasts to all teammates:
+Lead initiates debate via broadcast:
 
 ```
+SendMessage(type: "broadcast", summary: "Debate: share findings and challenge hypotheses"):
 "Investigation complete. Share your findings:
 1. State your hypothesis
 2. Present evidence FOR (with file:line references)
@@ -92,10 +127,13 @@ Rules:
 - Max 2 exchange rounds before we converge"
 ```
 
-Teammates message each other directly:
-- "My evidence at `src/auth.ts:42` disproves your hypothesis because..."
-- "Your theory doesn't explain why this only fails on Tuesdays..."
-- "I've updated my hypothesis based on your finding at..."
+Teammates challenge each other directly using SendMessage:
+- `SendMessage(type: "message", recipient: "investigator-b", summary: "Challenge: evidence at auth.ts:42")`
+  "My evidence at `src/auth.ts:42` disproves your hypothesis because..."
+- `SendMessage(type: "message", recipient: "investigator-a", summary: "Counter: Tuesday-only failure")`
+  "Your theory doesn't explain why this only fails on Tuesdays..."
+- `SendMessage(type: "message", recipient: "team-lead", summary: "Updated hypothesis")`
+  "I've updated my hypothesis based on investigator-b's finding at..."
 
 ### Phase 5: Convergence
 
@@ -111,7 +149,16 @@ Lead broadcast:
 
 ### Phase 6: Cleanup
 
-Lead shuts down all teammates and calls cleanup.
+Shut down all investigator teammates explicitly:
+
+```
+For each teammate in [investigator-a, investigator-b, investigator-c, ...]:
+  SendMessage(type: "shutdown_request", recipient: "{name}", content: "Investigation complete")
+  Wait for shutdown_response (approve: true)
+
+TeamDelete
+Verify TeamDelete succeeded. If failed, retry once after 5s. If retry fails, HALT.
+```
 
 ### Phase 7: Report
 

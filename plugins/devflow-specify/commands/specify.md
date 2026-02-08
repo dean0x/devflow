@@ -64,35 +64,80 @@ Create an agent team for collaborative requirements exploration:
 ```
 Create a team named "spec-explore-{feature-slug}" to explore requirements for: {feature}
 
-Spawn exploration teammates (with Skimmer context):
+Spawn exploration teammates with self-contained prompts:
 
-- "User Perspective Explorer"
-  Focus: Target users, goals, pain points, user journeys.
-  Skimmer context: {skimmer output}
+- Name: "user-perspective-explorer"
+  Prompt: |
+    You are exploring requirements for feature: {feature}
+    1. Codebase context from Skimmer:
+       {skimmer output}
+    2. Your deliverable: Target users, their goals, pain points, and user
+       journeys for this feature. How will users interact with it?
+    3. Document findings with references to existing UX patterns in the codebase.
+    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "User perspective exploration done")
 
-- "Similar Features Explorer"
-  Focus: Comparable features in codebase, scope patterns, precedents.
-  Skimmer context: {skimmer output}
+- Name: "similar-features-explorer"
+  Prompt: |
+    You are exploring requirements for feature: {feature}
+    1. Codebase context from Skimmer:
+       {skimmer output}
+    2. Your deliverable: Find comparable features in the codebase, scope
+       patterns, and precedents. What exists that this feature should follow?
+    3. Document findings with file:path references.
+    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Similar features exploration done")
 
-- "Constraints Explorer"
-  Focus: Dependencies, business rules, security requirements, performance limits.
-  Skimmer context: {skimmer output}
+- Name: "constraints-explorer"
+  Prompt: |
+    You are exploring requirements for feature: {feature}
+    1. Codebase context from Skimmer:
+       {skimmer output}
+    2. Your deliverable: Dependencies, business rules, security requirements,
+       performance limits, and technical constraints for this feature.
+    3. Document findings with file:path references.
+    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Constraints exploration done")
 
-- "Failure Mode Explorer"
-  Focus: Error states, edge cases, validation needs, what could go wrong.
-  Skimmer context: {skimmer output}
+- Name: "failure-mode-explorer"
+  Prompt: |
+    You are exploring requirements for feature: {feature}
+    1. Codebase context from Skimmer:
+       {skimmer output}
+    2. Your deliverable: Error states, edge cases, validation needs,
+       and what could go wrong with this feature.
+    3. Document findings with references to existing error handling patterns.
+    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
+       summary: "Failure mode exploration done")
 
-After initial exploration, teammates debate:
+After initial exploration, lead initiates debate:
+SendMessage(type: "broadcast", summary: "Debate: challenge requirements findings"):
 - Constraints challenges user perspective: "This requirement conflicts with X constraint"
 - Failure modes challenges similar features: "That pattern failed in Y scenario"
 - Similar features validates user perspective: "This UX pattern works well in Z"
+Teammates use SendMessage(type: "message", recipient: "{name}") for direct challenges.
 
 Max 2 debate rounds, then submit consensus requirements findings.
 ```
 
 **Exploration team output**: Consensus findings on user needs, similar features, constraints, failure modes.
 
-Shut down exploration team and clean up. **CRITICAL**: Verify TeamDelete completed before creating planning team.
+**Team Shutdown Protocol** (must complete before Phase 5):
+
+```
+Step 1: Shutdown each teammate
+  SendMessage(type: "shutdown_request", recipient: "user-perspective-explorer", content: "Exploration complete")
+  SendMessage(type: "shutdown_request", recipient: "similar-features-explorer", content: "Exploration complete")
+  SendMessage(type: "shutdown_request", recipient: "constraints-explorer", content: "Exploration complete")
+  SendMessage(type: "shutdown_request", recipient: "failure-mode-explorer", content: "Exploration complete")
+  Wait for each shutdown_response (approve: true)
+
+Step 2: TeamDelete
+
+Step 3: GATE — Verify TeamDelete succeeded
+  If failed → retry once after 5s
+  If retry failed → HALT and report: "Exploration team cleanup failed. Cannot create planning team."
+```
 
 ### Phase 4: Synthesize Exploration
 
@@ -113,33 +158,68 @@ Create an agent team for collaborative scope planning:
 ```
 Create a team named "spec-plan-{feature-slug}" to plan scope for: {feature}
 
-Context from exploration: {synthesis output from Phase 4}
+Spawn planning teammates with self-contained prompts:
 
-Spawn planning teammates:
+- Name: "user-stories-planner"
+  Prompt: |
+    You are planning scope for feature: {feature}
+    Exploration synthesis (what we know):
+    {synthesis output from Phase 4}
 
-- "User Stories Planner"
-  Focus: Actors, actions, outcomes in "As X, I want Y, so that Z" format.
-  Exploration context: {synthesis}
+    Your deliverable: User stories in "As X, I want Y, so that Z" format.
+    Cover all actors, actions, and outcomes identified in exploration.
+    Report completion: SendMessage(type: "message", recipient: "team-lead",
+      summary: "User stories ready")
 
-- "Scope Boundaries Planner"
-  Focus: v1 MVP, v2 deferred, out of scope, dependencies.
-  Exploration context: {synthesis}
+- Name: "scope-boundaries-planner"
+  Prompt: |
+    You are planning scope for feature: {feature}
+    Exploration synthesis (what we know):
+    {synthesis output from Phase 4}
 
-- "Acceptance Criteria Planner"
-  Focus: Success/failure/edge case criteria (testable).
-  Exploration context: {synthesis}
+    Your deliverable: v1 MVP scope, v2 deferred items, explicitly out of scope,
+    and dependencies on other features or systems.
+    Report completion: SendMessage(type: "message", recipient: "team-lead",
+      summary: "Scope boundaries ready")
 
-After initial planning, teammates debate:
+- Name: "acceptance-criteria-planner"
+  Prompt: |
+    You are planning scope for feature: {feature}
+    Exploration synthesis (what we know):
+    {synthesis output from Phase 4}
+
+    Your deliverable: Testable acceptance criteria for success cases,
+    failure cases, and edge cases. Every criterion must be verifiable.
+    Report completion: SendMessage(type: "message", recipient: "team-lead",
+      summary: "Acceptance criteria ready")
+
+After initial planning, lead initiates debate:
+SendMessage(type: "broadcast", summary: "Debate: challenge scope plans"):
 - Scope challenges user stories: "This story is too broad for v1"
 - Acceptance challenges scope: "These boundaries leave this edge case uncovered"
 - User stories challenges acceptance: "This criterion is untestable"
+Teammates use SendMessage(type: "message", recipient: "{name}") for direct challenges.
 
 Max 2 debate rounds, then submit consensus scope plan.
 ```
 
 **Planning team output**: Consensus on user stories, scope boundaries, acceptance criteria.
 
-Shut down planning team and clean up. Verify TeamDelete completed.
+**Team Shutdown Protocol** (must complete before Gate 1):
+
+```
+Step 1: Shutdown each teammate
+  SendMessage(type: "shutdown_request", recipient: "user-stories-planner", content: "Planning complete")
+  SendMessage(type: "shutdown_request", recipient: "scope-boundaries-planner", content: "Planning complete")
+  SendMessage(type: "shutdown_request", recipient: "acceptance-criteria-planner", content: "Planning complete")
+  Wait for each shutdown_response (approve: true)
+
+Step 2: TeamDelete
+
+Step 3: GATE — Verify TeamDelete succeeded
+  If failed → retry once after 5s
+  If retry failed → HALT and report: "Planning team cleanup failed. Cannot proceed to Gate 1."
+```
 
 ### Phase 6: Synthesize Planning
 
