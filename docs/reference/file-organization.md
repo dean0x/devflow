@@ -40,7 +40,12 @@ devflow/
 ├── docs/
 │   └── reference/                    # Extracted reference docs
 ├── scripts/
-│   └── build-plugins.ts
+│   ├── build-plugins.ts
+│   ├── statusline.sh
+│   └── hooks/                        # Working Memory hooks
+│       ├── stop-update-memory.sh     # Stop hook: writes WORKING-MEMORY.md
+│       ├── session-start-memory.sh   # SessionStart hook: injects memory + git state
+│       └── pre-compact-memory.sh     # PreCompact hook: saves git state backup
 └── src/
     └── cli/
         ├── commands/
@@ -85,6 +90,7 @@ The `skills` and `agents` arrays declare which shared assets this plugin needs. 
 | Agents | `~/.claude/agents/devflow/` | Namespaced |
 | Skills | `~/.claude/skills/` | Flat (auto-discovery) |
 | Scripts | `~/.devflow/scripts/` | Helper scripts |
+| Hooks | `~/.devflow/scripts/hooks/` | Working Memory hooks |
 | Settings | `~/.claude/settings.json` | DevFlow configuration |
 
 ## Build-Time Asset Distribution
@@ -122,11 +128,26 @@ Skills and agents are **not duplicated** in git. Instead:
 
 Included settings:
 - `statusLine` - Smart statusline with context percentage
+- `hooks` - Working Memory hooks (Stop, SessionStart, PreCompact)
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
 - `extraKnownMarketplaces` - DevFlow plugin marketplace (`dean0x/devflow`)
 - `permissions.deny` - Security deny list (126 blocked operations) + sensitive file patterns
+
+## Working Memory Hooks
+
+Three hooks in `scripts/hooks/` provide automatic session continuity:
+
+| Hook | Event | File | Purpose |
+|------|-------|------|---------|
+| `stop-update-memory.sh` | Stop | `.docs/WORKING-MEMORY.md` | Throttled (skips if <2min fresh). Slim instruction after first write. |
+| `session-start-memory.sh` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. |
+| `pre-compact-memory.sh` | PreCompact | `.docs/working-memory-backup.json` | Saves git state snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
+
+**Flow**: Claude responds → Stop hook checks mtime (skips if <2min fresh) → blocks with instruction → Claude writes WORKING-MEMORY.md silently → `stop_hook_active=true` → allows stop. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
+
+All hooks are no-ops in projects without `.docs/` (non-DevFlow projects).
 
 ## Statusline Script
 

@@ -4,6 +4,40 @@
     "type": "command",
     "command": "${DEVFLOW_DIR}/scripts/statusline.sh"
   },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/stop-update-memory.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/session-start-memory.sh"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/pre-compact-memory.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
   "teammateMode": "auto",
   "env": {
     "ENABLE_TOOL_SEARCH": "true",

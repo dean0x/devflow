@@ -368,15 +368,8 @@ export const initCommand = new Command('init')
           await fs.mkdir(scriptsTarget, { recursive: true });
           await copyDirectory(scriptsSource, scriptsTarget);
 
-          // Make scripts executable
-          const scripts = await fs.readdir(scriptsTarget);
-          for (const script of scripts) {
-            const scriptPath = path.join(scriptsTarget, script);
-            const stat = await fs.stat(scriptPath);
-            if (stat.isFile()) {
-              await fs.chmod(scriptPath, 0o755);
-            }
-          }
+          // Make all scripts executable (recursive — handles subdirectories like hooks/)
+          await chmodRecursive(scriptsTarget, 0o755);
         } catch { /* scripts may not exist */ }
 
         s.stop('Components installed via file copy');
@@ -429,6 +422,14 @@ export const initCommand = new Command('init')
           p.log.success('Settings overridden');
         }
       } else if (settingsExists) {
+        // Check if existing settings have hooks configured
+        try {
+          const existingSettings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+          if (!existingSettings.hooks) {
+            p.log.warn('Settings exist without hooks. Working Memory requires hooks.');
+            p.log.info('Run with --override-settings to enable, or manually add hooks to settings.json');
+          }
+        } catch { /* ignore parse errors */ }
         p.log.info('Settings exist - use --override-settings to replace');
       } else {
         await fs.writeFile(settingsPath, settingsContent, 'utf-8');
@@ -568,6 +569,21 @@ export const initCommand = new Command('init')
 
     p.outro(color.green('Ready! Run any command in Claude Code to get started.'));
   });
+
+/**
+ * Recursively chmod all files in a directory tree.
+ */
+async function chmodRecursive(dir: string, mode: number): Promise<void> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await chmodRecursive(fullPath, mode);
+    } else if (entry.isFile()) {
+      await fs.chmod(fullPath, mode);
+    }
+  }
+}
 
 async function copyDirectory(src: string, dest: string): Promise<void> {
   await fs.mkdir(dest, { recursive: true });

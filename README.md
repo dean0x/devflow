@@ -136,23 +136,42 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 | `accessibility` | Creating UI components, forms, interactive elements |
 | `frontend-design` | Working with CSS, styling, visual design |
 
+## Working Memory
+
+DevFlow automatically preserves session context across restarts, `/clear`, and context compaction — zero ceremony required.
+
+Three shell hooks run behind the scenes:
+
+| Hook | When | What |
+|------|------|------|
+| **Stop** | After each response | Updates `.docs/WORKING-MEMORY.md` with current focus, decisions, and progress. Throttled — skips if updated <2 min ago. |
+| **SessionStart** | On startup, `/clear`, resume, compaction | Injects previous working memory + fresh git state as system context. Warns if memory is >1h stale. |
+| **PreCompact** | Before context compaction | Backs up git state to JSON. Bootstraps a minimal working memory from git if none exists yet. |
+
+Working memory is **per-project** — scoped to each repo's `.docs/` directory. Multiple sessions across different repos don't interfere.
+
 ## Documentation Structure
 
 DevFlow creates project documentation in `.docs/`:
 
 ```
 .docs/
-├── reviews/{branch}/    # Review reports per branch
-├── design/              # Implementation plans
-├── status/              # Development logs
+├── reviews/{branch}/         # Review reports per branch
+├── design/                   # Implementation plans
+├── status/                   # Development logs
 │   ├── {timestamp}.md
 │   └── INDEX.md
-└── CATCH_UP.md          # Latest summary
+├── CATCH_UP.md               # Latest summary
+├── WORKING-MEMORY.md         # Auto-maintained by Stop hook
+└── working-memory-backup.json # Pre-compact git state snapshot
 ```
 
 ## Workflow
 
 ### Starting a Session
+
+Session context is restored automatically via Working Memory hooks — no manual steps needed. For a deeper review of recent history:
+
 ```bash
 /catch-up    # Review previous state and get recommendations
 ```
@@ -176,6 +195,9 @@ DevFlow creates project documentation in `.docs/`:
 ```
 
 ### Ending a Session
+
+Working memory is saved automatically. For a more detailed session record:
+
 ```bash
 /devlog      # Document decisions and state for next session
 ```

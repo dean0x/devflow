@@ -29,6 +29,8 @@ Plugin marketplace with 10 self-contained plugins, each following the Claude plu
 
 **Build-time asset distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/`, then copied to each plugin at build time based on `plugin.json` manifests. This eliminates duplication in git.
 
+**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Stop hook → Claude writes `.docs/WORKING-MEMORY.md` (throttled: skips if updated <2min ago, uses slim instruction after first write). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale). PreCompact hook → saves git state backup + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
+
 ## Project Structure
 
 ```
@@ -38,6 +40,7 @@ devflow/
 ├── plugins/devflow-*/      # 10 self-contained plugins
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
+│   └── hooks/              # Working Memory hooks (stop, session-start, pre-compact)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall)
 └── .claude-plugin/         # Marketplace registry
 ```
@@ -73,12 +76,14 @@ All generated docs live under `.docs/` in the project root:
 ├── reviews/{branch-slug}/    # Review reports per branch
 ├── design/                   # Implementation plans
 ├── status/                   # Development logs + INDEX.md
-└── CATCH_UP.md               # Latest summary (overwritten)
+├── CATCH_UP.md               # Latest summary (overwritten)
+├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each response)
+└── working-memory-backup.json # Pre-compact git state snapshot
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes. Use `.devflow/scripts/docs-helpers.sh` for consistent naming.
 
-**Persisting agents**: CatchUp → `.docs/CATCH_UP.md`, Devlog → `.docs/status/`, Reviewer → `.docs/reviews/`, Synthesizer → `.docs/reviews/` (review mode)
+**Persisting agents**: CatchUp → `.docs/CATCH_UP.md`, Devlog → `.docs/status/`, Reviewer → `.docs/reviews/`, Synthesizer → `.docs/reviews/` (review mode), Working Memory → `.docs/WORKING-MEMORY.md` (automatic)
 
 ## Agent & Command Roster
 
