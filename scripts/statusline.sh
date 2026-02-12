@@ -31,31 +31,57 @@ if [ -z "$GIT_BRANCH" ]; then
     GIT_INFO=""
     DIFF_STATS=""
 else
-    # Check if there are uncommitted changes
+    # Dirty indicator based on uncommitted changes
     if [ -n "$(cd "$CWD" 2>/dev/null && git status --porcelain 2>/dev/null)" ]; then
         GIT_INFO="  \033[33m$GIT_BRANCH*\033[0m"
-
-        # Get diff stats (staged + unstaged)
-        DIFF_OUTPUT=$(cd "$CWD" 2>/dev/null && git diff --shortstat HEAD 2>/dev/null)
-        if [ -n "$DIFF_OUTPUT" ]; then
-            FILES_CHANGED=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
-            ADDITIONS=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
-            DELETIONS=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
-            [ -z "$FILES_CHANGED" ] && FILES_CHANGED=0
-            [ -z "$ADDITIONS" ] && ADDITIONS=0
-            [ -z "$DELETIONS" ] && DELETIONS=0
-            DIFF_STATS="  ${FILES_CHANGED} \033[32m+$ADDITIONS\033[0m \033[31m-$DELETIONS\033[0m"
-        else
-            DIFF_STATS=""
-        fi
     else
         GIT_INFO="  \033[32m$GIT_BRANCH\033[0m"
+    fi
+
+    # Determine base branch and compute branch-level stats
+    BASE_BRANCH=""
+    cd "$CWD" 2>/dev/null && {
+        git rev-parse --verify main &>/dev/null && BASE_BRANCH="main"
+        [ -z "$BASE_BRANCH" ] && git rev-parse --verify master &>/dev/null && BASE_BRANCH="master"
+    }
+
+    BRANCH_STATS=""
+    if [ -n "$BASE_BRANCH" ] && [ "$GIT_BRANCH" != "$BASE_BRANCH" ]; then
+        # Total commits on branch (local + remote, since fork from base)
+        TOTAL_COMMITS=$(cd "$CWD" 2>/dev/null && git rev-list --count "$BASE_BRANCH"..HEAD 2>/dev/null || echo "0")
+        [ "$TOTAL_COMMITS" -gt 0 ] 2>/dev/null && BRANCH_STATS=" ${TOTAL_COMMITS}↑"
+
+        # Unpushed commits (local-only, ahead of remote tracking branch)
+        UPSTREAM=$(cd "$CWD" 2>/dev/null && git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
+        if [ -n "$UPSTREAM" ]; then
+            UNPUSHED=$(cd "$CWD" 2>/dev/null && git rev-list --count "$UPSTREAM"..HEAD 2>/dev/null || echo "0")
+            [ "$UNPUSHED" -gt 0 ] 2>/dev/null && BRANCH_STATS="$BRANCH_STATS \033[33m${UNPUSHED}⇡\033[0m"
+        elif [ "$TOTAL_COMMITS" -gt 0 ] 2>/dev/null; then
+            # No upstream at all — everything is unpushed
+            BRANCH_STATS="$BRANCH_STATS \033[33m${TOTAL_COMMITS}⇡\033[0m"
+        fi
+
+        MERGE_BASE=$(cd "$CWD" 2>/dev/null && git merge-base "$BASE_BRANCH" HEAD 2>/dev/null)
+        DIFF_OUTPUT=$(cd "$CWD" 2>/dev/null && git diff --shortstat "$MERGE_BASE" 2>/dev/null)
+    else
+        DIFF_OUTPUT=$(cd "$CWD" 2>/dev/null && git diff --shortstat HEAD 2>/dev/null)
+    fi
+
+    if [ -n "$DIFF_OUTPUT" ]; then
+        FILES_CHANGED=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
+        ADDITIONS=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+        DELETIONS=$(echo "$DIFF_OUTPUT" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+        [ -z "$FILES_CHANGED" ] && FILES_CHANGED=0
+        [ -z "$ADDITIONS" ] && ADDITIONS=0
+        [ -z "$DELETIONS" ] && DELETIONS=0
+        DIFF_STATS="  ${FILES_CHANGED} \033[32m+$ADDITIONS\033[0m \033[31m-$DELETIONS\033[0m"
+    else
         DIFF_STATS=""
     fi
 fi
 
 # Build status line with colors (regular, not bold)
-STATUS_LINE="\033[34m$DIR_NAME\033[0m$GIT_INFO$DIFF_STATS"
+STATUS_LINE="\033[34m$DIR_NAME\033[0m$GIT_INFO$BRANCH_STATS$DIFF_STATS"
 
 # Add model name
 STATUS_LINE="$STATUS_LINE  \033[36m$MODEL\033[0m"
