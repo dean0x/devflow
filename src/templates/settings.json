@@ -21,7 +21,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${DEVFLOW_DIR}/scripts/hooks/session-start-memory.sh"
+            "command": "${DEVFLOW_DIR}/scripts/hooks/session-start-memory.sh",
+            "timeout": 10
           }
         ]
       }

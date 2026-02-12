@@ -78,6 +78,7 @@ fi
 # Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
 jq -n --arg ctx "$CONTEXT" '{
   "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
     "additionalContext": $ctx
   }
 }'
