@@ -69,20 +69,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['self-review', 'core-patterns'],
   },
   {
-    name: 'devflow-catch-up',
-    description: 'Context restoration from status logs',
-    commands: ['/catch-up'],
-    agents: ['catch-up'],
-    skills: [],
-  },
-  {
-    name: 'devflow-devlog',
-    description: 'Development session logging',
-    commands: ['/devlog'],
-    agents: ['devlog'],
-    skills: [],
-  },
-  {
     name: 'devflow-audit-claude',
     description: 'Audit CLAUDE.md files against Anthropic best practices',
     commands: ['/audit-claude'],

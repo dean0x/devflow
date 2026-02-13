@@ -43,8 +43,6 @@ npx devflow-kit init --plugin=implement,review
 | `devflow-resolve` | `/resolve` | Process review issues - fix or defer to tech debt |
 | `devflow-debug` | `/debug` | Competing hypothesis debugging with agent teams |
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
-| `devflow-catch-up` | `/catch-up` | Context restoration from status logs |
-| `devflow-devlog` | `/devlog` | Development session logging |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
 
 ## Commands
@@ -103,23 +101,6 @@ Processes issues from `/review`:
 - Fixes low-risk issues immediately
 - Defers high-risk issues to tech debt backlog
 
-### /catch-up
-
-Restores context at the start of a session:
-
-- Reads recent status logs
-- Summarizes current project state
-- Recommends next actions
-
-### /devlog
-
-Documents session state before ending:
-
-- Captures decisions made
-- Records problems encountered
-- Notes current progress
-- Creates searchable history in `.docs/status/`
-
 ## Auto-Activating Skills
 
 The `devflow-core-skills` plugin provides quality enforcement skills that activate automatically:
@@ -161,7 +142,6 @@ DevFlow creates project documentation in `.docs/`:
 ├── status/                   # Development logs
 │   ├── {timestamp}.md
 │   └── INDEX.md
-├── CATCH_UP.md               # Latest summary
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook
 └── working-memory-backup.json # Pre-compact git state snapshot
 ```
@@ -170,11 +150,7 @@ DevFlow creates project documentation in `.docs/`:
 
 ### Starting a Session
 
-Session context is restored automatically via Working Memory hooks — no manual steps needed. For a deeper review of recent history:
-
-```bash
-/catch-up    # Review previous state and get recommendations
-```
+Session context is restored automatically via Working Memory hooks — no manual steps needed.
 
 ### Implementing a Feature
 ```bash
@@ -196,11 +172,7 @@ Session context is restored automatically via Working Memory hooks — no manual
 
 ### Ending a Session
 
-Working memory is saved automatically. For a more detailed session record:
-
-```bash
-/devlog      # Document decisions and state for next session
-```
+Working memory is saved automatically — no manual steps needed.
 
 ## CLI Reference
 

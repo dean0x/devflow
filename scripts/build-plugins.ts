@@ -14,8 +14,9 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
-const ROOT = path.resolve(import.meta.dirname, "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHARED_SKILLS = path.join(ROOT, "shared", "skills");
 const SHARED_AGENTS = path.join(ROOT, "shared", "agents");
 const PLUGINS_DIR = path.join(ROOT, "plugins");

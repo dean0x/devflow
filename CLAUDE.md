@@ -12,7 +12,7 @@ DevFlow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 10 self-contained plugins, each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 8 self-contained plugins, each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Agent Teams |
 |--------|---------|-------------|
@@ -22,8 +22,6 @@ Plugin marketplace with 10 self-contained plugins, each following the Claude plu
 | `devflow-resolve` | Review issue resolution | Yes |
 | `devflow-debug` | Competing hypothesis debugging | Yes |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
-| `devflow-catch-up` | Context restoration | No |
-| `devflow-devlog` | Session logging | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
 
@@ -37,7 +35,7 @@ Plugin marketplace with 10 self-contained plugins, each following the Claude plu
 devflow/
 ├── shared/skills/          # 28 skills (single source of truth)
 ├── shared/agents/          # 10 shared agents (single source of truth)
-├── plugins/devflow-*/      # 10 self-contained plugins
+├── plugins/devflow-*/      # 8 self-contained plugins
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory hooks (stop, session-start, pre-compact)
@@ -76,14 +74,13 @@ All generated docs live under `.docs/` in the project root:
 ├── reviews/{branch-slug}/    # Review reports per branch
 ├── design/                   # Implementation plans
 ├── status/                   # Development logs + INDEX.md
-├── CATCH_UP.md               # Latest summary (overwritten)
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each response)
 └── working-memory-backup.json # Pre-compact git state snapshot
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes. Use `.devflow/scripts/docs-helpers.sh` for consistent naming.
 
-**Persisting agents**: CatchUp → `.docs/CATCH_UP.md`, Devlog → `.docs/status/`, Reviewer → `.docs/reviews/`, Synthesizer → `.docs/reviews/` (review mode), Working Memory → `.docs/WORKING-MEMORY.md` (automatic)
+**Persisting agents**: Reviewer → `.docs/reviews/`, Synthesizer → `.docs/reviews/` (review mode), Working Memory → `.docs/WORKING-MEMORY.md` (automatic)
 
 ## Agent & Command Roster
 
@@ -94,12 +91,11 @@ All generated docs live under `.docs/` in the project root:
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential)
-- `/devlog`, `/catch-up` — Single-agent utilities
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
 **Shared agents** (10): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, shepherd, scrutinizer, validator
 
-**Plugin-specific agents** (3): devlog, catch-up, claude-md-auditor
+**Plugin-specific agents** (1): claude-md-auditor
 
 **Agent Teams**: 5 commands use Agent Teams (`/review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
@@ -124,7 +120,7 @@ All generated docs live under `.docs/` in the project root:
 
 - Commands are orchestration-only — spawn agents, never do agent work in main session
 - Create in `plugins/devflow-{plugin}/commands/`
-- Register new plugins in `DEVFLOW_PLUGINS` in `src/cli/commands/init.ts`
+- Register new plugins in `DEVFLOW_PLUGINS` in `src/cli/plugins.ts`
 
 ### Commits
 
