@@ -15,7 +15,7 @@ Shared patterns used by multiple agents.
 | `core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, Reviewer |
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
 | `self-review` | 9-pillar self-review framework | Scrutinizer |
-| `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Devlog, CatchUp |
+| `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
 | `git-safety` | Git operations, lock handling, commit conventions | Coder, Git |
 | `github-patterns` | GitHub API patterns (rate limiting, PR comments, issues, releases) | Git |
 | `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder |
@@ -194,7 +194,7 @@ activation:
 **Use a Command when:**
 - Requires explicit user decision
 - Performs state changes (commits, releases)
-- User controls timing (devlog, catch-up)
+- User controls timing and sequencing
 - Orchestrates complex workflows
 
 ## Creating New Skills

@@ -35,7 +35,7 @@ All generated documentation lives under `.docs/` in the project root:
 ├── swarm/                              # Swarm operation state
 │   ├── state.json
 │   └── plans/
-└── CATCH_UP.md                         # Latest summary (overwritten)
+└── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
 ```
 
 ---
@@ -64,7 +64,7 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 
 | Type | Pattern | Example |
 |------|---------|---------|
-| Special indexes | `UPPERCASE.md` | `CATCH_UP.md`, `INDEX.md` |
+| Special indexes | `UPPERCASE.md` | `WORKING-MEMORY.md`, `INDEX.md` |
 | Reports | `{type}-report.{timestamp}.md` | `security-report.2025-12-26_1430.md` |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
 
@@ -91,9 +91,8 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 
 | Agent | Output Location | Behavior |
 |-------|-----------------|----------|
-| CatchUp | `.docs/CATCH_UP.md` | Overwrites (latest summary) |
-| Devlog | `.docs/status/{timestamp}.md` | Creates new + updates `INDEX.md` |
 | Reviewer | `.docs/reviews/{branch-slug}/{type}-report.{timestamp}.md` | Creates new |
+| Working Memory | `.docs/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
 
 ### Agents That Don't Persist
 
@@ -120,9 +119,8 @@ When creating or modifying persisting agents:
 ## Integration
 
 This framework is used by:
-- **Devlog**: Creates status logs
-- **CatchUp**: Reads status logs, creates summary
 - **Review agents**: Creates review reports
+- **Working Memory hooks**: Auto-maintains `.docs/WORKING-MEMORY.md`
 
 All persisting agents should load this skill to ensure consistent documentation.
 

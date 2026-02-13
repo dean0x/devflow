@@ -25,14 +25,17 @@ fi
 # Get current directory name
 DIR_NAME=$(basename "$CWD")
 
+# Change to working directory once for all git commands
+cd "$CWD" 2>/dev/null || true
+
 # Get git branch if in a git repo
-GIT_BRANCH=$(cd "$CWD" 2>/dev/null && git branch --show-current 2>/dev/null || echo "")
+GIT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 if [ -z "$GIT_BRANCH" ]; then
     GIT_INFO=""
     DIFF_STATS=""
 else
     # Dirty indicator based on uncommitted changes
-    if [ -n "$(cd "$CWD" 2>/dev/null && git status --porcelain 2>/dev/null)" ]; then
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
         GIT_INFO="  \033[33m$GIT_BRANCH*\033[0m"
     else
         GIT_INFO="  \033[32m$GIT_BRANCH\033[0m"
@@ -40,31 +43,29 @@ else
 
     # Determine base branch and compute branch-level stats
     BASE_BRANCH=""
-    cd "$CWD" 2>/dev/null && {
-        git rev-parse --verify main &>/dev/null && BASE_BRANCH="main"
-        [ -z "$BASE_BRANCH" ] && git rev-parse --verify master &>/dev/null && BASE_BRANCH="master"
-    }
+    git rev-parse --verify main &>/dev/null && BASE_BRANCH="main"
+    [ -z "$BASE_BRANCH" ] && git rev-parse --verify master &>/dev/null && BASE_BRANCH="master"
 
     BRANCH_STATS=""
     if [ -n "$BASE_BRANCH" ] && [ "$GIT_BRANCH" != "$BASE_BRANCH" ]; then
         # Total commits on branch (local + remote, since fork from base)
-        TOTAL_COMMITS=$(cd "$CWD" 2>/dev/null && git rev-list --count "$BASE_BRANCH"..HEAD 2>/dev/null || echo "0")
+        TOTAL_COMMITS=$(git rev-list --count "$BASE_BRANCH"..HEAD 2>/dev/null || echo "0")
         [ "$TOTAL_COMMITS" -gt 0 ] 2>/dev/null && BRANCH_STATS=" ${TOTAL_COMMITS}↑"
 
         # Unpushed commits (local-only, ahead of remote tracking branch)
-        UPSTREAM=$(cd "$CWD" 2>/dev/null && git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
+        UPSTREAM=$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
         if [ -n "$UPSTREAM" ]; then
-            UNPUSHED=$(cd "$CWD" 2>/dev/null && git rev-list --count "$UPSTREAM"..HEAD 2>/dev/null || echo "0")
+            UNPUSHED=$(git rev-list --count "$UPSTREAM"..HEAD 2>/dev/null || echo "0")
             [ "$UNPUSHED" -gt 0 ] 2>/dev/null && BRANCH_STATS="$BRANCH_STATS \033[33m${UNPUSHED}⇡\033[0m"
         elif [ "$TOTAL_COMMITS" -gt 0 ] 2>/dev/null; then
             # No upstream at all — everything is unpushed
             BRANCH_STATS="$BRANCH_STATS \033[33m${TOTAL_COMMITS}⇡\033[0m"
         fi
 
-        MERGE_BASE=$(cd "$CWD" 2>/dev/null && git merge-base "$BASE_BRANCH" HEAD 2>/dev/null)
-        DIFF_OUTPUT=$(cd "$CWD" 2>/dev/null && git diff --shortstat "$MERGE_BASE" 2>/dev/null)
+        MERGE_BASE=$(git merge-base "$BASE_BRANCH" HEAD 2>/dev/null)
+        DIFF_OUTPUT=$(git diff --shortstat "$MERGE_BASE" 2>/dev/null)
     else
-        DIFF_OUTPUT=$(cd "$CWD" 2>/dev/null && git diff --shortstat HEAD 2>/dev/null)
+        DIFF_OUTPUT=$(git diff --shortstat HEAD 2>/dev/null)
     fi
 
     if [ -n "$DIFF_OUTPUT" ]; then

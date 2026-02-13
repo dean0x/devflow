@@ -20,7 +20,7 @@ devflow/
 │       ├── synthesizer.md
 │       ├── coder.md
 │       └── ...
-├── plugins/                          # Plugin collection (10 plugins)
+├── plugins/                          # Plugin collection (8 plugins)
 │   ├── devflow-specify/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
@@ -33,8 +33,6 @@ devflow/
 │   ├── devflow-resolve/
 │   ├── devflow-debug/
 │   ├── devflow-self-review/
-│   ├── devflow-catch-up/
-│   ├── devflow-devlog/
 │   ├── devflow-core-skills/
 │   └── devflow-audit-claude/
 ├── docs/
@@ -120,7 +118,7 @@ Skills and agents are **not duplicated** in git. Instead:
 ### Shared vs Plugin-Specific Agents
 
 - **Shared** (10): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `shepherd`, `scrutinizer`, `validator`
-- **Plugin-specific** (3): `devlog`, `catch-up`, `claude-md-auditor` — committed directly in their plugins
+- **Plugin-specific** (1): `claude-md-auditor` — committed directly in its plugin
 
 ## Settings Override
 
