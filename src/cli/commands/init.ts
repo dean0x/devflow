@@ -47,22 +47,16 @@ export function parsePluginSelection(
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
-  skipDocs?: boolean;
   scope?: string;
   verbose?: boolean;
-  overrideSettings?: boolean;
   plugin?: string;
-  list?: boolean;
 }
 
 export const initCommand = new Command('init')
   .description('Initialize DevFlow for Claude Code')
-  .option('--skip-docs', 'Skip creating .docs/ structure')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
-  .option('--override-settings', 'Override existing settings.json with DevFlow configuration')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,review)')
-  .option('--list', 'List available plugins')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -78,35 +72,6 @@ export const initCommand = new Command('init')
 
     // Start the CLI flow
     p.intro(color.bgCyan(color.black(` DevFlow v${version} `)));
-
-    // Handle --list option
-    if (options.list) {
-      const maxNameLen = Math.max(...DEVFLOW_PLUGINS.map(p => p.name.length));
-      const pluginList = DEVFLOW_PLUGINS
-        .map(plugin => {
-          const cmds = plugin.commands.length > 0 ? plugin.commands.join(', ') : '(skills only)';
-          const optionalTag = plugin.optional ? color.dim(' (optional)') : '';
-          return `${color.cyan(plugin.name.padEnd(maxNameLen + 2))}${color.dim(plugin.description)}${optionalTag}\n${' '.repeat(maxNameLen + 2)}${color.yellow(cmds)}`;
-        })
-        .join('\n\n');
-
-      p.note(pluginList, 'Available plugins');
-      p.outro(color.dim('Install with: npx devflow-kit init --plugin=<name>'));
-      return;
-    }
-
-    // Parse plugin selection
-    let selectedPlugins: string[] = [];
-    if (options.plugin) {
-      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
-      selectedPlugins = selected;
-
-      if (invalid.length > 0) {
-        p.log.error(`Unknown plugin(s): ${invalid.join(', ')}`);
-        p.log.info(`Valid plugins: ${DEVFLOW_PLUGINS.map(pl => pl.name).join(', ')}`);
-        process.exit(1);
-      }
-    }
 
     // Determine installation scope
     let scope: 'user' | 'local' = 'user';
@@ -136,6 +101,45 @@ export const initCommand = new Command('init')
       }
 
       scope = selected as 'user' | 'local';
+    }
+
+    // Select plugins to install
+    let selectedPlugins: string[] = [];
+    if (options.plugin) {
+      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
+      selectedPlugins = selected;
+
+      if (invalid.length > 0) {
+        p.log.error(`Unknown plugin(s): ${invalid.join(', ')}`);
+        p.log.info(`Valid plugins: ${DEVFLOW_PLUGINS.map(pl => pl.name).join(', ')}`);
+        process.exit(1);
+      }
+    } else if (process.stdin.isTTY) {
+      const choices = DEVFLOW_PLUGINS
+        .filter(pl => pl.name !== 'devflow-core-skills')
+        .map(pl => ({
+          value: pl.name,
+          label: pl.name.replace('devflow-', ''),
+          hint: pl.description + (pl.optional ? ' (optional)' : ''),
+        }));
+
+      const preSelected = DEVFLOW_PLUGINS
+        .filter(pl => !pl.optional && pl.name !== 'devflow-core-skills')
+        .map(pl => pl.name);
+
+      const pluginSelection = await p.multiselect({
+        message: 'Select plugins to install',
+        options: choices,
+        initialValues: preSelected,
+        required: true,
+      });
+
+      if (p.isCancel(pluginSelection)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+
+      selectedPlugins = pluginSelection as string[];
     }
 
     // Get installation paths
@@ -220,7 +224,7 @@ export const initCommand = new Command('init')
     }
 
     // === Post-install extras ===
-    await installSettings(claudeDir, rootDir, devflowDir, options.overrideSettings ?? false, verbose);
+    await installSettings(claudeDir, rootDir, devflowDir, verbose);
     await installClaudeMd(claudeDir, rootDir, verbose);
     if (gitRoot) {
       await installClaudeignore(gitRoot, rootDir, verbose);
@@ -228,7 +232,7 @@ export const initCommand = new Command('init')
     if (scope === 'local' && gitRoot) {
       await updateGitignore(gitRoot, verbose);
     }
-    if (!options.skipDocs) {
+    if (scope === 'local') {
       await createDocsStructure(verbose);
     }
 

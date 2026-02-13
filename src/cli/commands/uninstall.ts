@@ -129,12 +129,27 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       if (scopesToUninstall.length > 1) {
-        p.log.info(
-          `Found DevFlow in multiple scopes:\n` +
-          `  ${color.dim('User scope')}  ~/.claude/\n` +
-          `  ${color.dim('Local scope')}  git-root/.claude/\n` +
-          `Uninstalling from both...`
-        );
+        if (process.stdin.isTTY) {
+          const scopeChoice = await p.select({
+            message: 'Found DevFlow in multiple scopes. Uninstall from:',
+            options: [
+              { value: 'both', label: 'Both', hint: 'user + local' },
+              { value: 'user', label: 'User scope', hint: '~/.claude/' },
+              { value: 'local', label: 'Local scope', hint: 'git-root/.claude/' },
+            ],
+          });
+
+          if (p.isCancel(scopeChoice)) {
+            p.cancel('Uninstall cancelled.');
+            process.exit(0);
+          }
+
+          if (scopeChoice !== 'both') {
+            scopesToUninstall = [scopeChoice as 'user' | 'local'];
+          }
+        } else {
+          p.log.info('Multiple scopes detected, uninstalling from both...');
+        }
       }
     }
 
@@ -191,17 +206,37 @@ export const uninstallCommand = new Command('uninstall')
 
     // === CLEANUP EXTRAS (only for full uninstall) ===
     if (!isSelectiveUninstall) {
-      if (!options.keepDocs) {
-        const docsDir = path.join(process.cwd(), '.docs');
-        try {
-          await fs.access(docsDir);
-          p.log.warn('Found .docs/ directory in current project');
-          p.log.info(
-            'Contains session documentation and history.\n' +
-            'Use --keep-docs to preserve it, or manually remove it.'
-          );
-        } catch {
-          // .docs doesn't exist
+      const docsDir = path.join(process.cwd(), '.docs');
+      let docsExist = false;
+      try {
+        await fs.access(docsDir);
+        docsExist = true;
+      } catch { /* .docs doesn't exist */ }
+
+      if (docsExist) {
+        let shouldRemoveDocs = false;
+
+        if (options.keepDocs) {
+          shouldRemoveDocs = false;
+        } else if (process.stdin.isTTY) {
+          const removeDocs = await p.confirm({
+            message: '.docs/ directory found. Remove project documentation?',
+            initialValue: false,
+          });
+
+          if (p.isCancel(removeDocs)) {
+            p.cancel('Uninstall cancelled.');
+            process.exit(0);
+          }
+
+          shouldRemoveDocs = removeDocs;
+        }
+
+        if (shouldRemoveDocs) {
+          await fs.rm(docsDir, { recursive: true, force: true });
+          p.log.success('.docs/ removed');
+        } else {
+          p.log.info('.docs/ preserved');
         }
       }
 

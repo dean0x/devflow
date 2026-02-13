@@ -35,13 +35,13 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
 
 /**
  * Install or update settings.json with DevFlow configuration.
- * Handles existing settings, override confirmation, and hooks warning.
+ * Prompts interactively in TTY mode when settings already exist.
+ * In non-TTY mode, skips override (safe default).
  */
 export async function installSettings(
   claudeDir: string,
   rootDir: string,
   devflowDir: string,
-  overrideSettings: boolean,
   verbose: boolean,
 ): Promise<void> {
   const settingsPath = path.join(claudeDir, 'settings.json');
@@ -59,42 +59,49 @@ export async function installSettings(
       settingsExists = false;
     }
 
-    if (settingsExists && overrideSettings) {
-      if (process.stdin.isTTY) {
-        const confirmed = await p.confirm({
-          message: 'settings.json exists. Override with DevFlow settings?',
-          initialValue: false,
-        });
-
-        if (p.isCancel(confirmed)) {
-          p.cancel('Installation cancelled.');
-          process.exit(0);
-        }
-
-        if (confirmed) {
-          await fs.writeFile(settingsPath, settingsContent, 'utf-8');
-          p.log.success('Settings overridden');
-        } else {
-          p.log.info('Keeping existing settings');
-        }
-      } else {
-        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
-        p.log.success('Settings overridden');
-      }
-    } else if (settingsExists) {
-      try {
-        const existingSettings = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-        if (!existingSettings.hooks) {
-          p.log.warn('Settings exist without hooks. Working Memory requires hooks.');
-          p.log.info('Run with --override-settings to enable, or manually add hooks to settings.json');
-        }
-      } catch { /* ignore parse errors */ }
-      p.log.info('Settings exist - use --override-settings to replace');
-    } else {
+    if (!settingsExists) {
       await fs.writeFile(settingsPath, settingsContent, 'utf-8');
       if (verbose) {
         p.log.success('Settings configured');
       }
+      return;
+    }
+
+    // Settings exist — check if they already have hooks
+    let hasHooks = false;
+    try {
+      const existing = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+      hasHooks = !!existing.hooks;
+    } catch { /* parse error = treat as no hooks */ }
+
+    if (hasHooks) {
+      if (verbose) {
+        p.log.info('Settings already configured with hooks');
+      }
+      return;
+    }
+
+    // Settings exist without hooks — prompt in TTY, warn in non-TTY
+    if (process.stdin.isTTY) {
+      const confirmed = await p.confirm({
+        message: 'settings.json exists without hooks (Working Memory needs hooks). Override?',
+        initialValue: true,
+      });
+
+      if (p.isCancel(confirmed)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+
+      if (confirmed) {
+        await fs.writeFile(settingsPath, settingsContent, 'utf-8');
+        p.log.success('Settings overridden');
+      } else {
+        p.log.info('Keeping existing settings');
+      }
+    } else {
+      p.log.warn('Settings exist without hooks. Working Memory requires hooks.');
+      p.log.info('Re-run interactively to configure, or manually add hooks to settings.json');
     }
   } catch (error: unknown) {
     if (verbose) {
