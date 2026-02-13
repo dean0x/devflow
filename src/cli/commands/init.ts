@@ -9,6 +9,7 @@ import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, type PluginDefinition } from '../plugins.js';
+import { detectPlatform, getSafeDeleteSuggestion, hasSafeDelete } from '../utils/safe-delete.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -569,6 +570,18 @@ export const initCommand = new Command('init')
         .map(cmd => color.cyan(cmd))
         .join('  ');
       p.note(commandsNote, 'Available commands');
+    }
+
+    // Safe-delete suggestion
+    const platform = detectPlatform();
+    const safeDeleteInfo = getSafeDeleteSuggestion(platform);
+    if (safeDeleteInfo) {
+      const safeDeleteAvailable = hasSafeDelete(platform);
+      if (safeDeleteAvailable) {
+        p.log.info(`💡 Safe-delete available (${color.green(safeDeleteInfo.command)}). Add to shell profile: ${color.cyan(safeDeleteInfo.aliasHint)}`);
+      } else {
+        p.log.info(`💡 Protect against accidental ${color.red('rm -rf')}: ${color.cyan(safeDeleteInfo.installHint)}`);
+      }
     }
 
     // Verbose mode: show details
