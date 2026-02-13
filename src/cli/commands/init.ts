@@ -8,10 +8,44 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { DEVFLOW_PLUGINS, buildAssetMaps } from '../plugins.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps, type PluginDefinition } from '../plugins.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Parse a comma-separated plugin selection string into normalized plugin names.
+ * Validates against known plugins; returns invalid names as errors.
+ */
+export function parsePluginSelection(
+  input: string,
+  validPlugins: PluginDefinition[],
+): { selected: string[]; invalid: string[] } {
+  const selected = input.split(',').map(p => {
+    const trimmed = p.trim();
+    return trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
+  });
+
+  const validNames = validPlugins.map(p => p.name);
+  const invalid = selected.filter(p => !validNames.includes(p));
+  return { selected, invalid };
+}
+
+/**
+ * Replace ${DEVFLOW_DIR} placeholders in a settings template.
+ */
+export function substituteSettingsTemplate(template: string, devflowDir: string): string {
+  return template.replace(/\$\{DEVFLOW_DIR\}/g, devflowDir);
+}
+
+/**
+ * Compute which entries need appending to a .gitignore file.
+ * Returns only entries not already present.
+ */
+export function computeGitignoreAppend(existingContent: string, entries: string[]): string[] {
+  const existingLines = existingContent.split('\n').map(l => l.trim());
+  return entries.filter(entry => !existingLines.includes(entry));
+}
 
 /**
  * Type guard for Node.js system errors with error codes
@@ -128,18 +162,12 @@ export const initCommand = new Command('init')
     // Parse plugin selection
     let selectedPlugins: string[] = [];
     if (options.plugin) {
-      selectedPlugins = options.plugin.split(',').map(p => {
-        const trimmed = p.trim();
-        // Allow shorthand (e.g., "implement" -> "devflow-implement")
-        return trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
-      });
+      const { selected, invalid } = parsePluginSelection(options.plugin, DEVFLOW_PLUGINS);
+      selectedPlugins = selected;
 
-      // Validate plugin names
-      const validNames = DEVFLOW_PLUGINS.map(p => p.name);
-      const invalidPlugins = selectedPlugins.filter(p => !validNames.includes(p));
-      if (invalidPlugins.length > 0) {
-        p.log.error(`Unknown plugin(s): ${invalidPlugins.join(', ')}`);
-        p.log.info(`Valid plugins: ${validNames.join(', ')}`);
+      if (invalid.length > 0) {
+        p.log.error(`Unknown plugin(s): ${invalid.join(', ')}`);
+        p.log.info(`Valid plugins: ${DEVFLOW_PLUGINS.map(pl => pl.name).join(', ')}`);
         process.exit(1);
       }
     }
@@ -389,7 +417,7 @@ export const initCommand = new Command('init')
 
     try {
       const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
-      const settingsContent = settingsTemplate.replace(/\$\{DEVFLOW_DIR\}/g, devflowDir);
+      const settingsContent = substituteSettingsTemplate(settingsTemplate, devflowDir);
 
       let settingsExists = false;
       try {
@@ -490,12 +518,7 @@ export const initCommand = new Command('init')
           gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
         } catch { /* doesn't exist */ }
 
-        const linesToAdd: string[] = [];
-        for (const entry of entriesToAdd) {
-          if (!gitignoreContent.split('\n').some(line => line.trim() === entry)) {
-            linesToAdd.push(entry);
-          }
-        }
+        const linesToAdd = computeGitignoreAppend(gitignoreContent, entriesToAdd);
 
         if (linesToAdd.length > 0) {
           const newContent = gitignoreContent

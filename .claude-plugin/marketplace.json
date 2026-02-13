@@ -36,20 +36,6 @@
       "keywords": ["issues", "fixes", "tech-debt", "resolution"]
     },
     {
-      "name": "devflow-catch-up",
-      "source": "./plugins/devflow-catch-up",
-      "description": "Context restoration from development status logs",
-      "version": "0.9.0",
-      "keywords": ["context", "status", "documentation"]
-    },
-    {
-      "name": "devflow-devlog",
-      "source": "./plugins/devflow-devlog",
-      "description": "Development session logging and status tracking",
-      "version": "0.9.0",
-      "keywords": ["logging", "status", "documentation"]
-    },
-    {
       "name": "devflow-self-review",
       "source": "./plugins/devflow-self-review",
       "description": "Self-review workflow: Simplifier + Scrutinizer for code quality",

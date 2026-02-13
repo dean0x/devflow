@@ -5,7 +5,7 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-02-13
 
 ### Added
 - **Agent Teams integration** - Peer-to-peer agent collaboration across workflows
@@ -121,6 +121,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Debug` agent** - Removed entirely
 - **`PullRequest` agent** - Patterns moved to `devflow-pull-request` skill
 - **`Release` agent** - Removed (release process documented in CLAUDE.md)
+- **`/catch-up` command** - Superseded by Working Memory hooks (automatic context restoration)
+- **`/devlog` command** - Superseded by Working Memory hooks (automatic session logging)
+- **`catch-up` agent** - No longer needed with automatic Working Memory
+- **`devlog` agent** - No longer needed with automatic Working Memory
 - **`devflow-debug` skill** - Removed entirely
 - **`GetIssue` agent** - Replaced by Git agent (operation: fetch-issue)
 - **`Comment` agent** - Replaced by Git agent (operation: comment-pr)
@@ -706,6 +710,7 @@ devflow init
 
 ---
 
+[1.0.0]: https://github.com/dean0x/devflow/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/dean0x/devflow/releases/tag/v0.9.0
 [0.8.1]: https://github.com/dean0x/devflow/releases/tag/v0.8.1
 [0.8.0]: https://github.com/dean0x/devflow/releases/tag/v0.8.0

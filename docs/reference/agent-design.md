@@ -35,7 +35,7 @@ frontmatter (name, description, model, skills, hooks)
 
 | Agent Type | Target Lines | Examples |
 |------------|-------------|----------|
-| Utility | 50-80 | Skimmer, Simplifier, CatchUp |
+| Utility | 50-80 | Skimmer, Simplifier, Validator |
 | Worker | 80-120 | Coder, Reviewer, Git |
 | Orchestration | 100-150 | (Commands handle orchestration, not agents) |
 
@@ -93,4 +93,4 @@ Before committing a new or modified agent:
 3. Test with explicit invocation
 4. Document in plugin README.md
 
-**Note:** Shared agents live in `shared/agents/` and are distributed at build time. Only create plugin-specific agents when tightly coupled to a single workflow (e.g., `devlog.md`, `catch-up.md`).
+**Note:** Shared agents live in `shared/agents/` and are distributed at build time. Only create plugin-specific agents when tightly coupled to a single workflow (e.g., `claude-md-auditor.md`).

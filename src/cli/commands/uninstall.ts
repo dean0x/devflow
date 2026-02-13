@@ -4,7 +4,42 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { getInstallationPaths, getClaudeDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES } from '../plugins.js';
+import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
+
+/**
+ * Compute which assets should be removed during selective plugin uninstall.
+ * Skills and agents shared by remaining plugins are retained.
+ */
+export function computeAssetsToRemove(
+  selectedPlugins: PluginDefinition[],
+  allPlugins: PluginDefinition[],
+): { skills: string[]; agents: string[]; commands: string[] } {
+  const selectedNames = new Set(selectedPlugins.map(p => p.name));
+  const remainingPlugins = allPlugins.filter(p => !selectedNames.has(p.name));
+
+  const retainedSkills = new Set<string>();
+  const retainedAgents = new Set<string>();
+  for (const rp of remainingPlugins) {
+    for (const s of rp.skills) retainedSkills.add(s);
+    for (const a of rp.agents) retainedAgents.add(a);
+  }
+
+  const skills: string[] = [];
+  const agents: string[] = [];
+  const commands: string[] = [];
+
+  for (const plugin of selectedPlugins) {
+    for (const skill of plugin.skills) {
+      if (!retainedSkills.has(skill)) skills.push(skill);
+    }
+    for (const agent of plugin.agents) {
+      if (!retainedAgents.has(agent)) agents.push(agent);
+    }
+    commands.push(...plugin.commands);
+  }
+
+  return { skills, agents, commands };
+}
 
 /**
  * Check if Claude CLI is available
@@ -271,69 +306,45 @@ async function removeSelectedPlugins(
   plugins: typeof DEVFLOW_PLUGINS,
   verbose: boolean,
 ): Promise<void> {
-  const selectedNames = new Set(plugins.map(p => p.name));
-
-  // Collect skills/agents used by plugins that will remain
-  const remainingPlugins = DEVFLOW_PLUGINS.filter(p => !selectedNames.has(p.name));
-  const retainedSkills = new Set<string>();
-  const retainedAgents = new Set<string>();
-  for (const rp of remainingPlugins) {
-    for (const s of rp.skills) retainedSkills.add(s);
-    for (const a of rp.agents) retainedAgents.add(a);
-  }
+  const { skills, agents, commands } = computeAssetsToRemove(plugins, DEVFLOW_PLUGINS);
 
   // Remove commands for selected plugins
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
-  for (const plugin of plugins) {
-    for (const cmd of plugin.commands) {
-      // Command files are named like "review.md" from "/review"
-      const cmdFileName = cmd.replace(/^\//, '') + '.md';
-      try {
-        await fs.rm(path.join(commandsDir, cmdFileName), { force: true });
-        if (verbose) {
-          console.log(`  ✅ Removed command ${cmd}`);
-        }
-      } catch {
-        // Command file might not exist
+  for (const cmd of commands) {
+    const cmdFileName = cmd.replace(/^\//, '') + '.md';
+    try {
+      await fs.rm(path.join(commandsDir, cmdFileName), { force: true });
+      if (verbose) {
+        console.log(`  ✅ Removed command ${cmd}`);
       }
+    } catch {
+      // Command file might not exist
     }
   }
 
-  // Remove agents only used by selected plugins (not retained by remaining plugins)
+  // Remove agents not retained by remaining plugins
   const agentsDir = path.join(claudeDir, 'agents', 'devflow');
-  for (const plugin of plugins) {
-    for (const agent of plugin.agents) {
-      if (!retainedAgents.has(agent)) {
-        try {
-          await fs.rm(path.join(agentsDir, `${agent}.md`), { force: true });
-          if (verbose) {
-            console.log(`  ✅ Removed agent ${agent}`);
-          }
-        } catch {
-          // Agent file might not exist
-        }
-      } else if (verbose) {
-        console.log(`  ⏭️  Kept agent ${agent} (used by other plugins)`);
+  for (const agent of agents) {
+    try {
+      await fs.rm(path.join(agentsDir, `${agent}.md`), { force: true });
+      if (verbose) {
+        console.log(`  ✅ Removed agent ${agent}`);
       }
+    } catch {
+      // Agent file might not exist
     }
   }
 
-  // Remove skills only used by selected plugins (not retained by remaining plugins)
+  // Remove skills not retained by remaining plugins
   const skillsDir = path.join(claudeDir, 'skills');
-  for (const plugin of plugins) {
-    for (const skill of plugin.skills) {
-      if (!retainedSkills.has(skill)) {
-        try {
-          await fs.rm(path.join(skillsDir, skill), { recursive: true, force: true });
-          if (verbose) {
-            console.log(`  ✅ Removed skill ${skill}`);
-          }
-        } catch {
-          // Skill might not exist
-        }
-      } else if (verbose) {
-        console.log(`  ⏭️  Kept skill ${skill} (used by other plugins)`);
+  for (const skill of skills) {
+    try {
+      await fs.rm(path.join(skillsDir, skill), { recursive: true, force: true });
+      if (verbose) {
+        console.log(`  ✅ Removed skill ${skill}`);
       }
+    } catch {
+      // Skill might not exist
     }
   }
 }
