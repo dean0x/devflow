@@ -17,7 +17,8 @@ import {
   createDocsStructure,
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, type PluginDefinition } from '../plugins.js';
-import { detectPlatform, getSafeDeleteSuggestion, hasSafeDelete } from '../utils/safe-delete.js';
+import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
+import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend } from '../utils/post-install.js';
@@ -41,6 +42,41 @@ export function parsePluginSelection(
   const validNames = validPlugins.map(p => p.name);
   const invalid = selected.filter(p => !validNames.includes(p));
   return { selected, invalid };
+}
+
+export type ExtraId = 'settings' | 'claude-md' | 'claudeignore' | 'gitignore' | 'docs' | 'safe-delete';
+
+interface ExtraOption {
+  value: ExtraId;
+  label: string;
+  hint: string;
+}
+
+/**
+ * Build the list of configuration extras available for the given scope/git context.
+ * Pure function — no I/O, no side effects.
+ */
+export function buildExtrasOptions(scope: 'user' | 'local', gitRoot: string | null): ExtraOption[] {
+  const options: ExtraOption[] = [
+    { value: 'settings', label: 'Settings & Working Memory', hint: 'Model defaults, session memory hooks, status line, security deny list' },
+    { value: 'claude-md', label: 'CLAUDE.md quality enforcer', hint: 'Strict code critic role + engineering pattern references' },
+  ];
+
+  if (gitRoot) {
+    options.push({ value: 'claudeignore', label: '.claudeignore', hint: 'Exclude secrets, deps, build artifacts from Claude context' });
+  }
+
+  if (scope === 'local' && gitRoot) {
+    options.push({ value: 'gitignore', label: '.gitignore entries', hint: 'Add .claude/ and .devflow/ to .gitignore' });
+  }
+
+  if (scope === 'local') {
+    options.push({ value: 'docs', label: '.docs/ directory', hint: 'Review reports, dev logs, status tracking for this project' });
+  }
+
+  options.push({ value: 'safe-delete', label: 'Safe-delete (rm → trash)', hint: 'Override rm to use trash CLI — prevents accidental deletion' });
+
+  return options;
 }
 
 /**
@@ -142,6 +178,10 @@ export const initCommand = new Command('init')
       selectedPlugins = pluginSelection as string[];
     }
 
+    // Start spinner immediately after prompts — covers path resolution + git detection
+    const s = p.spinner();
+    s.start('Resolving paths');
+
     // Get installation paths
     let claudeDir: string;
     let devflowDir: string;
@@ -151,15 +191,15 @@ export const initCommand = new Command('init')
       const paths = await getInstallationPaths(scope);
       claudeDir = paths.claudeDir;
       devflowDir = paths.devflowDir;
-      gitRoot = await getGitRoot();
+      gitRoot = paths.gitRoot ?? await getGitRoot();
     } catch (error) {
+      s.stop('Path resolution failed');
       p.log.error(`Path configuration error: ${error instanceof Error ? error.message : error}`);
       process.exit(1);
     }
 
     // Validate target directory
-    const s = p.spinner();
-    s.start('Installing components');
+    s.message('Validating target directory');
 
     if (scope === 'local') {
       try {
@@ -181,6 +221,7 @@ export const initCommand = new Command('init')
     }
 
     // Resolve plugins and deduplication maps
+    s.message('Installing components');
     const rootDir = path.resolve(__dirname, '../..');
     const pluginsDir = path.join(rootDir, 'plugins');
 
@@ -223,17 +264,54 @@ export const initCommand = new Command('init')
       }
     }
 
-    // === Post-install extras ===
-    await installSettings(claudeDir, rootDir, devflowDir, verbose);
-    await installClaudeMd(claudeDir, rootDir, verbose);
-    if (gitRoot) {
-      await installClaudeignore(gitRoot, rootDir, verbose);
+    s.stop('Plugins installed');
+
+    // === Configuration extras ===
+    const extrasOptions = buildExtrasOptions(scope, gitRoot);
+    let selectedExtras: ExtraId[];
+
+    if (process.stdin.isTTY) {
+      const extrasSelection = await p.multiselect({
+        message: 'Configure extras',
+        options: extrasOptions,
+        initialValues: extrasOptions.map(o => o.value),
+        required: false,
+      });
+
+      if (p.isCancel(extrasSelection)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+
+      selectedExtras = extrasSelection as ExtraId[];
+    } else {
+      selectedExtras = extrasOptions.map(o => o.value);
     }
-    if (scope === 'local' && gitRoot) {
-      await updateGitignore(gitRoot, verbose);
+
+    // Settings may trigger its own TTY sub-prompt — run outside spinner
+    if (selectedExtras.includes('settings')) {
+      await installSettings(claudeDir, rootDir, devflowDir, verbose);
     }
-    if (scope === 'local') {
-      await createDocsStructure(verbose);
+
+    const fileExtras = selectedExtras.filter(e => e !== 'settings' && e !== 'safe-delete');
+    if (fileExtras.length > 0) {
+      const sExtras = p.spinner();
+      sExtras.start('Configuring extras');
+
+      if (selectedExtras.includes('claude-md')) {
+        await installClaudeMd(claudeDir, rootDir, verbose);
+      }
+      if (selectedExtras.includes('claudeignore') && gitRoot) {
+        await installClaudeignore(gitRoot, rootDir, verbose);
+      }
+      if (selectedExtras.includes('gitignore') && gitRoot) {
+        await updateGitignore(gitRoot, verbose);
+      }
+      if (selectedExtras.includes('docs')) {
+        await createDocsStructure(verbose);
+      }
+
+      sExtras.stop('Extras configured');
     }
 
     // Summary output
@@ -251,15 +329,46 @@ export const initCommand = new Command('init')
       p.note(commandsNote, 'Available commands');
     }
 
-    // Safe-delete suggestion
-    const platform = detectPlatform();
-    const safeDeleteInfo = getSafeDeleteSuggestion(platform);
-    if (safeDeleteInfo) {
+    // Safe-delete auto-install (gated by extras selection)
+    if (selectedExtras.includes('safe-delete')) {
+      const platform = detectPlatform();
+      const shell = detectShell();
+      const safeDeleteInfo = getSafeDeleteInfo(platform);
       const safeDeleteAvailable = hasSafeDelete(platform);
-      if (safeDeleteAvailable) {
-        p.log.info(`💡 Safe-delete available (${color.green(safeDeleteInfo.command)}). Add to shell profile: ${color.cyan(safeDeleteInfo.aliasHint)}`);
-      } else {
-        p.log.info(`💡 Protect against accidental ${color.red('rm -rf')}: ${color.cyan(safeDeleteInfo.installHint)}`);
+      const profilePath = getProfilePath(shell);
+
+      if (process.stdin.isTTY && profilePath) {
+        if (!safeDeleteAvailable && safeDeleteInfo.installHint) {
+          p.log.info(`Install ${color.cyan(safeDeleteInfo.command ?? 'trash')} first: ${color.dim(safeDeleteInfo.installHint)}`);
+          p.log.info(`Then re-run ${color.cyan('devflow init')} to auto-configure safe-delete.`);
+        } else if (safeDeleteAvailable) {
+          const alreadyInstalled = await isAlreadyInstalled(profilePath);
+          if (alreadyInstalled) {
+            p.log.info(`Safe-delete already configured in ${color.dim(profilePath)}`);
+          } else {
+            const trashCmd = safeDeleteInfo.command;
+            const block = generateSafeDeleteBlock(shell, process.platform, trashCmd);
+
+            if (block) {
+              const confirm = await p.confirm({
+                message: `Install safe-delete to ${profilePath}? (overrides rm to use ${trashCmd ?? 'recycle bin'})`,
+                initialValue: true,
+              });
+
+              if (!p.isCancel(confirm) && confirm) {
+                await installToProfile(profilePath, block);
+                p.log.success(`Safe-delete installed to ${color.dim(profilePath)}`);
+                p.log.info('Restart your shell or run: ' + color.cyan(`source ${profilePath}`));
+              }
+            }
+          }
+        }
+      } else if (!process.stdin.isTTY) {
+        if (safeDeleteAvailable && safeDeleteInfo.command) {
+          p.log.info(`Safe-delete available (${safeDeleteInfo.command}). Run interactively to auto-install.`);
+        } else if (safeDeleteInfo.installHint) {
+          p.log.info(`Protect against accidental ${color.red('rm -rf')}: ${color.cyan(safeDeleteInfo.installHint)}`);
+        }
       }
     }
 

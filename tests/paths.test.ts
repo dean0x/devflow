@@ -72,13 +72,14 @@ describe('getDevFlowDirectory', () => {
 });
 
 describe('getInstallationPaths', () => {
-  it('user scope returns home-based paths', async () => {
+  it('user scope returns home-based paths with null gitRoot', async () => {
     vi.stubEnv('CLAUDE_CODE_DIR', '');
     vi.stubEnv('DEVFLOW_DIR', '');
-    const { claudeDir, devflowDir } = await getInstallationPaths('user');
+    const { claudeDir, devflowDir, gitRoot } = await getInstallationPaths('user');
     const home = getHomeDirectory();
     expect(claudeDir).toBe(path.join(home, '.claude'));
     expect(devflowDir).toBe(path.join(home, '.devflow'));
+    expect(gitRoot).toBeNull();
   });
 
   it('local scope requires git root', async () => {
@@ -87,11 +88,12 @@ describe('getInstallationPaths', () => {
     await expect(getInstallationPaths('local')).rejects.toThrow('requires a git repository');
   });
 
-  it('local scope returns git-root-based paths', async () => {
+  it('local scope returns git-root-based paths with gitRoot', async () => {
     const mockedGetGitRoot = vi.mocked(getGitRoot);
     mockedGetGitRoot.mockResolvedValue('/repo/root');
-    const { claudeDir, devflowDir } = await getInstallationPaths('local');
+    const { claudeDir, devflowDir, gitRoot } = await getInstallationPaths('local');
     expect(claudeDir).toBe('/repo/root/.claude');
     expect(devflowDir).toBe('/repo/root/.devflow');
+    expect(gitRoot).toBe('/repo/root');
   });
 });

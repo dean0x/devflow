@@ -8,6 +8,8 @@ import { getInstallationPaths, getClaudeDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
+import { detectShell, getProfilePath } from '../utils/safe-delete.js';
+import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -206,6 +208,9 @@ export const uninstallCommand = new Command('uninstall')
 
     // === CLEANUP EXTRAS (only for full uninstall) ===
     if (!isSelectiveUninstall) {
+      const gitRoot = await getGitRoot();
+
+      // 1. .docs/ directory
       const docsDir = path.join(process.cwd(), '.docs');
       let docsExist = false;
       try {
@@ -240,22 +245,119 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      const claudeignorePath = path.join(process.cwd(), '.claudeignore');
+      // 2. .claudeignore
+      const claudeignorePath = gitRoot
+        ? path.join(gitRoot, '.claudeignore')
+        : path.join(process.cwd(), '.claudeignore');
+
+      let claudeignoreExists = false;
       try {
         await fs.access(claudeignorePath);
-        p.log.info(
-          'Found .claudeignore file — keeping it (may contain custom rules).\n' +
-          'Remove manually if it was only for DevFlow.'
-        );
-      } catch {
-        // .claudeignore doesn't exist
+        claudeignoreExists = true;
+      } catch { /* doesn't exist */ }
+
+      if (claudeignoreExists) {
+        if (process.stdin.isTTY) {
+          const removeClaudeignore = await p.confirm({
+            message: '.claudeignore found. Remove it? (may contain custom rules)',
+            initialValue: false,
+          });
+
+          if (!p.isCancel(removeClaudeignore) && removeClaudeignore) {
+            await fs.rm(claudeignorePath, { force: true });
+            p.log.success('.claudeignore removed');
+          } else {
+            p.log.info('.claudeignore preserved');
+          }
+        } else {
+          p.log.info('.claudeignore preserved (non-interactive mode)');
+        }
       }
 
-      if (verbose) {
-        p.log.info(
-          'settings.json preserved (may contain other configurations).\n' +
-          'Remove statusLine manually if desired.'
-        );
+      // 3. settings.json (DevFlow hooks)
+      for (const scope of scopesToUninstall) {
+        try {
+          const paths = await getInstallationPaths(scope);
+          const settingsPath = path.join(paths.claudeDir, 'settings.json');
+          const settingsContent = await fs.readFile(settingsPath, 'utf-8');
+          const settings = JSON.parse(settingsContent);
+
+          if (settings.hooks) {
+            if (process.stdin.isTTY) {
+              const removeHooks = await p.confirm({
+                message: `Remove DevFlow hooks from settings.json (${scope} scope)? Other settings preserved.`,
+                initialValue: false,
+              });
+
+              if (!p.isCancel(removeHooks) && removeHooks) {
+                delete settings.hooks;
+                await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+                p.log.success(`DevFlow hooks removed from settings.json (${scope})`);
+              } else {
+                p.log.info(`settings.json hooks preserved (${scope})`);
+              }
+            } else {
+              p.log.info(`settings.json hooks preserved (${scope}, non-interactive mode)`);
+            }
+          }
+        } catch {
+          // settings.json doesn't exist or can't be parsed — skip
+        }
+      }
+
+      // 4. CLAUDE.md (only if DevFlow installed it)
+      for (const scope of scopesToUninstall) {
+        try {
+          const paths = await getInstallationPaths(scope);
+          const claudeMdPath = path.join(paths.claudeDir, 'CLAUDE.md');
+          const content = await fs.readFile(claudeMdPath, 'utf-8');
+
+          // Only offer removal if it's the DevFlow template (check for marker)
+          if (content.includes('DevFlow')) {
+            if (process.stdin.isTTY) {
+              const removeClaudeMd = await p.confirm({
+                message: `Remove CLAUDE.md (${scope} scope)? May contain your customizations.`,
+                initialValue: false,
+              });
+
+              if (!p.isCancel(removeClaudeMd) && removeClaudeMd) {
+                await fs.rm(claudeMdPath, { force: true });
+                p.log.success(`CLAUDE.md removed (${scope})`);
+              } else {
+                p.log.info(`CLAUDE.md preserved (${scope})`);
+              }
+            } else {
+              p.log.info(`CLAUDE.md preserved (${scope}, non-interactive mode)`);
+            }
+          }
+        } catch {
+          // CLAUDE.md doesn't exist — skip
+        }
+      }
+
+      // 5. Safe-delete shell function
+      const shell = detectShell();
+      const profilePath = getProfilePath(shell);
+      if (profilePath && await isAlreadyInstalled(profilePath)) {
+        if (process.stdin.isTTY) {
+          const removeSafeDelete = await p.confirm({
+            message: `Remove safe-delete function from ${profilePath}?`,
+            initialValue: false,
+          });
+
+          if (!p.isCancel(removeSafeDelete) && removeSafeDelete) {
+            const removed = await removeFromProfile(profilePath);
+            if (removed) {
+              p.log.success(`Safe-delete removed from ${profilePath}`);
+            } else {
+              p.log.warn(`Could not remove safe-delete from ${profilePath}`);
+            }
+          } else {
+            p.log.info('Safe-delete preserved in shell profile');
+          }
+        } else {
+          p.log.info(`Safe-delete function preserved in ${profilePath} (non-interactive mode)`);
+        }
       }
     }
 

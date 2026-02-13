@@ -3,6 +3,7 @@ import {
   parsePluginSelection,
   substituteSettingsTemplate,
   computeGitignoreAppend,
+  buildExtrasOptions,
 } from '../src/cli/commands/init.js';
 import { DEVFLOW_PLUGINS } from '../src/cli/plugins.js';
 
@@ -70,6 +71,40 @@ describe('substituteSettingsTemplate', () => {
     const template = '${DEVFLOW_DIR} and ${DEVFLOW_DIR} again';
     const result = substituteSettingsTemplate(template, '/d');
     expect(result).toBe('/d and /d again');
+  });
+});
+
+describe('buildExtrasOptions', () => {
+  it('returns settings, claude-md, safe-delete for user scope without gitRoot', () => {
+    const options = buildExtrasOptions('user', null);
+    const values = options.map(o => o.value);
+    expect(values).toEqual(['settings', 'claude-md', 'safe-delete']);
+  });
+
+  it('adds claudeignore when gitRoot exists (user scope)', () => {
+    const options = buildExtrasOptions('user', '/repo');
+    const values = options.map(o => o.value);
+    expect(values).toEqual(['settings', 'claude-md', 'claudeignore', 'safe-delete']);
+  });
+
+  it('returns all 6 options for local scope with gitRoot', () => {
+    const options = buildExtrasOptions('local', '/repo');
+    const values = options.map(o => o.value);
+    expect(values).toEqual(['settings', 'claude-md', 'claudeignore', 'gitignore', 'docs', 'safe-delete']);
+  });
+
+  it('omits claudeignore and gitignore for local scope without gitRoot', () => {
+    const options = buildExtrasOptions('local', null);
+    const values = options.map(o => o.value);
+    expect(values).toEqual(['settings', 'claude-md', 'docs', 'safe-delete']);
+  });
+
+  it('all options have non-empty label and hint', () => {
+    const options = buildExtrasOptions('local', '/repo');
+    for (const option of options) {
+      expect(option.label.length).toBeGreaterThan(0);
+      expect(option.hint.length).toBeGreaterThan(0);
+    }
   });
 });
 

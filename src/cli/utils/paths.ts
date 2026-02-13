@@ -74,11 +74,12 @@ export function getDevFlowDirectory(): string {
  * @returns Object with claudeDir and devflowDir
  * @throws {Error} If local scope selected but not in a git repository
  */
-export async function getInstallationPaths(scope: 'user' | 'local'): Promise<{ claudeDir: string; devflowDir: string }> {
+export async function getInstallationPaths(scope: 'user' | 'local'): Promise<{ claudeDir: string; devflowDir: string; gitRoot: string | null }> {
   if (scope === 'user') {
     return {
       claudeDir: getClaudeDirectory(),
-      devflowDir: getDevFlowDirectory()
+      devflowDir: getDevFlowDirectory(),
+      gitRoot: null,
     };
   } else {
     // Local scope - install to git repository root
@@ -88,7 +89,8 @@ export async function getInstallationPaths(scope: 'user' | 'local'): Promise<{ c
     }
     return {
       claudeDir: path.join(gitRoot, '.claude'),
-      devflowDir: path.join(gitRoot, '.devflow')
+      devflowDir: path.join(gitRoot, '.devflow'),
+      gitRoot,
     };
   }
 }
