@@ -29,6 +29,9 @@ yarn-error.log*
 
 # Test documentation created during development
 .docs/
+# Working memory background updater artifacts (also covered by .docs/ above)
+.docs/.working-memory.lock
+.docs/.working-memory-update.log
 test-docs/
 
 # Temporary files
