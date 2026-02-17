@@ -27,7 +27,7 @@ Plugin marketplace with 8 self-contained plugins, each following the Claude plug
 
 **Build-time asset distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/`, then copied to each plugin at build time based on `plugin.json` manifests. This eliminates duplication in git.
 
-**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Stop hook → Claude writes `.docs/WORKING-MEMORY.md` (throttled: skips if updated <2min ago, uses slim instruction after first write). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale). PreCompact hook → saves git state backup + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
+**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Stop hook → spawns a background `claude -p --resume` process that asynchronously updates `.docs/WORKING-MEMORY.md` (throttled: skips if updated <2min ago; concurrent sessions serialize via mkdir-based lock). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale). PreCompact hook → saves git state backup + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
 
 ## Project Structure
 
