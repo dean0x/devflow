@@ -30,7 +30,7 @@ rotate_log() {
 # --- Locking (mkdir-based, POSIX-atomic) ---
 
 acquire_lock() {
-  local timeout=30
+  local timeout=90
   local waited=0
   while ! mkdir "$LOCK_DIR" 2>/dev/null; do
     if [ "$waited" -ge "$timeout" ]; then
@@ -49,14 +49,16 @@ trap cleanup EXIT
 
 # --- Main ---
 
-# Wait for parent session to flush transcript
+# Wait for parent session to flush transcript.
+# 3s provides ~6-10x margin over typical flush times.
+# If --resume shows stale transcripts, bump to 5s.
 sleep 3
 
 log "Starting update for session $SESSION_ID"
 
 # Acquire lock (other sessions may be updating concurrently)
 if ! acquire_lock; then
-  log "Lock timeout after 30s — skipping update for session $SESSION_ID"
+  log "Lock timeout after 90s — skipping update for session $SESSION_ID"
   # Don't clean up lock we don't own
   trap - EXIT
   exit 0
@@ -72,7 +74,7 @@ fi
 
 # Build instruction
 if [ -n "$EXISTING_MEMORY" ]; then
-  INSTRUCTION="Update the file $MEMORY_FILE with current working memory from this session. The file already exists — its content may be from a concurrent session that JUST wrote it moments ago. You MUST preserve ALL existing content in full (do not drop, summarize, or judge relevance — it is fresh). Add this session's context alongside the existing content, merging where sections overlap. Keep under 100 lines total. Use the same structure: ## Now, ## Decisions, ## Modified Files, ## Context, ## Session Log.
+  INSTRUCTION="Update the file $MEMORY_FILE with working memory from this session. The file already has content — possibly from a concurrent session that just wrote it moments ago. Merge this session's context with the existing content to produce a single unified working memory snapshot. Both this session and the existing content represent fresh, concurrent work — integrate both fully. Working memory captures what's active now, not a changelog. Deduplicate overlapping information. Keep under 100 lines total. Use the same structure: ## Now, ## Decisions, ## Modified Files, ## Context, ## Session Log.
 
 Existing content:
 $EXISTING_MEMORY"
@@ -103,7 +105,7 @@ else
 fi
 
 # Resume session headlessly to perform the update
-if env -u CLAUDECODE "$CLAUDE_BIN" -p \
+if DEVFLOW_BG_UPDATER=1 env -u CLAUDECODE "$CLAUDE_BIN" -p \
   --resume "$SESSION_ID" \
   --model haiku \
   --allowedTools "Write" "Read" \
