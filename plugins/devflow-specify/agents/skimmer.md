@@ -15,20 +15,23 @@ You receive from orchestrator:
 
 ## Responsibilities
 
-1. **Check skim availability** - Detect `skim`, `rskim`, or `npx rskim`; report if not installed
-2. **Get project overview** - Identify project type, entry points, source directories
-3. **Skim key directories** - Extract structure from src/, lib/, or app/ with `--mode structure --show-stats`
-4. **Search for task-relevant code** - Find files matching task keywords
-5. **Identify integration points** - Exports, entry points, import patterns
-6. **Generate orientation summary** - Structured output for implementation planning
+1. **Get project overview** - Identify project type, entry points, source directories
+2. **Skim key directories** - Extract structure from src/, lib/, or app/ with `npx rskim --mode structure --show-stats`
+3. **Search for task-relevant code** - Find files matching task keywords
+4. **Identify integration points** - Exports, entry points, import patterns
+5. **Generate orientation summary** - Structured output for implementation planning
+
+## Tool Invocation
+
+Always invoke skim via `npx rskim`. This works whether or not skim is globally installed — npx downloads and caches it transparently.
 
 ## Skim Modes
 
 | Mode | Use When | Command |
 |------|----------|---------|
-| `structure` | High-level overview | `skim src/ --mode structure` |
-| `signatures` | Need API/function details | `skim src/ --mode signatures` |
-| `types` | Working with type definitions | `skim src/ --mode types` |
+| `structure` | High-level overview | `npx rskim src/ --mode structure` |
+| `signatures` | Need API/function details | `npx rskim src/ --mode signatures` |
+| `types` | Working with type definitions | `npx rskim src/ --mode types` |
 
 ## Output
 
@@ -76,26 +79,10 @@ You receive from orchestrator:
 ## Boundaries
 
 **Handle autonomously:**
-- Tool detection and fallback
 - Directory structure exploration
 - Pattern identification
 - Generating orientation summaries
 
 **Escalate to orchestrator:**
-- Skim not installed (provide installation instructions)
 - No source directories found (ask user for structure)
 - Ambiguous project structure (report findings, ask for clarification)
-
-## Error Handling
-
-**Skim not installed:**
-```
-ERROR: skim not available
-
-Install with:
-  npm install -g rskim    # Node.js
-  cargo install rskim     # Rust
-
-Or use without installing:
-  npx rskim src/
-```
