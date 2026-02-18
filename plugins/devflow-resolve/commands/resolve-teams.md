@@ -68,7 +68,81 @@ Create execution plan:
 - **Dependent batches** - Mark for SEQUENTIAL execution
 - **Max 5 issues per batch** - Keep batches manageable
 
-### Phase 4: Resolve (Parallel where possible)
+### Phase 4: Resolve (Agent Teams with cross-validation)
+
+**With Agent Teams:**
+
+Create a resolution team for cross-validated fixes:
+
+```
+Create a team named "resolve-{branch-slug}" to resolve review issues.
+
+Spawn resolver teammates with self-contained prompts (one per independent batch):
+
+- Name: "resolver-batch-1"
+  Prompt: |
+    You are resolving review issues on branch {branch} (PR #{pr_number}).
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    2. Your issues to resolve:
+       {batch 1 issues — full structured list with id, file, line, severity, type, description, suggested_fix}
+    3. For each issue:
+       a. Read the code context around file:line
+       b. Validate: is this a real issue or false positive?
+       c. If real: assess risk (LOW → FIX now, HIGH → defer to TECH_DEBT)
+       d. If FIX: implement the fix, commit with descriptive message
+       e. If TECH_DEBT: document why it's deferred
+    4. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Batch 1: {n} fixed, {n} deferred, {n} false positive")
+
+- Name: "resolver-batch-2"
+  Prompt: |
+    You are resolving review issues on branch {branch} (PR #{pr_number}).
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    2. Your issues to resolve:
+       {batch 2 issues — full structured list with id, file, line, severity, type, description, suggested_fix}
+    3. For each issue:
+       a. Read the code context around file:line
+       b. Validate: is this a real issue or false positive?
+       c. If real: assess risk (LOW → FIX now, HIGH → defer to TECH_DEBT)
+       d. If FIX: implement the fix, commit with descriptive message
+       e. If TECH_DEBT: document why it's deferred
+    4. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Batch 2: {n} fixed, {n} deferred, {n} false positive")
+
+(Additional resolvers for additional batches — same pattern)
+
+After initial fixes complete, lead initiates cross-validation debate:
+SendMessage(type: "broadcast", summary: "Cross-validate: check for conflicts between fixes"):
+"Review each other's fixes. Does my fix in file-a conflict with your fix in file-b?
+Did either of us introduce a regression?"
+
+Resolvers cross-validate using direct messages:
+- SendMessage(type: "message", recipient: "resolver-batch-2", summary: "Conflict: interface change in file-a")
+  "My fix changes the interface used by your files — check imports"
+- SendMessage(type: "message", recipient: "resolver-batch-1", summary: "Confirmed: updating import")
+  "Confirmed — updating my import after your change"
+- SendMessage(type: "message", recipient: "team-lead", summary: "Escalation: conflicting fixes")
+  for unresolvable conflicts
+
+Max 2 debate rounds, then submit consensus resolution.
+```
+
+Shut down resolution team explicitly:
+
+```
+For each teammate in [resolver-batch-1, resolver-batch-2, ...]:
+  SendMessage(type: "shutdown_request", recipient: "{name}", content: "Resolution complete")
+  Wait for shutdown_response (approve: true)
+
+TeamDelete
+Verify TeamDelete succeeded. If failed, retry once after 5s. If retry fails, HALT.
+```
+
+For dependent batches that cannot run in parallel, spawn sequentially within the team and wait for completion before spawning dependents.
+
+**Without Agent Teams (fallback):**
 
 Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
 
@@ -145,7 +219,7 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 ## Architecture
 
 ```
-/resolve (orchestrator - spawns agents only)
+/resolve (orchestrator - spawns teams and agents)
 │
 ├─ Phase 0: Pre-flight
 │  └─ Git agent (validate-branch)
@@ -159,10 +233,11 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 ├─ Phase 3: Plan batches
 │  └─ Group issues, determine parallel vs sequential
 │
-├─ Phase 4: Resolve (PARALLEL where independent)
-│  ├─ Resolver: Batch 1 (file-a issues)
-│  ├─ Resolver: Batch 2 (file-b issues)
-│  └─ Resolver: Batch 3 (waits if depends on 1 or 2)
+├─ Phase 4: Resolve (Agent Teams with cross-validation)
+│  ├─ Resolver: Batch 1 (teammate)
+│  ├─ Resolver: Batch 2 (teammate)
+│  ├─ Resolver: Batch 3 (teammate, waits if depends on 1 or 2)
+│  └─ Cross-validation debate → consensus on conflicts
 │
 ├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred, blocked
