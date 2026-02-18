@@ -21,7 +21,7 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
-export { substituteSettingsTemplate, computeGitignoreAppend } from '../utils/post-install.js';
+export { substituteSettingsTemplate, computeGitignoreAppend, stripTeamsConfig } from '../utils/post-install.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,6 +86,7 @@ interface InitOptions {
   scope?: string;
   verbose?: boolean;
   plugin?: string;
+  teams?: boolean;
 }
 
 export const initCommand = new Command('init')
@@ -93,6 +94,8 @@ export const initCommand = new Command('init')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,review)')
+  .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
+  .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -178,6 +181,24 @@ export const initCommand = new Command('init')
       selectedPlugins = pluginSelection as string[];
     }
 
+    // Agent Teams variant selection
+    let teamsEnabled: boolean;
+    if (options.teams !== undefined) {
+      teamsEnabled = options.teams;
+    } else if (!process.stdin.isTTY) {
+      teamsEnabled = true; // backwards-compatible default
+    } else {
+      const teamsChoice = await p.confirm({
+        message: 'Enable Agent Teams? (peer debate in review, exploration, debugging)',
+        initialValue: true,
+      });
+      if (p.isCancel(teamsChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      teamsEnabled = teamsChoice;
+    }
+
     // Start spinner immediately after prompts — covers path resolution + git detection
     const s = p.spinner();
     s.start('Resolving paths');
@@ -255,6 +276,7 @@ export const initCommand = new Command('init')
           skillsMap,
           agentsMap,
           selectedPluginNames: selectedPlugins,
+          teamsEnabled,
           spinner: s,
         });
       } catch (error) {
@@ -290,7 +312,7 @@ export const initCommand = new Command('init')
 
     // Settings may trigger its own TTY sub-prompt — run outside spinner
     if (selectedExtras.includes('settings')) {
-      await installSettings(claudeDir, rootDir, devflowDir, verbose);
+      await installSettings(claudeDir, rootDir, devflowDir, verbose, teamsEnabled);
     }
 
     const fileExtras = selectedExtras.filter(e => e !== 'settings' && e !== 'safe-delete');

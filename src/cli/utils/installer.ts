@@ -107,6 +107,7 @@ export interface FileCopyOptions {
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
   selectedPluginNames: string[];
+  teamsEnabled: boolean;
   spinner: Spinner;
 }
 
@@ -125,6 +126,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     skillsMap,
     agentsMap,
     selectedPluginNames,
+    teamsEnabled,
     spinner,
   } = options;
 
@@ -157,17 +159,23 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   for (const plugin of plugins) {
     const pluginSourceDir = path.join(pluginsDir, plugin.name);
 
-    // Install commands
+    // Install commands (variant-aware: pick -teams.md or base .md)
     const commandsSource = path.join(pluginSourceDir, 'commands');
     const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
     try {
-      const files = await fs.readdir(commandsSource);
-      if (files.length > 0) {
+      const allFiles = await fs.readdir(commandsSource);
+      const mdFiles = allFiles.filter(f => f.endsWith('.md'));
+      const teamsVariants = new Set(mdFiles.filter(f => f.endsWith('-teams.md')));
+      const baseCommands = mdFiles.filter(f => !teamsVariants.has(f));
+
+      if (baseCommands.length > 0 || teamsVariants.size > 0) {
         await fs.mkdir(commandsTarget, { recursive: true });
-        for (const file of files) {
+        for (const file of baseCommands) {
+          const teamsFile = file.replace('.md', '-teams.md');
+          const sourceFile = (teamsEnabled && teamsVariants.has(teamsFile)) ? teamsFile : file;
           await fs.copyFile(
-            path.join(commandsSource, file),
-            path.join(commandsTarget, file),
+            path.join(commandsSource, sourceFile),
+            path.join(commandsTarget, file), // always install as base name
           );
         }
       }

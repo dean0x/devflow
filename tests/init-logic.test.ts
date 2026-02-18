@@ -4,6 +4,7 @@ import {
   substituteSettingsTemplate,
   computeGitignoreAppend,
   buildExtrasOptions,
+  stripTeamsConfig,
 } from '../src/cli/commands/init.js';
 import { DEVFLOW_PLUGINS } from '../src/cli/plugins.js';
 
@@ -135,5 +136,65 @@ describe('computeGitignoreAppend', () => {
   it('handles empty entries list', () => {
     const result = computeGitignoreAppend('something\n', []);
     expect(result).toEqual([]);
+  });
+});
+
+describe('stripTeamsConfig', () => {
+  it('removes teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', () => {
+    const input = JSON.stringify({
+      statusLine: { type: 'command', command: 'test' },
+      teammateMode: 'auto',
+      env: {
+        ENABLE_TOOL_SEARCH: 'true',
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      },
+    }, null, 2);
+
+    const result = JSON.parse(stripTeamsConfig(input));
+    expect(result.teammateMode).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined();
+    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
+    expect(result.statusLine).toEqual({ type: 'command', command: 'test' });
+  });
+
+  it('preserves all other settings', () => {
+    const input = JSON.stringify({
+      hooks: { Stop: [] },
+      teammateMode: 'auto',
+      env: {
+        ENABLE_TOOL_SEARCH: 'true',
+        ENABLE_LSP_TOOL: 'true',
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      },
+      permissions: { deny: ['Bash(rm -rf /*)'] },
+    }, null, 2);
+
+    const result = JSON.parse(stripTeamsConfig(input));
+    expect(result.hooks).toEqual({ Stop: [] });
+    expect(result.env).toEqual({ ENABLE_TOOL_SEARCH: 'true', ENABLE_LSP_TOOL: 'true' });
+    expect(result.permissions).toEqual({ deny: ['Bash(rm -rf /*)'] });
+  });
+
+  it('handles missing env and teammateMode gracefully', () => {
+    const input = JSON.stringify({
+      hooks: { Stop: [] },
+      statusLine: { type: 'command' },
+    }, null, 2);
+
+    const result = JSON.parse(stripTeamsConfig(input));
+    expect(result.hooks).toEqual({ Stop: [] });
+    expect(result.statusLine).toEqual({ type: 'command' });
+    expect(result.teammateMode).toBeUndefined();
+    expect(result.env).toBeUndefined();
+  });
+
+  it('removes empty env object when AGENT_TEAMS is the only key', () => {
+    const input = JSON.stringify({
+      teammateMode: 'auto',
+      env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' },
+    }, null, 2);
+
+    const result = JSON.parse(stripTeamsConfig(input));
+    expect(result.env).toBeUndefined();
   });
 });

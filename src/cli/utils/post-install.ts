@@ -25,6 +25,22 @@ export function substituteSettingsTemplate(template: string, devflowDir: string)
 }
 
 /**
+ * Remove Agent Teams configuration from settings JSON.
+ * Strips teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var.
+ */
+export function stripTeamsConfig(settingsJson: string): string {
+  const settings = JSON.parse(settingsJson);
+  delete settings.teammateMode;
+  if (settings.env) {
+    delete settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+    if (Object.keys(settings.env).length === 0) {
+      delete settings.env;
+    }
+  }
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+/**
  * Compute which entries need appending to a .gitignore file.
  * Returns only entries not already present.
  */
@@ -43,13 +59,17 @@ export async function installSettings(
   rootDir: string,
   devflowDir: string,
   verbose: boolean,
+  teamsEnabled: boolean = true,
 ): Promise<void> {
   const settingsPath = path.join(claudeDir, 'settings.json');
   const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
 
   try {
     const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
-    const settingsContent = substituteSettingsTemplate(settingsTemplate, devflowDir);
+    let settingsContent = substituteSettingsTemplate(settingsTemplate, devflowDir);
+    if (!teamsEnabled) {
+      settingsContent = stripTeamsConfig(settingsContent);
+    }
 
     let settingsExists = false;
     try {
