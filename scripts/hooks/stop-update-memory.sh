@@ -27,17 +27,20 @@ MEMORY_FILE="$CWD/.docs/WORKING-MEMORY.md"
 LOG_FILE="$CWD/.docs/.working-memory-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
 
-# Throttle: skip if WORKING-MEMORY.md was updated within the last 2 minutes
-if [ -f "$MEMORY_FILE" ]; then
+# Throttle: skip if stop hook was triggered within the last 2 minutes
+# Uses a marker file touched BEFORE spawning the updater — prevents race condition
+# where multiple hooks see stale WORKING-MEMORY.md mtime and all bypass throttle.
+TRIGGER_MARKER="$CWD/.docs/.working-memory-last-trigger"
+if [ -f "$TRIGGER_MARKER" ]; then
   if stat --version &>/dev/null 2>&1; then
-    FILE_MTIME=$(stat -c %Y "$MEMORY_FILE")
+    MARKER_MTIME=$(stat -c %Y "$TRIGGER_MARKER")
   else
-    FILE_MTIME=$(stat -f %m "$MEMORY_FILE")
+    MARKER_MTIME=$(stat -f %m "$TRIGGER_MARKER")
   fi
   NOW=$(date +%s)
-  AGE=$(( NOW - FILE_MTIME ))
+  AGE=$(( NOW - MARKER_MTIME ))
   if [ "$AGE" -lt 120 ]; then
-    log "Skipped: memory file is fresh (${AGE}s old)"
+    log "Skipped: triggered ${AGE}s ago (throttled)"
     exit 0
   fi
 fi
@@ -63,6 +66,9 @@ if [ ! -x "$UPDATER" ]; then
   log "Skipped: updater not found/not executable at $UPDATER"
   exit 0
 fi
+
+# Touch marker BEFORE spawning updater — prevents race with concurrent hooks
+touch "$TRIGGER_MARKER"
 
 # Spawn background updater — detached, no effect on session exit
 nohup "$UPDATER" "$CWD" "$SESSION_ID" "$MEMORY_FILE" "$CLAUDE_BIN" \

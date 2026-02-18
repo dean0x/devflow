@@ -108,11 +108,11 @@ fi
 if DEVFLOW_BG_UPDATER=1 env -u CLAUDECODE "$CLAUDE_BIN" -p \
   --resume "$SESSION_ID" \
   --model haiku \
-  --allowedTools "Write" "Read" \
+  --dangerously-skip-permissions \
   --no-session-persistence \
   --output-format text \
   "$INSTRUCTION" \
-  > /dev/null 2>&1; then
+  > /dev/null 2>> "$LOG_FILE"; then
   log "Update completed for session $SESSION_ID"
 else
   log "Update failed for session $SESSION_ID (exit code $?)"
