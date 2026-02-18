@@ -140,6 +140,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore
 - Generated copies in `plugins/*/skills/` and shared agent files are gitignored
 - Always run `npm run build` after modifying shared assets
 - Plugin manifests (`plugin.json`) declare `skills` and `agents` arrays
+- Every `-teams.md` command variant **must** have a matching base `.md` file — the installer iterates base files and looks up teams variants, so orphaned `-teams.md` files are silently skipped
 
 ### Token Optimization
 - Sub-agents cannot invoke other sub-agents (by design)
