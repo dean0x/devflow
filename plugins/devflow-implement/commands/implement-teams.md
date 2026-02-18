@@ -429,9 +429,7 @@ Verify Scrutinizer's fixes didn't break anything."
 
 ### Phase 9: Shepherd↔Coder Dialogue
 
-After Scrutinizer passes (and re-validation if needed), check alignment using direct dialogue when Agent Teams is available:
-
-**With Agent Teams:**
+After Scrutinizer passes (and re-validation if needed), check alignment using direct dialogue:
 
 Create a mini-team for alignment validation:
 
@@ -492,17 +490,6 @@ Step 2: TeamDelete
 Step 3: GATE — Verify TeamDelete succeeded
   If failed → retry once after 5s
   If retry failed → HALT and report: "Alignment team cleanup failed."
-```
-
-**Without Agent Teams (fallback):**
-
-```
-Task(subagent_type="Shepherd"):
-"ORIGINAL_REQUEST: {task description or issue content}
-EXECUTION_PLAN: {synthesized plan from Phase 5}
-FILES_CHANGED: {list of files from Coder output}
-ACCEPTANCE_CRITERIA: {extracted criteria if available}
-Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
 **If ALIGNED:** Continue to Phase 10
@@ -589,9 +576,8 @@ Display completion summary with phase status, PR info, and next steps.
 ├─ Phase 8.5: Re-Validate (if Scrutinizer made changes)
 │  └─ Validator agent (verify Scrutinizer fixes)
 │
-├─ Phase 9: Shepherd↔Coder Dialogue (Agent Teams) or Shepherd check (fallback)
-│  └─ With teams: direct Shepherd↔Coder messaging (max 2 exchanges)
-│  └─ Without teams: Shepherd subagent → Coder fix loop if misaligned
+├─ Phase 9: Shepherd↔Coder Dialogue (Agent Teams)
+│  └─ Direct Shepherd↔Coder messaging (max 2 exchanges)
 │
 ├─ Phase 10: Create PR (if needed)
 │  └─ SINGLE_CODER: handled by Coder
@@ -616,14 +602,6 @@ Display completion summary with phase status, PR info, and next steps.
 11. **Coder owns fixes** - Never implement fixes in main session; spawn Coder for validation failures and alignment fixes
 12. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
 13. **Cleanup always** - Team resources released after exploration and planning phases
-
-## Fallback
-
-If Agent Teams is unavailable (feature not enabled):
-- Phase 2: Fall back to 4 parallel Explore subagents (current behavior)
-- Phase 4: Fall back to 3 parallel Plan subagents (current behavior)
-- Phase 9: Fall back to Shepherd subagent → orchestrator-mediated Coder fix loop
-- Note in report: "Implementation run without team debate (Agent Teams not available)"
 
 ## Error Handling
 

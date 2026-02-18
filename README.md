@@ -47,6 +47,8 @@ npx devflow-kit init --plugin=implement,review
 
 ## Commands
 
+The descriptions below reflect the **teams variant** behavior (Agent Teams with peer debate). The **no-teams variant** achieves the same outcomes using parallel subagents without debate rounds.
+
 ### /specify
 
 Guides you through defining a feature with three mandatory gates:
@@ -189,9 +191,8 @@ Working memory is saved automatically — no manual steps needed.
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,review`) |
 | `--scope <user\|local>` | Installation scope (default: user) |
-| `--override-settings` | Replace existing settings.json |
+| `--teams` / `--no-teams` | Select command variant: `--teams` uses Agent Teams with peer debate; `--no-teams` uses parallel subagents (default: prompt at install) |
 | `--verbose` | Show detailed output |
-| `--skip-docs` | Skip creating .docs/ structure |
 
 ### Uninstall Options
 

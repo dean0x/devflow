@@ -260,10 +260,3 @@ Display results:
 6. **Honest reporting** - Report disagreements with evidence, don't paper over conflicts
 7. **Cleanup always** - Team resources released even on failure
 
-## Fallback
-
-If Agent Teams is unavailable (feature not enabled), fall back to parallel subagent mode:
-1. Spawn Reviewer subagents in parallel (one per focus, same message)
-2. Spawn Synthesizer subagent to aggregate findings
-3. Skip debate round (not possible without peer messaging)
-4. Note in report: "Review run without peer debate (Agent Teams not available)"

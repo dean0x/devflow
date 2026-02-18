@@ -1,5 +1,5 @@
 ---
-description: Specify a single feature through requirements exploration and interactive clarification - creates a well-defined GitHub issue ready for /implement
+description: Specify a single feature through agent-team exploration with debate and interactive clarification
 ---
 
 # Specify Command
@@ -308,13 +308,6 @@ Report issue number and URL.
 5. **Scope ruthlessly** - Small, focused issues ship faster
 6. **Testable criteria** - Every requirement must be verifiable
 7. **Enable /implement** - Output must be actionable for implementation
-
-## Fallback
-
-If Agent Teams is unavailable (feature not enabled):
-- Phase 3: Fall back to 4 parallel Explore subagents (user perspective, similar features, constraints, failure modes)
-- Phase 5: Fall back to 3 parallel Plan subagents (user stories, scope boundaries, acceptance criteria)
-- Note in report: "Specification run without team debate (Agent Teams not available)"
 
 ## Error Handling
 

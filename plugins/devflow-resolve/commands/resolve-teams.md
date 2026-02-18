@@ -1,5 +1,5 @@
 ---
-description: Process review issues - validate, assess risk, fix low-risk issues, defer high-risk to tech debt
+description: Process review issues using agent teams with cross-validation debate
 ---
 
 # Resolve Command
@@ -141,20 +141,6 @@ Verify TeamDelete succeeded. If failed, retry once after 5s. If retry fails, HAL
 ```
 
 For dependent batches that cannot run in parallel, spawn sequentially within the team and wait for completion before spawning dependents.
-
-**Without Agent Teams (fallback):**
-
-Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
-
-```
-Task(subagent_type="Resolver"):
-"ISSUES: [{issue1}, {issue2}, ...]
-BRANCH: {branch-slug}
-BATCH_ID: batch-{n}
-Validate, decide FIX vs TECH_DEBT, implement fixes"
-```
-
-For dependent batches, spawn sequentially and wait for completion before spawning dependents.
 
 ### Phase 5: Collect Results
 

@@ -14,16 +14,18 @@ DevFlow enhances Claude Code with intelligent development workflows. Modificatio
 
 Plugin marketplace with 8 self-contained plugins, each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
-| Plugin | Purpose | Agent Teams |
-|--------|---------|-------------|
-| `devflow-specify` | Feature specification workflow | Yes |
-| `devflow-implement` | Complete task implementation lifecycle | Yes |
-| `devflow-review` | Comprehensive code review | Yes |
-| `devflow-resolve` | Review issue resolution | Yes |
-| `devflow-debug` | Competing hypothesis debugging | Yes |
+| Plugin | Purpose | Teams Variant |
+|--------|---------|---------------|
+| `devflow-specify` | Feature specification workflow | Optional |
+| `devflow-implement` | Complete task implementation lifecycle | Optional |
+| `devflow-review` | Comprehensive code review | Optional |
+| `devflow-resolve` | Review issue resolution | Optional |
+| `devflow-debug` | Competing hypothesis debugging | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
+
+Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}-teams.md` (Agent Teams with debate). The installer copies the chosen variant based on `--teams`/`--no-teams` flag.
 
 **Build-time asset distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/`, then copied to each plugin at build time based on `plugin.json` manifests. This eliminates duplication in git.
 
