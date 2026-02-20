@@ -63,3 +63,6 @@ install.log
 # Session working data
 .memory/
 src/claude/CLAUDE.legacy.md
+
+# Launch marketing materials
+/launch/
