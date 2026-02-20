@@ -141,9 +141,6 @@ DevFlow creates project documentation in `.docs/`:
 .docs/
 ├── reviews/{branch}/         # Review reports per branch
 ├── design/                   # Implementation plans
-├── status/                   # Development logs
-│   ├── {timestamp}.md
-│   └── INDEX.md
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook
 └── working-memory-backup.json # Pre-compact git state snapshot
 ```

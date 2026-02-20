@@ -75,7 +75,6 @@ All generated docs live under `.docs/` in the project root:
 .docs/
 ├── reviews/{branch-slug}/    # Review reports per branch
 ├── design/                   # Implementation plans
-├── status/                   # Development logs + INDEX.md
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each response)
 └── working-memory-backup.json # Pre-compact git state snapshot
 ```

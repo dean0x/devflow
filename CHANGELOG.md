@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Iron Law: HONEST DESCRIPTIONS OR NO PR
   - Auto-triggers when creating PRs or generating descriptions
 - **Iron Laws** - Every skill now has a single, non-negotiable core principle
-  - 15 Iron Laws across all skills (e.g., "NEVER THROW IN BUSINESS LOGIC", "NO FAKE SOLUTIONS")
+  - 28 Iron Laws across all skills (e.g., "NEVER THROW IN BUSINESS LOGIC", "NO FAKE SOLUTIONS")
   - Automatically enforced when skills activate
   - Consistent format: `## Iron Law` section in each SKILL.md
 - **Clarification Gates** for `/specify` command
@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Override existing settings.json with DevFlow configuration
   - Prompts for confirmation if settings.json exists
   - No sudo required - writes to `~/.claude/settings.json`
-- **Security deny list** (126 blocked operations)
+- **Security deny list** (140 blocked operations)
   - System destruction (rm -rf, dd, mkfs, shred)
   - Code execution (curl|bash, eval, exec)
   - Privilege escalation (sudo, su, doas, pkexec)
@@ -89,6 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Replaces binary "exceeds 200k" warning
   - Color-coded: Green (<50%), Yellow (50-80%), Red (>80%)
   - Calculated from `context_window.current_usage` data
+- **Working Memory hooks** — Automatic session continuity via stop/session-start/pre-compact hooks (#59)
+  - Background haiku updater writes `.docs/WORKING-MEMORY.md` asynchronously
+  - SessionStart hook injects previous memory + git state on startup
+  - mkdir-based locking for concurrent session safety
+- **Teams/no-teams command variants** — Install-time selection of Agent Teams vs parallel subagents (#61)
+  - `--teams`/`--no-teams` CLI flags with TTY confirmation prompt
+  - Variant-aware installer copies correct `.md` files
+  - `stripTeamsConfig()` removes teams env vars when disabled
 
 ### Changed
 - **Lean agent and command redesign** - Major refactoring reducing 3,653 lines to 844 (-77%)
@@ -129,6 +137,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`GetIssue` agent** - Replaced by Git agent (operation: fetch-issue)
 - **`Comment` agent** - Replaced by Git agent (operation: comment-pr)
 - **`TechDebt` agent** - Replaced by Git agent (operation: manage-debt)
+
+### Fixed
+- **Skimmer agent** — Use `npx rskim` to eliminate global install requirement (#60)
+- **Working Memory throttle race** — Marker file prevents concurrent updater spawns during Agent Teams sessions (#62)
+- **Working Memory diagnostics** — stderr captured to log file instead of swallowed (#62)
 
 ---
 
