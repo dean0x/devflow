@@ -24,7 +24,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement (foundation layer)',
     commands: [],
     agents: [],
-    skills: ['accessibility', 'code-smell', 'commit', 'core-patterns', 'docs-framework', 'frontend-design', 'git-safety', 'github-patterns', 'input-validation', 'pull-request', 'react', 'test-design', 'typescript'],
+    skills: ['accessibility', 'core-patterns', 'docs-framework', 'frontend-design', 'git-safety', 'git-workflow', 'github-patterns', 'input-validation', 'react', 'test-patterns', 'typescript'],
   },
   {
     name: 'devflow-specify',
@@ -38,14 +38,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
-    skills: ['accessibility', 'agent-teams', 'codebase-navigation', 'frontend-design', 'implementation-patterns', 'self-review'],
+    skills: ['accessibility', 'agent-teams', 'frontend-design', 'implementation-patterns', 'self-review'],
   },
   {
     name: 'devflow-review',
     description: 'Comprehensive code review',
     commands: ['/review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['accessibility', 'agent-teams', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'frontend-design', 'performance-patterns', 'react', 'regression-patterns', 'review-methodology', 'security-patterns', 'tests-patterns'],
+    skills: ['accessibility', 'agent-teams', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'frontend-design', 'performance-patterns', 'react', 'regression-patterns', 'review-methodology', 'security-patterns', 'test-patterns'],
   },
   {
     name: 'devflow-resolve',
@@ -114,6 +114,13 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'devflow-accessibility',
   'devflow-frontend-design',
   'devflow-agent-teams',
+  // v1.0.0 consolidation: old unprefixed names from pre-v1.0.0 installs
+  'codebase-navigation',
+  'test-design',
+  'code-smell',
+  'commit',
+  'pull-request',
+  'tests-patterns',
 ];
 
 /**

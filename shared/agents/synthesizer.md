@@ -2,7 +2,7 @@
 name: Synthesizer
 description: Combines outputs from multiple agents into actionable summaries (modes: exploration, planning, review)
 model: haiku
-skills: review-methodology
+skills: review-methodology, docs-framework
 ---
 
 # Synthesizer Agent

@@ -12,19 +12,19 @@ Shared patterns used by multiple agents.
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `core-patterns` | Engineering patterns (Result types, DI, immutability, pure functions) | Coder, Reviewer |
-| `review-methodology` | 6-step review process, 3-category issue classification | Reviewer |
+| `core-patterns` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Shepherd |
+| `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
 | `self-review` | 9-pillar self-review framework | Scrutinizer |
 | `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
-| `git-safety` | Git operations, lock handling, commit conventions | Coder, Git |
+| `git-safety` | Git operations, lock handling, sequential ops | Coder, Git, Resolver |
+| `git-workflow` | Atomic commits, message format, PR descriptions, size assessment | Coder, Git, Resolver |
 | `github-patterns` | GitHub API patterns (rate limiting, PR comments, issues, releases) | Git |
-| `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder |
-| `codebase-navigation` | Exploration, entry points, data flow tracing, pattern discovery | Coder |
+| `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /review, /implement, /debug |
 
 ### Tier 1b: Pattern Skills
 
-Domain expertise for Reviewer agent focus areas.
+Domain expertise for Reviewer agent focus areas. Loaded dynamically based on review focus parameter.
 
 | Skill | Purpose | Reviewer Focus |
 |-------|---------|----------------|
@@ -33,7 +33,7 @@ Domain expertise for Reviewer agent focus areas.
 | `performance-patterns` | Algorithms, N+1, memory, I/O, caching | `performance` |
 | `complexity-patterns` | Cyclomatic complexity, readability, maintainability | `complexity` |
 | `consistency-patterns` | Pattern violations, simplification, truncation | `consistency` |
-| `tests-patterns` | Coverage, quality, brittle tests, mocking | `tests` |
+| `test-patterns` | Coverage, quality, brittle tests, mocking, test design | `tests` |
 | `database-patterns` | Schema, queries, migrations, indexes | `database` |
 | `documentation-patterns` | Docs quality, alignment, code-comment drift | `documentation` |
 | `dependencies-patterns` | CVEs, versions, licenses, supply chain | `dependencies` |
@@ -41,39 +41,44 @@ Domain expertise for Reviewer agent focus areas.
 
 ### Tier 2: Specialized Skills
 
-User-facing, auto-activate based on context.
+Listed in Claude Code's skill catalog. May auto-invoke based on description matching, but primary activation is through agent frontmatter references.
 
-| Skill | Purpose | Auto-Triggers When |
-|-------|---------|---------------------|
-| `test-design` | Test quality enforcement | Tests written or modified |
-| `code-smell` | Anti-pattern detection | Features implemented, code reviewed |
-| `commit` | Atomic commit patterns, message format | Staging files, creating commits |
-| `pull-request` | PR quality, size assessment | Creating PRs |
-| `input-validation` | Boundary validation enforcement | API endpoints created, external data handled |
+| Skill | Purpose | Agent Refs |
+|-------|---------|------------|
+| `input-validation` | Boundary validation enforcement | Coder |
 
 ### Tier 3: Domain-Specific Skills
 
-Language and framework patterns.
+Language and framework patterns. Referenced by agents via frontmatter and conditionally activated by Reviewer.
 
 | Skill | Purpose | Used When |
 |-------|---------|-----------|
 | `typescript` | Type safety, generics, utility types, type guards | TypeScript codebases |
 | `react` | Components, hooks, state management, performance | React codebases |
+| `accessibility` | Keyboard, ARIA, focus, color contrast | Frontend codebases |
+| `frontend-design` | Typography, color, spacing, visual design | Frontend codebases |
 
-## How Agents Use Skills
+## How Skills Activate
 
-Agents declare skills in their frontmatter to automatically load shared knowledge:
+Skills activate through two guaranteed mechanisms:
+
+1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
+2. **Reviewer dynamic read** — The Reviewer agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=tests` → `test-patterns/SKILL.md`).
+
+Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
+
+The `activation: file-patterns` frontmatter is metadata for documentation purposes. Claude Code does not currently use glob patterns to trigger skills.
+
+### Example: Agent Frontmatter
 
 ```yaml
 ---
-name: Reviewer
-description: Universal code review agent with parameterized focus
-model: inherit
-skills: review-methodology, security-patterns, architecture-patterns, ...
+name: Coder
+skills: core-patterns, git-safety, implementation-patterns, git-workflow, ...
 ---
 ```
 
-The unified `Reviewer` agent loads ALL pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.
+All listed skills are loaded when the Coder agent is spawned.
 
 ## Skill File Template
 
@@ -179,9 +184,9 @@ activation:
 | `typescript` | `**/*.ts`, `**/*.tsx` | `node_modules/**`, `**/*.d.ts` |
 | `accessibility` | `**/*.tsx`, `**/*.jsx`, `**/*.css` | `node_modules/**` |
 | `frontend-design` | `**/*.tsx`, `**/*.jsx`, `**/*.css`, `**/*.scss` | `node_modules/**` |
-| `test-design` | `**/*.test.*`, `**/*.spec.*`, `**/test/**` | `node_modules/**` |
+| `test-patterns` | `**/*.test.*`, `**/*.spec.*`, `**/test/**` | `node_modules/**` |
 
-**Note:** Glob patterns are currently metadata hints for future Claude Code support of conditional skill loading.
+**Note:** Glob patterns are metadata hints for documentation. Claude Code does not currently read glob patterns to trigger skills — activation happens through agent frontmatter and Reviewer dynamic read (see "How Skills Activate" above).
 
 ## Skill vs Command Decision
 

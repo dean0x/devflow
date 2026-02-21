@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (28 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (24 skills)
 │   │   ├── commit/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -74,7 +74,7 @@ devflow-{name}/
   "description": "Complete task implementation workflow",
   "version": "0.9.0",
   "agents": ["git", "coder", "synthesizer"],
-  "skills": ["codebase-navigation", "implementation-patterns", "self-review"]
+  "skills": ["implementation-patterns", "self-review"]
 }
 ```
 

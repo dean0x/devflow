@@ -2,7 +2,7 @@
 name: Resolver
 description: Validates review issues, decides FIX vs TECH_DEBT based on risk, implements fixes
 model: inherit
-skills: core-patterns, git-safety, implementation-patterns, commit
+skills: core-patterns, git-safety, implementation-patterns, git-workflow
 ---
 
 # Resolver Agent

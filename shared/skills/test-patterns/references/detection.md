@@ -59,8 +59,6 @@ grep -rn "toEqual\|toMatchObject\|toHaveLength\|toBe(" --include="*.test.ts" | w
 ```bash
 # Find tests that verify mock calls (may indicate implementation testing)
 grep -rn "toHaveBeenCalledWith\|toHaveBeenCalled\|toHaveBeenCalledTimes" --include="*.test.ts"
-
-# High ratio of these to behavior assertions is a red flag
 ```
 
 ---
@@ -72,20 +70,9 @@ grep -rn "toHaveBeenCalledWith\|toHaveBeenCalled\|toHaveBeenCalledTimes" --inclu
 ```bash
 # Find tests with long timeouts (>5000ms)
 grep -rn "}, [0-9][0-9][0-9][0-9][0-9])" --include="*.test.ts"
-grep -rn "timeout:\s*[0-9][0-9][0-9][0-9][0-9]" --include="*.test.ts"
 
 # Find real delays in tests
 grep -rn "setTimeout\|sleep\|delay" --include="*.test.ts"
-```
-
-### Flaky Test Indicators
-
-```bash
-# Find tests that might be timing-dependent
-grep -rn "setTimeout\|setInterval" --include="*.test.ts"
-
-# Find retry patterns (may indicate flakiness workarounds)
-grep -rn "retry\|flaky\|skip\|pending" --include="*.test.ts"
 ```
 
 ### Complex Setup
@@ -142,17 +129,11 @@ echo ""
 echo "Quality Indicators:"
 echo "  Strong assertions: $(grep -rn 'toEqual\|toMatchObject' --include='*.test.ts' 2>/dev/null | wc -l)"
 echo "  Weak assertions: $(grep -rn 'toBeDefined\|toBeTruthy' --include='*.test.ts' 2>/dev/null | wc -l)"
-echo "  Mock call checks: $(grep -rn 'toHaveBeenCalled' --include='*.test.ts' 2>/dev/null | wc -l)"
 echo ""
 
 echo "Design Indicators:"
 echo "  Long timeouts: $(grep -rn '}, [0-9]\{5,\})' --include='*.test.ts' 2>/dev/null | wc -l)"
 echo "  Mock count: $(grep -rn 'jest.fn\|mock' --include='*.test.ts' 2>/dev/null | wc -l)"
-echo ""
-
-echo "Error Coverage:"
-echo "  Source throws: $(grep -rn 'throw ' --include='*.ts' src/ 2>/dev/null | wc -l)"
-echo "  Error tests: $(grep -rn 'toThrow' --include='*.test.ts' 2>/dev/null | wc -l)"
 ```
 
 ---

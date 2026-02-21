@@ -278,7 +278,6 @@ const validation = schema.safeParse(input);
 
 This skill works with:
 
-- **core-patterns**: Ensures validation uses Result types
-- **code-smell**: Catches fake/incomplete validation
-- **test-design**: Validates boundary tests exist
+- **core-patterns**: Ensures validation uses Result types, catches fake/incomplete validation
+- **test-patterns**: Validates boundary tests exist
 - **security-patterns**: Broader security review context

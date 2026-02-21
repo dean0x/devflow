@@ -107,7 +107,7 @@ This methodology is used by the **Reviewer** agent with different focus areas:
 | `security` | security-patterns |
 | `performance` | performance-patterns |
 | `architecture` | architecture-patterns |
-| `tests` | tests-patterns |
+| `tests` | test-patterns |
 | `consistency` | consistency-patterns |
 | `complexity` | complexity-patterns |
 | `regression` | regression-patterns |

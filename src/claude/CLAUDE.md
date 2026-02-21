@@ -19,9 +19,9 @@ All engineering patterns, coding standards, and quality enforcement are defined 
 
 | Skill | Coverage |
 |-------|----------|
-| `core-patterns` | Result types, DI, immutability, pure functions, error handling, naming conventions, architecture documentation |
-| `code-smell` | Anti-patterns, fake solutions, workaround detection, magic values |
-| `test-design` | Test quality, setup complexity, mocking, behavior vs implementation testing |
+| `core-patterns` | Result types, DI, immutability, pure functions, error handling, workaround labeling, naming conventions |
+| `git-workflow` | Atomic commits, message format, PR descriptions, size assessment |
+| `test-patterns` | Test quality, setup complexity, mocking, behavior vs implementation testing, coverage |
 | `input-validation` | Boundary validation, parse-don't-validate pattern |
 | `security-patterns` | Security vulnerabilities, OWASP patterns |
 | `typescript` | TypeScript idioms, type safety, generics |

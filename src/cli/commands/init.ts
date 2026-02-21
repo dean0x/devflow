@@ -16,7 +16,7 @@ import {
   updateGitignore,
   createDocsStructure,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, buildAssetMaps, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
 
@@ -287,6 +287,22 @@ export const initCommand = new Command('init')
     }
 
     s.stop('Plugins installed');
+
+    // Clean up stale skills from previous installations
+    const skillsDir = path.join(claudeDir, 'skills');
+    let staleRemoved = 0;
+    for (const legacy of LEGACY_SKILL_NAMES) {
+      const legacyPath = path.join(skillsDir, legacy);
+      try {
+        await fs.rm(legacyPath, { recursive: true });
+        staleRemoved++;
+      } catch {
+        // Doesn't exist — expected for most entries
+      }
+    }
+    if (staleRemoved > 0 && verbose) {
+      p.log.info(`Cleaned up ${staleRemoved} legacy skill(s)`);
+    }
 
     // === Configuration extras ===
     const extrasOptions = buildExtrasOptions(scope, gitRoot);

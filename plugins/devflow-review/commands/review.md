@@ -58,7 +58,7 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | complexity | ✓ | complexity-patterns |
 | consistency | ✓ | consistency-patterns |
 | regression | ✓ | regression-patterns |
-| tests | ✓ | tests-patterns |
+| tests | ✓ | test-patterns |
 | typescript | conditional | typescript |
 | react | conditional | react |
 | accessibility | conditional | accessibility |

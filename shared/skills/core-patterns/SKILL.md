@@ -138,8 +138,22 @@ const customerMap = new Map(customers.map(c => [c.id, c]));  // O(1) vs O(n)
 | Fake Solutions | Hardcoded responses simulating functionality |
 | Silent Failures | Catch blocks that swallow errors |
 | Magic Values | Unlabeled constants with special meaning |
+| Deceptive Code | Functions that pretend to work (e.g., `return true` with no logic) |
 
-Label workarounds: `HACK:`, `TODO:`, `MOCK:`, `TEMPORARY:`
+### Workaround Labeling (Required)
+
+All workarounds, hacks, and temporary solutions MUST be labeled:
+
+| Label | Use When |
+|-------|----------|
+| `HACK:` | Workaround for specific problem |
+| `MOCK:` | Fake data for testing/development |
+| `TODO:` | Work that needs to be done |
+| `TEMPORARY:` | Short-term solution with deadline |
+| `NOT-PRODUCTION:` | Code that should never ship |
+| `ARCHITECTURE EXCEPTION:` | Violates pattern with justification |
+
+Unlabeled workarounds, empty catch blocks, and early returns without rationale are violations. See `references/code-smell-violations.md` for extended examples.
 
 ---
 

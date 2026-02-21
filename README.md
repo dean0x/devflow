@@ -109,10 +109,9 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 
 | Skill | Triggers When |
 |-------|---------------|
-| `commit` | Staging files, creating commits |
-| `pull-request` | Creating PRs |
-| `test-design` | Writing or modifying tests |
-| `code-smell` | Implementing features |
+| `core-patterns` | Implementing business logic, error handling |
+| `git-workflow` | Staging files, creating commits, PRs |
+| `test-patterns` | Writing or modifying tests |
 | `input-validation` | Creating API endpoints |
 | `typescript` | Working in TypeScript codebases |
 | `react` | Working with React components |
