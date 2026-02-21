@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
   parsePluginSelection,
   substituteSettingsTemplate,
@@ -6,7 +9,8 @@ import {
   buildExtrasOptions,
   stripTeamsConfig,
 } from '../src/cli/commands/init.js';
-import { DEVFLOW_PLUGINS } from '../src/cli/plugins.js';
+import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps } from '../src/cli/plugins.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -196,5 +200,74 @@ describe('stripTeamsConfig', () => {
 
     const result = JSON.parse(stripTeamsConfig(input));
     expect(result.env).toBeUndefined();
+  });
+});
+
+describe('installViaFileCopy cleanup (isPartialInstall)', () => {
+  let tmpDir: string;
+  let claudeDir: string;
+  let pluginsDir: string;
+  let rootDir: string;
+  let devflowDir: string;
+  const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-'));
+    claudeDir = path.join(tmpDir, 'claude');
+    pluginsDir = path.join(tmpDir, 'plugins');
+    rootDir = tmpDir;
+    devflowDir = path.join(tmpDir, 'devflow');
+
+    // Seed a stale command and agent that should be cleaned on full install
+    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+    const agentsDir = path.join(claudeDir, 'agents', 'devflow');
+    await fs.mkdir(commandsDir, { recursive: true });
+    await fs.mkdir(agentsDir, { recursive: true });
+    await fs.writeFile(path.join(commandsDir, 'stale.md'), '# stale');
+    await fs.writeFile(path.join(agentsDir, 'stale.md'), '# stale');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('full install (isPartialInstall=false) removes stale commands and agents', async () => {
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      pluginsDir,
+      rootDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: false,
+      teamsEnabled: false,
+      spinner: noopSpinner,
+    });
+
+    // Stale dirs should be removed
+    await expect(fs.access(path.join(claudeDir, 'commands', 'devflow', 'stale.md'))).rejects.toThrow();
+    await expect(fs.access(path.join(claudeDir, 'agents', 'devflow', 'stale.md'))).rejects.toThrow();
+  });
+
+  it('partial install (isPartialInstall=true) preserves existing commands and agents', async () => {
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      pluginsDir,
+      rootDir,
+      devflowDir,
+      skillsMap: new Map(),
+      agentsMap: new Map(),
+      isPartialInstall: true,
+      teamsEnabled: false,
+      spinner: noopSpinner,
+    });
+
+    // Stale files should still exist
+    const staleCommand = await fs.readFile(path.join(claudeDir, 'commands', 'devflow', 'stale.md'), 'utf-8');
+    expect(staleCommand).toBe('# stale');
+    const staleAgent = await fs.readFile(path.join(claudeDir, 'agents', 'devflow', 'stale.md'), 'utf-8');
+    expect(staleAgent).toBe('# stale');
   });
 });
