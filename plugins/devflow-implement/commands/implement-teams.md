@@ -69,7 +69,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "architecture-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
     2. Skimmer context (files/patterns already identified):
        {skimmer output}
     3. Your deliverable: Find similar implementations, established patterns,
@@ -81,7 +81,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "integration-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
     2. Skimmer context (files/patterns already identified):
        {skimmer output}
     3. Your deliverable: Find entry points, services, database models,
@@ -93,7 +93,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "reusable-code-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
     2. Skimmer context (files/patterns already identified):
        {skimmer output}
     3. Your deliverable: Find utilities, helpers, validation patterns,
@@ -105,7 +105,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "edge-case-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/codebase-navigation/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
     2. Skimmer context (files/patterns already identified):
        {skimmer output}
     3. Your deliverable: Find error scenarios, race conditions, permission
@@ -179,7 +179,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "testing-planner"
   Prompt: |
     You are planning the test strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/test-design/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/test-patterns/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 3}
     3. Your deliverable: Test strategy — unit tests, integration tests,

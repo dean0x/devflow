@@ -55,7 +55,7 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 - `complexity-patterns` - Complexity metrics
 - `consistency-patterns` - Pattern violations
 - `regression-patterns` - Regression detection
-- `tests-patterns` - Test quality
+- `test-patterns` - Test quality
 - `database-patterns` - Database issues
 - `dependencies-patterns` - Dependency management
 - `documentation-patterns` - Documentation quality

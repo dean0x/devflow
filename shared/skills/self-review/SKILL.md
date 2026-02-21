@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: Self-review framework for Scrutinizer agent. Evaluate implementation against 9 pillars. Fix P0/P1 issues immediately. Ensures quality before handoff to Simplifier.
+description: Self-review framework evaluating implementation quality against 9 pillars (correctness, completeness, security, performance, maintainability, testing, documentation, error handling, simplicity). Fixes P0/P1 issues immediately rather than reporting them. Used by the Scrutinizer agent as a quality gate.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---

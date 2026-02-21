@@ -115,7 +115,7 @@ Spawn review teammates with self-contained prompts:
     1. Read your skills:
        - `Read ~/.claude/skills/complexity-patterns/SKILL.md`
        - `Read ~/.claude/skills/consistency-patterns/SKILL.md`
-       - `Read ~/.claude/skills/tests-patterns/SKILL.md`
+       - `Read ~/.claude/skills/test-patterns/SKILL.md`
        - `Read ~/.claude/skills/regression-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
     3. Get the diff: `git diff {base_branch}...HEAD`

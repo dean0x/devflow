@@ -26,7 +26,7 @@ The orchestrator provides:
 | `complexity` | `~/.claude/skills/complexity-patterns/SKILL.md` |
 | `consistency` | `~/.claude/skills/consistency-patterns/SKILL.md` |
 | `regression` | `~/.claude/skills/regression-patterns/SKILL.md` |
-| `tests` | `~/.claude/skills/tests-patterns/SKILL.md` |
+| `tests` | `~/.claude/skills/test-patterns/SKILL.md` |
 | `typescript` | `~/.claude/skills/typescript/SKILL.md` |
 | `database` | `~/.claude/skills/database-patterns/SKILL.md` |
 | `dependencies` | `~/.claude/skills/dependencies-patterns/SKILL.md` |

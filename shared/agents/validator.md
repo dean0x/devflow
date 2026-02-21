@@ -2,7 +2,7 @@
 name: Validator
 description: Dedicated agent for running validation commands (build, typecheck, lint, test). Reports pass/fail with structured failure details - never fixes.
 model: haiku
-skills: test-design
+skills: test-patterns
 ---
 
 # Validator Agent

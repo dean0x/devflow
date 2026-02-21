@@ -1,6 +1,6 @@
 ---
 name: documentation-patterns
-description: Documentation analysis for Reviewer agent. Loaded when focus=documentation. Detects doc drift, missing docs, stale comments.
+description: Documentation analysis patterns for code review. Detects doc drift from code changes, missing documentation for public APIs, stale comments, and misleading README sections. Loaded by Reviewer agent when focus=documentation.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

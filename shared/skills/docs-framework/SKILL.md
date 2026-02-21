@@ -1,6 +1,6 @@
 ---
 name: docs-framework
-description: Documentation conventions for DevFlow artifacts. Load when creating status logs, debug sessions, review reports, or any persistent documentation in .docs/ directory. Ensures consistent naming, structure, and organization.
+description: This skill should be used when the user asks to "create a review report", "write a status log", "add documentation", "name this artifact", or creates files in the .docs/ directory. Provides naming conventions, templates, and directory structure for reviews, debug sessions, design docs, and all persistent DevFlow documentation artifacts.
 user-invocable: false
 allowed-tools: Read, Bash, Glob
 ---

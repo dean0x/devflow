@@ -2,7 +2,7 @@
 name: Git
 description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
 model: haiku
-skills: github-patterns, git-safety, commit, pull-request
+skills: github-patterns, git-safety, git-workflow
 ---
 
 # Git Agent
@@ -37,9 +37,9 @@ Pre-flight checks and fixes for `/review`. Ensures branch is ready for code revi
 
 **Process:**
 1. Verify on feature branch (not main/master/develop) - error if not
-2. Check for uncommitted changes - if any, create atomic commit using `commit` patterns
+2. Check for uncommitted changes - if any, create atomic commit using `git-workflow` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
-4. Check if PR exists - if not, create PR using `pull-request` patterns
+4. Check if PR exists - if not, create PR using `git-workflow` patterns
 5. Get base branch from PR
 6. Derive branch-slug (replace `/` with `-`)
 

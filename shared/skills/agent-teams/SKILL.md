@@ -1,6 +1,6 @@
 ---
 name: agent-teams
-description: Agent Teams patterns for peer-to-peer agent collaboration, team spawning, debate protocols, and consensus formation
+description: This skill should be used when the user asks to "create an agent team", "spawn teammates", "set up debate protocol", "coordinate agents", or discusses peer-to-peer agent collaboration, consensus formation, or team-based workflows. Provides patterns for team spawning, message passing, adversarial debate, and quality gates driven by multi-agent consensus.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

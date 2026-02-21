@@ -1,6 +1,6 @@
 ---
 name: react
-description: React patterns. Use when user works with React components, asks about "hooks", "state management", "JSX", or performance optimization.
+description: This skill should be used when the user works with React components (.tsx/.jsx), asks about "hooks", "state management", "context providers", "memo optimization", "useEffect", or discusses component composition and rendering performance. Provides patterns for hooks, state, effects, memoization, and React-specific architecture.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

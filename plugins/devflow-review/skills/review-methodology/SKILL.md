@@ -1,6 +1,6 @@
 ---
 name: review-methodology
-description: Standard review process for all DevFlow review agents. Load when performing code reviews to ensure consistent 6-step process with 3-category issue classification. This is the shared methodology used by the unified Reviewer agent across all focus areas.
+description: Standard review methodology providing the 6-step process and 3-category issue classification (must-fix, should-fix, nit) used by all DevFlow review agents. Ensures consistent, fair, and actionable code reviews across all focus areas. Loaded by the unified Reviewer agent.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---
@@ -107,7 +107,7 @@ This methodology is used by the **Reviewer** agent with different focus areas:
 | `security` | security-patterns |
 | `performance` | performance-patterns |
 | `architecture` | architecture-patterns |
-| `tests` | tests-patterns |
+| `tests` | test-patterns |
 | `consistency` | consistency-patterns |
 | `complexity` | complexity-patterns |
 | `regression` | regression-patterns |

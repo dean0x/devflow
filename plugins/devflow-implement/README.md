@@ -46,19 +46,17 @@ npx devflow-kit init --plugin=implement
 - `shepherd` - Alignment validation
 - `validator` - Build/test validation
 
-### Skills (12)
-- `core-patterns` - Result types, DI, immutability
+### Skills (10)
+- `core-patterns` - Result types, DI, immutability, workaround labeling
 - `git-safety` - Safe git operations
-- `commit` - Atomic commit patterns
-- `pull-request` - PR quality enforcement
+- `git-workflow` - Atomic commits, PR descriptions
 - `implementation-patterns` - CRUD, API, events
-- `codebase-navigation` - Pattern discovery
-- `test-design` - Test quality
-- `code-smell` - Anti-pattern detection
+- `test-patterns` - Test quality, coverage
 - `input-validation` - Boundary validation
 - `self-review` - 9-pillar framework
 - `typescript` - TypeScript patterns
 - `react` - React patterns
+- `accessibility` - Keyboard, ARIA, focus management
 
 ## Output
 

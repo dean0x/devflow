@@ -1,6 +1,6 @@
 ---
 name: accessibility
-description: Accessibility patterns. Use when creating UI components, forms, interactive elements, or React/JSX code. Triggers on keyboard, ARIA, focus, color contrast discussions.
+description: This skill should be used when the user asks to "add accessibility", "check ARIA", "handle keyboard navigation", "add focus management", or creates UI components, forms, or interactive elements. Provides WCAG 2.1 AA patterns for keyboard navigation, ARIA roles and states, focus management, color contrast, and screen reader support.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

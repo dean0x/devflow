@@ -1,6 +1,6 @@
 ---
 name: security-patterns
-description: Security vulnerability analysis for Reviewer agent. Loaded when focus=security. Detects injection, auth, crypto issues.
+description: Security vulnerability analysis patterns for code review. Detects injection flaws, authentication bypasses, insecure cryptography, hardcoded secrets, and missing input sanitization. Loaded by Reviewer agent when focus=security.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

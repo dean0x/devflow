@@ -24,7 +24,7 @@ After setup, DevFlow commands (`/review`, `/implement`, etc.) are available in C
 
 ```
 devflow/
-├── shared/skills/       # 28 skills (single source of truth)
+├── shared/skills/       # 24 skills (single source of truth)
 ├── shared/agents/       # 10 shared agents (single source of truth)
 ├── plugins/devflow-*/   # 10 self-contained plugins
 ├── scripts/hooks/       # Working Memory hooks

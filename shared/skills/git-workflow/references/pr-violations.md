@@ -40,9 +40,6 @@ Fixed some bugs and added features.
 Refactored authentication module.
 
 # GOOD: Breaking changes called out
-## Summary
-Refactored authentication module.
-
 ## Breaking Changes
 - `authenticate(token)` now returns `Result<User, AuthError>` instead of `User | null`
 - Required migration: Run `npm run migrate:auth` before deploying
@@ -51,8 +48,6 @@ Refactored authentication module.
 ---
 
 ## Massive PR Split Recommendation
-
-When PR is too large (>1000 lines), recommend splitting:
 
 ```markdown
 PR SIZE WARNING
@@ -76,18 +71,10 @@ Rationale: Smaller PRs are easier to review, safer to merge.
 Added new payment processing.
 
 # GOOD: Clear test plan
-## Summary
-Added new payment processing.
-
 ## Testing
 ### Automated
 - 12 unit tests for PaymentService
 - 3 integration tests for Stripe webhook
-
-### Manual
-1. Create test payment at /checkout
-2. Verify webhook received in Stripe dashboard
-3. Confirm order status updated to "paid"
 
 ### Gaps
 - Edge case: Partial refunds not tested (tracked in #456)
@@ -103,11 +90,7 @@ Added new payment processing.
 Implemented caching layer.
 
 # GOOD: Honest about limitations
-## Summary
-Implemented caching layer.
-
 ## Limitations
 - Cache invalidation not implemented (tracked in #789)
 - Memory usage not bounded - add eviction policy before production load
-- Redis cluster mode not supported yet
 ```

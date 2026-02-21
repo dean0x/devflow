@@ -1,6 +1,6 @@
 ---
 name: core-patterns
-description: Core patterns: Result types, DI, immutability. Use when user asks to "handle errors", "inject dependencies", "return Result", or implements business logic.
+description: This skill should be used when the user asks to "handle errors", "inject dependencies", "return Result", "make it immutable", "compose with pipes", or implements business logic, error handling, or service composition. Provides Result type patterns, dependency injection, immutability by default, pipe composition, and structured logging for robust application architecture.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---
@@ -138,8 +138,22 @@ const customerMap = new Map(customers.map(c => [c.id, c]));  // O(1) vs O(n)
 | Fake Solutions | Hardcoded responses simulating functionality |
 | Silent Failures | Catch blocks that swallow errors |
 | Magic Values | Unlabeled constants with special meaning |
+| Deceptive Code | Functions that pretend to work (e.g., `return true` with no logic) |
 
-Label workarounds: `HACK:`, `TODO:`, `MOCK:`, `TEMPORARY:`
+### Workaround Labeling (Required)
+
+All workarounds, hacks, and temporary solutions MUST be labeled:
+
+| Label | Use When |
+|-------|----------|
+| `HACK:` | Workaround for specific problem |
+| `MOCK:` | Fake data for testing/development |
+| `TODO:` | Work that needs to be done |
+| `TEMPORARY:` | Short-term solution with deadline |
+| `NOT-PRODUCTION:` | Code that should never ship |
+| `ARCHITECTURE EXCEPTION:` | Violates pattern with justification |
+
+Unlabeled workarounds, empty catch blocks, and early returns without rationale are violations. See `references/code-smell-violations.md` for extended examples.
 
 ---
 

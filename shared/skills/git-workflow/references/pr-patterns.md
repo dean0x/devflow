@@ -4,19 +4,6 @@ Correct patterns for high-quality PRs.
 
 ---
 
-## PR Title Format
-
-```
-<type>(<scope>): <description>
-
-feat(auth): add JWT token validation
-fix(api): handle null response from external service
-refactor(db): extract repository pattern
-docs(readme): add installation instructions
-```
-
----
-
 ## Full PR Description Template
 
 ```markdown
@@ -28,11 +15,9 @@ docs(readme): add installation instructions
 
 ### Features
 - Feature 1 with brief description
-- Feature 2 with brief description
 
 ### Bug Fixes
 - Fix 1 with impact description
-- Fix 2 with impact description
 
 ### Refactoring
 - Refactor 1 with rationale
@@ -83,44 +68,7 @@ Generated with [Claude Code](https://claude.com/claude-code)
 
 ---
 
-## Minimal PR Description
-
-For smaller changes:
-
-```markdown
-## Summary
-- Brief bullet points of what changed and why
-
-## Breaking Changes
-- API signature changes: `oldMethod()` → `newMethod(options)`
-
-## Test Plan
-- [ ] Unit tests pass
-- [ ] Manual testing steps
-
-## Related
-Closes #123
-```
-
----
-
-## Key Change Detection
-
-Check for and highlight these patterns when generating descriptions:
-
-| Change Type | Detection | Action |
-|-------------|-----------|--------|
-| Breaking Changes | `grep -i "BREAKING CHANGE" commits` | **MANDATORY** section |
-| Database Migrations | `migration\|schema` in file names | Highlight + deployment notes |
-| Dependency Changes | `package.json`, `Cargo.toml`, etc. | List versions changed |
-| Config Changes | `.config.`, `.yml`, `.toml` | Note configuration impact |
-| Missing Tests | Source changed, no test files | **WARN** in Testing Gaps |
-
----
-
 ## Creating the PR with HEREDOC
-
-Use HEREDOC for multi-line descriptions:
 
 ```bash
 gh pr create \
@@ -140,9 +88,30 @@ EOF
 
 ---
 
-## Pre-Flight Check Script
+## Key Change Detection
 
-Run before creating PR:
+| Change Type | Detection | Action |
+|-------------|-----------|--------|
+| Breaking Changes | `grep -i "BREAKING CHANGE" commits` | **MANDATORY** section |
+| Database Migrations | `migration\|schema` in file names | Highlight + deployment notes |
+| Dependency Changes | `package.json`, `Cargo.toml`, etc. | List versions changed |
+| Config Changes | `.config.`, `.yml`, `.toml` | Note configuration impact |
+| Missing Tests | Source changed, no test files | **WARN** in Testing Gaps |
+
+---
+
+## Size Guidelines
+
+| Size | Lines Changed | Review Time | Recommendation |
+|------|---------------|-------------|----------------|
+| Small | < 200 | 15 min | Ideal |
+| Medium | 200-500 | 30 min | Acceptable |
+| Large | 500-1000 | 1 hour | Consider splitting |
+| XL | > 1000 | Hours | **Must split** |
+
+---
+
+## Pre-Flight Check Script
 
 ```bash
 # 1. Verify commits exist
@@ -156,14 +125,3 @@ PR_EXISTS=$(gh pr list --head "$(git branch --show-current)" --json number --jq 
 # 3. Ensure branch is pushed
 git ls-remote --exit-code --heads origin "$(git branch --show-current)" || git push -u origin "$(git branch --show-current)"
 ```
-
----
-
-## Size Guidelines
-
-| Size | Lines Changed | Review Time | Recommendation |
-|------|---------------|-------------|----------------|
-| Small | < 200 | 15 min | Ideal |
-| Medium | 200-500 | 30 min | Acceptable |
-| Large | 500-1000 | 1 hour | Consider splitting |
-| XL | > 1000 | Hours | **Must split** |

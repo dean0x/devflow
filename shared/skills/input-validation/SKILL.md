@@ -1,6 +1,6 @@
 ---
 name: input-validation
-description: Input validation at boundaries. Use when user asks to "validate input", "parse request", "handle form data", or creates API endpoints.
+description: This skill should be used when the user asks to "validate input", "parse request data", "handle form data", "add Zod schema", "sanitize user input", or creates API endpoints and system boundaries. Provides parse-don't-validate patterns with Zod schemas for type-safe boundary validation and hostile input defense.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 ---
