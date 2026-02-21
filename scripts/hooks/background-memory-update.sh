@@ -27,6 +27,31 @@ rotate_log() {
   fi
 }
 
+# --- Stale Lock Recovery ---
+
+# Portable mtime in epoch seconds (same pattern as stop-update-memory.sh:35-39)
+get_mtime() {
+  if stat --version &>/dev/null 2>&1; then
+    stat -c %Y "$1"
+  else
+    stat -f %m "$1"
+  fi
+}
+
+STALE_THRESHOLD=300  # 5 min — generous vs 30-60s normal runtime
+
+break_stale_lock() {
+  if [ ! -d "$LOCK_DIR" ]; then return; fi
+  local lock_mtime now age
+  lock_mtime=$(get_mtime "$LOCK_DIR")
+  now=$(date +%s)
+  age=$(( now - lock_mtime ))
+  if [ "$age" -gt "$STALE_THRESHOLD" ]; then
+    log "Breaking stale lock (age: ${age}s, threshold: ${STALE_THRESHOLD}s)"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
 # --- Locking (mkdir-based, POSIX-atomic) ---
 
 acquire_lock() {
@@ -55,6 +80,9 @@ trap cleanup EXIT
 sleep 3
 
 log "Starting update for session $SESSION_ID"
+
+# Break stale locks from previous zombie processes
+break_stale_lock
 
 # Acquire lock (other sessions may be updating concurrently)
 if ! acquire_lock; then
@@ -105,17 +133,35 @@ else
 fi
 
 # Resume session headlessly to perform the update
-if DEVFLOW_BG_UPDATER=1 env -u CLAUDECODE "$CLAUDE_BIN" -p \
+TIMEOUT=120  # Normal runtime 30-60s; 2x margin
+
+DEVFLOW_BG_UPDATER=1 env -u CLAUDECODE "$CLAUDE_BIN" -p \
   --resume "$SESSION_ID" \
   --model haiku \
   --dangerously-skip-permissions \
   --no-session-persistence \
   --output-format text \
   "$INSTRUCTION" \
-  > /dev/null 2>> "$LOG_FILE"; then
+  > /dev/null 2>> "$LOG_FILE" &
+CLAUDE_PID=$!
+
+# Watchdog: kill claude if it exceeds timeout
+( sleep "$TIMEOUT" && kill "$CLAUDE_PID" 2>/dev/null ) &
+WATCHDOG_PID=$!
+
+if wait "$CLAUDE_PID" 2>/dev/null; then
   log "Update completed for session $SESSION_ID"
 else
-  log "Update failed for session $SESSION_ID (exit code $?)"
+  EXIT_CODE=$?
+  if [ "$EXIT_CODE" -gt 128 ]; then
+    log "Update timed out (killed after ${TIMEOUT}s) for session $SESSION_ID"
+  else
+    log "Update failed for session $SESSION_ID (exit code $EXIT_CODE)"
+  fi
 fi
+
+# Clean up watchdog
+kill "$WATCHDOG_PID" 2>/dev/null || true
+wait "$WATCHDOG_PID" 2>/dev/null || true
 
 exit 0
