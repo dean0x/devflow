@@ -1,6 +1,6 @@
 ---
 name: test-patterns
-description: Test quality enforcement and analysis. Use when writing tests, fixing failing tests, or reviewing test quality. Detects coverage gaps, brittle tests, poor test design.
+description: This skill should be used when the user asks to "write tests", "fix failing tests", "improve test coverage", "add integration tests", "debug a flaky test", or reviews test quality. Provides behavior-focused testing patterns, coverage analysis, and detection of brittle test anti-patterns like implementation coupling and non-deterministic assertions.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 activation:

@@ -1,6 +1,6 @@
 ---
 name: consistency-patterns
-description: Consistency analysis for Reviewer agent. Loaded when focus=consistency. Detects pattern violations, truncation, feature regressions.
+description: Consistency analysis patterns for code review. Detects naming convention violations, pattern deviations, unnecessary simplification, and feature truncation in diffs. Loaded by Reviewer agent when focus=consistency.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

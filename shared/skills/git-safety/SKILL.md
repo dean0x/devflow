@@ -1,6 +1,6 @@
 ---
 name: git-safety
-description: Git safety patterns and best practices. Load when performing git operations, creating commits, managing branches, or working with git history. Prevents common git mistakes and ensures clean history.
+description: This skill should be used when the user asks to "rebase safely", "manage branches", "fix merge conflicts", "clean git history", "undo a commit", or performs git operations that could lose work. Provides safety patterns for branch management, force-push prevention, index.lock handling, and sequential command execution to prevent data loss.
 user-invocable: false
 allowed-tools: Bash, Read
 ---

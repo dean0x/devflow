@@ -1,6 +1,6 @@
 ---
 name: regression-patterns
-description: Regression analysis for Reviewer agent. Loaded when focus=regression. Detects lost functionality, broken behavior.
+description: Regression analysis patterns for code review. Detects lost functionality, removed exports, changed signatures, and behavioral changes that break existing consumers. Loaded by Reviewer agent when focus=regression.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

@@ -1,6 +1,6 @@
 ---
 name: performance-patterns
-description: Performance analysis for Reviewer agent. Loaded when focus=performance. Detects N+1 queries, memory leaks, I/O bottlenecks.
+description: Performance analysis patterns for code review. Detects N+1 queries, memory leaks, unbounded allocations, I/O bottlenecks, and missing caching opportunities. Loaded by Reviewer agent when focus=performance.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

@@ -1,6 +1,6 @@
 ---
 name: github-patterns
-description: GitHub API patterns for PR comments, issue management, and release workflows. Load when performing git/GitHub operations via gh CLI.
+description: This skill should be used when the user asks to "comment on a PR", "create a release", "manage issues", "use gh CLI", "check PR status", or performs GitHub API operations. Provides patterns for PR comments, issue management, release workflows, rate limiting, and gh CLI usage for safe GitHub automation.
 user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---

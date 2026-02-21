@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: Commit and PR patterns. Use when user asks to "commit", "create PR", "stage files", "prepare for review", or runs git add/commit/gh pr operations.
+description: This skill should be used when the user asks to "commit changes", "create a pull request", "stage files", "prepare for review", "write a commit message", or runs git add, git commit, git push, or gh pr operations. Provides atomic commit patterns, conventional commit formatting, PR description templates, and honest change documentation.
 user-invocable: false
 allowed-tools: Bash, Read, Grep, Glob
 ---

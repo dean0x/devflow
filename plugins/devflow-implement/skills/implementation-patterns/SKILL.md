@@ -1,6 +1,6 @@
 ---
 name: implementation-patterns
-description: Automatically activate when implementing CRUD operations, API endpoints, event handlers, configuration systems, or logging. Triggers on feature implementation tasks involving database operations, REST/GraphQL APIs, pub/sub patterns, or service configuration.
+description: This skill should be used when the user asks to "create an API endpoint", "add CRUD operations", "implement event handlers", "set up logging", "add configuration", or builds features involving database operations, REST/GraphQL APIs, pub/sub patterns, or service configuration. Provides implementation patterns that follow existing codebase conventions.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
