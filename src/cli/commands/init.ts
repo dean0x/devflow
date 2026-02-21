@@ -275,7 +275,7 @@ export const initCommand = new Command('init')
           devflowDir,
           skillsMap,
           agentsMap,
-          selectedPluginNames: selectedPlugins,
+          isPartialInstall: !!options.plugin,
           teamsEnabled,
           spinner: s,
         });

@@ -106,7 +106,7 @@ export interface FileCopyOptions {
   devflowDir: string;
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
-  selectedPluginNames: string[];
+  isPartialInstall: boolean;
   teamsEnabled: boolean;
   spinner: Spinner;
 }
@@ -125,13 +125,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     devflowDir,
     skillsMap,
     agentsMap,
-    selectedPluginNames,
+    isPartialInstall,
     teamsEnabled,
     spinner,
   } = options;
 
   // Clean old DevFlow files before installing (only for full install)
-  if (selectedPluginNames.length === 0) {
+  if (!isPartialInstall) {
     const oldDirs = [
       path.join(claudeDir, 'commands', 'devflow'),
       path.join(claudeDir, 'agents', 'devflow'),

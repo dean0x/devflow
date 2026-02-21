@@ -1,39 +1,44 @@
-# DevFlow - Agentic Development Toolkit
+# DevFlow
 
-A collection of Claude Code plugins designed to enhance developer workflows with structured processes for specification, implementation, and review.
+[![npm version](https://img.shields.io/npm/v/devflow-kit)](https://www.npmjs.com/package/devflow-kit)
+[![CI](https://github.com/dean0x/devflow/actions/workflows/ci.yml/badge.svg)](https://github.com/dean0x/devflow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 
-## Installation
+**Agents that fight your code, not rubber-stamp it.**
 
-### Option 1: Install All Plugins
+<p align="center">
+  <img src=".github/assets/devflow-init.gif" alt="DevFlow init demo" width="720" />
+</p>
+
+## Why DevFlow
+
+AI code review today is sycophantic — it praises everything and catches nothing. Context vanishes on every restart. Workflows are ad-hoc prompts copy-pasted between sessions.
+
+DevFlow fixes this with adversarial agent teams that debate each other's findings, automatic session memory that survives restarts and compaction, and 24 quality skills that activate without you asking.
+
+## Features
+
+- **Adversarial code review** — agents debate findings with evidence, not rubber-stamp
+- **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
+- **Automatic session memory** — survives restarts, `/clear`, and context compaction
+- **Competing hypothesis debugging** — agents investigate in parallel and challenge each other
+- **24 auto-activating quality skills** — security, architecture, performance, and more
+- **Works with or without Agent Teams** — parallel subagents or full team debate
+
+## Quick Start
 
 ```bash
 npx devflow-kit init
 ```
 
-### Option 2: Install Specific Plugins
+Then in Claude Code:
 
-```bash
-# List available plugins
-npx devflow-kit list
-
-# Install specific plugin(s)
-npx devflow-kit init --plugin=implement
-npx devflow-kit init --plugin=implement,review
+```
+/review
 ```
 
-### Option 3: Native Plugin (When Available)
-
-```bash
-/plugin install dean0x/devflow-implement
-/plugin install dean0x/devflow-review
-```
-
-### Scopes
-
-- `--scope user` (default) - Install for all projects (`~/.claude/`)
-- `--scope local` - Install for current project only (`.claude/`)
-
-## Plugins
+## Commands
 
 | Plugin | Command | Description |
 |--------|---------|-------------|
@@ -45,9 +50,9 @@ npx devflow-kit init --plugin=implement,review
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
 
-## Commands
+The descriptions reflect the **teams variant** behavior (Agent Teams with peer debate). The **no-teams variant** achieves the same outcomes using parallel subagents without debate rounds.
 
-The descriptions below reflect the **teams variant** behavior (Agent Teams with peer debate). The **no-teams variant** achieves the same outcomes using parallel subagents without debate rounds.
+## Command Details
 
 ### /specify
 
@@ -68,7 +73,7 @@ Executes a single task through the complete development lifecycle:
 3. **Implementation** - Write the code on a feature branch
 4. **Validation** - Run build, typecheck, lint, and tests
 5. **Refinement** - Simplify and review for quality
-6. **Alignment Check** - Shepherd↔Coder direct dialogue validates alignment
+6. **Alignment Check** - Shepherd and Coder direct dialogue validates alignment
 
 Creates a PR when complete.
 
@@ -118,6 +123,37 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 | `accessibility` | Creating UI components, forms, interactive elements |
 | `frontend-design` | Working with CSS, styling, visual design |
 
+## Requirements
+
+- [Claude Code](https://claude.ai/download) (latest)
+- Node.js 18+
+- **Teams variant**: Agent Teams enabled in Claude Code settings (`teammateMode: "auto"` in `settings.json`)
+- **No-teams variant**: Works without Agent Teams — uses parallel subagents instead
+
+## Installation
+
+### Install All Plugins
+
+```bash
+npx devflow-kit init
+```
+
+### Install Specific Plugins
+
+```bash
+# List available plugins
+npx devflow-kit list
+
+# Install specific plugin(s)
+npx devflow-kit init --plugin=implement
+npx devflow-kit init --plugin=implement,review
+```
+
+### Scopes
+
+- `--scope user` (default) - Install for all projects (`~/.claude/`)
+- `--scope local` - Install for current project only (`.claude/`)
+
 ## Working Memory
 
 DevFlow automatically preserves session context across restarts, `/clear`, and context compaction — zero ceremony required.
@@ -144,11 +180,7 @@ DevFlow creates project documentation in `.docs/`:
 └── working-memory-backup.json # Pre-compact git state snapshot
 ```
 
-## Workflow
-
-### Starting a Session
-
-Session context is restored automatically via Working Memory hooks — no manual steps needed.
+## Workflow Examples
 
 ### Implementing a Feature
 ```bash
@@ -168,9 +200,9 @@ Session context is restored automatically via Working Memory hooks — no manual
 /resolve     # Fix low-risk issues, defer high-risk to backlog
 ```
 
-### Ending a Session
+### Session Continuity
 
-Working memory is saved automatically — no manual steps needed.
+Session context is saved and restored automatically via Working Memory hooks — no manual steps needed.
 
 ## CLI Reference
 
@@ -206,10 +238,6 @@ npm install
 npm run build
 node dist/cli.js init
 ```
-
-## Support
-
-Report issues at https://github.com/dean0x/devflow/issues
 
 ## License
 
