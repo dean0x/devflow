@@ -156,7 +156,6 @@ export const uninstallCommand = new Command('uninstall')
     }
 
     const cliAvailable = isClaudeCliAvailable();
-    let hasErrors = false;
 
     // Uninstall from each scope
     for (const scope of scopesToUninstall) {
@@ -361,13 +360,7 @@ export const uninstallCommand = new Command('uninstall')
       }
     }
 
-    if (hasErrors) {
-      p.log.warn('Uninstall completed with warnings — some components may not have been removed.');
-    }
-
-    const status = hasErrors
-      ? color.yellow('DevFlow uninstalled with warnings')
-      : color.green('DevFlow uninstalled successfully');
+    const status = color.green('DevFlow uninstalled successfully');
 
     p.outro(`${status}${color.dim('  Reinstall: npx devflow-kit init')}`);
   });

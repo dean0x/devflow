@@ -10,7 +10,7 @@ devflow/
 │   └── marketplace.json
 ├── shared/
 │   ├── skills/                       # SINGLE SOURCE OF TRUTH (24 skills)
-│   │   ├── commit/
+│   │   ├── git-workflow/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
 │   │   ├── core-patterns/
@@ -72,7 +72,7 @@ devflow-{name}/
 {
   "name": "devflow-implement",
   "description": "Complete task implementation workflow",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "agents": ["git", "coder", "synthesizer"],
   "skills": ["implementation-patterns", "self-review"]
 }
@@ -131,7 +131,7 @@ Included settings:
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
 - `extraKnownMarketplaces` - DevFlow plugin marketplace (`dean0x/devflow`)
-- `permissions.deny` - Security deny list (126 blocked operations) + sensitive file patterns
+- `permissions.deny` - Security deny list (140 blocked operations) + sensitive file patterns
 
 ## Working Memory Hooks
 
