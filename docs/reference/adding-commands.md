@@ -24,7 +24,7 @@ Brief description of what the command does.
 
 4. Test locally before committing
 5. Update plugin README.md with user-facing documentation
-6. Update `DEVFLOW_PLUGINS` in `src/cli/commands/init.ts` if creating a new plugin
+6. Update `DEVFLOW_PLUGINS` in `src/cli/plugins.ts` if creating a new plugin
 
 ## Plugin Registration
 
@@ -33,7 +33,7 @@ When creating a new plugin:
 1. Create plugin directory: `plugins/devflow-{name}/`
 2. Create `.claude-plugin/plugin.json` manifest
 3. Create `commands/`, `agents/`, and `skills/` directories as needed
-4. Add to `DEVFLOW_PLUGINS` array in `src/cli/commands/init.ts`
+4. Add to `DEVFLOW_PLUGINS` array in `src/cli/plugins.ts`
 5. Run `npm run build` to distribute shared assets
 
 ## Command Design Principles

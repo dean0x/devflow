@@ -5,13 +5,13 @@ Full runbook for creating new DevFlow Kit releases.
 ## 1. Prepare the Release
 
 **Update Version** in `package.json`:
-- Patch (0.1.x): Bug fixes, docs, minor tweaks, internal refactoring
-- Minor (0.x.0): New features, commands, CLI options (backwards compatible)
-- Major (x.0.0): Breaking changes, removed/renamed commands
+- Patch (x.y.Z): Bug fixes, docs, minor tweaks, internal refactoring
+- Minor (x.Y.0): New features, commands, CLI options (backwards compatible)
+- Major (X.0.0): Breaking changes, removed/renamed commands
 
 **Update CHANGELOG.md:**
 ```markdown
-## [0.1.x] - YYYY-MM-DD
+## [x.y.z] - YYYY-MM-DD
 
 ### Added
 - New features
@@ -26,7 +26,7 @@ Full runbook for creating new DevFlow Kit releases.
 - Doc improvements
 
 ---
-[0.1.x]: https://github.com/dean0x/devflow/releases/tag/v0.1.x
+[x.y.z]: https://github.com/dean0x/devflow/releases/tag/vx.y.z
 ```
 
 ## 2. Build and Test
@@ -41,12 +41,11 @@ npm pack --dry-run             # Verify package contents
 ## 3. Commit Version Bump
 
 ```bash
-rm -f .git/index.lock && \
-git add package.json CHANGELOG.md && \
-git commit -m "chore: bump version to 0.1.x
+git add package.json package-lock.json CHANGELOG.md && \
+git commit -m "chore: bump version to x.y.z
 
-- Update package.json to 0.1.x
-- Add CHANGELOG entry for v0.1.x
+- Update package.json to x.y.z
+- Add CHANGELOG entry for vx.y.z
 - Document [summary of changes]"
 
 git push origin main
@@ -62,20 +61,20 @@ npm view devflow-kit version    # Verify
 ## 5. Create Git Tag and GitHub Release
 
 ```bash
-git tag -a v0.1.x -m "Version 0.1.x - [Brief Description]
+git tag -a vx.y.z -m "Version x.y.z - [Brief Description]
 
 - Key change 1
 - Key change 2
 - Key change 3"
 
-git push origin v0.1.x
+git push origin vx.y.z
 ```
 
 ```bash
-gh release create v0.1.x \
-  --title "v0.1.x - [Release Title]" \
+gh release create vx.y.z \
+  --title "vx.y.z - [Release Title]" \
   --notes "$(cat <<'EOF'
-# DevFlow Kit v0.1.x
+# DevFlow Kit vx.y.z
 
 [Brief description]
 
@@ -111,7 +110,7 @@ EOF
 
 ```bash
 npm view devflow-kit
-gh release view v0.1.x
+gh release view vx.y.z
 npx devflow-kit@latest init
 ```
 
@@ -119,7 +118,11 @@ npx devflow-kit@latest init
 
 - [ ] Version bumped in package.json
 - [ ] CHANGELOG.md updated
+- [ ] All plugin.json files updated to match
+- [ ] marketplace.json updated to match
 - [ ] `npm run build` succeeds
+- [ ] `npm test` passes
+- [ ] `npm pack --dry-run` looks clean (no .map files, no build scripts)
 - [ ] Local testing passed
 - [ ] Version bump committed and pushed
 - [ ] Published to npm

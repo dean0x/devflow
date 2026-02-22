@@ -53,14 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `manage-debt` operation: Updates tech debt backlog issue with semantic deduplication
   - `create-release` operation: Creates GitHub release with version tag
   - Replaces: GetIssue, Comment, TechDebt agents
-- **`devflow-commit` skill** - Atomic commit patterns, message format, safety scanning
+- **`git-workflow` skill** - Unified commit and PR patterns (atomic commits, message format, PR quality)
   - Iron Law: ATOMIC COMMITS OR NO COMMITS
-  - Auto-triggers when staging files or creating commits
-- **`devflow-pull-request` skill** - PR quality, descriptions, size assessment
-  - Iron Law: HONEST DESCRIPTIONS OR NO PR
-  - Auto-triggers when creating PRs or generating descriptions
+  - Auto-triggers when staging files, creating commits, or opening PRs
 - **Iron Laws** - Every skill now has a single, non-negotiable core principle
-  - 28 Iron Laws across all skills (e.g., "NEVER THROW IN BUSINESS LOGIC", "NO FAKE SOLUTIONS")
+  - 24 Iron Laws across all skills (e.g., "NEVER THROW IN BUSINESS LOGIC", "NO FAKE SOLUTIONS")
   - Automatically enforced when skills activate
   - Consistent format: `## Iron Law` section in each SKILL.md
 - **Clarification Gates** for `/specify` command
@@ -118,22 +115,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All 5 git skills now have Related Skills table for discoverability
 
 ### Removed
-- **`/commit` command** - Replaced by `devflow-commit` skill (use `git commit` directly)
-- **`/debug` command** - Removed entirely (Claude Code's built-in debugging is sufficient)
-- **`/pull-request` command** - Replaced by `devflow-pull-request` skill (use `gh pr create` directly)
+- **`/commit` command** - Replaced by `git-workflow` skill (use `git commit` directly)
+- **`/pull-request` command** - Replaced by `git-workflow` skill (use `gh pr create` directly)
 - **`/breakdown` command** - Removed (use natural conversation or TodoWrite directly)
 - **`/release` command** - Removed (use manual release process documented in CLAUDE.md)
 - **`/resolve-comments` command** - Removed (address PR comments directly)
 - **`/run` command** - Removed (use `/implement` for full lifecycle)
-- **`Commit` agent** - Patterns moved to `devflow-commit` skill
-- **`Debug` agent** - Removed entirely
-- **`PullRequest` agent** - Patterns moved to `devflow-pull-request` skill
+- **`Commit` agent** - Patterns moved to `git-workflow` skill
+- **`PullRequest` agent** - Patterns moved to `git-workflow` skill
 - **`Release` agent** - Removed (release process documented in CLAUDE.md)
 - **`/catch-up` command** - Superseded by Working Memory hooks (automatic context restoration)
 - **`/devlog` command** - Superseded by Working Memory hooks (automatic session logging)
 - **`catch-up` agent** - No longer needed with automatic Working Memory
 - **`devlog` agent** - No longer needed with automatic Working Memory
-- **`devflow-debug` skill** - Removed entirely
 - **`GetIssue` agent** - Replaced by Git agent (operation: fetch-issue)
 - **`Comment` agent** - Replaced by Git agent (operation: comment-pr)
 - **`TechDebt` agent** - Replaced by Git agent (operation: manage-debt)
