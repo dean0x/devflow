@@ -7,6 +7,7 @@ import {
   substituteSettingsTemplate,
   computeGitignoreAppend,
   buildExtrasOptions,
+  applyTeamsConfig,
   stripTeamsConfig,
 } from '../src/cli/commands/init.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
@@ -140,6 +141,55 @@ describe('computeGitignoreAppend', () => {
   it('handles empty entries list', () => {
     const result = computeGitignoreAppend('something\n', []);
     expect(result).toEqual([]);
+  });
+});
+
+describe('applyTeamsConfig', () => {
+  it('adds teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', () => {
+    const input = JSON.stringify({
+      hooks: { Stop: [] },
+      statusLine: { type: 'command', command: 'test' },
+    }, null, 2);
+
+    const result = JSON.parse(applyTeamsConfig(input));
+    expect(result.teammateMode).toBe('auto');
+    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
+    expect(result.hooks).toEqual({ Stop: [] });
+    expect(result.statusLine).toEqual({ type: 'command', command: 'test' });
+  });
+
+  it('preserves existing env vars', () => {
+    const input = JSON.stringify({
+      env: { ENABLE_TOOL_SEARCH: 'true' },
+    }, null, 2);
+
+    const result = JSON.parse(applyTeamsConfig(input));
+    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
+    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
+    expect(result.teammateMode).toBe('auto');
+  });
+
+  it('creates env object when missing', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+
+    const result = JSON.parse(applyTeamsConfig(input));
+    expect(result.env).toEqual({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' });
+  });
+
+  it('is inverse of stripTeamsConfig (roundtrip)', () => {
+    const base = JSON.stringify({
+      hooks: { Stop: [] },
+      env: { ENABLE_TOOL_SEARCH: 'true' },
+    }, null, 2);
+
+    const withTeams = applyTeamsConfig(base);
+    const stripped = stripTeamsConfig(withTeams);
+    const result = JSON.parse(stripped);
+
+    expect(result.teammateMode).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined();
+    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
+    expect(result.hooks).toEqual({ Stop: [] });
   });
 });
 
