@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 
-**Agents that fight your code, not rubber-stamp it.**
+**Development workflows for Claude Code — spec, implement, review, debug in one command.**
 
 <p align="center">
   <img src=".github/assets/devflow-init.gif" alt="DevFlow init demo" width="720" />
@@ -13,18 +13,17 @@
 
 ## Why DevFlow
 
-AI code review today is sycophantic — it praises everything and catches nothing. Context vanishes on every restart. Workflows are ad-hoc prompts copy-pasted between sessions.
+Claude Code is powerful but workflows are manual — you write ad-hoc prompts, lose context on every restart, and repeat the same review steps across projects.
 
-DevFlow fixes this with adversarial agent teams that debate each other's findings, automatic session memory that survives restarts and compaction, and 24 quality skills that activate without you asking.
+DevFlow adds structured commands that handle the full lifecycle: specify features, implement with exploration and planning, review with multiple perspectives, and debug with parallel investigation. Session memory persists automatically across restarts and compaction.
 
 ## Features
 
-- **Adversarial code review** — agents debate findings with evidence, not rubber-stamp
+- **Structured code review** — multiple specialized reviewers (security, architecture, performance, and more)
 - **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
 - **Automatic session memory** — survives restarts, `/clear`, and context compaction
-- **Competing hypothesis debugging** — agents investigate in parallel and challenge each other
+- **Parallel debugging** — competing hypotheses investigated simultaneously
 - **24 auto-activating quality skills** — security, architecture, performance, and more
-- **Works with or without Agent Teams** — parallel subagents or full team debate
 
 ## Quick Start
 
@@ -43,14 +42,12 @@ Then in Claude Code:
 | Plugin | Command | Description |
 |--------|---------|-------------|
 | `devflow-specify` | `/specify` | Interactive feature specification with clarification gates |
-| `devflow-implement` | `/implement` | Complete task lifecycle with team-based exploration and planning |
-| `devflow-review` | `/review` | Adversarial code review with team debate and consensus |
-| `devflow-resolve` | `/resolve` | Process review issues - fix or defer to tech debt |
-| `devflow-debug` | `/debug` | Competing hypothesis debugging with agent teams |
+| `devflow-implement` | `/implement` | Complete task lifecycle — explore, plan, code, validate, refine |
+| `devflow-review` | `/review` | Multi-perspective code review with severity classification |
+| `devflow-resolve` | `/resolve` | Process review issues — fix or defer to tech debt |
+| `devflow-debug` | `/debug` | Parallel hypothesis debugging |
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
-
-The descriptions reflect the **teams variant** behavior (Agent Teams with peer debate). The **no-teams variant** achieves the same outcomes using parallel subagents without debate rounds.
 
 ## Command Details
 
@@ -68,34 +65,33 @@ Creates a GitHub issue with well-defined requirements ready for `/implement`.
 
 Executes a single task through the complete development lifecycle:
 
-1. **Exploration** - Agent team explores codebase with debate on findings
-2. **Planning** - Agent team designs approach with adversarial challenge
-3. **Implementation** - Write the code on a feature branch
-4. **Validation** - Run build, typecheck, lint, and tests
-5. **Refinement** - Simplify and review for quality
-6. **Alignment Check** - Shepherd and Coder direct dialogue validates alignment
+1. **Exploration** — analyze codebase for relevant patterns and dependencies
+2. **Planning** — design the implementation approach
+3. **Implementation** — write code on a feature branch
+4. **Validation** — run build, typecheck, lint, and tests
+5. **Refinement** — simplify and review for quality
+6. **Alignment Check** — verify implementation matches the original request
 
 Creates a PR when complete.
 
 ### /review
 
-Performs adversarial code review where reviewers debate findings:
+Multi-perspective code review with specialized reviewers:
 
-- Security, Architecture, Performance, and Quality perspectives
-- Conditional: TypeScript, React, Accessibility, Database, Dependencies, Documentation
-- Reviewers challenge each other's findings with evidence
-- Findings classified by consensus: HIGH / MEDIUM / LOW confidence
+- **Core**: Security, Architecture, Performance, Quality
+- **Conditional** (activated when relevant): TypeScript, React, Accessibility, Database, Dependencies, Documentation
+- Findings classified as must-fix, should-fix, or nit with severity and confidence levels
 
-Provides actionable feedback with severity levels, confidence, and specific fixes.
+Provides actionable feedback with specific file locations and suggested fixes.
 
 ### /debug
 
-Investigates bugs using competing hypotheses with an agent team:
+Investigates bugs using competing hypotheses:
 
-1. **Hypothesis Generation** - Identify 3-5 plausible explanations
-2. **Parallel Investigation** - Each agent investigates one hypothesis
-3. **Adversarial Debate** - Agents try to disprove each other's theories
-4. **Convergence** - Root cause is the hypothesis that survives scrutiny
+1. **Hypothesis Generation** — identify 3-5 plausible explanations
+2. **Parallel Investigation** — each hypothesis investigated independently
+3. **Evidence Evaluation** — hypotheses ranked by supporting evidence
+4. **Root Cause** — the best-supported explanation with fix recommendation
 
 Produces a root cause analysis report with confidence level.
 
@@ -127,8 +123,6 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 
 - [Claude Code](https://claude.ai/download) (latest)
 - Node.js 18+
-- **Teams variant**: Agent Teams enabled in Claude Code settings (`teammateMode: "auto"` in `settings.json`)
-- **No-teams variant**: Works without Agent Teams — uses parallel subagents instead
 
 ## Installation
 
@@ -196,7 +190,7 @@ DevFlow creates project documentation in `.docs/`:
 
 ### Before Creating a PR
 ```bash
-/review      # Adversarial review with team debate
+/review      # Multi-perspective code review
 /resolve     # Fix low-risk issues, defer high-risk to backlog
 ```
 
@@ -219,7 +213,7 @@ Session context is saved and restored automatically via Working Memory hooks —
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,review`) |
 | `--scope <user\|local>` | Installation scope (default: user) |
-| `--teams` / `--no-teams` | Select command variant: `--teams` uses Agent Teams with peer debate; `--no-teams` uses parallel subagents (default: prompt at install) |
+| `--teams` / `--no-teams` | Enable/disable experimental Agent Teams (default: off) |
 | `--verbose` | Show detailed output |
 
 ### Uninstall Options
