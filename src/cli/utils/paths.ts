@@ -1,6 +1,25 @@
-import { homedir } from 'os';
+import { homedir, platform } from 'os';
 import * as path from 'path';
 import { getGitRoot } from './git.js';
+
+/**
+ * Get the OS-specific path for Claude Code managed settings.
+ * Managed settings have highest precedence and cannot be overridden by users.
+ * - macOS: /Library/Application Support/ClaudeCode/managed-settings.json
+ * - Linux: /etc/claude-code/managed-settings.json
+ *
+ * @throws {Error} On unsupported platforms (Windows)
+ */
+export function getManagedSettingsPath(): string {
+  const os = platform();
+  if (os === 'darwin') {
+    return '/Library/Application Support/ClaudeCode/managed-settings.json';
+  }
+  if (os === 'linux') {
+    return '/etc/claude-code/managed-settings.json';
+  }
+  throw new Error(`Managed settings not supported on platform: ${os}`);
+}
 
 /**
  * Get home directory with proper fallback and validation

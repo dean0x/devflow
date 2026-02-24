@@ -1,6 +1,8 @@
-import { promises as fs } from 'fs';
+import { promises as fs, writeFileSync, unlinkSync } from 'fs';
+import { execSync } from 'child_process';
 import * as path from 'path';
 import * as p from '@clack/prompts';
+import { getManagedSettingsPath } from './paths.js';
 
 /**
  * Type guard for Node.js system errors with error codes.
@@ -64,9 +66,242 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
 }
 
 /**
+ * Merge DevFlow deny entries into an existing managed settings object.
+ * Preserves existing entries, deduplicates, and returns the merged JSON string.
+ */
+export function mergeDenyList(existingJson: string, newDenyEntries: string[]): string {
+  const existing = JSON.parse(existingJson);
+  const currentDeny: string[] = existing.permissions?.deny ?? [];
+  const merged = [...new Set([...currentDeny, ...newDenyEntries])];
+  existing.permissions = { ...existing.permissions, deny: merged };
+  return JSON.stringify(existing, null, 2) + '\n';
+}
+
+/**
+ * Attempt to install managed settings (security deny list) to the system path.
+ * Managed settings have highest precedence in Claude Code and cannot be overridden.
+ *
+ * Strategy:
+ * 1. Try direct write (works if running as root or directory is writable)
+ * 2. If EACCES in TTY, offer to retry with sudo
+ * 3. Returns true if managed settings were written, false if caller should fall back
+ */
+export async function installManagedSettings(
+  rootDir: string,
+  verbose: boolean,
+): Promise<boolean> {
+  let managedPath: string;
+  try {
+    managedPath = getManagedSettingsPath();
+  } catch {
+    return false; // Unsupported platform
+  }
+
+  const managedDir = path.dirname(managedPath);
+  const sourceManaged = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
+
+  let newDenyEntries: string[];
+  try {
+    const template = JSON.parse(await fs.readFile(sourceManaged, 'utf-8'));
+    newDenyEntries = template.permissions?.deny ?? [];
+  } catch {
+    if (verbose) {
+      p.log.warn('Could not read managed settings template');
+    }
+    return false;
+  }
+
+  // Build the content to write (merge with existing if present)
+  let content: string;
+  try {
+    const existing = await fs.readFile(managedPath, 'utf-8');
+    content = mergeDenyList(existing, newDenyEntries);
+  } catch {
+    // File doesn't exist — use template as-is
+    content = JSON.stringify({ permissions: { deny: newDenyEntries } }, null, 2) + '\n';
+  }
+
+  // Attempt 1: direct write
+  try {
+    await fs.mkdir(managedDir, { recursive: true });
+    await fs.writeFile(managedPath, content, 'utf-8');
+    if (verbose) {
+      p.log.success(`Managed settings written to ${managedPath}`);
+    }
+    return true;
+  } catch (error: unknown) {
+    if (!isNodeSystemError(error) || error.code !== 'EACCES') {
+      if (verbose) {
+        p.log.warn(`Could not write managed settings: ${error}`);
+      }
+      return false;
+    }
+  }
+
+  // Attempt 2: sudo (TTY only)
+  if (!process.stdin.isTTY) {
+    return false;
+  }
+
+  const confirmed = await p.confirm({
+    message: `Managed settings require admin access (${managedDir}). Use sudo?`,
+    initialValue: true,
+  });
+
+  if (p.isCancel(confirmed) || !confirmed) {
+    return false;
+  }
+
+  try {
+    execSync(`sudo mkdir -p '${managedDir}'`, { stdio: 'inherit' });
+    // Write via sudo tee to avoid shell quoting issues with the JSON content
+    const tmpFile = path.join(rootDir, '.managed-settings-tmp.json');
+    await fs.writeFile(tmpFile, content, 'utf-8');
+    execSync(`sudo cp '${tmpFile}' '${managedPath}'`, { stdio: 'inherit' });
+    await fs.rm(tmpFile, { force: true });
+    if (verbose) {
+      p.log.success(`Managed settings written to ${managedPath} (via sudo)`);
+    }
+    return true;
+  } catch (error) {
+    if (verbose) {
+      p.log.warn(`sudo write failed: ${error}`);
+    }
+    return false;
+  }
+}
+
+/**
+ * Remove DevFlow deny entries from managed settings.
+ * If only DevFlow entries remain, deletes the file entirely.
+ *
+ * Mirrors installManagedSettings strategy:
+ * 1. Try direct write/delete
+ * 2. If EACCES and TTY, ask user before sudo
+ * 3. Non-TTY: return false (caller logs preservation message)
+ */
+export async function removeManagedSettings(
+  rootDir: string,
+  verbose: boolean,
+): Promise<boolean> {
+  let managedPath: string;
+  try {
+    managedPath = getManagedSettingsPath();
+  } catch {
+    return false;
+  }
+
+  let existingContent: string;
+  try {
+    existingContent = await fs.readFile(managedPath, 'utf-8');
+  } catch {
+    return false; // File doesn't exist
+  }
+
+  // Load our deny entries to identify which to remove
+  const sourceManaged = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
+  let devflowDenyEntries: string[];
+  try {
+    const template = JSON.parse(await fs.readFile(sourceManaged, 'utf-8'));
+    devflowDenyEntries = template.permissions?.deny ?? [];
+  } catch {
+    return false;
+  }
+
+  const existing = JSON.parse(existingContent);
+  const currentDeny: string[] = existing.permissions?.deny ?? [];
+  const devflowSet = new Set(devflowDenyEntries);
+  const remaining = currentDeny.filter(entry => !devflowSet.has(entry));
+
+  // Determine the target action: delete file entirely or write updated content
+  let shouldDelete = false;
+  let updatedContent: string | null = null;
+
+  if (remaining.length === 0) {
+    const otherKeys = Object.keys(existing).filter(k => k !== 'permissions');
+    const hasOtherPermissions = existing.permissions &&
+      Object.keys(existing.permissions).filter(k => k !== 'deny').length > 0;
+
+    if (otherKeys.length === 0 && !hasOtherPermissions) {
+      shouldDelete = true;
+    } else {
+      delete existing.permissions.deny;
+      if (Object.keys(existing.permissions).length === 0) {
+        delete existing.permissions;
+      }
+      updatedContent = JSON.stringify(existing, null, 2) + '\n';
+    }
+  } else {
+    existing.permissions.deny = remaining;
+    updatedContent = JSON.stringify(existing, null, 2) + '\n';
+  }
+
+  // Attempt 1: direct write/delete
+  try {
+    if (shouldDelete) {
+      unlinkSync(managedPath);
+    } else {
+      writeFileSync(managedPath, updatedContent!, 'utf-8');
+    }
+    if (verbose) {
+      p.log.success(shouldDelete ? 'Managed settings file removed' : 'DevFlow deny entries removed from managed settings');
+    }
+    return true;
+  } catch (error: unknown) {
+    if (!isNodeSystemError(error) || error.code !== 'EACCES') {
+      if (verbose) {
+        p.log.warn(`Could not update managed settings: ${error}`);
+      }
+      return false;
+    }
+  }
+
+  // Attempt 2: sudo (TTY only, with explicit consent)
+  if (!process.stdin.isTTY) {
+    return false;
+  }
+
+  const managedDir = path.dirname(managedPath);
+  const confirmed = await p.confirm({
+    message: `Managed settings cleanup requires admin access (${managedDir}). Use sudo?`,
+    initialValue: true,
+  });
+
+  if (p.isCancel(confirmed) || !confirmed) {
+    return false;
+  }
+
+  try {
+    if (shouldDelete) {
+      execSync(`sudo rm '${managedPath}'`, { stdio: 'inherit' });
+    } else {
+      const tmpFile = path.join(rootDir, '.managed-settings-tmp.json');
+      await fs.writeFile(tmpFile, updatedContent!, 'utf-8');
+      execSync(`sudo cp '${tmpFile}' '${managedPath}'`, { stdio: 'inherit' });
+      await fs.rm(tmpFile, { force: true });
+    }
+    if (verbose) {
+      p.log.success(shouldDelete ? 'Managed settings file removed' : 'DevFlow deny entries removed from managed settings');
+    }
+    return true;
+  } catch (error) {
+    if (verbose) {
+      p.log.warn(`sudo cleanup failed: ${error}`);
+    }
+    return false;
+  }
+}
+
+export type SecurityMode = 'managed' | 'user';
+
+/**
  * Install or update settings.json with DevFlow configuration.
  * Prompts interactively in TTY mode when settings already exist.
  * In non-TTY mode, skips override (safe default).
+ *
+ * When securityMode is 'managed', the deny list goes to system-level managed
+ * settings and is excluded from user settings.json. When 'user', the deny list
+ * is included in settings.json (original behavior).
  */
 export async function installSettings(
   claudeDir: string,
@@ -74,6 +309,7 @@ export async function installSettings(
   devflowDir: string,
   verbose: boolean,
   teamsEnabled: boolean = false,
+  securityMode: SecurityMode = 'user',
 ): Promise<void> {
   const settingsPath = path.join(claudeDir, 'settings.json');
   const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
@@ -81,6 +317,22 @@ export async function installSettings(
   try {
     const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
     let settingsContent = substituteSettingsTemplate(settingsTemplate, devflowDir);
+
+    // When securityMode is 'user', inject deny list from managed-settings template
+    if (securityMode === 'user') {
+      const managedTemplatePath = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
+      try {
+        const managedTemplate = JSON.parse(await fs.readFile(managedTemplatePath, 'utf-8'));
+        const settings = JSON.parse(settingsContent);
+        settings.permissions = managedTemplate.permissions;
+        settingsContent = JSON.stringify(settings, null, 2) + '\n';
+      } catch {
+        if (verbose) {
+          p.log.warn('Could not load security deny list — settings will be written without it');
+        }
+      }
+    }
+
     if (!teamsEnabled) {
       settingsContent = stripTeamsConfig(settingsContent);
     }
@@ -145,30 +397,6 @@ export async function installSettings(
   } catch (error: unknown) {
     if (verbose) {
       p.log.warn(`Could not configure settings: ${error}`);
-    }
-  }
-}
-
-/**
- * Install CLAUDE.md template (skip if already exists).
- */
-export async function installClaudeMd(
-  claudeDir: string,
-  rootDir: string,
-  verbose: boolean,
-): Promise<void> {
-  const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
-  const sourceClaudeMdPath = path.join(rootDir, 'src', 'claude', 'CLAUDE.md');
-
-  try {
-    const content = await fs.readFile(sourceClaudeMdPath, 'utf-8');
-    await fs.writeFile(claudeMdPath, content, { encoding: 'utf-8', flag: 'wx' });
-    if (verbose) {
-      p.log.success('CLAUDE.md configured');
-    }
-  } catch (error: unknown) {
-    if (isNodeSystemError(error) && error.code === 'EEXIST') {
-      p.log.info('CLAUDE.md exists - keeping your configuration');
     }
   }
 }

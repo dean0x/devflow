@@ -1,15 +1,17 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths, getClaudeDirectory } from '../utils/paths.js';
+import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
+import { removeManagedSettings } from '../utils/post-install.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -304,33 +306,32 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // 4. CLAUDE.md (only if DevFlow installed it)
-      for (const scope of scopesToUninstall) {
-        try {
-          const paths = await getInstallationPaths(scope);
-          const claudeMdPath = path.join(paths.claudeDir, 'CLAUDE.md');
-          const content = await fs.readFile(claudeMdPath, 'utf-8');
+      // 4. Managed settings (security deny list)
+      let managedSettingsExist = false;
+      try {
+        const managedPath = getManagedSettingsPath();
+        await fs.access(managedPath);
+        managedSettingsExist = true;
+      } catch {
+        // Managed settings don't exist or platform unsupported
+      }
 
-          // Only offer removal if it's the DevFlow template (check for marker)
-          if (content.includes('DevFlow')) {
-            if (process.stdin.isTTY) {
-              const removeClaudeMd = await p.confirm({
-                message: `Remove CLAUDE.md (${scope} scope)? May contain your customizations.`,
-                initialValue: false,
-              });
+      if (managedSettingsExist) {
+        if (process.stdin.isTTY) {
+          const removeManagedConfirm = await p.confirm({
+            message: 'Remove DevFlow security deny list from managed settings?',
+            initialValue: false,
+          });
 
-              if (!p.isCancel(removeClaudeMd) && removeClaudeMd) {
-                await fs.rm(claudeMdPath, { force: true });
-                p.log.success(`CLAUDE.md removed (${scope})`);
-              } else {
-                p.log.info(`CLAUDE.md preserved (${scope})`);
-              }
-            } else {
-              p.log.info(`CLAUDE.md preserved (${scope}, non-interactive mode)`);
-            }
+          if (!p.isCancel(removeManagedConfirm) && removeManagedConfirm) {
+            // Resolve rootDir for the template path — use the dist directory
+            const uninstallRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+            await removeManagedSettings(uninstallRootDir, verbose);
+          } else {
+            p.log.info('Managed settings preserved');
           }
-        } catch {
-          // CLAUDE.md doesn't exist — skip
+        } else {
+          p.log.info('Managed settings preserved (non-interactive mode)');
         }
       }
 
