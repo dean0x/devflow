@@ -11,17 +11,18 @@ import { isClaudeCliAvailable } from '../utils/cli.js';
 import { installViaCli, installViaFileCopy } from '../utils/installer.js';
 import {
   installSettings,
-  installClaudeMd,
+  installManagedSettings,
   installClaudeignore,
   updateGitignore,
   createDocsStructure,
+  type SecurityMode,
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
-export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig } from '../utils/post-install.js';
+export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -44,7 +45,7 @@ export function parsePluginSelection(
   return { selected, invalid };
 }
 
-export type ExtraId = 'settings' | 'claude-md' | 'claudeignore' | 'gitignore' | 'docs' | 'safe-delete';
+export type ExtraId = 'settings' | 'claudeignore' | 'gitignore' | 'docs' | 'safe-delete';
 
 interface ExtraOption {
   value: ExtraId;
@@ -58,8 +59,7 @@ interface ExtraOption {
  */
 export function buildExtrasOptions(scope: 'user' | 'local', gitRoot: string | null): ExtraOption[] {
   const options: ExtraOption[] = [
-    { value: 'settings', label: 'Settings & Working Memory', hint: 'Model defaults, session memory hooks, status line, security deny list' },
-    { value: 'claude-md', label: 'CLAUDE.md quality enforcer', hint: 'Strict code critic role + engineering pattern references' },
+    { value: 'settings', label: 'Settings & Working Memory', hint: 'Model defaults, session memory hooks, status line' },
   ];
 
   if (gitRoot) {
@@ -199,6 +199,25 @@ export const initCommand = new Command('init')
       teamsEnabled = teamsChoice;
     }
 
+    // Security deny list placement (user scope + TTY only)
+    let securityMode: SecurityMode = 'user';
+    if (scope === 'user' && process.stdin.isTTY) {
+      const securityChoice = await p.select({
+        message: 'How should DevFlow install the security deny list?',
+        options: [
+          { value: 'managed', label: 'Managed settings (Recommended)', hint: 'Cannot be overridden, requires admin' },
+          { value: 'user', label: 'User settings', hint: 'Included in settings.json, editable' },
+        ],
+      });
+
+      if (p.isCancel(securityChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+
+      securityMode = securityChoice as SecurityMode;
+    }
+
     // Start spinner immediately after prompts — covers path resolution + git detection
     const s = p.spinner();
     s.start('Resolving paths');
@@ -328,7 +347,16 @@ export const initCommand = new Command('init')
 
     // Settings may trigger its own TTY sub-prompt — run outside spinner
     if (selectedExtras.includes('settings')) {
-      await installSettings(claudeDir, rootDir, devflowDir, verbose, teamsEnabled);
+      // Attempt managed settings write if user chose managed mode
+      let effectiveSecurityMode = securityMode;
+      if (securityMode === 'managed') {
+        const managed = await installManagedSettings(rootDir, verbose);
+        if (!managed) {
+          p.log.warn('Managed settings write failed — falling back to user settings');
+          effectiveSecurityMode = 'user';
+        }
+      }
+      await installSettings(claudeDir, rootDir, devflowDir, verbose, teamsEnabled, effectiveSecurityMode);
     }
 
     const fileExtras = selectedExtras.filter(e => e !== 'settings' && e !== 'safe-delete');
@@ -336,9 +364,6 @@ export const initCommand = new Command('init')
       const sExtras = p.spinner();
       sExtras.start('Configuring extras');
 
-      if (selectedExtras.includes('claude-md')) {
-        await installClaudeMd(claudeDir, rootDir, verbose);
-      }
       if (selectedExtras.includes('claudeignore') && gitRoot) {
         await installClaudeignore(gitRoot, rootDir, verbose);
       }

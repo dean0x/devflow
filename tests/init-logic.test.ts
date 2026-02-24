@@ -9,7 +9,9 @@ import {
   buildExtrasOptions,
   applyTeamsConfig,
   stripTeamsConfig,
+  mergeDenyList,
 } from '../src/cli/commands/init.js';
+import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps } from '../src/cli/plugins.js';
 
@@ -81,28 +83,28 @@ describe('substituteSettingsTemplate', () => {
 });
 
 describe('buildExtrasOptions', () => {
-  it('returns settings, claude-md, safe-delete for user scope without gitRoot', () => {
+  it('returns settings, safe-delete for user scope without gitRoot', () => {
     const options = buildExtrasOptions('user', null);
     const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'claude-md', 'safe-delete']);
+    expect(values).toEqual(['settings', 'safe-delete']);
   });
 
   it('adds claudeignore when gitRoot exists (user scope)', () => {
     const options = buildExtrasOptions('user', '/repo');
     const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'claude-md', 'claudeignore', 'safe-delete']);
+    expect(values).toEqual(['settings', 'claudeignore', 'safe-delete']);
   });
 
-  it('returns all 6 options for local scope with gitRoot', () => {
+  it('returns all 5 options for local scope with gitRoot', () => {
     const options = buildExtrasOptions('local', '/repo');
     const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'claude-md', 'claudeignore', 'gitignore', 'docs', 'safe-delete']);
+    expect(values).toEqual(['settings', 'claudeignore', 'gitignore', 'docs', 'safe-delete']);
   });
 
   it('omits claudeignore and gitignore for local scope without gitRoot', () => {
     const options = buildExtrasOptions('local', null);
     const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'claude-md', 'docs', 'safe-delete']);
+    expect(values).toEqual(['settings', 'docs', 'safe-delete']);
   });
 
   it('all options have non-empty label and hint', () => {
@@ -250,6 +252,70 @@ describe('stripTeamsConfig', () => {
 
     const result = JSON.parse(stripTeamsConfig(input));
     expect(result.env).toBeUndefined();
+  });
+});
+
+describe('getManagedSettingsPath', () => {
+  it('returns macOS path on darwin', () => {
+    // This test runs on the current platform
+    const p = getManagedSettingsPath();
+    if (process.platform === 'darwin') {
+      expect(p).toBe('/Library/Application Support/ClaudeCode/managed-settings.json');
+    } else if (process.platform === 'linux') {
+      expect(p).toBe('/etc/claude-code/managed-settings.json');
+    }
+  });
+
+  it('returns a path ending in managed-settings.json', () => {
+    const p = getManagedSettingsPath();
+    expect(p).toMatch(/managed-settings\.json$/);
+  });
+});
+
+describe('mergeDenyList', () => {
+  it('merges new entries into existing deny list', () => {
+    const existing = JSON.stringify({
+      permissions: { deny: ['Bash(rm -rf /*)'] },
+    });
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(rm -rf /*)', 'Bash(sudo *)']));
+    expect(result.permissions.deny).toEqual(['Bash(rm -rf /*)', 'Bash(sudo *)']);
+  });
+
+  it('deduplicates entries', () => {
+    const existing = JSON.stringify({
+      permissions: { deny: ['Bash(rm -rf /*)', 'Bash(sudo *)'] },
+    });
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(rm -rf /*)', 'Bash(eval *)']));
+    expect(result.permissions.deny).toEqual(['Bash(rm -rf /*)', 'Bash(sudo *)', 'Bash(eval *)']);
+  });
+
+  it('preserves existing non-deny settings', () => {
+    const existing = JSON.stringify({
+      permissions: { deny: ['Bash(rm -rf /*)'], allow: ['Read(*)'] },
+      otherKey: 'value',
+    });
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(sudo *)']));
+    expect(result.permissions.allow).toEqual(['Read(*)']);
+    expect(result.otherKey).toBe('value');
+  });
+
+  it('creates permissions.deny when missing', () => {
+    const existing = JSON.stringify({ otherKey: 'value' });
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(rm -rf /*)']));
+    expect(result.permissions.deny).toEqual(['Bash(rm -rf /*)']);
+    expect(result.otherKey).toBe('value');
+  });
+
+  it('handles empty existing deny list', () => {
+    const existing = JSON.stringify({ permissions: { deny: [] } });
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(rm -rf /*)']));
+    expect(result.permissions.deny).toEqual(['Bash(rm -rf /*)']);
+  });
+
+  it('handles empty new entries', () => {
+    const existing = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
+    const result = JSON.parse(mergeDenyList(existing, []));
+    expect(result.permissions.deny).toEqual(['Bash(rm -rf /*)']);
   });
 });
 
