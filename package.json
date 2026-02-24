@@ -13,7 +13,6 @@
     "shared/",
     "scripts/hooks/",
     "src/templates/",
-    "src/claude/CLAUDE.md",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
@@ -47,7 +46,7 @@
   "bugs": {
     "url": "https://github.com/dean0x/devflow/issues"
   },
-  "homepage": "https://github.com/dean0x/devflow#readme",
+  "homepage": "https://dean0x.github.io/x/devflow/",
   "engines": {
     "node": ">=18.0.0"
   },

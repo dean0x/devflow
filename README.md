@@ -24,7 +24,7 @@ DevFlow adds structured commands that handle the full lifecycle: specify feature
 - **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
 - **Automatic session memory** — survives restarts, `/clear`, and context compaction
 - **Parallel debugging** — competing hypotheses investigated simultaneously
-- **24 auto-activating quality skills** — security, architecture, performance, and more
+- **24 quality skills** — 11 auto-activating, plus specialized review and agent skills
 
 ## Quick Start
 
@@ -112,7 +112,10 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 | Skill | Triggers When |
 |-------|---------------|
 | `core-patterns` | Implementing business logic, error handling |
+| `docs-framework` | Creating documentation artifacts in .docs/ |
+| `git-safety` | Rebasing, force-pushing, merge conflicts |
 | `git-workflow` | Staging files, creating commits, PRs |
+| `github-patterns` | GitHub API operations, PR comments, releases |
 | `test-patterns` | Writing or modifying tests |
 | `input-validation` | Creating API endpoints |
 | `typescript` | Working in TypeScript codebases |
