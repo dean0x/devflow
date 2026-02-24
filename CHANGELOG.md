@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `/implement` uses exploration and planning teams with debate, Shepherd↔Coder direct dialogue
   - New `/debug` command for competing hypothesis investigation with agent teams
   - `agent-teams` foundation skill with team spawning, challenge protocol, consensus formation
-  - `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enabled in default settings
   - Graceful fallback to parallel subagents when Agent Teams is unavailable
 - **`devflow-debug` plugin** - New plugin for bug investigation
   - `/debug` command spawns 3-5 hypothesis investigators
@@ -39,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Glob pattern activation schema** for skills
   - Skills can declare `activation.file-patterns` and `activation.exclude` in frontmatter
   - Future-proofs for conditional skill loading
-- **`devflow-github-patterns` skill** - Foundation skill for GitHub API interactions
+- **`github-patterns` skill** - Foundation skill for GitHub API interactions
   - Rate limiting patterns (1-2s delays, 60s wait if <10 remaining)
   - Comment deduplication algorithms
   - Line-in-diff validation for PR comments
@@ -65,11 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Gate 1: Validate scope and priorities after exploration
   - Gate 2: Confirm acceptance criteria before issue creation
   - No gate may be skipped - explicit user approval required
-- **`--override-settings` flag** for `devflow init`
-  - Override existing settings.json with DevFlow configuration
-  - Prompts for confirmation if settings.json exists
-  - No sudo required - writes to `~/.claude/settings.json`
-- **Security deny list** (140 blocked operations)
+- **Security deny list** via OS-level managed settings (140 blocked operations)
   - System destruction (rm -rf, dd, mkfs, shred)
   - Code execution (curl|bash, eval, exec)
   - Privilege escalation (sudo, su, doas, pkexec)
@@ -108,22 +103,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Statusline shows actual percentage instead of just large context warning
 - Settings template includes permissions.deny and env configuration
 - Commit and PR patterns now auto-activate via skills instead of requiring explicit commands
-- **Git skills deduplication** - Removed ~80 lines of duplicated content across git-related skills
-  - `devflow-git-safety`: Canonical source for lock handling, sequential ops, sensitive file detection
-  - `devflow-commit`: Canonical source for commit message format, atomic grouping
-  - `devflow-worktree`: Simplified lock handling with cross-reference
-  - All 5 git skills now have Related Skills table for discoverability
+- **Skills consolidation** — 28 skills merged to 24
+  - `test-design` + `tests-patterns` → `test-patterns`
+  - `commit` + `pull-request` → `git-workflow`
+  - `code-smell` absorbed into `core-patterns`
+  - `codebase-navigation` removed (redundant with Explore agent)
+  - `devflow-` prefix dropped from all skill names
+- **Managed settings** replace `--override-settings` flag — OS-level deny list installed to system-managed path, non-overridable by user settings
+- **CLAUDE.md creation removed** — opinionated template no longer forced on users during init
+- **`--teams` default flipped to off** — Agent Teams now opt-in via `--teams` flag
 
 ### Removed
 - **`/commit` command** - Replaced by `git-workflow` skill (use `git commit` directly)
 - **`/pull-request` command** - Replaced by `git-workflow` skill (use `gh pr create` directly)
 - **`/breakdown` command** - Removed (use natural conversation or TodoWrite directly)
-- **`/release` command** - Removed (use manual release process documented in CLAUDE.md)
+- **`/release` command** - Removed (use manual release process)
 - **`/resolve-comments` command** - Removed (address PR comments directly)
 - **`/run` command** - Removed (use `/implement` for full lifecycle)
 - **`Commit` agent** - Patterns moved to `git-workflow` skill
 - **`PullRequest` agent** - Patterns moved to `git-workflow` skill
-- **`Release` agent** - Removed (release process documented in CLAUDE.md)
+- **`Release` agent** - Removed (use manual release process)
 - **`/catch-up` command** - Superseded by Working Memory hooks (automatic context restoration)
 - **`/devlog` command** - Superseded by Working Memory hooks (automatic session logging)
 - **`catch-up` agent** - No longer needed with automatic Working Memory
