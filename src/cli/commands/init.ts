@@ -21,7 +21,7 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
-export { substituteSettingsTemplate, computeGitignoreAppend, stripTeamsConfig } from '../utils/post-install.js';
+export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig } from '../utils/post-install.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -186,11 +186,11 @@ export const initCommand = new Command('init')
     if (options.teams !== undefined) {
       teamsEnabled = options.teams;
     } else if (!process.stdin.isTTY) {
-      teamsEnabled = true; // backwards-compatible default
+      teamsEnabled = false;
     } else {
       const teamsChoice = await p.confirm({
         message: 'Enable Agent Teams? (peer debate in review, exploration, debugging)',
-        initialValue: true,
+        initialValue: false,
       });
       if (p.isCancel(teamsChoice)) {
         p.cancel('Installation cancelled.');

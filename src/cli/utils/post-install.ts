@@ -25,6 +25,20 @@ export function substituteSettingsTemplate(template: string, devflowDir: string)
 }
 
 /**
+ * Add Agent Teams configuration to settings JSON.
+ * Sets teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var.
+ */
+export function applyTeamsConfig(settingsJson: string): string {
+  const settings = JSON.parse(settingsJson);
+  settings.teammateMode = 'auto';
+  if (!settings.env) {
+    settings.env = {};
+  }
+  settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+/**
  * Remove Agent Teams configuration from settings JSON.
  * Strips teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var.
  */
@@ -59,7 +73,7 @@ export async function installSettings(
   rootDir: string,
   devflowDir: string,
   verbose: boolean,
-  teamsEnabled: boolean = true,
+  teamsEnabled: boolean = false,
 ): Promise<void> {
   const settingsPath = path.join(claudeDir, 'settings.json');
   const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
@@ -95,8 +109,13 @@ export async function installSettings(
     } catch { /* parse error = treat as no hooks */ }
 
     if (hasHooks) {
+      const existing = await fs.readFile(settingsPath, 'utf-8');
+      const updated = teamsEnabled
+        ? applyTeamsConfig(existing)
+        : stripTeamsConfig(existing);
+      await fs.writeFile(settingsPath, updated, 'utf-8');
       if (verbose) {
-        p.log.info('Settings already configured with hooks');
+        p.log.info(`Settings updated (teams ${teamsEnabled ? 'enabled' : 'disabled'})`);
       }
       return;
     }
