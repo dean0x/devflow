@@ -174,7 +174,11 @@ export async function installManagedSettings(
 /**
  * Remove DevFlow deny entries from managed settings.
  * If only DevFlow entries remain, deletes the file entirely.
- * Returns true if cleanup was performed.
+ *
+ * Mirrors installManagedSettings strategy:
+ * 1. Try direct write/delete
+ * 2. If EACCES and TTY, ask user before sudo
+ * 3. Non-TTY: return false (caller logs preservation message)
  */
 export async function removeManagedSettings(
   rootDir: string,
@@ -209,80 +213,83 @@ export async function removeManagedSettings(
   const devflowSet = new Set(devflowDenyEntries);
   const remaining = currentDeny.filter(entry => !devflowSet.has(entry));
 
-  const writeContent = (content: string): boolean => {
-    try {
-      execSync(`sudo tee '${managedPath}' > /dev/null`, {
-        input: content,
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
-      return true;
-    } catch {
-      // Try direct write as fallback
-      try {
-        writeFileSync(managedPath, content, 'utf-8');
-        return true;
-      } catch {
-        return false;
-      }
-    }
-  };
-
-  const deleteFile = (): boolean => {
-    try {
-      execSync(`sudo rm '${managedPath}'`, { stdio: 'inherit' });
-      return true;
-    } catch {
-      try {
-        unlinkSync(managedPath);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-  };
+  // Determine the target action: delete file entirely or write updated content
+  let shouldDelete = false;
+  let updatedContent: string | null = null;
 
   if (remaining.length === 0) {
-    // Check if there are other keys beyond permissions.deny
     const otherKeys = Object.keys(existing).filter(k => k !== 'permissions');
-    const hasOtherPermissions = existing.permissions && Object.keys(existing.permissions).filter(k => k !== 'deny').length > 0;
+    const hasOtherPermissions = existing.permissions &&
+      Object.keys(existing.permissions).filter(k => k !== 'deny').length > 0;
 
     if (otherKeys.length === 0 && !hasOtherPermissions) {
-      if (deleteFile()) {
-        if (verbose) {
-          p.log.success('Managed settings file removed');
-        }
-        return true;
-      }
+      shouldDelete = true;
     } else {
-      // Keep other settings, just remove deny list
       delete existing.permissions.deny;
       if (Object.keys(existing.permissions).length === 0) {
         delete existing.permissions;
       }
-      const newContent = JSON.stringify(existing, null, 2) + '\n';
-      if (writeContent(newContent)) {
-        if (verbose) {
-          p.log.success('DevFlow deny entries removed from managed settings');
-        }
-        return true;
-      }
+      updatedContent = JSON.stringify(existing, null, 2) + '\n';
     }
   } else {
-    // Other entries remain — update with remaining only
     existing.permissions.deny = remaining;
-    const newContent = JSON.stringify(existing, null, 2) + '\n';
-    if (writeContent(newContent)) {
+    updatedContent = JSON.stringify(existing, null, 2) + '\n';
+  }
+
+  // Attempt 1: direct write/delete
+  try {
+    if (shouldDelete) {
+      unlinkSync(managedPath);
+    } else {
+      writeFileSync(managedPath, updatedContent!, 'utf-8');
+    }
+    if (verbose) {
+      p.log.success(shouldDelete ? 'Managed settings file removed' : 'DevFlow deny entries removed from managed settings');
+    }
+    return true;
+  } catch (error: unknown) {
+    if (!isNodeSystemError(error) || error.code !== 'EACCES') {
       if (verbose) {
-        p.log.success('DevFlow deny entries removed from managed settings');
+        p.log.warn(`Could not update managed settings: ${error}`);
       }
-      return true;
+      return false;
     }
   }
 
-  if (verbose) {
-    p.log.warn('Could not clean up managed settings (may need sudo)');
+  // Attempt 2: sudo (TTY only, with explicit consent)
+  if (!process.stdin.isTTY) {
+    return false;
   }
-  return false;
+
+  const managedDir = path.dirname(managedPath);
+  const confirmed = await p.confirm({
+    message: `Managed settings cleanup requires admin access (${managedDir}). Use sudo?`,
+    initialValue: true,
+  });
+
+  if (p.isCancel(confirmed) || !confirmed) {
+    return false;
+  }
+
+  try {
+    if (shouldDelete) {
+      execSync(`sudo rm '${managedPath}'`, { stdio: 'inherit' });
+    } else {
+      const tmpFile = path.join(rootDir, '.managed-settings-tmp.json');
+      await fs.writeFile(tmpFile, updatedContent!, 'utf-8');
+      execSync(`sudo cp '${tmpFile}' '${managedPath}'`, { stdio: 'inherit' });
+      await fs.rm(tmpFile, { force: true });
+    }
+    if (verbose) {
+      p.log.success(shouldDelete ? 'Managed settings file removed' : 'DevFlow deny entries removed from managed settings');
+    }
+    return true;
+  } catch (error) {
+    if (verbose) {
+      p.log.warn(`sudo cleanup failed: ${error}`);
+    }
+    return false;
+  }
 }
 
 export type SecurityMode = 'managed' | 'user';
