@@ -5,7 +5,7 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-02-13
+## [1.0.0] - 2026-02-25
 
 ### Added
 - **Agent Teams integration** - Peer-to-peer agent collaboration across workflows
@@ -112,6 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Managed settings** replace `--override-settings` flag — OS-level deny list installed to system-managed path, non-overridable by user settings
 - **CLAUDE.md creation removed** — opinionated template no longer forced on users during init
 - **`--teams` default flipped to off** — Agent Teams now opt-in via `--teams` flag
+- **`/review` renamed to `/code-review`** — Plugin directory, command files, CLI registry, and all cross-references updated for clarity
+- **Landing page** — Reference badge and repo homepage URL added
 
 ### Removed
 - **`/commit` command** - Replaced by `git-workflow` skill (use `git commit` directly)
@@ -132,6 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`TechDebt` agent** - Replaced by Git agent (operation: manage-debt)
 
 ### Fixed
+- **Statusline base branch detection** — Layered 4-tier fallback (branch reflog → HEAD reflog → `gh pr view` cache → main/master) replaces hardcoded main/master check; fixes incorrect diff stats for branches off `develop`, `staging`, etc. (#70)
+- **Stale CLAUDE.md in files array** — Removed from `package.json` after CLAUDE.md creation was dropped
 - **Skimmer agent** — Use `npx rskim` to eliminate global install requirement (#60)
 - **Working Memory throttle race** — Marker file prevents concurrent updater spawns during Agent Teams sessions (#62)
 - **Working Memory diagnostics** — stderr captured to log file instead of swallowed (#62)
