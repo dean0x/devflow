@@ -20,7 +20,7 @@ Shared patterns used by multiple agents.
 | `git-workflow` | Atomic commits, message format, PR descriptions, size assessment | Coder, Git, Resolver |
 | `github-patterns` | GitHub API patterns (rate limiting, PR comments, issues, releases) | Git |
 | `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
-| `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /review, /implement, /debug |
+| `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
 
 ### Tier 1b: Pattern Skills
 

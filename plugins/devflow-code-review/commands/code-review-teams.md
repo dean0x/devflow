@@ -2,15 +2,15 @@
 description: Comprehensive branch review using agent teams for adversarial peer review with debate and consensus
 ---
 
-# Review Command
+# Code Review Command
 
 Run a comprehensive code review of the current branch by spawning a review team where agents debate findings, then synthesize consensus results into PR comments.
 
 ## Usage
 
 ```
-/review           (review current branch)
-/review #42       (review specific PR)
+/code-review           (review current branch)
+/code-review #42       (review specific PR)
 ```
 
 ## Phases
@@ -225,7 +225,7 @@ Display results:
 ## Architecture
 
 ```
-/review (orchestrator - creates team, coordinates debate)
+/code-review (orchestrator - creates team, coordinates debate)
 │
 ├─ Phase 0: Pre-flight
 │  └─ Git agent (ensure-pr-ready)

@@ -67,5 +67,5 @@ npx devflow-kit init --plugin=implement
 ## Related Plugins
 
 - [devflow-specify](../devflow-specify) - Specify the task first
-- [devflow-review](../devflow-review) - Review the implementation
+- [devflow-code-review](../devflow-code-review) - Review the implementation
 - [devflow-resolve](../devflow-resolve) - Fix review issues

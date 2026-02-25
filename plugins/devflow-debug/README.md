@@ -61,5 +61,5 @@ Produces a root cause analysis report including:
 
 ## Related Plugins
 
-- [devflow-review](../devflow-review) - Code review with team-based debate
+- [devflow-code-review](../devflow-code-review) - Code review with team-based debate
 - [devflow-implement](../devflow-implement) - Implementation with team exploration

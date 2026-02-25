@@ -18,7 +18,7 @@ Plugin marketplace with 8 self-contained plugins, each following the Claude plug
 |--------|---------|---------------|
 | `devflow-specify` | Feature specification workflow | Optional |
 | `devflow-implement` | Complete task implementation lifecycle | Optional |
-| `devflow-review` | Comprehensive code review | Optional |
+| `devflow-code-review` | Comprehensive code review | Optional |
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
@@ -51,7 +51,7 @@ devflow/
 
 ```bash
 # 1. Edit source files
-vim plugins/devflow-review/commands/review.md  # Commands/agents in plugins
+vim plugins/devflow-code-review/commands/code-review.md  # Commands/agents in plugins
 vim shared/skills/security-patterns/SKILL.md   # Skills in shared/
 
 # 2. Build (compiles CLI + distributes skills/agents to plugins)
@@ -59,10 +59,10 @@ npm run build
 
 # 3. Reinstall to global context
 node dist/cli.js init                       # All plugins
-node dist/cli.js init --plugin=review       # Single plugin
+node dist/cli.js init --plugin=code-review       # Single plugin
 
 # 4. Test immediately
-/review
+/code-review
 ```
 
 **Build commands**: `npm run build` (full), `npm run build:cli` (TypeScript only), `npm run build:plugins` (skill/agent distribution only)
@@ -88,7 +88,7 @@ All generated docs live under `.docs/` in the project root:
 **Orchestration commands** (spawn agents, never do agent work in main session):
 - `/specify` — Skimmer + Explore + Synthesizer + Plan + Synthesizer → GitHub issue
 - `/implement` — Git + Skimmer + Explore + Synthesizer + Plan + Synthesizer + Coder + Simplifier + Scrutinizer + Shepherd → PR
-- `/review` — 7-11 Reviewer agents + Git + Synthesizer
+- `/code-review` — 7-11 Reviewer agents + Git + Synthesizer
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential)
@@ -98,7 +98,7 @@ All generated docs live under `.docs/` in the project root:
 
 **Plugin-specific agents** (1): claude-md-auditor
 
-**Agent Teams**: 5 commands use Agent Teams (`/review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
+**Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
 ## Key Conventions
 

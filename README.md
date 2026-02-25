@@ -6,7 +6,7 @@
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 [![Website](https://img.shields.io/badge/Website-dean0x.github.io%2Fx%2Fdevflow-blue)](https://dean0x.github.io/x/devflow/)
 
-**Development workflows for Claude Code — spec, implement, review, debug in one command.**
+**Development workflows for Claude Code — spec, implement, code-review, debug in one command.**
 
 <p align="center">
   <img src=".github/assets/devflow-init.gif" alt="DevFlow init demo" width="720" />
@@ -35,7 +35,7 @@ npx devflow-kit init
 Then in Claude Code:
 
 ```
-/review
+/code-review
 ```
 
 ## Commands
@@ -44,7 +44,7 @@ Then in Claude Code:
 |--------|---------|-------------|
 | `devflow-specify` | `/specify` | Interactive feature specification with clarification gates |
 | `devflow-implement` | `/implement` | Complete task lifecycle — explore, plan, code, validate, refine |
-| `devflow-review` | `/review` | Multi-perspective code review with severity classification |
+| `devflow-code-review` | `/code-review` | Multi-perspective code review with severity classification |
 | `devflow-resolve` | `/resolve` | Process review issues — fix or defer to tech debt |
 | `devflow-debug` | `/debug` | Parallel hypothesis debugging |
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
@@ -75,7 +75,7 @@ Executes a single task through the complete development lifecycle:
 
 Creates a PR when complete.
 
-### /review
+### /code-review
 
 Multi-perspective code review with specialized reviewers:
 
@@ -98,7 +98,7 @@ Produces a root cause analysis report with confidence level.
 
 ### /resolve
 
-Processes issues from `/review`:
+Processes issues from `/code-review`:
 
 - Validates each issue is real (not false positive)
 - Assesses risk of fixing (low vs high)
@@ -144,7 +144,7 @@ npx devflow-kit list
 
 # Install specific plugin(s)
 npx devflow-kit init --plugin=implement
-npx devflow-kit init --plugin=implement,review
+npx devflow-kit init --plugin=implement,code-review
 ```
 
 ### Scopes
@@ -194,7 +194,7 @@ DevFlow creates project documentation in `.docs/`:
 
 ### Before Creating a PR
 ```bash
-/review      # Multi-perspective code review
+/code-review      # Multi-perspective code review
 /resolve     # Fix low-risk issues, defer high-risk to backlog
 ```
 
@@ -215,7 +215,7 @@ Session context is saved and restored automatically via Working Memory hooks —
 
 | Option | Description |
 |--------|-------------|
-| `--plugin <names>` | Comma-separated plugin names (e.g., `implement,review`) |
+| `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--scope <user\|local>` | Installation scope (default: user) |
 | `--teams` / `--no-teams` | Enable/disable experimental Agent Teams (default: off) |
 | `--verbose` | Show detailed output |

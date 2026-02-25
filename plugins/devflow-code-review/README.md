@@ -1,4 +1,4 @@
-# devflow-review
+# devflow-code-review
 
 Comprehensive code review plugin for Claude Code. Runs parallel specialized review agents covering security, architecture, performance, and more.
 
@@ -6,18 +6,18 @@ Comprehensive code review plugin for Claude Code. Runs parallel specialized revi
 
 ```bash
 # Via DevFlow CLI
-npx devflow-kit init --plugin=review
+npx devflow-kit init --plugin=code-review
 
 # Via Claude Code (when available)
-/plugin install dean0x/devflow-review
+/plugin install dean0x/devflow-code-review
 ```
 
 ## Usage
 
 ```
-/review                    # Review current branch
-/review <branch-name>      # Review specific branch
-/review #123               # Review PR by number
+/code-review                    # Review current branch
+/code-review <branch-name>      # Review specific branch
+/code-review #123               # Review PR by number
 ```
 
 ## Review Focus Areas
@@ -40,7 +40,7 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 ## Components
 
 ### Command
-- `/review` - Comprehensive branch review
+- `/code-review` - Comprehensive branch review
 
 ### Agents
 - `git` - GitHub operations (PR comments)
@@ -70,4 +70,4 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 ## Related Plugins
 
 - [devflow-implement](../devflow-implement) - Implement features
-- [devflow-resolve](../devflow-resolve) - Fix review issues
+- [devflow-resolve](../devflow-resolve) - Fix code review issues

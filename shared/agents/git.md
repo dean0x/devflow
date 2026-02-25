@@ -31,7 +31,7 @@ The orchestrator provides:
 
 ## Operation: ensure-pr-ready
 
-Pre-flight checks and fixes for `/review`. Ensures branch is ready for code review.
+Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code review.
 
 **Input:** None (uses current branch)
 

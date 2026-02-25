@@ -95,7 +95,7 @@ BRANCH_SLUG=$(echo "$CURRENT_BRANCH" | sed 's/\//-/g')
 TIMESTAMP=$(date +%Y-%m-%d_%H%M)
 BRANCH_SLUG=$(git branch --show-current | sed 's/\//-/g')
 
-# When invoked by /review command
+# When invoked by /code-review command
 REPORT_FILE=".docs/reviews/${BRANCH_SLUG}/{domain}-report.${TIMESTAMP}.md"
 
 # When invoked standalone

@@ -1,5 +1,5 @@
 {
-  "name": "devflow-review",
+  "name": "devflow-code-review",
   "description": "Comprehensive code review with parallel specialized agents covering security, architecture, performance, and more",
   "author": {
     "name": "DevFlow Contributors",

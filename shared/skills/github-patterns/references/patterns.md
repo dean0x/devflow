@@ -224,7 +224,7 @@ fi
 ```
 
 ---
-<sub>Severity: {CRITICAL|HIGH|MEDIUM} | [Claude Code](https://claude.com/code) `/review`</sub>
+<sub>Severity: {CRITICAL|HIGH|MEDIUM} | [Claude Code](https://claude.com/code) `/code-review`</sub>
 ```
 
 ### Issue Operations

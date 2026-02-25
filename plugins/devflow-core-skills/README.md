@@ -47,4 +47,4 @@ No manual invocation needed. Skills activate automatically. To see what a skill 
 ## Related Plugins
 
 - [devflow-implement](../devflow-implement) - Implementation workflow with additional skills
-- [devflow-review](../devflow-review) - Review with pattern skills
+- [devflow-code-review](../devflow-code-review) - Review with pattern skills

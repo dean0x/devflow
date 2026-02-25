@@ -61,5 +61,5 @@ npx devflow-kit init --plugin=resolve
 
 ## Related Plugins
 
-- [devflow-review](../devflow-review) - Generate review issues
+- [devflow-code-review](../devflow-code-review) - Generate review issues
 - [devflow-implement](../devflow-implement) - Original implementation

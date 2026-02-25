@@ -22,7 +22,7 @@ describe('computeAssetsToRemove', () => {
   });
 
   it('retains agents shared with remaining plugins', () => {
-    // 'git' agent is in implement, review, resolve, debug
+    // 'git' agent is in implement, code-review, resolve, debug
     // Removing just debug should NOT remove 'git'
     const debugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-debug')!;
     const { agents } = computeAssetsToRemove([debugPlugin], DEVFLOW_PLUGINS);
@@ -30,9 +30,9 @@ describe('computeAssetsToRemove', () => {
   });
 
   it('collects all commands from selected plugins', () => {
-    const reviewPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-review')!;
+    const reviewPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-code-review')!;
     const { commands } = computeAssetsToRemove([reviewPlugin], DEVFLOW_PLUGINS);
-    expect(commands).toContain('/review');
+    expect(commands).toContain('/code-review');
   });
 
   it('returns empty arrays when no plugins selected', () => {

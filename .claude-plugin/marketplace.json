@@ -22,8 +22,8 @@
       "keywords": ["implementation", "coding", "workflow", "pr"]
     },
     {
-      "name": "devflow-review",
-      "source": "./plugins/devflow-review",
+      "name": "devflow-code-review",
+      "source": "./plugins/devflow-code-review",
       "description": "Comprehensive code review with parallel specialized agents",
       "version": "1.0.0",
       "keywords": ["review", "code-quality", "pr-review"]

@@ -18,7 +18,7 @@ npm run build
 node dist/cli.js init
 ```
 
-After setup, DevFlow commands (`/review`, `/implement`, etc.) are available in Claude Code.
+After setup, DevFlow commands (`/code-review`, `/implement`, etc.) are available in Claude Code.
 
 ## Project Structure
 

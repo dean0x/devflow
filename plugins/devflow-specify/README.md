@@ -43,4 +43,4 @@ Creates a well-defined GitHub issue with:
 ## Related Plugins
 
 - [devflow-implement](../devflow-implement) - Implement the specified feature
-- [devflow-review](../devflow-review) - Review the implementation
+- [devflow-code-review](../devflow-code-review) - Review the implementation

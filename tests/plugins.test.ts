@@ -16,7 +16,7 @@ describe('getAllSkillNames', () => {
 
   it('includes skills from multiple plugins', () => {
     const skills = getAllSkillNames();
-    // 'accessibility' appears in core-skills, implement, and review
+    // 'accessibility' appears in core-skills, implement, and code-review
     expect(skills).toContain('accessibility');
     // 'agent-teams' appears in multiple plugins
     expect(skills).toContain('agent-teams');
@@ -32,7 +32,7 @@ describe('getAllAgentNames', () => {
 
   it('includes agents from multiple plugins', () => {
     const agents = getAllAgentNames();
-    // 'git' appears in implement, review, resolve, debug
+    // 'git' appears in implement, code-review, resolve, debug
     expect(agents).toContain('git');
     expect(agents).toContain('synthesizer');
   });

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Agent Teams integration** - Peer-to-peer agent collaboration across workflows
-  - `/review` uses adversarial review team with debate round and consensus findings
+  - `/code-review` uses adversarial review team with debate round and consensus findings
   - `/implement` uses exploration and planning teams with debate, Shepherd↔Coder direct dialogue
   - New `/debug` command for competing hypothesis investigation with agent teams
   - `agent-teams` foundation skill with team spawning, challenge protocol, consensus formation
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Re-render Optimization (primitive deps, stable callbacks)
   - Image Optimization (dimensions, lazy loading, aspect-ratio)
   - Data Structure Performance (Set/Map for O(1) lookups)
-- **Conditional frontend reviews** in `/review` command
+- **Conditional frontend reviews** in `/code-review` command
   - `react` review (if .tsx/.jsx files changed)
   - `accessibility` review (if .tsx/.jsx files changed)
   - `frontend-design` review (if .tsx/.jsx/.css/.scss files changed)
@@ -92,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Lean agent and command redesign** - Major refactoring reducing 3,653 lines to 844 (-77%)
-  - Commands: `/implement` (479→182), `/specify` (631→179), `/devlog` (408→113), `/review` (312→136)
+  - Commands: `/implement` (479→182), `/specify` (631→179), `/devlog` (408→113), `/code-review` (312→136)
   - Agents: Coder, Synthesizer, Reviewer, Git, Devlog, CatchUp, Skimmer, Simplifier
   - Removed embedded bash scripts, verbose templates, redundant explanations
   - Preserved all workflows, agent invocations, and architecture

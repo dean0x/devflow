@@ -41,9 +41,9 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['accessibility', 'agent-teams', 'frontend-design', 'implementation-patterns', 'self-review'],
   },
   {
-    name: 'devflow-review',
+    name: 'devflow-code-review',
     description: 'Comprehensive code review',
-    commands: ['/review'],
+    commands: ['/code-review'],
     agents: ['git', 'reviewer', 'synthesizer'],
     skills: ['accessibility', 'agent-teams', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'frontend-design', 'performance-patterns', 'react', 'regression-patterns', 'review-methodology', 'security-patterns', 'test-patterns'],
   },
@@ -76,6 +76,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: [],
     optional: true,
   },
+];
+
+/**
+ * Deprecated command names from old installations.
+ * Used during init to clean up stale command files on upgrade.
+ */
+export const LEGACY_COMMAND_NAMES: string[] = [
+  'review',
 ];
 
 /**

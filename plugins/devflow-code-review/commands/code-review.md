@@ -2,15 +2,15 @@
 description: Comprehensive branch review using specialized sub-agents for PR readiness
 ---
 
-# Review Command
+# Code Review Command
 
 Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
 
 ## Usage
 
 ```
-/review           (review current branch)
-/review #42       (review specific PR)
+/code-review           (review current branch)
+/code-review #42       (review specific PR)
 ```
 
 ## Phases
@@ -107,7 +107,7 @@ Display results from all agents:
 ## Architecture
 
 ```
-/review (orchestrator - spawns agents only)
+/code-review (orchestrator - spawns agents only)
 │
 ├─ Phase 0: Pre-flight
 │  └─ Git agent (ensure-pr-ready)

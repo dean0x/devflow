@@ -131,7 +131,7 @@ For individual line comments on PRs:
 
 ---
 *Severity: {CRITICAL/HIGH/MEDIUM} | Category: {Your Changes/Code You Touched/Pre-existing}*
-<sub>Claude Code `/review`</sub>
+<sub>Claude Code `/code-review`</sub>
 ```
 
 ## File Naming

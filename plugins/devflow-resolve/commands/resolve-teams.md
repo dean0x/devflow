@@ -26,7 +26,7 @@ Check feature branch, clean working directory, reviews exist.
 Return: branch, branch-slug, PR#, review count"
 ```
 
-**If BLOCKED:** Stop and report the blocker to user. If no reviews found, suggest `/review` first.
+**If BLOCKED:** Stop and report the blocker to user. If no reviews found, suggest `/code-review` first.
 
 **Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` for use in subsequent phases.
 
@@ -241,7 +241,7 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 
 | Case | Handling |
 |------|----------|
-| No reviews exist | Error message, suggest `/review` first |
+| No reviews exist | Error message, suggest `/code-review` first |
 | All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |

@@ -29,7 +29,7 @@ devflow/
 │   │   ├── skills/                   # GENERATED skills (gitignored)
 │   │   └── README.md
 │   ├── devflow-implement/
-│   ├── devflow-review/
+│   ├── devflow-code-review/
 │   ├── devflow-resolve/
 │   ├── devflow-debug/
 │   ├── devflow-self-review/

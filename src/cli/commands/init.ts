@@ -17,7 +17,7 @@ import {
   createDocsStructure,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
 
@@ -93,7 +93,7 @@ export const initCommand = new Command('init')
   .description('Initialize DevFlow for Claude Code')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
-  .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,review)')
+  .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
   .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
   .action(async (options: InitOptions) => {
@@ -321,6 +321,24 @@ export const initCommand = new Command('init')
     }
     if (staleRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleRemoved} legacy skill(s)`);
+    }
+
+    // Clean up stale commands from previous installations (e.g., /review → /code-review)
+    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+    let staleCommandsRemoved = 0;
+    for (const legacy of LEGACY_COMMAND_NAMES) {
+      for (const suffix of ['.md', '-teams.md']) {
+        const legacyPath = path.join(commandsDir, `${legacy}${suffix}`);
+        try {
+          await fs.rm(legacyPath);
+          staleCommandsRemoved++;
+        } catch {
+          // Doesn't exist — expected for most entries
+        }
+      }
+    }
+    if (staleCommandsRemoved > 0 && verbose) {
+      p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
     }
 
     // === Configuration extras ===

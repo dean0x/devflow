@@ -17,26 +17,26 @@ import { DEVFLOW_PLUGINS, buildAssetMaps } from '../src/cli/plugins.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
-    const { selected, invalid } = parsePluginSelection('devflow-implement,devflow-review', DEVFLOW_PLUGINS);
-    expect(selected).toEqual(['devflow-implement', 'devflow-review']);
+    const { selected, invalid } = parsePluginSelection('devflow-implement,devflow-code-review', DEVFLOW_PLUGINS);
+    expect(selected).toEqual(['devflow-implement', 'devflow-code-review']);
     expect(invalid).toEqual([]);
   });
 
   it('normalizes shorthand names (adds devflow- prefix)', () => {
-    const { selected, invalid } = parsePluginSelection('implement,review', DEVFLOW_PLUGINS);
-    expect(selected).toEqual(['devflow-implement', 'devflow-review']);
+    const { selected, invalid } = parsePluginSelection('implement,code-review', DEVFLOW_PLUGINS);
+    expect(selected).toEqual(['devflow-implement', 'devflow-code-review']);
     expect(invalid).toEqual([]);
   });
 
   it('handles mixed shorthand and full names', () => {
-    const { selected, invalid } = parsePluginSelection('implement,devflow-review', DEVFLOW_PLUGINS);
-    expect(selected).toEqual(['devflow-implement', 'devflow-review']);
+    const { selected, invalid } = parsePluginSelection('implement,devflow-code-review', DEVFLOW_PLUGINS);
+    expect(selected).toEqual(['devflow-implement', 'devflow-code-review']);
     expect(invalid).toEqual([]);
   });
 
   it('trims whitespace', () => {
-    const { selected, invalid } = parsePluginSelection('  implement , review  ', DEVFLOW_PLUGINS);
-    expect(selected).toEqual(['devflow-implement', 'devflow-review']);
+    const { selected, invalid } = parsePluginSelection('  implement , code-review  ', DEVFLOW_PLUGINS);
+    expect(selected).toEqual(['devflow-implement', 'devflow-code-review']);
     expect(invalid).toEqual([]);
   });
 
