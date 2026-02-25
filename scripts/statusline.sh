@@ -38,11 +38,49 @@ else
         GIT_INFO="  \033[32m$GIT_BRANCH\033[0m"
     fi
 
-    # Determine base branch and compute branch-level stats
+    # Determine base branch via layered detection (most precise → least precise)
     BASE_BRANCH=""
     cd "$CWD" 2>/dev/null && {
-        git rev-parse --verify main &>/dev/null && BASE_BRANCH="main"
-        [ -z "$BASE_BRANCH" ] && git rev-parse --verify master &>/dev/null && BASE_BRANCH="master"
+        # Layer 1: Branch reflog — explicit "Created from <branch>"
+        CREATED_FROM=$(git reflog show "$GIT_BRANCH" --format='%gs' 2>/dev/null \
+            | grep -m1 'branch: Created from' \
+            | sed 's/branch: Created from //')
+        if [ -n "$CREATED_FROM" ] && [ "$CREATED_FROM" != "HEAD" ]; then
+            # Strip refs/heads/ prefix if present
+            CANDIDATE="${CREATED_FROM#refs/heads/}"
+            git rev-parse --verify "$CANDIDATE" &>/dev/null && BASE_BRANCH="$CANDIDATE"
+        fi
+
+        # Layer 2: HEAD reflog — "checkout: moving from X to <branch>"
+        if [ -z "$BASE_BRANCH" ]; then
+            MOVED_FROM=$(git reflog show HEAD --format='%gs' 2>/dev/null \
+                | grep -m1 "checkout: moving from .* to $GIT_BRANCH\$" \
+                | sed "s/checkout: moving from \(.*\) to $GIT_BRANCH/\1/")
+            if [ -n "$MOVED_FROM" ]; then
+                git rev-parse --verify "$MOVED_FROM" &>/dev/null && BASE_BRANCH="$MOVED_FROM"
+            fi
+        fi
+
+        # Layer 3: GitHub PR base branch (cached, 5-min TTL)
+        if [ -z "$BASE_BRANCH" ] && command -v gh &>/dev/null; then
+            REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
+            CACHE_FILE="/tmp/devflow-base-${REPO_NAME}-${GIT_BRANCH}"
+            if [ -f "$CACHE_FILE" ] && [ $(($(date +%s) - $(stat -f %m "$CACHE_FILE" 2>/dev/null || echo 0))) -lt 300 ]; then
+                BASE_BRANCH=$(cat "$CACHE_FILE")
+            else
+                PR_BASE=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null)
+                if [ -n "$PR_BASE" ]; then
+                    echo "$PR_BASE" > "$CACHE_FILE"
+                    BASE_BRANCH="$PR_BASE"
+                fi
+            fi
+        fi
+
+        # Layer 4: Fallback to main/master
+        if [ -z "$BASE_BRANCH" ]; then
+            git rev-parse --verify main &>/dev/null && BASE_BRANCH="main"
+            [ -z "$BASE_BRANCH" ] && git rev-parse --verify master &>/dev/null && BASE_BRANCH="master"
+        fi
     }
 
     BRANCH_STATS=""
