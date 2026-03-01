@@ -22,7 +22,7 @@ Plugin marketplace with 9 self-contained plugins, each following the Claude plug
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
-| `devflow-ambient` | Ambient mode — proportional quality enforcement | No |
+| `devflow-ambient` | Ambient mode — auto-loads relevant skills based on each prompt | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
 

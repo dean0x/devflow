@@ -2,7 +2,7 @@
 
 # Ambient Mode: UserPromptSubmit Hook
 # Injects a classification preamble before every user prompt so Claude applies
-# proportional quality enforcement via the ambient-router skill.
+# relevant skill loading via the ambient-router skill.
 # Zero file I/O beyond stdin — static injection only.
 
 set -euo pipefail

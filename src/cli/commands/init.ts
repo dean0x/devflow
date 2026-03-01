@@ -102,7 +102,7 @@ export const initCommand = new Command('init')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
   .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
-  .option('--ambient', 'Enable ambient mode (always-on proportional quality enforcement)')
+  .option('--ambient', 'Enable ambient mode (auto-loads relevant skills for every prompt)')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
@@ -217,7 +217,7 @@ export const initCommand = new Command('init')
       ambientEnabled = false;
     } else {
       const ambientChoice = await p.confirm({
-        message: 'Enable ambient mode? (proportional quality enforcement on every prompt)',
+        message: 'Enable ambient mode? (auto-loads relevant skills based on each prompt)',
         initialValue: false,
       });
       if (p.isCancel(ambientChoice)) {
