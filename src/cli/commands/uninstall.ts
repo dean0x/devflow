@@ -9,6 +9,7 @@ import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from
 import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
+import { removeAmbientHook } from './ambient.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
@@ -196,6 +197,21 @@ export const uninstallCommand = new Command('uninstall')
       if (!usedCli) {
         if (isSelectiveUninstall) {
           await removeSelectedPlugins(claudeDir, selectedPlugins, verbose);
+
+          // Clean up ambient hook if ambient plugin is being removed
+          if (selectedPlugins.some(sp => sp.name === 'devflow-ambient')) {
+            const settingsPath = path.join(claudeDir, 'settings.json');
+            try {
+              const settings = await fs.readFile(settingsPath, 'utf-8');
+              const updated = removeAmbientHook(settings);
+              if (updated !== settings) {
+                await fs.writeFile(settingsPath, updated, 'utf-8');
+                if (verbose) {
+                  p.log.success('Ambient mode hook removed from settings.json');
+                }
+              }
+            } catch { /* settings.json may not exist */ }
+          }
         } else {
           await removeAllDevFlow(claudeDir, devflowScriptsDir, verbose);
         }
@@ -280,7 +296,18 @@ export const uninstallCommand = new Command('uninstall')
         try {
           const paths = await getInstallationPaths(scope);
           const settingsPath = path.join(paths.claudeDir, 'settings.json');
-          const settingsContent = await fs.readFile(settingsPath, 'utf-8');
+          let settingsContent = await fs.readFile(settingsPath, 'utf-8');
+
+          // Always remove ambient hook on full uninstall (idempotent)
+          const withoutAmbient = removeAmbientHook(settingsContent);
+          if (withoutAmbient !== settingsContent) {
+            await fs.writeFile(settingsPath, withoutAmbient, 'utf-8');
+            settingsContent = withoutAmbient;
+            if (verbose) {
+              p.log.success(`Ambient mode hook removed from settings.json (${scope})`);
+            }
+          }
+
           const settings = JSON.parse(settingsContent);
 
           if (settings.hooks) {

@@ -24,9 +24,9 @@ After setup, DevFlow commands (`/code-review`, `/implement`, etc.) are available
 
 ```
 devflow/
-├── shared/skills/       # 24 skills (single source of truth)
+├── shared/skills/       # 26 skills (single source of truth)
 ├── shared/agents/       # 10 shared agents (single source of truth)
-├── plugins/devflow-*/   # 8 self-contained plugins
+├── plugins/devflow-*/   # 9 self-contained plugins
 ├── scripts/hooks/       # Working Memory hooks
 ├── src/cli/             # TypeScript CLI (init, list, uninstall)
 ├── tests/               # Test suite (Vitest)

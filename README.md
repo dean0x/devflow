@@ -24,7 +24,7 @@ DevFlow adds structured commands that handle the full lifecycle: specify feature
 - **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
 - **Automatic session memory** — survives restarts, `/clear`, and context compaction
 - **Parallel debugging** — competing hypotheses investigated simultaneously
-- **24 quality skills** — 11 auto-activating, plus specialized review and agent skills
+- **26 quality skills** — 12 auto-activating, plus specialized review and agent skills
 
 ## Quick Start
 
@@ -48,6 +48,7 @@ Then in Claude Code:
 | `devflow-resolve` | `/resolve` | Process review issues — fix or defer to tech debt |
 | `devflow-debug` | `/debug` | Parallel hypothesis debugging |
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
+| `devflow-ambient` | `/ambient` | Ambient mode — proportional quality enforcement |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
 
 ## Command Details
@@ -116,6 +117,7 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 | `git-safety` | Rebasing, force-pushing, merge conflicts |
 | `git-workflow` | Staging files, creating commits, PRs |
 | `github-patterns` | GitHub API operations, PR comments, releases |
+| `test-driven-development` | Implementing new features (RED-GREEN-REFACTOR) |
 | `test-patterns` | Writing or modifying tests |
 | `input-validation` | Creating API endpoints |
 | `typescript` | Working in TypeScript codebases |
@@ -209,6 +211,8 @@ Session context is saved and restored automatically via Working Memory hooks —
 | `npx devflow-kit init` | Install all plugins |
 | `npx devflow-kit init --plugin=<names>` | Install specific plugin(s) |
 | `npx devflow-kit list` | List available plugins |
+| `npx devflow-kit ambient --enable` | Enable always-on ambient mode |
+| `npx devflow-kit ambient --disable` | Disable ambient mode |
 | `npx devflow-kit uninstall` | Remove DevFlow |
 
 ### Init Options

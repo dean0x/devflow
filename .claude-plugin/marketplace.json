@@ -57,6 +57,13 @@
       "keywords": ["skills", "quality", "patterns"]
     },
     {
+      "name": "devflow-ambient",
+      "source": "./plugins/devflow-ambient",
+      "description": "Ambient mode — proportional quality enforcement without explicit commands",
+      "version": "1.0.0",
+      "keywords": ["ambient", "routing", "quality", "tdd"]
+    },
+    {
       "name": "devflow-audit-claude",
       "source": "./plugins/devflow-audit-claude",
       "description": "Audit CLAUDE.md files against Anthropic best practices",

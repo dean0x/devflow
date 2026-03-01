@@ -12,7 +12,7 @@ DevFlow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 8 self-contained plugins, each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 9 self-contained plugins, each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
@@ -22,6 +22,7 @@ Plugin marketplace with 8 self-contained plugins, each following the Claude plug
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
+| `devflow-ambient` | Ambient mode — proportional quality enforcement | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
 
@@ -35,13 +36,13 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 24 skills (single source of truth)
+├── shared/skills/          # 26 skills (single source of truth)
 ├── shared/agents/          # 10 shared agents (single source of truth)
-├── plugins/devflow-*/      # 8 self-contained plugins
+├── plugins/devflow-*/      # 9 self-contained plugins
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Working Memory hooks (stop, session-start, pre-compact)
-├── src/cli/                # TypeScript CLI (init, list, uninstall)
+│   └── hooks/              # Working Memory + ambient hooks (stop, session-start, pre-compact, ambient-prompt)
+├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient)
 └── .claude-plugin/         # Marketplace registry
 ```
 
@@ -92,6 +93,7 @@ All generated docs live under `.docs/` in the project root:
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential)
+- `/ambient` — Intent classification + proportional skill loading (no agents, main session only)
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
 **Shared agents** (10): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, shepherd, scrutinizer, validator

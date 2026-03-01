@@ -10,6 +10,9 @@ import {
   applyTeamsConfig,
   stripTeamsConfig,
   mergeDenyList,
+  addAmbientHook,
+  removeAmbientHook,
+  hasAmbientHook,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
@@ -316,6 +319,20 @@ describe('mergeDenyList', () => {
     const existing = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
     const result = JSON.parse(mergeDenyList(existing, []));
     expect(result.permissions.deny).toEqual(['Bash(rm -rf /*)']);
+  });
+});
+
+describe('ambient hook re-exports from init', () => {
+  it('re-exports addAmbientHook from ambient.ts', () => {
+    expect(typeof addAmbientHook).toBe('function');
+  });
+
+  it('re-exports removeAmbientHook from ambient.ts', () => {
+    expect(typeof removeAmbientHook).toBe('function');
+  });
+
+  it('re-exports hasAmbientHook from ambient.ts', () => {
+    expect(typeof hasAmbientHook).toBe('function');
   });
 });
 

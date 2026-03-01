@@ -31,6 +31,13 @@ fi
 
 MEMORY_CONTENT=$(cat "$MEMORY_FILE")
 
+# Read accumulated patterns if they exist
+PATTERNS_FILE="$CWD/.docs/patterns.md"
+PATTERNS_CONTENT=""
+if [ -f "$PATTERNS_FILE" ]; then
+  PATTERNS_CONTENT=$(cat "$PATTERNS_FILE")
+fi
+
 # Compute staleness warning
 if stat --version &>/dev/null 2>&1; then
   FILE_MTIME=$(stat -c %Y "$MEMORY_FILE")
@@ -62,7 +69,18 @@ fi
 # Build context string
 CONTEXT="${STALE_WARNING}--- WORKING MEMORY (from previous session) ---
 
-${MEMORY_CONTENT}
+${MEMORY_CONTENT}"
+
+# Insert accumulated patterns between working memory and git state
+if [ -n "$PATTERNS_CONTENT" ]; then
+  CONTEXT="${CONTEXT}
+
+--- PROJECT PATTERNS (accumulated) ---
+
+${PATTERNS_CONTENT}"
+fi
+
+CONTEXT="${CONTEXT}
 
 --- CURRENT GIT STATE ---
 Branch: ${GIT_BRANCH}
