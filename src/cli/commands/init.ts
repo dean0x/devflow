@@ -20,9 +20,11 @@ import {
 import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
+import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';
+export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -87,6 +89,7 @@ interface InitOptions {
   verbose?: boolean;
   plugin?: string;
   teams?: boolean;
+  ambient?: boolean;
 }
 
 export const initCommand = new Command('init')
@@ -96,6 +99,8 @@ export const initCommand = new Command('init')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
   .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
+  .option('--ambient', 'Enable ambient mode (always-on proportional quality enforcement)')
+  .option('--no-ambient', 'Disable ambient mode')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -197,6 +202,24 @@ export const initCommand = new Command('init')
         process.exit(0);
       }
       teamsEnabled = teamsChoice;
+    }
+
+    // Ambient mode selection
+    let ambientEnabled: boolean;
+    if (options.ambient !== undefined) {
+      ambientEnabled = options.ambient;
+    } else if (!process.stdin.isTTY) {
+      ambientEnabled = false;
+    } else {
+      const ambientChoice = await p.confirm({
+        message: 'Enable ambient mode? (proportional quality enforcement on every prompt)',
+        initialValue: false,
+      });
+      if (p.isCancel(ambientChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      ambientEnabled = ambientChoice;
     }
 
     // Security deny list placement (user scope + TTY only)
@@ -375,6 +398,21 @@ export const initCommand = new Command('init')
         }
       }
       await installSettings(claudeDir, rootDir, devflowDir, verbose, teamsEnabled, effectiveSecurityMode);
+
+      // Install ambient hook if enabled
+      if (ambientEnabled) {
+        const settingsPath = path.join(claudeDir, 'settings.json');
+        try {
+          const content = await fs.readFile(settingsPath, 'utf-8');
+          const updated = addAmbientHook(content, devflowDir);
+          if (updated !== content) {
+            await fs.writeFile(settingsPath, updated, 'utf-8');
+            if (verbose) {
+              p.log.success('Ambient mode hook installed');
+            }
+          }
+        } catch { /* settings.json may not exist yet */ }
+      }
     }
 
     const fileExtras = selectedExtras.filter(e => e !== 'settings' && e !== 'safe-delete');

@@ -102,11 +102,44 @@ fi
 
 # Build instruction
 if [ -n "$EXISTING_MEMORY" ]; then
-  INSTRUCTION="Update the file $MEMORY_FILE with working memory from this session. The file already has content — possibly from a concurrent session that just wrote it moments ago. Merge this session's context with the existing content to produce a single unified working memory snapshot. Both this session and the existing content represent fresh, concurrent work — integrate both fully. Working memory captures what's active now, not a changelog. Deduplicate overlapping information. Keep under 100 lines total. Use the same structure: ## Now, ## Decisions, ## Modified Files, ## Context, ## Session Log.
+  PATTERNS_INSTRUCTION=""
+PATTERNS_FILE="$CWD/.docs/patterns.md"
+EXISTING_PATTERNS=""
+if [ -f "$PATTERNS_FILE" ]; then
+  EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
+  PATTERNS_INSTRUCTION="
+
+Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD)
+
+Existing patterns:
+$EXISTING_PATTERNS"
+else
+  PATTERNS_INSTRUCTION="
+
+If recurring patterns were observed during this session (coding conventions, architectural decisions, team preferences, tooling quirks), create $PATTERNS_FILE with entries formatted as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Only create this file if genuine patterns were observed — do not fabricate entries."
+fi
+
+INSTRUCTION="Update the file $MEMORY_FILE with working memory from this session. The file already has content — possibly from a concurrent session that just wrote it moments ago. Merge this session's context with the existing content to produce a single unified working memory snapshot. Both this session and the existing content represent fresh, concurrent work — integrate both fully. Working memory captures what's active now, not a changelog. Deduplicate overlapping information. Keep under 100 lines total. Use the same structure: ## Now, ## Decisions, ## Modified Files, ## Context, ## Session Log.${PATTERNS_INSTRUCTION}
 
 Existing content:
 $EXISTING_MEMORY"
 else
+  PATTERNS_INSTRUCTION=""
+  PATTERNS_FILE="$CWD/.docs/patterns.md"
+  if [ -f "$PATTERNS_FILE" ]; then
+    EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
+    PATTERNS_INSTRUCTION="
+
+Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD)
+
+Existing patterns:
+$EXISTING_PATTERNS"
+  else
+    PATTERNS_INSTRUCTION="
+
+If recurring patterns were observed during this session (coding conventions, architectural decisions, team preferences, tooling quirks), create $PATTERNS_FILE with entries formatted as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Only create this file if genuine patterns were observed — do not fabricate entries."
+  fi
+
   INSTRUCTION="Create the file $MEMORY_FILE with working memory from this session. Keep under 100 lines. Use this structure:
 
 # Working Memory
@@ -129,7 +162,7 @@ else
 <!-- Chronological summary of work done today (2-5 bullets) -->
 
 ### This Week
-<!-- Broader multi-day context if relevant -->"
+<!-- Broader multi-day context if relevant -->${PATTERNS_INSTRUCTION}"
 fi
 
 # Resume session headlessly to perform the update

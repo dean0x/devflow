@@ -24,7 +24,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement (foundation layer)',
     commands: [],
     agents: [],
-    skills: ['accessibility', 'core-patterns', 'docs-framework', 'frontend-design', 'git-safety', 'git-workflow', 'github-patterns', 'input-validation', 'react', 'test-patterns', 'typescript'],
+    skills: ['accessibility', 'core-patterns', 'docs-framework', 'frontend-design', 'git-safety', 'git-workflow', 'github-patterns', 'input-validation', 'react', 'test-driven-development', 'test-patterns', 'typescript'],
   },
   {
     name: 'devflow-specify',
@@ -67,6 +67,13 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
     skills: ['self-review', 'core-patterns'],
+  },
+  {
+    name: 'devflow-ambient',
+    description: 'Ambient mode — proportional quality enforcement',
+    commands: ['/ambient'],
+    agents: [],
+    skills: ['ambient-router'],
   },
   {
     name: 'devflow-audit-claude',
