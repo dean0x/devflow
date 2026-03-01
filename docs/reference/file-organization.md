@@ -49,6 +49,7 @@ devflow/
         ├── commands/
         │   ├── init.ts
         │   ├── list.ts
+        │   ├── memory.ts
         │   └── uninstall.ts
         └── cli.ts
 ```
@@ -135,7 +136,7 @@ Included settings:
 
 ## Working Memory Hooks
 
-Three hooks in `scripts/hooks/` provide automatic session continuity:
+Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`:
 
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|

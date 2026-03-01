@@ -10,6 +10,7 @@ import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
+import { removeMemoryHooks } from './memory.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
@@ -305,6 +306,16 @@ export const uninstallCommand = new Command('uninstall')
             settingsContent = withoutAmbient;
             if (verbose) {
               p.log.success(`Ambient mode hook removed from settings.json (${scope})`);
+            }
+          }
+
+          // Always remove memory hooks on full uninstall (idempotent)
+          const withoutMemory = removeMemoryHooks(settingsContent);
+          if (withoutMemory !== settingsContent) {
+            await fs.writeFile(settingsPath, withoutMemory, 'utf-8');
+            settingsContent = withoutMemory;
+            if (verbose) {
+              p.log.success(`Memory hooks removed from settings.json (${scope})`);
             }
           }
 

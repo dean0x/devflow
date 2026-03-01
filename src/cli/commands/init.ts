@@ -21,10 +21,12 @@ import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMa
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
+import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
+export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -90,6 +92,7 @@ interface InitOptions {
   plugin?: string;
   teams?: boolean;
   ambient?: boolean;
+  memory?: boolean;
 }
 
 export const initCommand = new Command('init')
@@ -101,6 +104,8 @@ export const initCommand = new Command('init')
   .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
   .option('--ambient', 'Enable ambient mode (always-on proportional quality enforcement)')
   .option('--no-ambient', 'Disable ambient mode')
+  .option('--memory', 'Enable working memory (session context preservation)')
+  .option('--no-memory', 'Disable working memory hooks')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -220,6 +225,24 @@ export const initCommand = new Command('init')
         process.exit(0);
       }
       ambientEnabled = ambientChoice;
+    }
+
+    // Working memory selection (defaults ON — foundational, unlike ambient's false)
+    let memoryEnabled: boolean;
+    if (options.memory !== undefined) {
+      memoryEnabled = options.memory;
+    } else if (!process.stdin.isTTY) {
+      memoryEnabled = true;
+    } else {
+      const memoryChoice = await p.confirm({
+        message: 'Enable working memory? (automatic session context preservation)',
+        initialValue: true,
+      });
+      if (p.isCancel(memoryChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      memoryEnabled = memoryChoice;
     }
 
     // Security deny list placement (user scope + TTY only)
@@ -412,6 +435,26 @@ export const initCommand = new Command('init')
             }
           }
         } catch { /* settings.json may not exist yet */ }
+      }
+
+      // Manage memory hooks based on user choice
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      try {
+        const content = await fs.readFile(settingsPath, 'utf-8');
+        const updated = memoryEnabled
+          ? addMemoryHooks(content, devflowDir)
+          : removeMemoryHooks(content);
+        if (updated !== content) {
+          await fs.writeFile(settingsPath, updated, 'utf-8');
+          if (verbose) {
+            p.log.info(`Working memory ${memoryEnabled ? 'enabled' : 'disabled'}`);
+          }
+        }
+      } catch { /* settings.json may not exist yet */ }
+
+      // Ensure .docs/ exists when memory is enabled (hooks are no-ops without it)
+      if (memoryEnabled && gitRoot) {
+        await createDocsStructure(verbose);
       }
     }
 
