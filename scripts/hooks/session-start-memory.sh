@@ -47,6 +47,30 @@ fi
 NOW=$(date +%s)
 AGE=$(( NOW - FILE_MTIME ))
 
+# Check for pre-compact memory snapshot (compaction recovery)
+BACKUP_FILE="$CWD/.docs/working-memory-backup.json"
+COMPACT_NOTE=""
+if [ -f "$BACKUP_FILE" ]; then
+  BACKUP_MEMORY=$(jq -r '.memory_snapshot // ""' "$BACKUP_FILE" 2>/dev/null)
+  if [ -n "$BACKUP_MEMORY" ]; then
+    BACKUP_TS=$(jq -r '.timestamp // ""' "$BACKUP_FILE" 2>/dev/null)
+    BACKUP_EPOCH=0
+    if [ -n "$BACKUP_TS" ]; then
+      BACKUP_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BACKUP_TS" +%s 2>/dev/null \
+        || date -d "$BACKUP_TS" +%s 2>/dev/null \
+        || echo "0")
+    fi
+    if [ "$BACKUP_EPOCH" -gt "$FILE_MTIME" ]; then
+      COMPACT_NOTE="
+--- PRE-COMPACT SNAPSHOT ($BACKUP_TS) ---
+Context was compacted. This snapshot may contain decisions or progress not yet in working memory.
+
+$BACKUP_MEMORY
+"
+    fi
+  fi
+fi
+
 STALE_WARNING=""
 if [ "$AGE" -gt 3600 ]; then
   HOURS=$(( AGE / 3600 ))
@@ -91,6 +115,11 @@ if [ -n "$GIT_STATUS" ]; then
   CONTEXT="${CONTEXT}
 Uncommitted changes:
 ${GIT_STATUS}"
+fi
+
+if [ -n "$COMPACT_NOTE" ]; then
+  CONTEXT="${CONTEXT}
+${COMPACT_NOTE}"
 fi
 
 # Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)

@@ -39,6 +39,12 @@ if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   GIT_DIFF_STAT=$(git diff --stat HEAD 2>/dev/null || echo "")
 fi
 
+# Snapshot current WORKING-MEMORY.md (preserves session context through compaction)
+MEMORY_SNAPSHOT=""
+if [ -f "$CWD/.docs/WORKING-MEMORY.md" ]; then
+  MEMORY_SNAPSHOT=$(cat "$CWD/.docs/WORKING-MEMORY.md")
+fi
+
 # Write backup JSON
 jq -n \
   --arg ts "$TIMESTAMP" \
@@ -46,9 +52,11 @@ jq -n \
   --arg status "$GIT_STATUS" \
   --arg log "$GIT_LOG" \
   --arg diff "$GIT_DIFF_STAT" \
+  --arg memory "$MEMORY_SNAPSHOT" \
   '{
     timestamp: $ts,
     trigger: "pre-compact",
+    memory_snapshot: $memory,
     git: {
       branch: $branch,
       status: $status,

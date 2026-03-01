@@ -140,8 +140,8 @@ Three hooks in `scripts/hooks/` provide automatic session continuity:
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|
 | `stop-update-memory.sh` | Stop | `.docs/WORKING-MEMORY.md` | Throttled (skips if <2min fresh). Slim instruction after first write. |
-| `session-start-memory.sh` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. |
-| `pre-compact-memory.sh` | PreCompact | `.docs/working-memory-backup.json` | Saves git state snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
+| `session-start-memory.sh` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. Injects pre-compact snapshot when compaction occurred mid-session. |
+| `pre-compact-memory.sh` | PreCompact | `.docs/working-memory-backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
 
 **Flow**: Claude responds → Stop hook checks mtime (skips if <2min fresh) → blocks with instruction → Claude writes WORKING-MEMORY.md silently → `stop_hook_active=true` → allows stop. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
 
