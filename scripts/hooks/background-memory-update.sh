@@ -109,7 +109,7 @@ if [ -f "$PATTERNS_FILE" ]; then
   EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
   PATTERNS_INSTRUCTION="
 
-Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD)
+Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Keep patterns.md under 40 entries. When approaching the limit, consolidate related patterns into broader entries rather than adding duplicates.
 
 Existing patterns:
 $EXISTING_PATTERNS"
@@ -119,7 +119,11 @@ else
 If recurring patterns were observed during this session (coding conventions, architectural decisions, team preferences, tooling quirks), create $PATTERNS_FILE with entries formatted as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Only create this file if genuine patterns were observed — do not fabricate entries."
 fi
 
-INSTRUCTION="Update the file $MEMORY_FILE with working memory from this session. The file already has content — possibly from a concurrent session that just wrote it moments ago. Merge this session's context with the existing content to produce a single unified working memory snapshot. Both this session and the existing content represent fresh, concurrent work — integrate both fully. Working memory captures what's active now, not a changelog. Deduplicate overlapping information. Keep under 100 lines total. Use the same structure: ## Now, ## Decisions, ## Modified Files, ## Context, ## Session Log.${PATTERNS_INSTRUCTION}
+INSTRUCTION="Update the file $MEMORY_FILE with working memory from this session. The file already has content — possibly from a concurrent session that just wrote it moments ago. Merge this session's context with the existing content to produce a single unified working memory snapshot. Both this session and the existing content represent fresh, concurrent work — integrate both fully. Working memory captures what's active now, not a changelog. Deduplicate overlapping information. Keep under 120 lines total. Use the same structure: ## Now, ## Progress, ## Decisions, ## Modified Files, ## Context, ## Session Log.
+
+## Progress tracks Done (completed items), Remaining (next steps), and Blockers (if any). Keep each sub-list to 1-3 items. This section reflects current work state, not historical logs.
+
+## Decisions entries must include date and status. Format: - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED]. Mark superseded decisions rather than deleting them.${PATTERNS_INSTRUCTION}
 
 Existing content:
 $EXISTING_MEMORY"
@@ -130,7 +134,7 @@ else
     EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
     PATTERNS_INSTRUCTION="
 
-Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD)
+Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Keep patterns.md under 40 entries. When approaching the limit, consolidate related patterns into broader entries rather than adding duplicates.
 
 Existing patterns:
 $EXISTING_PATTERNS"
@@ -140,15 +144,18 @@ $EXISTING_PATTERNS"
 If recurring patterns were observed during this session (coding conventions, architectural decisions, team preferences, tooling quirks), create $PATTERNS_FILE with entries formatted as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Only create this file if genuine patterns were observed — do not fabricate entries."
   fi
 
-  INSTRUCTION="Create the file $MEMORY_FILE with working memory from this session. Keep under 100 lines. Use this structure:
+  INSTRUCTION="Create the file $MEMORY_FILE with working memory from this session. Keep under 120 lines. Use this structure:
 
 # Working Memory
 
 ## Now
 <!-- Current focus, status, blockers (1-3 bullets) -->
 
+## Progress
+<!-- Done: completed items (1-3). Remaining: next steps (1-3). Blockers: if any. -->
+
 ## Decisions
-<!-- Key decisions made this session with brief rationale -->
+<!-- Format: - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED] -->
 
 ## Modified Files
 <!-- File paths only, most recent first -->

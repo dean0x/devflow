@@ -1,10 +1,10 @@
 ---
-description: Ambient mode — classify intent and apply proportional quality enforcement to any prompt
+description: Ambient mode — classify intent and auto-load relevant skills for any prompt
 ---
 
 # Ambient Command
 
-Classify user intent and apply proportional quality enforcement. No agents spawned — enhances the main session only.
+Classify user intent and auto-load relevant skills. No agents spawned — enhances the main session only.
 
 ## Usage
 
@@ -32,7 +32,7 @@ If no arguments provided, output:
 ```
 ## Ambient Mode
 
-Classify intent and apply proportional quality enforcement.
+Classify intent and auto-load relevant skills.
 
 Usage: /ambient <your prompt>
 

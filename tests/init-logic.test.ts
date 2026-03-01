@@ -13,6 +13,9 @@ import {
   addAmbientHook,
   removeAmbientHook,
   hasAmbientHook,
+  addMemoryHooks,
+  removeMemoryHooks,
+  hasMemoryHooks,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
@@ -333,6 +336,20 @@ describe('ambient hook re-exports from init', () => {
 
   it('re-exports hasAmbientHook from ambient.ts', () => {
     expect(typeof hasAmbientHook).toBe('function');
+  });
+});
+
+describe('memory hook re-exports from init', () => {
+  it('re-exports addMemoryHooks from memory.ts', () => {
+    expect(typeof addMemoryHooks).toBe('function');
+  });
+
+  it('re-exports removeMemoryHooks from memory.ts', () => {
+    expect(typeof removeMemoryHooks).toBe('function');
+  });
+
+  it('re-exports hasMemoryHooks from memory.ts', () => {
+    expect(typeof hasMemoryHooks).toBe('function');
   });
 });
 
