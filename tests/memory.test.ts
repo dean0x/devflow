@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks } from '../src/cli/commands/memory.js';
+import { createMemoryDir, migrateMemoryFiles } from '../src/cli/utils/post-install.js';
 
 describe('addMemoryHooks', () => {
   it('adds all 3 hook types to empty settings', () => {
@@ -228,5 +232,102 @@ describe('countMemoryHooks', () => {
       },
     });
     expect(countMemoryHooks(input)).toBe(2);
+  });
+});
+
+describe('createMemoryDir', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('creates .memory/ directory', async () => {
+    await createMemoryDir(false, tmpDir);
+    const stat = await fs.stat(path.join(tmpDir, '.memory'));
+    expect(stat.isDirectory()).toBe(true);
+  });
+
+  it('is idempotent — calling twice succeeds without error', async () => {
+    await createMemoryDir(false, tmpDir);
+    await createMemoryDir(false, tmpDir);
+    const stat = await fs.stat(path.join(tmpDir, '.memory'));
+    expect(stat.isDirectory()).toBe(true);
+  });
+});
+
+describe('migrateMemoryFiles', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-'));
+    await fs.mkdir(path.join(tmpDir, '.memory'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns 0 on fresh install (no .docs/ files)', async () => {
+    const count = await migrateMemoryFiles(false, tmpDir);
+    expect(count).toBe(0);
+  });
+
+  it('migrates all 3 files from .docs/ to .memory/', async () => {
+    const docsDir = path.join(tmpDir, '.docs');
+    await fs.mkdir(docsDir, { recursive: true });
+    await fs.writeFile(path.join(docsDir, 'WORKING-MEMORY.md'), '# Working Memory');
+    await fs.writeFile(path.join(docsDir, 'patterns.md'), '# Patterns');
+    await fs.writeFile(path.join(docsDir, 'working-memory-backup.json'), '{}');
+
+    const count = await migrateMemoryFiles(false, tmpDir);
+    expect(count).toBe(3);
+
+    // Verify destinations exist
+    const wm = await fs.readFile(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), 'utf-8');
+    expect(wm).toBe('# Working Memory');
+
+    const patterns = await fs.readFile(path.join(tmpDir, '.memory', 'PROJECT-PATTERNS.md'), 'utf-8');
+    expect(patterns).toBe('# Patterns');
+
+    const backup = await fs.readFile(path.join(tmpDir, '.memory', 'backup.json'), 'utf-8');
+    expect(backup).toBe('{}');
+
+    // Verify sources removed
+    await expect(fs.access(path.join(docsDir, 'WORKING-MEMORY.md'))).rejects.toThrow();
+    await expect(fs.access(path.join(docsDir, 'patterns.md'))).rejects.toThrow();
+    await expect(fs.access(path.join(docsDir, 'working-memory-backup.json'))).rejects.toThrow();
+  });
+
+  it('skips migration when destination already exists (no clobber)', async () => {
+    const docsDir = path.join(tmpDir, '.docs');
+    await fs.mkdir(docsDir, { recursive: true });
+    await fs.writeFile(path.join(docsDir, 'WORKING-MEMORY.md'), 'old content');
+    await fs.writeFile(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), 'existing content');
+
+    const count = await migrateMemoryFiles(false, tmpDir);
+    expect(count).toBe(0);
+
+    // Existing content preserved
+    const content = await fs.readFile(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), 'utf-8');
+    expect(content).toBe('existing content');
+  });
+
+  it('cleans up ephemeral files from .docs/', async () => {
+    const docsDir = path.join(tmpDir, '.docs');
+    await fs.mkdir(docsDir, { recursive: true });
+    await fs.writeFile(path.join(docsDir, '.working-memory-update.log'), 'log content');
+    await fs.writeFile(path.join(docsDir, '.working-memory-last-trigger'), '');
+    await fs.mkdir(path.join(docsDir, '.working-memory.lock'), { recursive: true });
+
+    await migrateMemoryFiles(false, tmpDir);
+
+    await expect(fs.access(path.join(docsDir, '.working-memory-update.log'))).rejects.toThrow();
+    await expect(fs.access(path.join(docsDir, '.working-memory-last-trigger'))).rejects.toThrow();
+    await expect(fs.access(path.join(docsDir, '.working-memory.lock'))).rejects.toThrow();
   });
 });

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Working Memory: Stop Hook
-# Spawns a background process to update .docs/WORKING-MEMORY.md asynchronously.
+# Spawns a background process to update .memory/WORKING-MEMORY.md asynchronously.
 # The session ends immediately — no visible edit in the TUI.
 # On failure: does nothing (stale memory is better than fake data).
 
@@ -16,21 +16,21 @@ if ! command -v jq &>/dev/null; then exit 0; fi
 
 INPUT=$(cat)
 
-# Only activate in projects with .docs/ directory (DevFlow-initialized projects)
+# Only activate in projects with .memory/ directory (DevFlow-initialized projects)
 CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
-if [ -z "$CWD" ] || [ ! -d "$CWD/.docs" ]; then
+if [ -z "$CWD" ] || [ ! -d "$CWD/.memory" ]; then
   exit 0
 fi
 
 # Logging (shared log file with background updater; [stop-hook] prefix distinguishes)
-MEMORY_FILE="$CWD/.docs/WORKING-MEMORY.md"
-LOG_FILE="$CWD/.docs/.working-memory-update.log"
+MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
+LOG_FILE="$CWD/.memory/.working-memory-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
 
 # Throttle: skip if stop hook was triggered within the last 2 minutes
 # Uses a marker file touched BEFORE spawning the updater — prevents race condition
 # where multiple hooks see stale WORKING-MEMORY.md mtime and all bypass throttle.
-TRIGGER_MARKER="$CWD/.docs/.working-memory-last-trigger"
+TRIGGER_MARKER="$CWD/.memory/.working-memory-last-trigger"
 if [ -f "$TRIGGER_MARKER" ]; then
   if stat --version &>/dev/null 2>&1; then
     MARKER_MTIME=$(stat -c %Y "$TRIGGER_MARKER")

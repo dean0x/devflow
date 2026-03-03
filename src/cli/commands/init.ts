@@ -15,6 +15,8 @@ import {
   installClaudeignore,
   updateGitignore,
   createDocsStructure,
+  createMemoryDir,
+  migrateMemoryFiles,
   type SecurityMode,
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
@@ -452,9 +454,10 @@ export const initCommand = new Command('init')
         }
       } catch { /* settings.json may not exist yet */ }
 
-      // Ensure .docs/ exists when memory is enabled (hooks are no-ops without it)
-      if (memoryEnabled && gitRoot) {
-        await createDocsStructure(verbose);
+      // Ensure .memory/ exists when memory is enabled (hooks are no-ops without it)
+      if (memoryEnabled) {
+        await createMemoryDir(verbose);
+        await migrateMemoryFiles(verbose);
       }
     }
 

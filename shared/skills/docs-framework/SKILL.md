@@ -32,10 +32,14 @@ All generated documentation lives under `.docs/` in the project root:
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
 │   └── INDEX.md
-├── swarm/                              # Swarm operation state
-│   ├── state.json
-│   └── plans/
-└── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
+└── swarm/                              # Swarm operation state
+    ├── state.json
+    └── plans/
+
+.memory/
+├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
+├── PROJECT-PATTERNS.md                 # Accumulated patterns (merged across sessions)
+└── backup.json                         # Pre-compact git state snapshot
 ```
 
 ---
@@ -92,7 +96,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Agent | Output Location | Behavior |
 |-------|-----------------|----------|
 | Reviewer | `.docs/reviews/{branch-slug}/{type}-report.{timestamp}.md` | Creates new |
-| Working Memory | `.docs/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
+| Working Memory | `.memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
 
 ### Agents That Don't Persist
 
@@ -120,7 +124,7 @@ When creating or modifying persisting agents:
 
 This framework is used by:
 - **Review agents**: Creates review reports
-- **Working Memory hooks**: Auto-maintains `.docs/WORKING-MEMORY.md`
+- **Working Memory hooks**: Auto-maintains `.memory/WORKING-MEMORY.md`
 
 All persisting agents should load this skill to ensure consistent documentation.
 

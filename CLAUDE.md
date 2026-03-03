@@ -30,7 +30,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Build-time asset distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/`, then copied to each plugin at build time based on `plugin.json` manifests. This eliminates duplication in git.
 
-**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Stop hook → spawns a background `claude -p --resume` process that asynchronously updates `.docs/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`; throttled: skips if updated <2min ago; concurrent sessions serialize via mkdir-based lock). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
+**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Stop hook → spawns a background `claude -p --resume` process that asynchronously updates `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`; throttled: skips if updated <2min ago; concurrent sessions serialize via mkdir-based lock; restricted to Write tool on two specific files via `--tools`/`--allowedTools`). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
 
 ## Project Structure
 
@@ -43,7 +43,9 @@ devflow/
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient hooks (stop, session-start, pre-compact, ambient-prompt)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient)
-└── .claude-plugin/         # Marketplace registry
+├── .claude-plugin/         # Marketplace registry
+├── .docs/                  # Project docs (reviews, design) — per-project
+└── .memory/                # Working memory files — per-project
 ```
 
 **Install paths**: Commands → `~/.claude/commands/devflow/`, Agents → `~/.claude/agents/devflow/`, Skills → `~/.claude/skills/` (flat), Scripts → `~/.devflow/scripts/`
@@ -75,14 +77,21 @@ All generated docs live under `.docs/` in the project root:
 ```
 .docs/
 ├── reviews/{branch-slug}/    # Review reports per branch
-├── design/                   # Implementation plans
-├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each response)
-└── working-memory-backup.json # Pre-compact git state snapshot
+└── design/                   # Implementation plans
+```
+
+Working memory files live in a dedicated `.memory/` directory:
+
+```
+.memory/
+├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each session)
+├── PROJECT-PATTERNS.md       # Accumulated patterns (merged, not overwritten)
+└── backup.json               # Pre-compact git state snapshot
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes. Use `.devflow/scripts/docs-helpers.sh` for consistent naming.
 
-**Persisting agents**: Reviewer → `.docs/reviews/`, Synthesizer → `.docs/reviews/` (review mode), Working Memory → `.docs/WORKING-MEMORY.md` (automatic)
+**Persisting agents**: Reviewer → `.docs/reviews/`, Synthesizer → `.docs/reviews/` (review mode), Working Memory → `.memory/WORKING-MEMORY.md` (automatic)
 
 ## Agent & Command Roster
 

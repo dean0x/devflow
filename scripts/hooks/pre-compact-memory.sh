@@ -19,11 +19,11 @@ if [ -z "$CWD" ]; then
 fi
 
 # Only activate in DevFlow-initialized projects
-if [ ! -d "$CWD/.docs" ]; then
+if [ ! -d "$CWD/.memory" ]; then
   exit 0
 fi
 
-BACKUP_FILE="$CWD/.docs/working-memory-backup.json"
+BACKUP_FILE="$CWD/.memory/backup.json"
 
 # Capture git state
 GIT_BRANCH=""
@@ -41,8 +41,8 @@ fi
 
 # Snapshot current WORKING-MEMORY.md (preserves session context through compaction)
 MEMORY_SNAPSHOT=""
-if [ -f "$CWD/.docs/WORKING-MEMORY.md" ]; then
-  MEMORY_SNAPSHOT=$(cat "$CWD/.docs/WORKING-MEMORY.md")
+if [ -f "$CWD/.memory/WORKING-MEMORY.md" ]; then
+  MEMORY_SNAPSHOT=$(cat "$CWD/.memory/WORKING-MEMORY.md")
 fi
 
 # Write backup JSON
@@ -67,7 +67,7 @@ jq -n \
 
 # Bootstrap minimal WORKING-MEMORY.md if none exists yet
 # This ensures SessionStart has context to inject after compaction
-MEMORY_FILE="$CWD/.docs/WORKING-MEMORY.md"
+MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_BRANCH" ]; then
   {
     echo "# Working Memory"

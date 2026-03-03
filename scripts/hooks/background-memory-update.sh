@@ -2,7 +2,7 @@
 
 # Background Working Memory Updater
 # Called by stop-update-memory.sh as a detached background process.
-# Resumes the parent session headlessly to update .docs/WORKING-MEMORY.md.
+# Resumes the parent session headlessly to update .memory/WORKING-MEMORY.md.
 # On failure: logs error, does nothing (no fallback).
 
 set -euo pipefail
@@ -12,8 +12,8 @@ SESSION_ID="$2"
 MEMORY_FILE="$3"
 CLAUDE_BIN="$4"
 
-LOG_FILE="$CWD/.docs/.working-memory-update.log"
-LOCK_DIR="$CWD/.docs/.working-memory.lock"
+LOG_FILE="$CWD/.memory/.working-memory-update.log"
+LOCK_DIR="$CWD/.memory/.working-memory.lock"
 
 # --- Logging ---
 
@@ -103,7 +103,7 @@ fi
 # Build instruction
 if [ -n "$EXISTING_MEMORY" ]; then
   PATTERNS_INSTRUCTION=""
-PATTERNS_FILE="$CWD/.docs/patterns.md"
+PATTERNS_FILE="$CWD/.memory/PROJECT-PATTERNS.md"
 EXISTING_PATTERNS=""
 if [ -f "$PATTERNS_FILE" ]; then
   EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
@@ -129,7 +129,7 @@ Existing content:
 $EXISTING_MEMORY"
 else
   PATTERNS_INSTRUCTION=""
-  PATTERNS_FILE="$CWD/.docs/patterns.md"
+  PATTERNS_FILE="$CWD/.memory/PROJECT-PATTERNS.md"
   if [ -f "$PATTERNS_FILE" ]; then
     EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
     PATTERNS_INSTRUCTION="
@@ -178,7 +178,8 @@ TIMEOUT=120  # Normal runtime 30-60s; 2x margin
 DEVFLOW_BG_UPDATER=1 env -u CLAUDECODE "$CLAUDE_BIN" -p \
   --resume "$SESSION_ID" \
   --model haiku \
-  --dangerously-skip-permissions \
+  --tools "Write" \
+  --allowedTools "Write($CWD/.memory/WORKING-MEMORY.md)" "Write($CWD/.memory/PROJECT-PATTERNS.md)" \
   --no-session-persistence \
   --output-format text \
   "$INSTRUCTION" \

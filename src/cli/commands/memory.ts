@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import { createMemoryDir, migrateMemoryFiles } from '../utils/post-install.js';
 
 /**
  * The hook entry structure used by Claude Code settings.json.
@@ -211,6 +212,8 @@ export const memoryCommand = new Command('memory')
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
+      await createMemoryDir(false);
+      await migrateMemoryFiles(true);
       p.log.success('Working memory enabled — Stop/SessionStart/PreCompact hooks registered');
       p.log.info(color.dim('Session context will be automatically preserved across conversations'));
     }

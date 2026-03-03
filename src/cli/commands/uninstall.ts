@@ -263,7 +263,42 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // 2. .claudeignore
+      // 2. .memory/ directory
+      const memoryDir = path.join(process.cwd(), '.memory');
+      let memoryExist = false;
+      try {
+        await fs.access(memoryDir);
+        memoryExist = true;
+      } catch { /* .memory doesn't exist */ }
+
+      if (memoryExist) {
+        let shouldRemoveMemory = false;
+
+        if (options.keepDocs) {
+          shouldRemoveMemory = false;
+        } else if (process.stdin.isTTY) {
+          const removeMemory = await p.confirm({
+            message: '.memory/ directory found. Remove working memory files?',
+            initialValue: false,
+          });
+
+          if (p.isCancel(removeMemory)) {
+            p.cancel('Uninstall cancelled.');
+            process.exit(0);
+          }
+
+          shouldRemoveMemory = removeMemory;
+        }
+
+        if (shouldRemoveMemory) {
+          await fs.rm(memoryDir, { recursive: true, force: true });
+          p.log.success('.memory/ removed');
+        } else {
+          p.log.info('.memory/ preserved');
+        }
+      }
+
+      // 4. .claudeignore
       const claudeignorePath = gitRoot
         ? path.join(gitRoot, '.claudeignore')
         : path.join(process.cwd(), '.claudeignore');
@@ -292,7 +327,7 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // 3. settings.json (DevFlow hooks)
+      // 5. settings.json (DevFlow hooks)
       for (const scope of scopesToUninstall) {
         try {
           const paths = await getInstallationPaths(scope);
@@ -344,7 +379,7 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // 4. Managed settings (security deny list)
+      // 6. Managed settings (security deny list)
       let managedSettingsExist = false;
       try {
         const managedPath = getManagedSettingsPath();
@@ -373,7 +408,7 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // 5. Safe-delete shell function
+      // 7. Safe-delete shell function
       const shell = detectShell();
       const profilePath = getProfilePath(shell);
       if (profilePath && await isAlreadyInstalled(profilePath)) {
