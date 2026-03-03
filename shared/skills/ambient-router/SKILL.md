@@ -36,7 +36,7 @@ Determine what the user is trying to do from their prompt.
 | **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" | "where is the config?", "explain this function" |
 | **CHAT** | greetings, meta-questions, confirmations, short responses | "thanks", "yes", "what can you do?" |
 
-**Ambiguous prompts:** Default to the lowest-overhead classification. "Update the README" → BUILD (but QUICK depth since it's a single file, simple edit).
+**Ambiguous prompts:** Default to the lowest-overhead classification. "Update the README" → BUILD/STANDARD. Git operations like "commit this" → QUICK.
 
 ## Step 2: Classify Depth
 
@@ -44,9 +44,9 @@ Determine how much enforcement the prompt warrants.
 
 | Depth | Criteria | Action |
 |-------|----------|--------|
-| **QUICK** | CHAT or EXPLORE intent, OR prompt < 20 words with no file references, OR single-file trivial edit | Respond normally. Zero overhead. Do not state classification. |
-| **STANDARD** | BUILD/DEBUG/REVIEW/PLAN intent with 1-5 file scope | Read and apply 2-3 relevant skills from the selection matrix below. State classification briefly. |
-| **ESCALATE** | Multi-file architectural change, "refactor all", system-wide scope, > 5 files | Respond at best effort + recommend: "This looks like it would benefit from `/implement` for full lifecycle management." |
+| **QUICK** | CHAT intent. EXPLORE with no analytical depth ("where is X?"). Git/devops operations (commit, push, merge, branch, pr, deploy, reinstall). Single-word continuations. | Respond normally. Zero overhead. Do not state classification. |
+| **STANDARD** | BUILD/DEBUG/REVIEW/PLAN intent (any word count). EXPLORE with analytical depth ("analyze our X", "discuss how Y works"). | Read and apply 2-3 relevant skills from the selection matrix below. State classification briefly. |
+| **ESCALATE** | Multi-file architectural change, system-wide scope, > 5 files. Detailed implementation plan (100+ words with plan structure). | Respond at best effort + recommend: "This looks like it would benefit from `/implement` for full lifecycle management." |
 
 ## Step 3: Select Skills (STANDARD depth only)
 

@@ -24,9 +24,9 @@ if [[ "$PROMPT" == /* ]]; then
   exit 0
 fi
 
-# Skip short confirmations (< 3 words)
+# Skip single-word confirmations (< 2 words)
 WORD_COUNT=$(echo "$PROMPT" | wc -w | tr -d ' ')
-if [ "$WORD_COUNT" -lt 3 ]; then
+if [ "$WORD_COUNT" -lt 2 ]; then
   exit 0
 fi
 

@@ -40,7 +40,7 @@ When enabled, a `UserPromptSubmit` hook injects a classification preamble before
 
 | Depth | When | Overhead |
 |-------|------|----------|
-| QUICK | Chat, exploration, < 20 words, no file refs | ~0 tokens |
+| QUICK | Chat, simple exploration, git/devops ops, single-word confirmations | ~0 tokens |
 | STANDARD | BUILD/DEBUG/REVIEW/PLAN, 1-5 file scope | ~500-1000 tokens (skill reads) |
 | ESCALATE | Multi-file, architectural, system-wide scope | ~0 extra tokens (nudge only) |
 
