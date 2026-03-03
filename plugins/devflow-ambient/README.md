@@ -1,6 +1,6 @@
 # devflow-ambient
 
-Ambient mode — proportional quality enforcement without explicit command invocation.
+Ambient mode — auto-loads relevant skills based on each prompt, no explicit commands needed.
 
 ## Command
 

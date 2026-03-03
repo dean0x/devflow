@@ -1,0 +1,17 @@
+#!/bin/bash
+# Ensures .memory/ exists and .gitignore entries are configured.
+# Called from stop and pre-compact hooks. Idempotent, ~1μs after first run.
+# Usage: source ensure-memory-gitignore.sh "$CWD"
+
+_MEMORY_DIR="$1/.memory"
+
+# Create .memory/ if needed
+mkdir -p "$_MEMORY_DIR" 2>/dev/null || return 1
+
+# One-time .gitignore setup (marker prevents repeated checks)
+if [ ! -f "$_MEMORY_DIR/.gitignore-configured" ] && [ -e "$1/.git" ]; then
+  for _entry in ".memory/" ".docs/"; do
+    grep -qxF "$_entry" "$1/.gitignore" 2>/dev/null || echo "$_entry" >> "$1/.gitignore"
+  done
+  touch "$_MEMORY_DIR/.gitignore-configured"
+fi

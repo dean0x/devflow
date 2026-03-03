@@ -70,7 +70,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-ambient',
-    description: 'Ambient mode — proportional quality enforcement',
+    description: 'Ambient mode — auto-loads relevant skills based on each prompt',
     commands: ['/ambient'],
     agents: [],
     skills: ['ambient-router'],

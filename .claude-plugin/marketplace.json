@@ -59,7 +59,7 @@
     {
       "name": "devflow-ambient",
       "source": "./plugins/devflow-ambient",
-      "description": "Ambient mode — proportional quality enforcement without explicit commands",
+      "description": "Ambient mode — auto-loads relevant skills for every prompt",
       "version": "1.0.0",
       "keywords": ["ambient", "routing", "quality", "tdd"]
     },

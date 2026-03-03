@@ -436,7 +436,7 @@ export async function updateGitignore(
 ): Promise<void> {
   try {
     const gitignorePath = path.join(gitRoot, '.gitignore');
-    const entriesToAdd = ['.claude/', '.devflow/'];
+    const entriesToAdd = ['.claude/', '.devflow/', '.memory/', '.docs/'];
 
     let gitignoreContent = '';
     try {
@@ -476,4 +476,91 @@ export async function createDocsStructure(verbose: boolean): Promise<void> {
       p.log.success('.docs/ structure ready');
     }
   } catch { /* may already exist */ }
+}
+
+/**
+ * Create .memory/ directory for working memory files.
+ * Separate from .docs/ which is for reviews/releases.
+ */
+export async function createMemoryDir(verbose: boolean, cwd?: string): Promise<void> {
+  const memoryDir = path.join(cwd ?? process.cwd(), '.memory');
+
+  try {
+    await fs.mkdir(memoryDir, { recursive: true });
+    if (verbose) {
+      p.log.success('.memory/ directory ready');
+    }
+  } catch { /* may already exist */ }
+}
+
+/**
+ * Migrate memory files from .docs/ to .memory/.
+ * One-time migration for existing users. Skips if destination exists (no clobber).
+ * Also cleans up ephemeral files from .docs/.
+ * Returns count of migrated files.
+ */
+export async function migrateMemoryFiles(verbose: boolean, cwd?: string): Promise<number> {
+  const root = cwd ?? process.cwd();
+  const docsDir = path.join(root, '.docs');
+  const memoryDir = path.join(root, '.memory');
+
+  const migrations: Array<{ src: string; dest: string }> = [
+    { src: path.join(docsDir, 'WORKING-MEMORY.md'), dest: path.join(memoryDir, 'WORKING-MEMORY.md') },
+    { src: path.join(docsDir, 'patterns.md'), dest: path.join(memoryDir, 'PROJECT-PATTERNS.md') },
+    { src: path.join(docsDir, 'working-memory-backup.json'), dest: path.join(memoryDir, 'backup.json') },
+  ];
+
+  let migrated = 0;
+
+  for (const { src, dest } of migrations) {
+    try {
+      await fs.access(src);
+    } catch {
+      continue; // Source doesn't exist
+    }
+
+    try {
+      await fs.access(dest);
+      continue; // Destination already exists — no clobber
+    } catch {
+      // Destination doesn't exist — proceed with migration
+    }
+
+    try {
+      await fs.rename(src, dest);
+      migrated++;
+    } catch {
+      // Cross-device or permission error — try copy+delete
+      try {
+        await fs.copyFile(src, dest);
+        await fs.rm(src, { force: true });
+        migrated++;
+      } catch {
+        // Migration failed for this file — skip silently
+      }
+    }
+  }
+
+  // Clean up ephemeral files from .docs/
+  const ephemeralFiles = [
+    path.join(docsDir, '.working-memory-update.log'),
+    path.join(docsDir, '.working-memory-last-trigger'),
+  ];
+
+  for (const file of ephemeralFiles) {
+    try {
+      await fs.rm(file, { force: true });
+    } catch { /* doesn't exist or can't remove */ }
+  }
+
+  // Clean up lock directory
+  try {
+    await fs.rmdir(path.join(docsDir, '.working-memory.lock'));
+  } catch { /* doesn't exist or not empty */ }
+
+  if (migrated > 0 && verbose) {
+    p.log.success(`Migrated ${migrated} memory file(s) from .docs/ to .memory/`);
+  }
+
+  return migrated;
 }

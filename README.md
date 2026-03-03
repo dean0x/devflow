@@ -48,7 +48,7 @@ Then in Claude Code:
 | `devflow-resolve` | `/resolve` | Process review issues — fix or defer to tech debt |
 | `devflow-debug` | `/debug` | Parallel hypothesis debugging |
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
-| `devflow-ambient` | `/ambient` | Ambient mode — proportional quality enforcement |
+| `devflow-ambient` | `/ambient` | Ambient mode — auto-loads relevant skills based on each prompt |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
 
 ## Command Details
@@ -162,22 +162,25 @@ Three shell hooks run behind the scenes:
 
 | Hook | When | What |
 |------|------|------|
-| **Stop** | After each response | Updates `.docs/WORKING-MEMORY.md` with current focus, decisions, and progress. Throttled — skips if updated <2 min ago. |
+| **Stop** | After each response | Updates `.memory/WORKING-MEMORY.md` with current focus, decisions, and progress. Throttled — skips if updated <2 min ago. |
 | **SessionStart** | On startup, `/clear`, resume, compaction | Injects previous working memory + fresh git state as system context. Warns if memory is >1h stale. |
 | **PreCompact** | Before context compaction | Backs up git state to JSON. Bootstraps a minimal working memory from git if none exists yet. |
 
-Working memory is **per-project** — scoped to each repo's `.docs/` directory. Multiple sessions across different repos don't interfere.
+Working memory is **per-project** — scoped to each repo's `.memory/` directory. Multiple sessions across different repos don't interfere.
 
 ## Documentation Structure
 
-DevFlow creates project documentation in `.docs/`:
+DevFlow creates project documentation in `.docs/` and working memory in `.memory/`:
 
 ```
 .docs/
 ├── reviews/{branch}/         # Review reports per branch
-├── design/                   # Implementation plans
+└── design/                   # Implementation plans
+
+.memory/
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook
-└── working-memory-backup.json # Pre-compact git state snapshot
+├── PROJECT-PATTERNS.md       # Accumulated patterns across sessions
+└── backup.json               # Pre-compact git state snapshot
 ```
 
 ## Workflow Examples

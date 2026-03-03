@@ -1,16 +1,16 @@
 ---
 name: ambient-router
 description: >-
-  Classify user intent and response depth for ambient mode. Routes to proportional
-  quality enforcement without explicit command invocation. Used by /ambient command
-  and always-on UserPromptSubmit hook.
+  Classify user intent and response depth for ambient mode. Auto-loads relevant
+  skills without explicit command invocation. Used by /ambient command and
+  always-on UserPromptSubmit hook.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
 # Ambient Router
 
-Classify user intent and select proportional quality enforcement. Zero overhead for simple requests, skill injection for substantive work, workflow nudges for complex tasks.
+Classify user intent and auto-load relevant skills. Zero overhead for simple requests, skill injection for substantive work, workflow nudges for complex tasks.
 
 ## Iron Law
 

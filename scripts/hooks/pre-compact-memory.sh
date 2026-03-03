@@ -18,12 +18,10 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Only activate in DevFlow-initialized projects
-if [ ! -d "$CWD/.docs" ]; then
-  exit 0
-fi
+# Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
+source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore.sh" "$CWD" || exit 0
 
-BACKUP_FILE="$CWD/.docs/working-memory-backup.json"
+BACKUP_FILE="$CWD/.memory/backup.json"
 
 # Capture git state
 GIT_BRANCH=""
@@ -39,6 +37,12 @@ if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   GIT_DIFF_STAT=$(git diff --stat HEAD 2>/dev/null || echo "")
 fi
 
+# Snapshot current WORKING-MEMORY.md (preserves session context through compaction)
+MEMORY_SNAPSHOT=""
+if [ -f "$CWD/.memory/WORKING-MEMORY.md" ]; then
+  MEMORY_SNAPSHOT=$(cat "$CWD/.memory/WORKING-MEMORY.md")
+fi
+
 # Write backup JSON
 jq -n \
   --arg ts "$TIMESTAMP" \
@@ -46,9 +50,11 @@ jq -n \
   --arg status "$GIT_STATUS" \
   --arg log "$GIT_LOG" \
   --arg diff "$GIT_DIFF_STAT" \
+  --arg memory "$MEMORY_SNAPSHOT" \
   '{
     timestamp: $ts,
     trigger: "pre-compact",
+    memory_snapshot: $memory,
     git: {
       branch: $branch,
       status: $status,
@@ -59,7 +65,7 @@ jq -n \
 
 # Bootstrap minimal WORKING-MEMORY.md if none exists yet
 # This ensures SessionStart has context to inject after compaction
-MEMORY_FILE="$CWD/.docs/WORKING-MEMORY.md"
+MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_BRANCH" ]; then
   {
     echo "# Working Memory"

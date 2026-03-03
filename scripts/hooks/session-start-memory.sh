@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Working Memory: SessionStart Hook
-# Reads .docs/WORKING-MEMORY.md and injects it as additionalContext for the new session.
+# Reads .memory/WORKING-MEMORY.md and injects it as additionalContext for the new session.
 # Also captures fresh git state so Claude knows what's changed since the memory was written.
 # Adds staleness warning if memory is >1 hour old.
 
@@ -17,12 +17,7 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Only activate in DevFlow-initialized projects
-if [ ! -d "$CWD/.docs" ]; then
-  exit 0
-fi
-
-MEMORY_FILE="$CWD/.docs/WORKING-MEMORY.md"
+MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 
 # No memory file = nothing to restore (fresh project or first session)
 if [ ! -f "$MEMORY_FILE" ]; then
@@ -32,7 +27,7 @@ fi
 MEMORY_CONTENT=$(cat "$MEMORY_FILE")
 
 # Read accumulated patterns if they exist
-PATTERNS_FILE="$CWD/.docs/patterns.md"
+PATTERNS_FILE="$CWD/.memory/PROJECT-PATTERNS.md"
 PATTERNS_CONTENT=""
 if [ -f "$PATTERNS_FILE" ]; then
   PATTERNS_CONTENT=$(cat "$PATTERNS_FILE")
@@ -46,6 +41,30 @@ else
 fi
 NOW=$(date +%s)
 AGE=$(( NOW - FILE_MTIME ))
+
+# Check for pre-compact memory snapshot (compaction recovery)
+BACKUP_FILE="$CWD/.memory/backup.json"
+COMPACT_NOTE=""
+if [ -f "$BACKUP_FILE" ]; then
+  BACKUP_MEMORY=$(jq -r '.memory_snapshot // ""' "$BACKUP_FILE" 2>/dev/null)
+  if [ -n "$BACKUP_MEMORY" ]; then
+    BACKUP_TS=$(jq -r '.timestamp // ""' "$BACKUP_FILE" 2>/dev/null)
+    BACKUP_EPOCH=0
+    if [ -n "$BACKUP_TS" ]; then
+      BACKUP_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BACKUP_TS" +%s 2>/dev/null \
+        || date -d "$BACKUP_TS" +%s 2>/dev/null \
+        || echo "0")
+    fi
+    if [ "$BACKUP_EPOCH" -gt "$FILE_MTIME" ]; then
+      COMPACT_NOTE="
+--- PRE-COMPACT SNAPSHOT ($BACKUP_TS) ---
+Context was compacted. This snapshot may contain decisions or progress not yet in working memory.
+
+$BACKUP_MEMORY
+"
+    fi
+  fi
+fi
 
 STALE_WARNING=""
 if [ "$AGE" -gt 3600 ]; then
@@ -91,6 +110,11 @@ if [ -n "$GIT_STATUS" ]; then
   CONTEXT="${CONTEXT}
 Uncommitted changes:
 ${GIT_STATUS}"
+fi
+
+if [ -n "$COMPACT_NOTE" ]; then
+  CONTEXT="${CONTEXT}
+${COMPACT_NOTE}"
 fi
 
 # Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
