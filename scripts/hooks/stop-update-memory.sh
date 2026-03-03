@@ -22,8 +22,9 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Auto-create .memory/ if it doesn't exist (bootstraps on first session)
-mkdir -p "$CWD/.memory" 2>/dev/null || exit 0
+# Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
+SCRIPT_DIR_EARLY="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR_EARLY/ensure-memory-gitignore.sh" "$CWD" || exit 0
 
 # Logging (shared log file with background updater; [stop-hook] prefix distinguishes)
 MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"

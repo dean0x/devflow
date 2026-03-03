@@ -18,8 +18,8 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Auto-create .memory/ if it doesn't exist
-mkdir -p "$CWD/.memory" 2>/dev/null || exit 0
+# Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
+source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore.sh" "$CWD" || exit 0
 
 BACKUP_FILE="$CWD/.memory/backup.json"
 
