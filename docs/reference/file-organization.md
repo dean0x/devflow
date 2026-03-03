@@ -146,7 +146,7 @@ Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable
 
 **Flow**: Claude responds → Stop hook checks mtime (skips if <2min fresh) → blocks with instruction → Claude writes WORKING-MEMORY.md silently → `stop_hook_active=true` → allows stop. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
 
-All hooks are no-ops in projects without `.memory/` (non-DevFlow projects or memory not enabled).
+Hooks auto-create `.memory/` on first run — no manual setup needed per project.
 
 ## Statusline Script
 

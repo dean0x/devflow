@@ -16,11 +16,14 @@ if ! command -v jq &>/dev/null; then exit 0; fi
 
 INPUT=$(cat)
 
-# Only activate in projects with .memory/ directory (DevFlow-initialized projects)
+# Resolve project directory — bail if missing
 CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
-if [ -z "$CWD" ] || [ ! -d "$CWD/.memory" ]; then
+if [ -z "$CWD" ]; then
   exit 0
 fi
+
+# Auto-create .memory/ if it doesn't exist (bootstraps on first session)
+mkdir -p "$CWD/.memory" 2>/dev/null || exit 0
 
 # Logging (shared log file with background updater; [stop-hook] prefix distinguishes)
 MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"

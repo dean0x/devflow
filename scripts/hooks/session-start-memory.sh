@@ -17,11 +17,6 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Only activate in DevFlow-initialized projects
-if [ ! -d "$CWD/.memory" ]; then
-  exit 0
-fi
-
 MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 
 # No memory file = nothing to restore (fresh project or first session)
