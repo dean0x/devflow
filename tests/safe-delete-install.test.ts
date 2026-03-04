@@ -7,6 +7,8 @@ import {
   isAlreadyInstalled,
   installToProfile,
   removeFromProfile,
+  getInstalledVersion,
+  SAFE_DELETE_BLOCK_VERSION,
 } from '../src/cli/utils/safe-delete-install.js';
 
 describe('generateSafeDeleteBlock', () => {
@@ -63,6 +65,64 @@ describe('generateSafeDeleteBlock', () => {
 
   it('returns null for unknown shell', () => {
     expect(generateSafeDeleteBlock('unknown', 'darwin', 'trash')).toBeNull();
+  });
+
+  it('includes version stamp in all shell variants', () => {
+    const versionLine = `# v${SAFE_DELETE_BLOCK_VERSION}`;
+    const variants: Array<[Parameters<typeof generateSafeDeleteBlock>[0], NodeJS.Platform, string | null]> = [
+      ['bash', 'linux', 'trash-put'],
+      ['zsh', 'darwin', 'trash'],
+      ['fish', 'darwin', 'trash'],
+      ['powershell', 'win32', null],
+      ['powershell', 'darwin', 'trash'],
+    ];
+    for (const [shell, platform, cmd] of variants) {
+      const block = generateSafeDeleteBlock(shell, platform, cmd);
+      expect(block, `${shell}/${platform} should include version stamp`).toContain(versionLine);
+    }
+  });
+});
+
+describe('getInstalledVersion', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'safe-delete-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns 0 for missing file', async () => {
+    expect(await getInstalledVersion(path.join(tmpDir, 'nonexistent'))).toBe(0);
+  });
+
+  it('returns 0 for file without markers', async () => {
+    const filePath = path.join(tmpDir, '.zshrc');
+    await fs.writeFile(filePath, 'some unrelated content\n');
+    expect(await getInstalledVersion(filePath)).toBe(0);
+  });
+
+  it('returns 1 for legacy block without version line', async () => {
+    const filePath = path.join(tmpDir, '.zshrc');
+    await fs.writeFile(filePath, [
+      '# >>> DevFlow safe-delete >>>',
+      'rm() { trash "$@"; }',
+      '# <<< DevFlow safe-delete <<<',
+    ].join('\n'));
+    expect(await getInstalledVersion(filePath)).toBe(1);
+  });
+
+  it('returns version number for versioned block', async () => {
+    const filePath = path.join(tmpDir, '.zshrc');
+    await fs.writeFile(filePath, [
+      '# >>> DevFlow safe-delete >>>',
+      '# v2',
+      'rm() { trash "$@"; }',
+      '# <<< DevFlow safe-delete <<<',
+    ].join('\n'));
+    expect(await getInstalledVersion(filePath)).toBe(2);
   });
 });
 

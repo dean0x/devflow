@@ -21,7 +21,7 @@ import {
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
-import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile } from '../utils/safe-delete-install.js';
+import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 
@@ -507,14 +507,19 @@ export const initCommand = new Command('init')
           p.log.info(`Install ${color.cyan(safeDeleteInfo.command ?? 'trash')} first: ${color.dim(safeDeleteInfo.installHint)}`);
           p.log.info(`Then re-run ${color.cyan('devflow init')} to auto-configure safe-delete.`);
         } else if (safeDeleteAvailable) {
-          const alreadyInstalled = await isAlreadyInstalled(profilePath);
-          if (alreadyInstalled) {
-            p.log.info(`Safe-delete already configured in ${color.dim(profilePath)}`);
-          } else {
-            const trashCmd = safeDeleteInfo.command;
-            const block = generateSafeDeleteBlock(shell, process.platform, trashCmd);
+          const trashCmd = safeDeleteInfo.command;
+          const block = generateSafeDeleteBlock(shell, process.platform, trashCmd);
 
-            if (block) {
+          if (block) {
+            const installedVersion = await getInstalledVersion(profilePath);
+            if (installedVersion === SAFE_DELETE_BLOCK_VERSION) {
+              p.log.info(`Safe-delete already configured in ${color.dim(profilePath)}`);
+            } else if (installedVersion > 0) {
+              await removeFromProfile(profilePath);
+              await installToProfile(profilePath, block);
+              p.log.success(`Safe-delete upgraded in ${color.dim(profilePath)}`);
+              p.log.info('Restart your shell or run: ' + color.cyan(`source ${profilePath}`));
+            } else {
               const confirm = await p.confirm({
                 message: `Install safe-delete to ${profilePath}? (overrides rm to use ${trashCmd ?? 'recycle bin'})`,
                 initialValue: true,
