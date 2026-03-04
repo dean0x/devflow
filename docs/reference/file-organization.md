@@ -73,7 +73,7 @@ devflow-{name}/
 {
   "name": "devflow-implement",
   "description": "Complete task implementation workflow",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "agents": ["git", "coder", "synthesizer"],
   "skills": ["implementation-patterns", "self-review"]
 }

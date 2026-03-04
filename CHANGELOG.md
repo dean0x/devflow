@@ -5,6 +5,35 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-04
+
+### Added
+- **Ambient mode** — New `devflow-ambient` plugin with `/ambient` command for proportional quality enforcement
+  - Intent classification (BUILD/DEBUG/REVIEW/PLAN/EXPLORE/CHAT) auto-loads relevant skills
+  - Three depth tiers: QUICK (zero overhead), STANDARD (2-3 skills), ESCALATE (nudge to workflows)
+  - Always-on mode via `devflow ambient --enable` or `devflow init --ambient`
+  - New `ambient-router` skill for intent/depth classification
+  - New `test-driven-development` skill (auto-activates for BUILD tasks)
+  - Skills: 24 → 26, Plugins: 8 → 9
+- **Working memory enhancements** — Structured cross-session context preservation
+  - Structured sections: Now, Progress, Decisions, Modified Files, Context, Session Log
+  - Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`
+  - `PROJECT-PATTERNS.md` extraction — background hook accumulates patterns across sessions
+  - Directory separation: `.memory/` (session state) vs `.docs/` (reviews/design artifacts)
+  - Auto-migration from `.docs/` to `.memory/` with no-clobber semantics
+  - Auto-adds `.memory/` and `.docs/` to `.gitignore` on first hook run
+
+### Changed
+- **Background agent permissions** — Replaced `--dangerously-skip-permissions` with `--tools "Write"` + `--allowedTools` for restricted file access in memory update hooks
+- **Safe-delete auto-upgrade** — `devflow init` now detects outdated safe-delete blocks and silently upgrades them; no manual uninstall/reinstall needed
+
+### Fixed
+- **Ambient depth classification** — Intent now drives depth exclusively; removed 20-word threshold that silently downgraded ~32% of BUILD/DEBUG prompts to QUICK (#73)
+- **Safe-delete file existence** — Filter non-existent files before calling `trash` in bash/zsh, fish, and PowerShell Unix blocks; prevents noisy `trash: file doesn't exist` errors on `rm -f` of missing files (#74)
+- **Safe-delete deny list** — Expanded `rm` deny patterns from 8 to 21, covering `rm -r`, `rm -fr`, and `rm -f` flag variations that could bypass the `rm -rf`-only patterns (#74)
+
+---
+
 ## [1.0.0] - 2026-02-25
 
 ### Added
@@ -720,6 +749,7 @@ devflow init
 
 ---
 
+[1.1.0]: https://github.com/dean0x/devflow/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dean0x/devflow/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/dean0x/devflow/releases/tag/v0.9.0
 [0.8.1]: https://github.com/dean0x/devflow/releases/tag/v0.8.1
