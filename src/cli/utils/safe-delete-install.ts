@@ -5,6 +5,9 @@ import type { Shell } from './safe-delete.js';
 const START_MARKER = '# >>> DevFlow safe-delete >>>';
 const END_MARKER = '# <<< DevFlow safe-delete <<<';
 
+/** Bump this when the safe-delete block changes. */
+export const SAFE_DELETE_BLOCK_VERSION = 2;
+
 /**
  * Generate the safe-delete shell function block with markers.
  * Returns null for unsupported shells.
@@ -20,6 +23,7 @@ export function generateSafeDeleteBlock(
     const cmd = trashCommand ?? 'trash';
     return [
       START_MARKER,
+      `# v${SAFE_DELETE_BLOCK_VERSION}`,
       `rm() {`,
       `  local files=()`,
       `  for arg in "$@"; do`,
@@ -48,6 +52,7 @@ export function generateSafeDeleteBlock(
     const cmd = trashCommand ?? 'trash';
     return [
       START_MARKER,
+      `# v${SAFE_DELETE_BLOCK_VERSION}`,
       `function rm --description "Safe delete via trash"`,
       `  set -l files`,
       `  for arg in $argv`,
@@ -73,6 +78,7 @@ export function generateSafeDeleteBlock(
     if (platform === 'win32') {
       return [
         START_MARKER,
+        `# v${SAFE_DELETE_BLOCK_VERSION}`,
         `if (Get-Alias rm -ErrorAction SilentlyContinue) {`,
         `  Remove-Alias rm -Force -Scope Global`,
         `}`,
@@ -101,6 +107,7 @@ export function generateSafeDeleteBlock(
     const cmd = trashCommand ?? 'trash';
     return [
       START_MARKER,
+      `# v${SAFE_DELETE_BLOCK_VERSION}`,
       `if (Get-Alias rm -ErrorAction SilentlyContinue) {`,
       `  Remove-Alias rm -Force -Scope Global`,
       `}`,
@@ -145,6 +152,23 @@ export async function installToProfile(profilePath: string, block: string): Prom
   const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n\n' : '\n';
   const content = existing.length > 0 ? existing + separator + block + '\n' : block + '\n';
   await fs.writeFile(profilePath, content, 'utf-8');
+}
+
+/**
+ * Extract the installed safe-delete block version from a profile file.
+ * Returns 0 (not installed), 1 (legacy block without version stamp), or N (versioned block).
+ */
+export async function getInstalledVersion(profilePath: string): Promise<number> {
+  try {
+    const content = await fs.readFile(profilePath, 'utf-8');
+    const startIdx = content.indexOf(START_MARKER);
+    if (startIdx === -1) return 0;
+    const afterMarker = content.slice(startIdx + START_MARKER.length);
+    const match = afterMarker.match(/^\n# v(\d+)/);
+    return match ? parseInt(match[1], 10) : 1;
+  } catch {
+    return 0;
+  }
 }
 
 /**
