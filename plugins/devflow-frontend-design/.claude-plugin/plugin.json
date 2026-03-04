@@ -1,0 +1,15 @@
+{
+  "name": "devflow-frontend-design",
+  "description": "Frontend design patterns - typography, color systems, spacing, motion, responsive design",
+  "author": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "version": "1.1.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": ["design", "typography", "color", "css"],
+  "agents": [],
+  "skills": ["frontend-design"]
+}

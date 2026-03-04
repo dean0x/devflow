@@ -34,6 +34,10 @@ The orchestrator provides:
 | `react` | `~/.claude/skills/react/SKILL.md` |
 | `accessibility` | `~/.claude/skills/accessibility/SKILL.md` |
 | `frontend-design` | `~/.claude/skills/frontend-design/SKILL.md` |
+| `go` | `~/.claude/skills/go/SKILL.md` |
+| `java` | `~/.claude/skills/java/SKILL.md` |
+| `python` | `~/.claude/skills/python/SKILL.md` |
+| `rust` | `~/.claude/skills/rust/SKILL.md` |
 
 ## Responsibilities
 
@@ -117,3 +121,7 @@ Report format for `{output_path}`:
 | react | If .tsx/.jsx files changed |
 | accessibility | If .tsx/.jsx files changed |
 | frontend-design | If .tsx/.jsx/.css/.scss files changed |
+| go | If .go files changed |
+| java | If .java files changed |
+| python | If .py files changed |
+| rust | If .rs files changed |

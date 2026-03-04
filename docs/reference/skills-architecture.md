@@ -57,6 +57,10 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 | `react` | Components, hooks, state management, performance | React codebases |
 | `accessibility` | Keyboard, ARIA, focus, color contrast | Frontend codebases |
 | `frontend-design` | Typography, color, spacing, visual design | Frontend codebases |
+| `go` | Error handling, interfaces, concurrency, package design | Go codebases |
+| `python` | Type hints, protocols, dataclasses, async patterns | Python codebases |
+| `java` | Records, sealed classes, composition, modern Java | Java codebases |
+| `rust` | Ownership, borrowing, error handling, type-driven design | Rust codebases |
 
 ## How Skills Activate
 
@@ -184,6 +188,10 @@ activation:
 | `typescript` | `**/*.ts`, `**/*.tsx` | `node_modules/**`, `**/*.d.ts` |
 | `accessibility` | `**/*.tsx`, `**/*.jsx`, `**/*.css` | `node_modules/**` |
 | `frontend-design` | `**/*.tsx`, `**/*.jsx`, `**/*.css`, `**/*.scss` | `node_modules/**` |
+| `go` | `**/*.go` | `vendor/**` |
+| `python` | `**/*.py` | `venv/**`, `.venv/**`, `**/__pycache__/**` |
+| `java` | `**/*.java` | `**/build/**`, `**/target/**` |
+| `rust` | `**/*.rs` | `**/target/**` |
 | `test-patterns` | `**/*.test.*`, `**/*.spec.*`, `**/test/**` | `node_modules/**` |
 
 **Note:** Glob patterns are metadata hints for documentation. Claude Code does not currently read glob patterns to trigger skills — activation happens through agent frontmatter and Reviewer dynamic read (see "How Skills Activate" above).

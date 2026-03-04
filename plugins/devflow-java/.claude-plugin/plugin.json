@@ -1,0 +1,15 @@
+{
+  "name": "devflow-java",
+  "description": "Java language patterns - records, sealed classes, composition, modern Java features",
+  "author": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "version": "1.1.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": ["java", "records", "sealed-classes", "composition"],
+  "agents": [],
+  "skills": ["java"]
+}

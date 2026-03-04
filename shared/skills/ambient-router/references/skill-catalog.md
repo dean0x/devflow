@@ -16,6 +16,10 @@ These skills may be loaded during STANDARD-depth ambient routing.
 | react | React components in scope | `*.tsx`, `*.jsx` |
 | frontend-design | UI/styling work | `*.css`, `*.scss`, `*.tsx` with styling keywords |
 | input-validation | Forms, APIs, user input | Files with form/input/validation keywords |
+| go | Go files in scope | `*.go` |
+| python | Python files in scope | `*.py` |
+| java | Java files in scope | `*.java` |
+| rust | Rust files in scope | `*.rs` |
 | security-patterns | Auth, crypto, secrets | Files with auth/token/crypto/password keywords |
 
 ### DEBUG Intent

@@ -16,7 +16,7 @@ describe('getAllSkillNames', () => {
 
   it('includes skills from multiple plugins', () => {
     const skills = getAllSkillNames();
-    // 'accessibility' appears in core-skills, implement, and code-review
+    // 'accessibility' appears in devflow-accessibility (optional plugin)
     expect(skills).toContain('accessibility');
     // 'agent-teams' appears in multiple plugins
     expect(skills).toContain('agent-teams');
@@ -42,8 +42,8 @@ describe('buildAssetMaps', () => {
   it('assigns each asset to the first plugin that declares it', () => {
     const { skillsMap, agentsMap } = buildAssetMaps(DEVFLOW_PLUGINS);
 
-    // 'accessibility' first appears in devflow-core-skills
-    expect(skillsMap.get('accessibility')).toBe('devflow-core-skills');
+    // 'accessibility' first appears in devflow-accessibility (optional plugin)
+    expect(skillsMap.get('accessibility')).toBe('devflow-accessibility');
 
     // 'git' first appears in devflow-implement
     expect(agentsMap.get('git')).toBe('devflow-implement');

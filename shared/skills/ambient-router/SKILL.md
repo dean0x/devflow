@@ -54,7 +54,7 @@ Based on classified intent, read the following skills to inform your response.
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **BUILD** | test-driven-development, implementation-patterns | typescript (.ts), react (.tsx/.jsx), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
+| **BUILD** | test-driven-development, implementation-patterns | typescript (.ts), react (.tsx/.jsx), go (.go), python (.py), java (.java), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
 | **DEBUG** | test-patterns, core-patterns | git-safety (if git operations involved) |
 | **REVIEW** | self-review, core-patterns | test-patterns |
 | **PLAN** | implementation-patterns | core-patterns |

@@ -42,9 +42,15 @@ Detect file types in diff to determine conditional reviews:
 | .tsx/.jsx files | react |
 | .tsx/.jsx files | accessibility |
 | .tsx/.jsx/.css/.scss files | frontend-design |
+| .go files | go |
+| .py files | python |
+| .java files | java |
+| .rs files | rust |
 | DB/migration files | database |
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
+
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, python, java, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, check if `~/.claude/skills/{focus}/SKILL.md` exists (use Glob). If the skill file doesn't exist, **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Run Reviews (Parallel)
 
@@ -63,6 +69,10 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | react | conditional | react |
 | accessibility | conditional | accessibility |
 | frontend-design | conditional | frontend-design |
+| go | conditional | go |
+| python | conditional | python |
+| java | conditional | java |
+| rust | conditional | rust |
 | database | conditional | database-patterns |
 | dependencies | conditional | dependencies-patterns |
 | documentation | conditional | documentation-patterns |
@@ -123,7 +133,7 @@ Display results from all agents:
 │  ├─ Reviewer: consistency
 │  ├─ Reviewer: regression
 │  ├─ Reviewer: tests
-│  └─ Reviewer: [conditional: typescript, react, a11y, design, database, deps, docs]
+│  └─ Reviewer: [conditional: typescript, react, a11y, design, go, python, java, rust, database, deps, docs]
 │
 ├─ Phase 3: Synthesis (PARALLEL)
 │  ├─ Git agent (comment-pr)

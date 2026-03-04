@@ -1,0 +1,15 @@
+{
+  "name": "devflow-react",
+  "description": "React framework patterns - hooks, state management, composition, performance",
+  "author": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "version": "1.1.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": ["react", "hooks", "state", "components"],
+  "agents": [],
+  "skills": ["react"]
+}

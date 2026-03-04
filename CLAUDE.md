@@ -12,7 +12,7 @@ DevFlow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 9 self-contained plugins, each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 17 plugins (9 core + 8 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
@@ -25,6 +25,14 @@ Plugin marketplace with 9 self-contained plugins, each following the Claude plug
 | `devflow-ambient` | Ambient mode — auto-loads relevant skills based on each prompt | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
+| `devflow-typescript` | TypeScript language patterns (optional) | No |
+| `devflow-react` | React framework patterns (optional) | No |
+| `devflow-accessibility` | Web accessibility patterns (optional) | No |
+| `devflow-frontend-design` | Frontend design patterns (optional) | No |
+| `devflow-go` | Go language patterns (optional) | No |
+| `devflow-python` | Python language patterns (optional) | No |
+| `devflow-java` | Java language patterns (optional) | No |
+| `devflow-rust` | Rust language patterns (optional) | No |
 
 Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}-teams.md` (Agent Teams with debate). The installer copies the chosen variant based on `--teams`/`--no-teams` flag.
 
@@ -36,9 +44,9 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 26 skills (single source of truth)
+├── shared/skills/          # 30 skills (single source of truth)
 ├── shared/agents/          # 10 shared agents (single source of truth)
-├── plugins/devflow-*/      # 9 self-contained plugins
+├── plugins/devflow-*/      # 17 plugins (9 core + 8 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient hooks (stop, session-start, pre-compact, ambient-prompt)

@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: inherit
-skills: core-patterns, git-safety, implementation-patterns, git-workflow, typescript, react, test-patterns, input-validation, accessibility, frontend-design
+skills: core-patterns, git-safety, implementation-patterns, git-workflow, typescript, react, test-patterns, input-validation, accessibility, frontend-design, go, python, java, rust
 ---
 
 # Coder Agent
@@ -38,6 +38,7 @@ You receive from orchestrator:
    - `frontend`: react, typescript, accessibility, frontend-design
    - `tests`: test-patterns, typescript
    - `fullstack`: all of the above
+   - For non-TypeScript backends: load the corresponding language skill (go, python, java, rust) instead of typescript
 
 4. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 

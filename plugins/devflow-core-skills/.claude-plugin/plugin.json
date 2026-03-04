@@ -12,17 +12,13 @@
   "keywords": ["skills", "quality", "patterns", "auto-activate", "enforcement", "foundation"],
   "agents": [],
   "skills": [
-    "accessibility",
     "core-patterns",
     "docs-framework",
-    "frontend-design",
     "git-safety",
     "git-workflow",
     "github-patterns",
     "input-validation",
-    "react",
     "test-driven-development",
-    "test-patterns",
-    "typescript"
+    "test-patterns"
   ]
 }
