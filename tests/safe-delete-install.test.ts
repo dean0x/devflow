@@ -10,27 +10,31 @@ import {
 } from '../src/cli/utils/safe-delete-install.js';
 
 describe('generateSafeDeleteBlock', () => {
-  it('generates bash/zsh block with markers and both functions', () => {
+  it('generates bash/zsh block with markers, existence check, and both functions', () => {
     const block = generateSafeDeleteBlock('zsh', 'darwin', 'trash');
     expect(block).not.toBeNull();
     expect(block).toContain('# >>> DevFlow safe-delete >>>');
     expect(block).toContain('# <<< DevFlow safe-delete <<<');
     expect(block).toContain('rm() {');
     expect(block).toContain('command() {');
-    expect(block).toContain('trash "${files[@]}"');
+    expect(block).toContain('[ -e "$f" ] || [ -L "$f" ]');
+    expect(block).toContain('existing+=("$f")');
+    expect(block).toContain('trash "${existing[@]}"');
   });
 
   it('generates bash block with trash-put command', () => {
     const block = generateSafeDeleteBlock('bash', 'linux', 'trash-put');
-    expect(block).toContain('trash-put "${files[@]}"');
+    expect(block).toContain('trash-put "${existing[@]}"');
   });
 
-  it('generates fish block with fish syntax', () => {
+  it('generates fish block with fish syntax and existence check', () => {
     const block = generateSafeDeleteBlock('fish', 'darwin', 'trash');
     expect(block).not.toBeNull();
     expect(block).toContain('# >>> DevFlow safe-delete >>>');
     expect(block).toContain('function rm --description "Safe delete via trash"');
-    expect(block).toContain('trash $files');
+    expect(block).toContain('test -e $f; or test -L $f');
+    expect(block).toContain('set existing $existing $f');
+    expect(block).toContain('trash $existing');
     expect(block).not.toContain('command()');
   });
 
@@ -42,11 +46,19 @@ describe('generateSafeDeleteBlock', () => {
     expect(block).toContain('Remove-Alias rm');
   });
 
-  it('generates PowerShell macOS/Linux block with trash command', () => {
+  it('generates PowerShell macOS/Linux block with trash command and existence check', () => {
     const block = generateSafeDeleteBlock('powershell', 'darwin', 'trash');
     expect(block).not.toBeNull();
-    expect(block).toContain('& trash @files');
+    expect(block).toContain('Test-Path $_');
+    expect(block).toContain('& trash @existing');
     expect(block).not.toContain('Microsoft.VisualBasic');
+  });
+
+  it('generates PowerShell Windows block with Resolve-Path existence check', () => {
+    const block = generateSafeDeleteBlock('powershell', 'win32', null);
+    expect(block).not.toBeNull();
+    expect(block).toContain('Resolve-Path $f -ErrorAction SilentlyContinue');
+    expect(block).toContain('Test-Path $p -PathType Container');
   });
 
   it('returns null for unknown shell', () => {
