@@ -24,6 +24,7 @@
     "dev": "tsc --watch",
     "cli": "node dist/cli.js",
     "prepublishOnly": "npm run build",
+    "version:bump": "npx tsx scripts/bump-version.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

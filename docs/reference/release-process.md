@@ -1,132 +1,121 @@
 # Release Process
 
-Full runbook for creating new DevFlow Kit releases.
+One-click releases via GitHub Actions. The developer chooses the version; CI handles everything else.
 
-## 1. Prepare the Release
+## Prerequisites (One-Time Setup)
 
-**Update Version** in `package.json`:
-- Patch (x.y.Z): Bug fixes, docs, minor tweaks, internal refactoring
-- Minor (x.Y.0): New features, commands, CLI options (backwards compatible)
-- Major (X.0.0): Breaking changes, removed/renamed commands
+1. **Create npm access token** — npmjs.com → Access Tokens → Granular Access Token
+   - Package: `devflow-kit` only
+   - Permissions: Read and Write
+   - Expiration: No expiration (recommended for CI)
 
-**Update CHANGELOG.md:**
+2. **Add GitHub secret** — Repo Settings → Secrets → Actions → `NPM_TOKEN`
+
+3. **Allow CI to push to main** — Repo Settings → Rules → Rulesets → add "GitHub Actions" to bypass actors
+
+## During Development
+
+Update `CHANGELOG.md` `[Unreleased]` section in each PR:
+
 ```markdown
-## [x.y.z] - YYYY-MM-DD
+## [Unreleased]
 
 ### Added
-- New features
-
-### Changed
-- Modified functionality
+- New feature description
 
 ### Fixed
-- Bug fixes
-
-### Documentation
-- Doc improvements
+- Bug fix description
 
 ---
-[x.y.z]: https://github.com/dean0x/devflow/releases/tag/vx.y.z
 ```
 
-## 2. Build and Test
+## Creating a Release
 
-```bash
-npm run build
-node dist/cli.js --version    # Verify new version
-node dist/cli.js init          # Test installation
-npm pack --dry-run             # Verify package contents
+1. Go to **GitHub Actions** → **Release** workflow
+2. Click **Run workflow**
+3. Enter version (e.g., `1.3.0`) — strict semver, no `v` prefix
+4. Click **Run workflow**
+
+Done. npm package, git tag, and GitHub release are all created automatically.
+
+## What CI Does
+
+```
+validate version format
+  → check tag doesn't exist
+  → check [Unreleased] section exists
+  → bump version in 21 files (package.json, plugin.json x17, marketplace.json, CHANGELOG.md)
+  → sync package-lock.json
+  → build
+  → test
+  → verify CLI --version output
+  → commit "chore: bump version to X.Y.Z"
+  → push to main
+  → create + push git tag vX.Y.Z
+  → npm publish --provenance
+  → create GitHub release with extracted notes
+  → restore [Unreleased] section + commit + push
 ```
 
-## 3. Commit Version Bump
+## Manual Fallback
+
+If CI is unavailable, release manually:
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md && \
-git commit -m "chore: bump version to x.y.z
+# 1. Bump all version files
+npm run version:bump -- 1.3.0 > release-notes.md
 
-- Update package.json to x.y.z
-- Add CHANGELOG entry for vx.y.z
-- Document [summary of changes]"
+# 2. Build and test
+npm run build && npm test
 
+# 3. Commit and push
+git add -A
+git commit -m "chore: bump version to 1.3.0"
+git push origin main
+
+# 4. Tag
+git tag -a v1.3.0 -m "Version 1.3.0"
+git push origin v1.3.0
+
+# 5. Publish
+npm publish
+
+# 6. GitHub release
+gh release create v1.3.0 --title "v1.3.0" --notes-file release-notes.md
+
+# 7. Restore [Unreleased]
+# Add back the [Unreleased] section above the new version in CHANGELOG.md
+git add CHANGELOG.md
+git commit -m "chore: restore [Unreleased] section"
 git push origin main
 ```
 
-## 4. Publish to npm
+## Troubleshooting
 
-```bash
-npm publish
-npm view devflow-kit version    # Verify
-```
-
-## 5. Create Git Tag and GitHub Release
-
-```bash
-git tag -a vx.y.z -m "Version x.y.z - [Brief Description]
-
-- Key change 1
-- Key change 2
-- Key change 3"
-
-git push origin vx.y.z
-```
-
-```bash
-gh release create vx.y.z \
-  --title "vx.y.z - [Release Title]" \
-  --notes "$(cat <<'EOF'
-# DevFlow Kit vx.y.z
-
-[Brief description]
-
-## Highlights
-- Key improvement 1
-- Key improvement 2
-
-## Changes
-
-### Added
-- New features
-
-### Changed
-- Modified functionality
-
-### Fixed
-- Bug fixes
-
-## Installation
-
-\`\`\`bash
-npx devflow-kit init
-\`\`\`
-
-## Links
-- npm: https://www.npmjs.com/package/devflow-kit
-- Changelog: https://github.com/dean0x/devflow/blob/main/CHANGELOG.md
-EOF
-)"
-```
-
-## 6. Verify Release
-
-```bash
-npm view devflow-kit
-gh release view vx.y.z
-npx devflow-kit@latest init
-```
+| Issue | Fix |
+|-------|-----|
+| "Tag already exists" | Tag was created but release failed. Delete tag: `git push --delete origin v1.3.0 && git tag -d v1.3.0`, then re-run. |
+| "No [Unreleased] section" | CHANGELOG.md is missing the `## [Unreleased]` header. Add it manually above the latest version. |
+| npm publish fails (401) | `NPM_TOKEN` secret expired or missing. Generate a new token and update the secret. |
+| npm publish fails (403) | Token doesn't have write access to `devflow-kit`. Regenerate with correct package scope. |
+| CLI version mismatch | Build output doesn't match expected version. Check that `package.json` was updated correctly. |
+| Push to main rejected | GitHub Actions bot not in ruleset bypass list. Update branch protection rules. |
 
 ## Release Checklist
 
-- [ ] Version bumped in package.json
-- [ ] CHANGELOG.md updated
-- [ ] All plugin.json files updated to match
-- [ ] marketplace.json updated to match
-- [ ] `npm run build` succeeds
-- [ ] `npm test` passes
-- [ ] `npm pack --dry-run` looks clean (no .map files, no build scripts)
-- [ ] Local testing passed
-- [ ] Version bump committed and pushed
-- [ ] Published to npm
-- [ ] Git tag created and pushed
-- [ ] GitHub release created
-- [ ] npm shows correct version
-- [ ] `npx devflow-kit init` works
+Items marked with **[auto]** are handled by CI:
+
+- [ ] CHANGELOG.md `[Unreleased]` section has content
+- [x] **[auto]** Version bumped in package.json
+- [x] **[auto]** package-lock.json synced
+- [x] **[auto]** All 17 plugin.json files updated
+- [x] **[auto]** marketplace.json updated
+- [x] **[auto]** CHANGELOG.md dated and linked
+- [x] **[auto]** Build succeeds
+- [x] **[auto]** Tests pass
+- [x] **[auto]** CLI `--version` matches
+- [x] **[auto]** Committed and pushed to main
+- [x] **[auto]** Git tag created
+- [x] **[auto]** Published to npm with provenance
+- [x] **[auto]** GitHub release created
+- [x] **[auto]** `[Unreleased]` section restored

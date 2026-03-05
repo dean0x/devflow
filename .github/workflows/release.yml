@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.3.0 or 2.0.0-beta.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # ── Setup ──────────────────────────────────
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # ── Validate ───────────────────────────────
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$'; then
+            echo "::error::Invalid version format. Use semver (e.g., 1.3.0 or 2.0.0-beta.1)"
+            exit 1
+          fi
+
+      - name: Check tag doesn't exist
+        run: |
+          if git rev-parse "v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::Tag v${{ inputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Check [Unreleased] section exists
+        run: |
+          if ! grep -q '## \[Unreleased\]' CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no [Unreleased] section"
+            exit 1
+          fi
+
+      # ── Bump version ───────────────────────────
+      - name: Bump version in all files
+        run: npx tsx scripts/bump-version.ts ${{ inputs.version }} > release-notes.md
+
+      # ── Build & Test ───────────────────────────
+      - run: npm run build
+      - run: npm test
+
+      - name: Verify CLI version output
+        run: |
+          ACTUAL=$(node dist/cli.js --version)
+          if [ "$ACTUAL" != "${{ inputs.version }}" ]; then
+            echo "::error::CLI reports $ACTUAL, expected ${{ inputs.version }}"
+            exit 1
+          fi
+
+      # ── Commit & Tag ───────────────────────────
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version bump
+        run: |
+          git add -A
+          git commit -m "chore: bump version to ${{ inputs.version }}"
+          git push origin main
+
+      - name: Create and push tag
+        run: |
+          git tag -a "v${{ inputs.version }}" -m "Version ${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      # ── Publish to npm ─────────────────────────
+      - name: Determine npm tag
+        id: npm-tag
+        run: |
+          if echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            PRE=$(echo "${{ inputs.version }}" | sed 's/^[0-9]*\.[0-9]*\.[0-9]*-//' | sed 's/\..*//')
+            echo "tag=$PRE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        run: npm publish --provenance --tag ${{ steps.npm-tag.outputs.tag }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ── GitHub Release ─────────────────────────
+      - name: Create GitHub release
+        run: |
+          PRERELEASE_FLAG=""
+          if echo "${{ inputs.version }}" | grep -qE '-'; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "v${{ inputs.version }}" \
+            --title "v${{ inputs.version }}" \
+            --notes-file release-notes.md \
+            $PRERELEASE_FLAG
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # ── Restore [Unreleased] ───────────────────
+      - name: Restore [Unreleased] section
+        run: |
+          sed -i "s/^## \[${{ inputs.version }}\]/## [Unreleased]\n\n---\n\n## [${{ inputs.version }}]/" CHANGELOG.md
+          git add CHANGELOG.md
+          git commit -m "chore: restore [Unreleased] section"
+          git push origin main
