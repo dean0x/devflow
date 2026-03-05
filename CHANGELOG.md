@@ -5,7 +5,7 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-03-05
 
 ### Added
 - **Polyglot language skills** — Go, Java, Python, and Rust skill plugins with comprehensive patterns
@@ -783,6 +783,7 @@ devflow init
 
 ---
 
+[1.2.0]: https://github.com/dean0x/devflow/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dean0x/devflow/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dean0x/devflow/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/dean0x/devflow/releases/tag/v0.9.0
