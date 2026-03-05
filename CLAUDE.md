@@ -172,6 +172,6 @@ For detailed specifications beyond this overview:
 - **Skills architecture**: `docs/reference/skills-architecture.md` — tier catalog, templates, creation guide, activation patterns
 - **Agent design**: `docs/reference/agent-design.md` — templates, anti-patterns, quality checklist
 - **Adding commands**: `docs/reference/adding-commands.md` — command template, plugin registration
-- **Release process**: `docs/reference/release-process.md` — full runbook with checklists
+- **Release process**: `docs/reference/release-process.md` — CI-driven one-click releases via GitHub Actions `workflow_dispatch`
 - **File organization**: `docs/reference/file-organization.md` — source tree, build distribution, install paths, settings
 - **Docs framework skill**: `shared/skills/docs-framework/SKILL.md` — documentation naming conventions and templates

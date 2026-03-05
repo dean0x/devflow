@@ -41,13 +41,6 @@ jobs:
             exit 1
           fi
 
-      - name: Check [Unreleased] section exists
-        run: |
-          if ! grep -q '## \[Unreleased\]' CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no [Unreleased] section"
-            exit 1
-          fi
-
       # ── Bump version ───────────────────────────
       - name: Bump version in all files
         run: npx tsx scripts/bump-version.ts ${{ inputs.version }} > release-notes.md
@@ -70,11 +63,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit version bump
+      - name: Commit version bump (if files changed)
         run: |
           git add -A
-          git commit -m "chore: bump version to ${{ inputs.version }}"
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "No changes to commit (version already bumped)"
+          else
+            git commit -m "chore: bump version to ${{ inputs.version }}"
+            git push origin main
+          fi
 
       - name: Create and push tag
         run: |

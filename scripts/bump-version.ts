@@ -63,85 +63,93 @@ if (!isSemver(newVersion)) {
 const pkgPath = join(ROOT, 'package.json');
 const pkg = readJson(pkgPath) as { version: string };
 const oldVersion = pkg.version;
+const alreadyBumped = newVersion === oldVersion;
 
-if (newVersion === oldVersion) {
-  fail(`version ${newVersion} is already the current version`);
+if (alreadyBumped) {
+  process.stderr.write(`  package.json: already at ${newVersion} (skipping bump)\n`);
+} else {
+  pkg.version = newVersion;
+  writeJson(pkgPath, pkg);
+  process.stderr.write(`  package.json: ${oldVersion} → ${newVersion}\n`);
+
+  // ── 2. package-lock.json ─────────────────────────────────────
+
+  execSync('npm install --package-lock-only', { cwd: ROOT, stdio: 'pipe' });
+  process.stderr.write(`  package-lock.json: synced\n`);
+
+  // ── 3. Plugin plugin.json files ──────────────────────────────
+
+  const pluginJsonPaths = execSync(
+    'find plugins/devflow-*/.claude-plugin/plugin.json -type f',
+    { cwd: ROOT, encoding: 'utf-8' }
+  )
+    .trim()
+    .split('\n')
+    .filter(Boolean);
+
+  for (const rel of pluginJsonPaths) {
+    const abs = join(ROOT, rel);
+    const pj = readJson(abs) as { version: string };
+    pj.version = newVersion;
+    writeJson(abs, pj);
+  }
+  process.stderr.write(`  plugin.json: ${pluginJsonPaths.length} plugins updated\n`);
+
+  // ── 4. marketplace.json ──────────────────────────────────────
+
+  const marketplacePath = join(ROOT, '.claude-plugin', 'marketplace.json');
+  const marketplace = readJson(marketplacePath) as {
+    plugins: Array<{ version: string }>;
+  };
+
+  let marketplaceCount = 0;
+  for (const plugin of marketplace.plugins) {
+    plugin.version = newVersion;
+    marketplaceCount++;
+  }
+  writeJson(marketplacePath, marketplace);
+  process.stderr.write(`  marketplace.json: ${marketplaceCount} entries updated\n`);
 }
-
-pkg.version = newVersion;
-writeJson(pkgPath, pkg);
-process.stderr.write(`  package.json: ${oldVersion} → ${newVersion}\n`);
-
-// ── 2. package-lock.json ─────────────────────────────────────
-
-execSync('npm install --package-lock-only', { cwd: ROOT, stdio: 'pipe' });
-process.stderr.write(`  package-lock.json: synced\n`);
-
-// ── 3. Plugin plugin.json files ──────────────────────────────
-
-const pluginJsonPaths = execSync(
-  'find plugins/devflow-*/.claude-plugin/plugin.json -type f',
-  { cwd: ROOT, encoding: 'utf-8' }
-)
-  .trim()
-  .split('\n')
-  .filter(Boolean);
-
-for (const rel of pluginJsonPaths) {
-  const abs = join(ROOT, rel);
-  const pj = readJson(abs) as { version: string };
-  pj.version = newVersion;
-  writeJson(abs, pj);
-}
-process.stderr.write(`  plugin.json: ${pluginJsonPaths.length} plugins updated\n`);
-
-// ── 4. marketplace.json ──────────────────────────────────────
-
-const marketplacePath = join(ROOT, '.claude-plugin', 'marketplace.json');
-const marketplace = readJson(marketplacePath) as {
-  plugins: Array<{ version: string }>;
-};
-
-let marketplaceCount = 0;
-for (const plugin of marketplace.plugins) {
-  plugin.version = newVersion;
-  marketplaceCount++;
-}
-writeJson(marketplacePath, marketplace);
-process.stderr.write(`  marketplace.json: ${marketplaceCount} entries updated\n`);
 
 // ── 5. CHANGELOG.md ─────────────────────────────────────────
 
 const changelogPath = join(ROOT, 'CHANGELOG.md');
 let changelog = readFileSync(changelogPath, 'utf-8');
 
-if (!changelog.includes('## [Unreleased]')) {
-  fail('CHANGELOG.md has no [Unreleased] section');
-}
+// Skip CHANGELOG update if version header already exists (already bumped)
+const versionHeaderExists = changelog.includes(`## [${newVersion}]`);
 
-// Replace [Unreleased] header with versioned header
-changelog = changelog.replace(
-  '## [Unreleased]',
-  `## [${newVersion}] - ${today()}`
-);
-
-// Insert compare link before the old version's link reference
-const compareLinkNew = `[${newVersion}]: https://github.com/dean0x/devflow/compare/v${oldVersion}...v${newVersion}`;
-const oldVersionLink = `[${oldVersion}]:`;
-const oldLinkIdx = changelog.indexOf(oldVersionLink);
-
-if (oldLinkIdx !== -1) {
-  changelog =
-    changelog.slice(0, oldLinkIdx) +
-    compareLinkNew + '\n' +
-    changelog.slice(oldLinkIdx);
+if (versionHeaderExists) {
+  process.stderr.write(`  CHANGELOG.md: already has [${newVersion}] section (skipping)\n`);
 } else {
-  // No existing link for old version — append at end
-  changelog = changelog.trimEnd() + '\n\n' + compareLinkNew + '\n';
-}
+  if (!changelog.includes('## [Unreleased]')) {
+    fail('CHANGELOG.md has no [Unreleased] section');
+  }
 
-writeFileSync(changelogPath, changelog);
-process.stderr.write(`  CHANGELOG.md: [Unreleased] → [${newVersion}] - ${today()}\n`);
+  // Replace [Unreleased] header with versioned header
+  changelog = changelog.replace(
+    '## [Unreleased]',
+    `## [${newVersion}] - ${today()}`
+  );
+
+  // Insert compare link before the old version's link reference
+  const compareLinkNew = `[${newVersion}]: https://github.com/dean0x/devflow/compare/v${oldVersion}...v${newVersion}`;
+  const oldVersionLink = `[${oldVersion}]:`;
+  const oldLinkIdx = changelog.indexOf(oldVersionLink);
+
+  if (oldLinkIdx !== -1) {
+    changelog =
+      changelog.slice(0, oldLinkIdx) +
+      compareLinkNew + '\n' +
+      changelog.slice(oldLinkIdx);
+  } else {
+    // No existing link for old version — append at end
+    changelog = changelog.trimEnd() + '\n\n' + compareLinkNew + '\n';
+  }
+
+  writeFileSync(changelogPath, changelog);
+  process.stderr.write(`  CHANGELOG.md: [Unreleased] → [${newVersion}] - ${today()}\n`);
+}
 
 // ── 6. Extract release notes to stdout ──────────────────────
 
