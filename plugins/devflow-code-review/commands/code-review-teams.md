@@ -42,9 +42,15 @@ Detect file types in diff to determine conditional reviews:
 | .tsx/.jsx files | react |
 | .tsx/.jsx files | accessibility |
 | .tsx/.jsx/.css/.scss files | frontend-design |
+| .go files | go |
+| .java files | java |
+| .py files | python |
+| .rs files | rust |
 | DB/migration files | database |
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
+
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before adding a conditional perspective, check if `~/.claude/skills/{focus}/SKILL.md` exists (use Glob). If the skill file doesn't exist, **skip that perspective** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Spawn Review Team
 
@@ -61,6 +67,10 @@ Create an agent team for adversarial review. Always include 4 core perspectives;
 - **React**: hooks, state, rendering, composition (if .tsx/.jsx changed)
 - **Accessibility**: ARIA, keyboard nav, focus management (if .tsx/.jsx changed)
 - **Frontend Design**: visual consistency, spacing, typography (if .tsx/.jsx/.css changed)
+- **Go**: error handling, interfaces, concurrency (if .go changed)
+- **Java**: records, sealed classes, composition (if .java changed)
+- **Python**: type hints, protocols, data modeling (if .py changed)
+- **Rust**: ownership, error handling, type system (if .rs changed)
 - **Database**: schema, queries, migrations, indexes (if DB files changed)
 - **Dependencies**: CVEs, versions, licenses, supply chain (if package files changed)
 - **Documentation**: doc drift, missing docs, stale comments (if docs or significant code changed)
@@ -238,7 +248,7 @@ Display results:
 │  ├─ Architecture Reviewer (teammate)
 │  ├─ Performance Reviewer (teammate)
 │  ├─ Quality Reviewer (teammate)
-│  └─ [Conditional: TypeScript, React, A11y, Design, DB, Deps, Docs]
+│  └─ [Conditional: TypeScript, React, A11y, Design, Go, Java, Python, Rust, DB, Deps, Docs]
 │
 ├─ Phase 3: Debate round
 │  └─ Reviewers challenge each other (max 2 rounds)

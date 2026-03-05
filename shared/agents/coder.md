@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: inherit
-skills: core-patterns, git-safety, implementation-patterns, git-workflow, typescript, react, test-patterns, input-validation, accessibility, frontend-design
+skills: core-patterns, git-safety, implementation-patterns, git-workflow, test-patterns, input-validation
 ---
 
 # Coder Agent
@@ -33,11 +33,16 @@ You receive from orchestrator:
 
 2. **Reference handoff** (if PRIOR_PHASE_SUMMARY provided): Use summary to validate your understanding of prior work, not as the sole source of truth. The actual code is authoritative.
 
-3. **Load domain skills**: Based on DOMAIN hint, apply relevant patterns:
-   - `backend`: typescript, implementation-patterns, input-validation
-   - `frontend`: react, typescript, accessibility, frontend-design
-   - `tests`: test-patterns, typescript
-   - `fullstack`: all of the above
+3. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
+   - `backend` (TypeScript): Read `~/.claude/skills/typescript/SKILL.md`, `~/.claude/skills/input-validation/SKILL.md`
+   - `backend` (Go): Read `~/.claude/skills/go/SKILL.md`
+   - `backend` (Java): Read `~/.claude/skills/java/SKILL.md`
+   - `backend` (Python): Read `~/.claude/skills/python/SKILL.md`
+   - `backend` (Rust): Read `~/.claude/skills/rust/SKILL.md`
+   - `frontend`: Read `~/.claude/skills/react/SKILL.md`, `~/.claude/skills/typescript/SKILL.md`, `~/.claude/skills/accessibility/SKILL.md`, `~/.claude/skills/frontend-design/SKILL.md`
+   - `tests`: Read `~/.claude/skills/test-patterns/SKILL.md`, `~/.claude/skills/typescript/SKILL.md`
+   - `fullstack`: Combine backend + frontend skills
+   - If a Read fails (skill not installed), skip it silently and continue.
 
 4. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 

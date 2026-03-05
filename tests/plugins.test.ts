@@ -16,7 +16,7 @@ describe('getAllSkillNames', () => {
 
   it('includes skills from multiple plugins', () => {
     const skills = getAllSkillNames();
-    // 'accessibility' appears in core-skills, implement, and code-review
+    // 'accessibility' appears in devflow-accessibility (optional plugin)
     expect(skills).toContain('accessibility');
     // 'agent-teams' appears in multiple plugins
     expect(skills).toContain('agent-teams');
@@ -42,8 +42,8 @@ describe('buildAssetMaps', () => {
   it('assigns each asset to the first plugin that declares it', () => {
     const { skillsMap, agentsMap } = buildAssetMaps(DEVFLOW_PLUGINS);
 
-    // 'accessibility' first appears in devflow-core-skills
-    expect(skillsMap.get('accessibility')).toBe('devflow-core-skills');
+    // 'accessibility' first appears in devflow-accessibility (optional plugin)
+    expect(skillsMap.get('accessibility')).toBe('devflow-accessibility');
 
     // 'git' first appears in devflow-implement
     expect(agentsMap.get('git')).toBe('devflow-implement');
@@ -119,5 +119,51 @@ describe('DEVFLOW_PLUGINS integrity', () => {
 
   it('has at least 8 plugins', () => {
     expect(DEVFLOW_PLUGINS.length).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe('optional plugin flag', () => {
+  const languagePluginNames = [
+    'devflow-typescript',
+    'devflow-react',
+    'devflow-accessibility',
+    'devflow-frontend-design',
+    'devflow-go',
+    'devflow-java',
+    'devflow-python',
+    'devflow-rust',
+  ];
+
+  it('all language/ecosystem plugins have optional: true', () => {
+    for (const name of languagePluginNames) {
+      const plugin = DEVFLOW_PLUGINS.find(p => p.name === name);
+      expect(plugin, `${name} should exist`).toBeDefined();
+      expect(plugin!.optional, `${name} should be optional`).toBe(true);
+    }
+  });
+
+  it('non-language plugins do not have optional: true (except audit-claude)', () => {
+    const allowedOptional = new Set([...languagePluginNames, 'devflow-audit-claude']);
+    for (const plugin of DEVFLOW_PLUGINS) {
+      if (!allowedOptional.has(plugin.name)) {
+        expect(plugin.optional, `${plugin.name} should not be optional`).toBeFalsy();
+      }
+    }
+  });
+
+  it('new language skills exist in the registry', () => {
+    const skills = getAllSkillNames();
+    for (const lang of ['go', 'java', 'python', 'rust']) {
+      expect(skills, `skill '${lang}' should exist`).toContain(lang);
+    }
+  });
+
+  it('devflow-core-skills does not contain language/ecosystem skills', () => {
+    const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
+    expect(coreSkills).toBeDefined();
+    const movedSkills = ['typescript', 'react', 'accessibility', 'frontend-design'];
+    for (const skill of movedSkills) {
+      expect(coreSkills!.skills, `core-skills should not contain '${skill}'`).not.toContain(skill);
+    }
   });
 });

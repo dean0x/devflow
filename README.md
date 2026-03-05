@@ -24,7 +24,7 @@ DevFlow adds structured commands that handle the full lifecycle: specify feature
 - **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
 - **Automatic session memory** — survives restarts, `/clear`, and context compaction
 - **Parallel debugging** — competing hypotheses investigated simultaneously
-- **26 quality skills** — 12 auto-activating, plus specialized review and agent skills
+- **30 quality skills** — 8 auto-activating core, 8 optional language/ecosystem, plus specialized review and agent skills
 
 ## Quick Start
 
@@ -81,7 +81,7 @@ Creates a PR when complete.
 Multi-perspective code review with specialized reviewers:
 
 - **Core**: Security, Architecture, Performance, Quality
-- **Conditional** (activated when relevant): TypeScript, React, Accessibility, Database, Dependencies, Documentation
+- **Conditional** (activated when relevant): TypeScript, React, Accessibility, Go, Python, Java, Rust, Database, Dependencies, Documentation
 - Findings classified as must-fix, should-fix, or nit with severity and confidence levels
 
 Provides actionable feedback with specific file locations and suggested fixes.
@@ -120,10 +120,27 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 | `test-driven-development` | Implementing new features (RED-GREEN-REFACTOR) |
 | `test-patterns` | Writing or modifying tests |
 | `input-validation` | Creating API endpoints |
-| `typescript` | Working in TypeScript codebases |
-| `react` | Working with React components |
-| `accessibility` | Creating UI components, forms, interactive elements |
-| `frontend-design` | Working with CSS, styling, visual design |
+
+## Language & Ecosystem Plugins
+
+Optional plugins for language-specific patterns. Install only what you need:
+
+| Plugin | Skill | Triggers When |
+|--------|-------|---------------|
+| `devflow-typescript` | `typescript` | Working in TypeScript codebases |
+| `devflow-react` | `react` | Working with React components |
+| `devflow-accessibility` | `accessibility` | Creating UI components, forms |
+| `devflow-frontend-design` | `frontend-design` | Working with CSS, styling |
+| `devflow-go` | `go` | Working in Go codebases |
+| `devflow-python` | `python` | Working in Python codebases |
+| `devflow-java` | `java` | Working in Java codebases |
+| `devflow-rust` | `rust` | Working in Rust codebases |
+
+```bash
+# Install specific language plugins
+npx devflow-kit init --plugin=typescript,react
+npx devflow-kit init --plugin=go
+```
 
 ## Requirements
 

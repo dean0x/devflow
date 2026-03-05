@@ -69,6 +69,62 @@
       "description": "Audit CLAUDE.md files against Anthropic best practices",
       "version": "1.1.0",
       "keywords": ["audit", "claude-md", "best-practices"]
+    },
+    {
+      "name": "devflow-typescript",
+      "source": "./plugins/devflow-typescript",
+      "description": "TypeScript language patterns (type safety, generics, utility types)",
+      "version": "1.1.0",
+      "keywords": ["typescript", "types", "generics"]
+    },
+    {
+      "name": "devflow-react",
+      "source": "./plugins/devflow-react",
+      "description": "React framework patterns (hooks, state, composition, performance)",
+      "version": "1.1.0",
+      "keywords": ["react", "hooks", "components"]
+    },
+    {
+      "name": "devflow-accessibility",
+      "source": "./plugins/devflow-accessibility",
+      "description": "Web accessibility patterns (WCAG, ARIA, keyboard navigation)",
+      "version": "1.1.0",
+      "keywords": ["accessibility", "wcag", "aria", "a11y"]
+    },
+    {
+      "name": "devflow-frontend-design",
+      "source": "./plugins/devflow-frontend-design",
+      "description": "Frontend design patterns (typography, color, spacing, motion)",
+      "version": "1.1.0",
+      "keywords": ["design", "typography", "css"]
+    },
+    {
+      "name": "devflow-go",
+      "source": "./plugins/devflow-go",
+      "description": "Go language patterns (error handling, interfaces, concurrency)",
+      "version": "1.1.0",
+      "keywords": ["go", "golang", "concurrency"]
+    },
+    {
+      "name": "devflow-python",
+      "source": "./plugins/devflow-python",
+      "description": "Python language patterns (type hints, protocols, data modeling)",
+      "version": "1.1.0",
+      "keywords": ["python", "type-hints", "dataclasses"]
+    },
+    {
+      "name": "devflow-java",
+      "source": "./plugins/devflow-java",
+      "description": "Java language patterns (records, sealed classes, composition)",
+      "version": "1.1.0",
+      "keywords": ["java", "records", "composition"]
+    },
+    {
+      "name": "devflow-rust",
+      "source": "./plugins/devflow-rust",
+      "description": "Rust language patterns (ownership, error handling, type system)",
+      "version": "1.1.0",
+      "keywords": ["rust", "ownership", "type-safety"]
     }
   ]
 }

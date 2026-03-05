@@ -95,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const login = async (creds: Credentials) => setUser(await authApi.login(creds));
   const logout = () => { authApi.logout(); setUser(null); };
-  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext value={{ user, login, logout }}>{children}</AuthContext>;
 }
 
 export function useAuth() {

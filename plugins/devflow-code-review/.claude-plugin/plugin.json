@@ -12,7 +12,6 @@
   "keywords": ["review", "code-quality", "security", "architecture", "pr-review"],
   "agents": ["git", "reviewer", "synthesizer"],
   "skills": [
-    "accessibility",
     "agent-teams",
     "architecture-patterns",
     "complexity-patterns",
@@ -20,9 +19,7 @@
     "database-patterns",
     "dependencies-patterns",
     "documentation-patterns",
-    "frontend-design",
     "performance-patterns",
-    "react",
     "regression-patterns",
     "review-methodology",
     "security-patterns",

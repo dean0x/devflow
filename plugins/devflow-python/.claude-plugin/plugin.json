@@ -1,0 +1,15 @@
+{
+  "name": "devflow-python",
+  "description": "Python language patterns - type hints, protocols, dataclasses, async programming",
+  "author": {
+    "name": "DevFlow Contributors",
+    "email": "dean@keren.dev"
+  },
+  "version": "1.1.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": ["python", "type-hints", "dataclasses", "async"],
+  "agents": [],
+  "skills": ["python"]
+}
