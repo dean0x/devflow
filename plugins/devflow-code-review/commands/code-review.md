@@ -43,18 +43,18 @@ Detect file types in diff to determine conditional reviews:
 | .tsx/.jsx files | accessibility |
 | .tsx/.jsx/.css/.scss files | frontend-design |
 | .go files | go |
-| .py files | python |
 | .java files | java |
+| .py files | python |
 | .rs files | rust |
 | DB/migration files | database |
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
 
-**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, python, java, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, check if `~/.claude/skills/{focus}/SKILL.md` exists (use Glob). If the skill file doesn't exist, **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, check if `~/.claude/skills/{focus}/SKILL.md` exists (use Glob). If the skill file doesn't exist, **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Run Reviews (Parallel)
 
-Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add up to 4 more:
+Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add more based on changed file types:
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
@@ -70,8 +70,8 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | accessibility | conditional | accessibility |
 | frontend-design | conditional | frontend-design |
 | go | conditional | go |
-| python | conditional | python |
 | java | conditional | java |
+| python | conditional | python |
 | rust | conditional | rust |
 | database | conditional | database-patterns |
 | dependencies | conditional | dependencies-patterns |
@@ -133,7 +133,7 @@ Display results from all agents:
 │  ├─ Reviewer: consistency
 │  ├─ Reviewer: regression
 │  ├─ Reviewer: tests
-│  └─ Reviewer: [conditional: typescript, react, a11y, design, go, python, java, rust, database, deps, docs]
+│  └─ Reviewer: [conditional: typescript, react, a11y, design, go, java, python, rust, database, deps, docs]
 │
 ├─ Phase 3: Synthesis (PARALLEL)
 │  ├─ Git agent (comment-pr)

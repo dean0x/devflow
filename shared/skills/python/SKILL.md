@@ -117,7 +117,7 @@ def database_transaction(conn: Connection):
 class User:
     name: str
     email: str
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 ```
 
 ### Pydantic for Validation at Boundaries

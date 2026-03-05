@@ -283,7 +283,9 @@ type Client struct {
 
 func (c *Client) connection() (*grpc.ClientConn, error) {
     c.once.Do(func() {
-        c.conn, c.err = grpc.Dial("localhost:50051", grpc.WithInsecure())
+        // requires: "google.golang.org/grpc/credentials/insecure"
+        c.conn, c.err = grpc.Dial("localhost:50051",
+            grpc.WithTransportCredentials(insecure.NewCredentials()))
     })
     return c.conn, c.err
 }

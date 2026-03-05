@@ -78,14 +78,14 @@ async def resilient_batch(items: list[Item]) -> tuple[list[Result], list[Error]]
 ```python
 from typing import AsyncGenerator
 
-async def stream_results(query: str) -> AsyncGenerator[Record, None]:
+async def stream_results(query: str, params: tuple = ()) -> AsyncGenerator[Record, None]:
     async with get_connection() as conn:
-        cursor = await conn.execute(query)
+        cursor = await conn.execute(query, params)
         async for row in cursor:
             yield Record.from_row(row)
 
 # Usage
-async for record in stream_results("SELECT * FROM events"):
+async for record in stream_results("SELECT * FROM events WHERE type = ?", ("click",)):
     await process(record)
 ```
 

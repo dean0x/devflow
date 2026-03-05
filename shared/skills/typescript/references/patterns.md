@@ -137,7 +137,7 @@ const isUndefined = (value: unknown): value is undefined =>
 const isNullish = (value: unknown): value is null | undefined =>
   value === null || value === undefined;
 
-const isFunction = (value: unknown): value is Function =>
+const isFunction = (value: unknown): value is (...args: unknown[]) => unknown =>
   typeof value === 'function';
 
 const isObject = (value: unknown): value is object =>
@@ -760,7 +760,7 @@ function debounce<T extends (...args: any[]) => any>(
   fn: T,
   delayMs: number
 ): (...args: Parameters<T>) => void {
-  let timeoutId: NodeJS.Timeout | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   return (...args: Parameters<T>) => {
     if (timeoutId) clearTimeout(timeoutId);
@@ -774,7 +774,7 @@ function throttle<T extends (...args: any[]) => any>(
   limitMs: number
 ): (...args: Parameters<T>) => void {
   let lastRun = 0;
-  let timeoutId: NodeJS.Timeout | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   return (...args: Parameters<T>) => {
     const now = Date.now();

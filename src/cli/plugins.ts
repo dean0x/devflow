@@ -124,19 +124,19 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     optional: true,
   },
   {
-    name: 'devflow-python',
-    description: 'Python language patterns (type hints, protocols, data modeling)',
-    commands: [],
-    agents: [],
-    skills: ['python'],
-    optional: true,
-  },
-  {
     name: 'devflow-java',
     description: 'Java language patterns (records, sealed classes, composition)',
     commands: [],
     agents: [],
     skills: ['java'],
+    optional: true,
+  },
+  {
+    name: 'devflow-python',
+    description: 'Python language patterns (type hints, protocols, data modeling)',
+    commands: [],
+    agents: [],
+    skills: ['python'],
     optional: true,
   },
   {

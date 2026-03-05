@@ -8,7 +8,6 @@ activation:
     - "**/*.go"
   exclude:
     - "vendor/**"
-    - "**/*_test.go"
 ---
 
 # Go Patterns

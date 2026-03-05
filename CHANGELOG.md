@@ -5,6 +5,40 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Polyglot language skills** — Go, Java, Python, and Rust skill plugins with comprehensive patterns
+  - Go: error handling, interfaces, concurrency (errgroup, worker pools, fan-out/fan-in)
+  - Java: records, sealed classes, streams, composition over inheritance
+  - Python: type hints, protocols, dataclasses, async patterns
+  - Rust: ownership, error handling (`thiserror`/`anyhow`), type system, concurrency
+  - Skills: 26 → 30, Plugins: 9 → 17
+- **Optional plugin architecture** — Language/ecosystem plugins (`optional: true`) not installed by default
+  - Install selectively: `devflow init --plugin=go --plugin=python`
+  - Existing skills (typescript, react, accessibility, frontend-design) moved to optional plugins
+  - `devflow-core-skills` no longer bundles language-specific skills
+- **Conditional language reviews** in `/code-review` command
+  - Spawns language-specific Reviewer agents when matching files are in the diff
+  - Skill availability check: skips review if optional plugin not installed
+- **Dynamic skill loading in Coder agent** — Reads language skills at runtime based on DOMAIN hint instead of static frontmatter dependencies
+
+### Changed
+- **`devflow-core-skills`** no longer includes typescript, react, accessibility, or frontend-design skills (moved to optional plugins)
+- **Coder agent** frontmatter trimmed from 14 skills to 6 core skills; language skills loaded dynamically
+
+### Fixed
+- **Deprecated `grpc.WithInsecure()`** in Go concurrency examples → replaced with `grpc.WithTransportCredentials(insecure.NewCredentials())`
+- **Deprecated `datetime.utcnow`** in Python dataclass example → replaced with `datetime.now(timezone.utc)`
+- **SQL injection** in Python async streaming example → replaced raw query with parameterized query
+- **Deprecated `<Context.Provider>`** in React examples → replaced with `<Context>` (React 19+)
+- **Deprecated `useRef<T>()`** without argument in React patterns → replaced with `useRef<T | undefined>(undefined)` (React 19+)
+- **Non-portable `NodeJS.Timeout`** in TypeScript debounce/throttle → replaced with `ReturnType<typeof setTimeout>`
+- **Unsafe `Function` type** in TypeScript type guard → replaced with `(...args: unknown[]) => unknown`
+- **Go test file exclusion** removed from go skill activation (test files are valid Go code)
+
+---
+
 ## [1.1.0] - 2026-03-04
 
 ### Added
