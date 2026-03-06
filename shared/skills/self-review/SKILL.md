@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: Self-review framework evaluating implementation quality against 9 pillars (correctness, completeness, security, performance, maintainability, testing, documentation, error handling, simplicity). Fixes P0/P1 issues immediately rather than reporting them. Used by the Scrutinizer agent as a quality gate.
+description: This skill should be used when evaluating implementation quality before submission, checking correctness, security, and simplicity.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---

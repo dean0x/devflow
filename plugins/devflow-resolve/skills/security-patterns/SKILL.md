@@ -1,6 +1,6 @@
 ---
 name: security-patterns
-description: Security vulnerability analysis patterns for code review. Detects injection flaws, authentication bypasses, insecure cryptography, hardcoded secrets, and missing input sanitization. Loaded by Reviewer agent when focus=security.
+description: This skill should be used when reviewing code for injection flaws, auth bypasses, or hardcoded secrets.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
