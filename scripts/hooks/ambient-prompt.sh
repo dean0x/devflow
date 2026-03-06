@@ -35,7 +35,7 @@ PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt:
 Intent: BUILD | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
 Depth: QUICK (no overhead) | STANDARD (load skills) | ESCALATE (suggest /command)
 
-If STANDARD+: Read the ambient-router skill for classification details and skill selection matrix. For BUILD tasks, also load test-driven-development skill and enforce RED-GREEN-REFACTOR.
+If STANDARD+: Use the ambient-router skill already in your session context for classification details and skill selection matrix. For BUILD tasks, also load test-driven-development skill and enforce RED-GREEN-REFACTOR.
 
 If QUICK: Respond normally without stating classification.
 Only state classification aloud for STANDARD/ESCALATE."
