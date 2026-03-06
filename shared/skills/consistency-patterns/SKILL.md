@@ -1,6 +1,6 @@
 ---
 name: consistency-patterns
-description: Consistency analysis patterns for code review. Detects naming convention violations, pattern deviations, unnecessary simplification, and feature truncation in diffs. Loaded by Reviewer agent when focus=consistency.
+description: This skill should be used when reviewing code for naming convention violations, pattern deviations, or inconsistent API styles.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
