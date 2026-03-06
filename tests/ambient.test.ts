@@ -7,7 +7,7 @@ describe('addAmbientHook', () => {
     const settings = JSON.parse(result);
 
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('ambient-prompt.sh');
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('ambient-prompt');
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(5);
   });
 
@@ -35,7 +35,7 @@ describe('addAmbientHook', () => {
 
     expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
-    expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('ambient-prompt.sh');
+    expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('ambient-prompt');
   });
 
   it('is idempotent — does not add duplicate hooks', () => {
@@ -58,12 +58,13 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
   });
 
-  it('uses correct devflowDir path in command', () => {
+  it('uses correct devflowDir path in command via run-hook wrapper', () => {
     const result = addAmbientHook('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
     const command = settings.hooks.UserPromptSubmit[0].hooks[0].command;
 
-    expect(command).toContain('/custom/path/.devflow/scripts/hooks/ambient-prompt.sh');
+    expect(command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
+    expect(command).toContain('ambient-prompt');
   });
 });
 
@@ -81,7 +82,7 @@ describe('removeAmbientHook', () => {
       hooks: {
         UserPromptSubmit: [
           { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
-          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt.sh' }] },
+          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt' }] },
         ],
       },
     });
@@ -96,7 +97,7 @@ describe('removeAmbientHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt.sh' }] },
+          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt' }] },
         ],
       },
     });
@@ -111,7 +112,7 @@ describe('removeAmbientHook', () => {
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: 'stop.sh' }] }],
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt.sh' }] },
+          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt' }] },
         ],
       },
     });
@@ -134,7 +135,7 @@ describe('removeAmbientHook', () => {
       statusLine: { type: 'command' },
       hooks: {
         UserPromptSubmit: [
-          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt.sh' }] },
+          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt' }] },
         ],
       },
     });
@@ -171,7 +172,7 @@ describe('hasAmbientHook', () => {
       hooks: {
         UserPromptSubmit: [
           { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
-          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt.sh' }] },
+          { hooks: [{ type: 'command', command: '/path/to/ambient-prompt' }] },
         ],
       },
     });

@@ -13,9 +13,9 @@ describe('addMemoryHooks', () => {
     expect(settings.hooks.Stop).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.PreCompact).toHaveLength(1);
-    expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-memory.sh');
-    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory.sh');
-    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory.sh');
+    expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-memory');
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
+    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory');
   });
 
   it('preserves existing hooks (UserPromptSubmit/ambient untouched)', () => {
@@ -44,8 +44,8 @@ describe('addMemoryHooks', () => {
   it('adds only missing hooks when partial state (1 hook missing)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory.sh', timeout: 10 }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory.sh', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory', timeout: 10 }] }],
       },
     });
     const result = addMemoryHooks(input, '/home/user/.devflow');
@@ -56,7 +56,7 @@ describe('addMemoryHooks', () => {
     expect(settings.hooks.SessionStart).toHaveLength(1);
     // Missing hook added
     expect(settings.hooks.PreCompact).toHaveLength(1);
-    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory.sh');
+    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory');
   });
 
   it('creates hooks object if missing', () => {
@@ -68,13 +68,16 @@ describe('addMemoryHooks', () => {
     expect(settings.hooks.Stop).toHaveLength(1);
   });
 
-  it('uses correct devflowDir path in command', () => {
+  it('uses correct devflowDir path in command via run-hook wrapper', () => {
     const result = addMemoryHooks('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/stop-update-memory.sh');
-    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/session-start-memory.sh');
-    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/pre-compact-memory.sh');
+    expect(settings.hooks.Stop[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
+    expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-memory');
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('run-hook');
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
+    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('run-hook');
+    expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory');
   });
 
   it('preserves other settings (statusLine, env)', () => {
@@ -113,9 +116,9 @@ describe('removeMemoryHooks', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt.sh' }] }],
-        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory.sh' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory.sh' }] }],
-        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory.sh' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
       },
     });
     const result = removeMemoryHooks(input);
@@ -139,7 +142,7 @@ describe('removeMemoryHooks', () => {
   it('cleans empty hook type arrays', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory.sh' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
       },
     });
     const result = removeMemoryHooks(input);
@@ -159,7 +162,7 @@ describe('removeMemoryHooks', () => {
   it('removes only the hooks that exist (partial)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory.sh' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
         // SessionStart and PreCompact already missing
       },
     });
@@ -173,9 +176,9 @@ describe('removeMemoryHooks', () => {
     const input = JSON.stringify({
       statusLine: { type: 'command' },
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory.sh' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory.sh' }] }],
-        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory.sh' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
       },
     });
     const result = removeMemoryHooks(input);
@@ -198,7 +201,7 @@ describe('hasMemoryHooks', () => {
   it('returns false when partial (1 or 2 of 3)', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory.sh' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
       },
     });
     expect(hasMemoryHooks(input)).toBe(false);
@@ -227,8 +230,8 @@ describe('countMemoryHooks', () => {
   it('returns correct partial count', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory.sh' }] }],
-        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory.sh' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
       },
     });
     expect(countMemoryHooks(input)).toBe(2);

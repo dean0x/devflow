@@ -5,7 +5,7 @@
 # Also captures fresh git state so Claude knows what's changed since the memory was written.
 # Adds staleness warning if memory is >1 hour old.
 
-set -euo pipefail
+set -e
 
 # jq is required to parse hook input JSON — silently no-op if missing
 if ! command -v jq &>/dev/null; then exit 0; fi

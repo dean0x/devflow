@@ -6,7 +6,7 @@
 # has something to inject after compaction.
 # PreCompact hooks cannot block compaction — this is informational only.
 
-set -euo pipefail
+set -e
 
 # jq is required to parse hook input JSON — silently no-op if missing
 if ! command -v jq &>/dev/null; then exit 0; fi
