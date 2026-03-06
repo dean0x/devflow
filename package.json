@@ -26,7 +26,8 @@
     "prepublishOnly": "npm run build",
     "version:bump": "npx tsx scripts/bump-version.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "keywords": [
     "claude",
