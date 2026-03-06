@@ -1,9 +1,6 @@
 ---
 name: test-driven-development
-description: >-
-  Enforce RED-GREEN-REFACTOR cycle during implementation. Write failing tests before
-  production code. Distinct from test-patterns (which reviews test quality) — this
-  skill enforces the TDD workflow during code generation.
+description: This skill should be used when implementing new features, fixing bugs, or writing new code. Enforces RED-GREEN-REFACTOR.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:

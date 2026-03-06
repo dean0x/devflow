@@ -1,6 +1,6 @@
 ---
 name: database-patterns
-description: Database analysis patterns for code review. Detects missing indexes, slow queries, unsafe migrations, schema design issues, and connection pool misuse. Loaded by Reviewer agent when focus=database.
+description: This skill should be used when reviewing database queries, migrations, indexes, or schema changes.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

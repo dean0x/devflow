@@ -1,6 +1,6 @@
 ---
 name: dependencies-patterns
-description: Dependency analysis patterns for code review. Detects known CVEs, outdated packages, license incompatibilities, and unnecessary transitive dependencies. Loaded by Reviewer agent when focus=dependencies.
+description: This skill should be used when reviewing dependency changes, lock files, or package additions.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
