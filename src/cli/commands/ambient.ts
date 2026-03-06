@@ -23,7 +23,7 @@ interface Settings {
   [key: string]: unknown;
 }
 
-const AMBIENT_HOOK_MARKER = 'ambient-prompt.sh';
+const AMBIENT_HOOK_MARKER = 'ambient-prompt';
 
 /**
  * Add the ambient UserPromptSubmit hook to settings JSON.
@@ -40,7 +40,7 @@ export function addAmbientHook(settingsJson: string, devflowDir: string): string
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', AMBIENT_HOOK_MARKER);
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' ambient-prompt';
 
   const newEntry: HookMatcher = {
     hooks: [

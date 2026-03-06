@@ -224,7 +224,9 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   try {
     await fs.mkdir(scriptsTarget, { recursive: true });
     await copyDirectory(scriptsSource, scriptsTarget);
-    await chmodRecursive(scriptsTarget, 0o755);
+    if (process.platform !== 'win32') {
+      await chmodRecursive(scriptsTarget, 0o755);
+    }
   } catch { /* scripts may not exist */ }
 
   spinner.stop('Components installed via file copy');

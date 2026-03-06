@@ -1,0 +1,15 @@
+: << 'CMDBLOCK'
+@echo off
+setlocal enabledelayedexpansion
+set "SCRIPT_DIR=%~dp0"
+set "HOOK_NAME=%~1"
+shift
+where bash >nul 2>&1 && (
+    bash "%SCRIPT_DIR%%HOOK_NAME%.sh" %* & exit /b !errorlevel!
+)
+exit /b 0
+CMDBLOCK
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOOK_NAME="$1"
+shift
+exec bash "$SCRIPT_DIR/${HOOK_NAME}.sh" "$@"

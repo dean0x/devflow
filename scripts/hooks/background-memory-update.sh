@@ -5,7 +5,7 @@
 # Resumes the parent session headlessly to update .memory/WORKING-MEMORY.md.
 # On failure: logs error, does nothing (no fallback).
 
-set -euo pipefail
+set -e
 
 CWD="$1"
 SESSION_ID="$2"

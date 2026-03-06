@@ -6,7 +6,7 @@
 # Ambient: injects ambient-router SKILL.md so Claude has it in context (no Read call needed).
 # Either section can fire independently — ambient works even without memory files.
 
-set -euo pipefail
+set -e
 
 # jq is required to parse hook input JSON — silently no-op if missing
 if ! command -v jq &>/dev/null; then exit 0; fi
