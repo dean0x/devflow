@@ -5,7 +5,7 @@
 # The session ends immediately — no visible edit in the TUI.
 # On failure: does nothing (stale memory is better than fake data).
 
-set -euo pipefail
+set -e
 
 # Break feedback loop: background updater's headless session triggers stop hook on exit.
 # DEVFLOW_BG_UPDATER is set by background-memory-update.sh before invoking claude.

@@ -28,9 +28,9 @@ interface Settings {
  * Map of hook event type → filename marker for the 3 memory hooks.
  */
 const MEMORY_HOOK_CONFIG: Record<string, string> = {
-  Stop: 'stop-update-memory.sh',
-  SessionStart: 'session-start-memory.sh',
-  PreCompact: 'pre-compact-memory.sh',
+  Stop: 'stop-update-memory',
+  SessionStart: 'session-start-memory',
+  PreCompact: 'pre-compact-memory',
 };
 
 /**
@@ -57,7 +57,7 @@ export function addMemoryHooks(settingsJson: string, devflowDir: string): string
     );
 
     if (!alreadyPresent) {
-      const hookCommand = path.join(devflowDir, 'scripts', 'hooks', marker);
+      const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ` ${marker}`;
       const newEntry: HookMatcher = {
         hooks: [
           {
