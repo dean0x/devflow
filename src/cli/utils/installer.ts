@@ -149,6 +149,12 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
       }
     }
     for (const skill of allSkills) {
+      // Skip cleanup for shadowed skills — user has a personal override
+      const shadowDir = path.join(devflowDir, 'skills', skill);
+      try {
+        const stat = await fs.stat(shadowDir);
+        if (stat.isDirectory()) continue;
+      } catch { /* no shadow — proceed with cleanup */ }
       try {
         await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
       } catch { /* ignore */ }
@@ -200,13 +206,19 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
       }
     } catch { /* no agents directory */ }
 
-    // Install skills (deduplicated)
+    // Install skills (deduplicated, respects shadows)
     const skillsSource = path.join(pluginSourceDir, 'skills');
     try {
       const skillDirs = await fs.readdir(skillsSource, { withFileTypes: true });
       for (const skillDir of skillDirs) {
         if (skillDir.isDirectory()) {
           if (skillsMap.get(skillDir.name) === plugin.name) {
+            // Skip copy for shadowed skills — user has a personal override
+            const shadowDir = path.join(devflowDir, 'skills', skillDir.name);
+            try {
+              const stat = await fs.stat(shadowDir);
+              if (stat.isDirectory()) continue;
+            } catch { /* no shadow — proceed with copy */ }
             const skillTarget = path.join(claudeDir, 'skills', skillDir.name);
             await copyDirectory(
               path.join(skillsSource, skillDir.name),
