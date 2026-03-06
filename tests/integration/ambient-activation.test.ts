@@ -1,0 +1,57 @@
+import { describe, it, expect } from 'vitest';
+import {
+  isClaudeAvailable,
+  runClaude,
+  hasClassification,
+  isQuietResponse,
+  extractIntent,
+  extractDepth,
+} from './helpers.js';
+
+/**
+ * Integration tests for ambient mode skill activation.
+ *
+ * These tests require:
+ * - `claude` CLI installed and authenticated
+ * - Ambient mode enabled (`devflow ambient --enable`)
+ * - DevFlow skills installed (`devflow init`)
+ *
+ * Run manually: npm run test:integration
+ * Not part of `npm test` — each test is an API call.
+ */
+describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
+  // QUICK tier — no skills loaded, no classification output
+  it('classifies "thanks" as QUICK (silent)', () => {
+    const output = runClaude('thanks');
+    expect(isQuietResponse(output)).toBe(true);
+  });
+
+  it('classifies "commit this" as QUICK (git op)', () => {
+    const output = runClaude('commit the current changes');
+    // Git operations should not trigger STANDARD classification
+    expect(isQuietResponse(output) || extractDepth(output) === 'QUICK').toBe(true);
+  });
+
+  // STANDARD tier — skills referenced in output
+  it('classifies "add a login form" as BUILD/STANDARD', () => {
+    const output = runClaude('add a login form with email and password fields');
+    if (hasClassification(output)) {
+      expect(extractIntent(output)).toBe('BUILD');
+      expect(extractDepth(output)).toBe('STANDARD');
+    }
+    // Even without explicit classification, BUILD prompts should reference TDD
+    expect(
+      output.toLowerCase().includes('test') ||
+      output.toLowerCase().includes('tdd') ||
+      hasClassification(output)
+    ).toBe(true);
+  });
+
+  it('classifies "fix the auth error" as DEBUG/STANDARD', () => {
+    const output = runClaude('fix the authentication error in the login handler');
+    if (hasClassification(output)) {
+      expect(extractIntent(output)).toBe('DEBUG');
+      expect(['STANDARD', 'ESCALATE']).toContain(extractDepth(output));
+    }
+  });
+});
