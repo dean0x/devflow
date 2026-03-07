@@ -65,19 +65,26 @@ See `references/skill-catalog.md` for the full skill-to-intent mapping with file
 
 ## Step 4: Apply
 
+<IMPORTANT>
+When classification is STANDARD or ESCALATE, skill application is NON-NEGOTIABLE.
+Do not rationalize skipping skills. Do not respond without loading them first.
+If test-driven-development is selected, you MUST write the failing test before ANY production code.
+</IMPORTANT>
+
 - **QUICK:** Respond directly. No preamble, no classification statement.
-- **STANDARD:** State classification briefly: `Ambient: BUILD/STANDARD. Loading: test-driven-development, implementation-patterns.` Then read the selected skills and apply their patterns to your response. For BUILD intent, enforce RED-GREEN-REFACTOR from test-driven-development.
-- **ESCALATE:** Respond with your best effort, then append: `> This task spans multiple files/systems. Consider \`/implement\` for full lifecycle (exploration → planning → implementation → review).`
+- **STANDARD:** State classification briefly: `Ambient: BUILD/STANDARD. Loading: test-driven-development, implementation-patterns.` Then read the selected skills and apply their patterns. No exceptions.
+- **ESCALATE:** Respond with your best effort, then append: `> This task spans multiple files/systems. Consider \`/implement\` for full lifecycle.`
 
 ---
 
 ## Transparency Rules
 
 1. **QUICK → silent.** No classification output.
-2. **STANDARD → brief statement.** One line: intent, depth, skills loaded.
+2. **STANDARD → brief statement + full skill enforcement.** One line: intent, depth, skills loaded. Then follow every skill requirement without shortcuts.
 3. **ESCALATE → recommendation.** Best-effort response + workflow nudge.
 4. **Never lie about classification.** If uncertain, say so.
 5. **Never over-classify.** When in doubt, go one tier lower.
+6. **Never under-apply.** Rationalization is the enemy of quality. If a skill requires a step, do the step.
 
 ## Edge Cases
 

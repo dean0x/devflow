@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Background Working Memory Updater
-# Called by stop-update-memory.sh as a detached background process.
+# Called by stop-update-memory as a detached background process.
 # Resumes the parent session headlessly to update .memory/WORKING-MEMORY.md.
 # On failure: logs error, does nothing (no fallback).
 
@@ -29,7 +29,7 @@ rotate_log() {
 
 # --- Stale Lock Recovery ---
 
-# Portable mtime in epoch seconds (same pattern as stop-update-memory.sh:35-39)
+# Portable mtime in epoch seconds (same pattern as stop-update-memory:35-39)
 get_mtime() {
   if stat --version &>/dev/null 2>&1; then
     stat -c %Y "$1"

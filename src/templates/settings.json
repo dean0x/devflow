@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${DEVFLOW_DIR}/scripts/hooks/stop-update-memory.sh",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook stop-update-memory",
             "timeout": 10
           }
         ]
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${DEVFLOW_DIR}/scripts/hooks/session-start-memory.sh",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook session-start-memory",
             "timeout": 10
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${DEVFLOW_DIR}/scripts/hooks/pre-compact-memory.sh",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook pre-compact-memory",
             "timeout": 10
           }
         ]

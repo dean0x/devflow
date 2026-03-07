@@ -1,7 +1,7 @@
 #!/bin/bash
 # Ensures .memory/ exists and .gitignore entries are configured.
 # Called from stop and pre-compact hooks. Idempotent, ~1μs after first run.
-# Usage: source ensure-memory-gitignore.sh "$CWD"
+# Usage: source ensure-memory-gitignore "$CWD"
 
 _MEMORY_DIR="$1/.memory"
 

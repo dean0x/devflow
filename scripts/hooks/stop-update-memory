@@ -8,7 +8,7 @@
 set -e
 
 # Break feedback loop: background updater's headless session triggers stop hook on exit.
-# DEVFLOW_BG_UPDATER is set by background-memory-update.sh before invoking claude.
+# DEVFLOW_BG_UPDATER is set by background-memory-update before invoking claude.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
 
 # jq is required to parse hook input JSON — silently no-op if missing
@@ -24,7 +24,7 @@ fi
 
 # Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
 SCRIPT_DIR_EARLY="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR_EARLY/ensure-memory-gitignore.sh" "$CWD" || exit 0
+source "$SCRIPT_DIR_EARLY/ensure-memory-gitignore" "$CWD" || exit 0
 
 # Logging (shared log file with background updater; [stop-hook] prefix distinguishes)
 MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
@@ -65,7 +65,7 @@ fi
 
 # Resolve the background updater script (same directory as this hook)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-UPDATER="$SCRIPT_DIR/background-memory-update.sh"
+UPDATER="$SCRIPT_DIR/background-memory-update"
 if [ ! -x "$UPDATER" ]; then
   log "Skipped: updater not found/not executable at $UPDATER"
   exit 0
