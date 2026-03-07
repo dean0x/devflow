@@ -97,7 +97,7 @@ Working memory files live in a dedicated `.memory/` directory:
 └── backup.json               # Pre-compact git state snapshot
 ```
 
-**Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes. Use `.devflow/scripts/docs-helpers.sh` for consistent naming.
+**Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
 
 **Persisting agents**: Reviewer → `.docs/reviews/`, Synthesizer → `.docs/reviews/` (review mode), Working Memory → `.memory/WORKING-MEMORY.md` (automatic)
 
