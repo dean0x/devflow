@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../utils/paths.js';
+import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
@@ -439,8 +439,9 @@ export const uninstallCommand = new Command('uninstall')
     if (!isSelectiveUninstall) {
       const shadowed = await listShadowed();
       if (shadowed.length > 0) {
-        p.log.warn(`Personal skill overrides remain in ~/.devflow/skills/: ${shadowed.join(', ')}`);
-        p.log.info(color.dim('Remove manually or run: rm -rf ~/.devflow/skills/'));
+        const shadowPath = path.join(getDevFlowDirectory(), 'skills');
+        p.log.warn(`Personal skill overrides remain in ${shadowPath}: ${shadowed.join(', ')}`);
+        p.log.info(color.dim(`Remove manually or run: rm -rf ${shadowPath}`));
       }
     }
 

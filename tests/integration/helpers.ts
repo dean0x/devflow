@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 
 /**
  * Check if the `claude` CLI is available on this machine.
@@ -19,8 +19,9 @@ export function isClaudeAvailable(): boolean {
 export function runClaude(prompt: string, options?: { timeout?: number }): string {
   const timeout = options?.timeout ?? 30000;
 
-  const result = execSync(
-    `claude -p --output-format text --model haiku "${prompt.replace(/"/g, '\\"')}"`,
+  const result = execFileSync(
+    'claude',
+    ['-p', '--output-format', 'text', '--model', 'haiku', prompt],
     {
       stdio: 'pipe',
       timeout,

@@ -150,8 +150,9 @@ export const ambientCommand = new Command('ambient')
       // Try to extract devflowDir from existing hooks (e.g., Stop hook path)
       const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
       if (stopHook) {
-        // e.g., /Users/dean/.devflow/scripts/hooks/stop-update-memory.sh → /Users/dean/.devflow
-        devflowDir = path.resolve(stopHook, '..', '..', '..');
+        // e.g., "run-hook stop-update-memory" or "/path/to/.devflow/scripts/hooks/run-hook stop-update-memory"
+        const hookBinary = stopHook.split(' ')[0];
+        devflowDir = path.resolve(hookBinary, '..', '..', '..');
       } else {
         devflowDir = path.join(process.env.HOME || '~', '.devflow');
       }

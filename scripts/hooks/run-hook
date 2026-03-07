@@ -7,6 +7,7 @@ shift
 where bash >nul 2>&1 && (
     bash "%SCRIPT_DIR%%HOOK_NAME%.sh" %* & exit /b !errorlevel!
 )
+echo Warning: bash not found, DevFlow hooks require bash >&2
 exit /b 0
 CMDBLOCK
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
