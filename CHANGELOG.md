@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Background memory updater silent Write failures** — Added Read permission for memory files (Claude Code enforces Read-before-Write), read-only git commands for fresh context, mtime validation to detect silent failures, and stdout logging for debugging
+
 ---
 
 ## [1.3.0] - 2026-03-08
