@@ -83,7 +83,7 @@ export function mergeDenyList(existingJson: string, newDenyEntries: string[]): s
  *
  * Strategy:
  * 1. Try direct write (works if running as root or directory is writable)
- * 2. If EACCES in TTY, offer to retry with sudo
+ * 2. If EACCES in TTY, retry with sudo (caller is responsible for obtaining consent)
  * 3. Returns true if managed settings were written, false if caller should fall back
  */
 export async function installManagedSettings(
@@ -138,17 +138,8 @@ export async function installManagedSettings(
     }
   }
 
-  // Attempt 2: sudo (TTY only)
+  // Attempt 2: sudo (TTY only — sudo needs terminal for password prompt)
   if (!process.stdin.isTTY) {
-    return false;
-  }
-
-  const confirmed = await p.confirm({
-    message: `Managed settings require admin access (${managedDir}). Use sudo?`,
-    initialValue: true,
-  });
-
-  if (p.isCancel(confirmed) || !confirmed) {
     return false;
   }
 
