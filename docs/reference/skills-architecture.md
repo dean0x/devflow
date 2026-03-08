@@ -91,7 +91,7 @@ Create in `shared/skills/skill-name/SKILL.md` (~120-150 lines):
 ```markdown
 ---
 name: skill-name
-description: Brief description with trigger phrases (<180 chars)
+description: "This skill should be used when..." with concrete trigger words (<180 chars)
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion
 activation:
@@ -139,6 +139,24 @@ For additional examples and detection patterns:
 - [ ] Checklist item 1
 - [ ] Checklist item 2
 ```
+
+## Description Rules
+
+Skill descriptions appear in Claude Code's skill catalog and influence when Claude auto-invokes skills. Poorly written descriptions can cause Claude to treat the description itself as instructions, bypassing the actual SKILL.md flowchart.
+
+**Format**: Descriptions MUST start with `"This skill should be used when..."`.
+
+**Include**: Concrete trigger words -- tool names, error types, user phrases, file types, or review focus areas that signal when the skill is relevant.
+
+**Never**: Describe the skill's internal process, steps, methodology, or output format in the description. That information belongs in the SKILL.md body, not the frontmatter.
+
+### Examples
+
+| Bad (process summary) | Good (trigger-only) |
+|---|---|
+| "Standard review methodology providing the 6-step process and 3-category issue classification used by all review agents." | "This skill should be used when performing a code review to apply the standard 6-step review process." |
+| "Security vulnerability analysis patterns for code review. Detects injection flaws, authentication bypasses, insecure cryptography." | "This skill should be used when reviewing code for injection flaws, auth bypasses, or hardcoded secrets." |
+| "Enforce RED-GREEN-REFACTOR cycle during implementation. Write failing tests before production code." | "This skill should be used when implementing new features, fixing bugs, or writing new code. Enforces RED-GREEN-REFACTOR." |
 
 ## Progressive Disclosure Structure
 

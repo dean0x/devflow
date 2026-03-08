@@ -23,7 +23,7 @@ interface Settings {
   [key: string]: unknown;
 }
 
-const AMBIENT_HOOK_MARKER = 'ambient-prompt.sh';
+const AMBIENT_HOOK_MARKER = 'ambient-prompt';
 
 /**
  * Add the ambient UserPromptSubmit hook to settings JSON.
@@ -40,7 +40,7 @@ export function addAmbientHook(settingsJson: string, devflowDir: string): string
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', AMBIENT_HOOK_MARKER);
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' ambient-prompt';
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -150,8 +150,9 @@ export const ambientCommand = new Command('ambient')
       // Try to extract devflowDir from existing hooks (e.g., Stop hook path)
       const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
       if (stopHook) {
-        // e.g., /Users/dean/.devflow/scripts/hooks/stop-update-memory.sh → /Users/dean/.devflow
-        devflowDir = path.resolve(stopHook, '..', '..', '..');
+        // e.g., "run-hook stop-update-memory" or "/path/to/.devflow/scripts/hooks/run-hook stop-update-memory"
+        const hookBinary = stopHook.split(' ')[0];
+        devflowDir = path.resolve(hookBinary, '..', '..', '..');
       } else {
         devflowDir = path.join(process.env.HOME || '~', '.devflow');
       }

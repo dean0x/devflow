@@ -1,0 +1,23 @@
+: << 'CMDBLOCK'
+@echo off
+setlocal enabledelayedexpansion
+set "SCRIPT_DIR=%~dp0"
+set "HOOK_NAME=%~1"
+shift
+REM Try standard Git for Windows locations, then PATH
+set "BASH_EXE="
+if exist "C:\Program Files\Git\bin\bash.exe" set "BASH_EXE=C:\Program Files\Git\bin\bash.exe"
+if not defined BASH_EXE if exist "C:\Program Files (x86)\Git\bin\bash.exe" set "BASH_EXE=C:\Program Files (x86)\Git\bin\bash.exe"
+if not defined BASH_EXE (
+    where bash >nul 2>&1 && set "BASH_EXE=bash"
+)
+if defined BASH_EXE (
+    "%BASH_EXE%" "%SCRIPT_DIR%%HOOK_NAME%" %* & exit /b !errorlevel!
+)
+echo Warning: bash not found, DevFlow hooks require bash >&2
+exit /b 0
+CMDBLOCK
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HOOK_NAME="$1"
+shift
+exec bash "$SCRIPT_DIR/${HOOK_NAME}" "$@"

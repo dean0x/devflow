@@ -1,6 +1,6 @@
 ---
 name: complexity-patterns
-description: Complexity analysis patterns for code review. Detects high cyclomatic complexity, deep nesting, long functions, and readability issues that hinder maintainability. Loaded by Reviewer agent when focus=complexity.
+description: This skill should be used when reviewing code for high cyclomatic complexity, deep nesting, or long functions.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

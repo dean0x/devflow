@@ -6,7 +6,7 @@
 # has something to inject after compaction.
 # PreCompact hooks cannot block compaction — this is informational only.
 
-set -euo pipefail
+set -e
 
 # jq is required to parse hook input JSON — silently no-op if missing
 if ! command -v jq &>/dev/null; then exit 0; fi
@@ -19,7 +19,7 @@ if [ -z "$CWD" ]; then
 fi
 
 # Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
-source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore.sh" "$CWD" || exit 0
+source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore" "$CWD" || exit 0
 
 BACKUP_FILE="$CWD/.memory/backup.json"
 

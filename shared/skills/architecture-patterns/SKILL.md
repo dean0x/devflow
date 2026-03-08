@@ -1,6 +1,6 @@
 ---
 name: architecture-patterns
-description: Architecture analysis patterns for code review. Detects SOLID violations, tight coupling, layering issues, and dependency direction problems. Loaded by Reviewer agent when focus=architecture.
+description: This skill should be used when reviewing code for SOLID violations, tight coupling, or layering issues.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---

@@ -1,6 +1,6 @@
 ---
 name: review-methodology
-description: Standard review methodology providing the 6-step process and 3-category issue classification (must-fix, should-fix, nit) used by all DevFlow review agents. Ensures consistent, fair, and actionable code reviews across all focus areas. Loaded by the unified Reviewer agent.
+description: This skill should be used when performing a code review to apply the standard 6-step review process.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash
 ---

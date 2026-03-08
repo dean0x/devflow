@@ -9,6 +9,7 @@ import { uninstallCommand } from './commands/uninstall.js';
 import { listCommand } from './commands/list.js';
 import { ambientCommand } from './commands/ambient.js';
 import { memoryCommand } from './commands/memory.js';
+import { skillsCommand } from './commands/skills.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,6 +34,7 @@ program.addCommand(uninstallCommand);
 program.addCommand(listCommand);
 program.addCommand(ambientCommand);
 program.addCommand(memoryCommand);
+program.addCommand(skillsCommand);
 
 // Handle no command
 program.action(() => {

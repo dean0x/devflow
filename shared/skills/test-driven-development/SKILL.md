@@ -1,9 +1,6 @@
 ---
 name: test-driven-development
-description: >-
-  Enforce RED-GREEN-REFACTOR cycle during implementation. Write failing tests before
-  production code. Distinct from test-patterns (which reviews test quality) — this
-  skill enforces the TDD workflow during code generation.
+description: This skill should be used when implementing new features, fixing bugs, or writing new code. Enforces RED-GREEN-REFACTOR.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:
@@ -94,7 +91,7 @@ See `references/rationalization-prevention.md` for extended examples with code.
 
 ## Process Enforcement
 
-When implementing any feature under ambient BUILD/STANDARD:
+When implementing any feature under ambient BUILD/GUIDED:
 
 1. **Identify the first behavior** — What is the simplest thing this feature must do?
 2. **Write the test** — Describe that behavior as a failing test
@@ -133,7 +130,7 @@ When skipping TDD, never rationalize. State clearly: "Skipping TDD because: [spe
 
 ## Integration with Ambient Mode
 
-- **BUILD/STANDARD** → TDD enforced. Every new function/method gets test-first treatment.
+- **BUILD/GUIDED** → TDD enforced. Every new function/method gets test-first treatment.
 - **BUILD/QUICK** → TDD skipped (trivial single-file edit).
-- **BUILD/ESCALATE** → TDD mentioned in nudge toward `/implement`.
-- **DEBUG/STANDARD** → TDD applies to the fix: write a test that reproduces the bug first, then fix.
+- **BUILD/ELEVATE** → TDD mentioned in nudge toward `/implement`.
+- **DEBUG/GUIDED** → TDD applies to the fix: write a test that reproduces the bug first, then fix.

@@ -443,9 +443,11 @@ export const initCommand = new Command('init')
       const settingsPath = path.join(claudeDir, 'settings.json');
       try {
         const content = await fs.readFile(settingsPath, 'utf-8');
+        // Always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
+        const cleaned = removeMemoryHooks(content);
         const updated = memoryEnabled
-          ? addMemoryHooks(content, devflowDir)
-          : removeMemoryHooks(content);
+          ? addMemoryHooks(cleaned, devflowDir)
+          : cleaned;
         if (updated !== content) {
           await fs.writeFile(settingsPath, updated, 'utf-8');
           if (verbose) {

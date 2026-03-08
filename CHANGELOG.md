@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Ambient mode** — New `devflow-ambient` plugin with `/ambient` command for proportional quality enforcement
   - Intent classification (BUILD/DEBUG/REVIEW/PLAN/EXPLORE/CHAT) auto-loads relevant skills
-  - Three depth tiers: QUICK (zero overhead), STANDARD (2-3 skills), ESCALATE (nudge to workflows)
+  - Three depth tiers: QUICK (zero overhead), GUIDED (2-3 skills), ELEVATE (nudge to workflows)
   - Always-on mode via `devflow ambient --enable` or `devflow init --ambient`
   - New `ambient-router` skill for intent/depth classification
   - New `test-driven-development` skill (auto-activates for BUILD tasks)

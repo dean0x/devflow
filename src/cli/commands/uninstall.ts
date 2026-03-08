@@ -5,12 +5,13 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getInstallationPaths, getClaudeDirectory, getManagedSettingsPath } from '../utils/paths.js';
+import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
+import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
@@ -431,6 +432,16 @@ export const uninstallCommand = new Command('uninstall')
         } else {
           p.log.info(`Safe-delete function preserved in ${profilePath} (non-interactive mode)`);
         }
+      }
+    }
+
+    // Warn about personal skill overrides
+    if (!isSelectiveUninstall) {
+      const shadowed = await listShadowed();
+      if (shadowed.length > 0) {
+        const shadowPath = path.join(getDevFlowDirectory(), 'skills');
+        p.log.warn(`Personal skill overrides remain in ${shadowPath}: ${shadowed.join(', ')}`);
+        p.log.info(color.dim(`Remove manually or run: rm -rf ${shadowPath}`));
       }
     }
 
