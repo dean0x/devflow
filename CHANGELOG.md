@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Init prompt improvements** — Agent Teams marked as experimental with recommendation to disable; ambient mode now defaults to enabled (recommended)
+- **Init flags documented** — Added `--ambient`/`--no-ambient` and `--memory`/`--no-memory` to README
+
 ---
 
 ## [1.3.1] - 2026-03-08
