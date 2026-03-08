@@ -34,10 +34,10 @@ export function runClaude(prompt: string, options?: { timeout?: number }): strin
 
 /**
  * Assert that output contains a classification marker (case-insensitive).
- * Classification markers look like: "Ambient: BUILD/STANDARD"
+ * Classification markers look like: "Ambient: BUILD/GUIDED"
  */
 export function hasClassification(output: string): boolean {
-  return /ambient:\s*(BUILD|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|STANDARD|ESCALATE)/i.test(output);
+  return /ambient:\s*(BUILD|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ELEVATE)/i.test(output);
 }
 
 /**
@@ -60,6 +60,6 @@ export function extractIntent(output: string): string | null {
  * Extract the depth from a classification marker.
  */
 export function extractDepth(output: string): string | null {
-  const match = output.match(/ambient:\s*\w+\s*\/\s*(QUICK|STANDARD|ESCALATE)/i);
+  const match = output.match(/ambient:\s*\w+\s*\/\s*(QUICK|GUIDED|ELEVATE)/i);
   return match ? match[1].toUpperCase() : null;
 }

@@ -25,7 +25,7 @@ Read the `ambient-router` skill:
 Apply the ambient-router classification to `$ARGUMENTS`:
 
 1. **Intent:** BUILD | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
-2. **Depth:** QUICK | STANDARD | ESCALATE
+2. **Depth:** QUICK | GUIDED | ELEVATE
 
 If no arguments provided, output:
 
@@ -37,10 +37,10 @@ Classify intent and auto-load relevant skills.
 Usage: /ambient <your prompt>
 
 Examples:
-  /ambient add a login form          → BUILD/STANDARD (loads TDD + implementation-patterns)
-  /ambient fix the auth error        → DEBUG/STANDARD (loads test-patterns + core-patterns)
+  /ambient add a login form          → BUILD/GUIDED (loads TDD + implementation-patterns)
+  /ambient fix the auth error        → DEBUG/GUIDED (loads test-patterns + core-patterns)
   /ambient where is the config?      → EXPLORE/QUICK (responds normally)
-  /ambient refactor the auth system  → BUILD/ESCALATE (suggests /implement)
+  /ambient refactor the auth system  → BUILD/ELEVATE (suggests /implement)
 
 Always-on: devflow ambient --enable
 ```
@@ -50,15 +50,15 @@ Then stop.
 ### Phase 3: State Classification
 
 - **QUICK:** Skip this phase entirely. Respond directly in Phase 4.
-- **STANDARD:** Output one line: `Ambient: {INTENT}/{DEPTH}. Loading: {skill1}, {skill2}.`
-- **ESCALATE:** Skip — recommendation happens in Phase 4.
+- **GUIDED:** Output one line: `Ambient: {INTENT}/{DEPTH}. Loading: {skill1}, {skill2}.`
+- **ELEVATE:** Skip — recommendation happens in Phase 4.
 
 ### Phase 4: Apply
 
 **QUICK:**
 Respond to the user's prompt normally. Zero skill loading. Zero overhead.
 
-**STANDARD:**
+**GUIDED:**
 Read the selected skills based on the ambient-router's skill selection matrix:
 
 | Intent | Primary Skills | Secondary (conditional) |
@@ -72,7 +72,7 @@ Read up to 3 skills from `~/.claude/skills/{name}/SKILL.md`. Apply their pattern
 
 For BUILD intent: enforce RED-GREEN-REFACTOR from test-driven-development. Write failing tests before production code.
 
-**ESCALATE:**
+**ELEVATE:**
 Respond to the user's prompt with your best effort, then append:
 
 > This task spans multiple files/systems. Consider `/implement` for full lifecycle management (exploration → planning → implementation → review).
@@ -84,11 +84,11 @@ Respond to the user's prompt with your best effort, then append:
 │
 ├─ Phase 1: Load ambient-router skill
 ├─ Phase 2: Classify intent + depth
-├─ Phase 3: State classification (STANDARD only)
+├─ Phase 3: State classification (GUIDED only)
 └─ Phase 4: Apply
    ├─ QUICK → respond directly
-   ├─ STANDARD → load 2-3 skills, apply patterns, respond
-   └─ ESCALATE → respond + workflow nudge
+   ├─ GUIDED → load 2-3 skills, apply patterns, respond
+   └─ ELEVATE → respond + workflow nudge
 ```
 
 ## Edge Cases
@@ -104,7 +104,7 @@ Respond to the user's prompt with your best effort, then append:
 ## Principles
 
 1. **No agents** — Ambient enhances the main session, never spawns subagents
-2. **Proportional** — QUICK gets zero overhead, STANDARD gets 2-3 skills, ESCALATE gets a nudge
-3. **Transparent** — State classification for STANDARD/ESCALATE, silent for QUICK
+2. **Proportional** — QUICK gets zero overhead, GUIDED gets 2-3 skills, ELEVATE gets a nudge
+3. **Transparent** — State classification for GUIDED/ELEVATE, silent for QUICK
 4. **Respectful** — Never over-classify; when in doubt, go one tier lower
-5. **TDD for BUILD** — STANDARD depth BUILD tasks enforce test-first workflow
+5. **TDD for BUILD** — GUIDED depth BUILD tasks enforce test-first workflow

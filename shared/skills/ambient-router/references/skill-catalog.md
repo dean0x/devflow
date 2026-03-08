@@ -4,7 +4,7 @@ Full mapping of DevFlow skills to ambient intents and file-type triggers. The am
 
 ## Skills Available for Ambient Loading
 
-These skills may be loaded during STANDARD-depth ambient routing.
+These skills may be loaded during GUIDED-depth ambient routing.
 
 ### BUILD Intent
 
@@ -65,4 +65,4 @@ These skills are loaded only by explicit DevFlow commands (primarily `/code-revi
 - **Maximum 3 skills** per ambient response (primary + up to 2 secondary)
 - **Primary skills** are always loaded for the classified intent
 - **Secondary skills** are loaded only when file patterns match conversation context
-- If more than 3 skills seem relevant, this is an ESCALATE signal
+- If more than 3 skills seem relevant, this is an ELEVATE signal

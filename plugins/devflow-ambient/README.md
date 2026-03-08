@@ -9,10 +9,10 @@ Ambient mode — auto-loads relevant skills based on each prompt, no explicit co
 Classify user intent and apply proportional skill enforcement to any prompt.
 
 ```bash
-/ambient add a login form          # BUILD/STANDARD — loads TDD + implementation-patterns
-/ambient fix the auth error        # DEBUG/STANDARD — loads test-patterns + core-patterns
+/ambient add a login form          # BUILD/GUIDED — loads TDD + implementation-patterns
+/ambient fix the auth error        # DEBUG/GUIDED — loads test-patterns + core-patterns
 /ambient where is the config?      # EXPLORE/QUICK — responds normally, zero overhead
-/ambient refactor the auth system  # BUILD/ESCALATE — suggests /implement
+/ambient refactor the auth system  # BUILD/ELEVATE — suggests /implement
 ```
 
 ## Always-On Mode
@@ -30,19 +30,19 @@ When enabled, a `UserPromptSubmit` hook injects a classification preamble before
 ## How It Works
 
 1. **Classify intent** — BUILD, DEBUG, REVIEW, PLAN, EXPLORE, or CHAT
-2. **Classify depth** — QUICK (zero overhead), STANDARD (2-3 skills), or ESCALATE (workflow nudge)
+2. **Classify depth** — QUICK (zero overhead), GUIDED (2-3 skills), or ELEVATE (workflow nudge)
 3. **Apply proportionally**:
    - QUICK: respond normally
-   - STANDARD: load relevant skills, enforce TDD for BUILD
-   - ESCALATE: respond + recommend full workflow command
+   - GUIDED: load relevant skills, enforce TDD for BUILD
+   - ELEVATE: respond + recommend full workflow command
 
 ## Depth Tiers
 
 | Depth | When | Overhead |
 |-------|------|----------|
 | QUICK | Chat, simple exploration, git/devops ops, single-word confirmations | ~0 tokens |
-| STANDARD | BUILD/DEBUG/REVIEW/PLAN, 1-5 file scope | ~500-1000 tokens (skill reads) |
-| ESCALATE | Multi-file, architectural, system-wide scope | ~0 extra tokens (nudge only) |
+| GUIDED | BUILD/DEBUG/REVIEW/PLAN, 1-5 file scope | ~500-1000 tokens (skill reads) |
+| ELEVATE | Multi-file, architectural, system-wide scope | ~0 extra tokens (nudge only) |
 
 ## Skills
 

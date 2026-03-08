@@ -28,16 +28,16 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
 
   it('classifies "commit this" as QUICK (git op)', () => {
     const output = runClaude('commit the current changes');
-    // Git operations should not trigger STANDARD classification
+    // Git operations should not trigger GUIDED classification
     expect(isQuietResponse(output) || extractDepth(output) === 'QUICK').toBe(true);
   });
 
-  // STANDARD tier — skills referenced in output
-  it('classifies "add a login form" as BUILD/STANDARD', () => {
+  // GUIDED tier — skills referenced in output
+  it('classifies "add a login form" as BUILD/GUIDED', () => {
     const output = runClaude('add a login form with email and password fields');
     if (hasClassification(output)) {
       expect(extractIntent(output)).toBe('BUILD');
-      expect(extractDepth(output)).toBe('STANDARD');
+      expect(extractDepth(output)).toBe('GUIDED');
     }
     // Even without explicit classification, BUILD prompts should reference TDD
     expect(
@@ -47,11 +47,11 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
     ).toBe(true);
   });
 
-  it('classifies "fix the auth error" as DEBUG/STANDARD', () => {
+  it('classifies "fix the auth error" as DEBUG/GUIDED', () => {
     const output = runClaude('fix the authentication error in the login handler');
     if (hasClassification(output)) {
       expect(extractIntent(output)).toBe('DEBUG');
-      expect(['STANDARD', 'ESCALATE']).toContain(extractDepth(output));
+      expect(['GUIDED', 'ELEVATE']).toContain(extractDepth(output));
     }
   });
 });
