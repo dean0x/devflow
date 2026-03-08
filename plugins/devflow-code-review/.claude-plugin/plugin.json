@@ -5,12 +5,22 @@
     "name": "DevFlow Contributors",
     "email": "dean@keren.dev"
   },
-  "version": "1.2.0",
+  "version": "1.3.0",
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
-  "keywords": ["review", "code-quality", "security", "architecture", "pr-review"],
-  "agents": ["git", "reviewer", "synthesizer"],
+  "keywords": [
+    "review",
+    "code-quality",
+    "security",
+    "architecture",
+    "pr-review"
+  ],
+  "agents": [
+    "git",
+    "reviewer",
+    "synthesizer"
+  ],
   "skills": [
     "agent-teams",
     "architecture-patterns",

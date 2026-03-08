@@ -5,11 +5,18 @@
     "name": "DevFlow Contributors",
     "email": "dean@keren.dev"
   },
-  "version": "1.2.0",
+  "version": "1.3.0",
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
-  "keywords": ["java", "records", "sealed-classes", "composition"],
+  "keywords": [
+    "java",
+    "records",
+    "sealed-classes",
+    "composition"
+  ],
   "agents": [],
-  "skills": ["java"]
+  "skills": [
+    "java"
+  ]
 }
