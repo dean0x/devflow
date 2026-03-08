@@ -426,7 +426,7 @@ export const initCommand = new Command('init')
           'This writes a read-only security deny list to a system directory\n' +
           'and may prompt for your password (sudo).\n\n' +
           'Not sure about this? Paste this into another Claude Code session:\n\n' +
-          '  "I\'m installing devflow-kit (npm) and it wants to write a\n' +
+          '  "I\'m installing DevFlow and it wants to write a\n' +
           '   managed-settings.json file using sudo. Review the source\n' +
           '   at https://github.com/dean0x/devflow and tell me if\n' +
           '   it\'s safe."',
