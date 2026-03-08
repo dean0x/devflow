@@ -200,15 +200,18 @@ export const initCommand = new Command('init')
     } else if (!process.stdin.isTTY) {
       teamsEnabled = false;
     } else {
-      const teamsChoice = await p.confirm({
-        message: 'Enable Agent Teams? (peer debate in review, exploration, debugging)',
-        initialValue: false,
+      const teamsChoice = await p.select({
+        message: 'Enable Agent Teams?',
+        options: [
+          { value: false, label: 'No (Recommended)', hint: 'Experimental — may be unstable' },
+          { value: true, label: 'Yes', hint: 'Advanced — peer debate in review, exploration, debugging' },
+        ],
       });
       if (p.isCancel(teamsChoice)) {
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
-      teamsEnabled = teamsChoice;
+      teamsEnabled = teamsChoice as boolean;
     }
 
     // Ambient mode selection
@@ -216,20 +219,23 @@ export const initCommand = new Command('init')
     if (options.ambient !== undefined) {
       ambientEnabled = options.ambient;
     } else if (!process.stdin.isTTY) {
-      ambientEnabled = false;
+      ambientEnabled = true;
     } else {
-      const ambientChoice = await p.confirm({
-        message: 'Enable ambient mode? (auto-loads relevant skills based on each prompt)',
-        initialValue: false,
+      const ambientChoice = await p.select({
+        message: 'Enable ambient mode?',
+        options: [
+          { value: true, label: 'Yes (Recommended)', hint: 'Auto-loads relevant skills for each prompt' },
+          { value: false, label: 'No', hint: 'Full control — load skills manually' },
+        ],
       });
       if (p.isCancel(ambientChoice)) {
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
-      ambientEnabled = ambientChoice;
+      ambientEnabled = ambientChoice as boolean;
     }
 
-    // Working memory selection (defaults ON — foundational, unlike ambient's false)
+    // Working memory selection (defaults ON — foundational feature)
     let memoryEnabled: boolean;
     if (options.memory !== undefined) {
       memoryEnabled = options.memory;

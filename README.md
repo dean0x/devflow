@@ -241,7 +241,9 @@ Session context is saved and restored automatically via Working Memory hooks —
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--scope <user\|local>` | Installation scope (default: user) |
-| `--teams` / `--no-teams` | Enable/disable experimental Agent Teams (default: off) |
+| `--teams` / `--no-teams` | Enable/disable Agent Teams (experimental, default: off) |
+| `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
+| `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
 | `--verbose` | Show detailed output |
 
 ### Uninstall Options
