@@ -5,7 +5,7 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.3] - 2026-03-09
 
 ### Changed
 - **Sudo trust prompt** — Managed settings now shows a clear explanation, a copy-pasteable verification prompt, and an explicit fallback option before any password prompt
@@ -840,6 +840,7 @@ devflow init
 
 ---
 
+[1.3.3]: https://github.com/dean0x/devflow/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/dean0x/devflow/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/dean0x/devflow/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/dean0x/devflow/compare/v1.2.0...v1.3.0

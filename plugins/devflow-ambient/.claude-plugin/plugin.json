@@ -1,7 +1,7 @@
 {
   "name": "devflow-ambient",
   "description": "Ambient mode — auto-loads relevant skills for every prompt",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "agents": [],
   "skills": [
     "ambient-router"

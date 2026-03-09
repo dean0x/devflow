@@ -1,7 +1,7 @@
 {
   "name": "devflow-self-review",
   "description": "Self-review workflow: Simplifier + Scrutinizer for code quality",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "agents": [
     "simplifier",
     "scrutinizer",
