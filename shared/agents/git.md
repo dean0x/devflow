@@ -21,7 +21,7 @@ The orchestrator provides:
 |-----------|---------|----------------|
 | `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | - |
 | `validate-branch` | Pre-flight for /resolve: check branch state | - |
-| `setup-task` | Create feature branch and fetch issue | `TASK_ID`, `BASE_BRANCH`, `ISSUE_INPUT` (optional) |
+| `setup-task` | Create feature branch and fetch issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
 | `comment-pr` | Create PR inline comments for review findings | `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP` |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP` |
@@ -101,25 +101,30 @@ Pre-flight validation for `/resolve`. Checks branch state without modifications.
 
 ## Operation: setup-task
 
-Set up task environment: create feature branch and optionally fetch issue.
+Set up task environment: derive branch name, create feature branch, and optionally fetch issue.
 
 **Input:**
-- `TASK_ID`: Unique task identifier (becomes branch name)
 - `BASE_BRANCH`: Branch to create from (track this for PR target)
 - `ISSUE_INPUT` (optional): Issue number to fetch
+- `TASK_DESCRIPTION` (optional): Free-text task description (when no issue)
 
 **Process:**
 1. Record current branch as BASE_BRANCH for later PR targeting
-2. Create and checkout feature branch: `git checkout -b {TASK_ID}`
-3. If ISSUE_INPUT provided, fetch issue details via GitHub API
-4. Return setup summary with BASE_BRANCH recorded
+2. **Derive branch name:**
+   - If `ISSUE_INPUT` provided: fetch issue via GitHub API first, then derive branch name as `{type}/{number}-{slug}` where:
+     - `type` is inferred from issue labels: `bug` → `fix`, `documentation` or `docs` → `docs`, `refactor` → `refactor`, `chore` or `maintenance` → `chore`, default → `feature`
+     - `slug` is the issue title: lowercased, non-alphanumeric replaced with hyphens, consecutive hyphens collapsed, trimmed, max 40 characters
+   - If `TASK_DESCRIPTION` provided (no issue): infer type from description keywords (e.g., "fix login bug" → `fix`, "refactor auth" → `refactor`, "add JWT" → `feature`, "update docs" → `docs`, "chore: cleanup" → `chore`), then slugify description as `{type}/{slug}` (max 40 chars)
+   - If neither: fallback to `task-{YYYY-MM-DD_HHMM}`
+3. Create and checkout feature branch: `git checkout -b {derived-branch-name}`
+4. Return setup summary with branch name and BASE_BRANCH recorded
 
 **Output:**
 ```markdown
-## Task Setup: {TASK_ID}
+## Task Setup: {branch-name}
 
 ### Branch
-- **Feature branch**: {TASK_ID}
+- **Branch name**: {derived-branch-name}
 - **Base branch**: {BASE_BRANCH} (PR target)
 
 ### Issue (if fetched)
