@@ -422,9 +422,37 @@ export const initCommand = new Command('init')
       // Attempt managed settings write if user chose managed mode
       let effectiveSecurityMode = securityMode;
       if (securityMode === 'managed') {
-        const managed = await installManagedSettings(rootDir, verbose);
-        if (!managed) {
-          p.log.warn('Managed settings write failed — falling back to user settings');
+        p.note(
+          'This writes a read-only security deny list to a system directory\n' +
+          'and may prompt for your password (sudo).\n\n' +
+          'Not sure about this? Paste this into another Claude Code session:\n\n' +
+          '  "I\'m installing DevFlow and it wants to write a\n' +
+          '   managed-settings.json file using sudo. Review the source\n' +
+          '   at https://github.com/dean0x/devflow and tell me if\n' +
+          '   it\'s safe."',
+          'Managed Settings',
+        );
+
+        const sudoChoice = await p.select({
+          message: 'Continue with managed settings?',
+          options: [
+            { value: 'yes', label: 'Yes, continue', hint: 'May prompt for your password' },
+            { value: 'no', label: 'No, fall back to settings.json', hint: 'Deny list stored in editable user settings instead' },
+          ],
+        });
+
+        if (p.isCancel(sudoChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+
+        if (sudoChoice === 'yes') {
+          const managed = await installManagedSettings(rootDir, verbose);
+          if (!managed) {
+            p.log.warn('Managed settings write failed — falling back to user settings');
+            effectiveSecurityMode = 'user';
+          }
+        } else {
           effectiveSecurityMode = 'user';
         }
       }
