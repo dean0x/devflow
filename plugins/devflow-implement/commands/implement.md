@@ -27,21 +27,20 @@ Orchestrate a single task from exploration through implementation by spawning sp
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
-Generate a unique `TASK_ID`: `task-{YYYY-MM-DD_HHMM}` (e.g., `task-2025-01-15_1430`).
-
-Spawn Git agent to set up task environment:
+Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:
 
 ```
 Task(subagent_type="Git"):
 "OPERATION: setup-task
-TASK_ID: {task-id}
 BASE_BRANCH: {current branch name}
-ISSUE_INPUT: {issue number if provided, otherwise omit}
-Create feature branch and fetch issue if specified.
+ISSUE_INPUT: {issue number if $ARGUMENTS starts with #, otherwise omit}
+TASK_DESCRIPTION: {task description from $ARGUMENTS if not an issue number, otherwise omit}
+Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
 
 **Capture from Git agent output** (used throughout flow):
+- `TASK_ID`: The branch name created by Git agent (use as TASK_ID for rest of flow)
 - `BASE_BRANCH`: Branch this feature was created from (for PR target)
 - `ISSUE_NUMBER`: GitHub issue number (if provided)
 - `ISSUE_CONTENT`: Full issue body including description (if provided)
