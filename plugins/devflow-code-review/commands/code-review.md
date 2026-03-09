@@ -38,9 +38,9 @@ Detect file types in diff to determine conditional reviews:
 
 | Condition | Adds Review |
 |-----------|-------------|
-| .ts/.tsx files | typescript |
-| .tsx/.jsx files | react |
-| .tsx/.jsx files | accessibility |
+| Any .ts or .tsx files | typescript |
+| .tsx or .jsx files (React components) | react |
+| .tsx or .jsx files (React components) | accessibility |
 | .tsx/.jsx/.css/.scss files | frontend-design |
 | .go files | go |
 | .java files | java |
@@ -50,7 +50,7 @@ Detect file types in diff to determine conditional reviews:
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
 
-**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, check if `~/.claude/skills/{focus}/SKILL.md` exists (use Glob). If the skill file doesn't exist, **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, use Read to check if `~/.claude/skills/{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Run Reviews (Parallel)
 
