@@ -1,6 +1,7 @@
 {
   "name": "devflow-ambient",
   "description": "Ambient mode — auto-loads relevant skills for every prompt",
+  "author": { "name": "Dean0x" },
   "version": "1.3.3",
   "agents": [],
   "skills": [

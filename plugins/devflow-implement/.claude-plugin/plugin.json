@@ -1,10 +1,7 @@
 {
   "name": "devflow-implement",
   "description": "Complete task implementation workflow - orchestrates exploration, planning, coding, validation, and PR creation",
-  "author": {
-    "name": "DevFlow Contributors",
-    "email": "dean@keren.dev"
-  },
+  "author": { "name": "Dean0x" },
   "version": "1.3.3",
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",

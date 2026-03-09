@@ -3,8 +3,7 @@
   "name": "devflow",
   "description": "DevFlow - Agentic Development Toolkit for Claude Code",
   "owner": {
-    "name": "DevFlow Contributors",
-    "email": "dean@keren.dev"
+    "name": "Dean0x"
   },
   "plugins": [
     {

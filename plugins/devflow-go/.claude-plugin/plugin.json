@@ -1,10 +1,7 @@
 {
   "name": "devflow-go",
   "description": "Go language patterns - error handling, interfaces, concurrency, package design",
-  "author": {
-    "name": "DevFlow Contributors",
-    "email": "dean@keren.dev"
-  },
+  "author": { "name": "Dean0x" },
   "version": "1.3.3",
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
