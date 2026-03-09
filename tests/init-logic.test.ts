@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -18,6 +18,7 @@ import {
   hasMemoryHooks,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
+import { installManagedSettings } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps } from '../src/cli/plugins.js';
 
@@ -350,6 +351,115 @@ describe('memory hook re-exports from init', () => {
 
   it('re-exports hasMemoryHooks from memory.ts', () => {
     expect(typeof hasMemoryHooks).toBe('function');
+  });
+});
+
+describe('installManagedSettings', () => {
+  let tmpDir: string;
+  let managedDir: string;
+  let managedPath: string;
+  let templateDir: string;
+
+  const denyEntries = ['Bash(rm -rf /*)', 'Bash(sudo *)'];
+  const templateContent = JSON.stringify({ permissions: { deny: denyEntries } }, null, 2);
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-managed-test-'));
+    managedDir = path.join(tmpDir, 'managed');
+    managedPath = path.join(managedDir, 'managed-settings.json');
+    templateDir = path.join(tmpDir, 'root');
+
+    // Create template file at expected location
+    await fs.mkdir(path.join(templateDir, 'src', 'templates'), { recursive: true });
+    await fs.writeFile(
+      path.join(templateDir, 'src', 'templates', 'managed-settings.json'),
+      templateContent,
+      'utf-8',
+    );
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns false when getManagedSettingsPath throws (unsupported platform)', async () => {
+    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockImplementation(() => {
+      throw new Error('Unsupported platform');
+    });
+
+    const result = await installManagedSettings(templateDir, false);
+    expect(result).toBe(false);
+  });
+
+  it('returns false when template file cannot be read', async () => {
+    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+
+    // Use a rootDir with no template file
+    const emptyRoot = path.join(tmpDir, 'empty-root');
+    await fs.mkdir(emptyRoot, { recursive: true });
+
+    const result = await installManagedSettings(emptyRoot, true);
+    expect(result).toBe(false);
+  });
+
+  it('writes managed settings via direct write when directory is writable', async () => {
+    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+
+    const result = await installManagedSettings(templateDir, false);
+
+    expect(result).toBe(true);
+    const written = JSON.parse(await fs.readFile(managedPath, 'utf-8'));
+    expect(written.permissions.deny).toEqual(denyEntries);
+  });
+
+  it('merges with existing managed settings (preserves existing entries)', async () => {
+    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+
+    // Pre-populate existing managed settings with an extra entry
+    await fs.mkdir(managedDir, { recursive: true });
+    const existing = { permissions: { deny: ['Bash(eval *)'] } };
+    await fs.writeFile(managedPath, JSON.stringify(existing), 'utf-8');
+
+    const result = await installManagedSettings(templateDir, false);
+
+    expect(result).toBe(true);
+    const written = JSON.parse(await fs.readFile(managedPath, 'utf-8'));
+    // Should contain both the existing entry and new entries, deduplicated
+    expect(written.permissions.deny).toContain('Bash(eval *)');
+    expect(written.permissions.deny).toContain('Bash(rm -rf /*)');
+    expect(written.permissions.deny).toContain('Bash(sudo *)');
+  });
+
+  it('returns false on EACCES when not in TTY', async () => {
+    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(managedPath);
+
+    // Make the parent dir exist but not writable
+    await fs.mkdir(managedDir, { recursive: true });
+    await fs.chmod(managedDir, 0o444);
+
+    // Mock process.stdin.isTTY as falsy
+    const origTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+
+    try {
+      const result = await installManagedSettings(templateDir, false);
+      expect(result).toBe(false);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: origTTY, configurable: true });
+      // Restore permissions for cleanup
+      await fs.chmod(managedDir, 0o755);
+    }
+  });
+
+  it('returns false on non-EACCES write errors', async () => {
+    vi.spyOn(await import('../src/cli/utils/paths.js'), 'getManagedSettingsPath').mockReturnValue(
+      // Point to a path inside a file (not a directory) to trigger ENOTDIR
+      path.join(templateDir, 'src', 'templates', 'managed-settings.json', 'impossible', 'managed-settings.json'),
+    );
+
+    const result = await installManagedSettings(templateDir, false);
+    expect(result).toBe(false);
   });
 });
 
