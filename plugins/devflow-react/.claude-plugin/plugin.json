@@ -1,8 +1,10 @@
 {
   "name": "devflow-react",
   "description": "React framework patterns - hooks, state management, composition, performance",
-  "author": { "name": "Dean0x" },
-  "version": "1.3.3",
+  "author": {
+    "name": "Dean0x"
+  },
+  "version": "1.4.0",
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",

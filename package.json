@@ -1,6 +1,6 @@
 {
   "name": "devflow-kit",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "description": "Agentic Development Toolkit for Claude Code - Enhance AI-assisted development with intelligent commands and workflows",
   "type": "module",
   "bin": {
