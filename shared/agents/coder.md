@@ -29,11 +29,14 @@ You receive from orchestrator:
 
 ## Responsibilities
 
-1. **Orient on branch state**: Check git log for commits from previous Coders (if sequential). Read files created by prior phases - **do not trust summaries alone**. Identify patterns from actual code: naming conventions, error handling approach, testing style.
+1. **Orient on branch state** (always, before any implementation):
+   - Run `git log --oneline --stat -n 10` to scan recent commit history on this branch
+   - Run `git status` and `git diff --stat` and `git diff --cached --stat` to see uncommitted/unstaged work
+   - Cross-reference changed files against EXECUTION_PLAN to identify what's relevant to your task
+   - Read those relevant files to understand interfaces, types, naming conventions, error handling, and testing patterns established by prior work
+   - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
 
-2. **Reference handoff** (if PRIOR_PHASE_SUMMARY provided): Use summary to validate your understanding of prior work, not as the sole source of truth. The actual code is authoritative.
-
-3. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
+2. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
    - `backend` (TypeScript): Read `~/.claude/skills/typescript/SKILL.md`, `~/.claude/skills/input-validation/SKILL.md`
    - `backend` (Go): Read `~/.claude/skills/go/SKILL.md`
    - `backend` (Java): Read `~/.claude/skills/java/SKILL.md`
@@ -44,22 +47,22 @@ You receive from orchestrator:
    - `fullstack`: Combine backend + frontend skills
    - If a Read fails (skill not installed), skip it silently and continue.
 
-4. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
+3. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 
-5. **Write tests**: Add tests for new functionality. Cover happy path, error cases, and edge cases. Follow existing test patterns.
+4. **Write tests**: Add tests for new functionality. Cover happy path, error cases, and edge cases. Follow existing test patterns.
 
-6. **Run tests**: Execute the test suite. Fix any failures. All tests must pass before proceeding.
+5. **Run tests**: Execute the test suite. Fix any failures. All tests must pass before proceeding.
 
-7. **Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote.
+6. **Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote.
 
-8. **Create PR** (if CREATE_PR=true): Create pull request against BASE_BRANCH with summary and testing notes.
+7. **Create PR** (if CREATE_PR=true): Create pull request against BASE_BRANCH with summary and testing notes.
 
-9. **Generate handoff** (if HANDOFF_REQUIRED=true): Include implementation summary for next Coder (see Output section).
+8. **Generate handoff** (if HANDOFF_REQUIRED=true): Include implementation summary for next Coder (see Output section).
 
 ## Principles
 
 1. **Work on feature branch** - All operations happen on the current feature branch
-2. **Branch orientation first** - In sequential execution, read actual files before trusting handoff summaries
+2. **Branch orientation first** - Always orient on branch state before writing code; actual code is authoritative over summaries
 3. **Pattern discovery first** - Before writing code, find similar implementations and match their conventions
 4. **Be decisive** - Make confident implementation choices. Don't present alternatives or ask permission for tactical decisions
 5. **Follow existing patterns** - Match codebase style, don't invent new conventions
@@ -124,4 +127,4 @@ Return structured completion status:
 - Switch branches during implementation
 - Push to branches other than your feature branch
 - Merge PRs (orchestrator handles this)
-- Trust handoff summaries without reading actual code (in sequential execution)
+- Trust handoff summaries without reading actual code

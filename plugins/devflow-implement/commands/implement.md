@@ -191,11 +191,7 @@ FILES_FROM_PRIOR_PHASE: {list of files created}
 HANDOFF_REQUIRED: {true if not last phase}"
 ```
 
-**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary. The receiving Coder MUST:
-1. Check git log to see commits from previous phases
-2. Read actual files created - do not trust summary alone
-3. Identify patterns from actual code (naming, error handling, testing)
-4. Reference handoff summary to validate understanding
+**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically.
 
 ---
 
