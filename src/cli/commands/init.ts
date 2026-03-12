@@ -24,6 +24,7 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
+import { readManifest, writeManifest, mergeManifestPlugins, detectUpgrade } from '../utils/manifest.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';
@@ -290,6 +291,17 @@ export const initCommand = new Command('init')
       s.stop('Path resolution failed');
       p.log.error(`Path configuration error: ${error instanceof Error ? error.message : error}`);
       process.exit(1);
+    }
+
+    // Check existing manifest for upgrade detection
+    const existingManifest = await readManifest(devflowDir);
+    if (existingManifest) {
+      const upgrade = detectUpgrade(version, existingManifest.version);
+      if (upgrade.isUpgrade) {
+        s.message(`Upgrading from v${upgrade.previousVersion} to v${version}`);
+      } else if (upgrade.isSameVersion) {
+        s.message('Reinstalling same version');
+      }
     }
 
     // Validate target directory
@@ -595,6 +607,21 @@ export const initCommand = new Command('init')
       p.log.info(`Deduplication: ${skillsMap.size} unique skills (from ${totalSkillDeclarations} declarations)`);
       p.log.info(`Deduplication: ${agentsMap.size} unique agents (from ${totalAgentDeclarations} declarations)`);
     }
+
+    // Write installation manifest for upgrade tracking
+    const installedPluginNames = pluginsToInstall.map(pl => pl.name);
+    const now = new Date().toISOString();
+    const manifestData = {
+      version,
+      plugins: existingManifest && options.plugin
+        ? mergeManifestPlugins(existingManifest.plugins, installedPluginNames)
+        : installedPluginNames,
+      scope,
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled },
+      installedAt: existingManifest?.installedAt ?? now,
+      updatedAt: now,
+    };
+    await writeManifest(devflowDir, manifestData);
 
     p.outro(color.green('Ready! Run any command in Claude Code to get started.'));
   });
