@@ -46,8 +46,32 @@ The orchestrator provides:
 3. **Apply 3-category classification** - Sort issues by where they occur
 4. **Apply focus-specific analysis** - Use pattern skill detection rules from the loaded skill file
 5. **Assign severity** - CRITICAL, HIGH, MEDIUM, LOW based on impact
-6. **Generate report** - File:line references with suggested fixes
-7. **Determine merge recommendation** - Based on blocking issues
+6. **Assess confidence** - Assign 0-100% confidence to each finding (see Confidence Scale below)
+7. **Filter by confidence** - Only report findings ≥80% in main sections; lower-confidence items go to Suggestions
+8. **Consolidate similar issues** - Group related findings to reduce noise (see Consolidation Rules)
+9. **Generate report** - File:line references with suggested fixes
+10. **Determine merge recommendation** - Based on blocking issues
+
+## Confidence Scale
+
+Assess how certain you are that each finding is a real issue (not a false positive):
+
+| Range | Label | Meaning |
+|-------|-------|---------|
+| 90-100% | Certain | Clearly a bug, vulnerability, or violation — no ambiguity |
+| 80-89% | High | Very likely an issue, but minor chance of false positive |
+| 60-79% | Medium | Plausible issue, but depends on context you may not fully see |
+| < 60% | Low | Possible concern, but likely a matter of style or interpretation |
+
+**Threshold**: Only report findings with ≥80% confidence in Blocking, Should-Fix, and Pre-existing sections. Findings with 60-79% confidence go to the Suggestions section. Findings < 60% are dropped entirely.
+
+## Consolidation Rules
+
+Before writing your report, apply these noise reduction rules:
+
+1. **Group similar issues** — If 3+ instances of the same pattern appear (e.g., "missing error handling" in multiple functions), consolidate into 1 finding listing all locations rather than N separate findings
+2. **Skip stylistic preferences** — Do not flag formatting, naming style, or code organization choices unless they violate explicit project conventions found in CLAUDE.md, .editorconfig, or linter configs
+3. **Skip issues in unchanged code** — Pre-existing issues in lines you did NOT change should only be reported if CRITICAL severity (security vulnerabilities, data loss risks)
 
 ## Issue Categories (from review-methodology)
 
@@ -76,17 +100,24 @@ Report format for `{output_path}`:
 
 ### CRITICAL
 **{Issue}** - `file.ts:123`
+**Confidence**: {n}%
 - Problem: {description}
 - Fix: {suggestion with code}
 
 ### HIGH
-{issues...}
+{issues with **Confidence**: {n}% each...}
 
 ## Issues in Code You Touched (Should Fix)
-{issues with file:line...}
+{issues with file:line and **Confidence**: {n}% each...}
 
 ## Pre-existing Issues (Not Blocking)
-{informational issues...}
+{informational issues with **Confidence**: {n}% each...}
+
+## Suggestions (Lower Confidence)
+
+{Max 3 items with 60-79% confidence. Brief description only — no code fixes.}
+
+- **{Issue}** - `file.ts:456` (Confidence: {n}%) — {brief description}
 
 ## Summary
 | Category | CRITICAL | HIGH | MEDIUM | LOW |

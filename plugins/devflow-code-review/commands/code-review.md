@@ -95,7 +95,9 @@ IMPORTANT: Write report to .docs/reviews/{branch-slug}/{focus}.md using Write to
 Task(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
 Read reviews from .docs/reviews/{branch-slug}/
-Create inline PR comments, deduplicate, consolidate skipped into summary"
+Create inline PR comments for findings with ≥80% confidence only.
+Lower-confidence suggestions (60-79%) go in the summary comment, not as inline comments.
+Deduplicate findings across reviewers, consolidate skipped into summary."
 ```
 
 **Synthesizer Agent**:
