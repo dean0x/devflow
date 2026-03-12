@@ -12,6 +12,7 @@ These skills may be loaded during GUIDED-depth ambient routing.
 |-------|-------------|---------------|
 | test-driven-development | Always for BUILD | `*.ts`, `*.tsx`, `*.js`, `*.jsx`, `*.py` |
 | implementation-patterns | Always for BUILD | Any code file |
+| search-first | Always for BUILD | Any code file |
 | typescript | TypeScript files in scope | `*.ts`, `*.tsx` |
 | react | React components in scope | `*.tsx`, `*.jsx` |
 | frontend-design | UI/styling work | `*.css`, `*.scss`, `*.tsx` with styling keywords |
