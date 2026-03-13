@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readManifest, writeManifest, mergeManifestPlugins, detectUpgrade, type ManifestData } from '../src/cli/utils/manifest.js';
+import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, type ManifestData } from '../src/cli/utils/manifest.js';
 
 describe('readManifest', () => {
   let tmpDir: string;
@@ -222,5 +222,61 @@ describe('detectUpgrade', () => {
     expect(result.isDowngrade).toBe(false);
     expect(result.isSameVersion).toBe(false);
     expect(result.previousVersion).toBe('1.4.0');
+  });
+});
+
+describe('resolvePluginList', () => {
+  const existingManifest: ManifestData = {
+    version: '1.0.0',
+    plugins: ['devflow-core-skills', 'devflow-implement'],
+    scope: 'user',
+    features: { teams: false, ambient: true, memory: true },
+    installedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('replaces plugin list on full install (no existing manifest)', () => {
+    const result = resolvePluginList(
+      ['devflow-core-skills', 'devflow-code-review'],
+      null,
+      false,
+    );
+    expect(result).toEqual(['devflow-core-skills', 'devflow-code-review']);
+  });
+
+  it('replaces plugin list on full install (existing manifest present)', () => {
+    const result = resolvePluginList(
+      ['devflow-core-skills', 'devflow-code-review'],
+      existingManifest,
+      false,
+    );
+    expect(result).toEqual(['devflow-core-skills', 'devflow-code-review']);
+  });
+
+  it('merges plugins on partial install with existing manifest', () => {
+    const result = resolvePluginList(
+      ['devflow-code-review', 'devflow-debug'],
+      existingManifest,
+      true,
+    );
+    expect(result).toEqual(['devflow-core-skills', 'devflow-implement', 'devflow-code-review', 'devflow-debug']);
+  });
+
+  it('does not duplicate plugins on partial install merge', () => {
+    const result = resolvePluginList(
+      ['devflow-implement', 'devflow-code-review'],
+      existingManifest,
+      true,
+    );
+    expect(result).toEqual(['devflow-core-skills', 'devflow-implement', 'devflow-code-review']);
+  });
+
+  it('replaces plugin list on partial install without existing manifest', () => {
+    const result = resolvePluginList(
+      ['devflow-code-review'],
+      null,
+      true,
+    );
+    expect(result).toEqual(['devflow-code-review']);
   });
 });

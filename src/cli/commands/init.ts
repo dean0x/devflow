@@ -24,7 +24,7 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
-import { readManifest, writeManifest, mergeManifestPlugins, detectUpgrade } from '../utils/manifest.js';
+import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';
@@ -608,20 +608,22 @@ export const initCommand = new Command('init')
       p.log.info(`Deduplication: ${agentsMap.size} unique agents (from ${totalAgentDeclarations} declarations)`);
     }
 
-    // Write installation manifest for upgrade tracking
+    // Write installation manifest for upgrade tracking (non-fatal — install already succeeded)
     const installedPluginNames = pluginsToInstall.map(pl => pl.name);
     const now = new Date().toISOString();
     const manifestData = {
       version,
-      plugins: existingManifest && options.plugin
-        ? mergeManifestPlugins(existingManifest.plugins, installedPluginNames)
-        : installedPluginNames,
+      plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
       features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };
-    await writeManifest(devflowDir, manifestData);
+    try {
+      await writeManifest(devflowDir, manifestData);
+    } catch (error) {
+      p.log.warn(`Failed to write installation manifest (install succeeded): ${error instanceof Error ? error.message : error}`);
+    }
 
     p.outro(color.green('Ready! Run any command in Claude Code to get started.'));
   });
