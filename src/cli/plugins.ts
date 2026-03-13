@@ -24,7 +24,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement (foundation layer)',
     commands: [],
     agents: [],
-    skills: ['core-patterns', 'docs-framework', 'git-safety', 'git-workflow', 'github-patterns', 'input-validation', 'test-driven-development', 'test-patterns'],
+    skills: ['core-patterns', 'docs-framework', 'git-safety', 'git-workflow', 'github-patterns', 'input-validation', 'search-first', 'test-driven-development', 'test-patterns'],
   },
   {
     name: 'devflow-specify',

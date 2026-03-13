@@ -128,10 +128,14 @@ Analyze 3 axes to determine strategy:
 Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 
 **Process:**
-1. Read all review reports from `${REVIEW_BASE_DIR}/*-report.*.md`
-2. Categorize issues into 3 buckets (from review-methodology)
-3. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
-4. Determine merge recommendation based on blocking issues
+1. Read all review reports from `${REVIEW_BASE_DIR}/*.md` (exclude your own output `review-summary.*.md`)
+2. Extract confidence percentages from each finding
+3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%)
+<!-- Confidence threshold also in: shared/agents/reviewer.md, plugins/devflow-code-review/commands/code-review.md -->
+4. Maintain ≥80% confidence threshold in final output
+5. Categorize issues into 3 buckets (from review-methodology)
+6. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
+7. Determine merge recommendation based on blocking issues
 
 **Issue Categories:**
 - **Blocking** (Category 1): Issues in YOUR changes - CRITICAL/HIGH must block
@@ -172,7 +176,10 @@ Report format:
 | Pre-existing | - | - | {n} | {n} | {n} |
 
 ## Blocking Issues
-{List with file:line and suggested fix}
+{List with file:line, confidence %, and suggested fix}
+
+## Suggestions (Lower Confidence)
+{Max 5 items across all reviewers with 60-79% confidence. Brief descriptions only.}
 
 ## Action Plan
 1. {Priority fix}
