@@ -24,7 +24,7 @@ DevFlow adds structured commands that handle the full lifecycle: specify feature
 - **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
 - **Automatic session memory** — survives restarts, `/clear`, and context compaction
 - **Parallel debugging** — competing hypotheses investigated simultaneously
-- **30 quality skills** — 8 auto-activating core, 8 optional language/ecosystem, plus specialized review and agent skills
+- **31 quality skills** — 9 auto-activating core, 8 optional language/ecosystem, plus specialized review and agent skills
 
 ## Quick Start
 
@@ -120,6 +120,7 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 | `test-driven-development` | Implementing new features (RED-GREEN-REFACTOR) |
 | `test-patterns` | Writing or modifying tests |
 | `input-validation` | Creating API endpoints |
+| `search-first` | Adding utilities, helpers, or infrastructure code |
 
 ## Language & Ecosystem Plugins
 
