@@ -24,7 +24,7 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
-import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
+import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';

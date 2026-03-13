@@ -23,7 +23,7 @@ export function formatFeatures(features: ManifestData['features']): string {
  * Determine effective installation scope based on which manifest was found.
  * Local scope takes precedence when a local manifest exists.
  */
-export function resolveScope(localManifest: ManifestData | null): 'local' | 'user' {
+export function resolveScope(localManifest: ManifestData | null): 'user' | 'local' {
   return localManifest ? 'local' : 'user';
 }
 
