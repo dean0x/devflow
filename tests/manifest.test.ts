@@ -170,6 +170,21 @@ describe('mergeManifestPlugins', () => {
     );
     expect(result).toEqual(['b', 'a', 'c']);
   });
+
+  it('returns empty array when both inputs are empty', () => {
+    const result = mergeManifestPlugins([], []);
+    expect(result).toEqual([]);
+  });
+
+  it('returns new plugins when existing is empty', () => {
+    const result = mergeManifestPlugins([], ['devflow-core-skills', 'devflow-debug']);
+    expect(result).toEqual(['devflow-core-skills', 'devflow-debug']);
+  });
+
+  it('returns existing plugins when new is empty', () => {
+    const result = mergeManifestPlugins(['devflow-core-skills', 'devflow-debug'], []);
+    expect(result).toEqual(['devflow-core-skills', 'devflow-debug']);
+  });
 });
 
 describe('detectUpgrade', () => {
@@ -222,6 +237,41 @@ describe('detectUpgrade', () => {
     expect(result.isDowngrade).toBe(false);
     expect(result.isSameVersion).toBe(false);
     expect(result.previousVersion).toBe('1.4.0');
+  });
+
+  it('handles unparseable installed version gracefully', () => {
+    const result = detectUpgrade('1.4.0', 'garbage');
+    expect(result.isUpgrade).toBe(false);
+    expect(result.isDowngrade).toBe(false);
+    expect(result.isSameVersion).toBe(false);
+    expect(result.previousVersion).toBe('garbage');
+  });
+
+  it('detects upgrade with v-prefixed current version', () => {
+    const result = detectUpgrade('v2.0.0', '1.4.0');
+    expect(result.isUpgrade).toBe(true);
+    expect(result.isDowngrade).toBe(false);
+    expect(result.previousVersion).toBe('1.4.0');
+  });
+
+  it('detects upgrade with v-prefixed installed version', () => {
+    const result = detectUpgrade('2.0.0', 'v1.4.0');
+    expect(result.isUpgrade).toBe(true);
+    expect(result.isDowngrade).toBe(false);
+    expect(result.previousVersion).toBe('v1.4.0');
+  });
+
+  it('detects same version with both v-prefixed', () => {
+    const result = detectUpgrade('v1.4.0', 'v1.4.0');
+    expect(result.isSameVersion).toBe(true);
+    expect(result.isUpgrade).toBe(false);
+    expect(result.isDowngrade).toBe(false);
+  });
+
+  it('detects downgrade with v-prefixed versions', () => {
+    const result = detectUpgrade('v1.0.0', 'v1.4.0');
+    expect(result.isDowngrade).toBe(true);
+    expect(result.isUpgrade).toBe(false);
   });
 });
 
