@@ -63,6 +63,7 @@ Assess how certain you are that each finding is a real issue (not a false positi
 | 60-79% | Medium | Plausible issue, but depends on context you may not fully see |
 | < 60% | Low | Possible concern, but likely a matter of style or interpretation |
 
+<!-- Confidence threshold also in: shared/agents/synthesizer.md, plugins/devflow-code-review/commands/code-review.md -->
 **Threshold**: Only report findings with ≥80% confidence in Blocking, Should-Fix, and Pre-existing sections. Findings with 60-79% confidence go to the Suggestions section. Findings < 60% are dropped entirely.
 
 ## Consolidation Rules
@@ -103,6 +104,11 @@ Report format for `{output_path}`:
 **Confidence**: {n}%
 - Problem: {description}
 - Fix: {suggestion with code}
+
+**{Issue Title} ({N} occurrences)** — Confidence: {n}%
+- `file1.ts:12`, `file2.ts:45`, `file3.ts:89`
+- Problem: {description of the shared pattern}
+- Fix: {suggestion that applies to all occurrences}
 
 ### HIGH
 {issues with **Confidence**: {n}% each...}

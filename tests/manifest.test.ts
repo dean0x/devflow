@@ -32,6 +32,46 @@ describe('readManifest', () => {
     expect(result).toBeNull();
   });
 
+  it('returns null when features object is missing', async () => {
+    const partial = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      installedAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(partial), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when installedAt is missing', async () => {
+    const partial = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { teams: false, ambient: true, memory: true },
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(partial), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when features has wrong types', async () => {
+    const partial = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { teams: 'yes', ambient: true, memory: true },
+      installedAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(partial), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).toBeNull();
+  });
+
   it('returns parsed manifest for valid data', async () => {
     const data: ManifestData = {
       version: '1.4.0',

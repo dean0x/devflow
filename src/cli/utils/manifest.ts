@@ -25,7 +25,18 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
   try {
     const content = await fs.readFile(manifestPath, 'utf-8');
     const data = JSON.parse(content) as ManifestData;
-    if (!data.version || !Array.isArray(data.plugins) || !data.scope) {
+    if (
+      !data.version ||
+      !Array.isArray(data.plugins) ||
+      !data.scope ||
+      typeof data.features !== 'object' ||
+      data.features === null ||
+      typeof data.features.teams !== 'boolean' ||
+      typeof data.features.ambient !== 'boolean' ||
+      typeof data.features.memory !== 'boolean' ||
+      typeof data.installedAt !== 'string' ||
+      typeof data.updatedAt !== 'string'
+    ) {
       return null;
     }
     return data;
@@ -60,6 +71,9 @@ export function mergeManifestPlugins(existing: string[], newPlugins: string[]): 
 /**
  * Compare two semver strings. Returns -1, 0, or 1.
  * Handles simple x.y.z versions; returns null for unparseable input.
+ *
+ * Note: Pre-release suffixes (e.g., `-beta.1`, `-rc.2`) are silently ignored.
+ * `1.0.0-beta.1` and `1.0.0` compare as equal. Build metadata is also ignored.
  */
 function compareSemver(a: string, b: string): number | null {
   const parse = (v: string): number[] => {
@@ -87,6 +101,22 @@ export interface UpgradeInfo {
   isDowngrade: boolean;
   isSameVersion: boolean;
   previousVersion: string | null;
+}
+
+/**
+ * Resolve the final plugin list for a manifest write.
+ * On partial installs (--plugin flag), merge newly installed plugins into
+ * the existing manifest's plugin list. On full installs, replace entirely.
+ */
+export function resolvePluginList(
+  installedPluginNames: string[],
+  existingManifest: ManifestData | null,
+  isPartialInstall: boolean,
+): string[] {
+  if (existingManifest && isPartialInstall) {
+    return mergeManifestPlugins(existingManifest.plugins, installedPluginNames);
+  }
+  return installedPluginNames;
 }
 
 export function detectUpgrade(currentVersion: string, installedVersion: string | null): UpgradeInfo {
