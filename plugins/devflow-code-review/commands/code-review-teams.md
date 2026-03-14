@@ -85,42 +85,42 @@ Spawn review teammates with self-contained prompts:
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     1. Read your skill: `Read ~/.claude/skills/security-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
-    2.5. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    3. Get the diff: `git diff {base_branch}...HEAD`
-    4. Apply the 6-step review process from review-methodology
-    5. Focus: injection, auth bypass, crypto misuse, OWASP vulnerabilities
-    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    7. Include file:line references for every finding
-    8. Write your report: `Write to .docs/reviews/{branch_slug}/security.md`
-    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Security review done")
+    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    4. Get the diff: `git diff {base_branch}...HEAD`
+    5. Apply the 6-step review process from review-methodology
+    6. Focus: injection, auth bypass, crypto misuse, OWASP vulnerabilities
+    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    8. Include file:line references for every finding
+    9. Write your report: `Write to .docs/reviews/{branch_slug}/security.md`
+    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Security review done")
 
 - Name: "architecture-reviewer"
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     1. Read your skill: `Read ~/.claude/skills/architecture-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
-    2.5. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    3. Get the diff: `git diff {base_branch}...HEAD`
-    4. Apply the 6-step review process from review-methodology
-    5. Focus: SOLID violations, coupling, layering issues, modularity problems
-    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    7. Include file:line references for every finding
-    8. Write your report: `Write to .docs/reviews/{branch_slug}/architecture.md`
-    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Architecture review done")
+    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    4. Get the diff: `git diff {base_branch}...HEAD`
+    5. Apply the 6-step review process from review-methodology
+    6. Focus: SOLID violations, coupling, layering issues, modularity problems
+    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    8. Include file:line references for every finding
+    9. Write your report: `Write to .docs/reviews/{branch_slug}/architecture.md`
+    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Architecture review done")
 
 - Name: "performance-reviewer"
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     1. Read your skill: `Read ~/.claude/skills/performance-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
-    2.5. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    3. Get the diff: `git diff {base_branch}...HEAD`
-    4. Apply the 6-step review process from review-methodology
-    5. Focus: N+1 queries, memory leaks, algorithm issues, I/O bottlenecks
-    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    7. Include file:line references for every finding
-    8. Write your report: `Write to .docs/reviews/{branch_slug}/performance.md`
-    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Performance review done")
+    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    4. Get the diff: `git diff {base_branch}...HEAD`
+    5. Apply the 6-step review process from review-methodology
+    6. Focus: N+1 queries, memory leaks, algorithm issues, I/O bottlenecks
+    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    8. Include file:line references for every finding
+    9. Write your report: `Write to .docs/reviews/{branch_slug}/performance.md`
+    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Performance review done")
 
 - Name: "quality-reviewer"
   Prompt: |
@@ -131,14 +131,14 @@ Spawn review teammates with self-contained prompts:
        - `Read ~/.claude/skills/test-patterns/SKILL.md`
        - `Read ~/.claude/skills/regression-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
-    2.5. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    3. Get the diff: `git diff {base_branch}...HEAD`
-    4. Apply the 6-step review process from review-methodology
-    5. Focus: complexity, test gaps, pattern violations, regressions, naming
-    6. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    7. Include file:line references for every finding
-    8. Write your report: `Write to .docs/reviews/{branch_slug}/quality.md`
-    9. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Quality review done")
+    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    4. Get the diff: `git diff {base_branch}...HEAD`
+    5. Apply the 6-step review process from review-methodology
+    6. Focus: complexity, test gaps, pattern violations, regressions, naming
+    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    8. Include file:line references for every finding
+    9. Write your report: `Write to .docs/reviews/{branch_slug}/quality.md`
+    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Quality review done")
 
 [Add conditional perspectives based on Phase 1 — follow same pattern:
  explicit skill path, diff command, output path, SendMessage for completion]
@@ -219,15 +219,9 @@ Include confidence levels from debate consensus."
 ### Phase 4.5: Record Pitfalls (if blocking issues found)
 
 If the review summary contains CRITICAL or HIGH blocking issues:
-1. Read `.memory/knowledge/pitfalls.md` (create with template header if missing: `<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.`)
-2. Check entry count — if ≥50, log warning "Knowledge base at capacity — skipping new entry" and skip
-3. Find highest PF-NNN number via regex (`/^## PF-(\d+)/`), default to 0
-4. Append PF entry for each CRITICAL/HIGH blocking issue with Area (file paths), Issue, Impact, Resolution (the suggested fix), Source (`/code-review {branch}`)
-5. Deduplicate: skip if same Area + Issue already exists
-6. Update TL;DR comment on line 1
-7. Skip entirely if no CRITICAL/HIGH blocking issues
-
-Do this inline. Use mkdir-based lock at `.memory/.knowledge.lock` (30s timeout, 60s stale recovery) if writing.
+1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+2. Source field: `/code-review {branch}`
+3. Skip entirely if no CRITICAL/HIGH blocking issues
 
 ### Phase 5: Cleanup and Report
 

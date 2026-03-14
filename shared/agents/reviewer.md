@@ -42,18 +42,16 @@ The orchestrator provides:
 ## Responsibilities
 
 1. **Load focus skill** - Read the pattern skill file for your focus area from the table above. This gives you detection rules and patterns specific to your review type.
-
-1.5. **Check known pitfalls** - If `.memory/knowledge/pitfalls.md` exists, read it. Check if any pitfall Areas overlap with files in the current diff. Verify the Resolution was applied. Flag if a known pitfall pattern is being reintroduced.
-
-2. **Identify changed lines** - Get diff against base branch (main/master/develop)
-3. **Apply 3-category classification** - Sort issues by where they occur
-4. **Apply focus-specific analysis** - Use pattern skill detection rules from the loaded skill file
-5. **Assign severity** - CRITICAL, HIGH, MEDIUM, LOW based on impact
-6. **Assess confidence** - Assign 0-100% confidence to each finding (see Confidence Scale below)
-7. **Filter by confidence** - Only report findings ≥80% in main sections; lower-confidence items go to Suggestions
-8. **Consolidate similar issues** - Group related findings to reduce noise (see Consolidation Rules)
-9. **Generate report** - File:line references with suggested fixes
-10. **Determine merge recommendation** - Based on blocking issues
+2. **Check known pitfalls** - If `.memory/knowledge/pitfalls.md` exists, read it. Check if any pitfall Areas overlap with files in the current diff. Verify the Resolution was applied. Flag if a known pitfall pattern is being reintroduced.
+3. **Identify changed lines** - Get diff against base branch (main/master/develop)
+4. **Apply 3-category classification** - Sort issues by where they occur
+5. **Apply focus-specific analysis** - Use pattern skill detection rules from the loaded skill file
+6. **Assign severity** - CRITICAL, HIGH, MEDIUM, LOW based on impact
+7. **Assess confidence** - Assign 0-100% confidence to each finding (see Confidence Scale below)
+8. **Filter by confidence** - Only report findings ≥80% in main sections; lower-confidence items go to Suggestions
+9. **Consolidate similar issues** - Group related findings to reduce noise (see Consolidation Rules)
+10. **Generate report** - File:line references with suggested fixes
+11. **Determine merge recommendation** - Based on blocking issues
 
 ## Confidence Scale
 

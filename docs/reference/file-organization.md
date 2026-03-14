@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (24 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (31 skills)
 │   │   ├── git-workflow/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -20,7 +20,7 @@ devflow/
 │       ├── synthesizer.md
 │       ├── coder.md
 │       └── ...
-├── plugins/                          # Plugin collection (8 plugins)
+├── plugins/                          # Plugin collection (17 plugins)
 │   ├── devflow-specify/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
@@ -40,10 +40,11 @@ devflow/
 ├── scripts/
 │   ├── build-plugins.ts
 │   ├── statusline.sh
-│   └── hooks/                        # Working Memory hooks
+│   └── hooks/                        # Working Memory + ambient hooks
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
-│       └── pre-compact-memory       # PreCompact hook: saves git state backup
+│       ├── pre-compact-memory       # PreCompact hook: saves git state backup
+│       └── ambient-prompt.sh        # UserPromptSubmit hook: ambient skill injection
 └── src/
     └── cli/
         ├── commands/

@@ -20,7 +20,7 @@ You receive from orchestrator:
 3. **Search for task-relevant code** - Find files matching task keywords
 4. **Identify integration points** - Exports, entry points, import patterns
 5. **Generate orientation summary** - Structured output for implementation planning
-6. **Check project knowledge** - If `.memory/knowledge/decisions.md` exists, read its first line (TL;DR) and include active decision count in orientation under "### Active Decisions"
+6. **Check project knowledge** - If `.memory/knowledge/decisions.md` exists, read its `<!-- TL;DR: ... -->` first-line comment and include active decision count in orientation under "### Active Decisions". Only the TL;DR is read here (not full entries) — this is intentional for token efficiency; agents that need full entries read the file themselves.
 
 ## Tool Invocation
 

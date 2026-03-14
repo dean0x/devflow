@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { exec } from 'child_process';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks } from '../src/cli/commands/memory.js';
 import { createMemoryDir, migrateMemoryFiles } from '../src/cli/utils/post-install.js';
 
@@ -482,5 +483,75 @@ describe('knowledge file format', () => {
 
     expect(updatedTldr).toBe('<!-- TL;DR: 2 pitfalls. Key: PF-001, PF-002 -->');
     expect(updated).toContain('## PF-002');
+  });
+});
+
+describe('session-start-memory hook integration', () => {
+  let tmpDir: string;
+  const hookPath = path.resolve(__dirname, '..', 'scripts', 'hooks', 'session-start-memory');
+
+  function runHook(cwd: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = exec(`bash "${hookPath}"`, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (err) return reject(new Error(`Hook failed: ${err.message}\nstderr: ${stderr}`));
+        resolve(stdout);
+      });
+      child.stdin?.write(JSON.stringify({ cwd }));
+      child.stdin?.end();
+    });
+  }
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hook-test-'));
+    await fs.mkdir(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('injects PROJECT KNOWLEDGE TL;DR from knowledge files', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'),
+      '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
+    );
+    await fs.writeFile(
+      path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'),
+      '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->\n# Known Pitfalls',
+    );
+
+    const output = await runHook(tmpDir);
+    const json = JSON.parse(output);
+    const ctx = json.hookSpecificOutput.additionalContext;
+
+    expect(ctx).toContain('PROJECT KNOWLEDGE (TL;DR)');
+    expect(ctx).toContain('2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder');
+    expect(ctx).toContain('1 pitfall. Key: PF-001 Synthesizer glob');
+  });
+
+  it('produces no leading newlines when only knowledge files exist (no working memory)', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'),
+      '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
+    );
+
+    const output = await runHook(tmpDir);
+    const json = JSON.parse(output);
+    const ctx = json.hookSpecificOutput.additionalContext;
+
+    expect(ctx).not.toMatch(/^\n/);
+    expect(ctx).toMatch(/^---/);
+  });
+
+  it('does not include PROJECT KNOWLEDGE section when no knowledge files exist', async () => {
+    // Empty tmpDir with just the directories — no knowledge files
+    const output = await runHook(tmpDir);
+    // May still have ambient output depending on user settings, but should not have knowledge
+    if (output.trim()) {
+      const json = JSON.parse(output);
+      const ctx = json.hookSpecificOutput.additionalContext;
+      expect(ctx).not.toContain('PROJECT KNOWLEDGE');
+    }
+    // If no output at all, that's also correct
   });
 });

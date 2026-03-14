@@ -120,15 +120,9 @@ Display results from all agents:
 ### Phase 4.5: Record Pitfalls (if blocking issues found)
 
 If the review summary contains CRITICAL or HIGH blocking issues:
-1. Read `.memory/knowledge/pitfalls.md` (create with template header if missing: `<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.`)
-2. Check entry count — if ≥50, log warning "Knowledge base at capacity — skipping new entry" and skip
-3. Find highest PF-NNN number via regex (`/^## PF-(\d+)/`), default to 0
-4. Append PF entry for each CRITICAL/HIGH blocking issue with Area (file paths), Issue, Impact, Resolution (the suggested fix), Source (`/code-review {branch}`)
-5. Deduplicate: skip if same Area + Issue already exists
-6. Update TL;DR comment on line 1
-7. Skip entirely if no CRITICAL/HIGH blocking issues
-
-Do this inline. Use mkdir-based lock at `.memory/.knowledge.lock` (30s timeout, 60s stale recovery) if writing.
+1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+2. Source field: `/code-review {branch}`
+3. Skip entirely if no CRITICAL/HIGH blocking issues
 
 ## Architecture
 

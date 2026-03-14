@@ -132,14 +132,8 @@ Produce the final report:
 ### Phase 4.5: Record Pitfall (if root cause found)
 
 If root cause was identified with HIGH or MEDIUM confidence:
-1. Read `.memory/knowledge/pitfalls.md` (create with template header if missing)
-2. Check entry count — if ≥50, skip with warning
-3. Find highest PF-NNN number, default to 0
-4. Append PF entry with Area (affected files), Issue (root cause), Impact (bug symptoms), Resolution (recommended fix), Source (`/debug {bug description}`)
-5. Deduplicate: skip if same Area + Issue already exists
-6. Update TL;DR comment on line 1
-
-Do this inline. Use mkdir-based lock at `.memory/.knowledge.lock` if writing.
+1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+2. Source field: `/debug {bug description}`
 
 ## Architecture
 

@@ -93,15 +93,9 @@ Aggregate from all Resolvers:
 ### Phase 5.5: Record Pitfalls (from tech debt deferrals)
 
 For each issue deferred as TECH_DEBT:
-1. Read `.memory/knowledge/pitfalls.md` (create with template header if missing)
-2. Check entry count — if ≥50, skip with warning
-3. Find highest PF-NNN number, default to 0
-4. Append PF entry documenting the known issue and why it was deferred, with Area (affected files), Issue, Impact, Resolution (deferred — why), Source (`/resolve {branch}`)
-5. Deduplicate: skip if same Area + Issue already exists
-6. Update TL;DR comment on line 1
-7. Skip entirely if no TECH_DEBT deferrals
-
-Do this inline. Use mkdir-based lock at `.memory/.knowledge.lock` if writing.
+1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+2. Source field: `/resolve {branch}`
+3. Skip entirely if no TECH_DEBT deferrals
 
 ### Phase 6: Simplify
 
