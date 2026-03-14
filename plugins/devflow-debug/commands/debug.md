@@ -129,7 +129,7 @@ Produce the final report:
 {HIGH/MEDIUM/LOW based on evidence strength and investigator agreement}
 ```
 
-### Phase 4.5: Record Pitfall (if root cause found)
+### Phase 5: Record Pitfall (if root cause found)
 
 If root cause was identified with HIGH or MEDIUM confidence:
 1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
@@ -151,7 +151,7 @@ If root cause was identified with HIGH or MEDIUM confidence:
 │
 ├─ Phase 4: Root cause report with confidence level
 │
-└─ Phase 4.5: Record Pitfall (inline, if root cause found)
+└─ Phase 5: Record Pitfall (inline, if root cause found)
 ```
 
 ## Principles

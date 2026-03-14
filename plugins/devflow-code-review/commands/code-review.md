@@ -117,7 +117,7 @@ Display results from all agents:
 - PR comments created/skipped (from Git)
 - Artifact paths
 
-### Phase 4.5: Record Pitfalls (if blocking issues found)
+### Phase 5: Record Pitfalls (if blocking issues found)
 
 If the review summary contains CRITICAL or HIGH blocking issues:
 1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
@@ -151,7 +151,7 @@ If the review summary contains CRITICAL or HIGH blocking issues:
 │
 ├─ Phase 4: Display results
 │
-└─ Phase 4.5: Record Pitfalls (inline, if blocking issues)
+└─ Phase 5: Record Pitfalls (inline, if blocking issues)
 ```
 
 ## Principles

@@ -216,14 +216,14 @@ Include confidence levels from debate consensus."
 {Key exchanges that changed findings}
 ```
 
-### Phase 4.5: Record Pitfalls (if blocking issues found)
+### Phase 5: Record Pitfalls (if blocking issues found)
 
 If the review summary contains CRITICAL or HIGH blocking issues:
 1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
 2. Source field: `/code-review {branch}`
 3. Skip entirely if no CRITICAL/HIGH blocking issues
 
-### Phase 5: Cleanup and Report
+### Phase 6: Cleanup and Report
 
 Shut down all review teammates explicitly:
 
@@ -268,9 +268,9 @@ Display results:
 │  ├─ Git agent (comment-pr with consensus findings)
 │  └─ Lead writes review-summary with confidence levels
 │
-├─ Phase 4.5: Record Pitfalls (inline, if blocking issues)
+├─ Phase 5: Record Pitfalls (inline, if blocking issues)
 │
-└─ Phase 5: Cleanup and display results
+└─ Phase 6: Cleanup and display results
 ```
 
 ## Principles
