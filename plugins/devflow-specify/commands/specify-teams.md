@@ -57,11 +57,11 @@ Find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
 ```
 
-### Phase 2.5: Load Project Knowledge (if available)
+### Phase 3: Load Project Knowledge (if available)
 
 Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist. Pass their content as context to the exploration team below — prior decisions constrain requirements, known pitfalls inform failure modes.
 
-### Phase 3: Explore Requirements (Agent Teams)
+### Phase 4: Explore Requirements (Agent Teams)
 
 Create an agent team for collaborative requirements exploration:
 
@@ -126,7 +126,7 @@ Max 2 debate rounds, then submit consensus requirements findings.
 
 **Exploration team output**: Consensus findings on user needs, similar features, constraints, failure modes.
 
-**Team Shutdown Protocol** (must complete before Phase 5):
+**Team Shutdown Protocol** (must complete before Phase 6):
 
 ```
 Step 1: Shutdown each teammate
@@ -143,9 +143,9 @@ Step 3: GATE — Verify TeamDelete succeeded
   If retry failed → HALT and report: "Exploration team cleanup failed. Cannot create planning team."
 ```
 
-### Phase 4: Synthesize Exploration
+### Phase 5: Synthesize Exploration
 
-**WAIT** for Phase 3, then spawn Synthesizer:
+**WAIT** for Phase 4, then spawn Synthesizer:
 
 ```
 Task(subagent_type="Synthesizer"):
@@ -155,7 +155,7 @@ Explorer consensus: {team exploration consensus output}
 Combine into: user needs, similar features, constraints, failure modes"
 ```
 
-### Phase 5: Plan Scope (Agent Teams)
+### Phase 6: Plan Scope (Agent Teams)
 
 Create an agent team for collaborative scope planning:
 
@@ -168,7 +168,7 @@ Spawn planning teammates with self-contained prompts:
   Prompt: |
     You are planning scope for feature: {feature}
     Exploration synthesis (what we know):
-    {synthesis output from Phase 4}
+    {synthesis output from Phase 5}
 
     Your deliverable: User stories in "As X, I want Y, so that Z" format.
     Cover all actors, actions, and outcomes identified in exploration.
@@ -179,7 +179,7 @@ Spawn planning teammates with self-contained prompts:
   Prompt: |
     You are planning scope for feature: {feature}
     Exploration synthesis (what we know):
-    {synthesis output from Phase 4}
+    {synthesis output from Phase 5}
 
     Your deliverable: v1 MVP scope, v2 deferred items, explicitly out of scope,
     and dependencies on other features or systems.
@@ -190,7 +190,7 @@ Spawn planning teammates with self-contained prompts:
   Prompt: |
     You are planning scope for feature: {feature}
     Exploration synthesis (what we know):
-    {synthesis output from Phase 4}
+    {synthesis output from Phase 5}
 
     Your deliverable: Testable acceptance criteria for success cases,
     failure cases, and edge cases. Every criterion must be verifiable.
@@ -225,9 +225,9 @@ Step 3: GATE — Verify TeamDelete succeeded
   If retry failed → HALT and report: "Planning team cleanup failed. Cannot proceed to Gate 1."
 ```
 
-### Phase 6: Synthesize Planning
+### Phase 7: Synthesize Planning
 
-**WAIT** for Phase 5, then spawn Synthesizer:
+**WAIT** for Phase 6, then spawn Synthesizer:
 
 ```
 Task(subagent_type="Synthesizer"):
@@ -237,7 +237,7 @@ Planner consensus: {team planning consensus output}
 Combine into: user stories, scope breakdown, acceptance criteria, open questions"
 ```
 
-### Phase 7: Gate 1 - Validate Scope
+### Phase 8: Gate 1 - Validate Scope
 
 Use AskUserQuestion to validate:
 - Primary problem being solved
@@ -245,14 +245,14 @@ Use AskUserQuestion to validate:
 - v1 scope selection (minimal/medium/full)
 - Explicit exclusions
 
-### Phase 8: Gate 2 - Confirm Criteria
+### Phase 9: Gate 2 - Confirm Criteria
 
 Present specification summary, then use AskUserQuestion for final confirmation:
 - Success UX pattern
 - Error handling approach
 - Ready to create issue / Needs changes / Cancel
 
-### Phase 9: Create Issue
+### Phase 10: Create Issue
 
 Create GitHub issue with `gh issue create`:
 - Title: feature name
@@ -272,35 +272,35 @@ Report issue number and URL.
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase context via skim)
 │
-├─ Phase 2.5: Load Project Knowledge (if available)
+├─ Phase 3: Load Project Knowledge (if available)
 │  └─ Read decisions.md + pitfalls.md
 │
-├─ Phase 3: Explore Requirements (Agent Teams)
+├─ Phase 4: Explore Requirements (Agent Teams)
 │  ├─ User Perspective Explorer (teammate)
 │  ├─ Similar Features Explorer (teammate)
 │  ├─ Constraints Explorer (teammate)
 │  ├─ Failure Mode Explorer (teammate)
 │  └─ Debate → consensus requirements findings
 │
-├─ Phase 4: Synthesize Exploration
+├─ Phase 5: Synthesize Exploration
 │  └─ Synthesizer agent (mode: exploration)
 │
-├─ Phase 5: Plan Scope (Agent Teams)
+├─ Phase 6: Plan Scope (Agent Teams)
 │  ├─ User Stories Planner (teammate)
 │  ├─ Scope Boundaries Planner (teammate)
 │  ├─ Acceptance Criteria Planner (teammate)
 │  └─ Debate → consensus scope plan
 │
-├─ Phase 6: Synthesize Planning
+├─ Phase 7: Synthesize Planning
 │  └─ Synthesizer agent (mode: planning)
 │
-├─ Phase 7: GATE 1 - Validate Scope ⛔ MANDATORY
+├─ Phase 8: GATE 1 - Validate Scope ⛔ MANDATORY
 │  └─ AskUserQuestion: Confirm scope and priorities
 │
-├─ Phase 8: GATE 2 - Confirm Criteria ⛔ MANDATORY
+├─ Phase 9: GATE 2 - Confirm Criteria ⛔ MANDATORY
 │  └─ AskUserQuestion: Final spec approval
 │
-├─ Phase 9: Create Issue
+├─ Phase 10: Create Issue
 │  └─ gh issue create
 │
 └─ Report: Issue number, URL, /implement command

@@ -189,7 +189,7 @@ Lead produces final report:
 {HIGH/MEDIUM/LOW based on consensus strength}
 ```
 
-### Phase 7.5: Record Pitfall (if root cause found)
+### Phase 8: Record Pitfall (if root cause found)
 
 If root cause was identified with HIGH or MEDIUM confidence:
 1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
@@ -220,7 +220,7 @@ If root cause was identified with HIGH or MEDIUM confidence:
 │
 ├─ Phase 7: Root cause report with confidence level
 │
-└─ Phase 7.5: Record Pitfall (inline, if root cause found)
+└─ Phase 8: Record Pitfall (inline, if root cause found)
 ```
 
 ## Principles
