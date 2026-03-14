@@ -20,6 +20,7 @@ You receive from orchestrator:
 3. **Search for task-relevant code** - Find files matching task keywords
 4. **Identify integration points** - Exports, entry points, import patterns
 5. **Generate orientation summary** - Structured output for implementation planning
+6. **Check project knowledge** - If `.memory/knowledge/decisions.md` exists, read its first line (TL;DR) and include active decision count in orientation under "### Active Decisions"
 
 ## Tool Invocation
 
@@ -63,6 +64,9 @@ Always invoke skim via `npx rskim`. This works whether or not skim is globally i
 
 ### Patterns Observed
 {Existing patterns to follow}
+
+### Active Decisions
+{Count and key decisions from `.memory/knowledge/decisions.md` TL;DR, or "None found" if file missing}
 
 ### Suggested Approach
 {Brief recommendation based on codebase structure}

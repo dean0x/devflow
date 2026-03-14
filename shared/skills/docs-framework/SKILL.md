@@ -39,7 +39,10 @@ All generated documentation lives under `.docs/` in the project root:
 .memory/
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
 ├── PROJECT-PATTERNS.md                 # Accumulated patterns (merged across sessions)
-└── backup.json                         # Pre-compact git state snapshot
+├── backup.json                         # Pre-compact git state snapshot
+└── knowledge/
+    ├── decisions.md                    # Architectural decisions (ADR-NNN format)
+    └── pitfalls.md                     # Known pitfalls (PF-NNN format)
 ```
 
 ---
@@ -97,6 +100,8 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 |-------|-----------------|----------|
 | Reviewer | `.docs/reviews/{branch-slug}/{type}-report.{timestamp}.md` | Creates new |
 | Working Memory | `.memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
+| Knowledge (decisions) | `.memory/knowledge/decisions.md` | Append-only (ADR-NNN sequential IDs) |
+| Knowledge (pitfalls) | `.memory/knowledge/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
 
 ### Agents That Don't Persist
 
@@ -125,6 +130,7 @@ When creating or modifying persisting agents:
 This framework is used by:
 - **Review agents**: Creates review reports
 - **Working Memory hooks**: Auto-maintains `.memory/WORKING-MEMORY.md`
+- **Command flows**: `/implement` appends ADRs to `decisions.md`; `/code-review`, `/debug`, `/resolve` append PFs to `pitfalls.md`
 
 All persisting agents should load this skill to ensure consistent documentation.
 

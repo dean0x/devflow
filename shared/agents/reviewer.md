@@ -42,6 +42,9 @@ The orchestrator provides:
 ## Responsibilities
 
 1. **Load focus skill** - Read the pattern skill file for your focus area from the table above. This gives you detection rules and patterns specific to your review type.
+
+1.5. **Check known pitfalls** - If `.memory/knowledge/pitfalls.md` exists, read it. Check if any pitfall Areas overlap with files in the current diff. Verify the Resolution was applied. Flag if a known pitfall pattern is being reintroduced.
+
 2. **Identify changed lines** - Get diff against base branch (main/master/develop)
 3. **Apply 3-category classification** - Sort issues by where they occur
 4. **Apply focus-specific analysis** - Use pattern skill detection rules from the loaded skill file

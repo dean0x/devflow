@@ -69,11 +69,13 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring a codebase for task: {task description}
     1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
-    2. Skimmer context (files/patterns already identified):
+    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
+       Consider prior decisions and known pitfalls relevant to this task.
+    3. Skimmer context (files/patterns already identified):
        {skimmer output}
-    3. Your deliverable: Find similar implementations, established patterns,
+    4. Your deliverable: Find similar implementations, established patterns,
        module structure, and architectural conventions relevant to this task.
-    4. Document findings with file:path references.
+    5. Document findings with file:path references.
     5. Report completion: SendMessage(type: "message", recipient: "team-lead",
        summary: "Architecture exploration done")
 
@@ -81,11 +83,13 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring a codebase for task: {task description}
     1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
-    2. Skimmer context (files/patterns already identified):
+    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
+       Consider prior decisions and known pitfalls relevant to this task.
+    3. Skimmer context (files/patterns already identified):
        {skimmer output}
-    3. Your deliverable: Find entry points, services, database models,
+    4. Your deliverable: Find entry points, services, database models,
        configuration, and integration points relevant to this task.
-    4. Document findings with file:path references.
+    5. Document findings with file:path references.
     5. Report completion: SendMessage(type: "message", recipient: "team-lead",
        summary: "Integration exploration done")
 
@@ -93,11 +97,13 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring a codebase for task: {task description}
     1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
-    2. Skimmer context (files/patterns already identified):
+    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
+       Consider prior decisions and known pitfalls relevant to this task.
+    3. Skimmer context (files/patterns already identified):
        {skimmer output}
-    3. Your deliverable: Find utilities, helpers, validation patterns,
+    4. Your deliverable: Find utilities, helpers, validation patterns,
        and error handling that can be reused for this task.
-    4. Document findings with file:path references.
+    5. Document findings with file:path references.
     5. Report completion: SendMessage(type: "message", recipient: "team-lead",
        summary: "Reusable code exploration done")
 
@@ -105,11 +111,13 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring a codebase for task: {task description}
     1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
-    2. Skimmer context (files/patterns already identified):
+    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
+       Consider prior decisions and known pitfalls relevant to this task.
+    3. Skimmer context (files/patterns already identified):
        {skimmer output}
-    3. Your deliverable: Find error scenarios, race conditions, permission
+    4. Your deliverable: Find error scenarios, race conditions, permission
        failures, and boundary cases relevant to this task.
-    4. Document findings with file:path references.
+    5. Document findings with file:path references.
     5. Report completion: SendMessage(type: "message", recipient: "team-lead",
        summary: "Edge case exploration done")
 
@@ -523,6 +531,18 @@ Step 3: GATE — Verify TeamDelete succeeded
 
 Display completion summary with phase status, PR info, and next steps.
 
+### Phase 11.5: Record Decisions (if any)
+
+If the Coder's report includes Key Decisions with architectural significance:
+1. Read `.memory/knowledge/decisions.md` (create with template header if missing: `<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.`)
+2. Check entry count — if ≥50, log warning "Knowledge base at capacity — skipping new entry" and skip
+3. Find highest ADR-NNN number via regex (`/^## ADR-(\d+)/`), default to 0
+4. Append new ADR entry for each architectural decision with Date, Status (Accepted), Context, Decision, Consequences, Source (`/implement {TASK_ID}`)
+5. Update TL;DR comment on line 1 to reflect new count and key decisions
+6. Skip entirely if no architectural decisions were made
+
+Do this inline (no agent spawn). 2-3 Read/Write operations. Use mkdir-based lock at `.memory/.knowledge.lock` (30s timeout, 60s stale recovery) if writing.
+
 ## Architecture
 
 ```
@@ -579,7 +599,9 @@ Display completion summary with phase status, PR info, and next steps.
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-└─ Phase 11: Display agent outputs
+├─ Phase 11: Display agent outputs
+│
+└─ Phase 11.5: Record Decisions (inline, if any)
 ```
 
 ## Principles

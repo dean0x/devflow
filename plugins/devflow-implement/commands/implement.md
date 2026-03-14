@@ -344,6 +344,18 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 
 Display completion summary with phase status, PR info, and next steps.
 
+### Phase 11.5: Record Decisions (if any)
+
+If the Coder's report includes Key Decisions with architectural significance:
+1. Read `.memory/knowledge/decisions.md` (create with template header if missing: `<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.`)
+2. Check entry count — if ≥50, log warning "Knowledge base at capacity — skipping new entry" and skip
+3. Find highest ADR-NNN number via regex (`/^## ADR-(\d+)/`), default to 0
+4. Append new ADR entry for each architectural decision with Date, Status (Accepted), Context, Decision, Consequences, Source (`/implement {TASK_ID}`)
+5. Update TL;DR comment on line 1 to reflect new count and key decisions
+6. Skip entirely if no architectural decisions were made
+
+Do this inline (no agent spawn). 2-3 Read/Write operations. Use mkdir-based lock at `.memory/.knowledge.lock` (30s timeout, 60s stale recovery) if writing.
+
 ## Architecture
 
 ```
@@ -399,7 +411,9 @@ Display completion summary with phase status, PR info, and next steps.
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-└─ Phase 11: Display agent outputs
+├─ Phase 11: Display agent outputs
+│
+└─ Phase 11.5: Record Decisions (inline, if any)
 ```
 
 ## Principles

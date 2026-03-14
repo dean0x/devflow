@@ -119,6 +119,26 @@ ${COMPACT_NOTE}"
   fi
 fi
 
+# --- Section 1.5: Project Knowledge TL;DR ---
+KNOWLEDGE_DIR="$CWD/.memory/knowledge"
+if [ -d "$KNOWLEDGE_DIR" ]; then
+  KNOWLEDGE_TLDR=""
+  for kf in "$KNOWLEDGE_DIR"/decisions.md "$KNOWLEDGE_DIR"/pitfalls.md; do
+    if [ -f "$kf" ]; then
+      TLDR_LINE=$(head -1 "$kf" | sed 's/<!-- TL;DR: //;s/ -->//')
+      if [ -n "$TLDR_LINE" ] && echo "$TLDR_LINE" | grep -qv '^#'; then
+        KNOWLEDGE_TLDR="${KNOWLEDGE_TLDR}${TLDR_LINE}\n"
+      fi
+    fi
+  done
+  if [ -n "$KNOWLEDGE_TLDR" ]; then
+    CONTEXT="${CONTEXT}
+
+--- PROJECT KNOWLEDGE (TL;DR) ---
+$(printf '%b' "$KNOWLEDGE_TLDR")"
+  fi
+fi
+
 # --- Section 2: Ambient Skill Injection ---
 
 # Inject ambient-router SKILL.md directly into context so Claude doesn't need a Read call.

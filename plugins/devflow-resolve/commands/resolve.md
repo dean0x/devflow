@@ -90,6 +90,19 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
+### Phase 5.5: Record Pitfalls (from tech debt deferrals)
+
+For each issue deferred as TECH_DEBT:
+1. Read `.memory/knowledge/pitfalls.md` (create with template header if missing)
+2. Check entry count — if ≥50, skip with warning
+3. Find highest PF-NNN number, default to 0
+4. Append PF entry documenting the known issue and why it was deferred, with Area (affected files), Issue, Impact, Resolution (deferred — why), Source (`/resolve {branch}`)
+5. Deduplicate: skip if same Area + Issue already exists
+6. Update TL;DR comment on line 1
+7. Skip entirely if no TECH_DEBT deferrals
+
+Do this inline. Use mkdir-based lock at `.memory/.knowledge.lock` if writing.
+
 ### Phase 6: Simplify
 
 If any fixes were made, spawn Simplifier agent to refine the changed code:
@@ -166,6 +179,8 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 │
 ├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred, blocked
+│
+├─ Phase 5.5: Record Pitfalls (inline, from tech debt deferrals)
 │
 ├─ Phase 6: Simplify
 │  └─ Simplifier agent (refine fixes)

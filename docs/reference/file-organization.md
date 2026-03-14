@@ -148,6 +148,17 @@ Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable
 
 Hooks auto-create `.memory/` on first run — no manual setup needed per project.
 
+## Project Knowledge
+
+Knowledge files in `.memory/knowledge/` capture decisions and pitfalls that agents can't rediscover at runtime:
+
+| File | Format | Source | Purpose |
+|------|--------|--------|---------|
+| `decisions.md` | ADR-NNN (sequential) | `/implement` Phase 11.5 | Architectural decisions — why choices were made |
+| `pitfalls.md` | PF-NNN (sequential) | `/code-review`, `/debug`, `/resolve` | Known gotchas, fragile areas, past bugs |
+
+Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file.
+
 ## Statusline Script
 
 The statusline (`scripts/statusline.sh`) displays:

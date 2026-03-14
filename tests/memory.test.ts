@@ -255,11 +255,19 @@ describe('createMemoryDir', () => {
     expect(stat.isDirectory()).toBe(true);
   });
 
+  it('creates .memory/knowledge/ subdirectory', async () => {
+    await createMemoryDir(false, tmpDir);
+    const stat = await fs.stat(path.join(tmpDir, '.memory', 'knowledge'));
+    expect(stat.isDirectory()).toBe(true);
+  });
+
   it('is idempotent — calling twice succeeds without error', async () => {
     await createMemoryDir(false, tmpDir);
     await createMemoryDir(false, tmpDir);
     const stat = await fs.stat(path.join(tmpDir, '.memory'));
     expect(stat.isDirectory()).toBe(true);
+    const knowledgeStat = await fs.stat(path.join(tmpDir, '.memory', 'knowledge'));
+    expect(knowledgeStat.isDirectory()).toBe(true);
   });
 });
 
@@ -332,5 +340,147 @@ describe('migrateMemoryFiles', () => {
     await expect(fs.access(path.join(docsDir, '.working-memory-update.log'))).rejects.toThrow();
     await expect(fs.access(path.join(docsDir, '.working-memory-last-trigger'))).rejects.toThrow();
     await expect(fs.access(path.join(docsDir, '.working-memory.lock'))).rejects.toThrow();
+  });
+});
+
+describe('knowledge file format', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-'));
+    await fs.mkdir(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('parses TL;DR from decisions.md comment header', async () => {
+    const content = '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions';
+    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), content);
+
+    const firstLine = (await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), 'utf-8')).split('\n')[0];
+    const tldr = firstLine.replace('<!-- TL;DR: ', '').replace(' -->', '');
+
+    expect(tldr).toBe('2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder');
+  });
+
+  it('parses TL;DR from pitfalls.md comment header', async () => {
+    const content = '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->\n# Known Pitfalls';
+    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), content);
+
+    const firstLine = (await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8')).split('\n')[0];
+    const tldr = firstLine.replace('<!-- TL;DR: ', '').replace(' -->', '');
+
+    expect(tldr).toBe('1 pitfall. Key: PF-001 Synthesizer glob');
+  });
+
+  it('extracts highest ADR number via regex', async () => {
+    const content = [
+      '<!-- TL;DR: 3 decisions. Key: ADR-001 A, ADR-002 B, ADR-003 C -->',
+      '# Architectural Decisions',
+      '',
+      '## ADR-001: First decision',
+      '- **Status**: Accepted',
+      '',
+      '## ADR-002: Second decision',
+      '- **Status**: Accepted',
+      '',
+      '## ADR-003: Third decision',
+      '- **Status**: Accepted',
+    ].join('\n');
+    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), content);
+
+    const fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), 'utf-8');
+    const matches = [...fileContent.matchAll(/^## ADR-(\d+)/gm)];
+    const highest = matches.length > 0 ? Math.max(...matches.map(m => parseInt(m[1], 10))) : 0;
+
+    expect(highest).toBe(3);
+  });
+
+  it('returns 0 for empty file with no ADR entries', async () => {
+    const content = '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only.';
+    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), content);
+
+    const fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), 'utf-8');
+    const matches = [...fileContent.matchAll(/^## ADR-(\d+)/gm)];
+    const highest = matches.length > 0 ? Math.max(...matches.map(m => parseInt(m[1], 10))) : 0;
+
+    expect(highest).toBe(0);
+  });
+
+  it('detects duplicate pitfall by Area + Issue match', async () => {
+    const content = [
+      '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->',
+      '# Known Pitfalls',
+      '',
+      '## PF-001: Synthesizer review glob matched zero files',
+      '- **Area**: shared/agents/synthesizer.md',
+      '- **Issue**: Glob didn\'t match reviewer output filenames',
+    ].join('\n');
+    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), content);
+
+    const fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8');
+
+    // Check if an entry with matching Area and Issue already exists
+    const newArea = 'shared/agents/synthesizer.md';
+    const newIssue = 'Glob didn\'t match reviewer output filenames';
+    const isDuplicate = fileContent.includes(`**Area**: ${newArea}`) && fileContent.includes(`**Issue**: ${newIssue}`);
+
+    expect(isDuplicate).toBe(true);
+  });
+
+  it('gracefully handles missing knowledge files', async () => {
+    // Verify no error when reading non-existent knowledge files
+    const knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
+    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+
+    // Simulate the graceful degradation pattern from session-start hook
+    let tldrLines: string[] = [];
+    for (const kf of [decisionsPath, pitfallsPath]) {
+      try {
+        await fs.access(kf);
+        const firstLine = (await fs.readFile(kf, 'utf-8')).split('\n')[0];
+        if (firstLine.startsWith('<!-- TL;DR:')) {
+          tldrLines.push(firstLine.replace('<!-- TL;DR: ', '').replace(' -->', ''));
+        }
+      } catch {
+        // File doesn't exist — skip silently
+      }
+    }
+
+    expect(tldrLines).toHaveLength(0);
+  });
+
+  it('updates TL;DR to reflect new entry count after append', async () => {
+    const content = [
+      '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->',
+      '# Known Pitfalls',
+      '',
+      '## PF-001: Synthesizer review glob matched zero files',
+      '- **Area**: shared/agents/synthesizer.md',
+      '- **Issue**: Glob pattern mismatch',
+    ].join('\n');
+    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), content);
+
+    // Simulate appending a new entry and updating TL;DR
+    let fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8');
+    const newEntry = '\n\n## PF-002: Race condition in background hook\n- **Area**: scripts/hooks/stop-update-memory\n- **Issue**: Concurrent writes to memory file';
+    fileContent += newEntry;
+
+    // Update TL;DR
+    const matches = [...fileContent.matchAll(/^## PF-(\d+)/gm)];
+    const count = matches.length;
+    const keys = matches.map(m => `PF-${m[1].padStart(3, '0')}`).join(', ');
+    fileContent = fileContent.replace(/^<!-- TL;DR:.*-->/, `<!-- TL;DR: ${count} pitfalls. Key: ${keys} -->`);
+
+    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), fileContent);
+
+    const updated = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8');
+    const updatedTldr = updated.split('\n')[0];
+
+    expect(updatedTldr).toBe('<!-- TL;DR: 2 pitfalls. Key: PF-001, PF-002 -->');
+    expect(updated).toContain('## PF-002');
   });
 });

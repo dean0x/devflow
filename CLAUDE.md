@@ -94,7 +94,10 @@ Working memory files live in a dedicated `.memory/` directory:
 .memory/
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each session)
 ├── PROJECT-PATTERNS.md       # Accumulated patterns (merged, not overwritten)
-└── backup.json               # Pre-compact git state snapshot
+├── backup.json               # Pre-compact git state snapshot
+└── knowledge/
+    ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
+    └── pitfalls.md            # Known pitfalls (PF-NNN, area-specific gotchas)
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
