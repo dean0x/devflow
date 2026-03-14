@@ -270,6 +270,15 @@ describe('createMemoryDir', () => {
     const knowledgeStat = await fs.stat(path.join(tmpDir, '.memory', 'knowledge'));
     expect(knowledgeStat.isDirectory()).toBe(true);
   });
+
+  it('does not throw when path is invalid (verbose logs warning)', async () => {
+    // Create a file where the directory would go — mkdir will fail
+    const blockerPath = path.join(tmpDir, '.memory');
+    await fs.writeFile(blockerPath, 'not a directory');
+
+    // Should not throw even though mkdir fails
+    await expect(createMemoryDir(false, tmpDir)).resolves.toBeUndefined();
+  });
 });
 
 describe('migrateMemoryFiles', () => {

@@ -57,16 +57,20 @@ Find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
 ```
 
+### Phase 2.5: Load Project Knowledge (if available)
+
+Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist. Pass their content as context to the Explore agents below — prior decisions constrain requirements, known pitfalls inform failure modes.
+
 ### Phase 3: Explore Requirements (Parallel)
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context:
+Spawn 4 Explore agents **in a single message**, each with Skimmer context and project knowledge (if loaded):
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
 | User perspective | medium | Target users, goals, pain points, user journeys |
 | Similar features | medium | Comparable features, scope patterns, edge cases |
-| Constraints | quick | Dependencies, business rules, security, performance |
-| Failure modes | quick | Error states, edge cases, validation needs |
+| Constraints | quick | Dependencies, business rules, security, performance, **prior architectural decisions** |
+| Failure modes | quick | Error states, edge cases, validation needs, **known pitfalls** |
 
 ### Phase 4: Synthesize Exploration
 
@@ -134,6 +138,9 @@ Report issue number and URL.
 │
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase context via skim)
+│
+├─ Phase 2.5: Load Project Knowledge (if available)
+│  └─ Read decisions.md + pitfalls.md
 │
 ├─ Phase 3: Explore Requirements (PARALLEL)
 │  ├─ Explore: User perspective
