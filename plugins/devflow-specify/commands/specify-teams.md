@@ -57,6 +57,10 @@ Find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
 ```
 
+### Phase 2.5: Load Project Knowledge (if available)
+
+Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist. Pass their content as context to the exploration team below — prior decisions constrain requirements, known pitfalls inform failure modes.
+
 ### Phase 3: Explore Requirements (Agent Teams)
 
 Create an agent team for collaborative requirements exploration:
@@ -267,6 +271,9 @@ Report issue number and URL.
 │
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase context via skim)
+│
+├─ Phase 2.5: Load Project Knowledge (if available)
+│  └─ Read decisions.md + pitfalls.md
 │
 ├─ Phase 3: Explore Requirements (Agent Teams)
 │  ├─ User Perspective Explorer (teammate)
