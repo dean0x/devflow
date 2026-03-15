@@ -15,7 +15,8 @@
     "agent-teams"
   ],
   "agents": [
-    "git"
+    "git",
+    "synthesizer"
   ],
   "skills": [
     "agent-teams",
