@@ -91,7 +91,7 @@ Focus area: {specific code area, mechanism, or condition}
 Once all investigators return, spawn a Synthesizer agent to aggregate findings:
 
 ```
-Task(subagent_type="general-purpose", name="synthesizer"):
+Task(subagent_type="Synthesizer"):
 "You are a root cause analyst. Synthesize these investigation reports:
 
 {paste all investigator reports}

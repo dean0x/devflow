@@ -1,6 +1,7 @@
 ---
 name: Skimmer
 description: Codebase orientation using skim to identify relevant files, functions, and patterns for a feature or task
+skills: knowledge-persistence
 model: inherit
 ---
 
