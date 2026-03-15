@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (24 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (31 skills)
 │   │   ├── git-workflow/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -20,7 +20,7 @@ devflow/
 │       ├── synthesizer.md
 │       ├── coder.md
 │       └── ...
-├── plugins/                          # Plugin collection (8 plugins)
+├── plugins/                          # Plugin collection (17 plugins)
 │   ├── devflow-specify/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
@@ -40,10 +40,11 @@ devflow/
 ├── scripts/
 │   ├── build-plugins.ts
 │   ├── statusline.sh
-│   └── hooks/                        # Working Memory hooks
+│   └── hooks/                        # Working Memory + ambient hooks
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
-│       └── pre-compact-memory       # PreCompact hook: saves git state backup
+│       ├── pre-compact-memory       # PreCompact hook: saves git state backup
+│       └── ambient-prompt.sh        # UserPromptSubmit hook: ambient skill injection
 └── src/
     └── cli/
         ├── commands/
@@ -147,6 +148,17 @@ Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable
 **Flow**: Claude responds → Stop hook checks mtime (skips if <2min fresh) → blocks with instruction → Claude writes WORKING-MEMORY.md silently → `stop_hook_active=true` → allows stop. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
 
 Hooks auto-create `.memory/` on first run — no manual setup needed per project.
+
+## Project Knowledge
+
+Knowledge files in `.memory/knowledge/` capture decisions and pitfalls that agents can't rediscover at runtime:
+
+| File | Format | Source | Purpose |
+|------|--------|--------|---------|
+| `decisions.md` | ADR-NNN (sequential) | `/implement` Phase 11.5 | Architectural decisions — why choices were made |
+| `pitfalls.md` | PF-NNN (sequential) | `/code-review`, `/debug`, `/resolve` | Known gotchas, fragile areas, past bugs |
+
+Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file.
 
 ## Statusline Script
 

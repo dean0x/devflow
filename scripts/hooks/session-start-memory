@@ -119,6 +119,31 @@ ${COMPACT_NOTE}"
   fi
 fi
 
+# --- Section 1.5: Project Knowledge TL;DR ---
+KNOWLEDGE_DIR="$CWD/.memory/knowledge"
+if [ -d "$KNOWLEDGE_DIR" ]; then
+  KNOWLEDGE_TLDR=""
+  for kf in "$KNOWLEDGE_DIR"/decisions.md "$KNOWLEDGE_DIR"/pitfalls.md; do
+    if [ -f "$kf" ]; then
+      TLDR_LINE=$(sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p' "$kf")
+      if [ -n "$TLDR_LINE" ]; then
+        KNOWLEDGE_TLDR="${KNOWLEDGE_TLDR}${TLDR_LINE}\n"
+      fi
+    fi
+  done
+  if [ -n "$KNOWLEDGE_TLDR" ]; then
+    KNOWLEDGE_SECTION="--- PROJECT KNOWLEDGE (TL;DR) ---
+$(printf '%b' "$KNOWLEDGE_TLDR")"
+    if [ -n "$CONTEXT" ]; then
+      CONTEXT="${CONTEXT}
+
+${KNOWLEDGE_SECTION}"
+    else
+      CONTEXT="$KNOWLEDGE_SECTION"
+    fi
+  fi
+fi
+
 # --- Section 2: Ambient Skill Injection ---
 
 # Inject ambient-router SKILL.md directly into context so Claude doesn't need a Read call.
@@ -129,10 +154,15 @@ AMBIENT_SKILL_PATH="$HOME/.claude/skills/ambient-router/SKILL.md"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 if [ -f "$AMBIENT_SKILL_PATH" ] && [ -f "$SETTINGS_FILE" ] && grep -q "ambient-prompt" "$SETTINGS_FILE" 2>/dev/null; then
   AMBIENT_SKILL_CONTENT=$(cat "$AMBIENT_SKILL_PATH")
-  CONTEXT="${CONTEXT}
-
---- AMBIENT ROUTER (auto-loaded) ---
+  AMBIENT_SECTION="--- AMBIENT ROUTER (auto-loaded) ---
 ${AMBIENT_SKILL_CONTENT}"
+  if [ -n "$CONTEXT" ]; then
+    CONTEXT="${CONTEXT}
+
+${AMBIENT_SECTION}"
+  else
+    CONTEXT="$AMBIENT_SECTION"
+  fi
 fi
 
 # --- Output ---

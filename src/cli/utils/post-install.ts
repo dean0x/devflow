@@ -478,10 +478,15 @@ export async function createMemoryDir(verbose: boolean, cwd?: string): Promise<v
 
   try {
     await fs.mkdir(memoryDir, { recursive: true });
+    await fs.mkdir(path.join(memoryDir, 'knowledge'), { recursive: true });
     if (verbose) {
       p.log.success('.memory/ directory ready');
     }
-  } catch { /* may already exist */ }
+  } catch (e) {
+    if (verbose) {
+      p.log.warn(`Failed to create .memory/ directory: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 }
 
 /**

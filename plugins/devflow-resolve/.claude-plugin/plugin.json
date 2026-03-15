@@ -21,8 +21,9 @@
     "simplifier"
   ],
   "skills": [
+    "agent-teams",
     "implementation-patterns",
-    "security-patterns",
-    "agent-teams"
+    "knowledge-persistence",
+    "security-patterns"
   ]
 }

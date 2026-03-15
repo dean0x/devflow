@@ -23,7 +23,11 @@ Investigate bugs by spawning a team of agents, each pursuing a different hypothe
 
 ## Phases
 
-### Phase 1: Context Gathering
+### Phase 1: Load Project Knowledge
+
+Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Known pitfalls from prior debugging sessions and code reviews can directly inform hypothesis generation — pass their content as context to investigators in Phase 2.
+
+### Phase 2: Context Gathering
 
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
@@ -39,7 +43,7 @@ Analyze the bug description (from arguments or issue) and identify 3-5 plausible
 - **Testable**: Can be confirmed or disproved by reading code/logs
 - **Distinct**: Does not overlap significantly with other hypotheses
 
-### Phase 2: Spawn Investigation Team
+### Phase 3: Spawn Investigation Team
 
 Create an agent team with one investigator per hypothesis:
 
@@ -99,7 +103,7 @@ Spawn investigator teammates with self-contained prompts:
 (Add more investigators if bug complexity warrants 4-5 hypotheses — same pattern)
 ```
 
-### Phase 3: Investigation
+### Phase 4: Investigation
 
 Teammates investigate in parallel:
 - Read relevant source files
@@ -108,7 +112,7 @@ Teammates investigate in parallel:
 - Look for edge cases and race conditions
 - Build evidence for or against their hypothesis
 
-### Phase 4: Adversarial Debate
+### Phase 5: Adversarial Debate
 
 Lead initiates debate via broadcast:
 
@@ -135,7 +139,7 @@ Teammates challenge each other directly using SendMessage:
 - `SendMessage(type: "message", recipient: "team-lead", summary: "Updated hypothesis")`
   "I've updated my hypothesis based on investigator-b's finding at..."
 
-### Phase 5: Convergence
+### Phase 6: Convergence
 
 After debate (max 2 rounds), lead collects results:
 
@@ -147,7 +151,7 @@ Lead broadcast:
 - PARTIAL: Some aspects confirmed, others not (details)"
 ```
 
-### Phase 6: Cleanup
+### Phase 7: Cleanup
 
 Shut down all investigator teammates explicitly:
 
@@ -160,7 +164,7 @@ TeamDelete
 Verify TeamDelete succeeded. If failed, retry once after 5s. If retry fails, HALT.
 ```
 
-### Phase 7: Report
+### Phase 8: Report
 
 Lead produces final report:
 
@@ -189,30 +193,40 @@ Lead produces final report:
 {HIGH/MEDIUM/LOW based on consensus strength}
 ```
 
+### Phase 9: Record Pitfall (if root cause found)
+
+If root cause was identified with HIGH or MEDIUM confidence:
+1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+2. Source field: `/debug {bug description}`
+
 ## Architecture
 
 ```
 /debug (orchestrator)
 │
-├─ Phase 1: Context gathering
+├─ Phase 1: Load Project Knowledge
+│
+├─ Phase 2: Context gathering
 │  └─ Git agent (fetch issue, if #N provided)
 │
-├─ Phase 2: Spawn investigation team
+├─ Phase 3: Spawn investigation team
 │  └─ Create team with 3-5 hypothesis investigators
 │
-├─ Phase 3: Parallel investigation
+├─ Phase 4: Parallel investigation
 │  └─ Each teammate investigates independently
 │
-├─ Phase 4: Adversarial debate
+├─ Phase 5: Adversarial debate
 │  └─ Teammates challenge each other directly (max 2 rounds)
 │
-├─ Phase 5: Convergence
+├─ Phase 6: Convergence
 │  └─ Teammates submit final hypothesis status
 │
-├─ Phase 6: Cleanup
+├─ Phase 7: Cleanup
 │  └─ Shut down teammates, release resources
 │
-└─ Phase 7: Root cause report with confidence level
+├─ Phase 8: Root cause report with confidence level
+│
+└─ Phase 9: Record Pitfall (inline, if root cause found)
 ```
 
 ## Principles

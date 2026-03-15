@@ -57,20 +57,24 @@ Find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
 ```
 
-### Phase 3: Explore Requirements (Parallel)
+### Phase 3: Load Project Knowledge
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context:
+Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Pass their content as context to the Explore agents below — prior decisions constrain requirements, known pitfalls inform failure modes.
+
+### Phase 4: Explore Requirements (Parallel)
+
+Spawn 4 Explore agents **in a single message**, each with Skimmer context and project knowledge (if loaded):
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
 | User perspective | medium | Target users, goals, pain points, user journeys |
 | Similar features | medium | Comparable features, scope patterns, edge cases |
-| Constraints | quick | Dependencies, business rules, security, performance |
-| Failure modes | quick | Error states, edge cases, validation needs |
+| Constraints | quick | Dependencies, business rules, security, performance, **prior architectural decisions** |
+| Failure modes | quick | Error states, edge cases, validation needs, **known pitfalls** |
 
-### Phase 4: Synthesize Exploration
+### Phase 5: Synthesize Exploration
 
-**WAIT** for Phase 3, then spawn Synthesizer:
+**WAIT** for Phase 4, then spawn Synthesizer:
 
 ```
 Task(subagent_type="Synthesizer"):
@@ -79,7 +83,7 @@ Mode: exploration
 Combine into: user needs, similar features, constraints, failure modes"
 ```
 
-### Phase 5: Plan Scope (Parallel)
+### Phase 6: Plan Scope (Parallel)
 
 Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 
@@ -89,9 +93,9 @@ Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 | Scope boundaries | v1 MVP, v2 deferred, out of scope, dependencies |
 | Acceptance criteria | Success/failure/edge case criteria (testable) |
 
-### Phase 6: Synthesize Planning
+### Phase 7: Synthesize Planning
 
-**WAIT** for Phase 5, then spawn Synthesizer:
+**WAIT** for Phase 6, then spawn Synthesizer:
 
 ```
 Task(subagent_type="Synthesizer"):
@@ -100,7 +104,7 @@ Mode: planning
 Combine into: user stories, scope breakdown, acceptance criteria, open questions"
 ```
 
-### Phase 7: Gate 1 - Validate Scope
+### Phase 8: Gate 1 - Validate Scope
 
 Use AskUserQuestion to validate:
 - Primary problem being solved
@@ -108,14 +112,14 @@ Use AskUserQuestion to validate:
 - v1 scope selection (minimal/medium/full)
 - Explicit exclusions
 
-### Phase 8: Gate 2 - Confirm Criteria
+### Phase 9: Gate 2 - Confirm Criteria
 
 Present specification summary, then use AskUserQuestion for final confirmation:
 - Success UX pattern
 - Error handling approach
 - Ready to create issue / Needs changes / Cancel
 
-### Phase 9: Create Issue
+### Phase 10: Create Issue
 
 Create GitHub issue with `gh issue create`:
 - Title: feature name
@@ -135,30 +139,33 @@ Report issue number and URL.
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase context via skim)
 │
-├─ Phase 3: Explore Requirements (PARALLEL)
+├─ Phase 3: Load Project Knowledge
+│  └─ Read decisions.md + pitfalls.md
+│
+├─ Phase 4: Explore Requirements (PARALLEL)
 │  ├─ Explore: User perspective
 │  ├─ Explore: Similar features
 │  ├─ Explore: Constraints
 │  └─ Explore: Failure modes
 │
-├─ Phase 4: Synthesize Exploration
+├─ Phase 5: Synthesize Exploration
 │  └─ Synthesizer agent (mode: exploration)
 │
-├─ Phase 5: Plan Scope (PARALLEL)
+├─ Phase 6: Plan Scope (PARALLEL)
 │  ├─ Plan: User stories
 │  ├─ Plan: Scope boundaries
 │  └─ Plan: Acceptance criteria
 │
-├─ Phase 6: Synthesize Planning
+├─ Phase 7: Synthesize Planning
 │  └─ Synthesizer agent (mode: planning)
 │
-├─ Phase 7: GATE 1 - Validate Scope ⛔ MANDATORY
+├─ Phase 8: GATE 1 - Validate Scope ⛔ MANDATORY
 │  └─ AskUserQuestion: Confirm scope and priorities
 │
-├─ Phase 8: GATE 2 - Confirm Criteria ⛔ MANDATORY
+├─ Phase 9: GATE 2 - Confirm Criteria ⛔ MANDATORY
 │  └─ AskUserQuestion: Final spec approval
 │
-├─ Phase 9: Create Issue
+├─ Phase 10: Create Issue
 │  └─ gh issue create
 │
 └─ Report: Issue number, URL, /implement command

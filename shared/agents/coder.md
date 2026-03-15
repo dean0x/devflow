@@ -35,6 +35,8 @@ You receive from orchestrator:
    - Cross-reference changed files against EXECUTION_PLAN to identify what's relevant to your task
    - Read those relevant files to understand interfaces, types, naming conventions, error handling, and testing patterns established by prior work
    - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
+   - If `.memory/knowledge/decisions.md` exists, read it. Apply prior architectural decisions relevant to this task. Avoid contradicting accepted decisions without documenting a new ADR.
+   - If `.memory/knowledge/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
 
 2. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
    - `backend` (TypeScript): Read `~/.claude/skills/typescript/SKILL.md`, `~/.claude/skills/input-validation/SKILL.md`
@@ -88,6 +90,9 @@ Return structured completion status:
 
 ### PR (if created)
 - URL: {pr_url}
+
+### Key Decisions (if any)
+- {Decision}: {rationale}
 
 ### Blockers (if any)
 {Description of blocker or failure with recommendation}

@@ -21,8 +21,9 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
+5. Read `.memory/knowledge/pitfalls.md` and `.memory/knowledge/decisions.md`. Pass as KNOWLEDGE_CONTEXT to Simplifier and Scrutinizer — known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency.
 
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string)
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional)
 
 ### Phase 1: Simplifier (Code Refinement)
 
@@ -31,7 +32,9 @@ Spawn Simplifier agent to refine code for clarity and consistency:
 Task(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-Simplify and refine the code for clarity and consistency while preserving functionality"
+KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
+Simplify and refine the code for clarity and consistency while preserving functionality.
+If knowledge context is provided, verify no known pitfall patterns are being reintroduced."
 
 **Wait for completion.** Simplifier commits changes directly.
 
@@ -42,7 +45,9 @@ Spawn Scrutinizer agent for quality evaluation and fixing:
 Task(subagent_type="Scrutinizer", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report."
+KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
+Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
+If knowledge context is provided, check whether any known pitfall patterns are being reintroduced and verify architectural consistency with prior decisions."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED), changes_made (bool)
 
@@ -93,7 +98,8 @@ Display summary:
 /self-review (orchestrator)
 │
 ├─ Phase 0: Context gathering
-│  └─ Git diff for changed files
+│  ├─ Git diff for changed files
+│  └─ Read project knowledge (decisions.md + pitfalls.md)
 │
 ├─ Phase 1: Simplifier
 │  └─ Code refinement (commits directly)

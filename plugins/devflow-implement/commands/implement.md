@@ -46,7 +46,7 @@ Return the branch setup summary."
 - `ISSUE_CONTENT`: Full issue body including description (if provided)
 - `ACCEPTANCE_CRITERIA`: Extracted acceptance criteria from issue (if provided)
 
-### Phase 1.5: Orient
+### Phase 2: Orient
 
 Spawn Skimmer agent for codebase overview:
 
@@ -56,7 +56,7 @@ Task(subagent_type="Skimmer"):
 Use skim to identify relevant files, functions, integration points"
 ```
 
-### Phase 2: Explore (Parallel)
+### Phase 3: Explore (Parallel)
 
 Spawn 4 Explore agents **in a single message**, each with Skimmer context:
 
@@ -69,9 +69,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context:
 
 Track success/failure of each explorer for synthesis context.
 
-### Phase 3: Synthesize Exploration
+### Phase 4: Synthesize Exploration
 
-**WAIT** for Phase 2 to complete.
+**WAIT** for Phase 3 to complete.
 
 **CRITICAL**: Do NOT synthesize outputs yourself in the main session.
 You MUST spawn the Synthesizer agent - "spawn Synthesizer" means delegate to the agent, not do the work yourself.
@@ -85,7 +85,7 @@ Failed explorations: {any failures}
 Combine into: patterns, integration points, reusable code, edge cases"
 ```
 
-### Phase 4: Plan (Parallel)
+### Phase 5: Plan (Parallel)
 
 Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 
@@ -109,9 +109,9 @@ Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 - **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODERS (2-3 phases)
 - **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODERS (more phases)
 
-### Phase 5: Synthesize Planning
+### Phase 6: Synthesize Planning
 
-**WAIT** for Phase 4 to complete.
+**WAIT** for Phase 5 to complete.
 
 **CRITICAL**: Do NOT synthesize outputs yourself in the main session.
 You MUST spawn the Synthesizer agent - "spawn Synthesizer" means delegate to the agent, not do the work yourself.
@@ -130,9 +130,9 @@ Combine into: execution plan with strategy decision (SINGLE_CODER | SEQUENTIAL_C
 - Subtask breakdown with DOMAIN hints (if not SINGLE_CODER)
 - Implementation plan with dependencies
 
-### Phase 6: Implement
+### Phase 7: Implement
 
-Based on Phase 5 synthesis, use the three-strategy framework:
+Based on Phase 6 synthesis, use the three-strategy framework:
 
 **Strategy Selection** (from Execution Strategy planner):
 
@@ -225,7 +225,7 @@ DOMAIN: {subtask 2 domain}"
 - Different files/modules with no imports between them
 - Each subtask is self-contained
 
-### Phase 6.5: Validate
+### Phase 8: Validate
 
 After Coder completes, spawn Validator to verify correctness:
 
@@ -250,12 +250,12 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false"
    ```
-   - Loop back to Phase 6.5 (re-validate)
+   - Loop back to Phase 8 (re-validate)
 4. If `validation_retry_count > 2`: Report failures to user and halt
 
-**If PASS:** Continue to Phase 7
+**If PASS:** Continue to Phase 9
 
-### Phase 7: Simplify
+### Phase 9: Simplify
 
 After validation passes, spawn Simplifier to polish the code:
 
@@ -267,7 +267,7 @@ FILES_CHANGED: {list of files from Coder output}
 Focus on code modified by Coder, apply project standards, enhance clarity"
 ```
 
-### Phase 8: Self-Review
+### Phase 10: Self-Review
 
 After Simplifier completes, spawn Scrutinizer as final quality gate:
 
@@ -280,7 +280,7 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 
 If Scrutinizer returns BLOCKED, report to user and halt.
 
-### Phase 8.5: Re-Validate (if Scrutinizer made changes)
+### Phase 11: Re-Validate (if Scrutinizer made changes)
 
 If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
 
@@ -293,22 +293,22 @@ Verify Scrutinizer's fixes didn't break anything."
 
 **If FAIL:** Report to user - Scrutinizer broke tests, needs manual intervention.
 
-**If PASS:** Continue to Phase 9
+**If PASS:** Continue to Phase 12
 
-### Phase 9: Alignment Check
+### Phase 12: Alignment Check
 
 After Scrutinizer passes (and re-validation if needed), spawn Shepherd to validate alignment:
 
 ```
 Task(subagent_type="Shepherd"):
 "ORIGINAL_REQUEST: {task description or issue content}
-EXECUTION_PLAN: {synthesized plan from Phase 5}
+EXECUTION_PLAN: {synthesized plan from Phase 6}
 FILES_CHANGED: {list of files from Coder output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
-**If ALIGNED:** Continue to Phase 10
+**If ALIGNED:** Continue to Phase 13
 
 **If MISALIGNED:**
 1. Extract misalignment details from Shepherd output
@@ -331,18 +331,25 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    VALIDATION_SCOPE: changed-only"
    ```
    - If Validator FAIL: Report to user
-   - If Validator PASS: Loop back to Phase 9 (re-check alignment)
+   - If Validator PASS: Loop back to Phase 12 (re-check alignment)
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
-### Phase 10: Create PR
+### Phase 13: Create PR
 
 **For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `git-workflow` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
-### Phase 11: Report
+### Phase 14: Report
 
 Display completion summary with phase status, PR info, and next steps.
+
+### Phase 15: Record Decisions (if any)
+
+If the Coder's report includes Key Decisions with architectural significance:
+1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
+2. Source field: `/implement {TASK_ID}`
+3. Skip entirely if no architectural decisions were made
 
 ## Architecture
 
@@ -352,54 +359,56 @@ Display completion summary with phase status, PR info, and next steps.
 ├─ Phase 1: Setup
 │  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
 │
-├─ Phase 1.5: Orient
+├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase overview via skim)
 │
-├─ Phase 2: Explore (PARALLEL, with Skimmer context)
+├─ Phase 3: Explore (PARALLEL, with Skimmer context)
 │  ├─ Explore: Architecture
 │  ├─ Explore: Integration
 │  ├─ Explore: Reusable code
 │  └─ Explore: Edge cases
 │
-├─ Phase 3: Synthesize Exploration
+├─ Phase 4: Synthesize Exploration
 │  └─ Synthesizer agent (mode: exploration)
 │
-├─ Phase 4: Plan (PARALLEL)
+├─ Phase 5: Plan (PARALLEL)
 │  ├─ Plan: Implementation steps
 │  ├─ Plan: Testing strategy
 │  └─ Plan: Execution strategy (3-strategy decision)
 │
-├─ Phase 5: Synthesize Planning
+├─ Phase 6: Synthesize Planning
 │  └─ Synthesizer agent (mode: planning) → returns strategy + DOMAIN hints
 │
-├─ Phase 6: Implement (3-strategy framework)
+├─ Phase 7: Implement (3-strategy framework)
 │  ├─ SINGLE_CODER (80%): One Coder, full plan, CREATE_PR: true
 │  ├─ SEQUENTIAL_CODERS (15%): N Coders with handoff summaries
 │  └─ PARALLEL_CODERS (5%): N Coders in single message (rare)
 │
-├─ Phase 6.5: Validate
+├─ Phase 8: Validate
 │  └─ Validator agent (build, typecheck, lint, test)
 │  └─ If FAIL: Coder fix loop (max 2 retries) → re-validate
 │
-├─ Phase 7: Simplify
+├─ Phase 9: Simplify
 │  └─ Simplifier agent (refines code clarity and consistency)
 │
-├─ Phase 8: Self-Review
+├─ Phase 10: Self-Review
 │  └─ Scrutinizer agent (final quality gate, fixes P0/P1)
 │
-├─ Phase 8.5: Re-Validate (if Scrutinizer made changes)
+├─ Phase 11: Re-Validate (if Scrutinizer made changes)
 │  └─ Validator agent (verify Scrutinizer fixes)
 │
-├─ Phase 9: Alignment Check
+├─ Phase 12: Alignment Check
 │  └─ Shepherd agent (validates alignment - reports only, no fixes)
 │  └─ If MISALIGNED: Coder fix loop (max 2 iterations) → Validator → re-check
 │
-├─ Phase 10: Create PR (if needed)
+├─ Phase 13: Create PR (if needed)
 │  └─ SINGLE_CODER: handled by Coder
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-└─ Phase 11: Display agent outputs
+├─ Phase 14: Display agent outputs
+│
+└─ Phase 15: Record Decisions (inline, if any)
 ```
 
 ## Principles
