@@ -48,7 +48,7 @@ Analyze the bug description (from arguments or issue) and identify 3-5 plausible
 Spawn one Explore agent per hypothesis in a **single message** (parallel execution):
 
 ```
-Task(subagent_type="Explore", name="investigator-a"):
+Task(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
 
 Hypothesis: {hypothesis A description}
@@ -67,7 +67,7 @@ Return a structured report:
 - Evidence AGAINST: [list with file:line refs]
 - Key finding: {one-sentence summary}"
 
-Task(subagent_type="Explore", name="investigator-b"):
+Task(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
 
 Hypothesis: {hypothesis B description}
@@ -75,7 +75,7 @@ Focus area: {specific code area, mechanism, or condition}
 
 [same steps and return format]"
 
-Task(subagent_type="Explore", name="investigator-c"):
+Task(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
 
 Hypothesis: {hypothesis C description}
