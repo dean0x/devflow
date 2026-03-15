@@ -57,9 +57,9 @@ Find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
 ```
 
-### Phase 3: Load Project Knowledge (if available)
+### Phase 3: Load Project Knowledge
 
-Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist. Pass their content as context to the Explore agents below — prior decisions constrain requirements, known pitfalls inform failure modes.
+Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Pass their content as context to the Explore agents below — prior decisions constrain requirements, known pitfalls inform failure modes.
 
 ### Phase 4: Explore Requirements (Parallel)
 
@@ -139,7 +139,7 @@ Report issue number and URL.
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase context via skim)
 │
-├─ Phase 3: Load Project Knowledge (if available)
+├─ Phase 3: Load Project Knowledge
 │  └─ Read decisions.md + pitfalls.md
 │
 ├─ Phase 4: Explore Requirements (PARALLEL)

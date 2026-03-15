@@ -23,7 +23,11 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 
 ## Phases
 
-### Phase 1: Context Gathering
+### Phase 1: Load Project Knowledge
+
+Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Known pitfalls from prior debugging sessions and code reviews can directly inform hypothesis generation — pass their content as context to investigators in Phase 2.
+
+### Phase 2: Context Gathering
 
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
@@ -39,7 +43,7 @@ Analyze the bug description (from arguments or issue) and identify 3-5 plausible
 - **Testable**: Can be confirmed or disproved by reading code/logs
 - **Distinct**: Does not overlap significantly with other hypotheses
 
-### Phase 2: Investigate (Parallel)
+### Phase 3: Investigate (Parallel)
 
 Spawn one Explore agent per hypothesis in a **single message** (parallel execution):
 
@@ -82,7 +86,7 @@ Focus area: {specific code area, mechanism, or condition}
 (Add more investigators if bug complexity warrants 4-5 hypotheses)
 ```
 
-### Phase 3: Synthesize
+### Phase 4: Synthesize
 
 Once all investigators return, spawn a Synthesizer agent to aggregate findings:
 
@@ -100,7 +104,7 @@ Instructions:
 5. Assess confidence level based on evidence strength"
 ```
 
-### Phase 4: Report
+### Phase 5: Report
 
 Produce the final report:
 
@@ -129,7 +133,7 @@ Produce the final report:
 {HIGH/MEDIUM/LOW based on evidence strength and investigator agreement}
 ```
 
-### Phase 5: Record Pitfall (if root cause found)
+### Phase 6: Record Pitfall (if root cause found)
 
 If root cause was identified with HIGH or MEDIUM confidence:
 1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
@@ -140,18 +144,20 @@ If root cause was identified with HIGH or MEDIUM confidence:
 ```
 /debug (orchestrator)
 │
-├─ Phase 1: Context gathering
+├─ Phase 1: Load Project Knowledge
+│
+├─ Phase 2: Context gathering
 │  └─ Git agent (fetch issue, if #N provided)
 │
-├─ Phase 2: Parallel investigation
+├─ Phase 3: Parallel investigation
 │  └─ 3-5 Explore agents, one per hypothesis (single message)
 │
-├─ Phase 3: Synthesize
+├─ Phase 4: Synthesize
 │  └─ Synthesizer aggregates and compares findings
 │
-├─ Phase 4: Root cause report with confidence level
+├─ Phase 5: Root cause report with confidence level
 │
-└─ Phase 5: Record Pitfall (inline, if root cause found)
+└─ Phase 6: Record Pitfall (inline, if root cause found)
 ```
 
 ## Principles

@@ -21,7 +21,7 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
-5. Read `.memory/knowledge/pitfalls.md` and `.memory/knowledge/decisions.md` if they exist. Pass as KNOWLEDGE_CONTEXT to Simplifier and Scrutinizer — known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency.
+5. Read `.memory/knowledge/pitfalls.md` and `.memory/knowledge/decisions.md`. Pass as KNOWLEDGE_CONTEXT to Simplifier and Scrutinizer — known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency.
 
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional)
 
@@ -99,7 +99,7 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
-│  └─ Read project knowledge (decisions.md + pitfalls.md, if available)
+│  └─ Read project knowledge (decisions.md + pitfalls.md)
 │
 ├─ Phase 1: Simplifier
 │  └─ Code refinement (commits directly)

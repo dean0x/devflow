@@ -1,6 +1,9 @@
 ---
 name: knowledge-persistence
-description: Canonical procedure for recording architectural decisions and pitfalls to project knowledge files
+description: >-
+  This skill should be used when recording architectural decisions or pitfalls
+  to project knowledge files, or when loading prior decisions and known pitfalls
+  for context during investigation, specification, or review.
 user-invocable: false
 allowed-tools: Read, Write, Bash
 ---
@@ -17,6 +20,14 @@ Record architectural decisions and pitfalls to `.memory/knowledge/` files. This 
 > their own extraction steps — they read this skill and follow it.
 
 ---
+
+## File Locations
+
+```
+.memory/knowledge/
+├── decisions.md    # ADR entries (append-only)
+└── pitfalls.md     # PF entries (area-specific gotchas)
+```
 
 ## File Formats
 
@@ -76,7 +87,7 @@ Follow these steps when recording decisions or pitfalls:
 5. **Append** the new entry using the format above.
 6. **Update TL;DR** — rewrite the `<!-- TL;DR: ... -->` comment on line 1 to reflect the new count and key topics.
 
-### Lock Protocol
+## Lock Protocol
 
 When writing, use a mkdir-based lock:
 - Lock path: `.memory/.knowledge.lock`
@@ -84,6 +95,34 @@ When writing, use a mkdir-based lock:
 - Stale recovery: if lock directory is >60 seconds old, remove it and retry
 - Release lock after write completes (remove lock directory)
 
-### Operation Budget
+## Loading Knowledge for Context
 
-Do this inline (no agent spawn). 2-3 Read/Write operations total.
+When a command needs prior knowledge as input (not recording):
+
+1. Read `.memory/knowledge/decisions.md` if it exists
+2. Read `.memory/knowledge/pitfalls.md` if it exists
+3. Pass content as context to downstream agents — prior decisions constrain scope, known pitfalls inform investigation
+
+If neither file exists, skip silently. No error, no empty-file creation.
+
+## Operation Budget
+
+Recording: do inline (no agent spawn), 2-3 Read/Write operations total.
+Loading: 1-2 Read operations, pass as context string.
+
+---
+
+## Extended References
+
+For entry examples and status lifecycle details:
+- `references/examples.md` - Full decision and pitfall entry examples
+
+---
+
+## Success Criteria
+
+- [ ] Entry appended with correct sequential ID
+- [ ] No duplicate pitfalls (same Area + Issue)
+- [ ] TL;DR comment updated with current count
+- [ ] Lock acquired before write, released after
+- [ ] Capacity limit (50) respected
