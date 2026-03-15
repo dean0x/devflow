@@ -12,7 +12,7 @@ DevFlow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 17 plugins (9 core + 8 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 17 plugins (8 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
@@ -46,7 +46,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 devflow/
 ├── shared/skills/          # 32 skills (single source of truth)
 ├── shared/agents/          # 10 shared agents (single source of truth)
-├── plugins/devflow-*/      # 17 plugins (9 core + 8 optional language/ecosystem)
+├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient hooks (stop, session-start, pre-compact, ambient-prompt)

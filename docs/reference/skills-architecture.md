@@ -21,6 +21,7 @@ Shared patterns used by multiple agents.
 | `github-patterns` | GitHub API patterns (rate limiting, PR comments, issues, releases) | Git |
 | `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
+| `ambient-router` | Intent classification and proportional skill loading for ambient mode | `/ambient` command |
 | `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /specify, /self-review |
 
 ### Tier 1b: Pattern Skills
@@ -47,6 +48,8 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 | Skill | Purpose | Agent Refs |
 |-------|---------|------------|
 | `input-validation` | Boundary validation enforcement | Coder |
+| `search-first` | Research-before-building enforcement for utility code | Coder |
+| `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Coder |
 
 ### Tier 3: Domain-Specific Skills
 

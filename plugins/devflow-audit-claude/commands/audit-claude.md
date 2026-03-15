@@ -1,3 +1,7 @@
+---
+description: Audit CLAUDE.md files against Anthropic best practices
+---
+
 # Command: /audit-claude
 
 ## Description
