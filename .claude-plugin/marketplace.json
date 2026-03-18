@@ -80,7 +80,7 @@
     {
       "name": "devflow-core-skills",
       "source": "./plugins/devflow-core-skills",
-      "description": "Auto-activating quality enforcement skills",
+      "description": "Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins",
       "version": "1.5.0",
       "keywords": [
         "skills",
@@ -114,7 +114,7 @@
     {
       "name": "devflow-typescript",
       "source": "./plugins/devflow-typescript",
-      "description": "TypeScript language patterns (type safety, generics, utility types)",
+      "description": "TypeScript language patterns - type safety, generics, utility types, type guards",
       "version": "1.5.0",
       "keywords": [
         "typescript",
@@ -125,7 +125,7 @@
     {
       "name": "devflow-react",
       "source": "./plugins/devflow-react",
-      "description": "React framework patterns (hooks, state, composition, performance)",
+      "description": "React framework patterns - hooks, state management, composition, performance",
       "version": "1.5.0",
       "keywords": [
         "react",
@@ -136,7 +136,7 @@
     {
       "name": "devflow-accessibility",
       "source": "./plugins/devflow-accessibility",
-      "description": "Web accessibility patterns (WCAG, ARIA, keyboard navigation)",
+      "description": "Web accessibility patterns - WCAG compliance, ARIA roles, keyboard navigation, focus management",
       "version": "1.5.0",
       "keywords": [
         "accessibility",
@@ -148,7 +148,7 @@
     {
       "name": "devflow-frontend-design",
       "source": "./plugins/devflow-frontend-design",
-      "description": "Frontend design patterns (typography, color, spacing, motion)",
+      "description": "Frontend design patterns - typography, color systems, spacing, motion, responsive design",
       "version": "1.5.0",
       "keywords": [
         "design",
@@ -159,7 +159,7 @@
     {
       "name": "devflow-go",
       "source": "./plugins/devflow-go",
-      "description": "Go language patterns (error handling, interfaces, concurrency)",
+      "description": "Go language patterns - error handling, interfaces, concurrency, package design",
       "version": "1.5.0",
       "keywords": [
         "go",
@@ -170,7 +170,7 @@
     {
       "name": "devflow-python",
       "source": "./plugins/devflow-python",
-      "description": "Python language patterns (type hints, protocols, data modeling)",
+      "description": "Python language patterns - type hints, protocols, dataclasses, async programming",
       "version": "1.5.0",
       "keywords": [
         "python",
@@ -181,7 +181,7 @@
     {
       "name": "devflow-java",
       "source": "./plugins/devflow-java",
-      "description": "Java language patterns (records, sealed classes, composition)",
+      "description": "Java language patterns - records, sealed classes, composition, modern Java features",
       "version": "1.5.0",
       "keywords": [
         "java",
@@ -192,7 +192,7 @@
     {
       "name": "devflow-rust",
       "source": "./plugins/devflow-rust",
-      "description": "Rust language patterns (ownership, error handling, type system)",
+      "description": "Rust language patterns - ownership, borrowing, error handling, type-driven design",
       "version": "1.5.0",
       "keywords": [
         "rust",

@@ -5,6 +5,16 @@
     "name": "Dean0x"
   },
   "version": "1.5.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": [
+    "ambient",
+    "intent",
+    "classification",
+    "skills",
+    "auto-load"
+  ],
   "agents": [],
   "skills": [
     "ambient-router"
