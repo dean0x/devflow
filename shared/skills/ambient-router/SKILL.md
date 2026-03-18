@@ -1,9 +1,6 @@
 ---
 name: ambient-router
-description: >-
-  Classify user intent and response depth for ambient mode. Auto-loads relevant
-  skills without explicit command invocation. Used by /ambient command and
-  always-on UserPromptSubmit hook.
+description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by /ambient command and always-on UserPromptSubmit hook.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
