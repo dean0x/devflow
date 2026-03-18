@@ -21,7 +21,7 @@ export interface PluginDefinition {
 export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   {
     name: 'devflow-core-skills',
-    description: 'Auto-activating quality enforcement (foundation layer)',
+    description: 'Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins',
     commands: [],
     agents: [],
     skills: ['core-patterns', 'docs-framework', 'git-safety', 'git-workflow', 'github-patterns', 'input-validation', 'search-first', 'test-driven-development', 'test-patterns'],
@@ -85,7 +85,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-typescript',
-    description: 'TypeScript language patterns (type safety, generics, utility types)',
+    description: 'TypeScript language patterns - type safety, generics, utility types, type guards',
     commands: [],
     agents: [],
     skills: ['typescript'],
@@ -93,7 +93,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-react',
-    description: 'React framework patterns (hooks, state, composition, performance)',
+    description: 'React framework patterns - hooks, state management, composition, performance',
     commands: [],
     agents: [],
     skills: ['react'],
@@ -101,7 +101,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-accessibility',
-    description: 'Web accessibility patterns (WCAG, ARIA, keyboard navigation)',
+    description: 'Web accessibility patterns - WCAG compliance, ARIA roles, keyboard navigation, focus management',
     commands: [],
     agents: [],
     skills: ['accessibility'],
@@ -109,7 +109,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-frontend-design',
-    description: 'Frontend design patterns (typography, color, spacing, motion)',
+    description: 'Frontend design patterns - typography, color systems, spacing, motion, responsive design',
     commands: [],
     agents: [],
     skills: ['frontend-design'],
@@ -117,7 +117,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-go',
-    description: 'Go language patterns (error handling, interfaces, concurrency)',
+    description: 'Go language patterns - error handling, interfaces, concurrency, package design',
     commands: [],
     agents: [],
     skills: ['go'],
@@ -125,7 +125,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-java',
-    description: 'Java language patterns (records, sealed classes, composition)',
+    description: 'Java language patterns - records, sealed classes, composition, modern Java features',
     commands: [],
     agents: [],
     skills: ['java'],
@@ -133,7 +133,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-python',
-    description: 'Python language patterns (type hints, protocols, data modeling)',
+    description: 'Python language patterns - type hints, protocols, dataclasses, async programming',
     commands: [],
     agents: [],
     skills: ['python'],
@@ -141,7 +141,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-rust',
-    description: 'Rust language patterns (ownership, error handling, type system)',
+    description: 'Rust language patterns - ownership, borrowing, error handling, type-driven design',
     commands: [],
     agents: [],
     skills: ['rust'],
