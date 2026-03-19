@@ -198,7 +198,10 @@ DevFlow creates project documentation in `.docs/` and working memory in `.memory
 .memory/
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook
 ├── PROJECT-PATTERNS.md       # Accumulated patterns across sessions
-└── backup.json               # Pre-compact git state snapshot
+├── backup.json               # Pre-compact git state snapshot
+└── knowledge/
+    ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
+    └── pitfalls.md            # Known pitfalls (area-specific gotchas)
 ```
 
 ## Workflow Examples
