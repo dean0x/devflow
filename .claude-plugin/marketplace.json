@@ -10,7 +10,7 @@
       "name": "devflow-specify",
       "source": "./plugins/devflow-specify",
       "description": "Interactive feature specification - creates well-defined GitHub issues",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "specification",
         "requirements",
@@ -22,7 +22,7 @@
       "name": "devflow-implement",
       "source": "./plugins/devflow-implement",
       "description": "Complete task implementation workflow with exploration, planning, and coding",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "implementation",
         "coding",
@@ -34,7 +34,7 @@
       "name": "devflow-code-review",
       "source": "./plugins/devflow-code-review",
       "description": "Comprehensive code review with parallel specialized agents",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "review",
         "code-quality",
@@ -45,7 +45,7 @@
       "name": "devflow-resolve",
       "source": "./plugins/devflow-resolve",
       "description": "Process and fix code review issues with risk assessment",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "issues",
         "fixes",
@@ -57,7 +57,7 @@
       "name": "devflow-debug",
       "source": "./plugins/devflow-debug",
       "description": "Debugging workflows with competing hypothesis investigation using agent teams",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "debugging",
         "hypotheses",
@@ -69,7 +69,7 @@
       "name": "devflow-self-review",
       "source": "./plugins/devflow-self-review",
       "description": "Self-review workflow: Simplifier + Scrutinizer for code quality",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "self-review",
         "quality",
@@ -81,7 +81,7 @@
       "name": "devflow-core-skills",
       "source": "./plugins/devflow-core-skills",
       "description": "Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "skills",
         "quality",
@@ -92,7 +92,7 @@
       "name": "devflow-ambient",
       "source": "./plugins/devflow-ambient",
       "description": "Ambient mode — classifies intent and applies proportional effort (skills for guided work, agent orchestration for complex tasks)",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "ambient",
         "routing",
@@ -104,7 +104,7 @@
       "name": "devflow-audit-claude",
       "source": "./plugins/devflow-audit-claude",
       "description": "Audit CLAUDE.md files against Anthropic best practices",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "audit",
         "claude-md",
@@ -115,7 +115,7 @@
       "name": "devflow-typescript",
       "source": "./plugins/devflow-typescript",
       "description": "TypeScript language patterns - type safety, generics, utility types, type guards",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "typescript",
         "types",
@@ -126,7 +126,7 @@
       "name": "devflow-react",
       "source": "./plugins/devflow-react",
       "description": "React framework patterns - hooks, state management, composition, performance",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "react",
         "hooks",
@@ -137,7 +137,7 @@
       "name": "devflow-accessibility",
       "source": "./plugins/devflow-accessibility",
       "description": "Web accessibility patterns - WCAG compliance, ARIA roles, keyboard navigation, focus management",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "accessibility",
         "wcag",
@@ -149,7 +149,7 @@
       "name": "devflow-frontend-design",
       "source": "./plugins/devflow-frontend-design",
       "description": "Frontend design patterns - typography, color systems, spacing, motion, responsive design",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "design",
         "typography",
@@ -160,7 +160,7 @@
       "name": "devflow-go",
       "source": "./plugins/devflow-go",
       "description": "Go language patterns - error handling, interfaces, concurrency, package design",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "go",
         "golang",
@@ -171,7 +171,7 @@
       "name": "devflow-python",
       "source": "./plugins/devflow-python",
       "description": "Python language patterns - type hints, protocols, dataclasses, async programming",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "python",
         "type-hints",
@@ -182,7 +182,7 @@
       "name": "devflow-java",
       "source": "./plugins/devflow-java",
       "description": "Java language patterns - records, sealed classes, composition, modern Java features",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "java",
         "records",
@@ -193,7 +193,7 @@
       "name": "devflow-rust",
       "source": "./plugins/devflow-rust",
       "description": "Rust language patterns - ownership, borrowing, error handling, type-driven design",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "keywords": [
         "rust",
         "ownership",
