@@ -168,7 +168,7 @@ export const initCommand = new Command('init')
       }
     } else if (process.stdin.isTTY) {
       const choices = DEVFLOW_PLUGINS
-        .filter(pl => pl.name !== 'devflow-core-skills')
+        .filter(pl => pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient')
         .map(pl => ({
           value: pl.name,
           label: pl.name.replace('devflow-', ''),
@@ -176,7 +176,7 @@ export const initCommand = new Command('init')
         }));
 
       const preSelected = DEVFLOW_PLUGINS
-        .filter(pl => !pl.optional && pl.name !== 'devflow-core-skills')
+        .filter(pl => !pl.optional && pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient')
         .map(pl => pl.name);
 
       const pluginSelection = await p.multiselect({
@@ -338,6 +338,11 @@ export const initCommand = new Command('init')
     const coreSkillsPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
     if (pluginsToInstall.length > 0 && coreSkillsPlugin && !pluginsToInstall.includes(coreSkillsPlugin)) {
       pluginsToInstall = [coreSkillsPlugin, ...pluginsToInstall];
+    }
+
+    const ambientPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
+    if (ambientEnabled && ambientPlugin && !pluginsToInstall.includes(ambientPlugin)) {
+      pluginsToInstall.push(ambientPlugin);
     }
 
     const { skillsMap, agentsMap } = buildAssetMaps(pluginsToInstall);
