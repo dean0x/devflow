@@ -4,12 +4,12 @@ description: Ambient mode — classify intent and auto-load relevant skills for 
 
 # Ambient Command
 
-Classify user intent and auto-load relevant skills. No agents spawned — enhances the main session only.
+Classify user intent and respond with proportional effort — zero overhead for simple requests, skill loading + agent orchestration for substantive work.
 
 ## Usage
 
 ```
-/ambient <prompt>           Classify and respond with skill enforcement
+/ambient <prompt>           Classify, load skills, orchestrate agents if needed
 /ambient                    Show usage
 ```
 
@@ -24,23 +24,24 @@ Read the `ambient-router` skill:
 
 Apply the ambient-router classification to `$ARGUMENTS`:
 
-1. **Intent:** BUILD | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
-2. **Depth:** QUICK | GUIDED | ELEVATE
+1. **Intent:** IMPLEMENT | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
+2. **Depth:** QUICK | ORCHESTRATED
 
 If no arguments provided, output:
 
 ```
 ## Ambient Mode
 
-Classify intent and auto-load relevant skills.
+Classify intent and auto-load relevant skills with agent orchestration.
 
 Usage: /ambient <your prompt>
 
 Examples:
-  /ambient add a login form          → BUILD/GUIDED (loads TDD + implementation-patterns)
-  /ambient fix the auth error        → DEBUG/GUIDED (loads test-patterns + core-patterns)
+  /ambient add a login form          → IMPLEMENT/ORCHESTRATED (Coder + quality gates)
+  /ambient fix the auth error        → DEBUG/ORCHESTRATED (parallel hypothesis investigation)
+  /ambient how should we cache?      → PLAN/ORCHESTRATED (Skimmer + Explore + Plan agents)
   /ambient where is the config?      → EXPLORE/QUICK (responds normally)
-  /ambient refactor the auth system  → BUILD/ELEVATE (suggests /implement)
+  /ambient commit this               → QUICK (no overhead)
 
 Always-on: devflow ambient --enable
 ```
@@ -50,45 +51,40 @@ Then stop.
 ### Phase 3: State Classification
 
 - **QUICK:** Skip this phase entirely. Respond directly in Phase 4.
-- **GUIDED:** Output one line: `Ambient: {INTENT}/{DEPTH}. Loading: {skill1}, {skill2}.`
-- **ELEVATE:** Skip — recommendation happens in Phase 4.
+- **ORCHESTRATED:** Output one line: `Ambient: {INTENT}/ORCHESTRATED. Loading: {skill1}, {skill2}.`
 
 ### Phase 4: Apply
 
 **QUICK:**
 Respond to the user's prompt normally. Zero skill loading. Zero overhead.
 
-**GUIDED:**
-Read the selected skills based on the ambient-router's skill selection matrix:
+**ORCHESTRATED:**
+Invoke each selected skill using the Skill tool based on the ambient-router's skill selection matrix:
 
-| Intent | Primary Skills | Secondary (conditional) |
-|--------|---------------|------------------------|
-| BUILD | test-driven-development, implementation-patterns | typescript (.ts), react (.tsx), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
-| DEBUG | test-patterns, core-patterns | git-safety (if git ops) |
-| REVIEW | self-review, core-patterns | test-patterns |
-| PLAN | implementation-patterns | core-patterns |
+| Intent | Skills Loaded | Agent Pipeline |
+|--------|--------------|----------------|
+| IMPLEMENT | implementation-orchestration, implementation-patterns | Pre-flight → Coder → Validator → Simplifier → Scrutinizer → Shepherd |
+| DEBUG | debug-orchestration, core-patterns | Hypotheses → parallel Explores → convergence → report → offer fix |
+| PLAN | plan-orchestration, implementation-patterns, core-patterns | Skimmer → Explores → Plan agent → gap validation |
+| REVIEW | self-review, core-patterns | Single Reviewer agent with focus from prompt |
 
-Read up to 3 skills from `~/.claude/skills/{name}/SKILL.md`. Apply their patterns and constraints when responding to the user's prompt.
-
-For BUILD intent: enforce RED-GREEN-REFACTOR from test-driven-development. Write failing tests before production code.
-
-**ELEVATE:**
-Respond to the user's prompt with your best effort, then append:
-
-> This task spans multiple files/systems. Consider `/implement` for full lifecycle management (exploration → planning → implementation → review).
+After loading skills, follow the orchestration skill's pipeline (Step 5 of ambient-router).
 
 ## Architecture
 
 ```
-/ambient <prompt> (main session, no agents)
+/ambient <prompt>
 │
 ├─ Phase 1: Load ambient-router skill
 ├─ Phase 2: Classify intent + depth
-├─ Phase 3: State classification (GUIDED only)
+├─ Phase 3: State classification (ORCHESTRATED only)
 └─ Phase 4: Apply
-   ├─ QUICK → respond directly
-   ├─ GUIDED → load 2-3 skills, apply patterns, respond
-   └─ ELEVATE → respond + workflow nudge
+   ├─ QUICK → respond directly (no agents)
+   └─ ORCHESTRATED → load skills via Skill tool → orchestrate agents
+      ├─ IMPLEMENT → implementation-orchestration pipeline
+      ├─ DEBUG → debug-orchestration pipeline
+      ├─ PLAN → plan-orchestration pipeline
+      └─ REVIEW → single Reviewer agent
 ```
 
 ## Edge Cases
@@ -98,13 +94,14 @@ Respond to the user's prompt with your best effort, then append:
 | No arguments | Show usage and stop |
 | Single word ("help") | Classify — likely CHAT/QUICK |
 | Prompt references `/implement` etc. | Classify as normal — user chose /ambient intentionally |
-| Mixed intent ("fix and add test") | Use higher-overhead intent (BUILD > DEBUG) |
+| Mixed intent ("fix and add test") | Use higher-overhead intent (IMPLEMENT > DEBUG) |
 | User says "no enforcement" | Respect immediately — treat as QUICK |
+| Multiple ORCHESTRATED triggers per session | Each runs independently; context compaction handles accumulation |
 
 ## Principles
 
-1. **No agents** — Ambient enhances the main session, never spawns subagents
-2. **Proportional** — QUICK gets zero overhead, GUIDED gets 2-3 skills, ELEVATE gets a nudge
-3. **Transparent** — State classification for GUIDED/ELEVATE, silent for QUICK
-4. **Respectful** — Never over-classify; when in doubt, go one tier lower
-5. **TDD for BUILD** — GUIDED depth BUILD tasks enforce test-first workflow
+1. **Agents for ORCHESTRATED, main session for QUICK** — proportional response
+2. **Skill tool for loading** — invoke skills via Skill tool, not Read
+3. **Conservative classification** — default to QUICK; ORCHESTRATED has real agent cost
+4. **Transparent** — state classification for ORCHESTRATED, silent for QUICK
+5. **Respectful** — never over-classify; when in doubt, QUICK

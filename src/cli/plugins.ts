@@ -70,10 +70,10 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-ambient',
-    description: 'Ambient mode — auto-loads relevant skills for every prompt',
+    description: 'Ambient mode — intent classification with proportional agent orchestration',
     commands: ['/ambient'],
-    agents: [],
-    skills: ['ambient-router'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'shepherd', 'skimmer', 'reviewer'],
+    skills: ['ambient-router', 'implementation-orchestration', 'debug-orchestration', 'plan-orchestration'],
   },
   {
     name: 'devflow-audit-claude',

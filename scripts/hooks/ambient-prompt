@@ -32,13 +32,18 @@ fi
 
 # Inject classification preamble
 PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt:
-Intent: BUILD | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
-Depth: QUICK (no overhead) | GUIDED (load skills) | ELEVATE (suggest /command)
+Intent: IMPLEMENT | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
+Depth: QUICK (no overhead) | ORCHESTRATED (skills + agent orchestration)
 
-If GUIDED+: Use the ambient-router skill already in your session context for classification details and skill selection matrix. Then Read the selected skills from ~/.claude/skills/<name>/SKILL.md and apply their patterns. For BUILD tasks, also load test-driven-development skill and enforce RED-GREEN-REFACTOR.
+Classification conservatism: default to QUICK. Only classify ORCHESTRATED when the prompt
+has clear task scope. Small edits, config changes, git ops, exploratory questions → QUICK.
+
+If ORCHESTRATED: Use the ambient-router skill already in your session context.
+BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
+Then orchestrate agents per the ambient-router Step 5.
 
 If QUICK: Respond normally without stating classification.
-Only state classification aloud for GUIDED/ELEVATE."
+Only state classification aloud for ORCHESTRATED."
 
 jq -n --arg ctx "$PREAMBLE" '{
   "hookSpecificOutput": {

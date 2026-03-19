@@ -1,6 +1,6 @@
 {
   "name": "devflow-ambient",
-  "description": "Ambient mode — auto-loads relevant skills for every prompt",
+  "description": "Ambient mode — intent classification with proportional agent orchestration",
   "author": {
     "name": "Dean0x"
   },
@@ -12,11 +12,22 @@
     "ambient",
     "intent",
     "classification",
-    "skills",
-    "auto-load"
+    "orchestration",
+    "agents"
   ],
-  "agents": [],
+  "agents": [
+    "coder",
+    "validator",
+    "simplifier",
+    "scrutinizer",
+    "shepherd",
+    "skimmer",
+    "reviewer"
+  ],
   "skills": [
-    "ambient-router"
+    "ambient-router",
+    "implementation-orchestration",
+    "debug-orchestration",
+    "plan-orchestration"
   ]
 }

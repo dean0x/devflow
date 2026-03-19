@@ -22,7 +22,7 @@ Plugin marketplace with 17 plugins (8 core + 9 optional language/ecosystem), eac
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
-| `devflow-ambient` | Ambient mode — auto-loads relevant skills based on each prompt | No |
+| `devflow-ambient` | Ambient mode — intent classification with agent orchestration | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
 | `devflow-typescript` | TypeScript language patterns (optional) | No |
@@ -44,7 +44,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 32 skills (single source of truth)
+├── shared/skills/          # 35 skills (single source of truth)
 ├── shared/agents/          # 10 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
@@ -113,7 +113,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential)
-- `/ambient` — Intent classification + proportional skill loading (no agents, main session only)
+- `/ambient` — Intent classification + agent orchestration (IMPLEMENT/DEBUG/PLAN/REVIEW pipelines)
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
 **Shared agents** (10): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, shepherd, scrutinizer, validator

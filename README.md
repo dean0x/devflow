@@ -24,7 +24,7 @@ DevFlow adds structured commands that handle the full lifecycle: specify feature
 - **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
 - **Automatic session memory** — survives restarts, `/clear`, and context compaction
 - **Parallel debugging** — competing hypotheses investigated simultaneously
-- **32 quality skills** — 9 auto-activating core, 8 optional language/ecosystem, plus specialized review and agent skills
+- **35 quality skills** — 9 auto-activating core, 8 optional language/ecosystem, plus specialized review, agent, and orchestration skills
 
 ## Quick Start
 
@@ -48,7 +48,7 @@ Then in Claude Code:
 | `devflow-resolve` | `/resolve` | Process review issues — fix or defer to tech debt |
 | `devflow-debug` | `/debug` | Parallel hypothesis debugging |
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
-| `devflow-ambient` | `/ambient` | Ambient mode — auto-loads relevant skills based on each prompt |
+| `devflow-ambient` | `/ambient` | Ambient mode — intent classification with agent orchestration |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
 
 ## Command Details

@@ -91,7 +91,7 @@ See `references/rationalization-prevention.md` for extended examples with code.
 
 ## Process Enforcement
 
-When implementing any feature under ambient BUILD/GUIDED:
+When implementing any feature under ambient IMPLEMENT/ORCHESTRATED:
 
 1. **Identify the first behavior** — What is the simplest thing this feature must do?
 2. **Write the test** — Describe that behavior as a failing test
@@ -130,7 +130,6 @@ When skipping TDD, never rationalize. State clearly: "Skipping TDD because: [spe
 
 ## Integration with Ambient Mode
 
-- **BUILD/GUIDED** → TDD enforced. Every new function/method gets test-first treatment.
-- **BUILD/QUICK** → TDD skipped (trivial single-file edit).
-- **BUILD/ELEVATE** → TDD mentioned in nudge toward `/implement`.
-- **DEBUG/GUIDED** → TDD applies to the fix: write a test that reproduces the bug first, then fix.
+- **IMPLEMENT/ORCHESTRATED** → TDD enforced via Coder agent (skill in Coder frontmatter). Every implementation gets test-first treatment.
+- **IMPLEMENT/QUICK** → TDD skipped (trivial single-file edit).
+- **DEBUG/ORCHESTRATED** → TDD applies to the fix: write a test that reproduces the bug first, then fix.

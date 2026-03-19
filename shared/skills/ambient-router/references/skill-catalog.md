@@ -4,15 +4,14 @@ Full mapping of DevFlow skills to ambient intents and file-type triggers. The am
 
 ## Skills Available for Ambient Loading
 
-These skills may be loaded during GUIDED-depth ambient routing.
+These skills may be loaded during ORCHESTRATED-depth ambient routing.
 
-### BUILD Intent
+### IMPLEMENT Intent
 
 | Skill | When to Load | File Patterns |
 |-------|-------------|---------------|
-| test-driven-development | Always for BUILD | `*.ts`, `*.tsx`, `*.js`, `*.jsx`, `*.py` |
-| implementation-patterns | Always for BUILD | Any code file |
-| search-first | Always for BUILD | Any code file |
+| implementation-orchestration | Always for IMPLEMENT | Any — orchestrates agent pipeline |
+| implementation-patterns | Always for IMPLEMENT | Any code file |
 | typescript | TypeScript files in scope | `*.ts`, `*.tsx` |
 | react | React components in scope | `*.tsx`, `*.jsx` |
 | frontend-design | UI/styling work | `*.css`, `*.scss`, `*.tsx` with styling keywords |
@@ -27,7 +26,7 @@ These skills may be loaded during GUIDED-depth ambient routing.
 
 | Skill | When to Load | File Patterns |
 |-------|-------------|---------------|
-| test-patterns | Always for DEBUG | Any test-related context |
+| debug-orchestration | Always for DEBUG | Any — orchestrates investigation pipeline |
 | core-patterns | Always for DEBUG | Any code file |
 | git-safety | Git operations involved | User mentions git, rebase, merge, etc. |
 
@@ -43,6 +42,7 @@ These skills may be loaded during GUIDED-depth ambient routing.
 
 | Skill | When to Load | File Patterns |
 |-------|-------------|---------------|
+| plan-orchestration | Always for PLAN | Any — orchestrates design pipeline |
 | implementation-patterns | Always for PLAN | Any planning context |
 | core-patterns | Architectural planning | System design discussions |
 
@@ -63,7 +63,7 @@ These skills are loaded only by explicit DevFlow commands (primarily `/code-revi
 
 ## Selection Limits
 
-- **Maximum 3 skills** per ambient response (primary + up to 2 secondary)
+- **Maximum 3 knowledge skills** per ambient response (primary + up to 2 secondary)
+- **Orchestration skills** (implementation-orchestration, debug-orchestration, plan-orchestration) are loaded in addition to knowledge skills — they don't count toward the limit
 - **Primary skills** are always loaded for the classified intent
 - **Secondary skills** are loaded only when file patterns match conversation context
-- If more than 3 skills seem relevant, this is an ELEVATE signal
