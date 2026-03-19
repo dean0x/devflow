@@ -29,9 +29,21 @@ Analyze the bug description, error messages, and conversation context. Generate 
 
 If fewer than 3 hypotheses are possible, proceed with 2.
 
+## Agent Budget
+
+Hard cap: **8 total Explore agents** across all phases.
+
+| Phase | Allocation |
+|-------|-----------|
+| Phase 2 (Investigate) | Up to 5 (one per hypothesis, 3-5 hypotheses) |
+| Phase 3 (Converge — validation) | Up to 2 |
+| Phase 3 (Converge — second round) | Remaining budget (typically 1) |
+
+If budget is exhausted before convergence, ask user to narrow scope via AskUserQuestion rather than spawning more agents.
+
 ## Phase 2: Investigate (Parallel)
 
-Spawn one Explore agent per hypothesis **in a single message** (parallel execution):
+Spawn one Explore agent per hypothesis **in a single message** (parallel execution, max 5):
 
 - Each investigator searches for evidence FOR and AGAINST its hypothesis
 - Must provide file:line references for all evidence

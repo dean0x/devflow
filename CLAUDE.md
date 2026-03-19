@@ -22,7 +22,7 @@ Plugin marketplace with 17 plugins (8 core + 9 optional language/ecosystem), eac
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
-| `devflow-ambient` | Ambient mode — intent classification with agent orchestration | No |
+| `devflow-ambient` | Ambient mode — three-tier intent classification (QUICK/GUIDED/ORCHESTRATED) | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
 | `devflow-typescript` | TypeScript language patterns (optional) | No |

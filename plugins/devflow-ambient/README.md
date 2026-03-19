@@ -1,18 +1,21 @@
 # devflow-ambient
 
-Ambient mode — auto-loads relevant skills based on each prompt, no explicit commands needed.
+Ambient mode — auto-classifies intent and applies proportional skill enforcement with optional agent orchestration.
 
 ## Command
 
 ### `/ambient`
 
-Classify user intent and apply proportional skill enforcement to any prompt.
+Classify user intent and apply proportional enforcement to any prompt.
 
 ```bash
-/ambient add a login form          # BUILD/GUIDED — loads TDD + implementation-patterns
-/ambient fix the auth error        # DEBUG/GUIDED — loads test-patterns + core-patterns
+/ambient add a login form          # IMPLEMENT/GUIDED — skills + main session + Simplifier
+/ambient refactor the auth system  # IMPLEMENT/ORCHESTRATED — Coder + quality gates
+/ambient fix the auth error        # DEBUG/GUIDED — main session diagnoses + fixes
+/ambient debug flaky test failures # DEBUG/ORCHESTRATED — parallel hypothesis investigation
+/ambient how should we cache?      # PLAN/ORCHESTRATED — Skimmer + Explore + Plan agents
 /ambient where is the config?      # EXPLORE/QUICK — responds normally, zero overhead
-/ambient refactor the auth system  # BUILD/ELEVATE — suggests /implement
+/ambient commit this               # QUICK — no overhead
 ```
 
 ## Always-On Mode
@@ -29,21 +32,39 @@ When enabled, a `UserPromptSubmit` hook injects a classification preamble before
 
 ## How It Works
 
-1. **Classify intent** — BUILD, DEBUG, REVIEW, PLAN, EXPLORE, or CHAT
-2. **Classify depth** — QUICK (zero overhead), GUIDED (2-3 skills), or ELEVATE (workflow nudge)
+1. **Classify intent** — IMPLEMENT, DEBUG, REVIEW, PLAN, EXPLORE, or CHAT
+2. **Classify depth** — QUICK, GUIDED, or ORCHESTRATED (scope-based)
 3. **Apply proportionally**:
-   - QUICK: respond normally
-   - GUIDED: load relevant skills, enforce TDD for BUILD
-   - ELEVATE: respond + recommend full workflow command
+   - QUICK: respond normally (zero overhead)
+   - GUIDED: load skills, implement in main session, spawn Simplifier after code changes
+   - ORCHESTRATED: load skills, orchestrate full agent pipeline
 
 ## Depth Tiers
 
-| Depth | When | Overhead |
-|-------|------|----------|
-| QUICK | Chat, simple exploration, git/devops ops, single-word confirmations | ~0 tokens |
-| GUIDED | BUILD/DEBUG/REVIEW/PLAN, 1-5 file scope | ~500-1000 tokens (skill reads) |
-| ELEVATE | Multi-file, architectural, system-wide scope | ~0 extra tokens (nudge only) |
+| Depth | When | What Happens |
+|-------|------|-------------|
+| QUICK | Chat, exploration, git ops, config, trivial edits | Zero overhead — respond normally |
+| GUIDED | Small-scope IMPLEMENT (≤2 files), clear DEBUG, focused PLAN, REVIEW | Load skills → main session works → Simplifier cleanup |
+| ORCHESTRATED | Large-scope IMPLEMENT (>2 files), vague DEBUG, system-level PLAN | Load skills → spawn agent pipeline |
+
+### Scope-Based Split
+
+| Intent | GUIDED | ORCHESTRATED |
+|--------|--------|-------------|
+| IMPLEMENT | ≤2 files, single module | >2 files, multi-module |
+| DEBUG | Clear error with stack trace/location | Vague/cross-cutting bug |
+| PLAN | Focused design question | System-level architecture |
+| REVIEW | Always GUIDED | — |
+
+## Agent Orchestration (ORCHESTRATED only)
+
+| Intent | Pipeline |
+|--------|----------|
+| IMPLEMENT | Pre-flight → Coder → Validator → Simplifier → Scrutinizer → Shepherd |
+| DEBUG | Hypotheses → parallel Explores (max 8) → convergence → report → offer fix |
+| PLAN | Skimmer → Explores → Plan agent → gap validation |
 
 ## Skills
 
 - `ambient-router` — Intent + depth classification, skill selection matrix
+- `test-driven-development` — TDD enforcement for IMPLEMENT (GUIDED + ORCHESTRATED)

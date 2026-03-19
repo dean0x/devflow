@@ -34,10 +34,10 @@ export function runClaude(prompt: string, options?: { timeout?: number }): strin
 
 /**
  * Assert that output contains a classification marker (case-insensitive).
- * Classification markers look like: "Ambient: BUILD/GUIDED"
+ * Classification markers look like: "Ambient: IMPLEMENT/GUIDED"
  */
 export function hasClassification(output: string): boolean {
-  return /ambient:\s*(BUILD|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ELEVATE)/i.test(output);
+  return /ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i.test(output);
 }
 
 /**
@@ -52,7 +52,7 @@ export function isQuietResponse(output: string): boolean {
  * Extract the intent from a classification marker.
  */
 export function extractIntent(output: string): string | null {
-  const match = output.match(/ambient:\s*(BUILD|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)/i);
+  const match = output.match(/ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)/i);
   return match ? match[1].toUpperCase() : null;
 }
 
@@ -60,6 +60,6 @@ export function extractIntent(output: string): string | null {
  * Extract the depth from a classification marker.
  */
 export function extractDepth(output: string): string | null {
-  const match = output.match(/ambient:\s*\w+\s*\/\s*(QUICK|GUIDED|ELEVATE)/i);
+  const match = output.match(/ambient:\s*\w+\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i);
   return match ? match[1].toUpperCase() : null;
 }

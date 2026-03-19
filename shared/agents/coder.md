@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: inherit
-skills: core-patterns, git-safety, implementation-patterns, git-workflow, test-patterns, test-driven-development, input-validation
+skills: core-patterns, git-safety, implementation-patterns, git-workflow, test-patterns, test-driven-development, search-first, input-validation
 ---
 
 # Coder Agent

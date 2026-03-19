@@ -33,17 +33,22 @@ fi
 # Inject classification preamble
 PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt:
 Intent: IMPLEMENT | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
-Depth: QUICK (no overhead) | ORCHESTRATED (skills + agent orchestration)
+Depth: QUICK (no overhead) | GUIDED (skills + main session + Simplifier) | ORCHESTRATED (skills + agent orchestration)
 
-Classification conservatism: default to QUICK. Only classify ORCHESTRATED when the prompt
-has clear task scope. Small edits, config changes, git ops, exploratory questions → QUICK.
+Classification conservatism: default to QUICK. Only classify GUIDED when the prompt has clear
+task scope with small scope (≤2 files). Only classify ORCHESTRATED when scope is large (>2 files,
+multi-module). Small edits, config changes, git ops, exploratory questions → QUICK.
+
+If GUIDED: Use the ambient-router skill already in your session context.
+BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
+Then implement directly in main session. After code changes, spawn Simplifier on changed files.
 
 If ORCHESTRATED: Use the ambient-router skill already in your session context.
 BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
 Then orchestrate agents per the ambient-router Step 5.
 
 If QUICK: Respond normally without stating classification.
-Only state classification aloud for ORCHESTRATED."
+Only state classification aloud for GUIDED and ORCHESTRATED."
 
 jq -n --arg ctx "$PREAMBLE" '{
   "hookSpecificOutput": {

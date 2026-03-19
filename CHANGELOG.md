@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Ambient mode**: Three depth tiers (QUICK/GUIDED/ORCHESTRATED) replacing old QUICK/GUIDED/ELEVATE
+- **Ambient mode**: ORCHESTRATED tier spawns agent pipelines for IMPLEMENT, DEBUG, PLAN intents
+- **Ambient mode**: GUIDED tier for small-scope IMPLEMENT (≤2 files), simple DEBUG, focused PLAN, and REVIEW — main session with skills + Simplifier
+- **Ambient mode**: BUILD intent renamed to IMPLEMENT for clarity
+- **Coder agent**: Added `test-driven-development` and `search-first` to permanent skills
+- **Debug pipeline**: Agent budget capped at 8 Explore agents total
+
 ---
 
 ## [1.5.0] - 2026-03-13

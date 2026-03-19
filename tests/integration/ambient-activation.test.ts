@@ -32,14 +32,14 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
     expect(isQuietResponse(output) || extractDepth(output) === 'QUICK').toBe(true);
   });
 
-  // GUIDED tier — skills referenced in output
-  it('classifies "add a login form" as BUILD/GUIDED', () => {
+  // GUIDED tier — skills loaded, main session implements
+  it('classifies "add a login form" as IMPLEMENT/GUIDED', () => {
     const output = runClaude('add a login form with email and password fields');
     if (hasClassification(output)) {
-      expect(extractIntent(output)).toBe('BUILD');
-      expect(extractDepth(output)).toBe('GUIDED');
+      expect(extractIntent(output)).toBe('IMPLEMENT');
+      expect(['GUIDED', 'ORCHESTRATED']).toContain(extractDepth(output));
     }
-    // Even without explicit classification, BUILD prompts should reference TDD
+    // Even without explicit classification, IMPLEMENT prompts should reference TDD
     expect(
       output.toLowerCase().includes('test') ||
       output.toLowerCase().includes('tdd') ||
@@ -51,7 +51,7 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
     const output = runClaude('fix the authentication error in the login handler');
     if (hasClassification(output)) {
       expect(extractIntent(output)).toBe('DEBUG');
-      expect(['GUIDED', 'ELEVATE']).toContain(extractDepth(output));
+      expect(['GUIDED', 'ORCHESTRATED']).toContain(extractDepth(output));
     }
   });
 });
