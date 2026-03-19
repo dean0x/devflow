@@ -91,7 +91,7 @@
     {
       "name": "devflow-ambient",
       "source": "./plugins/devflow-ambient",
-      "description": "Ambient mode — auto-loads relevant skills for every prompt",
+      "description": "Ambient mode — classifies intent and applies proportional effort (skills for guided work, agent orchestration for complex tasks)",
       "version": "1.5.0",
       "keywords": [
         "ambient",

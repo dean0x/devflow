@@ -1,22 +1,23 @@
 ---
 name: ambient-router
-description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by /ambient command and always-on UserPromptSubmit hook.
+description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
 # Ambient Router
 
-Classify user intent and auto-load relevant skills. Zero overhead for simple requests, skill injection for substantive work, workflow nudges for complex tasks.
+Classify user intent and auto-load relevant skills. Zero overhead for simple requests, skill loading + optional agent orchestration for substantive work.
 
 ## Iron Law
 
-> **PROPORTIONAL RESPONSE**
+> **PROPORTIONAL RESPONSE MATCHED TO SCOPE**
 >
-> Match effort to intent. Never apply heavyweight processes to lightweight requests.
-> A chat question gets zero overhead. A 3-file feature gets 2-3 skills. A system
-> refactor gets a nudge toward `/implement`. Misclassification in either direction
-> is a failure.
+> QUICK gets zero overhead. GUIDED gets skill loading + main session implementation
+> with Simplifier cleanup. ORCHESTRATED gets full skill loading via the Skill tool plus
+> agent pipeline execution. Misclassification in either direction is a failure —
+> false-positive ORCHESTRATED is expensive (5-6 agent spawns), false-negative
+> GUIDED leaves quality on the table.
 
 ---
 
@@ -26,14 +27,14 @@ Determine what the user is trying to do from their prompt.
 
 | Intent | Signal Words / Patterns | Examples |
 |--------|------------------------|---------|
-| **BUILD** | "add", "create", "implement", "build", "write", "make" | "add a login form", "create an API endpoint" |
+| **IMPLEMENT** | "add", "create", "implement", "build", "write", "make" | "add a login form", "create an API endpoint" |
 | **DEBUG** | "fix", "bug", "broken", "failing", "error", "why does" | "fix the auth error", "why is this test failing" |
 | **REVIEW** | "check", "look at", "review", "is this ok", "any issues" | "check this function", "any issues with this?" |
 | **PLAN** | "how should", "design", "architecture", "approach", "strategy" | "how should I structure auth?", "what's the approach for caching?" |
 | **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" | "where is the config?", "explain this function" |
 | **CHAT** | greetings, meta-questions, confirmations, short responses | "thanks", "yes", "what can you do?" |
 
-**Ambiguous prompts:** Default to the lowest-overhead classification. "Update the README" → BUILD/GUIDED. Git operations like "commit this" → QUICK.
+**Ambiguous prompts:** Default to the lowest-overhead classification. "Update the README" → QUICK. Git operations like "commit this" → QUICK.
 
 ## Step 2: Classify Depth
 
@@ -41,44 +42,87 @@ Determine how much enforcement the prompt warrants.
 
 | Depth | Criteria | Action |
 |-------|----------|--------|
-| **QUICK** | CHAT intent. EXPLORE with no analytical depth ("where is X?"). Git/devops operations (commit, push, merge, branch, pr, deploy, reinstall). Single-word continuations. | Respond normally. Zero overhead. Do not state classification. |
-| **GUIDED** | BUILD/DEBUG/REVIEW/PLAN intent (any word count). EXPLORE with analytical depth ("analyze our X", "discuss how Y works"). | Read and apply 2-3 relevant skills from the selection matrix below. State classification briefly. |
-| **ELEVATE** | Multi-file architectural change, system-wide scope, > 5 files. Detailed implementation plan (100+ words with plan structure). | Respond at best effort + recommend: "This looks like it would benefit from `/implement` for full lifecycle management." |
+| **QUICK** | CHAT intent. EXPLORE intent. Git/devops operations (commit, push, merge, branch, pr, deploy, reinstall). Single-word continuations. Small edits, config changes, trivial single-file tweaks. | Respond normally. Zero overhead. Do not state classification. |
+| **GUIDED** | IMPLEMENT with small scope (≤2 files, single module). DEBUG with clear error location (stack trace, specific file, known function). PLAN for focused design questions (specific area/pattern). REVIEW (always GUIDED). | Load skills via Skill tool. Main session implements directly. Spawn Simplifier after code changes. State classification. |
+| **ORCHESTRATED** | IMPLEMENT with larger scope (>2 files, multi-module, complex). DEBUG with vague/cross-cutting bug (no clear location, multiple possible causes). PLAN for system-level architecture (caching layer, auth system, multi-module design). | Load skills via Skill tool, then orchestrate agents per Step 5. State classification. |
 
-## Step 3: Select Skills (GUIDED depth only)
+**Scope-based decision criteria:**
 
-Based on classified intent, read the following skills to inform your response.
+| Intent | GUIDED (small scope) | ORCHESTRATED (large scope) |
+|--------|---------------------|---------------------------|
+| **IMPLEMENT** | ≤2 files, single module, clear task | >2 files, multi-module, complex |
+| **DEBUG** | Clear error with known location (stack trace, specific file) | Vague/cross-cutting bug, multiple possible causes |
+| **PLAN** | Focused question about specific area/pattern | System-level architecture, multi-module design |
+| **REVIEW** | Always GUIDED | — |
+
+**Classification conservatism:** Default to QUICK. Only classify GUIDED/ORCHESTRATED when the prompt has clear task scope. When choosing between GUIDED and ORCHESTRATED, prefer GUIDED — escalate only when scope clearly exceeds main-session capacity.
+
+## Step 3: Select Skills
+
+Based on classified intent and depth, invoke each selected skill using the Skill tool.
+
+### GUIDED-depth skills
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **BUILD** | test-driven-development, implementation-patterns, search-first | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
-| **DEBUG** | test-patterns, core-patterns | git-safety (if git operations involved) |
+| **IMPLEMENT** | test-driven-development, implementation-patterns, search-first | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
+| **DEBUG** | core-patterns, test-patterns | git-safety (if git operations involved) |
+| **PLAN** | implementation-patterns, core-patterns | — |
 | **REVIEW** | self-review, core-patterns | test-patterns |
-| **PLAN** | implementation-patterns | core-patterns |
 
-**Excluded from ambient** (review-command-only): review-methodology, complexity-patterns, consistency-patterns, database-patterns, dependencies-patterns, documentation-patterns, regression-patterns, architecture-patterns, accessibility.
+### ORCHESTRATED-depth skills
+
+| Intent | Primary Skills | Secondary (if file type matches) |
+|--------|---------------|----------------------------------|
+| **IMPLEMENT** | implementation-orchestration, implementation-patterns | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
+| **DEBUG** | debug-orchestration, core-patterns | git-safety (if git operations involved) |
+| **PLAN** | plan-orchestration, implementation-patterns, core-patterns | — |
+
+**Excluded from ambient** (review-command-only): review-methodology, complexity-patterns, consistency-patterns, database-patterns, dependencies-patterns, documentation-patterns, regression-patterns, architecture-patterns, accessibility, performance-patterns.
 
 See `references/skill-catalog.md` for the full skill-to-intent mapping with file pattern triggers.
 
 ## Step 4: Apply
 
 <IMPORTANT>
-When classification is GUIDED or ELEVATE, skill application is NON-NEGOTIABLE.
+When classification is GUIDED or ORCHESTRATED, skill loading is NON-NEGOTIABLE.
 Do not rationalize skipping skills. Do not respond without loading them first.
-If test-driven-development is selected, you MUST write the failing test before ANY production code.
+BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
+For IMPLEMENT intent, enforce TDD: write the failing test before ANY production code.
 </IMPORTANT>
 
 - **QUICK:** Respond directly. No preamble, no classification statement.
-- **GUIDED:** State classification briefly: `Ambient: BUILD/GUIDED. Loading: test-driven-development, implementation-patterns.` Then read the selected skills and apply their patterns. No exceptions.
-- **ELEVATE:** Respond with your best effort, then append: `> This task spans multiple files/systems. Consider \`/implement\` for full lifecycle.`
+- **GUIDED:** State classification briefly: `Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first.` Then invoke each skill using the Skill tool and work directly in main session. After code changes, spawn Simplifier on changed files.
+- **ORCHESTRATED:** State classification briefly: `Ambient: IMPLEMENT/ORCHESTRATED. Loading: implementation-orchestration, implementation-patterns.` Then invoke each skill using the Skill tool and follow Step 5 for agent orchestration.
+
+### GUIDED Behavior by Intent
+
+| Intent | Main Session Work | Post-Work |
+|--------|------------------|-----------|
+| **IMPLEMENT** | Implement directly with loaded skills. Follow TDD cycle. | Spawn Simplifier on changed files. |
+| **DEBUG** | Investigate directly — reproduce bug, diagnose from stack trace/error, fix. | Spawn Simplifier on changed files. |
+| **PLAN** | Explore relevant code and design directly. The area is focused enough for main session. | No Simplifier (no code changes). |
+| **REVIEW** | Review directly with loaded skills. | No Simplifier. |
+
+## Step 5: Orchestrate Agents (ORCHESTRATED depth only)
+
+After loading skills via Step 3-4, execute the agent pipeline for the classified intent:
+
+| Intent | Pipeline |
+|--------|----------|
+| **IMPLEMENT** | Follow implementation-orchestration skill pipeline: pre-flight → plan synthesis → Coder → quality gates |
+| **DEBUG** | Follow debug-orchestration skill pipeline: hypotheses → parallel Explores → convergence → report → offer fix |
+| **PLAN** | Follow plan-orchestration skill pipeline: Skimmer → Explores → Plan agent → gap validation |
+| **EXPLORE** | No agents — respond in main session |
+| **CHAT** | No agents — respond in main session |
 
 ---
 
 ## Transparency Rules
 
 1. **QUICK → silent.** No classification output.
-2. **GUIDED → brief statement + full skill enforcement.** One line: intent, depth, skills loaded. Then follow every skill requirement without shortcuts.
-3. **ELEVATE → recommendation.** Best-effort response + workflow nudge.
+2. **GUIDED → brief statement + full skill enforcement.** One line: intent, depth, skills loaded. Then implement in main session with skill patterns applied.
+3. **ORCHESTRATED → brief statement + full skill enforcement + agent orchestration.** One line: intent, depth, skills loaded. Then follow every skill requirement and orchestrate agents per Step 5.
 4. **Never lie about classification.** If uncertain, say so.
 5. **Never over-classify.** When in doubt, go one tier lower.
 6. **Never under-apply.** Rationalization is the enemy of quality. If a skill requires a step, do the step.
@@ -87,7 +131,10 @@ If test-driven-development is selected, you MUST write the failing test before A
 
 | Case | Handling |
 |------|----------|
-| Mixed intent ("fix this bug and add a test") | Use the higher-overhead intent (BUILD > DEBUG) |
+| Mixed intent ("fix this bug and add a test") | Use the higher-overhead intent (IMPLEMENT > DEBUG) |
 | Continuation of previous conversation | Inherit previous classification unless prompt clearly shifts |
 | User explicitly requests no enforcement | Respect immediately — classify as QUICK |
 | Prompt references specific DevFlow command | Skip ambient — the command has its own orchestration |
+| Scope ambiguous between GUIDED and ORCHESTRATED | Default to GUIDED; escalate if complexity emerges during work |
+| REVIEW intent | Always GUIDED — single Reviewer focus, no orchestration pipeline |
+| Multiple triggers per session | Each runs independently; context compaction handles accumulation |

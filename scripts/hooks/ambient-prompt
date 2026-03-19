@@ -30,15 +30,16 @@ if [ "$WORD_COUNT" -lt 2 ]; then
   exit 0
 fi
 
+# Normalize to lowercase for matching
+PROMPT_LOWER=$(echo "$PROMPT" | tr '[:upper:]' '[:lower:]')
+
+# Fast-path: git operations are always QUICK — skip preamble
+if echo "$PROMPT_LOWER" | grep -qE '^(commit|push|pull|merge|rebase|cherry-pick|squash|tag|stash)|create (a )?pr|open (a )?pr'; then
+  exit 0
+fi
+
 # Inject classification preamble
-PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt:
-Intent: BUILD | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
-Depth: QUICK (no overhead) | GUIDED (load skills) | ELEVATE (suggest /command)
-
-If GUIDED+: Use the ambient-router skill already in your session context for classification details and skill selection matrix. Then Read the selected skills from ~/.claude/skills/<name>/SKILL.md and apply their patterns. For BUILD tasks, also load test-driven-development skill and enforce RED-GREEN-REFACTOR.
-
-If QUICK: Respond normally without stating classification.
-Only state classification aloud for GUIDED/ELEVATE."
+PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification."
 
 jq -n --arg ctx "$PREAMBLE" '{
   "hookSpecificOutput": {

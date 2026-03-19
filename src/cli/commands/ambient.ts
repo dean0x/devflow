@@ -168,7 +168,7 @@ export const ambientCommand = new Command('ambient')
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
       p.log.success('Ambient mode enabled — UserPromptSubmit hook registered');
-      p.log.info(color.dim('Relevant skills will now auto-load based on each prompt'));
+      p.log.info(color.dim('Skills auto-load and agents orchestrate based on each prompt'));
     }
 
     if (options.disable) {
