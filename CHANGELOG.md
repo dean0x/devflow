@@ -7,13 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Ambient agent orchestration**: ORCHESTRATED tier spawns agent pipelines for IMPLEMENT, DEBUG, PLAN intents
+- **Orchestration skills**: `implementation-orchestration`, `debug-orchestration`, `plan-orchestration` for ambient agent pipelines
+
 ### Changed
 - **Ambient mode**: Three depth tiers (QUICK/GUIDED/ORCHESTRATED) replacing old QUICK/GUIDED/ELEVATE
-- **Ambient mode**: ORCHESTRATED tier spawns agent pipelines for IMPLEMENT, DEBUG, PLAN intents
 - **Ambient mode**: GUIDED tier for small-scope IMPLEMENT (≤2 files), simple DEBUG, focused PLAN, and REVIEW — main session with skills + Simplifier
 - **Ambient mode**: BUILD intent renamed to IMPLEMENT for clarity
 - **Coder agent**: Added `test-driven-development` and `search-first` to permanent skills
-- **Debug pipeline**: Agent budget capped at 8 Explore agents total
+
+### Removed
+- **`/ambient` command**: Ambient mode is now hook-only. Use `devflow ambient --enable` to activate.
+
+### Behavioral Changes
+- EXPLORE intent now always classifies as QUICK (was split QUICK/GUIDED)
+- Simple text edits ("Update the README") classify as QUICK (was BUILD/GUIDED)
+- Debug agent budget cap removed — agents scale to investigation needs
 
 ---
 

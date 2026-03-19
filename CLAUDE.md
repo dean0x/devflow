@@ -113,7 +113,6 @@ Working memory files live in a dedicated `.memory/` directory:
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential)
-- `/ambient` — Intent classification + agent orchestration (IMPLEMENT/DEBUG/PLAN/REVIEW pipelines)
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
 **Shared agents** (10): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, shepherd, scrutinizer, validator

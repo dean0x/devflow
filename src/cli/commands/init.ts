@@ -105,7 +105,7 @@ export const initCommand = new Command('init')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
   .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
-  .option('--ambient', 'Enable ambient mode (auto-loads relevant skills for every prompt)')
+  .option('--ambient', 'Enable ambient mode (classifies intent, loads skills, orchestrates agents)')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
@@ -225,7 +225,7 @@ export const initCommand = new Command('init')
       const ambientChoice = await p.select({
         message: 'Enable ambient mode?',
         options: [
-          { value: true, label: 'Yes (Recommended)', hint: 'Auto-loads relevant skills for each prompt' },
+          { value: true, label: 'Yes (Recommended)', hint: 'Classifies intent, loads skills, orchestrates agents' },
           { value: false, label: 'No', hint: 'Full control — load skills manually' },
         ],
       });

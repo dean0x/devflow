@@ -9,6 +9,8 @@ allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 
 Agent pipeline for PLAN intent in ambient ORCHESTRATED mode. Codebase orientation, targeted exploration, architecture design, and gap validation.
 
+This is a lightweight variant of the Plan phase in `/implement` for ambient ORCHESTRATED mode.
+
 ## Iron Law
 
 > **PLANS WITHOUT CODEBASE GROUNDING ARE FANTASIES**
@@ -21,7 +23,7 @@ Agent pipeline for PLAN intent in ambient ORCHESTRATED mode. Codebase orientatio
 
 ## Phase 1: Orient
 
-Spawn Skimmer agent to get codebase overview relevant to the planning question:
+Spawn `Task(subagent_type="Skimmer")` to get codebase overview relevant to the planning question:
 
 - Existing patterns and conventions in the affected area
 - File structure and module boundaries
@@ -30,7 +32,7 @@ Spawn Skimmer agent to get codebase overview relevant to the planning question:
 
 ## Phase 2: Explore
 
-Based on Skimmer findings, spawn 2-3 Explore agents **in a single message** (parallel execution):
+Based on Skimmer findings, spawn 2-3 `Task(subagent_type="Explore")` agents **in a single message** (parallel execution):
 
 - **Integration explorer**: Examine integration points — APIs, shared types, module boundaries the plan must respect
 - **Pattern explorer**: Find existing implementations of similar features to follow as templates
@@ -40,7 +42,7 @@ Adjust explorer focus based on the specific planning question.
 
 ## Phase 3: Design
 
-Spawn Plan agent with combined Skimmer + Explore findings:
+Spawn `Task(subagent_type="Plan")` with combined Skimmer + Explore findings:
 
 - Design implementation approach with file-level specificity
 - Reference existing patterns discovered in Phase 1-2

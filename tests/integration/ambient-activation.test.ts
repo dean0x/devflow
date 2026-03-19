@@ -35,23 +35,23 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
   // GUIDED tier — skills loaded, main session implements
   it('classifies "add a login form" as IMPLEMENT/GUIDED', () => {
     const output = runClaude('add a login form with email and password fields');
-    if (hasClassification(output)) {
-      expect(extractIntent(output)).toBe('IMPLEMENT');
-      expect(['GUIDED', 'ORCHESTRATED']).toContain(extractDepth(output));
-    }
-    // Even without explicit classification, IMPLEMENT prompts should reference TDD
-    expect(
-      output.toLowerCase().includes('test') ||
-      output.toLowerCase().includes('tdd') ||
-      hasClassification(output)
-    ).toBe(true);
+    expect(hasClassification(output)).toBe(true);
+    expect(extractIntent(output)).toBe('IMPLEMENT');
+    expect(['GUIDED', 'ORCHESTRATED']).toContain(extractDepth(output));
   });
 
   it('classifies "fix the auth error" as DEBUG/GUIDED', () => {
     const output = runClaude('fix the authentication error in the login handler');
-    if (hasClassification(output)) {
-      expect(extractIntent(output)).toBe('DEBUG');
-      expect(['GUIDED', 'ORCHESTRATED']).toContain(extractDepth(output));
-    }
+    expect(hasClassification(output)).toBe(true);
+    expect(extractIntent(output)).toBe('DEBUG');
+    expect(['GUIDED', 'ORCHESTRATED']).toContain(extractDepth(output));
+  });
+
+  // ORCHESTRATED tier — agents spawned for complex multi-file work
+  it('classifies complex multi-file refactor as ORCHESTRATED', () => {
+    const output = runClaude('Refactor the authentication system across the API layer, database models, and frontend components');
+    expect(hasClassification(output)).toBe(true);
+    expect(extractIntent(output)).toBe('IMPLEMENT');
+    expect(extractDepth(output)).toBe('ORCHESTRATED');
   });
 });

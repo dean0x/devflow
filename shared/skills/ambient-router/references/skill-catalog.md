@@ -11,6 +11,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
 | implementation-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates agent pipeline |
+| test-driven-development | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file — enforces RED-GREEN-REFACTOR |
 | implementation-patterns | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file |
 | search-first | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
 | typescript | TypeScript files in scope | GUIDED + ORCHESTRATED | `*.ts`, `*.tsx` |

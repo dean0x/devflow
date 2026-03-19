@@ -9,6 +9,8 @@ allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 
 Agent pipeline for DEBUG intent in ambient ORCHESTRATED mode. Competing hypothesis investigation, parallel evidence gathering, convergence validation, and optional fix.
 
+This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Excluded: knowledge persistence loading, GitHub issue fetching, pitfall recording.
+
 ## Iron Law
 
 > **COMPETING HYPOTHESES BEFORE CONCLUSIONS**
@@ -29,21 +31,9 @@ Analyze the bug description, error messages, and conversation context. Generate 
 
 If fewer than 3 hypotheses are possible, proceed with 2.
 
-## Agent Budget
-
-Hard cap: **8 total Explore agents** across all phases.
-
-| Phase | Allocation |
-|-------|-----------|
-| Phase 2 (Investigate) | Up to 5 (one per hypothesis, 3-5 hypotheses) |
-| Phase 3 (Converge — validation) | Up to 2 |
-| Phase 3 (Converge — second round) | Remaining budget (typically 1) |
-
-If budget is exhausted before convergence, ask user to narrow scope via AskUserQuestion rather than spawning more agents.
-
 ## Phase 2: Investigate (Parallel)
 
-Spawn one Explore agent per hypothesis **in a single message** (parallel execution, max 5):
+Spawn one `Task(subagent_type="Explore")` per hypothesis **in a single message** (parallel execution):
 
 - Each investigator searches for evidence FOR and AGAINST its hypothesis
 - Must provide file:line references for all evidence
@@ -53,7 +43,7 @@ Spawn one Explore agent per hypothesis **in a single message** (parallel executi
 
 Evaluate investigation results:
 
-- **One CONFIRMED**: Spawn 1-2 additional Explore agents to validate from different angles (prevent confirmation bias)
+- **One CONFIRMED**: Spawn 1-2 additional `Task(subagent_type="Explore")` agents to validate from different angles (prevent confirmation bias)
 - **Multiple PARTIAL**: Look for a unifying root cause that explains all partial evidence
 - **All DISPROVED**: Report honestly — "No root cause identified from initial hypotheses." Generate 2-3 second-round hypotheses if conversation context suggests avenues not yet explored.
 
@@ -70,7 +60,7 @@ Present root cause analysis:
 
 Ask user via AskUserQuestion: "Want me to implement this fix?"
 
-- **YES** → Run the implementation-orchestration pipeline (load it via Skill tool): pre-flight → Coder → quality gates. The fix description becomes the EXECUTION_PLAN.
+- **YES** → Implement the fix directly in main session using GUIDED approach: load implementation-patterns, search-first, and test-driven-development skills, then code the fix. Spawn `Task(subagent_type="Simplifier")` on changed files after.
 - **NO** → Done. Report stands as documentation.
 
 ## Error Handling

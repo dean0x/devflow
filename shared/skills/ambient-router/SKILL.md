@@ -1,6 +1,6 @@
 ---
 name: ambient-router
-description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by /ambient command and always-on UserPromptSubmit hook.
+description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
@@ -65,7 +65,7 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | implementation-patterns, search-first | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
+| **IMPLEMENT** | test-driven-development, implementation-patterns, search-first | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
 | **DEBUG** | core-patterns, test-patterns | git-safety (if git operations involved) |
 | **PLAN** | implementation-patterns, core-patterns | — |
 | **REVIEW** | self-review, core-patterns | test-patterns |
@@ -88,7 +88,7 @@ See `references/skill-catalog.md` for the full skill-to-intent mapping with file
 When classification is GUIDED or ORCHESTRATED, skill loading is NON-NEGOTIABLE.
 Do not rationalize skipping skills. Do not respond without loading them first.
 BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
-If test-driven-development is selected (IMPLEMENT intent), you MUST write the failing test before ANY production code.
+For IMPLEMENT intent, enforce TDD: write the failing test before ANY production code.
 </IMPORTANT>
 
 - **QUICK:** Respond directly. No preamble, no classification statement.

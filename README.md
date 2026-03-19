@@ -48,7 +48,7 @@ Then in Claude Code:
 | `devflow-resolve` | `/resolve` | Process review issues — fix or defer to tech debt |
 | `devflow-debug` | `/debug` | Parallel hypothesis debugging |
 | `devflow-self-review` | `/self-review` | Self-review workflow (Simplifier + Scrutinizer) |
-| `devflow-ambient` | `/ambient` | Ambient mode — intent classification with agent orchestration |
+| `devflow-ambient` | (hook) | Ambient mode — intent classification with agent orchestration |
 | `devflow-core-skills` | (auto) | Auto-activating quality enforcement skills |
 
 ## Command Details

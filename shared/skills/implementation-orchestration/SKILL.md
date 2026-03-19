@@ -9,6 +9,8 @@ allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 
 Agent pipeline for IMPLEMENT intent in ambient ORCHESTRATED mode. Pre-flight checks, plan synthesis, Coder execution, and quality gates.
 
+This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Excluded: strategy selection (single/sequential/parallel Coders), retry loops, PR creation, knowledge loading.
+
 ## Iron Law
 
 > **QUALITY GATES ARE NON-NEGOTIABLE**
@@ -40,7 +42,7 @@ Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
 
 Record git SHA before first Coder: `git rev-parse HEAD`
 
-Spawn Coder agent with input variables:
+Spawn `Task(subagent_type="Coder")` with input variables:
 - **TASK_ID**: Generated from timestamp (e.g., `task-2026-03-19_1430`)
 - **TASK_DESCRIPTION**: From conversation context
 - **BASE_BRANCH**: Current branch (or newly created branch from Phase 1)
@@ -67,11 +69,11 @@ Pass FILES_CHANGED to all quality gate agents.
 
 Run sequentially — each gate must pass before the next:
 
-1. **Validator** (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
-2. **Simplifier** — code clarity and maintainability pass on FILES_CHANGED
-3. **Scrutinizer** — 9-pillar quality evaluation on FILES_CHANGED
-4. **Validator** (re-validate after Simplifier/Scrutinizer changes)
-5. **Shepherd** — verify implementation matches original request — retry up to 2× if misalignment found
+1. `Task(subagent_type="Validator")` (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
+2. `Task(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
+3. `Task(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED
+4. `Task(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
+5. `Task(subagent_type="Shepherd")` — verify implementation matches original request — retry up to 2× if misalignment found
 
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
 

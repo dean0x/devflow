@@ -30,25 +30,16 @@ if [ "$WORD_COUNT" -lt 2 ]; then
   exit 0
 fi
 
+# Normalize to lowercase for matching
+PROMPT_LOWER=$(echo "$PROMPT" | tr '[:upper:]' '[:lower:]')
+
+# Fast-path: git operations are always QUICK — skip preamble
+if echo "$PROMPT_LOWER" | grep -qE '^(commit|push|pull|merge|rebase|cherry-pick|squash|tag|stash)|create (a )?pr|open (a )?pr'; then
+  exit 0
+fi
+
 # Inject classification preamble
-PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt:
-Intent: IMPLEMENT | DEBUG | REVIEW | PLAN | EXPLORE | CHAT
-Depth: QUICK (no overhead) | GUIDED (skills + main session + Simplifier) | ORCHESTRATED (skills + agent orchestration)
-
-Classification conservatism: default to QUICK. Only classify GUIDED when the prompt has clear
-task scope with small scope (≤2 files). Only classify ORCHESTRATED when scope is large (>2 files,
-multi-module). Small edits, config changes, git ops, exploratory questions → QUICK.
-
-If GUIDED: Use the ambient-router skill already in your session context.
-BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
-Then implement directly in main session. After code changes, spawn Simplifier on changed files.
-
-If ORCHESTRATED: Use the ambient-router skill already in your session context.
-BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
-Then orchestrate agents per the ambient-router Step 5.
-
-If QUICK: Respond normally without stating classification.
-Only state classification aloud for GUIDED and ORCHESTRATED."
+PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification."
 
 jq -n --arg ctx "$PREAMBLE" '{
   "hookSpecificOutput": {

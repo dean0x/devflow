@@ -1,5 +1,7 @@
 import { execSync, execFileSync } from 'child_process';
 
+const CLASSIFICATION_PATTERN = /ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
+
 /**
  * Check if the `claude` CLI is available on this machine.
  */
@@ -37,7 +39,7 @@ export function runClaude(prompt: string, options?: { timeout?: number }): strin
  * Classification markers look like: "Ambient: IMPLEMENT/GUIDED"
  */
 export function hasClassification(output: string): boolean {
-  return /ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i.test(output);
+  return CLASSIFICATION_PATTERN.test(output);
 }
 
 /**
@@ -52,7 +54,7 @@ export function isQuietResponse(output: string): boolean {
  * Extract the intent from a classification marker.
  */
 export function extractIntent(output: string): string | null {
-  const match = output.match(/ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)/i);
+  const match = output.match(CLASSIFICATION_PATTERN);
   return match ? match[1].toUpperCase() : null;
 }
 
@@ -60,6 +62,6 @@ export function extractIntent(output: string): string | null {
  * Extract the depth from a classification marker.
  */
 export function extractDepth(output: string): string | null {
-  const match = output.match(/ambient:\s*\w+\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i);
-  return match ? match[1].toUpperCase() : null;
+  const match = output.match(CLASSIFICATION_PATTERN);
+  return match ? match[2].toUpperCase() : null;
 }
