@@ -13,9 +13,18 @@ import {
 /**
  * Integration tests for ambient mode skill activation.
  *
+ * KNOWN LIMITATION: These tests use `claude -p` (non-interactive mode) which
+ * does not reliably trigger the ambient classification flow. In `-p` mode,
+ * the model prioritizes the concrete task over the meta-instruction to classify.
+ * The ambient preamble is injected via --append-system-prompt, but models
+ * (including haiku and sonnet) often skip classification and respond directly.
+ *
+ * QUICK tests pass because absence of classification = quiet response.
+ * GUIDED/ORCHESTRATED tests may fail in `-p` mode — verify manually in an
+ * interactive Claude Code session where the UserPromptSubmit hook fires.
+ *
  * These tests require:
  * - `claude` CLI installed and authenticated
- * - Ambient mode enabled (`devflow ambient --enable`)
  * - DevFlow skills installed (`devflow init`)
  *
  * Run manually: npm run test:integration
@@ -51,7 +60,10 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
 
   // ORCHESTRATED tier — agents spawned for complex multi-file work
   it('classifies complex multi-file refactor as ORCHESTRATED', () => {
-    const output = runClaude('Refactor the authentication system across the API layer, database models, and frontend components');
+    const output = runClaude(
+      'Refactor the authentication system across the API layer, database models, and frontend components',
+      { timeout: 60000 },
+    );
     expect(hasClassification(output)).toBe(true);
     expect(extractIntent(output)).toBe('IMPLEMENT');
     expect(extractDepth(output)).toBe('ORCHESTRATED');
@@ -68,7 +80,10 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
 
   // Skill loading verification — ORCHESTRATED should show "Loading:" marker
   it('loads skills for ORCHESTRATED classification', () => {
-    const output = runClaude('Refactor the authentication system across the API layer, database models, and frontend components');
+    const output = runClaude(
+      'Refactor the authentication system across the API layer, database models, and frontend components',
+      { timeout: 60000 },
+    );
     expect(hasClassification(output)).toBe(true);
     expect(hasSkillLoading(output)).toBe(true);
     const skills = extractLoadedSkills(output);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from '../src/cli/commands/ambient.js';
+import { hasClassification, isQuietResponse, extractIntent, extractDepth, hasSkillLoading, extractLoadedSkills } from './integration/helpers.js';
 
 describe('addAmbientHook', () => {
   it('adds hook to empty settings', () => {
@@ -177,5 +178,67 @@ describe('hasAmbientHook', () => {
       },
     });
     expect(hasAmbientHook(input)).toBe(true);
+  });
+});
+
+describe('classification helpers', () => {
+  it('detects classification marker', () => {
+    expect(hasClassification('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe(true);
+    expect(hasClassification('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe(true);
+  });
+
+  it('returns false when no classification', () => {
+    expect(hasClassification('Here is the code you asked for.')).toBe(false);
+    expect(hasClassification('')).toBe(false);
+  });
+
+  it('isQuietResponse is inverse of hasClassification', () => {
+    expect(isQuietResponse('Just a normal response')).toBe(true);
+    expect(isQuietResponse('Ambient: IMPLEMENT/GUIDED. Loading: x.')).toBe(false);
+  });
+
+  it('extracts intent', () => {
+    expect(extractIntent('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe('IMPLEMENT');
+    expect(extractIntent('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe('DEBUG');
+    expect(extractIntent('Ambient: REVIEW/GUIDED. Loading: self-review.')).toBe('REVIEW');
+    expect(extractIntent('Ambient: PLAN/GUIDED. Loading: core-patterns.')).toBe('PLAN');
+  });
+
+  it('extracts depth', () => {
+    expect(extractDepth('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe('GUIDED');
+    expect(extractDepth('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe('ORCHESTRATED');
+  });
+
+  it('returns null for missing classification', () => {
+    expect(extractIntent('no classification here')).toBeNull();
+    expect(extractDepth('no classification here')).toBeNull();
+  });
+});
+
+describe('skill loading helpers', () => {
+  it('detects Loading marker', () => {
+    expect(hasSkillLoading('Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first.')).toBe(true);
+    expect(hasSkillLoading('Loading: core-patterns')).toBe(true);
+  });
+
+  it('returns false when no Loading marker', () => {
+    expect(hasSkillLoading('Ambient: IMPLEMENT/GUIDED.')).toBe(false);
+    expect(hasSkillLoading('Just some text')).toBe(false);
+  });
+
+  it('extracts single skill', () => {
+    expect(extractLoadedSkills('Loading: core-patterns')).toEqual(['core-patterns']);
+  });
+
+  it('extracts multiple skills', () => {
+    expect(extractLoadedSkills('Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first, typescript.')).toEqual([
+      'implementation-patterns',
+      'search-first',
+      'typescript',
+    ]);
+  });
+
+  it('returns empty array when no Loading marker', () => {
+    expect(extractLoadedSkills('no skills here')).toEqual([]);
   });
 });

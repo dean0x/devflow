@@ -15,16 +15,28 @@ export function isClaudeAvailable(): boolean {
   }
 }
 
+const AMBIENT_PREAMBLE =
+  'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, you MUST load the selected skills using the Skill tool before proceeding.';
+
 /**
  * Run a prompt through claude CLI in non-interactive mode.
+ * Injects the ambient preamble via --append-system-prompt since
+ * UserPromptSubmit hooks don't fire in -p (non-interactive) mode.
  * Returns the text output.
  */
-export function runClaude(prompt: string, options?: { timeout?: number }): string {
+export function runClaude(prompt: string, options?: { timeout?: number; ambient?: boolean }): string {
   const timeout = options?.timeout ?? 30000;
+  const ambient = options?.ambient ?? true;
+
+  const args = ['-p', '--output-format', 'text', '--model', 'haiku'];
+  if (ambient) {
+    args.push('--append-system-prompt', AMBIENT_PREAMBLE);
+  }
+  args.push(prompt);
 
   const result = execFileSync(
     'claude',
-    ['-p', '--output-format', 'text', '--model', 'haiku', prompt],
+    args,
     {
       stdio: 'pipe',
       timeout,
