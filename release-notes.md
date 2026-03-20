@@ -1,8 +1,8 @@
 ### Added
-- **`--dry-run` flag** for `devflow uninstall` — preview removal plan without deleting anything
+- **Version update notification** — statusline shows magenta `⬆ X.Y.Z` badge when newer devflow-kit is available (24h cached npm check, fully async)
 
 ### Fixed
-- **Ambient skill loading** — removed `allowed-tools` restriction from ambient-router so skills actually load via the Skill tool
-- **Ambient hook preamble** — explicit Skill tool instruction ensures models invoke skills rather than responding directly
-- **Init wizard** — hide `devflow-ambient` from plugin multiselect (auto-included via ambient prompt)
-- **Working memory** — replaced broken `--resume` with transcript-based background updater
+- **Skimmer agent** — enforce rskim usage via `tools: ["Bash", "Read"]` platform restriction and strict sequential workflow; prevents fallback to Grep/Glob
+- **Init multiselect** — remove redundant "(optional)" suffix from plugin hints
+- **Init multiselect** — hide `audit-claude` plugin (not production-ready; still installable via `--plugin=audit-claude`)
+- **Statusline portability** — replace macOS-only `stat -f %m` with portable `get_mtime()` helper (macOS + Linux)
