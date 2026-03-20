@@ -298,29 +298,24 @@ describe('migrateMemoryFiles', () => {
     expect(count).toBe(0);
   });
 
-  it('migrates all 3 files from .docs/ to .memory/', async () => {
+  it('migrates memory files from .docs/ to .memory/', async () => {
     const docsDir = path.join(tmpDir, '.docs');
     await fs.mkdir(docsDir, { recursive: true });
     await fs.writeFile(path.join(docsDir, 'WORKING-MEMORY.md'), '# Working Memory');
-    await fs.writeFile(path.join(docsDir, 'patterns.md'), '# Patterns');
     await fs.writeFile(path.join(docsDir, 'working-memory-backup.json'), '{}');
 
     const count = await migrateMemoryFiles(false, tmpDir);
-    expect(count).toBe(3);
+    expect(count).toBe(2);
 
     // Verify destinations exist
     const wm = await fs.readFile(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), 'utf-8');
     expect(wm).toBe('# Working Memory');
-
-    const patterns = await fs.readFile(path.join(tmpDir, '.memory', 'PROJECT-PATTERNS.md'), 'utf-8');
-    expect(patterns).toBe('# Patterns');
 
     const backup = await fs.readFile(path.join(tmpDir, '.memory', 'backup.json'), 'utf-8');
     expect(backup).toBe('{}');
 
     // Verify sources removed
     await expect(fs.access(path.join(docsDir, 'WORKING-MEMORY.md'))).rejects.toThrow();
-    await expect(fs.access(path.join(docsDir, 'patterns.md'))).rejects.toThrow();
     await expect(fs.access(path.join(docsDir, 'working-memory-backup.json'))).rejects.toThrow();
   });
 

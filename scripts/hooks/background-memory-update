@@ -2,8 +2,9 @@
 
 # Background Working Memory Updater
 # Called by stop-update-memory as a detached background process.
-# Resumes the parent session headlessly to update .memory/WORKING-MEMORY.md.
-# On failure: logs error, does nothing (no fallback).
+# Reads the last turn from the session transcript, then uses a fresh `claude -p`
+# invocation to update .memory/WORKING-MEMORY.md.
+# On failure: logs error, does nothing (stale memory is better than fake data).
 
 set -e
 
@@ -29,7 +30,7 @@ rotate_log() {
 
 # --- Stale Lock Recovery ---
 
-# Portable mtime in epoch seconds (same pattern as stop-update-memory:35-39)
+# Portable mtime in epoch seconds
 get_mtime() {
   if stat --version &>/dev/null 2>&1; then
     stat -c %Y "$1"
@@ -72,11 +73,65 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# --- Transcript Extraction ---
+
+extract_last_turn() {
+  # Compute transcript path: Claude Code stores transcripts at
+  # ~/.claude/projects/{cwd-with-slashes-replaced-by-hyphens}/{session_id}.jsonl
+  local encoded_cwd
+  encoded_cwd=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
+  local transcript="$HOME/.claude/projects/-${encoded_cwd}/${SESSION_ID}.jsonl"
+
+  if [ ! -f "$transcript" ]; then
+    log "Transcript not found at $transcript"
+    return 1
+  fi
+
+  # Extract last user and assistant text from JSONL
+  # Each line is a JSON object with "type" field
+  local last_user last_assistant
+
+  last_user=$(grep '"type":"user"' "$transcript" 2>/dev/null \
+    | tail -3 \
+    | jq -r '
+      if .message.content then
+        [.message.content[] | select(.type == "text") | .text] | join("\n")
+      else ""
+      end
+    ' 2>/dev/null \
+    | tail -1)
+
+  last_assistant=$(grep '"type":"assistant"' "$transcript" 2>/dev/null \
+    | tail -3 \
+    | jq -r '
+      if .message.content then
+        [.message.content[] | select(.type == "text") | .text] | join("\n")
+      else ""
+      end
+    ' 2>/dev/null \
+    | tail -1)
+
+  # Truncate to ~4000 chars total to keep token cost low
+  if [ ${#last_user} -gt 2000 ]; then
+    last_user="${last_user:0:2000}... [truncated]"
+  fi
+  if [ ${#last_assistant} -gt 2000 ]; then
+    last_assistant="${last_assistant:0:2000}... [truncated]"
+  fi
+
+  if [ -z "$last_user" ] && [ -z "$last_assistant" ]; then
+    log "No text content found in transcript"
+    return 1
+  fi
+
+  LAST_USER_TEXT="$last_user"
+  LAST_ASSISTANT_TEXT="$last_assistant"
+  return 0
+}
+
 # --- Main ---
 
-# Wait for parent session to flush transcript.
-# 3s provides ~6-10x margin over typical flush times.
-# If --resume shows stale transcripts, bump to 5s.
+# Wait for parent session to flush transcript
 sleep 3
 
 log "Starting update for session $SESSION_ID"
@@ -87,7 +142,6 @@ break_stale_lock
 # Acquire lock (other sessions may be updating concurrently)
 if ! acquire_lock; then
   log "Lock timeout after 90s — skipping update for session $SESSION_ID"
-  # Don't clean up lock we don't own
   trap - EXIT
   exit 0
 fi
@@ -102,97 +156,72 @@ if [ -f "$MEMORY_FILE" ]; then
   PRE_UPDATE_MTIME=$(get_mtime "$MEMORY_FILE")
 fi
 
-# Build instruction
-if [ -n "$EXISTING_MEMORY" ]; then
-  PATTERNS_INSTRUCTION=""
-PATTERNS_FILE="$CWD/.memory/PROJECT-PATTERNS.md"
-EXISTING_PATTERNS=""
-if [ -f "$PATTERNS_FILE" ]; then
-  EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
-  PATTERNS_INSTRUCTION="
-
-Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Keep patterns.md under 40 entries. When approaching the limit, consolidate related patterns into broader entries rather than adding duplicates.
-
-Existing patterns:
-$EXISTING_PATTERNS"
-else
-  PATTERNS_INSTRUCTION="
-
-If recurring patterns were observed during this session (coding conventions, architectural decisions, team preferences, tooling quirks), create $PATTERNS_FILE with entries formatted as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Only create this file if genuine patterns were observed — do not fabricate entries."
+# Gather git state (always available, used as fallback too)
+GIT_STATE=""
+if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
+  GIT_STATUS=$(git status --short 2>/dev/null | head -20)
+  GIT_LOG=$(git log --oneline -5 2>/dev/null)
+  GIT_DIFF=$(git diff --stat HEAD 2>/dev/null | tail -10)
+  GIT_STATE="Branch: $(git branch --show-current 2>/dev/null || echo 'unknown')
+Recent commits:
+${GIT_LOG}
+Changed files:
+${GIT_STATUS}
+Diff summary:
+${GIT_DIFF}"
 fi
 
-INSTRUCTION="First, Read the file $MEMORY_FILE to satisfy Claude Code's read-before-write requirement. Then update it with working memory from this session. The file already has content — possibly from a concurrent session that just wrote it moments ago. Merge this session's context with the existing content to produce a single unified working memory snapshot. Both this session and the existing content represent fresh, concurrent work — integrate both fully. Working memory captures what's active now, not a changelog. Deduplicate overlapping information. Keep under 120 lines total. Use the same structure: ## Now, ## Progress, ## Decisions, ## Modified Files, ## Context, ## Session Log.
+# Extract last turn from transcript (or fall back to git-only)
+LAST_USER_TEXT=""
+LAST_ASSISTANT_TEXT=""
+EXCHANGE_SECTION=""
 
-## Progress tracks Done (completed items), Remaining (next steps), and Blockers (if any). Keep each sub-list to 1-3 items. This section reflects current work state, not historical logs.
-
-## Decisions entries must include date and status. Format: - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED]. Mark superseded decisions rather than deleting them.${PATTERNS_INSTRUCTION}
-
-Existing content:
-$EXISTING_MEMORY"
+if extract_last_turn; then
+  log "--- Extracted user text (${#LAST_USER_TEXT} chars) ---"
+  log "$LAST_USER_TEXT"
+  log "--- Extracted assistant text (${#LAST_ASSISTANT_TEXT} chars) ---"
+  log "$LAST_ASSISTANT_TEXT"
+  log "--- End transcript extraction ---"
+  EXCHANGE_SECTION="Last exchange:
+User: ${LAST_USER_TEXT}
+Assistant: ${LAST_ASSISTANT_TEXT}"
 else
-  PATTERNS_INSTRUCTION=""
-  PATTERNS_FILE="$CWD/.memory/PROJECT-PATTERNS.md"
-  if [ -f "$PATTERNS_FILE" ]; then
-    EXISTING_PATTERNS=$(cat "$PATTERNS_FILE")
-    PATTERNS_INSTRUCTION="
-
-Also update $PATTERNS_FILE by APPENDING any new recurring patterns discovered during this session. Do NOT overwrite existing entries — only add new ones. Skip if no new patterns were observed. Format each entry as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Keep patterns.md under 40 entries. When approaching the limit, consolidate related patterns into broader entries rather than adding duplicates.
-
-Existing patterns:
-$EXISTING_PATTERNS"
-  else
-    PATTERNS_INSTRUCTION="
-
-If recurring patterns were observed during this session (coding conventions, architectural decisions, team preferences, tooling quirks), create $PATTERNS_FILE with entries formatted as: - **Pattern name**: Brief description (discovered: YYYY-MM-DD). Only create this file if genuine patterns were observed — do not fabricate entries."
-  fi
-
-  INSTRUCTION="First, Read the file $MEMORY_FILE if it exists (to satisfy Claude Code's read-before-write requirement). Then create it with working memory from this session. Keep under 120 lines. Use this structure:
-
-# Working Memory
-
-## Now
-<!-- Current focus, status, blockers (1-3 bullets) -->
-
-## Progress
-<!-- Done: completed items (1-3). Remaining: next steps (1-3). Blockers: if any. -->
-
-## Decisions
-<!-- Format: - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED] -->
-
-## Modified Files
-<!-- File paths only, most recent first -->
-
-## Context
-<!-- Branch, PR, architectural context, open questions -->
-
-## Session Log
-
-### Today
-<!-- Chronological summary of work done today (2-5 bullets) -->
-
-### This Week
-<!-- Broader multi-day context if relevant -->${PATTERNS_INSTRUCTION}"
+  log "Falling back to git-state-only context"
+  EXCHANGE_SECTION="(Session transcript not available — using git state only)"
 fi
 
-# Resume session headlessly to perform the update
-TIMEOUT=120  # Normal runtime 30-60s; 2x margin
+# Build prompt for fresh claude -p invocation
+PROMPT="You are a working memory updater. Your ONLY job is to update the file at ${MEMORY_FILE} using the Write tool. Do it immediately — do not ask questions or explain.
 
-DEVFLOW_BG_UPDATER=1 env -u CLAUDECODE "$CLAUDE_BIN" -p \
-  --resume "$SESSION_ID" \
+Current working memory:
+${EXISTING_MEMORY:-"(no existing content)"}
+
+${EXCHANGE_SECTION}
+
+Git state:
+${GIT_STATE:-"(not a git repo)"}
+
+Instructions:
+- Use the Write tool to update ${MEMORY_FILE} immediately
+- Keep under 120 lines
+- Use sections: ## Now, ## Progress, ## Decisions, ## Modified Files, ## Context, ## Session Log
+- Integrate new information with existing content
+- Deduplicate overlapping information
+- ## Progress tracks Done (completed), Remaining (next steps), Blockers (if any)
+- ## Decisions entries: format as - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED]"
+
+log "--- Full prompt being passed to claude -p ---"
+log "$PROMPT"
+log "--- End prompt ---"
+
+# Run fresh claude -p (no --resume, no conversation confusion)
+TIMEOUT=120
+
+DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
   --model haiku \
-  --tools "Read,Write,Bash" \
-  --allowedTools \
-    "Read($CWD/.memory/WORKING-MEMORY.md)" \
-    "Read($CWD/.memory/PROJECT-PATTERNS.md)" \
-    "Write($CWD/.memory/WORKING-MEMORY.md)" \
-    "Write($CWD/.memory/PROJECT-PATTERNS.md)" \
-    "Bash(git status:*)" \
-    "Bash(git log:*)" \
-    "Bash(git diff:*)" \
-    "Bash(git branch:*)" \
-  --no-session-persistence \
+  --dangerously-skip-permissions \
   --output-format text \
-  "$INSTRUCTION" \
+  "$PROMPT" \
   >> "$LOG_FILE" 2>&1 &
 CLAUDE_PID=$!
 
