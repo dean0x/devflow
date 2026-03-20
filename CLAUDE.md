@@ -38,7 +38,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Build-time asset distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/`, then copied to each plugin at build time based on `plugin.json` manifests. This eliminates duplication in git.
 
-**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Stop hook → spawns a background `claude -p --resume` process that asynchronously updates `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`; throttled: skips if updated <2min ago; concurrent sessions serialize via mkdir-based lock; restricted to Read+Write on two specific files + read-only git commands via `--tools`/`--allowedTools`). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
+**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Stop hook → reads last turn from session transcript (`~/.claude/projects/{encoded-cwd}/{session_id}.jsonl`), spawns background `claude -p --model haiku` to update `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`; throttled: skips if triggered <2min ago; concurrent sessions serialize via mkdir-based lock). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
 
 ## Project Structure
 
@@ -93,7 +93,6 @@ Working memory files live in a dedicated `.memory/` directory:
 ```
 .memory/
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each session)
-├── PROJECT-PATTERNS.md       # Accumulated patterns (merged, not overwritten)
 ├── backup.json               # Pre-compact git state snapshot
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)

@@ -145,7 +145,7 @@ Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable
 | `session-start-memory` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. Injects pre-compact snapshot when compaction occurred mid-session. |
 | `pre-compact-memory` | PreCompact | `.memory/backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
 
-**Flow**: Claude responds → Stop hook checks mtime (skips if <2min fresh) → blocks with instruction → Claude writes WORKING-MEMORY.md silently → `stop_hook_active=true` → allows stop. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
+**Flow**: Session ends → Stop hook checks throttle (skips if <2min fresh) → spawns background updater → background updater reads session transcript + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
 
 Hooks auto-create `.memory/` on first run — no manual setup needed per project.
 

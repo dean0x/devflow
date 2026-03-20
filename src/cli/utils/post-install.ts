@@ -502,7 +502,6 @@ export async function migrateMemoryFiles(verbose: boolean, cwd?: string): Promis
 
   const migrations: Array<{ src: string; dest: string }> = [
     { src: path.join(docsDir, 'WORKING-MEMORY.md'), dest: path.join(memoryDir, 'WORKING-MEMORY.md') },
-    { src: path.join(docsDir, 'patterns.md'), dest: path.join(memoryDir, 'PROJECT-PATTERNS.md') },
     { src: path.join(docsDir, 'working-memory-backup.json'), dest: path.join(memoryDir, 'backup.json') },
   ];
 

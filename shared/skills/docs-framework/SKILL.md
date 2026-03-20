@@ -38,7 +38,6 @@ All generated documentation lives under `.docs/` in the project root:
 
 .memory/
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
-├── PROJECT-PATTERNS.md                 # Accumulated patterns (merged across sessions)
 ├── backup.json                         # Pre-compact git state snapshot
 └── knowledge/
     ├── decisions.md                    # Architectural decisions (ADR-NNN format)

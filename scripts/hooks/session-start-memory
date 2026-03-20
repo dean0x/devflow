@@ -2,7 +2,7 @@
 
 # SessionStart Hook
 # Injects working memory AND ambient skill content as additionalContext.
-# Memory: restores .memory/WORKING-MEMORY.md + patterns + git state + compact recovery.
+# Memory: restores .memory/WORKING-MEMORY.md + git state + compact recovery.
 # Ambient: injects ambient-router SKILL.md so Claude has it in context (no Read call needed).
 # Either section can fire independently — ambient works even without memory files.
 
@@ -26,13 +26,6 @@ MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 
 if [ -f "$MEMORY_FILE" ]; then
   MEMORY_CONTENT=$(cat "$MEMORY_FILE")
-
-  # Read accumulated patterns if they exist
-  PATTERNS_FILE="$CWD/.memory/PROJECT-PATTERNS.md"
-  PATTERNS_CONTENT=""
-  if [ -f "$PATTERNS_FILE" ]; then
-    PATTERNS_CONTENT=$(cat "$PATTERNS_FILE")
-  fi
 
   # Compute staleness warning
   if stat --version &>/dev/null 2>&1; then
@@ -90,15 +83,6 @@ $BACKUP_MEMORY
   CONTEXT="${STALE_WARNING}--- WORKING MEMORY (from previous session) ---
 
 ${MEMORY_CONTENT}"
-
-  # Insert accumulated patterns between working memory and git state
-  if [ -n "$PATTERNS_CONTENT" ]; then
-    CONTEXT="${CONTEXT}
-
---- PROJECT PATTERNS (accumulated) ---
-
-${PATTERNS_CONTENT}"
-  fi
 
   CONTEXT="${CONTEXT}
 
