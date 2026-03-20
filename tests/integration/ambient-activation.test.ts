@@ -6,6 +6,8 @@ import {
   isQuietResponse,
   extractIntent,
   extractDepth,
+  hasSkillLoading,
+  extractLoadedSkills,
 } from './helpers.js';
 
 /**
@@ -53,5 +55,23 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
     expect(hasClassification(output)).toBe(true);
     expect(extractIntent(output)).toBe('IMPLEMENT');
     expect(extractDepth(output)).toBe('ORCHESTRATED');
+  });
+
+  // Skill loading verification — GUIDED should show "Loading:" marker
+  it('loads skills for GUIDED classification', () => {
+    const output = runClaude('add a login form with email and password fields');
+    expect(hasClassification(output)).toBe(true);
+    expect(hasSkillLoading(output)).toBe(true);
+    const skills = extractLoadedSkills(output);
+    expect(skills.length).toBeGreaterThan(0);
+  });
+
+  // Skill loading verification — ORCHESTRATED should show "Loading:" marker
+  it('loads skills for ORCHESTRATED classification', () => {
+    const output = runClaude('Refactor the authentication system across the API layer, database models, and frontend components');
+    expect(hasClassification(output)).toBe(true);
+    expect(hasSkillLoading(output)).toBe(true);
+    const skills = extractLoadedSkills(output);
+    expect(skills.length).toBeGreaterThan(0);
   });
 });

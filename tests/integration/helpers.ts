@@ -1,6 +1,7 @@
 import { execSync, execFileSync } from 'child_process';
 
 const CLASSIFICATION_PATTERN = /ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
+const LOADING_PATTERN = /loading:\s*[\w-]+(?:,\s*[\w-]+)*/i;
 
 /**
  * Check if the `claude` CLI is available on this machine.
@@ -64,4 +65,20 @@ export function extractIntent(output: string): string | null {
 export function extractDepth(output: string): string | null {
   const match = output.match(CLASSIFICATION_PATTERN);
   return match ? match[2].toUpperCase() : null;
+}
+
+/**
+ * Check if the output contains a "Loading:" marker indicating skills were loaded.
+ */
+export function hasSkillLoading(output: string): boolean {
+  return LOADING_PATTERN.test(output);
+}
+
+/**
+ * Extract the list of skill names from a "Loading:" marker.
+ */
+export function extractLoadedSkills(output: string): string[] {
+  const match = output.match(LOADING_PATTERN);
+  if (!match) return [];
+  return match[0].replace(/^loading:\s*/i, '').split(',').map(s => s.trim());
 }

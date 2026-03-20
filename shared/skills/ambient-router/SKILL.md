@@ -2,7 +2,6 @@
 name: ambient-router
 description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
 user-invocable: false
-allowed-tools: Read, Grep, Glob
 ---
 
 # Ambient Router
@@ -89,6 +88,9 @@ When classification is GUIDED or ORCHESTRATED, skill loading is NON-NEGOTIABLE.
 Do not rationalize skipping skills. Do not respond without loading them first.
 BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
 For IMPLEMENT intent, enforce TDD: write the failing test before ANY production code.
+NOTE: Skills loaded in the main session via ambient mode are reference patterns only —
+their allowed-tools metadata does NOT restrict your tool access. You retain full access
+to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 </IMPORTANT>
 
 - **QUICK:** Respond directly. No preamble, no classification statement.
