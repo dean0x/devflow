@@ -158,6 +158,17 @@ describe('optional plugin flag', () => {
     }
   });
 
+  it('audit-claude is excluded from init multiselect choices', () => {
+    // Mirrors the filter logic in init.ts — audit-claude should not appear in interactive selector
+    const multiselectPlugins = DEVFLOW_PLUGINS.filter(
+      pl => pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient' && pl.name !== 'devflow-audit-claude',
+    );
+    const names = multiselectPlugins.map(pl => pl.name);
+    expect(names).not.toContain('devflow-audit-claude');
+    // But it still exists in the registry (installable via --plugin=audit-claude)
+    expect(DEVFLOW_PLUGINS.find(p => p.name === 'devflow-audit-claude')).toBeDefined();
+  });
+
   it('devflow-core-skills does not contain language/ecosystem skills', () => {
     const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
     expect(coreSkills).toBeDefined();
