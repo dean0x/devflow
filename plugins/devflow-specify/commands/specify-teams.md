@@ -53,7 +53,7 @@ Spawn Skimmer agent for codebase context:
 ```
 Task(subagent_type="Skimmer"):
 "Orient in codebase for requirements exploration: {feature}
-Find: project structure, similar features, patterns, integration points
+Run rskim on source directories (NOT repo root) to find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
 ```
 
