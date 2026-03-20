@@ -168,11 +168,11 @@ export const initCommand = new Command('init')
       }
     } else if (process.stdin.isTTY) {
       const choices = DEVFLOW_PLUGINS
-        .filter(pl => pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient')
+        .filter(pl => pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient' && pl.name !== 'devflow-audit-claude')
         .map(pl => ({
           value: pl.name,
           label: pl.name.replace('devflow-', ''),
-          hint: pl.description + (pl.optional ? ' (optional)' : ''),
+          hint: pl.description,
         }));
 
       const preSelected = DEVFLOW_PLUGINS

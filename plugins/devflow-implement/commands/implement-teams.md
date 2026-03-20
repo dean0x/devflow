@@ -53,7 +53,7 @@ Spawn Skimmer agent for codebase overview:
 ```
 Task(subagent_type="Skimmer"):
 "Orient in codebase for: {task description}
-Use skim to identify relevant files, functions, integration points"
+Run rskim on source directories (NOT repo root) to identify relevant files, functions, integration points"
 ```
 
 ### Phase 3: Exploration Team

@@ -8,7 +8,7 @@ Every agent should follow this template (~50-150 lines total):
 
 ```markdown
 ---
-frontmatter (name, description, model, skills, hooks)
+frontmatter (name, description, model, skills, hooks, tools)
 ---
 
 # Agent Name
@@ -30,6 +30,19 @@ frontmatter (name, description, model, skills, hooks)
 ## Boundaries
 [What to escalate vs handle autonomously]
 ```
+
+## Tool Restrictions
+
+Use the `tools` frontmatter field to restrict which tools an agent can access. Claude Code enforces this at platform level — the agent physically cannot call tools outside the allowlist. This is far more reliable than prompt-level prohibitions.
+
+```markdown
+---
+name: Skimmer
+tools: ["Bash", "Read"]
+---
+```
+
+When an agent only needs a subset of tools, prefer platform-enforced restriction over prompt instructions. Only omit `tools` when the agent genuinely needs full tool access.
 
 ## Length Guidelines
 
