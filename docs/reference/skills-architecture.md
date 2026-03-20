@@ -21,7 +21,7 @@ Shared patterns used by multiple agents.
 | `github-patterns` | GitHub API patterns (rate limiting, PR comments, issues, releases) | Git |
 | `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
-| `ambient-router` | Intent classification and proportional skill loading for ambient mode | Ambient UserPromptSubmit hook |
+| `ambient-router` | Intent classification and proportional skill loading for ambient mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
 | `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /specify, /self-review |
 
 ### Tier 1b: Pattern Skills

@@ -1,6 +1,7 @@
 import { execSync, execFileSync } from 'child_process';
 
 const CLASSIFICATION_PATTERN = /ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
+const LOADING_PATTERN = /loading:\s*[\w-]+(?:,\s*[\w-]+)*/i;
 
 /**
  * Check if the `claude` CLI is available on this machine.
@@ -14,16 +15,29 @@ export function isClaudeAvailable(): boolean {
   }
 }
 
+// SYNC: must match scripts/hooks/ambient-prompt line 43
+const AMBIENT_PREAMBLE =
+  'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, you MUST load the selected skills using the Skill tool before proceeding.';
+
 /**
  * Run a prompt through claude CLI in non-interactive mode.
+ * Injects the ambient preamble via --append-system-prompt since
+ * UserPromptSubmit hooks don't fire in -p (non-interactive) mode.
  * Returns the text output.
  */
-export function runClaude(prompt: string, options?: { timeout?: number }): string {
+export function runClaude(prompt: string, options?: { timeout?: number; ambient?: boolean }): string {
   const timeout = options?.timeout ?? 30000;
+  const ambient = options?.ambient ?? true;
+
+  const args = ['-p', '--output-format', 'text', '--model', 'haiku'];
+  if (ambient) {
+    args.push('--append-system-prompt', AMBIENT_PREAMBLE);
+  }
+  args.push(prompt);
 
   const result = execFileSync(
     'claude',
-    ['-p', '--output-format', 'text', '--model', 'haiku', prompt],
+    args,
     {
       stdio: 'pipe',
       timeout,
@@ -64,4 +78,20 @@ export function extractIntent(output: string): string | null {
 export function extractDepth(output: string): string | null {
   const match = output.match(CLASSIFICATION_PATTERN);
   return match ? match[2].toUpperCase() : null;
+}
+
+/**
+ * Check if the output contains a "Loading:" marker indicating skills were loaded.
+ */
+export function hasSkillLoading(output: string): boolean {
+  return LOADING_PATTERN.test(output);
+}
+
+/**
+ * Extract the list of skill names from a "Loading:" marker.
+ */
+export function extractLoadedSkills(output: string): string[] {
+  const match = output.match(LOADING_PATTERN);
+  if (!match) return [];
+  return match[0].replace(/^loading:\s*/i, '').split(',').map(s => s.trim());
 }

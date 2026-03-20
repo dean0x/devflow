@@ -254,7 +254,10 @@ Session context is saved and restored automatically via Working Memory hooks —
 | Option | Description |
 |--------|-------------|
 | `--scope <user\|local>` | Uninstall scope (default: user) |
+| `--plugin <names>` | Comma-separated plugin names to uninstall selectively |
 | `--keep-docs` | Preserve .docs/ directory |
+| `--dry-run` | Show what would be removed without deleting anything |
+| `--verbose` | Show detailed uninstall output |
 
 ## Building from Source
 

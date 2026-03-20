@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
@@ -52,12 +52,39 @@ export function computeAssetsToRemove(
 }
 
 /**
+ * Format a dry-run plan showing what would be removed.
+ * Pure function — no I/O, fully testable.
+ */
+export function formatDryRunPlan(
+  assets: { skills: string[]; agents: string[]; commands: string[] },
+  extras?: string[],
+): string {
+  const skills = [...new Set(assets.skills)];
+  const agents = [...new Set(assets.agents)];
+  const commands = [...new Set(assets.commands)];
+  const hasAssets = skills.length > 0 || agents.length > 0 || commands.length > 0;
+  const hasExtras = extras && extras.length > 0;
+
+  if (!hasAssets && !hasExtras) {
+    return 'Nothing to remove.';
+  }
+
+  const lines: string[] = [];
+  if (skills.length > 0) lines.push(`Skills (${skills.length}): ${skills.join(', ')}`);
+  if (agents.length > 0) lines.push(`Agents (${agents.length}): ${agents.join(', ')}`);
+  if (commands.length > 0) lines.push(`Commands (${commands.length}): ${commands.join(', ')}`);
+  if (hasExtras) lines.push(`Extras: ${extras.join(', ')}`);
+
+  return lines.join('\n');
+}
+
+/**
  * Uninstall plugin using Claude CLI
  */
 function uninstallPluginViaCli(scope: 'user' | 'local'): boolean {
   try {
     const cliScope = scope === 'local' ? 'project' : 'user';
-    execSync(`claude plugin uninstall devflow --scope ${cliScope}`, { stdio: 'inherit' });
+    execFileSync('claude', ['plugin', 'uninstall', 'devflow', '--scope', cliScope], { stdio: 'inherit' });
     return true;
   } catch {
     return false;
@@ -82,8 +109,11 @@ export const uninstallCommand = new Command('uninstall')
   .option('--scope <type>', 'Uninstall from specific scope only (default: auto-detect all)', /^(user|local)$/i)
   .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,review)')
   .option('--verbose', 'Show detailed uninstall output')
+  .option('--dry-run', 'Show what would be removed without actually removing anything')
   .action(async (options) => {
-    p.intro(color.bgRed(color.white(' Uninstalling DevFlow ')));
+    const dryRun = options.dryRun ?? false;
+
+    p.intro(color.bgRed(color.white(dryRun ? ' DevFlow Uninstall (dry run) ' : ' Uninstalling DevFlow ')));
 
     const verbose = options.verbose ?? false;
 
@@ -135,7 +165,7 @@ export const uninstallCommand = new Command('uninstall')
         process.exit(1);
       }
 
-      if (scopesToUninstall.length > 1) {
+      if (scopesToUninstall.length > 1 && !dryRun) {
         if (process.stdin.isTTY) {
           const scopeChoice = await p.select({
             message: 'Found DevFlow in multiple scopes. Uninstall from:',
@@ -158,6 +188,33 @@ export const uninstallCommand = new Command('uninstall')
           p.log.info('Multiple scopes detected, uninstalling from both...');
         }
       }
+    }
+
+    // === DRY RUN: show plan and exit ===
+    if (dryRun) {
+      p.log.info(`Scope(s): ${scopesToUninstall.join(', ')} (dry-run shows all detected scopes)`);
+
+      const assets = isSelectiveUninstall
+        ? computeAssetsToRemove(selectedPlugins, DEVFLOW_PLUGINS)
+        : computeAssetsToRemove(DEVFLOW_PLUGINS, DEVFLOW_PLUGINS);
+
+      // Detect extras that would be cleaned up (full uninstall only)
+      const extras: string[] = [];
+      if (!isSelectiveUninstall) {
+        const docsDir = path.join(process.cwd(), '.docs');
+        const memoryDir = path.join(process.cwd(), '.memory');
+        try { await fs.access(docsDir); extras.push('.docs/'); } catch { /* noop */ }
+        try { await fs.access(memoryDir); extras.push('.memory/'); } catch { /* noop */ }
+        extras.push('hooks in settings.json', 'scripts in ~/.devflow/');
+      }
+
+      const plan = formatDryRunPlan(assets, extras.length > 0 ? extras : undefined);
+      for (const line of plan.split('\n')) {
+        p.log.info(line);
+      }
+
+      p.outro(color.dim('No changes made (dry run)'));
+      return;
     }
 
     const cliAvailable = isClaudeCliAvailable();

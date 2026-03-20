@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`--dry-run` flag** for `devflow uninstall` — preview removal plan without deleting anything
+
+### Fixed
+- **Ambient skill loading** — removed `allowed-tools` restriction from ambient-router so skills actually load via the Skill tool
+- **Ambient hook preamble** — explicit Skill tool instruction ensures models invoke skills rather than responding directly
+
 ---
 
 ## [1.6.0] - 2026-03-19

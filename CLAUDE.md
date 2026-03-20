@@ -127,7 +127,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - 3-tier system: Foundation (shared patterns), Specialized (auto-activate), Domain (language/framework)
 - Each skill has one non-negotiable **Iron Law** in its `SKILL.md`
 - Target: ~120-150 lines per SKILL.md with progressive disclosure to `references/`
-- Skills default to read-only (`allowed-tools: Read, Grep, Glob`); exceptions: git/review skills add `Bash`, interactive skills add `AskUserQuestion`, and `knowledge-persistence`/`self-review` add `Write` for state persistence
+- Skills default to read-only (`allowed-tools: Read, Grep, Glob`); exceptions: git/review skills add `Bash`, interactive skills add `AskUserQuestion`, `knowledge-persistence`/`self-review` add `Write` for state persistence, and `ambient-router` omits `allowed-tools` entirely (unrestricted, as the main-session orchestrator)
 - All skills live in `shared/skills/` — add to plugin `plugin.json` `skills` array, then `npm run build`
 
 ### Agents

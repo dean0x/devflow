@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from '../src/cli/commands/ambient.js';
+import { hasClassification, isQuietResponse, extractIntent, extractDepth, hasSkillLoading, extractLoadedSkills } from './integration/helpers.js';
 
 describe('addAmbientHook', () => {
   it('adds hook to empty settings', () => {
@@ -177,5 +180,88 @@ describe('hasAmbientHook', () => {
       },
     });
     expect(hasAmbientHook(input)).toBe(true);
+  });
+});
+
+describe('classification helpers', () => {
+  it('detects classification marker', () => {
+    expect(hasClassification('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe(true);
+    expect(hasClassification('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe(true);
+  });
+
+  it('returns false when no classification', () => {
+    expect(hasClassification('Here is the code you asked for.')).toBe(false);
+    expect(hasClassification('')).toBe(false);
+  });
+
+  it('isQuietResponse is inverse of hasClassification', () => {
+    expect(isQuietResponse('Just a normal response')).toBe(true);
+    expect(isQuietResponse('Ambient: IMPLEMENT/GUIDED. Loading: x.')).toBe(false);
+  });
+
+  it('extracts intent', () => {
+    expect(extractIntent('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe('IMPLEMENT');
+    expect(extractIntent('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe('DEBUG');
+    expect(extractIntent('Ambient: REVIEW/GUIDED. Loading: self-review.')).toBe('REVIEW');
+    expect(extractIntent('Ambient: PLAN/GUIDED. Loading: core-patterns.')).toBe('PLAN');
+    expect(extractIntent('Ambient: EXPLORE/QUICK')).toBe('EXPLORE');
+    expect(extractIntent('Ambient: CHAT/QUICK')).toBe('CHAT');
+  });
+
+  it('extracts depth', () => {
+    expect(extractDepth('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe('GUIDED');
+    expect(extractDepth('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe('ORCHESTRATED');
+  });
+
+  it('returns null for missing classification', () => {
+    expect(extractIntent('no classification here')).toBeNull();
+    expect(extractDepth('no classification here')).toBeNull();
+  });
+});
+
+describe('skill loading helpers', () => {
+  it('detects Loading marker', () => {
+    expect(hasSkillLoading('Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first.')).toBe(true);
+    expect(hasSkillLoading('Loading: core-patterns')).toBe(true);
+  });
+
+  it('returns false when no Loading marker', () => {
+    expect(hasSkillLoading('Ambient: IMPLEMENT/GUIDED.')).toBe(false);
+    expect(hasSkillLoading('Just some text')).toBe(false);
+  });
+
+  it('extracts single skill', () => {
+    expect(extractLoadedSkills('Loading: core-patterns')).toEqual(['core-patterns']);
+  });
+
+  it('extracts multiple skills', () => {
+    expect(extractLoadedSkills('Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first, typescript.')).toEqual([
+      'implementation-patterns',
+      'search-first',
+      'typescript',
+    ]);
+  });
+
+  it('returns empty array when no Loading marker', () => {
+    expect(extractLoadedSkills('no skills here')).toEqual([]);
+  });
+});
+
+describe('preamble drift detection', () => {
+  it('ambient-prompt PREAMBLE matches helpers.ts AMBIENT_PREAMBLE', async () => {
+    const hookPath = path.resolve(__dirname, '../scripts/hooks/ambient-prompt');
+    const hookContent = await fs.readFile(hookPath, 'utf-8');
+
+    // Extract the PREAMBLE string from the shell script
+    const match = hookContent.match(/PREAMBLE="([^"]+)"/);
+    expect(match).not.toBeNull();
+    const shellPreamble = match![1];
+
+    // The helpers.ts AMBIENT_PREAMBLE is used by extractIntent/extractDepth etc.
+    // We verify it indirectly by checking the shell script value matches expected.
+    const expectedPreamble =
+      'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, you MUST load the selected skills using the Skill tool before proceeding.';
+
+    expect(shellPreamble).toBe(expectedPreamble);
   });
 });
