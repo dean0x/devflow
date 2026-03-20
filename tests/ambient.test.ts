@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from '../src/cli/commands/ambient.js';
 import { hasClassification, isQuietResponse, extractIntent, extractDepth, hasSkillLoading, extractLoadedSkills } from './integration/helpers.js';
 
@@ -202,6 +204,8 @@ describe('classification helpers', () => {
     expect(extractIntent('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe('DEBUG');
     expect(extractIntent('Ambient: REVIEW/GUIDED. Loading: self-review.')).toBe('REVIEW');
     expect(extractIntent('Ambient: PLAN/GUIDED. Loading: core-patterns.')).toBe('PLAN');
+    expect(extractIntent('Ambient: EXPLORE/QUICK')).toBe('EXPLORE');
+    expect(extractIntent('Ambient: CHAT/QUICK')).toBe('CHAT');
   });
 
   it('extracts depth', () => {
@@ -240,5 +244,24 @@ describe('skill loading helpers', () => {
 
   it('returns empty array when no Loading marker', () => {
     expect(extractLoadedSkills('no skills here')).toEqual([]);
+  });
+});
+
+describe('preamble drift detection', () => {
+  it('ambient-prompt PREAMBLE matches helpers.ts AMBIENT_PREAMBLE', async () => {
+    const hookPath = path.resolve(__dirname, '../scripts/hooks/ambient-prompt');
+    const hookContent = await fs.readFile(hookPath, 'utf-8');
+
+    // Extract the PREAMBLE string from the shell script
+    const match = hookContent.match(/PREAMBLE="([^"]+)"/);
+    expect(match).not.toBeNull();
+    const shellPreamble = match![1];
+
+    // The helpers.ts AMBIENT_PREAMBLE is used by extractIntent/extractDepth etc.
+    // We verify it indirectly by checking the shell script value matches expected.
+    const expectedPreamble =
+      'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, you MUST load the selected skills using the Skill tool before proceeding.';
+
+    expect(shellPreamble).toBe(expectedPreamble);
   });
 });

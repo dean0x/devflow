@@ -2,6 +2,7 @@
 name: ambient-router
 description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
 user-invocable: false
+# No allowed-tools: orchestrator requires unrestricted access (Skill, Agent, Edit, Write, Bash)
 ---
 
 # Ambient Router

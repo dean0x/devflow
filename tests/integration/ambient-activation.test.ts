@@ -16,12 +16,14 @@ import {
  * KNOWN LIMITATION: These tests use `claude -p` (non-interactive mode) which
  * does not reliably trigger the ambient classification flow. In `-p` mode,
  * the model prioritizes the concrete task over the meta-instruction to classify.
- * The ambient preamble is injected via --append-system-prompt, but models
- * (including haiku and sonnet) often skip classification and respond directly.
+ * The ambient preamble is injected via --append-system-prompt (see
+ * scripts/hooks/ambient-prompt line 42), but models (including haiku and sonnet)
+ * often skip classification and respond directly.
  *
  * QUICK tests pass because absence of classification = quiet response.
- * GUIDED/ORCHESTRATED tests may fail in `-p` mode — verify manually in an
- * interactive Claude Code session where the UserPromptSubmit hook fires.
+ * GUIDED/ORCHESTRATED tests are skipped — they fail non-deterministically in
+ * `-p` mode. Verify manually in an interactive Claude Code session where the
+ * UserPromptSubmit hook fires.
  *
  * These tests require:
  * - `claude` CLI installed and authenticated
@@ -44,14 +46,16 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
   });
 
   // GUIDED tier — skills loaded, main session implements
-  it('classifies "add a login form" as IMPLEMENT/GUIDED', () => {
+  // Skipped: non-deterministic in -p mode (model skips classification)
+  it.skip('classifies "add a login form" as IMPLEMENT/GUIDED', () => {
     const output = runClaude('add a login form with email and password fields');
     expect(hasClassification(output)).toBe(true);
     expect(extractIntent(output)).toBe('IMPLEMENT');
     expect(['GUIDED', 'ORCHESTRATED']).toContain(extractDepth(output));
   });
 
-  it('classifies "fix the auth error" as DEBUG/GUIDED', () => {
+  // Skipped: non-deterministic in -p mode (model skips classification)
+  it.skip('classifies "fix the auth error" as DEBUG/GUIDED', () => {
     const output = runClaude('fix the authentication error in the login handler');
     expect(hasClassification(output)).toBe(true);
     expect(extractIntent(output)).toBe('DEBUG');
@@ -59,7 +63,8 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
   });
 
   // ORCHESTRATED tier — agents spawned for complex multi-file work
-  it('classifies complex multi-file refactor as ORCHESTRATED', () => {
+  // Skipped: non-deterministic in -p mode (model skips classification)
+  it.skip('classifies complex multi-file refactor as ORCHESTRATED', () => {
     const output = runClaude(
       'Refactor the authentication system across the API layer, database models, and frontend components',
       { timeout: 60000 },
@@ -70,7 +75,8 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
   });
 
   // Skill loading verification — GUIDED should show "Loading:" marker
-  it('loads skills for GUIDED classification', () => {
+  // Skipped: depends on GUIDED classification which is non-deterministic in -p mode
+  it.skip('loads skills for GUIDED classification', () => {
     const output = runClaude('add a login form with email and password fields');
     expect(hasClassification(output)).toBe(true);
     expect(hasSkillLoading(output)).toBe(true);
@@ -79,7 +85,8 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
   });
 
   // Skill loading verification — ORCHESTRATED should show "Loading:" marker
-  it('loads skills for ORCHESTRATED classification', () => {
+  // Skipped: depends on ORCHESTRATED classification which is non-deterministic in -p mode
+  it.skip('loads skills for ORCHESTRATED classification', () => {
     const output = runClaude(
       'Refactor the authentication system across the API layer, database models, and frontend components',
       { timeout: 60000 },

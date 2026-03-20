@@ -103,4 +103,16 @@ describe('formatDryRunPlan', () => {
     expect(plan).toContain('.memory/');
     expect(plan).toContain('hooks in settings.json');
   });
+
+  it('deduplicates skills, agents, and commands', () => {
+    const plan = formatDryRunPlan({
+      skills: ['core-patterns', 'core-patterns', 'test-patterns'],
+      agents: ['coder', 'coder'],
+      commands: ['/implement', '/implement'],
+    });
+    // Should show count based on unique items, not duplicates
+    expect(plan).toContain('Skills (2)');
+    expect(plan).toContain('Agents (1)');
+    expect(plan).toContain('Commands (1)');
+  });
 });

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
@@ -84,7 +84,7 @@ export function formatDryRunPlan(
 function uninstallPluginViaCli(scope: 'user' | 'local'): boolean {
   try {
     const cliScope = scope === 'local' ? 'project' : 'user';
-    execSync(`claude plugin uninstall devflow --scope ${cliScope}`, { stdio: 'inherit' });
+    execFileSync('claude', ['plugin', 'uninstall', 'devflow', '--scope', cliScope], { stdio: 'inherit' });
     return true;
   } catch {
     return false;
@@ -192,7 +192,7 @@ export const uninstallCommand = new Command('uninstall')
 
     // === DRY RUN: show plan and exit ===
     if (dryRun) {
-      p.log.info(`Scope(s): ${scopesToUninstall.join(', ')}`);
+      p.log.info(`Scope(s): ${scopesToUninstall.join(', ')} (dry-run shows all detected scopes)`);
 
       const assets = isSelectiveUninstall
         ? computeAssetsToRemove(selectedPlugins, DEVFLOW_PLUGINS)
