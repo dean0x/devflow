@@ -138,6 +138,6 @@ Produce the orientation summary in the output format below.
 - Generating orientation summaries
 
 **Escalate to orchestrator:**
-- If `npx rskim` fails, report the error (do not attempt manual fallbacks with other tools)
+- If `npx rskim` fails, report the error (do not attempt manual fallbacks with other tools) — orchestrators should spawn an ad-hoc Explore agent if Skimmer reports rskim failure
 - No source directories found (ask user for structure)
 - Ambiguous project structure (report findings, ask for clarification)

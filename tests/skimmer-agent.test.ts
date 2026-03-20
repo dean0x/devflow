@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -20,7 +20,7 @@ describe('skimmer agent', () => {
   let content: string;
   let tools: string[];
 
-  it('loads the agent file', async () => {
+  beforeAll(async () => {
     content = await fs.readFile(AGENT_PATH, 'utf-8');
     tools = parseToolsFromFrontmatter(content);
   });
