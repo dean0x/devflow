@@ -2,10 +2,25 @@
 
 # Claude Code Status Line Script
 # Receives JSON input via stdin with session context
-# Displays: directory, git branch, diff stats, model, context usage
+# Displays: directory, git branch, diff stats, model, context usage, update badge
 
 # Read JSON input
 INPUT=$(cat)
+
+# Derive devflow directory from script location (scripts/ → parent is ~/.devflow/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+DEVFLOW_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Portable mtime helper (works on macOS + Linux)
+get_mtime() {
+    if stat -f %m "$1" &>/dev/null 2>&1; then
+        stat -f %m "$1"  # macOS
+    elif stat -c %Y "$1" &>/dev/null 2>&1; then
+        stat -c %Y "$1"  # Linux
+    else
+        echo 0
+    fi
+}
 
 # Parse values using jq (with fallbacks if jq is not available or fields are missing)
 if command -v jq &> /dev/null; then
@@ -65,7 +80,7 @@ else
         if [ -z "$BASE_BRANCH" ] && command -v gh &>/dev/null; then
             REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
             CACHE_FILE="/tmp/devflow-base-${REPO_NAME}-${GIT_BRANCH}"
-            if [ -f "$CACHE_FILE" ] && [ $(($(date +%s) - $(stat -f %m "$CACHE_FILE" 2>/dev/null || echo 0))) -lt 300 ]; then
+            if [ -f "$CACHE_FILE" ] && [ $(($(date +%s) - $(get_mtime "$CACHE_FILE"))) -lt 300 ]; then
                 BASE_BRANCH=$(cat "$CACHE_FILE")
             else
                 PR_BASE=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null)
@@ -154,5 +169,54 @@ if [ "$USAGE" != "null" ] && [ "$CONTEXT_SIZE" != "0" ] && [ -n "$CONTEXT_SIZE" 
         fi
     fi
 fi
+
+# Version update notification (24h cached check)
+VERSION_BADGE=""
+MANIFEST_FILE="${DEVFLOW_DIR}/manifest.json"
+VERSION_CACHE_DIR="${HOME}/.cache/devflow"
+VERSION_CACHE_FILE="${VERSION_CACHE_DIR}/latest-version"
+
+if [ -f "$MANIFEST_FILE" ] && command -v jq &>/dev/null; then
+    LOCAL_VERSION=$(jq -r '.version // empty' "$MANIFEST_FILE" 2>/dev/null)
+
+    if [ -n "$LOCAL_VERSION" ]; then
+        # Read cached latest version (fast path — no network)
+        LATEST_VERSION=""
+        if [ -f "$VERSION_CACHE_FILE" ]; then
+            LATEST_VERSION=$(cat "$VERSION_CACHE_FILE" 2>/dev/null)
+        fi
+
+        # Compare versions if cache exists
+        if [ -n "$LATEST_VERSION" ] && [ "$LOCAL_VERSION" != "$LATEST_VERSION" ]; then
+            # sort -V: lowest version first. If local sorts before latest, update available.
+            LOWEST=$(printf '%s\n%s' "$LOCAL_VERSION" "$LATEST_VERSION" | sort -V | head -n1)
+            if [ "$LOWEST" = "$LOCAL_VERSION" ]; then
+                VERSION_BADGE="  \033[35m⬆ ${LATEST_VERSION}\033[0m"
+            fi
+        fi
+
+        # Background refresh if cache is missing or older than 24h
+        REFRESH=false
+        if [ ! -f "$VERSION_CACHE_FILE" ]; then
+            REFRESH=true
+        else
+            CACHE_AGE=$(($(date +%s) - $(get_mtime "$VERSION_CACHE_FILE")))
+            [ "$CACHE_AGE" -ge 86400 ] && REFRESH=true
+        fi
+
+        if [ "$REFRESH" = true ] && command -v npm &>/dev/null; then
+            (
+                mkdir -p "$VERSION_CACHE_DIR" 2>/dev/null
+                FETCHED=$(npm view devflow-kit version 2>/dev/null)
+                if [ -n "$FETCHED" ]; then
+                    echo "$FETCHED" > "$VERSION_CACHE_FILE"
+                fi
+            ) &
+            disown 2>/dev/null
+        fi
+    fi
+fi
+
+STATUS_LINE="${STATUS_LINE}${VERSION_BADGE}"
 
 echo -e "$STATUS_LINE"
