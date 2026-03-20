@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Ambient skill loading** — removed `allowed-tools` restriction from ambient-router so skills actually load via the Skill tool
 - **Ambient hook preamble** — explicit Skill tool instruction ensures models invoke skills rather than responding directly
+- **Init wizard** — hide `devflow-ambient` from plugin multiselect (auto-included via ambient prompt)
+- **Working memory** — replaced broken `--resume` with transcript-based background updater
 
 ---
 
