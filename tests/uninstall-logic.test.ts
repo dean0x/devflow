@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeAssetsToRemove } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/cli/plugins.js';
 
 describe('computeAssetsToRemove', () => {
@@ -62,5 +62,45 @@ describe('computeAssetsToRemove', () => {
     expect(commands).toEqual(['/a']);
     expect(agents).toEqual(['only-a']); // 'shared' is retained by 'b'
     expect(skills).toEqual(['only-a-skill']); // 'shared-skill' is retained by 'b'
+  });
+});
+
+describe('formatDryRunPlan', () => {
+  it('lists skills, agents, and commands', () => {
+    const plan = formatDryRunPlan({
+      skills: ['ambient-router', 'test-driven-development'],
+      agents: ['coder'],
+      commands: ['/implement'],
+    });
+    expect(plan).toContain('ambient-router');
+    expect(plan).toContain('test-driven-development');
+    expect(plan).toContain('coder');
+    expect(plan).toContain('/implement');
+  });
+
+  it('returns nothing-to-remove message for empty plan', () => {
+    const plan = formatDryRunPlan({ skills: [], agents: [], commands: [] });
+    expect(plan).toContain('Nothing to remove');
+  });
+
+  it('omits empty sections', () => {
+    const plan = formatDryRunPlan({
+      skills: ['core-patterns'],
+      agents: [],
+      commands: [],
+    });
+    expect(plan).toContain('core-patterns');
+    expect(plan).not.toContain('Agents');
+    expect(plan).not.toContain('Commands');
+  });
+
+  it('includes extras when provided', () => {
+    const plan = formatDryRunPlan(
+      { skills: ['x'], agents: [], commands: [] },
+      ['.docs/', '.memory/', 'hooks in settings.json'],
+    );
+    expect(plan).toContain('.docs/');
+    expect(plan).toContain('.memory/');
+    expect(plan).toContain('hooks in settings.json');
   });
 });
