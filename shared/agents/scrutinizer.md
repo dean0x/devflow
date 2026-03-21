@@ -21,13 +21,15 @@ You receive from orchestrator:
 
 2. **Evaluate P0 pillars** (Design, Functionality, Security): These MUST pass. Fix all issues found.
 
-3. **Evaluate P1 pillars** (Complexity, Error Handling, Tests): These SHOULD pass. Fix all issues found.
+3. **Detect stubs and wiring gaps**: Check for placeholder implementations that compile but don't deliver real functionality. See `references/stub-detection.md` for patterns. Flag as P0-Functionality issues.
 
-4. **Evaluate P2 pillars** (Naming, Consistency, Documentation): Report as suggestions. Fix if straightforward.
+4. **Evaluate P1 pillars** (Complexity, Error Handling, Tests): These SHOULD pass. Fix all issues found.
 
-5. **Commit fixes**: If any changes were made, create a commit with message "fix: address self-review issues".
+5. **Evaluate P2 pillars** (Naming, Consistency, Documentation): Report as suggestions. Fix if straightforward.
 
-6. **Report status**: Return structured report with pillar evaluations and changes made.
+6. **Commit fixes**: If any changes were made, create a commit with message "fix: address self-review issues".
+
+7. **Report status**: Return structured report with pillar evaluations and changes made.
 
 ## Principles
 

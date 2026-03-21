@@ -30,31 +30,39 @@ Analyze recently modified code and apply refinements that:
    - Use proper error handling patterns (avoid try/catch when possible)
    - Maintain consistent naming conventions
 
-3. **Enhance Clarity**: Simplify code structure by:
+3. **Remove Slop**: Detect and remove these categories:
 
-   - Reducing unnecessary complexity and nesting
-   - Eliminating redundant code and abstractions
-   - Improving readability through clear variable and function names
+   | Category | Pattern |
+   |----------|---------|
+   | Language-behavior tests | Tests verifying built-in language features work as documented |
+   | Redundant type checks | Runtime checks for types TypeScript already enforces |
+   | Over-defensive handling | try/catch around code that cannot throw |
+   | Debug remnants | console.log, debugger, alert() left behind |
+   | Commented-out code | Dead code preserved in comments |
+   | Unused imports | Imports not referenced anywhere in file |
+   | Verbose names | Unnecessarily long names (`currentUserDataObject` → `user`) |
+   | Unnecessary intermediates | Variables used once, immediately after assignment |
+
+4. **Enhance Clarity**: Simplify code structure by:
+
+   - Reducing unnecessary nesting (early returns, guard clauses)
    - Consolidating related logic
-   - Removing unnecessary comments that describe obvious code
-   - IMPORTANT: Avoid nested ternary operators - prefer switch statements or if/else chains for multiple conditions
-   - Choose clarity over brevity - explicit code is often better than overly compact code
+   - Avoiding nested ternary operators — prefer switch or if/else
+   - Choosing clarity over brevity — explicit code beats compact code
 
-4. **Maintain Balance**: Avoid over-simplification that could:
+5. **Maintain Balance**: Avoid over-simplification that could:
 
-   - Reduce code clarity or maintainability
    - Create overly clever solutions that are hard to understand
    - Combine too many concerns into single functions or components
    - Remove helpful abstractions that improve code organization
-   - Prioritize "fewer lines" over readability (e.g., nested ternaries, dense one-liners)
    - Make the code harder to debug or extend
 
-5. **Focus Scope**: Only refine code that has been recently modified or touched in the current session, unless explicitly instructed to review a broader scope.
+6. **Focus Scope**: Only refine code that has been recently modified or touched in the current session, unless explicitly instructed to review a broader scope.
 
 Your refinement process:
 
 1. Identify the recently modified code sections
-2. Analyze for opportunities to improve elegance and consistency
+2. Analyze for slop categories and clarity improvements
 3. Apply project-specific best practices and coding standards
 4. Ensure all functionality remains unchanged
 5. Verify the refined code is simpler and more maintainable
@@ -87,7 +95,8 @@ Return structured completion status:
 - Files outside the recently modified scope (unless instructed)
 
 **Handle autonomously:**
-- Naming improvements, dead code removal, nesting reduction
+- Slop removal (all 8 categories)
+- Naming improvements, nesting reduction
 - Import sorting and organization
 - Redundant abstraction elimination
 - Comment cleanup (remove obvious, keep non-obvious)
