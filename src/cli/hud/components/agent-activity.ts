@@ -12,15 +12,12 @@ export default async function agentActivity(
   const rawParts: string[] = [];
 
   for (const a of agents.slice(-4)) {
+    const icon = a.status === 'completed' ? '\u2713' : '\u25D0';
+    const colorFn = a.status === 'completed' ? green : yellow;
     const modelTag = a.model ? gray(` [${a.model}]`) : '';
     const modelRaw = a.model ? ` [${a.model}]` : '';
-    if (a.status === 'completed') {
-      parts.push(green(`\u2713 ${a.name}`) + modelTag);
-      rawParts.push(`\u2713 ${a.name}${modelRaw}`);
-    } else {
-      parts.push(yellow(`\u25D0 ${a.name}`) + modelTag);
-      rawParts.push(`\u25D0 ${a.name}${modelRaw}`);
-    }
+    parts.push(colorFn(`${icon} ${a.name}`) + modelTag);
+    rawParts.push(`${icon} ${a.name}${modelRaw}`);
   }
 
   return { text: parts.join(dim('  ')), raw: rawParts.join('  ') };

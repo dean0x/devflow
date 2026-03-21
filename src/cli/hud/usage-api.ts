@@ -1,12 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
 import { readCache, writeCache, readCacheStale } from './cache.js';
 import type { UsageData } from './types.js';
 
 const USAGE_CACHE_KEY = 'usage';
 const USAGE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const USAGE_FAIL_TTL = 15 * 1000; // 15 seconds
-const API_TIMEOUT = 15_000;
+const API_TIMEOUT = 1_500; // Must fit within 2s overall HUD timeout
 const BACKOFF_CACHE_KEY = 'usage-backoff';
 
 interface BackoffState {
@@ -17,7 +18,7 @@ interface BackoffState {
 function getCredentialsPath(): string {
   const claudeDir =
     process.env.CLAUDE_CONFIG_DIR ||
-    path.join(process.env.HOME || '~', '.claude');
+    path.join(process.env.HOME || homedir(), '.claude');
   return path.join(claudeDir, '.credentials.json');
 }
 

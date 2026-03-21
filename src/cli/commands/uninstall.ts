@@ -391,35 +391,17 @@ export const uninstallCommand = new Command('uninstall')
         try {
           const paths = await getInstallationPaths(scope);
           const settingsPath = path.join(paths.claudeDir, 'settings.json');
-          let settingsContent = await fs.readFile(settingsPath, 'utf-8');
+          const originalContent = await fs.readFile(settingsPath, 'utf-8');
 
-          // Always remove ambient hook on full uninstall (idempotent)
-          const withoutAmbient = removeAmbientHook(settingsContent);
-          if (withoutAmbient !== settingsContent) {
-            await fs.writeFile(settingsPath, withoutAmbient, 'utf-8');
-            settingsContent = withoutAmbient;
-            if (verbose) {
-              p.log.success(`Ambient mode hook removed from settings.json (${scope})`);
-            }
-          }
+          // Remove all DevFlow hooks in one pass (idempotent)
+          let settingsContent = removeAmbientHook(originalContent);
+          settingsContent = removeMemoryHooks(settingsContent);
+          settingsContent = removeHudStatusLine(settingsContent);
 
-          // Always remove memory hooks on full uninstall (idempotent)
-          const withoutMemory = removeMemoryHooks(settingsContent);
-          if (withoutMemory !== settingsContent) {
-            await fs.writeFile(settingsPath, withoutMemory, 'utf-8');
-            settingsContent = withoutMemory;
+          if (settingsContent !== originalContent) {
+            await fs.writeFile(settingsPath, settingsContent, 'utf-8');
             if (verbose) {
-              p.log.success(`Memory hooks removed from settings.json (${scope})`);
-            }
-          }
-
-          // Always remove HUD statusLine on full uninstall (idempotent)
-          const withoutHud = removeHudStatusLine(settingsContent);
-          if (withoutHud !== settingsContent) {
-            await fs.writeFile(settingsPath, withoutHud, 'utf-8');
-            settingsContent = withoutHud;
-            if (verbose) {
-              p.log.success(`HUD statusLine removed from settings.json (${scope})`);
+              p.log.success(`DevFlow hooks removed from settings.json (${scope})`);
             }
           }
 

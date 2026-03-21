@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
 
 interface CacheEntry<T> {
   data: T;
@@ -9,25 +10,40 @@ interface CacheEntry<T> {
 
 export function getCacheDir(): string {
   const devflowDir =
-    process.env.DEVFLOW_DIR || path.join(process.env.HOME || '~', '.devflow');
+    process.env.DEVFLOW_DIR || path.join(process.env.HOME || homedir(), '.devflow');
   return path.join(devflowDir, 'cache');
 }
 
 /**
  * Read a cached value. Returns null if missing or expired.
+ * When `ignoreExpiry` is true, returns data regardless of TTL (stale read).
  */
-export function readCache<T>(key: string): T | null {
+function readCacheEntry<T>(key: string, ignoreExpiry: boolean): T | null {
   try {
     const filePath = path.join(getCacheDir(), `${key}.json`);
     const raw = fs.readFileSync(filePath, 'utf-8');
     const entry = JSON.parse(raw) as CacheEntry<T>;
-    if (Date.now() - entry.timestamp < entry.ttl) {
+    if (ignoreExpiry || Date.now() - entry.timestamp < entry.ttl) {
       return entry.data;
     }
     return null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Read a cached value. Returns null if missing or expired.
+ */
+export function readCache<T>(key: string): T | null {
+  return readCacheEntry<T>(key, false);
+}
+
+/**
+ * Read a cached value regardless of TTL (stale data). Returns null if missing.
+ */
+export function readCacheStale<T>(key: string): T | null {
+  return readCacheEntry<T>(key, true);
 }
 
 /**
@@ -43,19 +59,5 @@ export function writeCache<T>(key: string, data: T, ttlMs: number): void {
     fs.writeFileSync(path.join(dir, `${key}.json`), JSON.stringify(entry));
   } catch {
     // Cache write failure is non-fatal
-  }
-}
-
-/**
- * Read a cached value regardless of TTL (stale data). Returns null if missing.
- */
-export function readCacheStale<T>(key: string): T | null {
-  try {
-    const filePath = path.join(getCacheDir(), `${key}.json`);
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const entry = JSON.parse(raw) as CacheEntry<T>;
-    return entry.data;
-  } catch {
-    return null;
   }
 }

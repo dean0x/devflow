@@ -5,7 +5,16 @@ function renderBar(percent: number): { text: string; raw: string } {
   const blocks = 3;
   const filled = Math.round((percent / 100) * blocks);
   const empty = blocks - filled;
-  const colorFn = percent < 50 ? green : percent < 80 ? yellow : red;
+
+  let colorFn: (s: string) => string;
+  if (percent < 50) {
+    colorFn = green;
+  } else if (percent < 80) {
+    colorFn = yellow;
+  } else {
+    colorFn = red;
+  }
+
   const filledBar = '\u258B'.repeat(filled);
   const emptyBar = '\u258B'.repeat(empty);
   const text = colorFn(filledBar) + dim(emptyBar) + ` ${percent}%`;
@@ -19,7 +28,7 @@ export default async function usageQuota(
   if (!ctx.usage) return null;
   // Prefer daily, fallback to weekly
   const pct = ctx.usage.dailyUsagePercent ?? ctx.usage.weeklyUsagePercent;
-  if (pct === null || pct === undefined) return null;
+  if (pct === null) return null;
   const bar = renderBar(Math.round(pct));
   return { text: bar.text, raw: bar.raw };
 }

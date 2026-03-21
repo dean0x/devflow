@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
 import type { ComponentResult, GatherContext, ConfigCountsData } from '../types.js';
 import { dim } from '../colors.js';
 
@@ -10,7 +11,7 @@ function countClaudeMdFiles(cwd: string): number {
   // Check user CLAUDE.md
   const claudeDir =
     process.env.CLAUDE_CONFIG_DIR ||
-    path.join(process.env.HOME || '~', '.claude');
+    path.join(process.env.HOME || homedir(), '.claude');
   if (fs.existsSync(path.join(claudeDir, 'CLAUDE.md'))) count++;
   return count;
 }
@@ -44,7 +45,7 @@ function countFromSettings(settingsPath: string): {
 export function gatherConfigCounts(cwd: string): ConfigCountsData {
   const claudeDir =
     process.env.CLAUDE_CONFIG_DIR ||
-    path.join(process.env.HOME || '~', '.claude');
+    path.join(process.env.HOME || homedir(), '.claude');
   const claudeMdFiles = countClaudeMdFiles(cwd);
 
   // Count rules (.md/.mdc files in .claude/rules)

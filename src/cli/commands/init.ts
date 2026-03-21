@@ -552,36 +552,26 @@ export const initCommand = new Command('init')
 
       // Configure HUD
       if (hudPreset !== 'off') {
-        // Save HUD config
         saveHudConfig({ preset: hudPreset, components: PRESETS[hudPreset] });
+      }
 
-        // Ensure statusLine points to HUD (the settings template already has it,
-        // but upgrade from old statusline.sh may need this)
-        const hudSettingsPath = path.join(claudeDir, 'settings.json');
-        try {
-          const hudContent = await fs.readFile(hudSettingsPath, 'utf-8');
-          const hudUpdated = addHudStatusLine(hudContent, devflowDir);
-          if (hudUpdated !== hudContent) {
-            await fs.writeFile(hudSettingsPath, hudUpdated, 'utf-8');
-            if (verbose) {
+      // Update statusLine in settings.json (add or remove based on preset)
+      try {
+        const hudContent = await fs.readFile(settingsPath, 'utf-8');
+        const hudUpdated = hudPreset !== 'off'
+          ? addHudStatusLine(hudContent, devflowDir)
+          : removeHudStatusLine(hudContent);
+        if (hudUpdated !== hudContent) {
+          await fs.writeFile(settingsPath, hudUpdated, 'utf-8');
+          if (verbose) {
+            if (hudPreset !== 'off') {
               p.log.success(`HUD enabled (preset: ${hudPreset})`);
-            }
-          }
-        } catch { /* settings.json may not exist yet */ }
-      } else {
-        // HUD disabled — remove statusLine if it points to DevFlow
-        const hudSettingsPath = path.join(claudeDir, 'settings.json');
-        try {
-          const hudContent = await fs.readFile(hudSettingsPath, 'utf-8');
-          const hudUpdated = removeHudStatusLine(hudContent);
-          if (hudUpdated !== hudContent) {
-            await fs.writeFile(hudSettingsPath, hudUpdated, 'utf-8');
-            if (verbose) {
+            } else {
               p.log.info('HUD disabled');
             }
           }
-        } catch { /* settings.json may not exist yet */ }
-      }
+        }
+      } catch { /* settings.json may not exist yet */ }
     }
 
     const fileExtras = selectedExtras.filter(e => e !== 'settings' && e !== 'safe-delete');

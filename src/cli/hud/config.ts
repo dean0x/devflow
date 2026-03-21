@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
 import type { HudConfig, PresetName, ComponentId } from './types.js';
 
 /**
@@ -54,7 +55,7 @@ export const ALL_COMPONENT_IDS: ReadonlySet<string> = new Set<string>(PRESETS.fu
 
 export function getConfigPath(): string {
   const devflowDir =
-    process.env.DEVFLOW_DIR || path.join(process.env.HOME || '~', '.devflow');
+    process.env.DEVFLOW_DIR || path.join(process.env.HOME || homedir(), '.devflow');
   return path.join(devflowDir, 'hud.json');
 }
 

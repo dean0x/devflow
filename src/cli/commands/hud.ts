@@ -13,11 +13,6 @@ import {
 } from '../hud/config.js';
 import type { HudConfig, PresetName } from '../hud/types.js';
 
-/**
- * Marker to identify DevFlow HUD in settings.json statusLine.
- */
-const HUD_MARKER = 'hud';
-
 interface StatusLine {
   type: string;
   command: string;
@@ -90,12 +85,15 @@ export function hasHudStatusLine(settingsJson: string): boolean {
 
 /**
  * Check if an existing statusLine belongs to DevFlow (HUD or legacy statusline).
+ * Matches paths containing 'hud.sh', 'statusline.sh', or a '/devflow/' directory segment.
  */
 function isDevFlowStatusLine(statusLine: StatusLine): boolean {
+  const cmd = statusLine.command ?? '';
   return (
-    statusLine.command?.includes(HUD_MARKER) ||
-    statusLine.command?.includes('statusline') ||
-    statusLine.command?.includes('devflow')
+    cmd.includes('hud.sh') ||
+    cmd.includes('statusline.sh') ||
+    cmd.includes('/devflow/') ||
+    cmd.includes('\\devflow\\')
   );
 }
 

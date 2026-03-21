@@ -17,6 +17,13 @@ export default async function contextUsage(
   const label = `${pct}%`;
 
   // Color thresholds from statusline.sh
-  const colorFn = pct < 50 ? green : pct < 80 ? yellow : red;
+  let colorFn: (s: string) => string;
+  if (pct < 50) {
+    colorFn = green;
+  } else if (pct < 80) {
+    colorFn = yellow;
+  } else {
+    colorFn = red;
+  }
   return { text: colorFn(label), raw: label };
 }

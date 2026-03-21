@@ -1,3 +1,5 @@
+import * as path from 'node:path';
+import { homedir } from 'node:os';
 import { readStdin } from './stdin.js';
 import { loadConfig, resolveComponents } from './config.js';
 import { gatherGitStatus } from './git.js';
@@ -29,10 +31,7 @@ async function run(): Promise<string> {
   const cwd = stdin.cwd || process.cwd();
   const devflowDir =
     process.env.DEVFLOW_DIR ||
-    (await import('node:path')).join(
-      process.env.HOME || '~',
-      '.devflow',
-    );
+    path.join(process.env.HOME || homedir(), '.devflow');
 
   // Determine what data to gather based on enabled components
   const needsGit =
@@ -57,10 +56,9 @@ async function run(): Promise<string> {
   ]);
 
   // Session start time from session_id presence (approximate via process uptime)
-  let sessionStartTime: number | null = null;
-  if (stdin.session_id) {
-    sessionStartTime = Date.now() - process.uptime() * 1000;
-  }
+  const sessionStartTime = stdin.session_id
+    ? Date.now() - process.uptime() * 1000
+    : null;
 
   // Config counts (fast, synchronous filesystem reads)
   const configCountsData = needsConfigCounts

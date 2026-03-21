@@ -6,7 +6,7 @@ import {
   resolveComponents,
 } from '../src/cli/hud/config.js';
 import { stripAnsi } from '../src/cli/hud/colors.js';
-import type { GatherContext, GitStatus, HudConfig } from '../src/cli/hud/types.js';
+import type { GatherContext, HudConfig } from '../src/cli/hud/types.js';
 
 function makeCtx(
   config: HudConfig,
