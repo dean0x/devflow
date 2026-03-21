@@ -101,6 +101,7 @@ interface InitOptions {
   ambient?: boolean;
   memory?: boolean;
   hud?: string;
+  hudOnly?: boolean;
 }
 
 export const initCommand = new Command('init')
@@ -115,6 +116,7 @@ export const initCommand = new Command('init')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
   .option('--hud <preset>', 'HUD preset (minimal, classic, standard, full, off)')
+  .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -134,7 +136,10 @@ export const initCommand = new Command('init')
     // Determine installation scope
     let scope: 'user' | 'local' = 'user';
 
-    if (options.scope) {
+    if (options.hudOnly) {
+      // --hud-only: skip scope prompt, always user scope
+      scope = 'user';
+    } else if (options.scope) {
       const normalizedScope = options.scope.toLowerCase();
       if (normalizedScope !== 'user' && normalizedScope !== 'local') {
         p.log.error('Invalid scope. Use "user" or "local"');
@@ -159,6 +164,90 @@ export const initCommand = new Command('init')
       }
 
       scope = selected as 'user' | 'local';
+    }
+
+    // --hud-only: install only HUD (skip plugins, hooks, extras)
+    if (options.hudOnly) {
+      // Resolve HUD preset
+      let hudPreset: PresetName | 'off' = DEFAULT_PRESET;
+      if (options.hud !== undefined) {
+        const val = options.hud;
+        if (val === 'off') {
+          hudPreset = 'off';
+        } else if (val in PRESETS) {
+          hudPreset = val as PresetName;
+        } else {
+          p.log.error(`Unknown HUD preset: ${val}. Valid: minimal, classic, standard, full, off`);
+          process.exit(1);
+        }
+      } else if (process.stdin.isTTY) {
+        const hudChoice = await p.select({
+          message: 'Choose HUD preset',
+          options: [
+            { value: 'standard', label: 'Standard (Recommended)', hint: 'directory, git, model, context, version, session, usage' },
+            { value: 'minimal', label: 'Minimal', hint: 'directory, git branch, model, context usage' },
+            { value: 'classic', label: 'Classic', hint: 'Like statusline.sh with version badge' },
+            { value: 'full', label: 'Full', hint: 'All 14 components' },
+            { value: 'off', label: 'No HUD', hint: 'Disable status line entirely' },
+          ],
+          initialValue: 'standard',
+        });
+        if (p.isCancel(hudChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        hudPreset = hudChoice as PresetName | 'off';
+      }
+
+      // Resolve paths
+      const paths = await getInstallationPaths(scope);
+      const claudeDir = paths.claudeDir;
+      const devflowDir = paths.devflowDir;
+
+      // Save HUD config
+      if (hudPreset !== 'off') {
+        saveHudConfig({ preset: hudPreset, components: PRESETS[hudPreset] });
+      }
+
+      // Update statusLine in settings.json
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      try {
+        let content: string;
+        try {
+          content = await fs.readFile(settingsPath, 'utf-8');
+        } catch {
+          content = '{}';
+        }
+        const updated = hudPreset !== 'off'
+          ? addHudStatusLine(content, devflowDir)
+          : removeHudStatusLine(content);
+        await fs.writeFile(settingsPath, updated, 'utf-8');
+      } catch (error) {
+        p.log.error(`Failed to update settings: ${error instanceof Error ? error.message : error}`);
+        process.exit(1);
+      }
+
+      // Write minimal manifest
+      const now = new Date().toISOString();
+      try {
+        await writeManifest(devflowDir, {
+          version,
+          plugins: [],
+          scope,
+          features: { teams: false, ambient: false, memory: false, hud: hudPreset === 'off' ? false as const : String(hudPreset) },
+          installedAt: now,
+          updatedAt: now,
+        });
+      } catch { /* non-fatal */ }
+
+      if (hudPreset !== 'off') {
+        p.log.success(`HUD installed (preset: ${hudPreset})`);
+      } else {
+        p.log.info('HUD disabled');
+      }
+      p.log.info(`Configure later: ${color.cyan('devflow hud --configure')}`);
+      p.outro(color.green('HUD-only install complete.'));
+      return;
     }
 
     // Select plugins to install

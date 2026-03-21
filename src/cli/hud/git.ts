@@ -3,12 +3,16 @@ import type { GitStatus } from './types.js';
 
 const GIT_TIMEOUT = 1000; // 1s per command
 
-function gitExec(args: string[], cwd: string): Promise<string> {
+function shellExec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: GIT_TIMEOUT }, (err, stdout) => {
+    execFile(cmd, args, { cwd, timeout: GIT_TIMEOUT }, (err, stdout) => {
       resolve(err ? '' : stdout.trim());
     });
   });
+}
+
+function gitExec(args: string[], cwd: string): Promise<string> {
+  return shellExec('git', args, cwd);
 }
 
 /**
@@ -66,7 +70,11 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
 
 /**
  * Detect the base branch for ahead/behind calculations.
- * Uses a 3-layer fallback: branch reflog, HEAD reflog, main/master.
+ * Uses a 4-layer fallback (ported from statusline.sh):
+ *   1. Branch reflog ("Created from")
+ *   2. HEAD reflog ("checkout: moving from X to branch")
+ *   3. GitHub PR base branch (gh pr view, cached)
+ *   4. main/master fallback
  */
 async function detectBaseBranch(
   branch: string,
@@ -112,7 +120,17 @@ async function detectBaseBranch(
     }
   }
 
-  // Layer 3: main/master fallback
+  // Layer 3: GitHub PR base branch via gh CLI
+  const prBase = await shellExec(
+    'gh', ['pr', 'view', '--json', 'baseRefName', '-q', '.baseRefName'],
+    cwd,
+  );
+  if (prBase) {
+    const exists = await gitExec(['rev-parse', '--verify', prBase], cwd);
+    if (exists) return prBase;
+  }
+
+  // Layer 4: main/master fallback
   for (const candidate of ['main', 'master']) {
     const exists = await gitExec(['rev-parse', '--verify', candidate], cwd);
     if (exists) return candidate;
