@@ -11,6 +11,7 @@ import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
+import { removeHudStatusLine } from './hud.js';
 import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
@@ -409,6 +410,16 @@ export const uninstallCommand = new Command('uninstall')
             settingsContent = withoutMemory;
             if (verbose) {
               p.log.success(`Memory hooks removed from settings.json (${scope})`);
+            }
+          }
+
+          // Always remove HUD statusLine on full uninstall (idempotent)
+          const withoutHud = removeHudStatusLine(settingsContent);
+          if (withoutHud !== settingsContent) {
+            await fs.writeFile(settingsPath, withoutHud, 'utf-8');
+            settingsContent = withoutHud;
+            if (verbose) {
+              p.log.success(`HUD statusLine removed from settings.json (${scope})`);
             }
           }
 

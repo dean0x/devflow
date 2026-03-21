@@ -24,12 +24,16 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
+import { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
+import { PRESETS, DEFAULT_PRESET, saveConfig as saveHudConfig } from '../hud/config.js';
+import type { PresetName } from '../hud/types.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
+export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -96,6 +100,7 @@ interface InitOptions {
   teams?: boolean;
   ambient?: boolean;
   memory?: boolean;
+  hud?: string;
 }
 
 export const initCommand = new Command('init')
@@ -109,6 +114,7 @@ export const initCommand = new Command('init')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
+  .option('--hud <preset>', 'HUD preset (minimal, classic, standard, full, off)')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -252,6 +258,37 @@ export const initCommand = new Command('init')
         process.exit(0);
       }
       memoryEnabled = memoryChoice;
+    }
+
+    // HUD preset selection
+    let hudPreset: PresetName | 'off' = DEFAULT_PRESET;
+    if (options.hud !== undefined) {
+      const val = options.hud;
+      if (val === 'off') {
+        hudPreset = 'off';
+      } else if (val in PRESETS) {
+        hudPreset = val as PresetName;
+      } else {
+        p.log.error(`Unknown HUD preset: ${val}. Valid: minimal, classic, standard, full, off`);
+        process.exit(1);
+      }
+    } else if (process.stdin.isTTY) {
+      const hudChoice = await p.select({
+        message: 'Choose HUD preset',
+        options: [
+          { value: 'standard', label: 'Standard (Recommended)', hint: 'directory, git, model, context, version, session, usage' },
+          { value: 'minimal', label: 'Minimal', hint: 'directory, git branch, model, context usage' },
+          { value: 'classic', label: 'Classic', hint: 'Like statusline.sh with version badge' },
+          { value: 'full', label: 'Full', hint: 'All 14 components' },
+          { value: 'off', label: 'No HUD', hint: 'Disable status line entirely' },
+        ],
+        initialValue: 'standard',
+      });
+      if (p.isCancel(hudChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      hudPreset = hudChoice as PresetName | 'off';
     }
 
     // Security deny list placement (user scope + TTY only)
@@ -512,6 +549,39 @@ export const initCommand = new Command('init')
         await createMemoryDir(verbose);
         await migrateMemoryFiles(verbose);
       }
+
+      // Configure HUD
+      if (hudPreset !== 'off') {
+        // Save HUD config
+        saveHudConfig({ preset: hudPreset, components: PRESETS[hudPreset] });
+
+        // Ensure statusLine points to HUD (the settings template already has it,
+        // but upgrade from old statusline.sh may need this)
+        const hudSettingsPath = path.join(claudeDir, 'settings.json');
+        try {
+          const hudContent = await fs.readFile(hudSettingsPath, 'utf-8');
+          const hudUpdated = addHudStatusLine(hudContent, devflowDir);
+          if (hudUpdated !== hudContent) {
+            await fs.writeFile(hudSettingsPath, hudUpdated, 'utf-8');
+            if (verbose) {
+              p.log.success(`HUD enabled (preset: ${hudPreset})`);
+            }
+          }
+        } catch { /* settings.json may not exist yet */ }
+      } else {
+        // HUD disabled — remove statusLine if it points to DevFlow
+        const hudSettingsPath = path.join(claudeDir, 'settings.json');
+        try {
+          const hudContent = await fs.readFile(hudSettingsPath, 'utf-8');
+          const hudUpdated = removeHudStatusLine(hudContent);
+          if (hudUpdated !== hudContent) {
+            await fs.writeFile(hudSettingsPath, hudUpdated, 'utf-8');
+            if (verbose) {
+              p.log.info('HUD disabled');
+            }
+          }
+        } catch { /* settings.json may not exist yet */ }
+      }
     }
 
     const fileExtras = selectedExtras.filter(e => e !== 'settings' && e !== 'safe-delete');
@@ -620,7 +690,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, hud: hudPreset === 'off' ? false as const : String(hudPreset) },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

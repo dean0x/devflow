@@ -10,6 +10,7 @@ import { listCommand } from './commands/list.js';
 import { ambientCommand } from './commands/ambient.js';
 import { memoryCommand } from './commands/memory.js';
 import { skillsCommand } from './commands/skills.js';
+import { hudCommand } from './commands/hud.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,7 +27,7 @@ program
   .description('Agentic Development Toolkit for Claude Code\n\nEnhance your AI-assisted development with intelligent commands and workflows.')
   .version(packageJson.version, '-v, --version', 'Display version number')
   .helpOption('-h, --help', 'Display help information')
-  .addHelpText('after', '\nExamples:\n  $ devflow init                       Install all DevFlow plugins\n  $ devflow init --plugin=implement    Install specific plugin\n  $ devflow init --plugin=implement,review  Install multiple plugins\n  $ devflow list                       List available plugins\n  $ devflow ambient --enable           Enable always-on ambient mode\n  $ devflow memory --status            Check working memory state\n  $ devflow uninstall                  Remove DevFlow from Claude Code\n  $ devflow --version                  Show version\n  $ devflow --help                     Show help\n\nDocumentation:\n  https://github.com/dean0x/devflow#readme');
+  .addHelpText('after', '\nExamples:\n  $ devflow init                       Install all DevFlow plugins\n  $ devflow init --plugin=implement    Install specific plugin\n  $ devflow init --plugin=implement,review  Install multiple plugins\n  $ devflow list                       List available plugins\n  $ devflow ambient --enable           Enable always-on ambient mode\n  $ devflow memory --status            Check working memory state\n  $ devflow hud --configure            Configure HUD preset\n  $ devflow uninstall                  Remove DevFlow from Claude Code\n  $ devflow --version                  Show version\n  $ devflow --help                     Show help\n\nDocumentation:\n  https://github.com/dean0x/devflow#readme');
 
 // Register commands
 program.addCommand(initCommand);
@@ -35,6 +36,7 @@ program.addCommand(listCommand);
 program.addCommand(ambientCommand);
 program.addCommand(memoryCommand);
 program.addCommand(skillsCommand);
+program.addCommand(hudCommand);
 
 // Handle no command
 program.action(() => {

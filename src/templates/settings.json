@@ -1,7 +1,7 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "${DEVFLOW_DIR}/scripts/statusline.sh"
+    "command": "${DEVFLOW_DIR}/scripts/hud.sh"
   },
   "hooks": {
     "Stop": [
