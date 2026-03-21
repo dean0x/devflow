@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ComponentResult, GatherContext } from '../types.js';
-import { green, cyan } from '../colors.js';
+import { yellow } from '../colors.js';
 import { readCache, writeCache } from '../cache.js';
 
 const VERSION_CACHE_KEY = 'version-check';
@@ -91,11 +91,10 @@ export default async function versionBadge(
   }
 
   if (info && compareVersions(info.current, info.latest) < 0) {
-    const badge = `\u2B06 ${info.latest}`;
-    return { text: green(badge), raw: badge };
+    const badge = `\u2726 Devflow v${info.latest} \u00B7 update: npx devflow-kit init`;
+    return { text: yellow(badge), raw: badge };
   }
 
-  // Show current version as dim badge when up to date
-  const badge = `v${current}`;
-  return { text: cyan(badge), raw: badge };
+  // Don't show version when up to date
+  return null;
 }

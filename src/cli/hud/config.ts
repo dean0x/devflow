@@ -1,57 +1,27 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
-import type { HudConfig, PresetName, ComponentId } from './types.js';
+import type { HudConfig, ComponentId } from './types.js';
 
 /**
- * Preset definitions mapping preset names to their component lists.
+ * All 14 HUD components in display order.
  */
-export const PRESETS: Record<PresetName, ComponentId[]> = {
-  minimal: ['directory', 'gitBranch', 'model', 'contextUsage'],
-  classic: [
-    'directory',
-    'gitBranch',
-    'gitAheadBehind',
-    'diffStats',
-    'model',
-    'contextUsage',
-    'versionBadge',
-  ],
-  standard: [
-    'directory',
-    'gitBranch',
-    'gitAheadBehind',
-    'diffStats',
-    'model',
-    'contextUsage',
-    'versionBadge',
-    'sessionDuration',
-    'usageQuota',
-  ],
-  full: [
-    'directory',
-    'gitBranch',
-    'gitAheadBehind',
-    'diffStats',
-    'model',
-    'contextUsage',
-    'versionBadge',
-    'sessionDuration',
-    'usageQuota',
-    'toolActivity',
-    'agentActivity',
-    'todoProgress',
-    'speed',
-    'configCounts',
-  ],
-};
-
-export const DEFAULT_PRESET: PresetName = 'standard';
-
-/**
- * All valid component IDs for validation.
- */
-export const ALL_COMPONENT_IDS: ReadonlySet<string> = new Set<string>(PRESETS.full);
+export const HUD_COMPONENTS: readonly ComponentId[] = [
+  'directory',
+  'gitBranch',
+  'gitAheadBehind',
+  'diffStats',
+  'releaseInfo',
+  'worktreeCount',
+  'model',
+  'contextUsage',
+  'versionBadge',
+  'sessionDuration',
+  'sessionCost',
+  'usageQuota',
+  'todoProgress',
+  'configCounts',
+];
 
 export function getConfigPath(): string {
   const devflowDir =
@@ -64,17 +34,12 @@ export function loadConfig(): HudConfig {
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw) as Partial<HudConfig>;
-    const preset =
-      parsed.preset && (parsed.preset in PRESETS || parsed.preset === 'custom')
-        ? parsed.preset
-        : DEFAULT_PRESET;
-    const components =
-      preset === 'custom' && Array.isArray(parsed.components)
-        ? parsed.components.filter((c): c is ComponentId => ALL_COMPONENT_IDS.has(c))
-        : PRESETS[preset as PresetName] ?? PRESETS[DEFAULT_PRESET];
-    return { preset, components };
+    return {
+      enabled: parsed.enabled !== false,
+      detail: parsed.detail === true,
+    };
   } catch {
-    return { preset: DEFAULT_PRESET, components: PRESETS[DEFAULT_PRESET] };
+    return { enabled: true, detail: false };
   }
 }
 
@@ -88,8 +53,7 @@ export function saveConfig(config: HudConfig): void {
 }
 
 export function resolveComponents(config: HudConfig): ComponentId[] {
-  if (config.preset === 'custom') {
-    return config.components;
-  }
-  return PRESETS[config.preset as PresetName] ?? PRESETS[DEFAULT_PRESET];
+  if (config.enabled) return [...HUD_COMPONENTS];
+  // Version badge always renders so users see upgrade notifications
+  return ['versionBadge'];
 }

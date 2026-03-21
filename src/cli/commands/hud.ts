@@ -1,17 +1,14 @@
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
-import * as path from 'path';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import {
-  PRESETS,
-  DEFAULT_PRESET,
+  HUD_COMPONENTS,
   loadConfig,
   saveConfig,
-  resolveComponents,
 } from '../hud/config.js';
-import type { HudConfig, PresetName } from '../hud/types.js';
 
 interface StatusLine {
   type: string;
@@ -106,59 +103,44 @@ export function hasNonDevFlowStatusLine(settingsJson: string): boolean {
   return !isDevFlowStatusLine(settings.statusLine);
 }
 
-/**
- * Format a preset preview for interactive display.
- */
-function formatPresetPreview(preset: PresetName): string {
-  const components = PRESETS[preset];
-  return components.join(', ');
-}
-
 export const hudCommand = new Command('hud')
   .description('Configure the HUD (status line)')
-  .option('--configure', 'Interactive preset picker')
-  .option(
-    '--preset <name>',
-    'Quick preset switch (minimal, classic, standard, full)',
-  )
   .option('--status', 'Show current HUD config')
+  .option('--detail', 'Show tool/agent descriptions in HUD')
+  .option('--no-detail', 'Hide tool/agent descriptions')
   .option('--enable', 'Enable HUD in settings')
   .option('--disable', 'Disable HUD (remove statusLine)')
   .action(async (options) => {
     const hasFlag =
-      options.configure ||
-      options.preset ||
       options.status ||
       options.enable ||
-      options.disable;
+      options.disable ||
+      options.detail !== undefined;
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' HUD ')));
       p.note(
-        `${color.cyan('devflow hud --configure')}   Interactive preset picker\n` +
-          `${color.cyan('devflow hud --preset=<n>')} Quick preset switch\n` +
+        `${color.cyan('devflow hud --detail')}      Show tool/agent descriptions\n` +
+          `${color.cyan('devflow hud --no-detail')}   Hide tool/agent descriptions\n` +
           `${color.cyan('devflow hud --status')}      Show current config\n` +
           `${color.cyan('devflow hud --enable')}      Enable HUD in settings\n` +
           `${color.cyan('devflow hud --disable')}     Remove HUD from settings`,
         'Usage',
       );
       p.note(
-        `${color.yellow('minimal')}   ${formatPresetPreview('minimal')}\n` +
-          `${color.yellow('classic')}   ${formatPresetPreview('classic')}\n` +
-          `${color.yellow('standard')}  ${formatPresetPreview('standard')}\n` +
-          `${color.yellow('full')}      ${formatPresetPreview('full')}`,
-        'Presets',
+        `${HUD_COMPONENTS.length} components: ${HUD_COMPONENTS.join(', ')}`,
+        'Components',
       );
-      p.outro(color.dim('Default preset: standard'));
+      p.outro(color.dim('Toggle with --enable / --disable'));
       return;
     }
 
     if (options.status) {
       const config = loadConfig();
-      const components = resolveComponents(config);
       p.intro(color.bgCyan(color.white(' HUD Status ')));
       p.note(
-        `${color.dim('Preset:')}     ${color.cyan(config.preset)}\n` +
-          `${color.dim('Components:')} ${components.join(', ')}`,
+        `${color.dim('Enabled:')}    ${config.enabled ? color.green('yes') : color.dim('no')}\n` +
+          `${color.dim('Detail:')}     ${config.detail ? color.green('on') : color.dim('off')}\n` +
+          `${color.dim('Components:')} ${HUD_COMPONENTS.length}`,
         'Current config',
       );
 
@@ -177,130 +159,75 @@ export const hudCommand = new Command('hud')
       return;
     }
 
-    if (options.preset) {
-      const preset = options.preset as string;
-      if (!(preset in PRESETS)) {
-        p.log.error(
-          `Unknown preset: ${preset}. Valid: ${Object.keys(PRESETS).join(', ')}`,
-        );
-        process.exit(1);
-      }
-      const config: HudConfig = {
-        preset: preset as PresetName,
-        components: PRESETS[preset as PresetName],
-      };
+    if (options.detail !== undefined) {
+      const config = loadConfig();
+      config.detail = options.detail;
       saveConfig(config);
-      p.log.success(`HUD preset set to ${color.cyan(preset)}`);
-      p.log.info(
-        color.dim(`Components: ${config.components.join(', ')}`),
-      );
+      p.log.success(`HUD detail ${config.detail ? 'enabled' : 'disabled'}`);
       return;
-    }
-
-    if (options.configure) {
-      const currentConfig = loadConfig();
-      const presetChoice = await p.select({
-        message: 'Choose HUD preset',
-        options: [
-          {
-            value: 'minimal',
-            label: 'Minimal',
-            hint: formatPresetPreview('minimal'),
-          },
-          {
-            value: 'classic',
-            label: 'Classic',
-            hint: formatPresetPreview('classic'),
-          },
-          {
-            value: 'standard',
-            label: 'Standard (Recommended)',
-            hint: formatPresetPreview('standard'),
-          },
-          {
-            value: 'full',
-            label: 'Full',
-            hint: formatPresetPreview('full'),
-          },
-        ],
-        initialValue: currentConfig.preset === 'custom' ? DEFAULT_PRESET : currentConfig.preset,
-      });
-
-      if (p.isCancel(presetChoice)) {
-        p.cancel('Configuration cancelled.');
-        process.exit(0);
-      }
-
-      const preset = presetChoice as PresetName;
-      const config: HudConfig = {
-        preset,
-        components: PRESETS[preset],
-      };
-      saveConfig(config);
-      p.log.success(`HUD preset set to ${color.cyan(preset)}`);
-      p.log.info(
-        color.dim(`Components: ${config.components.join(', ')}`),
-      );
-      return;
-    }
-
-    const claudeDir = getClaudeDirectory();
-    const settingsPath = path.join(claudeDir, 'settings.json');
-
-    let settingsContent: string;
-    try {
-      settingsContent = await fs.readFile(settingsPath, 'utf-8');
-    } catch {
-      if (options.status) {
-        p.log.info('HUD: disabled (no settings.json found)');
-        return;
-      }
-      settingsContent = '{}';
     }
 
     if (options.enable) {
-      // Check for non-DevFlow statusLine
-      if (hasNonDevFlowStatusLine(settingsContent)) {
-        const settings = JSON.parse(settingsContent) as Settings;
-        p.log.warn(
-          `Existing statusLine found: ${color.dim(settings.statusLine?.command ?? 'unknown')}`,
-        );
-        if (process.stdin.isTTY) {
-          const overwrite = await p.confirm({
-            message:
-              'Replace existing statusLine with DevFlow HUD?',
-            initialValue: false,
-          });
-          if (p.isCancel(overwrite) || !overwrite) {
-            p.log.info('HUD not enabled — existing statusLine preserved');
-            return;
-          }
-        } else {
-          p.log.info(
-            'Non-interactive mode — skipping (existing statusLine would be overwritten)',
-          );
-          return;
-        }
+      const claudeDir = getClaudeDirectory();
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      let settingsContent: string;
+      try {
+        settingsContent = await fs.readFile(settingsPath, 'utf-8');
+      } catch {
+        settingsContent = '{}';
       }
 
-      const devflowDir = getDevFlowDirectory();
-      const updated = addHudStatusLine(settingsContent, devflowDir);
-      if (updated === settingsContent) {
+      // Ensure statusLine is registered
+      if (!hasHudStatusLine(settingsContent)) {
+        // Check for non-DevFlow statusLine
+        if (hasNonDevFlowStatusLine(settingsContent)) {
+          const settings = JSON.parse(settingsContent) as Settings;
+          p.log.warn(
+            `Existing statusLine found: ${color.dim(settings.statusLine?.command ?? 'unknown')}`,
+          );
+          if (process.stdin.isTTY) {
+            const overwrite = await p.confirm({
+              message:
+                'Replace existing statusLine with DevFlow HUD?',
+              initialValue: false,
+            });
+            if (p.isCancel(overwrite) || !overwrite) {
+              p.log.info('HUD not enabled — existing statusLine preserved');
+              return;
+            }
+          } else {
+            p.log.info(
+              'Non-interactive mode — skipping (existing statusLine would be overwritten)',
+            );
+            return;
+          }
+        }
+
+        const devflowDir = getDevFlowDirectory();
+        const updated = addHudStatusLine(settingsContent, devflowDir);
+        await fs.writeFile(settingsPath, updated, 'utf-8');
+      }
+
+      // Update config
+      const config = loadConfig();
+      if (config.enabled) {
         p.log.info('HUD already enabled');
         return;
       }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('HUD enabled — statusLine registered');
+      saveConfig({ ...config, enabled: true });
+
+      p.log.success('HUD enabled');
       p.log.info(color.dim('Restart Claude Code to see the HUD'));
     }
 
     if (options.disable) {
-      const updated = removeHudStatusLine(settingsContent);
-      if (updated === settingsContent) {
+      const config = loadConfig();
+      if (!config.enabled) {
         p.log.info('HUD already disabled');
         return;
       }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('HUD disabled — statusLine removed');
+      saveConfig({ ...config, enabled: false });
+      p.log.success('HUD disabled');
+      p.log.info(color.dim('Version upgrade notifications will still appear'));
     }
   });

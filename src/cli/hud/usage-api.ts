@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { homedir } from 'node:os';
 import { readCache, writeCache, readCacheStale } from './cache.js';
+import { getCredentials } from './credentials.js';
 import type { UsageData } from './types.js';
 
 const USAGE_CACHE_KEY = 'usage';
@@ -15,22 +14,12 @@ interface BackoffState {
   delay: number;
 }
 
-function getCredentialsPath(): string {
-  const claudeDir =
-    process.env.CLAUDE_CONFIG_DIR ||
-    path.join(process.env.HOME || homedir(), '.claude');
-  return path.join(claudeDir, '.credentials.json');
-}
+const DEBUG = !!process.env.DEVFLOW_HUD_DEBUG;
 
-function getOAuthToken(): string | null {
-  try {
-    const raw = fs.readFileSync(getCredentialsPath(), 'utf-8');
-    const creds = JSON.parse(raw) as Record<string, unknown>;
-    const oauth = creds.claudeAiOauth as Record<string, unknown> | undefined;
-    return (oauth?.accessToken as string) || null;
-  } catch {
-    return null;
-  }
+function debugLog(msg: string, data?: Record<string, unknown>): void {
+  if (!DEBUG) return;
+  const entry = { ts: new Date().toISOString(), source: 'usage-api', msg, ...data };
+  fs.appendFileSync('/tmp/hud-debug.log', JSON.stringify(entry) + '\n');
 }
 
 /**
@@ -41,6 +30,7 @@ export async function fetchUsageData(): Promise<UsageData | null> {
   // Check backoff
   const backoff = readCache<BackoffState>(BACKOFF_CACHE_KEY);
   if (backoff && Date.now() < backoff.retryAfter) {
+    debugLog('skipped: backoff active', { retryAfter: backoff.retryAfter });
     return readCacheStale<UsageData>(USAGE_CACHE_KEY);
   }
 
@@ -48,17 +38,24 @@ export async function fetchUsageData(): Promise<UsageData | null> {
   const cached = readCache<UsageData>(USAGE_CACHE_KEY);
   if (cached) return cached;
 
-  const token = getOAuthToken();
-  if (!token) return null;
+  const creds = await getCredentials();
+  if (!creds) {
+    debugLog('no OAuth credentials found');
+    return null;
+  }
+  const token = creds.accessToken;
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), API_TIMEOUT);
 
+    debugLog('fetching usage', { timeout: API_TIMEOUT });
+
     const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'anthropic-beta': 'oauth-2025-04-20',
       },
       signal: controller.signal,
     });
@@ -76,29 +73,37 @@ export async function fetchUsageData(): Promise<UsageData | null> {
         { retryAfter: Date.now() + delay, delay },
         delay,
       );
+      debugLog('rate limited (429)', { retryAfter, delay });
       return readCacheStale<UsageData>(USAGE_CACHE_KEY);
     }
 
     if (!response.ok) {
+      debugLog('non-200 response', { status: response.status, statusText: response.statusText });
       writeCache<UsageData | null>(USAGE_CACHE_KEY, null, USAGE_FAIL_TTL);
       return readCacheStale<UsageData>(USAGE_CACHE_KEY);
     }
 
     const body = (await response.json()) as Record<string, unknown>;
+    const fiveHour = body.five_hour as Record<string, unknown> | undefined;
+    const sevenDay = body.seven_day as Record<string, unknown> | undefined;
+
     const data: UsageData = {
-      dailyUsagePercent:
-        typeof body.daily_usage_percent === 'number'
-          ? body.daily_usage_percent
+      fiveHourPercent:
+        typeof fiveHour?.utilization === 'number'
+          ? Math.round(Math.max(0, Math.min(100, fiveHour.utilization)))
           : null,
-      weeklyUsagePercent:
-        typeof body.weekly_usage_percent === 'number'
-          ? body.weekly_usage_percent
+      sevenDayPercent:
+        typeof sevenDay?.utilization === 'number'
+          ? Math.round(Math.max(0, Math.min(100, sevenDay.utilization)))
           : null,
     };
 
+    debugLog('usage fetched', { fiveHour: data.fiveHourPercent, sevenDay: data.sevenDayPercent });
     writeCache(USAGE_CACHE_KEY, data, USAGE_CACHE_TTL);
     return data;
-  } catch {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    debugLog('fetch failed', { error: message });
     writeCache<UsageData | null>(USAGE_CACHE_KEY, null, USAGE_FAIL_TTL);
     return readCacheStale<UsageData>(USAGE_CACHE_KEY);
   }

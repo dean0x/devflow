@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
 import { readStdin } from './stdin.js';
@@ -26,8 +27,15 @@ async function main(): Promise<void> {
 
 async function run(): Promise<string> {
   const stdin = await readStdin();
+
+  // Debug: dump raw stdin to file when DEVFLOW_HUD_DEBUG is set
+  if (process.env.DEVFLOW_HUD_DEBUG) {
+    fs.writeFileSync(process.env.DEVFLOW_HUD_DEBUG, JSON.stringify(stdin, null, 2));
+  }
+
   const config = loadConfig();
-  const components = new Set(resolveComponents(config));
+  const resolved = resolveComponents(config);
+  const components = new Set(resolved);
   const cwd = stdin.cwd || process.cwd();
   const devflowDir =
     process.env.DEVFLOW_DIR ||
@@ -37,12 +45,12 @@ async function run(): Promise<string> {
   const needsGit =
     components.has('gitBranch') ||
     components.has('gitAheadBehind') ||
-    components.has('diffStats');
+    components.has('diffStats') ||
+    components.has('releaseInfo') ||
+    components.has('worktreeCount');
   const needsTranscript =
-    components.has('toolActivity') ||
-    components.has('agentActivity') ||
     components.has('todoProgress') ||
-    components.has('speed');
+    components.has('configCounts');
   const needsUsage = components.has('usageQuota');
   const needsConfigCounts = components.has('configCounts');
 
@@ -55,10 +63,14 @@ async function run(): Promise<string> {
     needsUsage ? fetchUsageData() : Promise.resolve(null),
   ]);
 
-  // Session start time from session_id presence (approximate via process uptime)
-  const sessionStartTime = stdin.session_id
-    ? Date.now() - process.uptime() * 1000
-    : null;
+  // Session start time from transcript file creation time
+  let sessionStartTime: number | null = null;
+  if (stdin.transcript_path) {
+    try {
+      const stat = fs.statSync(stdin.transcript_path);
+      sessionStartTime = stat.birthtime.getTime();
+    } catch { /* file may not exist yet */ }
+  }
 
   // Config counts (fast, synchronous filesystem reads)
   const configCountsData = needsConfigCounts
@@ -73,9 +85,8 @@ async function run(): Promise<string> {
     git,
     transcript,
     usage,
-    speed: null, // Speed requires cross-render state tracking (future enhancement)
     configCounts: configCountsData,
-    config: { ...config, components: resolveComponents(config) },
+    config: { ...config, components: resolved } as GatherContext['config'],
     devflowDir,
     sessionStartTime,
     terminalWidth,

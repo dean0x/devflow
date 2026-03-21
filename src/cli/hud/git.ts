@@ -33,7 +33,17 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
     ['status', '--porcelain', '--no-optional-locks'],
     cwd,
   );
-  const dirty = statusOutput.length > 0;
+  let dirty = false;
+  let staged = false;
+  for (const line of statusOutput.split('\n')) {
+    if (line.length < 2) continue;
+    const index = line[0];
+    const worktree = line[1];
+    // Index column: staged change (A/M/D/R/C)
+    if (index !== ' ' && index !== '?') staged = true;
+    // Worktree column: unstaged change (M/D), or untracked (??)
+    if (worktree !== ' ' || index === '?') dirty = true;
+  }
 
   // Ahead/behind — detect base branch with layered fallback (ported from statusline.sh)
   const baseBranch = await detectBaseBranch(branch, cwd);
@@ -65,7 +75,36 @@ export async function gatherGitStatus(cwd: string): Promise<GitStatus | null> {
     deletions = delMatch ? parseInt(delMatch[1], 10) : 0;
   }
 
-  return { branch, dirty, ahead, behind, filesChanged, additions, deletions };
+  // Tag and worktree info (parallel)
+  const [tagOutput, worktreeOutput] = await Promise.all([
+    gitExec(['describe', '--tags', '--abbrev=0'], cwd),
+    gitExec(['worktree', 'list'], cwd),
+  ]);
+
+  const lastTag = tagOutput || null;
+  let commitsSinceTag = 0;
+  if (lastTag) {
+    const countOutput = await gitExec(['rev-list', `${lastTag}..HEAD`, '--count'], cwd);
+    commitsSinceTag = parseInt(countOutput, 10) || 0;
+  }
+
+  const worktreeCount = worktreeOutput
+    ? worktreeOutput.split('\n').filter(l => l.trim().length > 0).length
+    : 1;
+
+  return {
+    branch,
+    dirty,
+    staged,
+    ahead,
+    behind,
+    filesChanged,
+    additions,
+    deletions,
+    lastTag,
+    commitsSinceTag,
+    worktreeCount,
+  };
 }
 
 /**

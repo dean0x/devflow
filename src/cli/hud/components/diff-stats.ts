@@ -1,5 +1,5 @@
 import type { ComponentResult, GatherContext } from '../types.js';
-import { yellow, green, red } from '../colors.js';
+import { dim, green, red } from '../colors.js';
 
 export default async function diffStats(
   ctx: GatherContext,
@@ -7,19 +7,31 @@ export default async function diffStats(
   if (!ctx.git) return null;
   const { filesChanged, additions, deletions } = ctx.git;
   if (filesChanged === 0 && additions === 0 && deletions === 0) return null;
-  const parts: string[] = [];
-  const rawParts: string[] = [];
-  if (filesChanged > 0) {
-    parts.push(yellow(`${filesChanged}`));
-    rawParts.push(`${filesChanged}`);
+  const filePart = filesChanged > 0
+    ? `${filesChanged} file${filesChanged === 1 ? '' : 's'}`
+    : '';
+  const lineParts: string[] = [];
+  if (additions > 0) lineParts.push(`+${additions}`);
+  if (deletions > 0) lineParts.push(`-${deletions}`);
+
+  const sections: string[] = [];
+  const rawSections: string[] = [];
+
+  if (filePart) {
+    sections.push(dim(filePart));
+    rawSections.push(filePart);
   }
-  if (additions > 0) {
-    parts.push(green(`+${additions}`));
-    rawParts.push(`+${additions}`);
+  if (lineParts.length > 0) {
+    const lineText = lineParts
+      .map((p) => (p.startsWith('+') ? green(p) : red(p)))
+      .join(' ');
+    sections.push(lineText);
+    rawSections.push(lineParts.join(' '));
   }
-  if (deletions > 0) {
-    parts.push(red(`-${deletions}`));
-    rawParts.push(`-${deletions}`);
-  }
-  return { text: parts.join(' '), raw: rawParts.join(' ') };
+
+  if (sections.length === 0) return null;
+  return {
+    text: sections.join(dim(' \u00B7 ')),
+    raw: rawSections.join(' \u00B7 '),
+  };
 }

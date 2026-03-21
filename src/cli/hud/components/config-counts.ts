@@ -86,12 +86,15 @@ export default async function configCounts(
   if (!ctx.configCounts) return null;
   const { claudeMdFiles, rules: ruleCount, mcpServers, hooks: hookCount } =
     ctx.configCounts;
+  const skillCount = ctx.transcript?.skills.length ?? 0;
   const parts: string[] = [];
   if (claudeMdFiles > 0) parts.push(`${claudeMdFiles} CLAUDE.md`);
   if (ruleCount > 0) parts.push(`${ruleCount} rules`);
   if (mcpServers > 0) parts.push(`${mcpServers} MCPs`);
   if (hookCount > 0) parts.push(`${hookCount} hooks`);
+  if (skillCount > 0) parts.push(`${skillCount} skills`);
   if (parts.length === 0) return null;
-  const label = parts.join(', ');
-  return { text: dim(label), raw: label };
+  const raw = parts.join(' \u00B7 ');
+  const text = parts.map((p) => dim(p)).join(dim(' \u00B7 '));
+  return { text, raw };
 }

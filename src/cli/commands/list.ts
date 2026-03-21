@@ -16,7 +16,7 @@ export function formatFeatures(features: ManifestData['features']): string {
     features.teams ? 'teams' : null,
     features.ambient ? 'ambient' : null,
     features.memory ? 'memory' : null,
-    features.hud ? `hud:${features.hud}` : null,
+    features.hud ? 'hud' : null,
   ].filter(Boolean).join(', ') || 'none';
 }
 

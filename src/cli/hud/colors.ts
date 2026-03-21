@@ -36,6 +36,15 @@ export function gray(s: string): string {
 export function white(s: string): string {
   return `${ESC}37m${s}${RESET}`;
 }
+export function orange(s: string): string {
+  return `${ESC}38;5;208m${s}${RESET}`;
+}
+export function brightRed(s: string): string {
+  return `${ESC}91m${s}${RESET}`;
+}
+export function boldRed(s: string): string {
+  return `${ESC}1;31m${s}${RESET}`;
+}
 export function bgGreen(s: string): string {
   return `${ESC}42m${s}${RESET}`;
 }
@@ -44,6 +53,10 @@ export function bgYellow(s: string): string {
 }
 export function bgRed(s: string): string {
   return `${ESC}41m${s}${RESET}`;
+}
+
+export function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + '\u2026' : s;
 }
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;

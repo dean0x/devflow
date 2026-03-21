@@ -6,7 +6,6 @@ import type {
 } from './types.js';
 import { dim } from './colors.js';
 
-// Import all components
 import directory from './components/directory.js';
 import gitBranch from './components/git-branch.js';
 import gitAheadBehind from './components/git-ahead-behind.js';
@@ -16,11 +15,11 @@ import contextUsage from './components/context-usage.js';
 import versionBadge from './components/version-badge.js';
 import sessionDuration from './components/session-duration.js';
 import usageQuota from './components/usage-quota.js';
-import toolActivity from './components/tool-activity.js';
-import agentActivity from './components/agent-activity.js';
 import todoProgress from './components/todo-progress.js';
-import speed from './components/speed.js';
 import configCounts from './components/config-counts.js';
+import sessionCost from './components/session-cost.js';
+import releaseInfo from './components/release-info.js';
+import worktreeCount from './components/worktree-count.js';
 
 const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   directory,
@@ -32,37 +31,31 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   versionBadge,
   sessionDuration,
   usageQuota,
-  toolActivity,
-  agentActivity,
   todoProgress,
-  speed,
   configCounts,
+  sessionCost,
+  releaseInfo,
+  worktreeCount,
 };
 
 /**
  * Line groupings for smart layout.
  * Components are assigned to lines and only rendered if enabled.
+ * null entries denote section breaks (blank line between sections).
  */
-const LINE_GROUPS: ComponentId[][] = [
-  // Line 1: core info
-  [
-    'directory',
-    'gitBranch',
-    'gitAheadBehind',
-    'diffStats',
-    'model',
-    'contextUsage',
-    'versionBadge',
-  ],
-  // Line 2: session + quota
-  ['sessionDuration', 'usageQuota', 'speed'],
-  // Line 3: tool activity
-  ['toolActivity'],
-  // Line 4: agents + todos + config
-  ['agentActivity', 'todoProgress', 'configCounts'],
+const LINE_GROUPS: (ComponentId[] | null)[] = [
+  // Section 1: Info (3 lines)
+  ['directory', 'gitBranch', 'gitAheadBehind', 'releaseInfo', 'worktreeCount', 'diffStats'],
+  ['contextUsage', 'usageQuota'],
+  ['model', 'sessionDuration', 'sessionCost', 'configCounts'],
+  // --- section break ---
+  null,
+  // Section 2: Activity
+  ['todoProgress'],
+  ['versionBadge'],
 ];
 
-const SEPARATOR = dim('  ');
+const SEPARATOR = dim(' \u00B7 ');
 
 /**
  * Render all enabled components into a multi-line HUD string.
@@ -91,16 +84,42 @@ export async function render(ctx: GatherContext): Promise<string> {
 
   await Promise.all(promises);
 
-  // Assemble lines using smart layout
+  // Assemble lines using smart layout with section breaks
   const lines: string[] = [];
+  let pendingBreak = false;
 
-  for (const lineGroup of LINE_GROUPS) {
-    const lineResults = lineGroup
+  for (const entry of LINE_GROUPS) {
+    if (entry === null) {
+      if (lines.length > 0) pendingBreak = true;
+      continue;
+    }
+
+    const lineResults = entry
       .filter((id) => enabled.has(id) && results.has(id))
       .map((id) => results.get(id)!);
 
     if (lineResults.length > 0) {
-      lines.push(lineResults.map((r) => r.text).join(SEPARATOR));
+      if (pendingBreak) {
+        lines.push('');
+        pendingBreak = false;
+      }
+      // Separate multi-line results (containing newlines) from single-line
+      const singleLine: string[] = [];
+      for (const r of lineResults) {
+        if (r.text.includes('\n')) {
+          // Flush any accumulated single-line parts first
+          if (singleLine.length > 0) {
+            lines.push(singleLine.join(SEPARATOR));
+            singleLine.length = 0;
+          }
+          lines.push(r.text);
+        } else {
+          singleLine.push(r.text);
+        }
+      }
+      if (singleLine.length > 0) {
+        lines.push(singleLine.join(SEPARATOR));
+      }
     }
   }
 

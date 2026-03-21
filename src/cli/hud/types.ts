@@ -6,8 +6,10 @@ export interface StdinData {
   cwd?: string;
   context_window?: {
     context_window_size?: number;
-    current_usage?: { input_tokens?: number };
+    current_usage?: { input_tokens?: number; output_tokens?: number };
+    used_percentage?: number;
   };
+  cost?: { total_cost_usd?: number };
   session_id?: string;
   transcript_path?: string;
 }
@@ -25,23 +27,18 @@ export type ComponentId =
   | 'versionBadge'
   | 'sessionDuration'
   | 'usageQuota'
-  | 'toolActivity'
-  | 'agentActivity'
   | 'todoProgress'
-  | 'speed'
-  | 'configCounts';
-
-/**
- * Preset names.
- */
-export type PresetName = 'minimal' | 'classic' | 'standard' | 'full';
+  | 'configCounts'
+  | 'sessionCost'
+  | 'releaseInfo'
+  | 'worktreeCount';
 
 /**
  * HUD config persisted to ~/.devflow/hud.json.
  */
 export interface HudConfig {
-  preset: PresetName | 'custom';
-  components: ComponentId[];
+  enabled: boolean;
+  detail: boolean;
 }
 
 /**
@@ -63,35 +60,33 @@ export type ComponentFn = (ctx: GatherContext) => Promise<ComponentResult | null
 export interface GitStatus {
   branch: string;
   dirty: boolean;
+  staged: boolean;
   ahead: number;
   behind: number;
   filesChanged: number;
   additions: number;
   deletions: number;
+  lastTag: string | null;
+  commitsSinceTag: number;
+  worktreeCount: number;
 }
 
 /**
  * Transcript data parsed from session JSONL.
  */
 export interface TranscriptData {
-  tools: Array<{ name: string; status: 'running' | 'completed' }>;
-  agents: Array<{ name: string; model?: string; status: 'running' | 'completed' }>;
+  tools: Array<{ name: string; status: 'running' | 'completed'; target?: string; description?: string }>;
+  agents: Array<{ name: string; model?: string; status: 'running' | 'completed'; description?: string }>;
   todos: { completed: number; total: number };
+  skills: string[];
 }
 
 /**
  * Usage API data.
  */
 export interface UsageData {
-  dailyUsagePercent: number | null;
-  weeklyUsagePercent: number | null;
-}
-
-/**
- * Speed tracking data.
- */
-export interface SpeedData {
-  tokensPerSecond: number | null;
+  fiveHourPercent: number | null;
+  sevenDayPercent: number | null;
 }
 
 /**
@@ -112,9 +107,8 @@ export interface GatherContext {
   git: GitStatus | null;
   transcript: TranscriptData | null;
   usage: UsageData | null;
-  speed: SpeedData | null;
   configCounts: ConfigCountsData | null;
-  config: HudConfig;
+  config: HudConfig & { components: ComponentId[] };
   devflowDir: string;
   sessionStartTime: number | null;
   terminalWidth: number;

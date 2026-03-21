@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as readline from 'node:readline';
 import type { TranscriptData } from './types.js';
 
@@ -17,12 +18,13 @@ export async function parseTranscript(
 
     const tools = new Map<
       string,
-      { name: string; status: 'running' | 'completed' }
+      { name: string; status: 'running' | 'completed'; target?: string; description?: string }
     >();
     const agents = new Map<
       string,
-      { name: string; model?: string; status: 'running' | 'completed' }
+      { name: string; model?: string; status: 'running' | 'completed'; description?: string }
     >();
+    const skills = new Set<string>();
     let todosCompleted = 0;
     let todosTotal = 0;
 
@@ -36,7 +38,16 @@ export async function parseTranscript(
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line) as Record<string, unknown>;
-        const todoResult = processEntry(entry, tools, agents);
+
+        // Turn boundary: clear tools and agents on each human message
+        // so only the current turn's activity shows in the HUD
+        if (entry.type === 'human') {
+          tools.clear();
+          agents.clear();
+          continue;
+        }
+
+        const todoResult = processEntry(entry, tools, agents, skills);
         if (todoResult) {
           todosCompleted = todoResult.completed;
           todosTotal = todoResult.total;
@@ -50,6 +61,7 @@ export async function parseTranscript(
       tools: Array.from(tools.values()),
       agents: Array.from(agents.values()),
       todos: { completed: todosCompleted, total: todosTotal },
+      skills: Array.from(skills),
     };
   } catch {
     return null;
@@ -63,11 +75,12 @@ interface TodoResult {
 
 function processEntry(
   entry: Record<string, unknown>,
-  tools: Map<string, { name: string; status: 'running' | 'completed' }>,
+  tools: Map<string, { name: string; status: 'running' | 'completed'; target?: string; description?: string }>,
   agents: Map<
     string,
-    { name: string; model?: string; status: 'running' | 'completed' }
+    { name: string; model?: string; status: 'running' | 'completed'; description?: string }
   >,
+  skills: Set<string>,
 ): TodoResult | null {
   if (entry.type !== 'assistant' || !entry.message) return null;
   const message = entry.message as {
@@ -88,11 +101,19 @@ function processEntry(
         // Agent spawn
         const input = block.input as Record<string, unknown> | undefined;
         const agentType = (input?.subagent_type as string) || 'Agent';
+        const agentDesc = typeof input?.description === 'string' ? input.description : undefined;
         agents.set(id, {
           name: agentType,
           model: input?.model as string | undefined,
           status: 'running',
+          description: agentDesc,
         });
+      } else if (name === 'Skill') {
+        // Track loaded skills
+        const input = block.input as Record<string, unknown> | undefined;
+        if (input?.skill && typeof input.skill === 'string') {
+          skills.add(input.skill);
+        }
       } else if (TODO_WRITE_NAME.test(name)) {
         // Track todos
         const input = block.input as Record<string, unknown> | undefined;
@@ -105,7 +126,20 @@ function processEntry(
           todoResult = { completed, total };
         }
       } else {
-        tools.set(id, { name, status: 'running' });
+        // Regular tool — extract file target for Read/Edit/Write
+        const input = block.input as Record<string, unknown> | undefined;
+        let target: string | undefined;
+        if (input?.file_path && typeof input.file_path === 'string') {
+          target = path.basename(input.file_path);
+        }
+        // Extract description: prefer input.description, fallback to first 4 words of command (Bash)
+        let description: string | undefined;
+        if (typeof input?.description === 'string') {
+          description = input.description;
+        } else if (name === 'Bash' && typeof input?.command === 'string') {
+          description = input.command.split(/\s+/).slice(0, 4).join(' ');
+        }
+        tools.set(id, { name, status: 'running', target, description });
       }
     } else if (blockType === 'tool_result') {
       const toolUseId = block.tool_use_id as string;

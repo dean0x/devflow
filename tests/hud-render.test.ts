@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '../src/cli/hud/render.js';
 import {
-  PRESETS,
+  HUD_COMPONENTS,
   loadConfig,
   resolveComponents,
 } from '../src/cli/hud/config.js';
 import { stripAnsi } from '../src/cli/hud/colors.js';
-import type { GatherContext, HudConfig } from '../src/cli/hud/types.js';
+import type { GatherContext, HudConfig, ComponentId } from '../src/cli/hud/types.js';
 
 function makeCtx(
-  config: HudConfig,
-  overrides: Partial<GatherContext> = {},
+  overrides: Partial<GatherContext> & { config?: Partial<HudConfig> & { components?: ComponentId[] } } = {},
 ): GatherContext {
+  const { config: configOverride, ...rest } = overrides;
   return {
     stdin: {
       cwd: '/home/user/project',
@@ -24,97 +24,78 @@ function makeCtx(
     git: {
       branch: 'feat/test',
       dirty: false,
+      staged: false,
       ahead: 2,
       behind: 0,
       filesChanged: 3,
       additions: 50,
       deletions: 10,
+      lastTag: null,
+      commitsSinceTag: 0,
+      worktreeCount: 1,
     },
     transcript: null,
     usage: null,
-    speed: null,
     configCounts: null,
-    config,
+    config: {
+      enabled: true,
+      detail: false,
+      components: [...HUD_COMPONENTS],
+      ...configOverride,
+    },
     devflowDir: '/test/.devflow',
     sessionStartTime: null,
     terminalWidth: 120,
-    ...overrides,
+    ...rest,
   };
 }
 
 describe('render', () => {
-  it('minimal preset produces single line', async () => {
-    const config: HudConfig = {
-      preset: 'minimal',
-      components: PRESETS.minimal,
-    };
-    const ctx = makeCtx(config);
+  it('all components produces three lines', async () => {
+    const ctx = makeCtx();
     const output = await render(ctx);
     const lines = output.split('\n').filter((l) => l.length > 0);
 
-    expect(lines).toHaveLength(1);
+    // Line 1: git, Line 2: context, Line 3: model
+    expect(lines).toHaveLength(3);
     const raw = stripAnsi(output);
     expect(raw).toContain('project');
     expect(raw).toContain('feat/test');
-    expect(raw).toContain('Claude Opus 4');
+    expect(raw).toContain('Opus 4 [200k]');
     expect(raw).toContain('20%');
   });
 
-  it('classic preset produces single line', async () => {
-    const config: HudConfig = {
-      preset: 'classic',
-      components: PRESETS.classic,
-    };
-    const ctx = makeCtx(config);
+  it('uses dot separator between components', async () => {
+    const ctx = makeCtx();
     const output = await render(ctx);
-    const lines = output.split('\n').filter((l) => l.length > 0);
-
-    // All classic components are in LINE_1
-    expect(lines).toHaveLength(1);
     const raw = stripAnsi(output);
-    expect(raw).toContain('project');
-    expect(raw).toContain('feat/test');
-    expect(raw).toContain('2\u2191'); // ahead arrows
-    expect(raw).toContain('+50');
-    expect(raw).toContain('-10');
-    expect(raw).toContain('Claude Opus 4');
-    expect(raw).toContain('20%');
+    expect(raw).toContain('\u00B7');
   });
 
-  it('standard preset produces 2 lines with session data', async () => {
-    const config: HudConfig = {
-      preset: 'standard',
-      components: PRESETS.standard,
-    };
-    const ctx = makeCtx(config, {
+  it('shows session data when available', async () => {
+    const ctx = makeCtx({
       sessionStartTime: Date.now() - 15 * 60 * 1000,
-      usage: { dailyUsagePercent: 30, weeklyUsagePercent: null },
+      usage: { fiveHourPercent: 30, sevenDayPercent: null },
     });
     const output = await render(ctx);
     const lines = output.split('\n').filter((l) => l.length > 0);
 
-    // Line 1: core info, Line 2: session + usage
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     const raw = stripAnsi(output);
     expect(raw).toContain('15m');
+    expect(raw).toContain('Session');
     expect(raw).toContain('30%');
   });
 
-  it('full preset produces 2+ lines with transcript data', async () => {
-    const config: HudConfig = {
-      preset: 'full',
-      components: PRESETS.full,
-    };
-    const ctx = makeCtx(config, {
+  it('shows activity section with todos and config counts', async () => {
+    const ctx = makeCtx({
       sessionStartTime: Date.now() - 5 * 60 * 1000,
-      usage: { dailyUsagePercent: 20, weeklyUsagePercent: null },
+      usage: { fiveHourPercent: 20, sevenDayPercent: null },
       transcript: {
-        tools: [
-          { name: 'Read', status: 'completed' },
-          { name: 'Bash', status: 'running' },
-        ],
-        agents: [{ name: 'Reviewer', status: 'completed' }],
+        tools: [],
+        agents: [],
         todos: { completed: 2, total: 4 },
+        skills: [],
       },
       configCounts: {
         claudeMdFiles: 2,
@@ -126,25 +107,19 @@ describe('render', () => {
     const output = await render(ctx);
     const lines = output.split('\n').filter((l) => l.length > 0);
 
-    // Should have multiple lines
-    expect(lines.length).toBeGreaterThanOrEqual(3);
+    // 3 info lines + blank + todo line = 4+
+    expect(lines.length).toBeGreaterThanOrEqual(4);
     const raw = stripAnsi(output);
-    expect(raw).toContain('Read');
-    expect(raw).toContain('Reviewer');
     expect(raw).toContain('2/4 todos');
     expect(raw).toContain('2 CLAUDE.md');
     expect(raw).toContain('3 rules');
     expect(raw).toContain('1 MCPs');
     expect(raw).toContain('4 hooks');
+    expect(raw).toContain('Session');
   });
 
   it('components that return null are excluded', async () => {
-    const config: HudConfig = {
-      preset: 'minimal',
-      components: PRESETS.minimal,
-    };
-    // No cwd, no model, no context — all components return null
-    const ctx = makeCtx(config, {
+    const ctx = makeCtx({
       stdin: {},
       git: null,
     });
@@ -153,19 +128,51 @@ describe('render', () => {
     expect(output).toBe('');
   });
 
-  it('handles custom preset with subset of components', async () => {
-    const config: HudConfig = {
-      preset: 'custom',
-      components: ['directory', 'model'],
-    };
-    const ctx = makeCtx(config);
+  it('handles subset of components', async () => {
+    const ctx = makeCtx({
+      config: { enabled: true, detail: false, components: ['directory', 'model'] },
+    });
     const output = await render(ctx);
     const raw = stripAnsi(output);
 
     expect(raw).toContain('project');
-    expect(raw).toContain('Claude Opus 4');
+    expect(raw).toContain('Opus 4 [200k]');
     // Should not contain git info
     expect(raw).not.toContain('feat/test');
+  });
+
+  it('inserts blank line between info and activity sections', async () => {
+    const ctx = makeCtx({
+      sessionStartTime: Date.now() - 5 * 60 * 1000,
+      usage: { fiveHourPercent: 20, sevenDayPercent: null },
+      transcript: {
+        tools: [],
+        agents: [],
+        todos: { completed: 1, total: 3 },
+        skills: [],
+      },
+    });
+    const output = await render(ctx);
+    const lines = output.split('\n');
+
+    // Should contain an empty line between info and activity sections
+    expect(lines).toContain('');
+    // Empty line should be between non-empty lines
+    const emptyIdx = lines.indexOf('');
+    expect(emptyIdx).toBeGreaterThan(0);
+    expect(emptyIdx).toBeLessThan(lines.length - 1);
+  });
+
+  it('no blank line when activity section is empty', async () => {
+    const ctx = makeCtx({
+      sessionStartTime: Date.now() - 5 * 60 * 1000,
+      usage: { fiveHourPercent: 20, sevenDayPercent: null },
+    });
+    const output = await render(ctx);
+    const lines = output.split('\n');
+
+    // No empty lines — no activity components have data
+    expect(lines.every((l) => l.length > 0)).toBe(true);
   });
 });
 
@@ -176,8 +183,8 @@ describe('config', () => {
     process.env.DEVFLOW_DIR = '/tmp/nonexistent-devflow-test-dir';
     try {
       const config = loadConfig();
-      expect(config.preset).toBe('standard');
-      expect(config.components).toEqual(PRESETS.standard);
+      expect(config.enabled).toBe(true);
+      expect(config.detail).toBe(false);
     } finally {
       if (originalEnv !== undefined) {
         process.env.DEVFLOW_DIR = originalEnv;
@@ -187,32 +194,17 @@ describe('config', () => {
     }
   });
 
-  it('resolveComponents returns preset components', () => {
-    const config: HudConfig = { preset: 'minimal', components: [] };
-    expect(resolveComponents(config)).toEqual(PRESETS.minimal);
+  it('resolveComponents returns all components when enabled', () => {
+    const config: HudConfig = { enabled: true, detail: false };
+    expect(resolveComponents(config)).toEqual([...HUD_COMPONENTS]);
   });
 
-  it('resolveComponents returns custom components', () => {
-    const config: HudConfig = {
-      preset: 'custom',
-      components: ['directory', 'model'],
-    };
-    expect(resolveComponents(config)).toEqual(['directory', 'model']);
+  it('resolveComponents returns only versionBadge when disabled', () => {
+    const config: HudConfig = { enabled: false, detail: false };
+    expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
-  it('PRESETS.minimal has 4 components', () => {
-    expect(PRESETS.minimal).toHaveLength(4);
-  });
-
-  it('PRESETS.classic has 7 components', () => {
-    expect(PRESETS.classic).toHaveLength(7);
-  });
-
-  it('PRESETS.standard has 9 components', () => {
-    expect(PRESETS.standard).toHaveLength(9);
-  });
-
-  it('PRESETS.full has 14 components', () => {
-    expect(PRESETS.full).toHaveLength(14);
+  it('HUD_COMPONENTS has 14 components', () => {
+    expect(HUD_COMPONENTS).toHaveLength(14);
   });
 });
