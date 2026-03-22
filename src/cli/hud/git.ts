@@ -149,13 +149,13 @@ async function detectBaseBranch(
     const match = line.match(checkoutPattern);
     if (match) {
       const candidate = match[1];
-      if (candidate !== branch) {
-        const exists = await gitExec(
-          ['rev-parse', '--verify', candidate],
-          cwd,
-        );
-        if (exists) return candidate;
-      }
+      // Skip raw commit hashes and the current branch
+      if (candidate === branch || /^[0-9a-f]{7,}$/.test(candidate)) continue;
+      const exists = await gitExec(
+        ['rev-parse', '--verify', candidate],
+        cwd,
+      );
+      if (exists) return candidate;
     }
   }
 
@@ -169,8 +169,14 @@ async function detectBaseBranch(
     if (exists) return prBase;
   }
 
-  // Layer 4: main/master fallback
+  // Layer 4: main/master fallback (skip if already on that branch — use remote tracking instead)
   for (const candidate of ['main', 'master']) {
+    if (candidate === branch) {
+      // On main/master itself — compare against remote tracking branch
+      const remote = await gitExec(['rev-parse', '--verify', `origin/${candidate}`], cwd);
+      if (remote) return `origin/${candidate}`;
+      continue;
+    }
     const exists = await gitExec(['rev-parse', '--verify', candidate], cwd);
     if (exists) return candidate;
   }
