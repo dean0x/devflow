@@ -157,6 +157,8 @@ npx devflow-kit init --plugin=go
 npx devflow-kit init
 ```
 
+The interactive wizard walks through plugin selection, feature configuration (ambient mode, working memory, HUD, safe-delete), and security settings. In user scope, it discovers all projects Claude has worked on and batch-installs `.claudeignore` across them.
+
 ### Install Specific Plugins
 
 ```bash
