@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **HUD**: version upgrade notice persists after install — cache now stores only npm `latest`, reads installed version live
+
 ---
 
 ## [1.8.2] - 2026-03-22

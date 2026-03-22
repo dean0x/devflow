@@ -9,7 +9,6 @@ const VERSION_CACHE_KEY = 'version-check';
 const VERSION_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 interface VersionInfo {
-  current: string;
   latest: string;
 }
 
@@ -80,17 +79,17 @@ export default async function versionBadge(
   const current = getCurrentVersion(ctx.devflowDir);
   if (!current) return null;
 
-  // Check cache
+  // Cache only the npm registry result (expensive); current is always live
   let info = readCache<VersionInfo>(VERSION_CACHE_KEY);
   if (!info) {
     const latest = await fetchLatestVersion();
     if (latest) {
-      info = { current, latest };
+      info = { latest };
       writeCache(VERSION_CACHE_KEY, info, VERSION_CACHE_TTL);
     }
   }
 
-  if (info && compareVersions(info.current, info.latest) < 0) {
+  if (info && compareVersions(current, info.latest) < 0) {
     const badge = `\u2726 Devflow v${info.latest} \u00B7 update: npx devflow-kit init`;
     return { text: yellow(badge), raw: badge };
   }
