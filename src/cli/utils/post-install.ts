@@ -425,9 +425,10 @@ export async function installClaudeignore(
 /**
  * Discover git repository roots from Claude's project history.
  * Parses ~/.claude/history.jsonl for unique project paths that are valid git repos.
+ * @param homeDir - Override home directory (dependency injection for tests)
  */
-export async function discoverProjectGitRoots(): Promise<string[]> {
-  const historyPath = path.join(os.homedir(), '.claude', 'history.jsonl');
+export async function discoverProjectGitRoots(homeDir?: string): Promise<string[]> {
+  const historyPath = path.join(homeDir ?? os.homedir(), '.claude', 'history.jsonl');
   let content: string;
   try {
     content = await fs.readFile(historyPath, 'utf-8');

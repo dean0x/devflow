@@ -248,8 +248,8 @@ Session context is saved and restored automatically via Working Memory hooks —
 | `--teams` / `--no-teams` | Enable/disable Agent Teams (experimental, default: off) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
+| `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
-| `--no-hud` | Disable HUD status line |
 | `--verbose` | Show detailed output |
 
 ### HUD Options

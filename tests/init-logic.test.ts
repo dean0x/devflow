@@ -466,16 +466,12 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
 
 describe('discoverProjectGitRoots', () => {
   let tmpDir: string;
-  let origHome: string;
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-discover-test-'));
-    origHome = process.env.HOME!;
-    process.env.HOME = tmpDir;
   });
 
   afterEach(async () => {
-    process.env.HOME = origHome;
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -496,7 +492,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots();
+    const roots = await discoverProjectGitRoots(tmpDir);
     expect(roots).toEqual([projA, projB]);
   });
 
@@ -515,7 +511,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots();
+    const roots = await discoverProjectGitRoots(tmpDir);
     expect(roots).toEqual([projGit]);
   });
 
@@ -526,12 +522,12 @@ describe('discoverProjectGitRoots', () => {
     const lines = JSON.stringify({ project: path.join(tmpDir, 'gone') });
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots();
+    const roots = await discoverProjectGitRoots(tmpDir);
     expect(roots).toEqual([]);
   });
 
   it('returns empty array when history.jsonl is missing', async () => {
-    const roots = await discoverProjectGitRoots();
+    const roots = await discoverProjectGitRoots(tmpDir);
     expect(roots).toEqual([]);
   });
 
@@ -540,7 +536,7 @@ describe('discoverProjectGitRoots', () => {
     await fs.mkdir(claudeDir, { recursive: true });
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), '', 'utf-8');
 
-    const roots = await discoverProjectGitRoots();
+    const roots = await discoverProjectGitRoots(tmpDir);
     expect(roots).toEqual([]);
   });
 
@@ -558,7 +554,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots();
+    const roots = await discoverProjectGitRoots(tmpDir);
     expect(roots).toEqual([proj]);
   });
 
@@ -576,7 +572,7 @@ describe('discoverProjectGitRoots', () => {
     ].join('\n');
     await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
 
-    const roots = await discoverProjectGitRoots();
+    const roots = await discoverProjectGitRoots(tmpDir);
     expect(roots).toEqual([proj]);
   });
 });
