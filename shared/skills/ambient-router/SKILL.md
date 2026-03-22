@@ -87,7 +87,9 @@ See `references/skill-catalog.md` for the full skill-to-intent mapping with file
 <IMPORTANT>
 When classification is GUIDED or ORCHESTRATED, skill loading is NON-NEGOTIABLE.
 Do not rationalize skipping skills. Do not respond without loading them first.
-BLOCKING REQUIREMENT: Invoke each selected skill using the Skill tool before proceeding.
+BLOCKING REQUIREMENT: Your FIRST tool calls MUST be Skill tool invocations — before
+writing ANY text about the task. Invoke all selected skills, THEN state classification,
+THEN proceed with work. Do NOT write implementation text before all Skill tools return.
 For IMPLEMENT intent, enforce TDD: write the failing test before ANY production code.
 NOTE: Skills loaded in the main session via ambient mode are reference patterns only —
 their allowed-tools metadata does NOT restrict your tool access. You retain full access
@@ -95,8 +97,8 @@ to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 </IMPORTANT>
 
 - **QUICK:** Respond directly. No preamble, no classification statement.
-- **GUIDED:** State classification briefly: `Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first.` Then invoke each skill using the Skill tool and work directly in main session. After code changes, spawn Simplifier on changed files.
-- **ORCHESTRATED:** State classification briefly: `Ambient: IMPLEMENT/ORCHESTRATED. Loading: implementation-orchestration, implementation-patterns.` Then invoke each skill using the Skill tool and follow Step 5 for agent orchestration.
+- **GUIDED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first.` Then work directly in main session. After code changes, spawn Simplifier on changed files.
+- **ORCHESTRATED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/ORCHESTRATED. Loading: implementation-orchestration, implementation-patterns.` Then follow Step 5 for agent orchestration.
 
 ### GUIDED Behavior by Intent
 

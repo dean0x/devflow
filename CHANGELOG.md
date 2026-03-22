@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Ambient mode**: skills not loading despite correct classification — reordered instructions so Skill tool invocations happen before any text output
+
 ---
 
 ## [1.8.1] - 2026-03-22
