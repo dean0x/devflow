@@ -439,24 +439,30 @@ export async function discoverProjectGitRoots(): Promise<string[]> {
   for (const line of content.split('\n')) {
     if (!line.trim()) continue;
     try {
-      const entry = JSON.parse(line);
-      if (typeof entry.project === 'string') {
-        projects.add(entry.project);
+      const entry: unknown = JSON.parse(line);
+      if (
+        typeof entry === 'object' &&
+        entry !== null &&
+        'project' in entry &&
+        typeof (entry as Record<string, unknown>).project === 'string'
+      ) {
+        projects.add(path.resolve((entry as Record<string, unknown>).project as string));
       }
     } catch {
       // Malformed line — skip
     }
   }
 
-  const gitRoots: string[] = [];
-  for (const project of projects) {
-    try {
+  const results = await Promise.allSettled(
+    [...projects].map(async (project) => {
       await fs.access(path.join(project, '.git'));
-      gitRoots.push(project);
-    } catch {
-      // Not a git repo or doesn't exist — skip
-    }
-  }
+      return project;
+    }),
+  );
+
+  const gitRoots: string[] = results
+    .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+    .map((r) => r.value);
 
   return gitRoots.sort();
 }

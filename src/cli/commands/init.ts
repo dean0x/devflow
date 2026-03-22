@@ -684,32 +684,31 @@ export const initCommand = new Command('init')
 
     const settingsPath = path.join(claudeDir, 'settings.json');
 
-    // Install ambient hook if enabled
-    if (ambientEnabled) {
-      try {
-        const content = await fs.readFile(settingsPath, 'utf-8');
-        const updated = addAmbientHook(content, devflowDir);
-        if (updated !== content) {
-          await fs.writeFile(settingsPath, updated, 'utf-8');
-          if (verbose) {
-            p.log.success('Ambient mode hook installed');
-          }
-        }
-      } catch { /* settings.json may not exist yet */ }
-    }
-
-    // Manage memory hooks based on user choice
+    // Configure ambient hook, memory hooks, and HUD statusLine in a single read-modify-write pass
     try {
-      const content = await fs.readFile(settingsPath, 'utf-8');
-      // Always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
+      let content = await fs.readFile(settingsPath, 'utf-8');
+      const original = content;
+
+      // Ambient hook
+      if (ambientEnabled) {
+        content = addAmbientHook(content, devflowDir);
+      }
+
+      // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
       const cleaned = removeMemoryHooks(content);
-      const updated = memoryEnabled
-        ? addMemoryHooks(cleaned, devflowDir)
-        : cleaned;
-      if (updated !== content) {
-        await fs.writeFile(settingsPath, updated, 'utf-8');
+      content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
+
+      // HUD statusLine
+      content = hudEnabled
+        ? addHudStatusLine(content, devflowDir)
+        : removeHudStatusLine(content);
+
+      if (content !== original) {
+        await fs.writeFile(settingsPath, content, 'utf-8');
         if (verbose) {
+          if (ambientEnabled) p.log.success('Ambient mode hook installed');
           p.log.info(`Working memory ${memoryEnabled ? 'enabled' : 'disabled'}`);
+          p.log.info(`HUD ${hudEnabled ? 'enabled' : 'disabled'}`);
         }
       }
     } catch { /* settings.json may not exist yet */ }
@@ -724,27 +723,13 @@ export const initCommand = new Command('init')
     const existingHud = loadHudConfig();
     saveHudConfig({ enabled: hudEnabled, detail: existingHud.detail });
 
-    // Update statusLine in settings.json (add or remove based on choice)
-    try {
-      const hudContent = await fs.readFile(settingsPath, 'utf-8');
-      const hudUpdated = hudEnabled
-        ? addHudStatusLine(hudContent, devflowDir)
-        : removeHudStatusLine(hudContent);
-      if (hudUpdated !== hudContent) {
-        await fs.writeFile(settingsPath, hudUpdated, 'utf-8');
-        if (verbose) {
-          p.log.info(`HUD ${hudEnabled ? 'enabled' : 'disabled'}`);
-        }
-      }
-    } catch { /* settings.json may not exist yet */ }
-
     // File extras
     if (claudeignoreEnabled) {
       if (scope === 'user' && discoveredProjects.length > 0) {
-        let created = 0;
-        for (const root of discoveredProjects) {
-          if (await installClaudeignore(root, rootDir, verbose)) created++;
-        }
+        const results = await Promise.all(
+          discoveredProjects.map(root => installClaudeignore(root, rootDir, verbose)),
+        );
+        const created = results.filter(Boolean).length;
         if (created > 0) {
           p.log.success(`.claudeignore created in ${created} project(s)`);
         } else {
