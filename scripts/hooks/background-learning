@@ -1,0 +1,551 @@
+#!/bin/bash
+
+# Background Learning Agent
+# Called by stop-update-learning as a detached background process.
+# Reads user messages from the session transcript, then uses a fresh `claude -p`
+# invocation with Sonnet to detect patterns and update learning-log.jsonl.
+# On failure: logs error, does nothing (missing patterns are better than fake data).
+
+set -e
+
+CWD="$1"
+SESSION_ID="$2"
+CLAUDE_BIN="$3"
+
+LOG_FILE="$CWD/.memory/.learning-update.log"
+LOCK_DIR="$CWD/.memory/.learning.lock"
+LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
+
+# --- Logging ---
+
+log() {
+  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $1" >> "$LOG_FILE"
+}
+
+rotate_log() {
+  if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE")" -gt 100 ]; then
+    tail -50 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+  fi
+}
+
+# --- Stale Lock Recovery ---
+
+get_mtime() {
+  if stat --version &>/dev/null 2>&1; then
+    stat -c %Y "$1"
+  else
+    stat -f %m "$1"
+  fi
+}
+
+STALE_THRESHOLD=300  # 5 min
+
+break_stale_lock() {
+  if [ ! -d "$LOCK_DIR" ]; then return; fi
+  local lock_mtime now age
+  lock_mtime=$(get_mtime "$LOCK_DIR")
+  now=$(date +%s)
+  age=$(( now - lock_mtime ))
+  if [ "$age" -gt "$STALE_THRESHOLD" ]; then
+    log "Breaking stale lock (age: ${age}s, threshold: ${STALE_THRESHOLD}s)"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
+# --- Locking (mkdir-based, POSIX-atomic) ---
+
+acquire_lock() {
+  local timeout=90
+  local waited=0
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [ "$waited" -ge "$timeout" ]; then
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 0
+}
+
+cleanup() {
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# --- Config Loading ---
+
+load_config() {
+  GLOBAL_CONFIG="$HOME/.devflow/learning.json"
+  PROJECT_CONFIG="$CWD/.memory/learning.json"
+  # Defaults
+  MAX_DAILY_RUNS=10
+  THROTTLE_MINUTES=5
+  MODEL="sonnet"
+  # Apply global
+  if [ -f "$GLOBAL_CONFIG" ]; then
+    MAX_DAILY_RUNS=$(jq -r '.max_daily_runs // 10' "$GLOBAL_CONFIG")
+    THROTTLE_MINUTES=$(jq -r '.throttle_minutes // 5' "$GLOBAL_CONFIG")
+    MODEL=$(jq -r '.model // "sonnet"' "$GLOBAL_CONFIG")
+  fi
+  # Apply project override
+  if [ -f "$PROJECT_CONFIG" ]; then
+    MAX_DAILY_RUNS=$(jq -r ".max_daily_runs // $MAX_DAILY_RUNS" "$PROJECT_CONFIG")
+    THROTTLE_MINUTES=$(jq -r ".throttle_minutes // $THROTTLE_MINUTES" "$PROJECT_CONFIG")
+    MODEL=$(jq -r ".model // \"$MODEL\"" "$PROJECT_CONFIG")
+  fi
+}
+
+# --- Daily Run Cap ---
+
+check_daily_cap() {
+  COUNTER_FILE="$CWD/.memory/.learning-runs-today"
+  TODAY=$(date +%Y-%m-%d)
+  if [ -f "$COUNTER_FILE" ]; then
+    COUNTER_DATE=$(cut -f1 "$COUNTER_FILE")
+    COUNTER_COUNT=$(cut -f2 "$COUNTER_FILE")
+    if [ "$COUNTER_DATE" = "$TODAY" ] && [ "$COUNTER_COUNT" -ge "$MAX_DAILY_RUNS" ]; then
+      log "Daily cap reached ($COUNTER_COUNT/$MAX_DAILY_RUNS)"
+      return 1
+    fi
+  fi
+  return 0
+}
+
+increment_daily_counter() {
+  TODAY=$(date +%Y-%m-%d)
+  COUNT=1
+  if [ -f "$COUNTER_FILE" ] && [ "$(cut -f1 "$COUNTER_FILE")" = "$TODAY" ]; then
+    COUNT=$(( $(cut -f2 "$COUNTER_FILE") + 1 ))
+  fi
+  printf '%s\t%d\n' "$TODAY" "$COUNT" > "$COUNTER_FILE"
+}
+
+# --- Temporal Decay ---
+
+decay_factor() {
+  case $1 in
+    0) echo "100";; 1) echo "90";; 2) echo "81";;
+    3) echo "73";; 4) echo "66";; 5) echo "59";;
+    *) echo "53";;  # floor for 6+ periods
+  esac
+}
+
+# --- Transcript Extraction ---
+
+extract_user_messages() {
+  local encoded_cwd
+  encoded_cwd=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
+  local transcript="$HOME/.claude/projects/-${encoded_cwd}/${SESSION_ID}.jsonl"
+
+  if [ ! -f "$transcript" ]; then
+    log "Transcript not found at $transcript"
+    return 1
+  fi
+
+  # Extract ALL user text messages, skip tool_result blocks
+  USER_MESSAGES=$(grep '"type":"user"' "$transcript" 2>/dev/null \
+    | jq -r 'if .message.content then
+      [.message.content[] | select(.type == "text") | .text] | join("\n")
+    else "" end' 2>/dev/null | grep -v '^$')
+
+  # Truncate to 12,000 chars
+  if [ ${#USER_MESSAGES} -gt 12000 ]; then
+    USER_MESSAGES="${USER_MESSAGES:0:12000}... [truncated]"
+  fi
+
+  if [ -z "$USER_MESSAGES" ]; then
+    log "No user text content found in transcript"
+    return 1
+  fi
+
+  return 0
+}
+
+# --- Main ---
+
+# Wait for parent session to flush transcript
+sleep 3
+
+log "Starting learning analysis for session $SESSION_ID"
+
+# Break stale locks from previous zombie processes
+break_stale_lock
+
+# Acquire lock
+if ! acquire_lock; then
+  log "Lock timeout after 90s — skipping for session $SESSION_ID"
+  trap - EXIT
+  exit 0
+fi
+
+rotate_log
+load_config
+
+# Check daily cap
+if ! check_daily_cap; then
+  exit 0
+fi
+
+# Extract user messages
+USER_MESSAGES=""
+if ! extract_user_messages; then
+  log "No messages to analyze — skipping"
+  exit 0
+fi
+
+# Read existing observations (top 30 by confidence for dedup context)
+EXISTING_OBS=""
+if [ -f "$LEARNING_LOG" ]; then
+  # Apply temporal decay first
+  NOW_EPOCH=$(date +%s)
+  TEMP_FILE="$LEARNING_LOG.tmp"
+  > "$TEMP_FILE"
+  while IFS= read -r line; do
+    # Skip empty/malformed lines
+    if ! echo "$line" | jq -e . >/dev/null 2>&1; then continue; fi
+
+    LAST_SEEN=$(echo "$line" | jq -r '.last_seen // ""')
+    CONF=$(echo "$line" | jq -r '.confidence // 0')
+
+    if [ -n "$LAST_SEEN" ]; then
+      # Calculate days since last seen
+      LAST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$LAST_SEEN" +%s 2>/dev/null \
+        || date -d "$LAST_SEEN" +%s 2>/dev/null \
+        || echo "$NOW_EPOCH")
+      DAYS_ELAPSED=$(( (NOW_EPOCH - LAST_EPOCH) / 86400 ))
+      PERIODS=$(( DAYS_ELAPSED / 30 ))
+
+      if [ "$PERIODS" -gt 0 ]; then
+        FACTOR=$(decay_factor "$PERIODS")
+        # Integer math: confidence * 100, then * factor / 100
+        CONF_INT=$(echo "$CONF" | awk '{printf "%d", $1 * 100}')
+        NEW_CONF_INT=$(( CONF_INT * FACTOR / 100 ))
+        NEW_CONF=$(echo "$NEW_CONF_INT" | awk '{printf "%.2f", $1 / 100}')
+
+        # Prune if below 0.1
+        if [ "$NEW_CONF_INT" -lt 10 ]; then
+          log "Pruned observation (confidence: $NEW_CONF)"
+          continue
+        fi
+
+        line=$(echo "$line" | jq -c --arg c "$NEW_CONF" '.confidence = ($c | tonumber)')
+      fi
+    fi
+
+    echo "$line" >> "$TEMP_FILE"
+  done < "$LEARNING_LOG"
+  mv "$TEMP_FILE" "$LEARNING_LOG"
+
+  # Cap at 100 entries (prune lowest confidence)
+  LINE_COUNT=$(wc -l < "$LEARNING_LOG")
+  if [ "$LINE_COUNT" -gt 100 ]; then
+    jq -c '.' "$LEARNING_LOG" | jq -s 'sort_by(.confidence) | reverse | .[0:100][]' > "$TEMP_FILE" 2>/dev/null
+    mv "$TEMP_FILE" "$LEARNING_LOG"
+  fi
+
+  # Get top 30 for prompt context
+  EXISTING_OBS=$(jq -s 'sort_by(.confidence) | reverse | .[0:30]' "$LEARNING_LOG" 2>/dev/null || echo "[]")
+fi
+
+if [ -z "$EXISTING_OBS" ]; then
+  EXISTING_OBS="[]"
+fi
+
+# Build prompt for Sonnet
+PROMPT="You are a pattern detection agent. Analyze the user's session messages to identify repeated workflows and procedural knowledge.
+
+EXISTING OBSERVATIONS (for deduplication — reuse IDs for matching patterns):
+$EXISTING_OBS
+
+USER MESSAGES FROM THIS SESSION:
+$USER_MESSAGES
+
+Detect two types of patterns:
+
+1. WORKFLOW patterns: Multi-step sequences the user instructs repeatedly (e.g., \"squash merge PR, pull main, delete branch\"). These become slash commands.
+   - Required observations for artifact creation: 3 (seen across multiple sessions)
+   - Temporal spread requirement: first_seen and last_seen must be 24h+ apart
+
+2. PROCEDURAL patterns: Knowledge about how to accomplish specific tasks (e.g., debugging hook failures, configuring specific tools). These become skills.
+   - Required observations for artifact creation: 2
+   - No temporal spread requirement
+
+Rules:
+- If an existing observation matches a pattern from this session, report it with the SAME id so the count can be incremented
+- For new patterns, generate a new id in format obs_XXXXXX (6 random alphanumeric chars)
+- Quote specific evidence from user messages that supports each observation
+- Only report patterns that are clearly distinct — do not create near-duplicate observations
+- If no patterns detected, return empty arrays
+
+Output ONLY the JSON object. No markdown fences, no explanation.
+
+{
+  \"observations\": [
+    {
+      \"id\": \"obs_XXXXXX\",
+      \"type\": \"workflow\" | \"procedural\",
+      \"pattern\": \"Short description of the pattern\",
+      \"evidence\": [\"quoted user message excerpt 1\", \"quoted user message excerpt 2\"],
+      \"details\": \"Step-by-step description of the workflow or knowledge\"
+    }
+  ],
+  \"artifacts\": [
+    {
+      \"observation_id\": \"obs_XXXXXX\",
+      \"type\": \"command\" | \"skill\",
+      \"name\": \"kebab-case-name\",
+      \"description\": \"One-line description for frontmatter\",
+      \"content\": \"Full markdown content for the command/skill file\"
+    }
+  ]
+}"
+
+log "--- Sending to claude -p --model $MODEL ---"
+
+# Run Sonnet analysis
+TIMEOUT=180
+
+RESPONSE_FILE="$CWD/.memory/.learning-response.tmp"
+
+DEVFLOW_BG_UPDATER=1 DEVFLOW_BG_LEARNER=1 "$CLAUDE_BIN" -p \
+  --model "$MODEL" \
+  --dangerously-skip-permissions \
+  --output-format text \
+  "$PROMPT" \
+  > "$RESPONSE_FILE" 2>> "$LOG_FILE" &
+CLAUDE_PID=$!
+
+# Watchdog: kill claude if it exceeds timeout
+( sleep "$TIMEOUT" && kill "$CLAUDE_PID" 2>/dev/null ) &
+WATCHDOG_PID=$!
+
+if ! wait "$CLAUDE_PID" 2>/dev/null; then
+  EXIT_CODE=$?
+  if [ "$EXIT_CODE" -gt 128 ]; then
+    log "Analysis timed out (killed after ${TIMEOUT}s) for session $SESSION_ID"
+  else
+    log "Analysis failed for session $SESSION_ID (exit code $EXIT_CODE)"
+  fi
+  rm -f "$RESPONSE_FILE"
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+  wait "$WATCHDOG_PID" 2>/dev/null || true
+  exit 0
+fi
+
+# Clean up watchdog
+kill "$WATCHDOG_PID" 2>/dev/null || true
+wait "$WATCHDOG_PID" 2>/dev/null || true
+
+if [ ! -f "$RESPONSE_FILE" ]; then
+  log "No response file produced"
+  exit 0
+fi
+
+RESPONSE=$(cat "$RESPONSE_FILE")
+rm -f "$RESPONSE_FILE"
+
+# Strip markdown fences if present
+RESPONSE=$(echo "$RESPONSE" | sed '1s/^```json$//' | sed '1s/^```$//' | sed '$s/^```$//')
+
+# Validate JSON
+if ! echo "$RESPONSE" | jq -e . >/dev/null 2>&1; then
+  log "Invalid JSON response from model — skipping"
+  log "--- Raw response ---"
+  log "$RESPONSE"
+  log "--- End raw response ---"
+  exit 0
+fi
+
+log "--- Processing response ---"
+
+# Process observations
+OBS_COUNT=$(echo "$RESPONSE" | jq '.observations | length')
+NOW_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+for i in $(seq 0 $((OBS_COUNT - 1))); do
+  OBS=$(echo "$RESPONSE" | jq -c ".observations[$i]")
+  OBS_ID=$(echo "$OBS" | jq -r '.id')
+  OBS_TYPE=$(echo "$OBS" | jq -r '.type')
+  OBS_PATTERN=$(echo "$OBS" | jq -r '.pattern')
+  OBS_EVIDENCE=$(echo "$OBS" | jq -c '.evidence')
+  OBS_DETAILS=$(echo "$OBS" | jq -r '.details')
+
+  # Check if observation already exists
+  EXISTING_LINE=""
+  if [ -f "$LEARNING_LOG" ]; then
+    EXISTING_LINE=$(grep "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | head -1)
+  fi
+
+  if [ -n "$EXISTING_LINE" ]; then
+    # Update existing: increment count, update last_seen, merge evidence
+    OLD_COUNT=$(echo "$EXISTING_LINE" | jq -r '.observations')
+    NEW_COUNT=$((OLD_COUNT + 1))
+    FIRST_SEEN=$(echo "$EXISTING_LINE" | jq -r '.first_seen')
+    OLD_EVIDENCE=$(echo "$EXISTING_LINE" | jq -c '.evidence')
+    MERGED_EVIDENCE=$(echo "[$OLD_EVIDENCE, $OBS_EVIDENCE]" | jq -c 'flatten | unique | .[0:10]')
+
+    # Calculate confidence
+    if [ "$OBS_TYPE" = "workflow" ]; then
+      REQUIRED=3
+    else
+      REQUIRED=2
+    fi
+    CONF_RAW=$((NEW_COUNT * 100 / REQUIRED))
+    if [ "$CONF_RAW" -gt 95 ]; then CONF_RAW=95; fi
+    CONF=$(echo "$CONF_RAW" | awk '{printf "%.2f", $1 / 100}')
+
+    # Check temporal spread for workflows
+    STATUS=$(echo "$EXISTING_LINE" | jq -r '.status')
+    if [ "$OBS_TYPE" = "workflow" ] && [ "$STATUS" != "created" ]; then
+      FIRST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$FIRST_SEEN" +%s 2>/dev/null \
+        || date -d "$FIRST_SEEN" +%s 2>/dev/null \
+        || echo "0")
+      NOW_EPOCH=$(date +%s)
+      SPREAD=$((NOW_EPOCH - FIRST_EPOCH))
+      if [ "$SPREAD" -lt 86400 ] && [ "$CONF_RAW" -ge 70 ]; then
+        # Confidence is high enough but temporal spread not met
+        STATUS="observing"
+      fi
+    fi
+
+    # Determine status
+    ARTIFACT_PATH=$(echo "$EXISTING_LINE" | jq -r '.artifact_path // ""')
+    if [ "$STATUS" != "created" ] && [ "$CONF_RAW" -ge 70 ]; then
+      if [ "$OBS_TYPE" = "workflow" ]; then
+        FIRST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$FIRST_SEEN" +%s 2>/dev/null \
+          || date -d "$FIRST_SEEN" +%s 2>/dev/null \
+          || echo "0")
+        NOW_EPOCH=$(date +%s)
+        SPREAD=$((NOW_EPOCH - FIRST_EPOCH))
+        if [ "$SPREAD" -ge 86400 ]; then
+          STATUS="ready"
+        fi
+      else
+        STATUS="ready"
+      fi
+    fi
+
+    # Build updated entry
+    UPDATED=$(jq -n -c \
+      --arg id "$OBS_ID" \
+      --arg type "$OBS_TYPE" \
+      --arg pattern "$OBS_PATTERN" \
+      --argjson confidence "$CONF" \
+      --argjson observations "$NEW_COUNT" \
+      --arg first_seen "$FIRST_SEEN" \
+      --arg last_seen "$NOW_ISO" \
+      --arg status "$STATUS" \
+      --argjson evidence "$MERGED_EVIDENCE" \
+      --arg details "$OBS_DETAILS" \
+      --arg artifact_path "$ARTIFACT_PATH" \
+      '{id: $id, type: $type, pattern: $pattern, confidence: $confidence, observations: $observations, first_seen: $first_seen, last_seen: $last_seen, status: $status, evidence: $evidence, details: $details, artifact_path: $artifact_path}')
+
+    # Replace line in file
+    TEMP_LOG="$LEARNING_LOG.tmp"
+    grep -v "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" > "$TEMP_LOG" 2>/dev/null || true
+    echo "$UPDATED" >> "$TEMP_LOG"
+    mv "$TEMP_LOG" "$LEARNING_LOG"
+
+    log "Updated observation $OBS_ID: count=$NEW_COUNT confidence=$CONF status=$STATUS"
+  else
+    # New observation
+    if [ "$OBS_TYPE" = "workflow" ]; then
+      CONF="0.33"
+    else
+      CONF="0.50"
+    fi
+
+    NEW_ENTRY=$(jq -n -c \
+      --arg id "$OBS_ID" \
+      --arg type "$OBS_TYPE" \
+      --arg pattern "$OBS_PATTERN" \
+      --argjson confidence "$CONF" \
+      --argjson observations 1 \
+      --arg first_seen "$NOW_ISO" \
+      --arg last_seen "$NOW_ISO" \
+      --arg status "observing" \
+      --argjson evidence "$OBS_EVIDENCE" \
+      --arg details "$OBS_DETAILS" \
+      '{id: $id, type: $type, pattern: $pattern, confidence: $confidence, observations: $observations, first_seen: $first_seen, last_seen: $last_seen, status: $status, evidence: $evidence, details: $details}')
+
+    echo "$NEW_ENTRY" >> "$LEARNING_LOG"
+    log "New observation $OBS_ID: type=$OBS_TYPE confidence=$CONF"
+  fi
+done
+
+# Process artifacts (create command/skill files)
+ART_COUNT=$(echo "$RESPONSE" | jq '.artifacts | length')
+
+for i in $(seq 0 $((ART_COUNT - 1))); do
+  ART=$(echo "$RESPONSE" | jq -c ".artifacts[$i]")
+  ART_OBS_ID=$(echo "$ART" | jq -r '.observation_id')
+  ART_TYPE=$(echo "$ART" | jq -r '.type')
+  ART_NAME=$(echo "$ART" | jq -r '.name')
+  ART_DESC=$(echo "$ART" | jq -r '.description')
+  ART_CONTENT=$(echo "$ART" | jq -r '.content')
+
+  # Check the observation's status — only create if ready
+  if [ -f "$LEARNING_LOG" ]; then
+    OBS_STATUS=$(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.status' 2>/dev/null)
+    if [ "$OBS_STATUS" != "ready" ]; then
+      log "Skipping artifact for $ART_OBS_ID (status: $OBS_STATUS, need: ready)"
+      continue
+    fi
+  fi
+
+  if [ "$ART_TYPE" = "command" ]; then
+    ART_DIR="$CWD/.claude/commands/learned"
+    ART_PATH="$ART_DIR/$ART_NAME.md"
+  else
+    ART_DIR="$CWD/.claude/skills/learned-$ART_NAME"
+    ART_PATH="$ART_DIR/SKILL.md"
+  fi
+
+  # Never overwrite existing files (user customization preserved)
+  if [ -f "$ART_PATH" ]; then
+    log "Artifact already exists at $ART_PATH — skipping"
+    continue
+  fi
+
+  mkdir -p "$ART_DIR"
+
+  # Write artifact with learning marker
+  if [ "$ART_TYPE" = "command" ]; then
+    cat > "$ART_PATH" << ARTEOF
+---
+description: $ART_DESC
+# devflow-learning: auto-generated ($(date +%Y-%m-%d), confidence: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.confidence' 2>/dev/null), obs: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.observations' 2>/dev/null))
+---
+
+$ART_CONTENT
+ARTEOF
+  else
+    cat > "$ART_PATH" << ARTEOF
+---
+name: learned-$ART_NAME
+description: $ART_DESC
+# devflow-learning: auto-generated ($(date +%Y-%m-%d), confidence: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.confidence' 2>/dev/null), obs: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.observations' 2>/dev/null))
+---
+
+$ART_CONTENT
+ARTEOF
+  fi
+
+  # Update observation status to "created" and record artifact path
+  TEMP_LOG="$LEARNING_LOG.tmp"
+  while IFS= read -r line; do
+    if echo "$line" | grep -q "\"id\":\"$ART_OBS_ID\""; then
+      echo "$line" | jq -c --arg ap "$ART_PATH" '.status = "created" | .artifact_path = $ap'
+    else
+      echo "$line"
+    fi
+  done < "$LEARNING_LOG" > "$TEMP_LOG"
+  mv "$TEMP_LOG" "$LEARNING_LOG"
+
+  log "Created artifact: $ART_PATH"
+done
+
+increment_daily_counter
+log "Learning analysis complete for session $SESSION_ID"
+
+exit 0

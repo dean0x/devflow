@@ -189,6 +189,26 @@ Three shell hooks run behind the scenes:
 
 Working memory is **per-project** — scoped to each repo's `.memory/` directory. Multiple sessions across different repos don't interfere.
 
+## Self-Learning
+
+DevFlow detects repeated workflows and procedural knowledge across your sessions and automatically creates slash commands and skills.
+
+A background agent runs on session stop (same as Working Memory) and analyzes your session transcript for patterns. When a pattern is observed enough times (3 for workflows with 24h+ temporal spread, 2 for procedural knowledge), it creates an artifact:
+
+- **Workflow patterns** become slash commands at `.claude/commands/learned/`
+- **Procedural patterns** become skills at `.claude/skills/learned-*/`
+
+| Command | Description |
+|---------|-------------|
+| `devflow learn --enable` | Register the learning Stop hook |
+| `devflow learn --disable` | Remove the learning hook |
+| `devflow learn --status` | Show learning status and observation counts |
+| `devflow learn --list` | Show all observations sorted by confidence |
+| `devflow learn --configure` | Interactive configuration (model, throttle, daily cap) |
+| `devflow learn --clear` | Reset all observations |
+
+Observations accumulate in `.memory/learning-log.jsonl` with confidence scores and temporal decay. You can edit or delete any generated artifacts — they are never overwritten.
+
 ## Documentation Structure
 
 DevFlow creates project documentation in `.docs/` and working memory in `.memory/`:
@@ -239,6 +259,8 @@ Session context is saved and restored automatically via Working Memory hooks —
 | `npx devflow-kit list` | List available plugins |
 | `npx devflow-kit ambient --enable` | Enable always-on ambient mode |
 | `npx devflow-kit ambient --disable` | Disable ambient mode |
+| `npx devflow-kit learn --enable` | Enable self-learning |
+| `npx devflow-kit learn --disable` | Disable self-learning |
 | `npx devflow-kit uninstall` | Remove DevFlow |
 
 ### Init Options
@@ -250,6 +272,7 @@ Session context is saved and restored automatically via Working Memory hooks —
 | `--teams` / `--no-teams` | Enable/disable Agent Teams (experimental, default: off) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
+| `--learn` / `--no-learn` | Enable/disable self-learning (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--verbose` | Show detailed output |

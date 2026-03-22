@@ -1,0 +1,289 @@
+import { describe, it, expect } from 'vitest';
+import {
+  addLearningHook,
+  removeLearningHook,
+  hasLearningHook,
+  parseLearningLog,
+  formatLearningStatus,
+  loadLearningConfig,
+  type LearningObservation,
+} from '../src/cli/commands/learn.js';
+
+describe('addLearningHook', () => {
+  it('adds hook to empty settings', () => {
+    const result = addLearningHook('{}', '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-learning');
+    expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(10);
+  });
+
+  it('adds alongside existing hooks (Stop hooks from memory)', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: 'stop-update-memory' }] }],
+      },
+    });
+    const result = addLearningHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.Stop).toHaveLength(2);
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
+    expect(settings.hooks.Stop[1].hooks[0].command).toContain('stop-update-learning');
+  });
+
+  it('is idempotent — does not add duplicate', () => {
+    const first = addLearningHook('{}', '/home/user/.devflow');
+    const second = addLearningHook(first, '/home/user/.devflow');
+
+    expect(second).toBe(first);
+  });
+
+  it('uses correct path via run-hook wrapper', () => {
+    const result = addLearningHook('{}', '/custom/path/.devflow');
+    const settings = JSON.parse(result);
+    const command = settings.hooks.Stop[0].hooks[0].command;
+
+    expect(command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
+    expect(command).toContain('stop-update-learning');
+  });
+
+  it('preserves other settings', () => {
+    const input = JSON.stringify({
+      statusLine: { type: 'command', command: 'statusline.sh' },
+      env: { SOME_VAR: '1' },
+    });
+    const result = addLearningHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(settings.statusLine.command).toBe('statusline.sh');
+    expect(settings.env.SOME_VAR).toBe('1');
+    expect(settings.hooks.Stop).toHaveLength(1);
+  });
+
+  it('adds alongside existing Stop hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: 'other-stop.sh' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+      },
+    });
+    const result = addLearningHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.Stop).toHaveLength(2);
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+  });
+});
+
+describe('removeLearningHook', () => {
+  it('removes learning hook', () => {
+    const withHook = addLearningHook('{}', '/home/user/.devflow');
+    const result = removeLearningHook(withHook);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('preserves memory Stop hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    const result = removeLearningHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
+  });
+
+  it('cleans empty hooks object when last hook removed', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    const result = removeLearningHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('preserves other hook event types', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    const result = removeLearningHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.Stop).toBeUndefined();
+  });
+
+  it('is idempotent', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: 'stop-update-memory' }] }],
+      },
+    });
+    const result = removeLearningHook(input);
+
+    expect(result).toBe(input);
+  });
+});
+
+describe('hasLearningHook', () => {
+  it('returns true when present', () => {
+    const withHook = addLearningHook('{}', '/home/user/.devflow');
+    expect(hasLearningHook(withHook)).toBe(true);
+  });
+
+  it('returns false when absent', () => {
+    expect(hasLearningHook('{}')).toBe(false);
+  });
+
+  it('returns false for non-learning Stop hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe(false);
+  });
+
+  it('returns true among other Stop hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe(true);
+  });
+});
+
+describe('parseLearningLog', () => {
+  it('parses valid JSONL', () => {
+    const log = [
+      '{"id":"obs_abc123","type":"workflow","pattern":"PR merge flow","confidence":0.66,"observations":2,"first_seen":"2026-03-20T00:00:00Z","last_seen":"2026-03-22T00:00:00Z","status":"observing","evidence":["merge PR"],"details":"steps"}',
+      '{"id":"obs_def456","type":"procedural","pattern":"Debug hooks","confidence":0.50,"observations":1,"first_seen":"2026-03-22T00:00:00Z","last_seen":"2026-03-22T00:00:00Z","status":"observing","evidence":["check hooks"],"details":"steps"}',
+    ].join('\n');
+
+    const result = parseLearningLog(log);
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('obs_abc123');
+    expect(result[1].type).toBe('procedural');
+  });
+
+  it('skips malformed lines', () => {
+    const log = [
+      '{"id":"obs_abc123","type":"workflow","pattern":"test","confidence":0.5,"observations":1,"first_seen":"t","last_seen":"t","status":"observing","evidence":[],"details":"d"}',
+      'not json at all',
+      '',
+      '{"id":"obs_def456","type":"procedural","pattern":"test2","confidence":0.5,"observations":1,"first_seen":"t","last_seen":"t","status":"observing","evidence":[],"details":"d"}',
+    ].join('\n');
+
+    const result = parseLearningLog(log);
+    expect(result).toHaveLength(2);
+  });
+
+  it('handles empty input', () => {
+    expect(parseLearningLog('')).toEqual([]);
+    expect(parseLearningLog('  ')).toEqual([]);
+  });
+
+  it('parses single entry', () => {
+    const log = '{"id":"obs_abc123","type":"workflow","pattern":"deploy flow","confidence":0.33,"observations":1,"first_seen":"2026-03-22T00:00:00Z","last_seen":"2026-03-22T00:00:00Z","status":"observing","evidence":["deploy"],"details":"steps"}';
+    const result = parseLearningLog(log);
+    expect(result).toHaveLength(1);
+    expect(result[0].pattern).toBe('deploy flow');
+  });
+});
+
+describe('formatLearningStatus', () => {
+  it('shows enabled state', () => {
+    const result = formatLearningStatus([], true);
+    expect(result).toContain('enabled');
+  });
+
+  it('shows disabled state', () => {
+    const result = formatLearningStatus([], false);
+    expect(result).toContain('disabled');
+  });
+
+  it('shows observation counts', () => {
+    const observations: LearningObservation[] = [
+      { id: 'obs_1', type: 'workflow', pattern: 'p1', confidence: 0.33, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+      { id: 'obs_2', type: 'procedural', pattern: 'p2', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+      { id: 'obs_3', type: 'workflow', pattern: 'p3', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'ready', evidence: [], details: 'd' },
+    ];
+    const result = formatLearningStatus(observations, true);
+    expect(result).toContain('3 total');
+    expect(result).toContain('Workflows: 2');
+    expect(result).toContain('Procedural: 1');
+  });
+
+  it('shows promoted artifacts count', () => {
+    const observations: LearningObservation[] = [
+      { id: 'obs_1', type: 'workflow', pattern: 'p1', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '/path' },
+      { id: 'obs_2', type: 'procedural', pattern: 'p2', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+    ];
+    const result = formatLearningStatus(observations, true);
+    expect(result).toContain('1 promoted');
+    expect(result).toContain('1 observing');
+  });
+
+  it('handles empty observations', () => {
+    const result = formatLearningStatus([], true);
+    expect(result).toContain('none');
+  });
+});
+
+describe('loadLearningConfig', () => {
+  it('returns defaults when no config files', () => {
+    const config = loadLearningConfig(null, null);
+    expect(config.max_daily_runs).toBe(10);
+    expect(config.throttle_minutes).toBe(5);
+    expect(config.model).toBe('sonnet');
+  });
+
+  it('loads global config', () => {
+    const globalJson = JSON.stringify({ max_daily_runs: 20, model: 'haiku' });
+    const config = loadLearningConfig(globalJson, null);
+    expect(config.max_daily_runs).toBe(20);
+    expect(config.throttle_minutes).toBe(5); // default preserved
+    expect(config.model).toBe('haiku');
+  });
+
+  it('project config overrides global', () => {
+    const globalJson = JSON.stringify({ max_daily_runs: 20, model: 'haiku' });
+    const projectJson = JSON.stringify({ max_daily_runs: 5 });
+    const config = loadLearningConfig(globalJson, projectJson);
+    expect(config.max_daily_runs).toBe(5); // project wins
+    expect(config.model).toBe('haiku'); // global preserved when project doesn't set
+  });
+
+  it('handles partial override (only some fields)', () => {
+    const projectJson = JSON.stringify({ throttle_minutes: 15 });
+    const config = loadLearningConfig(null, projectJson);
+    expect(config.max_daily_runs).toBe(10); // default
+    expect(config.throttle_minutes).toBe(15); // overridden
+    expect(config.model).toBe('sonnet'); // default
+  });
+});

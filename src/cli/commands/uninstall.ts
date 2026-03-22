@@ -11,6 +11,7 @@ import { isClaudeCliAvailable } from '../utils/cli.js';
 import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
+import { removeLearningHook } from './learn.js';
 import { removeHudStatusLine } from './hud.js';
 import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
@@ -396,6 +397,7 @@ export const uninstallCommand = new Command('uninstall')
           // Remove all DevFlow hooks in one pass (idempotent)
           let settingsContent = removeAmbientHook(originalContent);
           settingsContent = removeMemoryHooks(settingsContent);
+          settingsContent = removeLearningHook(settingsContent);
           settingsContent = removeHudStatusLine(settingsContent);
 
           if (settingsContent !== originalContent) {
