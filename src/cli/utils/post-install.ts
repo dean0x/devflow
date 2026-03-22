@@ -440,14 +440,9 @@ export async function discoverProjectGitRoots(homeDir?: string): Promise<string[
   for (const line of content.split('\n')) {
     if (!line.trim()) continue;
     try {
-      const entry: unknown = JSON.parse(line);
-      if (
-        typeof entry === 'object' &&
-        entry !== null &&
-        'project' in entry &&
-        typeof (entry as Record<string, unknown>).project === 'string'
-      ) {
-        projects.add(path.resolve((entry as Record<string, unknown>).project as string));
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      if (typeof entry?.project === 'string') {
+        projects.add(path.resolve(entry.project));
       }
     } catch {
       // Malformed line — skip
