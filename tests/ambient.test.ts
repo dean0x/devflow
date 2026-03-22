@@ -260,7 +260,7 @@ describe('preamble drift detection', () => {
     // The helpers.ts AMBIENT_PREAMBLE is used by extractIntent/extractDepth etc.
     // We verify it indirectly by checking the shell script value matches expected.
     const expectedPreamble =
-      'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, you MUST load the selected skills using the Skill tool before proceeding.';
+      'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, your FIRST tool calls MUST be Skill tool invocations for each selected skill — before writing ANY text about the task.';
 
     expect(shellPreamble).toBe(expectedPreamble);
   });

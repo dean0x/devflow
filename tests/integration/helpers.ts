@@ -17,7 +17,7 @@ export function isClaudeAvailable(): boolean {
 
 // SYNC: must match scripts/hooks/ambient-prompt line 43
 const AMBIENT_PREAMBLE =
-  'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, you MUST load the selected skills using the Skill tool before proceeding.';
+  'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, your FIRST tool calls MUST be Skill tool invocations for each selected skill — before writing ANY text about the task.';
 
 /**
  * Run a prompt through claude CLI in non-interactive mode.
