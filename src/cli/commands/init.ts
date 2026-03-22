@@ -8,7 +8,7 @@ import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
-import { installViaCli, installViaFileCopy } from '../utils/installer.js';
+import { installViaCli, installViaFileCopy, copyDirectory } from '../utils/installer.js';
 import {
   installSettings,
   installManagedSettings,
@@ -24,12 +24,15 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, isAlreadyInstalled, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
+import { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
+import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList } from '../utils/post-install.js';
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
+export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -96,6 +99,8 @@ interface InitOptions {
   teams?: boolean;
   ambient?: boolean;
   memory?: boolean;
+  hud?: boolean;
+  hudOnly?: boolean;
 }
 
 export const initCommand = new Command('init')
@@ -109,6 +114,8 @@ export const initCommand = new Command('init')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
+  .option('--no-hud', 'Disable HUD status line')
+  .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -128,7 +135,10 @@ export const initCommand = new Command('init')
     // Determine installation scope
     let scope: 'user' | 'local' = 'user';
 
-    if (options.scope) {
+    if (options.hudOnly) {
+      // --hud-only: skip scope prompt, always user scope
+      scope = 'user';
+    } else if (options.scope) {
       const normalizedScope = options.scope.toLowerCase();
       if (normalizedScope !== 'user' && normalizedScope !== 'local') {
         p.log.error('Invalid scope. Use "user" or "local"');
@@ -153,6 +163,75 @@ export const initCommand = new Command('init')
       }
 
       scope = selected as 'user' | 'local';
+    }
+
+    // --hud-only: install only HUD (skip plugins, hooks, extras)
+    if (options.hudOnly) {
+      // Resolve paths
+      const paths = await getInstallationPaths(scope);
+      const claudeDir = paths.claudeDir;
+      const devflowDir = paths.devflowDir;
+
+      // Save HUD config
+      const existingHud = loadHudConfig();
+      saveHudConfig({ enabled: true, detail: existingHud.detail });
+
+      // Update statusLine in settings.json
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      try {
+        let content: string;
+        try {
+          content = await fs.readFile(settingsPath, 'utf-8');
+        } catch {
+          content = '{}';
+        }
+        const updated = addHudStatusLine(content, devflowDir);
+        await fs.writeFile(settingsPath, updated, 'utf-8');
+      } catch (error) {
+        p.log.error(`Failed to update settings: ${error instanceof Error ? error.message : error}`);
+        process.exit(1);
+      }
+
+      // Copy HUD scripts to devflow dir
+      const rootDir = path.resolve(__dirname, '..', '..');
+      const scriptsSource = path.join(rootDir, 'scripts');
+      const scriptsTarget = path.join(devflowDir, 'scripts');
+      try {
+        await fs.mkdir(scriptsTarget, { recursive: true });
+        // Copy hud.sh
+        await fs.copyFile(
+          path.join(scriptsSource, 'hud.sh'),
+          path.join(scriptsTarget, 'hud.sh'),
+        );
+        // Copy hud/ directory
+        const hudSource = path.join(scriptsSource, 'hud');
+        const hudTarget = path.join(scriptsTarget, 'hud');
+        await copyDirectory(hudSource, hudTarget);
+        if (process.platform !== 'win32') {
+          await fs.chmod(path.join(scriptsTarget, 'hud.sh'), 0o755);
+        }
+      } catch (error) {
+        p.log.error(`Failed to copy HUD scripts: ${error instanceof Error ? error.message : error}`);
+        process.exit(1);
+      }
+
+      // Write minimal manifest
+      const now = new Date().toISOString();
+      try {
+        await writeManifest(devflowDir, {
+          version,
+          plugins: [],
+          scope,
+          features: { teams: false, ambient: false, memory: false, hud: true },
+          installedAt: now,
+          updatedAt: now,
+        });
+      } catch { /* non-fatal */ }
+
+      p.log.success('HUD installed');
+      p.log.info(`Configure later: ${color.cyan('devflow hud --status')}`);
+      p.outro(color.green('HUD-only install complete.'));
+      return;
     }
 
     // Select plugins to install
@@ -252,6 +331,24 @@ export const initCommand = new Command('init')
         process.exit(0);
       }
       memoryEnabled = memoryChoice;
+    }
+
+    // HUD selection (yes/no)
+    let hudEnabled: boolean;
+    if (options.hud !== undefined) {
+      hudEnabled = options.hud;
+    } else if (!process.stdin.isTTY) {
+      hudEnabled = true;
+    } else {
+      const hudChoice = await p.confirm({
+        message: 'Enable HUD status line?',
+        initialValue: true,
+      });
+      if (p.isCancel(hudChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      hudEnabled = hudChoice;
     }
 
     // Security deny list placement (user scope + TTY only)
@@ -512,6 +609,24 @@ export const initCommand = new Command('init')
         await createMemoryDir(verbose);
         await migrateMemoryFiles(verbose);
       }
+
+      // Configure HUD
+      const existingHud = loadHudConfig();
+      saveHudConfig({ enabled: hudEnabled, detail: existingHud.detail });
+
+      // Update statusLine in settings.json (add or remove based on choice)
+      try {
+        const hudContent = await fs.readFile(settingsPath, 'utf-8');
+        const hudUpdated = hudEnabled
+          ? addHudStatusLine(hudContent, devflowDir)
+          : removeHudStatusLine(hudContent);
+        if (hudUpdated !== hudContent) {
+          await fs.writeFile(settingsPath, hudUpdated, 'utf-8');
+          if (verbose) {
+            p.log.info(`HUD ${hudEnabled ? 'enabled' : 'disabled'}`);
+          }
+        }
+      } catch { /* settings.json may not exist yet */ }
     }
 
     const fileExtras = selectedExtras.filter(e => e !== 'settings' && e !== 'safe-delete');
@@ -620,7 +735,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

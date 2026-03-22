@@ -8,6 +8,9 @@ dist/
 # Generated plugin skills (copied from shared/skills/ at build time)
 plugins/*/skills/
 
+# Generated HUD scripts (copied from dist/hud/ at build time)
+scripts/hud/
+
 # Generated shared agents (copied from shared/agents/ at build time)
 # Note: plugin-specific agents (catch-up.md, devlog.md) are committed in their plugins
 plugins/*/agents/git.md

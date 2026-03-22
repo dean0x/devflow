@@ -12,6 +12,7 @@ export interface ManifestData {
     teams: boolean;
     ambient: boolean;
     memory: boolean;
+    hud?: boolean;
   };
   installedAt: string;
   updatedAt: string;

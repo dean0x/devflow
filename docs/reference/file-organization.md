@@ -39,7 +39,9 @@ devflow/
 │   └── reference/                    # Extracted reference docs
 ├── scripts/
 │   ├── build-plugins.ts
-│   ├── statusline.sh
+│   ├── build-hud.js                  # Copies dist/hud/ → scripts/hud/
+│   ├── hud.sh                        # Thin wrapper: exec node hud/index.js
+│   ├── hud/                          # GENERATED — compiled HUD module (gitignored)
 │   └── hooks/                        # Working Memory + ambient hooks
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
@@ -51,7 +53,14 @@ devflow/
         │   ├── init.ts
         │   ├── list.ts
         │   ├── memory.ts
+        │   ├── hud.ts
         │   └── uninstall.ts
+        ├── hud/                          # HUD module (TypeScript source)
+        │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
+        │   ├── types.ts                  # StdinData, HudConfig, ComponentId, etc.
+        │   ├── config.ts                 # PRESETS, loadConfig, saveConfig
+        │   ├── render.ts                 # Smart multi-line layout assembly
+        │   └── components/               # 14 individual component renderers
         └── cli.ts
 ```
 
@@ -127,7 +136,7 @@ Skills and agents are **not duplicated** in git. Instead:
 `devflow init --override-settings` replaces `~/.claude/settings.json`.
 
 Included settings:
-- `statusLine` - Smart statusline with context percentage
+- `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
 - `hooks` - Working Memory hooks (Stop, SessionStart, PreCompact)
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
@@ -160,11 +169,17 @@ Knowledge files in `.memory/knowledge/` capture decisions and pitfalls that agen
 
 Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file.
 
-## Statusline Script
+## HUD (Heads-Up Display)
 
-The statusline (`scripts/statusline.sh`) displays:
-- Directory name and model
-- Git branch with dirty indicator (`*`)
-- Context usage percentage (green <50%, yellow 50-80%, red >80%)
+The HUD (`scripts/hud.sh` → `scripts/hud/index.js`) is a configurable TypeScript status line with 14 components and 4 presets:
 
-Data source: `context_window.current_usage` from Claude Code's JSON stdin.
+| Preset | Components | Layout |
+|--------|-----------|--------|
+| Minimal | directory, git branch, model, context % | Single line |
+| Classic | + ahead/behind, diff stats, version badge | Single line |
+| Standard (default) | + session duration, usage quota | 2 lines |
+| Full | + tool/agent activity, todos, speed, config counts | 3-4 lines |
+
+Configuration: `~/.devflow/hud.json` (preset + component toggles). Manage via `devflow hud --configure`.
+
+Data source: `context_window.current_usage` from Claude Code's JSON stdin. Git data gathered with 1s per-command timeout. Overall 2s timeout with graceful degradation.
