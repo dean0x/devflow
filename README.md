@@ -248,7 +248,37 @@ Session context is saved and restored automatically via Working Memory hooks —
 | `--teams` / `--no-teams` | Enable/disable Agent Teams (experimental, default: off) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
+| `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
+| `--no-hud` | Disable HUD status line |
 | `--verbose` | Show detailed output |
+
+### HUD Options
+
+| Command | Description |
+|---------|-------------|
+| `npx devflow-kit hud --status` | Show current HUD config |
+| `npx devflow-kit hud --enable` | Enable HUD |
+| `npx devflow-kit hud --disable` | Disable HUD (version notifications still appear) |
+| `npx devflow-kit hud --detail` | Show tool/agent descriptions |
+| `npx devflow-kit hud --no-detail` | Hide tool/agent descriptions |
+
+### Skill Shadowing
+
+Override any DevFlow skill with your own version. Shadowed skills survive `devflow init` — they won't be overwritten on reinstall or upgrade.
+
+```bash
+# Create a personal override (copies current version as reference)
+npx devflow-kit skills shadow core-patterns
+
+# Edit your override
+vim ~/.claude/skills/core-patterns/SKILL.md
+
+# List all overrides
+npx devflow-kit skills list-shadowed
+
+# Remove override (next init restores DevFlow's version)
+npx devflow-kit skills unshadow core-patterns
+```
 
 ### Uninstall Options
 
