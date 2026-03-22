@@ -6,19 +6,13 @@ import {
   parsePluginSelection,
   substituteSettingsTemplate,
   computeGitignoreAppend,
-  buildExtrasOptions,
   applyTeamsConfig,
   stripTeamsConfig,
   mergeDenyList,
-  addAmbientHook,
-  removeAmbientHook,
-  hasAmbientHook,
-  addMemoryHooks,
-  removeMemoryHooks,
-  hasMemoryHooks,
+  discoverProjectGitRoots,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
-import { installManagedSettings } from '../src/cli/utils/post-install.js';
+import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps } from '../src/cli/plugins.js';
 
@@ -86,40 +80,6 @@ describe('substituteSettingsTemplate', () => {
     const template = '${DEVFLOW_DIR} and ${DEVFLOW_DIR} again';
     const result = substituteSettingsTemplate(template, '/d');
     expect(result).toBe('/d and /d again');
-  });
-});
-
-describe('buildExtrasOptions', () => {
-  it('returns settings, safe-delete for user scope without gitRoot', () => {
-    const options = buildExtrasOptions('user', null);
-    const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'safe-delete']);
-  });
-
-  it('adds claudeignore when gitRoot exists (user scope)', () => {
-    const options = buildExtrasOptions('user', '/repo');
-    const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'claudeignore', 'safe-delete']);
-  });
-
-  it('returns all 5 options for local scope with gitRoot', () => {
-    const options = buildExtrasOptions('local', '/repo');
-    const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'claudeignore', 'gitignore', 'docs', 'safe-delete']);
-  });
-
-  it('omits claudeignore and gitignore for local scope without gitRoot', () => {
-    const options = buildExtrasOptions('local', null);
-    const values = options.map(o => o.value);
-    expect(values).toEqual(['settings', 'docs', 'safe-delete']);
-  });
-
-  it('all options have non-empty label and hint', () => {
-    const options = buildExtrasOptions('local', '/repo');
-    for (const option of options) {
-      expect(option.label.length).toBeGreaterThan(0);
-      expect(option.hint.length).toBeGreaterThan(0);
-    }
   });
 });
 
@@ -326,34 +286,6 @@ describe('mergeDenyList', () => {
   });
 });
 
-describe('ambient hook re-exports from init', () => {
-  it('re-exports addAmbientHook from ambient.ts', () => {
-    expect(typeof addAmbientHook).toBe('function');
-  });
-
-  it('re-exports removeAmbientHook from ambient.ts', () => {
-    expect(typeof removeAmbientHook).toBe('function');
-  });
-
-  it('re-exports hasAmbientHook from ambient.ts', () => {
-    expect(typeof hasAmbientHook).toBe('function');
-  });
-});
-
-describe('memory hook re-exports from init', () => {
-  it('re-exports addMemoryHooks from memory.ts', () => {
-    expect(typeof addMemoryHooks).toBe('function');
-  });
-
-  it('re-exports removeMemoryHooks from memory.ts', () => {
-    expect(typeof removeMemoryHooks).toBe('function');
-  });
-
-  it('re-exports hasMemoryHooks from memory.ts', () => {
-    expect(typeof hasMemoryHooks).toBe('function');
-  });
-});
-
 describe('installManagedSettings', () => {
   let tmpDir: string;
   let managedDir: string;
@@ -529,5 +461,166 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
     expect(staleCommand).toBe('# stale');
     const staleAgent = await fs.readFile(path.join(claudeDir, 'agents', 'devflow', 'stale.md'), 'utf-8');
     expect(staleAgent).toBe('# stale');
+  });
+});
+
+describe('discoverProjectGitRoots', () => {
+  let tmpDir: string;
+  let origHome: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-discover-test-'));
+    origHome = process.env.HOME!;
+    process.env.HOME = tmpDir;
+  });
+
+  afterEach(async () => {
+    process.env.HOME = origHome;
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns sorted git roots from history.jsonl', async () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    // Create two project dirs with .git
+    const projA = path.join(tmpDir, 'project-a');
+    const projB = path.join(tmpDir, 'project-b');
+    await fs.mkdir(path.join(projA, '.git'), { recursive: true });
+    await fs.mkdir(path.join(projB, '.git'), { recursive: true });
+
+    // Write history with both projects (projB before projA to verify sorting)
+    const lines = [
+      JSON.stringify({ project: projB, timestamp: '2026-01-01' }),
+      JSON.stringify({ project: projA, timestamp: '2026-01-02' }),
+    ].join('\n');
+    await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
+
+    const roots = await discoverProjectGitRoots();
+    expect(roots).toEqual([projA, projB]);
+  });
+
+  it('skips projects without .git directory', async () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    const projGit = path.join(tmpDir, 'has-git');
+    const projNoGit = path.join(tmpDir, 'no-git');
+    await fs.mkdir(path.join(projGit, '.git'), { recursive: true });
+    await fs.mkdir(projNoGit, { recursive: true });
+
+    const lines = [
+      JSON.stringify({ project: projGit }),
+      JSON.stringify({ project: projNoGit }),
+    ].join('\n');
+    await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
+
+    const roots = await discoverProjectGitRoots();
+    expect(roots).toEqual([projGit]);
+  });
+
+  it('skips non-existent project paths', async () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    const lines = JSON.stringify({ project: path.join(tmpDir, 'gone') });
+    await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
+
+    const roots = await discoverProjectGitRoots();
+    expect(roots).toEqual([]);
+  });
+
+  it('returns empty array when history.jsonl is missing', async () => {
+    const roots = await discoverProjectGitRoots();
+    expect(roots).toEqual([]);
+  });
+
+  it('returns empty array when history.jsonl is empty', async () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+    await fs.writeFile(path.join(claudeDir, 'history.jsonl'), '', 'utf-8');
+
+    const roots = await discoverProjectGitRoots();
+    expect(roots).toEqual([]);
+  });
+
+  it('skips malformed JSON lines gracefully', async () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    const proj = path.join(tmpDir, 'valid');
+    await fs.mkdir(path.join(proj, '.git'), { recursive: true });
+
+    const lines = [
+      'not valid json',
+      JSON.stringify({ project: proj }),
+      '{broken',
+    ].join('\n');
+    await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
+
+    const roots = await discoverProjectGitRoots();
+    expect(roots).toEqual([proj]);
+  });
+
+  it('deduplicates repeated project entries', async () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    const proj = path.join(tmpDir, 'dupe-proj');
+    await fs.mkdir(path.join(proj, '.git'), { recursive: true });
+
+    const lines = [
+      JSON.stringify({ project: proj }),
+      JSON.stringify({ project: proj }),
+      JSON.stringify({ project: proj }),
+    ].join('\n');
+    await fs.writeFile(path.join(claudeDir, 'history.jsonl'), lines, 'utf-8');
+
+    const roots = await discoverProjectGitRoots();
+    expect(roots).toEqual([proj]);
+  });
+});
+
+describe('installClaudeignore return value', () => {
+  let tmpDir: string;
+  let rootDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-claudeignore-test-'));
+    rootDir = path.join(tmpDir, 'root');
+    await fs.mkdir(path.join(rootDir, 'src', 'templates'), { recursive: true });
+    await fs.writeFile(
+      path.join(rootDir, 'src', 'templates', 'claudeignore.template'),
+      '# .claudeignore\nnode_modules/\n',
+      'utf-8',
+    );
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns true when .claudeignore is newly created', async () => {
+    const gitRoot = path.join(tmpDir, 'project');
+    await fs.mkdir(gitRoot, { recursive: true });
+
+    const result = await installClaudeignore(gitRoot, rootDir, false);
+    expect(result).toBe(true);
+
+    const content = await fs.readFile(path.join(gitRoot, '.claudeignore'), 'utf-8');
+    expect(content).toContain('node_modules/');
+  });
+
+  it('returns false when .claudeignore already exists', async () => {
+    const gitRoot = path.join(tmpDir, 'project');
+    await fs.mkdir(gitRoot, { recursive: true });
+    await fs.writeFile(path.join(gitRoot, '.claudeignore'), '# existing', 'utf-8');
+
+    const result = await installClaudeignore(gitRoot, rootDir, false);
+    expect(result).toBe(false);
+
+    // Should not overwrite existing file
+    const content = await fs.readFile(path.join(gitRoot, '.claudeignore'), 'utf-8');
+    expect(content).toBe('# existing');
   });
 });

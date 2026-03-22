@@ -1,6 +1,7 @@
 import { promises as fs, writeFileSync, unlinkSync } from 'fs';
 import { execSync } from 'child_process';
 import * as path from 'path';
+import * as os from 'os';
 import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './paths.js';
 
@@ -394,12 +395,13 @@ export async function installSettings(
 
 /**
  * Create .claudeignore in git repository root (skip if already exists).
+ * Returns true if a new file was created, false if it already existed or on error.
  */
 export async function installClaudeignore(
   gitRoot: string,
   rootDir: string,
   verbose: boolean,
-): Promise<void> {
+): Promise<boolean> {
   const claudeignorePath = path.join(gitRoot, '.claudeignore');
   const claudeignoreTemplatePath = path.join(rootDir, 'src', 'templates', 'claudeignore.template');
 
@@ -409,13 +411,54 @@ export async function installClaudeignore(
     if (verbose) {
       p.log.success('.claudeignore created');
     }
+    return true;
   } catch (error: unknown) {
     if (isNodeSystemError(error) && error.code === 'EEXIST') {
       // Already exists, skip silently
     } else if (verbose) {
       p.log.warn(`Could not create .claudeignore: ${error}`);
     }
+    return false;
   }
+}
+
+/**
+ * Discover git repository roots from Claude's project history.
+ * Parses ~/.claude/history.jsonl for unique project paths that are valid git repos.
+ */
+export async function discoverProjectGitRoots(): Promise<string[]> {
+  const historyPath = path.join(os.homedir(), '.claude', 'history.jsonl');
+  let content: string;
+  try {
+    content = await fs.readFile(historyPath, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  const projects = new Set<string>();
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (typeof entry.project === 'string') {
+        projects.add(entry.project);
+      }
+    } catch {
+      // Malformed line — skip
+    }
+  }
+
+  const gitRoots: string[] = [];
+  for (const project of projects) {
+    try {
+      await fs.access(path.join(project, '.git'));
+      gitRoots.push(project);
+    } catch {
+      // Not a git repo or doesn't exist — skip
+    }
+  }
+
+  return gitRoots.sort();
 }
 
 /**
