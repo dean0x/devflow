@@ -24,7 +24,7 @@ DevFlow adds structured commands that handle the full lifecycle: specify feature
 - **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
 - **Automatic session memory** — survives restarts, `/clear`, and context compaction
 - **Parallel debugging** — competing hypotheses investigated simultaneously
-- **Version notifications** — statusline shows an update badge when a newer version is available
+- **Version notifications** — HUD shows `✦ Devflow vX.Y.Z · update: npx devflow-kit init` when a newer version is available
 - **35 quality skills** — 9 auto-activating core, 8 optional language/ecosystem, plus specialized review, agent, and orchestration skills
 
 ## Quick Start
