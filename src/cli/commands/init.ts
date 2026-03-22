@@ -363,61 +363,6 @@ export const initCommand = new Command('init')
       hudEnabled = hudChoice;
     }
 
-    // Security deny list placement (user scope + TTY only)
-    let securityMode: SecurityMode = 'user';
-    if (scope === 'user' && process.stdin.isTTY) {
-      p.note(
-        'DevFlow includes a security deny list that blocks dangerous\n' +
-        'commands (rm -rf, sudo, eval, etc). It can be installed as a\n' +
-        'read-only system file or in your editable settings.json.',
-        'Security Deny List',
-      );
-      const securityChoice = await p.select({
-        message: 'How should DevFlow install the deny list?',
-        options: [
-          { value: 'managed', label: 'Managed settings', hint: 'Recommended — read-only, cannot be overridden' },
-          { value: 'user', label: 'User settings', hint: 'Editable in settings.json' },
-        ],
-      });
-
-      if (p.isCancel(securityChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-
-      securityMode = securityChoice as SecurityMode;
-    }
-
-    // Managed settings sudo confirmation (prompt phase — action deferred to install phase)
-    let managedSettingsConfirmed = false;
-    if (securityMode === 'managed') {
-      p.note(
-        'This writes a read-only security deny list to a system directory\n' +
-        'and may prompt for your password (sudo).\n\n' +
-        'Not sure about this? Paste this into another Claude Code session:\n\n' +
-        '  "I\'m installing DevFlow and it wants to write a\n' +
-        '   managed-settings.json file using sudo. Review the source\n' +
-        '   at https://github.com/dean0x/devflow and tell me if\n' +
-        '   it\'s safe."',
-        'Managed Settings',
-      );
-
-      const sudoChoice = await p.select({
-        message: 'Continue with managed settings?',
-        options: [
-          { value: 'yes', label: 'Yes, continue', hint: 'May prompt for your password' },
-          { value: 'no', label: 'No, fall back to settings.json', hint: 'Editable user settings instead' },
-        ],
-      });
-
-      if (p.isCancel(sudoChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-
-      managedSettingsConfirmed = sudoChoice === 'yes';
-    }
-
     // .claudeignore prompt (needs early git detection)
     const earlyGitRoot = await getGitRoot();
     let claudeignoreEnabled = true;
@@ -519,6 +464,61 @@ export const initCommand = new Command('init')
           }
         }
       }
+    }
+
+    // Security deny list placement (user scope + TTY only — last prompt before install)
+    let securityMode: SecurityMode = 'user';
+    if (scope === 'user' && process.stdin.isTTY) {
+      p.note(
+        'DevFlow includes a security deny list that blocks dangerous\n' +
+        'commands (rm -rf, sudo, eval, etc). It can be installed as a\n' +
+        'read-only system file or in your editable settings.json.',
+        'Security Deny List',
+      );
+      const securityChoice = await p.select({
+        message: 'How should DevFlow install the deny list?',
+        options: [
+          { value: 'managed', label: 'Managed settings', hint: 'Recommended — read-only, cannot be overridden' },
+          { value: 'user', label: 'User settings', hint: 'Editable in settings.json' },
+        ],
+      });
+
+      if (p.isCancel(securityChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+
+      securityMode = securityChoice as SecurityMode;
+    }
+
+    // Managed settings sudo confirmation (last interactive step — may prompt for password)
+    let managedSettingsConfirmed = false;
+    if (securityMode === 'managed') {
+      p.note(
+        'This writes a read-only security deny list to a system directory\n' +
+        'and may prompt for your password (sudo).\n\n' +
+        'Not sure about this? Paste this into another Claude Code session:\n\n' +
+        '  "I\'m installing DevFlow and it wants to write a\n' +
+        '   managed-settings.json file using sudo. Review the source\n' +
+        '   at https://github.com/dean0x/devflow and tell me if\n' +
+        '   it\'s safe."',
+        'Managed Settings',
+      );
+
+      const sudoChoice = await p.select({
+        message: 'Continue with managed settings?',
+        options: [
+          { value: 'yes', label: 'Yes, continue', hint: 'May prompt for your password' },
+          { value: 'no', label: 'No, fall back to settings.json', hint: 'Editable user settings instead' },
+        ],
+      });
+
+      if (p.isCancel(sudoChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+
+      managedSettingsConfirmed = sudoChoice === 'yes';
     }
 
     // ╭──────────────────────────────────────────────────────────╮
@@ -665,20 +665,10 @@ export const initCommand = new Command('init')
     // === Settings & hooks (all automatic based on collected choices) ===
     s.message('Configuring settings');
 
-    // Managed settings (sudo may prompt for password — spinner paused)
+    // Determine effective security mode (managed settings executed later, after safe-delete)
     let effectiveSecurityMode = securityMode;
-    if (securityMode === 'managed') {
-      if (managedSettingsConfirmed) {
-        s.stop('Installing managed settings (may prompt for password)');
-        const managed = await installManagedSettings(rootDir, verbose);
-        if (!managed) {
-          p.log.warn('Managed settings write failed — falling back to user settings');
-          effectiveSecurityMode = 'user';
-        }
-        s.start('Configuring settings');
-      } else {
-        effectiveSecurityMode = 'user';
-      }
+    if (securityMode === 'managed' && !managedSettingsConfirmed) {
+      effectiveSecurityMode = 'user';
     }
     await installSettings(claudeDir, rootDir, devflowDir, verbose, teamsEnabled, effectiveSecurityMode);
 
@@ -752,6 +742,16 @@ export const initCommand = new Command('init')
     } else if (safeDeleteAction === 'upgrade' && safeDeleteBlock && profilePath) {
       await removeFromProfile(profilePath);
       await installToProfile(profilePath, safeDeleteBlock);
+    }
+
+    // Managed settings (last install step — sudo may prompt for password)
+    if (securityMode === 'managed' && managedSettingsConfirmed) {
+      s.stop('Installing managed settings (may prompt for password)');
+      const managed = await installManagedSettings(rootDir, verbose);
+      if (!managed) {
+        p.log.warn('Managed settings write failed — falling back to user settings');
+      }
+      s.start('Finalizing');
     }
 
     s.stop('Installation complete');
