@@ -5,7 +5,7 @@ All notable changes to DevFlow will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] - 2026-03-22
 
 ### Added
 - **Configurable HUD** replacing bash statusline — 14 components, on/off model (#155)
@@ -958,6 +958,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v1.4.0...HEAD
+[1.8.0]: https://github.com/dean0x/devflow/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/dean0x/devflow/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/dean0x/devflow/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/dean0x/devflow/compare/v1.5.0...v1.6.0
