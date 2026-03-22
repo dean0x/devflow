@@ -373,7 +373,7 @@ for i in $(seq 0 $((OBS_COUNT - 1))); do
   # Check if observation already exists
   EXISTING_LINE=""
   if [ -f "$LEARNING_LOG" ]; then
-    EXISTING_LINE=$(grep "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | head -1)
+    EXISTING_LINE=$(grep -F "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | head -1)
   fi
 
   if [ -n "$EXISTING_LINE" ]; then
@@ -442,7 +442,7 @@ for i in $(seq 0 $((OBS_COUNT - 1))); do
 
     # Replace line in file
     TEMP_LOG="$LEARNING_LOG.tmp"
-    grep -v "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" > "$TEMP_LOG" 2>/dev/null || true
+    grep -vF "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" > "$TEMP_LOG" 2>/dev/null || true
     echo "$UPDATED" >> "$TEMP_LOG"
     mv "$TEMP_LOG" "$LEARNING_LOG"
 
@@ -484,9 +484,16 @@ for i in $(seq 0 $((ART_COUNT - 1))); do
   ART_DESC=$(echo "$ART" | jq -r '.description')
   ART_CONTENT=$(echo "$ART" | jq -r '.content')
 
+  # Sanitize ART_NAME — prevent path traversal (model-generated input)
+  ART_NAME=$(echo "$ART_NAME" | tr -d '/' | sed 's/\.\.//g')
+  if [ -z "$ART_NAME" ]; then
+    log "Skipping artifact with empty/invalid name"
+    continue
+  fi
+
   # Check the observation's status — only create if ready
   if [ -f "$LEARNING_LOG" ]; then
-    OBS_STATUS=$(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.status' 2>/dev/null)
+    OBS_STATUS=$(grep -F "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.status' 2>/dev/null)
     if [ "$OBS_STATUS" != "ready" ]; then
       log "Skipping artifact for $ART_OBS_ID (status: $OBS_STATUS, need: ready)"
       continue
@@ -509,32 +516,34 @@ for i in $(seq 0 $((ART_COUNT - 1))); do
 
   mkdir -p "$ART_DIR"
 
+  # Precompute metadata (safe — our own data, not model-generated)
+  ART_DATE=$(date +%Y-%m-%d)
+  ART_CONF=$(grep -F "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.confidence' 2>/dev/null)
+  ART_OBS_N=$(grep -F "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.observations' 2>/dev/null)
+
   # Write artifact with learning marker
+  # Uses printf %s to safely write model-generated content (no shell expansion)
   if [ "$ART_TYPE" = "command" ]; then
-    cat > "$ART_PATH" << ARTEOF
----
-description: $ART_DESC
-# devflow-learning: auto-generated ($(date +%Y-%m-%d), confidence: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.confidence' 2>/dev/null), obs: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.observations' 2>/dev/null))
----
-
-$ART_CONTENT
-ARTEOF
+    printf '%s\n' "---" \
+      "description: $ART_DESC" \
+      "# devflow-learning: auto-generated ($ART_DATE, confidence: $ART_CONF, obs: $ART_OBS_N)" \
+      "---" \
+      "" > "$ART_PATH"
+    printf '%s\n' "$ART_CONTENT" >> "$ART_PATH"
   else
-    cat > "$ART_PATH" << ARTEOF
----
-name: learned-$ART_NAME
-description: $ART_DESC
-# devflow-learning: auto-generated ($(date +%Y-%m-%d), confidence: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.confidence' 2>/dev/null), obs: $(grep "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | jq -r '.observations' 2>/dev/null))
----
-
-$ART_CONTENT
-ARTEOF
+    printf '%s\n' "---" \
+      "name: learned-$ART_NAME" \
+      "description: $ART_DESC" \
+      "# devflow-learning: auto-generated ($ART_DATE, confidence: $ART_CONF, obs: $ART_OBS_N)" \
+      "---" \
+      "" > "$ART_PATH"
+    printf '%s\n' "$ART_CONTENT" >> "$ART_PATH"
   fi
 
   # Update observation status to "created" and record artifact path
   TEMP_LOG="$LEARNING_LOG.tmp"
   while IFS= read -r line; do
-    if echo "$line" | grep -q "\"id\":\"$ART_OBS_ID\""; then
+    if echo "$line" | grep -qF "\"id\":\"$ART_OBS_ID\""; then
       echo "$line" | jq -c --arg ap "$ART_PATH" '.status = "created" | .artifact_path = $ap'
     else
       echo "$line"

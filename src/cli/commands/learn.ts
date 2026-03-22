@@ -189,39 +189,33 @@ export function formatLearningStatus(observations: LearningObservation[], hookEn
 }
 
 /**
- * Load and merge learning configuration from global and project config files.
+ * Apply a single JSON config layer onto a mutable LearningConfig.
+ * Skips fields with wrong types; swallows parse errors.
+ */
+function applyConfigLayer(config: LearningConfig, json: string): void {
+  try {
+    const raw = JSON.parse(json) as Record<string, unknown>;
+    if (typeof raw.max_daily_runs === 'number') config.max_daily_runs = raw.max_daily_runs;
+    if (typeof raw.throttle_minutes === 'number') config.throttle_minutes = raw.throttle_minutes;
+    if (typeof raw.model === 'string') config.model = raw.model;
+  } catch {
+    // Invalid config — keep existing values
+  }
+}
+
+/**
+ * Load and merge learning configuration from global and project config JSON strings.
  * Project config overrides global config; both override defaults.
  */
-export function loadLearningConfig(globalPath: string | null, projectPath: string | null): LearningConfig {
-  const defaults: LearningConfig = {
+export function loadLearningConfig(globalJson: string | null, projectJson: string | null): LearningConfig {
+  const config: LearningConfig = {
     max_daily_runs: 10,
     throttle_minutes: 5,
     model: 'sonnet',
   };
 
-  const config = { ...defaults };
-
-  if (globalPath) {
-    try {
-      const raw = JSON.parse(globalPath) as Record<string, unknown>;
-      if (typeof raw.max_daily_runs === 'number') config.max_daily_runs = raw.max_daily_runs;
-      if (typeof raw.throttle_minutes === 'number') config.throttle_minutes = raw.throttle_minutes;
-      if (typeof raw.model === 'string') config.model = raw.model;
-    } catch {
-      // Invalid config — keep defaults
-    }
-  }
-
-  if (projectPath) {
-    try {
-      const raw = JSON.parse(projectPath) as Record<string, unknown>;
-      if (typeof raw.max_daily_runs === 'number') config.max_daily_runs = raw.max_daily_runs;
-      if (typeof raw.throttle_minutes === 'number') config.throttle_minutes = raw.throttle_minutes;
-      if (typeof raw.model === 'string') config.model = raw.model;
-    } catch {
-      // Invalid config — keep defaults
-    }
-  }
+  if (globalJson) applyConfigLayer(config, globalJson);
+  if (projectJson) applyConfigLayer(config, projectJson);
 
   return config;
 }
@@ -254,18 +248,11 @@ export const learnCommand = new Command('learn')
     const claudeDir = getClaudeDirectory();
     const settingsPath = path.join(claudeDir, 'settings.json');
 
-    // Read settings
     let settingsContent: string;
     try {
       settingsContent = await fs.readFile(settingsPath, 'utf-8');
     } catch {
-      if (options.status || options.list) {
-        settingsContent = '{}';
-      } else if (options.clear) {
-        settingsContent = '{}';
-      } else {
-        settingsContent = '{}';
-      }
+      settingsContent = '{}';
     }
 
     // --- --status ---
@@ -386,7 +373,7 @@ export const learnCommand = new Command('learn')
       const config: LearningConfig = {
         max_daily_runs: Number(maxRuns),
         throttle_minutes: Number(throttle),
-        model: model as string,
+        model: String(model),
       };
 
       const configJson = JSON.stringify(config, null, 2) + '\n';

@@ -195,7 +195,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true },
+          features: { teams: false, ambient: false, memory: false, hud: true, learn: false },
           installedAt: now,
           updatedAt: now,
         });
