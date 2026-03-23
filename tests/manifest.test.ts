@@ -119,7 +119,7 @@ describe('writeManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true },
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: false },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -133,7 +133,7 @@ describe('writeManifest', () => {
       version: '1.0.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: false, memory: false },
+      features: { teams: false, ambient: false, memory: false, learn: false, hud: false },
       installedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
@@ -152,7 +152,7 @@ describe('writeManifest', () => {
       version: '1.4.0',
       plugins: [],
       scope: 'local',
-      features: { teams: false, ambient: false, memory: false },
+      features: { teams: false, ambient: false, memory: false, learn: false, hud: false },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -296,7 +296,7 @@ describe('resolvePluginList', () => {
     version: '1.0.0',
     plugins: ['devflow-core-skills', 'devflow-implement'],
     scope: 'user',
-    features: { teams: false, ambient: true, memory: true },
+    features: { teams: false, ambient: true, memory: true, learn: false, hud: false },
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };

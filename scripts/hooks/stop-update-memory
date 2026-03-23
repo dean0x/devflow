@@ -11,9 +11,11 @@ set -e
 # DEVFLOW_BG_UPDATER is set by background-memory-update before invoking claude.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
 
+# Resolve script directory once (used for json-parse, ensure-memory-gitignore, and updater)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # JSON parsing (jq with node fallback) — silently no-op if neither available
-SCRIPT_DIR_JSON="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR_JSON/json-parse"
+source "$SCRIPT_DIR/json-parse"
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
@@ -25,8 +27,7 @@ if [ -z "$CWD" ]; then
 fi
 
 # Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
-SCRIPT_DIR_EARLY="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR_EARLY/ensure-memory-gitignore" "$CWD" || exit 0
+source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
 # Logging (shared log file with background updater; [stop-hook] prefix distinguishes)
 MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
@@ -66,7 +67,6 @@ if [ -z "$SESSION_ID" ]; then
 fi
 
 # Resolve the background updater script (same directory as this hook)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UPDATER="$SCRIPT_DIR/background-memory-update"
 if [ ! -x "$UPDATER" ]; then
   log "Skipped: updater not found/not executable at $UPDATER"

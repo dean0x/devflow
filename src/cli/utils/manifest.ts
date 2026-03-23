@@ -43,7 +43,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       return null;
     }
     // Normalize optional fields with defaults (backwards-compatible with old manifests)
-    const manifest: ManifestData = {
+    return {
       version: data.version as string,
       plugins: data.plugins as string[],
       scope: data.scope as 'user' | 'local',
@@ -57,7 +57,6 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,
     };
-    return manifest;
   } catch {
     return null;
   }

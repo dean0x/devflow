@@ -444,7 +444,7 @@ export const learnCommand = new Command('learn')
     // Resolve devflow scripts directory from settings.json hooks or default
     let devflowDir: string;
     try {
-      const settings = JSON.parse(settingsContent) as Settings;
+      const settings: Settings = JSON.parse(settingsContent);
       // Try to extract devflowDir from existing hooks (e.g., Stop hook path)
       const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
       if (stopHook) {

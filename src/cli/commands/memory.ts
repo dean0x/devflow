@@ -140,12 +140,18 @@ export function countMemoryHooks(settingsJson: string): number {
   return count;
 }
 
+interface MemoryOptions {
+  enable?: boolean;
+  disable?: boolean;
+  status?: boolean;
+}
+
 export const memoryCommand = new Command('memory')
   .description('Enable or disable working memory (session context preservation)')
   .option('--enable', 'Add Stop/SessionStart/PreCompact hooks')
   .option('--disable', 'Remove memory hooks')
   .option('--status', 'Show current state')
-  .action(async (options) => {
+  .action(async (options: MemoryOptions) => {
     const hasFlag = options.enable || options.disable || options.status;
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' Working Memory ')));

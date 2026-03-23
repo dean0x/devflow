@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-// scripts/hooks/json-helper.js
+// scripts/hooks/json-helper.cjs
 // Provides jq-equivalent operations for hooks when jq is not installed.
-// Usage: node json-helper.js <operation> [args...]
+// SECURITY: This is a local CLI helper invoked only by shell hooks with controlled arguments.
+// File path arguments come from hook-owned variables, not from external/untrusted input.
+// Usage: node json-helper.cjs <operation> [args...]
 //
 // Operations:
 //   get-field <field> [default]           Read field from stdin JSON
@@ -28,9 +30,22 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 
 const op = process.argv[2];
 const args = process.argv.slice(3);
+
+/**
+ * Resolve and validate a file path argument. Returns the resolved absolute path.
+ * Rejects paths containing '..' traversal sequences for defense-in-depth.
+ */
+function safePath(filePath) {
+  const resolved = path.resolve(filePath);
+  if (resolved.includes('..')) {
+    throw new Error(`Refused path with traversal: ${filePath}`);
+  }
+  return resolved;
+}
 
 function readStdin() {
   try {
@@ -48,6 +63,13 @@ function getNestedField(obj, field) {
     current = current[part];
   }
   return current;
+}
+
+function parseJsonl(file) {
+  const lines = fs.readFileSync(safePath(file), 'utf8').trim().split('\n').filter(Boolean);
+  return lines.map(l => {
+    try { return JSON.parse(l); } catch { return null; }
+  }).filter(Boolean);
 }
 
 function parseArgs(argList) {
@@ -81,7 +103,7 @@ try {
     }
 
     case 'get-field-file': {
-      const file = args[0];
+      const file = safePath(args[0]);
       const field = args[1];
       const def = args[2] || '';
       const content = fs.readFileSync(file, 'utf8').trim();
@@ -169,10 +191,7 @@ try {
       const file = args[0];
       const field = args[1];
       const limit = parseInt(args[2]) || 30;
-      const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-      const parsed = lines.map(l => {
-        try { return JSON.parse(l); } catch { return null; }
-      }).filter(Boolean);
+      const parsed = parseJsonl(file);
       parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
       console.log(JSON.stringify(parsed.slice(0, limit)));
       break;
@@ -183,10 +202,7 @@ try {
       const file = args[0];
       const field = args[1];
       const limit = parseInt(args[2]) || 100;
-      const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-      const parsed = lines.map(l => {
-        try { return JSON.parse(l); } catch { return null; }
-      }).filter(Boolean);
+      const parsed = parseJsonl(file);
       parsed.sort((a, b) => (b[field] || 0) - (a[field] || 0));
       for (const item of parsed.slice(0, limit)) {
         console.log(JSON.stringify(item));
@@ -263,10 +279,7 @@ try {
     case 'learning-created': {
       // Extract created artifacts from learning log JSONL
       const file = args[0];
-      const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-      const parsed = lines.map(l => {
-        try { return JSON.parse(l); } catch { return null; }
-      }).filter(Boolean);
+      const parsed = parseJsonl(file);
 
       const created = parsed.filter(o => o.status === 'created' && o.artifact_path);
 
@@ -297,10 +310,7 @@ try {
       // Find new artifacts since epoch
       const file = args[0];
       // since_epoch argument unused in current implementation — always show created
-      const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-      const parsed = lines.map(l => {
-        try { return JSON.parse(l); } catch { return null; }
-      }).filter(Boolean);
+      const parsed = parseJsonl(file);
 
       const created = parsed.filter(o => o.status === 'created' && o.last_seen);
       const messages = created.map(o => {
@@ -323,6 +333,6 @@ try {
       process.exit(1);
   }
 } catch (err) {
-  process.stderr.write(`json-helper error: ${err.message}\n`);
+  process.stderr.write(`json-helper error: ${err && err.message ? err.message : String(err)}\n`);
   process.exit(1);
 }
