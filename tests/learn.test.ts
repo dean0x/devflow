@@ -6,6 +6,8 @@ import {
   parseLearningLog,
   formatLearningStatus,
   loadLearningConfig,
+  isLearningObservation,
+  applyConfigLayer,
   type LearningObservation,
 } from '../src/cli/commands/learn.js';
 
@@ -285,5 +287,100 @@ describe('loadLearningConfig', () => {
     expect(config.max_daily_runs).toBe(10); // default
     expect(config.throttle_minutes).toBe(15); // overridden
     expect(config.model).toBe('sonnet'); // default
+  });
+});
+
+describe('isLearningObservation', () => {
+  const validObs = {
+    id: 'obs_abc123',
+    type: 'workflow',
+    pattern: 'test pattern',
+    confidence: 0.5,
+    observations: 1,
+    first_seen: '2026-03-22T00:00:00Z',
+    last_seen: '2026-03-22T00:00:00Z',
+    status: 'observing',
+    evidence: ['some evidence'],
+    details: 'details',
+  };
+
+  it('accepts valid observation', () => {
+    expect(isLearningObservation(validObs)).toBe(true);
+  });
+
+  it('rejects null', () => {
+    expect(isLearningObservation(null)).toBe(false);
+  });
+
+  it('rejects non-object', () => {
+    expect(isLearningObservation('string')).toBe(false);
+    expect(isLearningObservation(42)).toBe(false);
+  });
+
+  it('rejects missing id', () => {
+    const { id, ...rest } = validObs;
+    expect(isLearningObservation(rest)).toBe(false);
+  });
+
+  it('rejects invalid type', () => {
+    expect(isLearningObservation({ ...validObs, type: 'unknown' })).toBe(false);
+  });
+
+  it('rejects confidence as string', () => {
+    expect(isLearningObservation({ ...validObs, confidence: '0.5' })).toBe(false);
+  });
+
+  it('rejects invalid status', () => {
+    expect(isLearningObservation({ ...validObs, status: 'done' })).toBe(false);
+  });
+
+  it('rejects evidence as non-array', () => {
+    expect(isLearningObservation({ ...validObs, evidence: 'not array' })).toBe(false);
+  });
+
+  it('rejects missing details', () => {
+    const { details, ...rest } = validObs;
+    expect(isLearningObservation(rest)).toBe(false);
+  });
+});
+
+describe('parseLearningLog — type guard filtering', () => {
+  it('rejects objects with missing required fields', () => {
+    const log = '{"id":"obs_1","type":"workflow","pattern":"p"}\n';
+    const result = parseLearningLog(log);
+    expect(result).toHaveLength(0);
+  });
+
+  it('rejects objects with wrong field types', () => {
+    const log = JSON.stringify({
+      id: 'obs_1', type: 'workflow', pattern: 'p',
+      confidence: 'high', observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    }) + '\n';
+    const result = parseLearningLog(log);
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('applyConfigLayer — immutability', () => {
+  it('returns new object without mutating input', () => {
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet' };
+    const result = applyConfigLayer(original, JSON.stringify({ max_daily_runs: 20 }));
+    expect(result.max_daily_runs).toBe(20);
+    expect(original.max_daily_runs).toBe(10); // not mutated
+  });
+
+  it('returns copy on invalid JSON', () => {
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet' };
+    const result = applyConfigLayer(original, 'not json');
+    expect(result).toEqual(original);
+    expect(result).not.toBe(original); // different reference
+  });
+
+  it('ignores wrong-typed fields', () => {
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet' };
+    const result = applyConfigLayer(original, JSON.stringify({ max_daily_runs: 'lots', model: 42 }));
+    expect(result.max_daily_runs).toBe(10);
+    expect(result.model).toBe('sonnet');
   });
 });

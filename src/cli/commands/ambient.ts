@@ -4,24 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory } from '../utils/paths.js';
-
-/**
- * The hook entry structure used by Claude Code settings.json.
- */
-interface HookEntry {
-  type: string;
-  command: string;
-  timeout?: number;
-}
-
-interface HookMatcher {
-  hooks: HookEntry[];
-}
-
-interface Settings {
-  hooks?: Record<string, HookMatcher[]>;
-  [key: string]: unknown;
-}
+import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 const AMBIENT_HOOK_MARKER = 'ambient-prompt';
 

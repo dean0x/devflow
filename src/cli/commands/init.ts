@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
@@ -788,6 +789,14 @@ export const initCommand = new Command('init')
     }
 
     s.stop('Installation complete');
+
+    // Check for jq (hooks degrade gracefully without it, but features are reduced)
+    try {
+      execSync('command -v jq', { stdio: 'ignore' });
+    } catch {
+      p.log.warn('jq not found — some hook features will have reduced functionality');
+      p.log.info(`Install: ${color.cyan('brew install jq')}`);
+    }
 
     // === Summary ===
 

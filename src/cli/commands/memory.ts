@@ -5,24 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { createMemoryDir, migrateMemoryFiles } from '../utils/post-install.js';
-
-/**
- * The hook entry structure used by Claude Code settings.json.
- */
-interface HookEntry {
-  type: string;
-  command: string;
-  timeout?: number;
-}
-
-interface HookMatcher {
-  hooks: HookEntry[];
-}
-
-interface Settings {
-  hooks?: Record<string, HookMatcher[]>;
-  [key: string]: unknown;
-}
+import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 /**
  * Map of hook event type → filename marker for the 3 memory hooks.

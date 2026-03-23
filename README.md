@@ -221,6 +221,12 @@ DevFlow creates project documentation in `.docs/` and working memory in `.memory
 .memory/
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook
 ├── backup.json               # Pre-compact git state snapshot
+├── learning-log.jsonl        # Learning observations (JSONL)
+├── learning.json             # Project-level learning config
+├── .learning-runs-today      # Daily run counter
+├── .learning-update.log      # Background learning agent log
+├── .learning-last-trigger    # Throttle marker
+├── .learning-notified-at     # New artifact notification marker
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
     └── pitfalls.md            # Known pitfalls (area-specific gotchas)

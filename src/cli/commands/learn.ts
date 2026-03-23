@@ -4,24 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-
-/**
- * The hook entry structure used by Claude Code settings.json.
- */
-interface HookEntry {
-  type: string;
-  command: string;
-  timeout?: number;
-}
-
-interface HookMatcher {
-  hooks: HookEntry[];
-}
-
-interface Settings {
-  hooks?: Record<string, HookMatcher[]>;
-  [key: string]: unknown;
-}
+import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 /**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
@@ -47,6 +30,24 @@ export interface LearningConfig {
   max_daily_runs: number;
   throttle_minutes: number;
   model: string;
+}
+
+/**
+ * Type guard for validating raw JSON as a LearningObservation.
+ */
+export function isLearningObservation(obj: unknown): obj is LearningObservation {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const o = obj as Record<string, unknown>;
+  return typeof o.id === 'string'
+    && (o.type === 'workflow' || o.type === 'procedural')
+    && typeof o.pattern === 'string'
+    && typeof o.confidence === 'number'
+    && typeof o.observations === 'number'
+    && typeof o.first_seen === 'string'
+    && typeof o.last_seen === 'string'
+    && (o.status === 'observing' || o.status === 'ready' || o.status === 'created')
+    && Array.isArray(o.evidence)
+    && typeof o.details === 'string';
 }
 
 const LEARNING_HOOK_MARKER = 'stop-update-learning';
@@ -150,8 +151,8 @@ export function parseLearningLog(logContent: string): LearningObservation[] {
     if (!trimmed) continue;
 
     try {
-      const parsed = JSON.parse(trimmed) as LearningObservation;
-      if (parsed.id && parsed.type && parsed.pattern) {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (isLearningObservation(parsed)) {
         observations.push(parsed);
       }
     } catch {
@@ -189,17 +190,20 @@ export function formatLearningStatus(observations: LearningObservation[], hookEn
 }
 
 /**
- * Apply a single JSON config layer onto a mutable LearningConfig.
+ * Apply a single JSON config layer onto a LearningConfig, returning a new object.
  * Skips fields with wrong types; swallows parse errors.
  */
-function applyConfigLayer(config: LearningConfig, json: string): void {
+// SYNC: Config loading duplicated in scripts/hooks/background-learning load_config()
+export function applyConfigLayer(config: LearningConfig, json: string): LearningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
-    if (typeof raw.max_daily_runs === 'number') config.max_daily_runs = raw.max_daily_runs;
-    if (typeof raw.throttle_minutes === 'number') config.throttle_minutes = raw.throttle_minutes;
-    if (typeof raw.model === 'string') config.model = raw.model;
+    return {
+      max_daily_runs: typeof raw.max_daily_runs === 'number' ? raw.max_daily_runs : config.max_daily_runs,
+      throttle_minutes: typeof raw.throttle_minutes === 'number' ? raw.throttle_minutes : config.throttle_minutes,
+      model: typeof raw.model === 'string' ? raw.model : config.model,
+    };
   } catch {
-    // Invalid config — keep existing values
+    return { ...config };
   }
 }
 
@@ -208,16 +212,25 @@ function applyConfigLayer(config: LearningConfig, json: string): void {
  * Project config overrides global config; both override defaults.
  */
 export function loadLearningConfig(globalJson: string | null, projectJson: string | null): LearningConfig {
-  const config: LearningConfig = {
+  let config: LearningConfig = {
     max_daily_runs: 10,
     throttle_minutes: 5,
     model: 'sonnet',
   };
 
-  if (globalJson) applyConfigLayer(config, globalJson);
-  if (projectJson) applyConfigLayer(config, projectJson);
+  if (globalJson) config = applyConfigLayer(config, globalJson);
+  if (projectJson) config = applyConfigLayer(config, projectJson);
 
   return config;
+}
+
+interface LearnOptions {
+  enable?: boolean;
+  disable?: boolean;
+  status?: boolean;
+  list?: boolean;
+  configure?: boolean;
+  clear?: boolean;
 }
 
 export const learnCommand = new Command('learn')
@@ -228,7 +241,7 @@ export const learnCommand = new Command('learn')
   .option('--list', 'Show all observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard')
   .option('--clear', 'Reset learning log (removes all observations)')
-  .action(async (options) => {
+  .action(async (options: LearnOptions) => {
     const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
@@ -252,6 +265,10 @@ export const learnCommand = new Command('learn')
     try {
       settingsContent = await fs.readFile(settingsPath, 'utf-8');
     } catch {
+      if (options.status) {
+        p.log.info('Self-learning: disabled (no settings.json found)');
+        return;
+      }
       settingsContent = '{}';
     }
 
