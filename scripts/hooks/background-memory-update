@@ -13,6 +13,10 @@ SESSION_ID="$2"
 MEMORY_FILE="$3"
 CLAUDE_BIN="$4"
 
+# Source JSON parsing helpers (jq with node fallback)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/json-parse"
+
 LOG_FILE="$CWD/.memory/.working-memory-update.log"
 LOCK_DIR="$CWD/.memory/.working-memory.lock"
 
@@ -93,22 +97,12 @@ extract_last_turn() {
 
   last_user=$(grep '"type":"user"' "$transcript" 2>/dev/null \
     | tail -3 \
-    | jq -r '
-      if .message.content then
-        [.message.content[] | select(.type == "text") | .text] | join("\n")
-      else ""
-      end
-    ' 2>/dev/null \
+    | while IFS= read -r line; do echo "$line" | json_extract_messages; done \
     | tail -1)
 
   last_assistant=$(grep '"type":"assistant"' "$transcript" 2>/dev/null \
     | tail -3 \
-    | jq -r '
-      if .message.content then
-        [.message.content[] | select(.type == "text") | .text] | join("\n")
-      else ""
-      end
-    ' 2>/dev/null \
+    | while IFS= read -r line; do echo "$line" | json_extract_messages; done \
     | tail -1)
 
   # Truncate to ~4000 chars total to keep token cost low

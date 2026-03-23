@@ -7,17 +7,19 @@
 
 set -e
 
-# jq is required to parse hook input JSON — silently no-op if missing
-if ! command -v jq &>/dev/null; then exit 0; fi
+# JSON parsing (jq with node fallback) — silently no-op if neither available
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
+CWD=$(echo "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
   exit 0
 fi
 
-PROMPT=$(echo "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)
+PROMPT=$(echo "$INPUT" | json_field "prompt" "")
 
 # Skip slash commands — they have their own orchestration
 if [[ "$PROMPT" == /* ]]; then
@@ -42,9 +44,4 @@ fi
 # SYNC: must match tests/integration/helpers.ts AMBIENT_PREAMBLE
 PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, your FIRST tool calls MUST be Skill tool invocations for each selected skill — before writing ANY text about the task."
 
-jq -n --arg ctx "$PREAMBLE" '{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": $ctx
-  }
-}'
+json_prompt_output "$PREAMBLE"

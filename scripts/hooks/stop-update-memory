@@ -11,13 +11,15 @@ set -e
 # DEVFLOW_BG_UPDATER is set by background-memory-update before invoking claude.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
 
-# jq is required to parse hook input JSON — silently no-op if missing
-if ! command -v jq &>/dev/null; then exit 0; fi
+# JSON parsing (jq with node fallback) — silently no-op if neither available
+SCRIPT_DIR_JSON="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR_JSON/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
 # Resolve project directory — bail if missing
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
+CWD=$(echo "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
   exit 0
 fi
@@ -57,7 +59,7 @@ if [ -z "$CLAUDE_BIN" ]; then
 fi
 
 # Extract session ID from hook input
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null)
+SESSION_ID=$(echo "$INPUT" | json_field "session_id" "")
 if [ -z "$SESSION_ID" ]; then
   log "Skipped: no session_id in hook input"
   exit 0

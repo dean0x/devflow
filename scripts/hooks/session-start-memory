@@ -8,12 +8,14 @@
 
 set -e
 
-# jq is required to parse hook input JSON — silently no-op if missing
-if ! command -v jq &>/dev/null; then exit 0; fi
+# JSON parsing (jq with node fallback) — silently no-op if neither available
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
+CWD=$(echo "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
   exit 0
 fi
@@ -40,9 +42,9 @@ if [ -f "$MEMORY_FILE" ]; then
   BACKUP_FILE="$CWD/.memory/backup.json"
   COMPACT_NOTE=""
   if [ -f "$BACKUP_FILE" ]; then
-    BACKUP_MEMORY=$(jq -r '.memory_snapshot // ""' "$BACKUP_FILE" 2>/dev/null)
+    BACKUP_MEMORY=$(json_field_file "$BACKUP_FILE" "memory_snapshot" "")
     if [ -n "$BACKUP_MEMORY" ]; then
-      BACKUP_TS=$(jq -r '.timestamp // ""' "$BACKUP_FILE" 2>/dev/null)
+      BACKUP_TS=$(json_field_file "$BACKUP_FILE" "timestamp" "")
       BACKUP_EPOCH=0
       if [ -n "$BACKUP_TS" ]; then
         BACKUP_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BACKUP_TS" +%s 2>/dev/null \
@@ -133,42 +135,28 @@ fi
 LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
 NOTIFIED_MARKER="$CWD/.memory/.learning-notified-at"
 
-if [ -f "$LEARNING_LOG" ] && command -v jq &>/dev/null; then
-  # Build index of promoted artifacts (status=created)
+if [ -f "$LEARNING_LOG" ]; then
+  # Single-pass extraction of created artifacts (commands + skills)
+  LEARNED_JSON=$(json_learning_created "$LEARNING_LOG")
+
   LEARNED_COMMANDS=""
   LEARNED_SKILLS=""
-
-  while IFS= read -r line; do
-    if ! echo "$line" | jq -e . >/dev/null 2>&1; then continue; fi
-
-    STATUS=$(echo "$line" | jq -r '.status // ""')
-    CONF=$(echo "$line" | jq -r '.confidence // 0')
-    TYPE=$(echo "$line" | jq -r '.type // ""')
-    ARTIFACT_PATH=$(echo "$line" | jq -r '.artifact_path // ""')
-
-    # Only show created artifacts
-    if [ "$STATUS" != "created" ]; then continue; fi
-    if [ -z "$ARTIFACT_PATH" ]; then continue; fi
-
-    CONF_DISPLAY=$(echo "$CONF" | awk '{printf "%.1f", $1}')
-
-    if [ "$TYPE" = "workflow" ]; then
-      # Extract command name from artifact path
-      CMD_NAME=$(basename "$ARTIFACT_PATH" .md)
-      if [ -n "$LEARNED_COMMANDS" ]; then
-        LEARNED_COMMANDS="$LEARNED_COMMANDS, /learned/$CMD_NAME ($CONF_DISPLAY)"
-      else
-        LEARNED_COMMANDS="/learned/$CMD_NAME ($CONF_DISPLAY)"
-      fi
+  if [ -n "$LEARNED_JSON" ]; then
+    if [ "$_HAS_JQ" = "true" ]; then
+      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | jq -r '.commands | map("/learned/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
+      LEARNED_SKILLS=$(echo "$LEARNED_JSON" | jq -r '.skills | map("\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
     else
-      SKILL_NAME=$(echo "$ARTIFACT_PATH" | grep -o 'learned-[^/]*' || echo "")
-      if [ -n "$SKILL_NAME" ] && [ -n "$LEARNED_SKILLS" ]; then
-        LEARNED_SKILLS="$LEARNED_SKILLS, $SKILL_NAME ($CONF_DISPLAY)"
-      elif [ -n "$SKILL_NAME" ]; then
-        LEARNED_SKILLS="$SKILL_NAME ($CONF_DISPLAY)"
-      fi
+      # Node fallback: parse the JSON and format
+      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        console.log(d.commands.map(c=>\"/learned/\"+c.name+\" (\"+c.conf+\")\").join(', '));
+      " 2>/dev/null)
+      LEARNED_SKILLS=$(echo "$LEARNED_JSON" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        console.log(d.skills.map(s=>s.name+\" (\"+s.conf+\")\").join(', '));
+      " 2>/dev/null)
     fi
-  done < "$LEARNING_LOG"
+  fi
 
   if [ -n "$LEARNED_COMMANDS" ] || [ -n "$LEARNED_SKILLS" ]; then
     LEARNED_SECTION="--- LEARNED BEHAVIORS ---"
@@ -183,47 +171,25 @@ Skills: $LEARNED_SKILLS"
     LEARNED_SECTION="$LEARNED_SECTION
 Edit or delete: .claude/commands/learned/ and .claude/skills/"
 
-    # Check for new artifacts since last notification
-    NEW_ARTIFACTS=""
+    # Check for new artifacts since last notification (single jq -s pass)
     LAST_NOTIFIED=0
     if [ -f "$NOTIFIED_MARKER" ]; then
       LAST_NOTIFIED=$(cat "$NOTIFIED_MARKER" 2>/dev/null || echo "0")
     fi
 
-    while IFS= read -r line; do
-      if ! echo "$line" | jq -e . >/dev/null 2>&1; then continue; fi
-      STATUS=$(echo "$line" | jq -r '.status // ""')
-      if [ "$STATUS" != "created" ]; then continue; fi
-
-      LAST_SEEN=$(echo "$line" | jq -r '.last_seen // ""')
-      if [ -n "$LAST_SEEN" ]; then
-        SEEN_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$LAST_SEEN" +%s 2>/dev/null \
-          || date -d "$LAST_SEEN" +%s 2>/dev/null \
-          || echo "0")
-        if [ "$SEEN_EPOCH" -gt "$LAST_NOTIFIED" ]; then
-          ARTIFACT_PATH=$(echo "$line" | jq -r '.artifact_path // ""')
-          TYPE=$(echo "$line" | jq -r '.type // ""')
-          if [ "$TYPE" = "workflow" ]; then
-            CMD_NAME=$(basename "$ARTIFACT_PATH" .md)
-            NEW_ARTIFACTS="${NEW_ARTIFACTS}NEW: /learned/$CMD_NAME command created from repeated workflow\n"
-          else
-            SKILL_NAME=$(echo "$ARTIFACT_PATH" | grep -o 'learned-[^/]*' || echo "")
-            NEW_ARTIFACTS="${NEW_ARTIFACTS}NEW: $SKILL_NAME skill created from procedural knowledge\n"
-          fi
-        fi
-      fi
-    done < "$LEARNING_LOG"
+    NEW_ARTIFACTS=$(json_learning_new "$LEARNING_LOG" "$LAST_NOTIFIED")
 
     if [ -n "$NEW_ARTIFACTS" ]; then
       LEARNED_SECTION="$LEARNED_SECTION
 
 --- NEW LEARNED BEHAVIORS ---
-$(printf '%b' "$NEW_ARTIFACTS")TIP: Type the command name to use it. Rename to shorter path for quicker access.
+${NEW_ARTIFACTS}
+TIP: Type the command name to use it. Rename to shorter path for quicker access.
 Run \`devflow learn --list\` to see all."
-    fi
 
-    # Update notified marker
-    date +%s > "$NOTIFIED_MARKER"
+      # Only update notified marker when new artifacts exist
+      date +%s > "$NOTIFIED_MARKER"
+    fi
 
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
@@ -264,9 +230,4 @@ if [ -z "$CONTEXT" ]; then
 fi
 
 # Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
-jq -n --arg ctx "$CONTEXT" '{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": $ctx
-  }
-}'
+json_session_output "$CONTEXT"

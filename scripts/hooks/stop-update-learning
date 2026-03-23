@@ -13,13 +13,15 @@ if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
 # Also guard against memory updater triggering learning
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
 
-# jq is required to parse hook input JSON — silently no-op if missing
-if ! command -v jq &>/dev/null; then exit 0; fi
+# JSON parsing (jq with node fallback) — silently no-op if neither available
+SCRIPT_DIR_JSON="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR_JSON/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
 # Resolve project directory — bail if missing
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
+CWD=$(echo "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
   exit 0
 fi
@@ -38,9 +40,9 @@ THROTTLE_MINUTES=5
 GLOBAL_CONFIG="$HOME/.devflow/learning.json"
 PROJECT_CONFIG="$CWD/.memory/learning.json"
 if [ -f "$PROJECT_CONFIG" ]; then
-  THROTTLE_MINUTES=$(jq -r ".throttle_minutes // 5" "$PROJECT_CONFIG" 2>/dev/null)
+  THROTTLE_MINUTES=$(json_field_file "$PROJECT_CONFIG" "throttle_minutes" "5")
 elif [ -f "$GLOBAL_CONFIG" ]; then
-  THROTTLE_MINUTES=$(jq -r ".throttle_minutes // 5" "$GLOBAL_CONFIG" 2>/dev/null)
+  THROTTLE_MINUTES=$(json_field_file "$GLOBAL_CONFIG" "throttle_minutes" "5")
 fi
 THROTTLE_SECONDS=$((THROTTLE_MINUTES * 60))
 
@@ -67,7 +69,7 @@ if [ -z "$CLAUDE_BIN" ]; then
 fi
 
 # Extract session ID from hook input
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null)
+SESSION_ID=$(echo "$INPUT" | json_field "session_id" "")
 if [ -z "$SESSION_ID" ]; then
   log "Skipped: no session_id in hook input"
   exit 0
