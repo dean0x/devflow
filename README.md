@@ -1,4 +1,4 @@
-# DevFlow
+# DevFlow: The Most Advanced Agentic Development Toolkit
 
 [![npm version](https://img.shields.io/npm/v/devflow-kit)](https://www.npmjs.com/package/devflow-kit)
 [![CI](https://github.com/dean0x/devflow/actions/workflows/ci.yml/badge.svg)](https://github.com/dean0x/devflow/actions/workflows/ci.yml)
@@ -6,7 +6,7 @@
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 [![Website](https://img.shields.io/badge/Website-dean0x.github.io%2Fx%2Fdevflow-blue)](https://dean0x.github.io/x/devflow/)
 
-**Development workflows for Claude Code — spec, implement, code-review, debug in one command.**
+**The most advanced toolkit for generating production-grade code with Claude Code. 18 parallel code reviewers. Working memory that never forgets. Self-learning that gets smarter every session.**
 
 <p align="center">
   <img src=".github/assets/devflow-init.gif" alt="DevFlow init demo" width="720" />
@@ -14,18 +14,28 @@
 
 ## Why DevFlow
 
-Claude Code is powerful but workflows are manual — you write ad-hoc prompts, lose context on every restart, and repeat the same review steps across projects.
+Claude Code is powerful. DevFlow makes it extraordinary.
 
-DevFlow adds structured commands that handle the full lifecycle: specify features, implement with exploration and planning, review with multiple perspectives, and debug with parallel investigation. Session memory persists automatically across restarts and compaction.
+**18 parallel code reviewers.** Not a linter. Not a single-pass review. DevFlow deploys up to 18 specialized reviewers simultaneously: security, architecture, performance, complexity, consistency, regression, tests, plus conditional reviewers for TypeScript, React, accessibility, Go, Python, Java, Rust, database, dependencies, and documentation. Each reviewer has domain-specific expertise. Findings include confidence scores, and false positives are tracked and penalized.
+
+**Working memory that never forgets.** Three shell hooks preserve session context across restarts, `/clear`, and context compaction. Zero ceremony. Your AI remembers what it was doing, what decisions were made, and what files were modified. Every session picks up exactly where the last one left off.
+
+**Long-term project knowledge.** Architectural decisions (ADRs) and known pitfalls persist across sessions in `.memory/knowledge/`. Reviewers automatically check if changes reintroduce known pitfalls or violate prior architectural decisions.
+
+**Self-learning workflows.** DevFlow watches how you work and auto-creates slash commands and skills from repeated patterns. It literally gets smarter the more you use it, detecting workflow patterns across sessions and generating reusable artifacts.
+
+35 quality skills. 10 shared agents. Full lifecycle from specification to PR. One `npx devflow-kit init`.
 
 ## Features
 
-- **Structured code review** — multiple specialized reviewers (security, architecture, performance, and more)
-- **Full-lifecycle implementation** — spec, explore, plan, code, validate, refine in one command
-- **Automatic session memory** — survives restarts, `/clear`, and context compaction
-- **Parallel debugging** — competing hypotheses investigated simultaneously
-- **Version notifications** — HUD shows `✦ Devflow vX.Y.Z · update: npx devflow-kit init` when a newer version is available
-- **35 quality skills** — 9 auto-activating core, 8 optional language/ecosystem, plus specialized review, agent, and orchestration skills
+- **18 parallel code reviewers** with security, architecture, performance, complexity, consistency, regression, tests, plus conditional language and framework reviewers
+- **Working memory** that survives restarts, `/clear`, and context compaction. Zero ceremony.
+- **Self-learning** that detects repeated workflows and auto-creates slash commands and skills
+- **Long-term project knowledge** with architectural decisions and known pitfalls that persist and inform reviews
+- **Full-lifecycle implementation** from spec to explore to plan to code to validate to refine in one command
+- **Parallel debugging** with competing hypotheses investigated simultaneously
+- **35 quality skills** with 9 auto-activating core, 8 language/ecosystem, plus specialized review and orchestration skills
+- **Ambient mode** that classifies intent and loads proportional skill sets automatically
 
 ## Quick Start
 
@@ -320,6 +330,16 @@ npx devflow-kit skills unshadow core-patterns
 | `--keep-docs` | Preserve .docs/ directory |
 | `--dry-run` | Show what would be removed without deleting anything |
 | `--verbose` | Show detailed uninstall output |
+
+## Part of the AI Development Stack
+
+| Tool | Role | What It Does |
+|------|------|-------------|
+| **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Compresses code, test output, build output, and git output for optimal LLM reasoning |
+| **DevFlow** | Quality Orchestration | 18 parallel reviewers, working memory, self-learning, production-grade lifecycle workflows |
+| **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | The only framework with Karpathy optimization loops. Multi-agent pipelines, DAG dependencies, scheduling |
+
+Skim optimizes what your AI sees. DevFlow enforces how it works. Backbeat scales everything across agents. No other stack covers all three.
 
 ## Building from Source
 
