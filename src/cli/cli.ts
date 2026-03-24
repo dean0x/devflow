@@ -11,6 +11,7 @@ import { ambientCommand } from './commands/ambient.js';
 import { memoryCommand } from './commands/memory.js';
 import { skillsCommand } from './commands/skills.js';
 import { hudCommand } from './commands/hud.js';
+import { learnCommand } from './commands/learn.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -37,6 +38,7 @@ program.addCommand(ambientCommand);
 program.addCommand(memoryCommand);
 program.addCommand(skillsCommand);
 program.addCommand(hudCommand);
+program.addCommand(learnCommand);
 
 // Handle no command
 program.action(() => {

@@ -1,0 +1,97 @@
+#!/bin/bash
+
+# Self-Learning: Stop Hook
+# Spawns a background process to analyze session patterns asynchronously.
+# The session ends immediately — no visible effect in the TUI.
+# On failure: does nothing (missing patterns are better than fake data).
+
+set -e
+
+# Break feedback loop: background learner's headless session triggers stop hook on exit.
+# DEVFLOW_BG_LEARNER is set by background-learning before invoking claude.
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
+# Also guard against memory updater triggering learning
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+
+# Resolve script directory once (used for json-parse, ensure-memory-gitignore, and learner)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# JSON parsing (jq with node fallback) — silently no-op if neither available
+source "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+# Resolve project directory — bail if missing
+CWD=$(echo "$INPUT" | json_field "cwd" "")
+if [ -z "$CWD" ]; then
+  exit 0
+fi
+
+# Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
+source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
+
+# Logging
+LOG_FILE="$CWD/.memory/.learning-update.log"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
+
+# Throttle: skip if triggered within configured throttle window
+# Load throttle config
+THROTTLE_MINUTES=5
+GLOBAL_CONFIG="$HOME/.devflow/learning.json"
+PROJECT_CONFIG="$CWD/.memory/learning.json"
+if [ -f "$PROJECT_CONFIG" ]; then
+  THROTTLE_MINUTES=$(json_field_file "$PROJECT_CONFIG" "throttle_minutes" "5")
+elif [ -f "$GLOBAL_CONFIG" ]; then
+  THROTTLE_MINUTES=$(json_field_file "$GLOBAL_CONFIG" "throttle_minutes" "5")
+fi
+THROTTLE_SECONDS=$((THROTTLE_MINUTES * 60))
+
+TRIGGER_MARKER="$CWD/.memory/.learning-last-trigger"
+if [ -f "$TRIGGER_MARKER" ]; then
+  if stat --version &>/dev/null 2>&1; then
+    MARKER_MTIME=$(stat -c %Y "$TRIGGER_MARKER")
+  else
+    MARKER_MTIME=$(stat -f %m "$TRIGGER_MARKER")
+  fi
+  NOW=$(date +%s)
+  AGE=$(( NOW - MARKER_MTIME ))
+  if [ "$AGE" -lt "$THROTTLE_SECONDS" ]; then
+    log "Skipped: triggered ${AGE}s ago (throttle: ${THROTTLE_SECONDS}s)"
+    exit 0
+  fi
+fi
+
+# Resolve claude binary — if not found, skip (graceful degradation)
+CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
+if [ -z "$CLAUDE_BIN" ]; then
+  log "Skipped: claude binary not found"
+  exit 0
+fi
+
+# Extract session ID from hook input
+SESSION_ID=$(echo "$INPUT" | json_field "session_id" "")
+if [ -z "$SESSION_ID" ]; then
+  log "Skipped: no session_id in hook input"
+  exit 0
+fi
+
+# Resolve the background learning script (same directory as this hook)
+LEARNER="$SCRIPT_DIR/background-learning"
+if [ ! -x "$LEARNER" ]; then
+  log "Skipped: learner not found/not executable at $LEARNER"
+  exit 0
+fi
+
+# Touch marker BEFORE spawning learner — prevents race with concurrent hooks
+touch "$TRIGGER_MARKER"
+
+# Spawn background learner — detached, no effect on session exit
+nohup "$LEARNER" "$CWD" "$SESSION_ID" "$CLAUDE_BIN" \
+  </dev/null >/dev/null 2>&1 &
+disown
+
+log "Spawned background learner: session=$SESSION_ID cwd=$CWD claude=$CLAUDE_BIN learner=$LEARNER"
+
+# Allow stop immediately (no JSON output = proceed)
+exit 0

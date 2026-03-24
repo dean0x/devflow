@@ -12,7 +12,8 @@ export interface ManifestData {
     teams: boolean;
     ambient: boolean;
     memory: boolean;
-    hud?: boolean;
+    learn: boolean;
+    hud: boolean;
   };
   installedAt: string;
   updatedAt: string;
@@ -25,22 +26,37 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
   const manifestPath = path.join(devflowDir, 'manifest.json');
   try {
     const content = await fs.readFile(manifestPath, 'utf-8');
-    const data = JSON.parse(content) as ManifestData;
+    const data = JSON.parse(content) as Record<string, unknown>;
+    const features = data.features as Record<string, unknown> | undefined;
     if (
       !data.version ||
       !Array.isArray(data.plugins) ||
       !data.scope ||
-      typeof data.features !== 'object' ||
-      data.features === null ||
-      typeof data.features.teams !== 'boolean' ||
-      typeof data.features.ambient !== 'boolean' ||
-      typeof data.features.memory !== 'boolean' ||
+      typeof features !== 'object' ||
+      features === null ||
+      typeof features.teams !== 'boolean' ||
+      typeof features.ambient !== 'boolean' ||
+      typeof features.memory !== 'boolean' ||
       typeof data.installedAt !== 'string' ||
       typeof data.updatedAt !== 'string'
     ) {
       return null;
     }
-    return data;
+    // Normalize optional fields with defaults (backwards-compatible with old manifests)
+    return {
+      version: data.version as string,
+      plugins: data.plugins as string[],
+      scope: data.scope as 'user' | 'local',
+      features: {
+        teams: features.teams as boolean,
+        ambient: features.ambient as boolean,
+        memory: features.memory as boolean,
+        hud: typeof features.hud === 'boolean' ? features.hud : false,
+        learn: typeof features.learn === 'boolean' ? features.learn : false,
+      },
+      installedAt: data.installedAt as string,
+      updatedAt: data.updatedAt as string,
+    };
   } catch {
     return null;
   }

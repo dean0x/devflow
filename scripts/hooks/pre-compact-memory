@@ -8,12 +8,13 @@
 
 set -e
 
-# jq is required to parse hook input JSON — silently no-op if missing
-if ! command -v jq &>/dev/null; then exit 0; fi
+# JSON parsing (jq with node fallback) — silently no-op if neither available
+source "$(cd "$(dirname "$0")" && pwd)/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
+CWD=$(echo "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
   exit 0
 fi
@@ -44,24 +45,14 @@ if [ -f "$CWD/.memory/WORKING-MEMORY.md" ]; then
 fi
 
 # Write backup JSON
-jq -n \
+json_backup_construct \
   --arg ts "$TIMESTAMP" \
   --arg branch "$GIT_BRANCH" \
   --arg status "$GIT_STATUS" \
   --arg log "$GIT_LOG" \
   --arg diff "$GIT_DIFF_STAT" \
   --arg memory "$MEMORY_SNAPSHOT" \
-  '{
-    timestamp: $ts,
-    trigger: "pre-compact",
-    memory_snapshot: $memory,
-    git: {
-      branch: $branch,
-      status: $status,
-      log: $log,
-      diff_stat: $diff
-    }
-  }' > "$BACKUP_FILE"
+  > "$BACKUP_FILE"
 
 # Bootstrap minimal WORKING-MEMORY.md if none exists yet
 # This ensures SessionStart has context to inject after compaction

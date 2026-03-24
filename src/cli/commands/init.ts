@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getInstallationPaths } from '../utils/paths.js';
@@ -25,6 +26,7 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
+import { addLearningHook, removeLearningHook } from './learn.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
@@ -33,6 +35,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '.
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
+export { addLearningHook, removeLearningHook, hasLearningHook } from './learn.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -66,6 +69,7 @@ interface InitOptions {
   teams?: boolean;
   ambient?: boolean;
   memory?: boolean;
+  learn?: boolean;
   hud?: boolean;
   hudOnly?: boolean;
 }
@@ -81,6 +85,8 @@ export const initCommand = new Command('init')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
+  .option('--learn', 'Enable self-learning (workflow detection)')
+  .option('--no-learn', 'Disable self-learning')
   .option('--hud', 'Enable HUD (git info, context usage, session stats)')
   .option('--no-hud', 'Disable HUD status line')
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
@@ -190,7 +196,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true },
+          features: { teams: false, ambient: false, memory: false, hud: true, learn: false },
           installedAt: now,
           updatedAt: now,
         });
@@ -338,6 +344,30 @@ export const initCommand = new Command('init')
         process.exit(0);
       }
       memoryEnabled = memoryChoice;
+    }
+
+    // Self-learning selection (defaults ON — foundational feature)
+    let learnEnabled: boolean;
+    if (options.learn !== undefined) {
+      learnEnabled = options.learn;
+    } else if (!process.stdin.isTTY) {
+      learnEnabled = true;
+    } else {
+      p.note(
+        'Detects repeated workflows and creates slash commands\n' +
+        'automatically. Runs a background agent on session stop\n' +
+        'that consumes additional tokens.',
+        'Self-Learning',
+      );
+      const learnChoice = await p.confirm({
+        message: 'Enable self-learning? (Recommended)',
+        initialValue: true,
+      });
+      if (p.isCancel(learnChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      learnEnabled = learnChoice;
     }
 
     // HUD selection (yes/no)
@@ -688,6 +718,10 @@ export const initCommand = new Command('init')
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 
+      // Learning hook — remove-then-add for upgrade safety
+      const cleanedForLearn = removeLearningHook(content);
+      content = learnEnabled ? addLearningHook(cleanedForLearn, devflowDir) : cleanedForLearn;
+
       // HUD statusLine
       content = hudEnabled
         ? addHudStatusLine(content, devflowDir)
@@ -756,6 +790,14 @@ export const initCommand = new Command('init')
 
     s.stop('Installation complete');
 
+    // Check for jq (hooks degrade gracefully without it, but features are reduced)
+    try {
+      execSync('command -v jq', { stdio: 'ignore' });
+    } catch {
+      p.log.warn('jq not found — some hook features will have reduced functionality');
+      p.log.info(`Install: ${color.cyan('brew install jq')}`);
+    }
+
     // === Summary ===
 
     if (usedNativeCli) {
@@ -822,7 +864,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

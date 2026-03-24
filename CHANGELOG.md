@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Self-learning system: detects repeated workflows and creates slash commands/skills automatically
+
 ---
 
 ## [1.8.3] - 2026-03-22

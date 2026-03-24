@@ -3,25 +3,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory } from '../utils/paths.js';
-
-/**
- * The hook entry structure used by Claude Code settings.json.
- */
-interface HookEntry {
-  type: string;
-  command: string;
-  timeout?: number;
-}
-
-interface HookMatcher {
-  hooks: HookEntry[];
-}
-
-interface Settings {
-  hooks?: Record<string, HookMatcher[]>;
-  [key: string]: unknown;
-}
+import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 const AMBIENT_HOOK_MARKER = 'ambient-prompt';
 
@@ -73,9 +56,14 @@ export function removeAmbientHook(settingsJson: string): string {
     return settingsJson;
   }
 
+  const before = settings.hooks.UserPromptSubmit.length;
   settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
     (matcher) => !matcher.hooks.some((h) => h.command.includes(AMBIENT_HOOK_MARKER)),
   );
+
+  if (settings.hooks.UserPromptSubmit.length === before) {
+    return settingsJson;
+  }
 
   if (settings.hooks.UserPromptSubmit.length === 0) {
     delete settings.hooks.UserPromptSubmit;
@@ -103,12 +91,18 @@ export function hasAmbientHook(settingsJson: string): boolean {
   );
 }
 
+interface AmbientOptions {
+  enable?: boolean;
+  disable?: boolean;
+  status?: boolean;
+}
+
 export const ambientCommand = new Command('ambient')
   .description('Enable or disable ambient mode (always-on quality enforcement)')
   .option('--enable', 'Register UserPromptSubmit hook for ambient mode')
   .option('--disable', 'Remove ambient mode hook')
   .option('--status', 'Check if ambient mode is enabled')
-  .action(async (options) => {
+  .action(async (options: AmbientOptions) => {
     const hasFlag = options.enable || options.disable || options.status;
     if (!hasFlag) {
       p.intro(color.bgMagenta(color.white(' Ambient Mode ')));
@@ -146,18 +140,17 @@ export const ambientCommand = new Command('ambient')
     // Resolve devflow scripts directory from settings.json hooks or default
     let devflowDir: string;
     try {
-      const settings = JSON.parse(settingsContent);
+      const settings: Settings = JSON.parse(settingsContent);
       // Try to extract devflowDir from existing hooks (e.g., Stop hook path)
       const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
       if (stopHook) {
-        // e.g., "run-hook stop-update-memory" or "/path/to/.devflow/scripts/hooks/run-hook stop-update-memory"
         const hookBinary = stopHook.split(' ')[0];
         devflowDir = path.resolve(hookBinary, '..', '..', '..');
       } else {
-        devflowDir = path.join(process.env.HOME || '~', '.devflow');
+        devflowDir = getDevFlowDirectory();
       }
     } catch {
-      devflowDir = path.join(process.env.HOME || '~', '.devflow');
+      devflowDir = getDevFlowDirectory();
     }
 
     if (options.enable) {

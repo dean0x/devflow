@@ -42,17 +42,23 @@ devflow/
 │   ├── build-hud.js                  # Copies dist/hud/ → scripts/hud/
 │   ├── hud.sh                        # Thin wrapper: exec node hud/index.js
 │   ├── hud/                          # GENERATED — compiled HUD module (gitignored)
-│   └── hooks/                        # Working Memory + ambient hooks
+│   └── hooks/                        # Working Memory + ambient + learning hooks
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
-│       └── ambient-prompt.sh        # UserPromptSubmit hook: ambient skill injection
+│       ├── ambient-prompt           # UserPromptSubmit hook: ambient skill injection
+│       ├── stop-update-learning     # Stop hook: triggers background learning
+│       ├── background-learning      # Background: pattern detection via Sonnet
+│       ├── json-helper.cjs           # Node.js jq-equivalent operations
+│       └── json-parse               # Shell wrapper: jq with node fallback
 └── src/
     └── cli/
         ├── commands/
         │   ├── init.ts
         │   ├── list.ts
         │   ├── memory.ts
+        │   ├── learn.ts
+        │   ├── ambient.ts
         │   ├── hud.ts
         │   └── uninstall.ts
         ├── hud/                          # HUD module (TypeScript source)
@@ -137,7 +143,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
-- `hooks` - Working Memory hooks (Stop, SessionStart, PreCompact)
+- `hooks` - Working Memory hooks (Stop, SessionStart, PreCompact) + Learning Stop hook
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
@@ -146,7 +152,9 @@ Included settings:
 
 ## Working Memory Hooks
 
-Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`:
+Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
+
+A fourth hook (`stop-update-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
 
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|

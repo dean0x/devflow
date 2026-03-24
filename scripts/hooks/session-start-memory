@@ -8,12 +8,14 @@
 
 set -e
 
-# jq is required to parse hook input JSON — silently no-op if missing
-if ! command -v jq &>/dev/null; then exit 0; fi
+# JSON parsing (jq with node fallback) — silently no-op if neither available
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
+CWD=$(echo "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
   exit 0
 fi
@@ -40,9 +42,9 @@ if [ -f "$MEMORY_FILE" ]; then
   BACKUP_FILE="$CWD/.memory/backup.json"
   COMPACT_NOTE=""
   if [ -f "$BACKUP_FILE" ]; then
-    BACKUP_MEMORY=$(jq -r '.memory_snapshot // ""' "$BACKUP_FILE" 2>/dev/null)
+    BACKUP_MEMORY=$(json_field_file "$BACKUP_FILE" "memory_snapshot" "")
     if [ -n "$BACKUP_MEMORY" ]; then
-      BACKUP_TS=$(jq -r '.timestamp // ""' "$BACKUP_FILE" 2>/dev/null)
+      BACKUP_TS=$(json_field_file "$BACKUP_FILE" "timestamp" "")
       BACKUP_EPOCH=0
       if [ -n "$BACKUP_TS" ]; then
         BACKUP_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BACKUP_TS" +%s 2>/dev/null \
@@ -128,6 +130,77 @@ ${KNOWLEDGE_SECTION}"
   fi
 fi
 
+# --- Section 1.75: Learned Behaviors ---
+
+LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
+NOTIFIED_MARKER="$CWD/.memory/.learning-notified-at"
+
+if [ -f "$LEARNING_LOG" ]; then
+  # Single-pass extraction of created artifacts (commands + skills)
+  LEARNED_JSON=$(json_learning_created "$LEARNING_LOG")
+
+  LEARNED_COMMANDS=""
+  LEARNED_SKILLS=""
+  if [ -n "$LEARNED_JSON" ]; then
+    if [ "$_HAS_JQ" = "true" ]; then
+      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | jq -r '.commands | map("/learned/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
+      LEARNED_SKILLS=$(echo "$LEARNED_JSON" | jq -r '.skills | map("\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
+    else
+      # Node fallback: parse the JSON and format
+      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        console.log(d.commands.map(c=>\"/learned/\"+c.name+\" (\"+c.conf+\")\").join(', '));
+      " 2>/dev/null)
+      LEARNED_SKILLS=$(echo "$LEARNED_JSON" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        console.log(d.skills.map(s=>s.name+\" (\"+s.conf+\")\").join(', '));
+      " 2>/dev/null)
+    fi
+  fi
+
+  if [ -n "$LEARNED_COMMANDS" ] || [ -n "$LEARNED_SKILLS" ]; then
+    LEARNED_SECTION="--- LEARNED BEHAVIORS ---"
+    if [ -n "$LEARNED_COMMANDS" ]; then
+      LEARNED_SECTION="$LEARNED_SECTION
+Commands: $LEARNED_COMMANDS"
+    fi
+    if [ -n "$LEARNED_SKILLS" ]; then
+      LEARNED_SECTION="$LEARNED_SECTION
+Skills: $LEARNED_SKILLS"
+    fi
+    LEARNED_SECTION="$LEARNED_SECTION
+Edit or delete: .claude/commands/learned/ and .claude/skills/"
+
+    # Check for new artifacts since last notification (single jq -s pass)
+    LAST_NOTIFIED=0
+    if [ -f "$NOTIFIED_MARKER" ]; then
+      LAST_NOTIFIED=$(cat "$NOTIFIED_MARKER" 2>/dev/null || echo "0")
+    fi
+
+    NEW_ARTIFACTS=$(json_learning_new "$LEARNING_LOG" "$LAST_NOTIFIED")
+
+    if [ -n "$NEW_ARTIFACTS" ]; then
+      LEARNED_SECTION="$LEARNED_SECTION
+
+--- NEW LEARNED BEHAVIORS ---
+${NEW_ARTIFACTS}
+TIP: Type the command name to use it. Rename to shorter path for quicker access.
+Run \`devflow learn --list\` to see all."
+
+      # Only update notified marker when new artifacts exist
+      date +%s > "$NOTIFIED_MARKER"
+    fi
+
+    if [ -n "$CONTEXT" ]; then
+      CONTEXT="${CONTEXT}
+
+${LEARNED_SECTION}"
+    else
+      CONTEXT="$LEARNED_SECTION"
+    fi
+  fi
+fi
+
 # --- Section 2: Ambient Skill Injection ---
 
 # Inject ambient-router SKILL.md directly into context so Claude doesn't need a Read call.
@@ -157,9 +230,4 @@ if [ -z "$CONTEXT" ]; then
 fi
 
 # Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
-jq -n --arg ctx "$CONTEXT" '{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": $ctx
-  }
-}'
+json_session_output "$CONTEXT"

@@ -1,0 +1,295 @@
+#!/bin/bash
+
+# JSON parsing helper — tries jq, falls back to node json-helper.js
+# Usage: source "$SCRIPT_DIR/json-parse"
+#
+# After sourcing, check $_JSON_AVAILABLE before using json_* functions.
+# All functions read from stdin unless noted otherwise.
+
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_JSON_HELPER="$_SCRIPT_DIR/json-helper.cjs"
+
+_HAS_JQ=false
+_HAS_NODE=false
+command -v jq &>/dev/null && _HAS_JQ=true
+command -v node &>/dev/null && _HAS_NODE=true
+
+if [ "$_HAS_JQ" = "false" ] && [ "$_HAS_NODE" = "false" ]; then
+  _JSON_AVAILABLE=false
+  return 0 2>/dev/null || exit 0
+fi
+_JSON_AVAILABLE=true
+
+# --- Core field extraction ---
+
+# Extract a field from stdin JSON. Usage: echo '{"k":"v"}' | json_field "k" "default"
+json_field() {
+  local field="$1" default="${2:-}"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -r ".$field // \"$default\"" 2>/dev/null
+  else
+    node "$_JSON_HELPER" get-field "$field" "$default"
+  fi
+}
+
+# Extract a field from a JSON file. Usage: json_field_file "/path/to/file.json" "field" "default"
+json_field_file() {
+  local file="$1" field="$2" default="${3:-}"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -r ".$field // \"$default\"" "$file" 2>/dev/null
+  else
+    node "$_JSON_HELPER" get-field-file "$file" "$field" "$default"
+  fi
+}
+
+# --- Validation ---
+
+# Validate stdin as JSON (exit code 0/1). Usage: echo '{}' | json_valid
+json_valid() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -e . >/dev/null 2>&1
+  else
+    node "$_JSON_HELPER" validate
+  fi
+}
+
+# --- Compact ---
+
+# Compact stdin JSON to single line. Usage: echo '{ "k": "v" }' | json_compact
+json_compact() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -c '.' 2>/dev/null
+  else
+    node "$_JSON_HELPER" compact
+  fi
+}
+
+# --- Construction ---
+
+# Build a JSON object from --arg/--argjson pairs.
+# Usage: json_construct --arg key1 val1 --arg key2 val2
+json_construct() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    # Build jq expression from args
+    local jq_args=()
+    local fields=""
+    local i=0
+    while [ $i -lt $# ]; do
+      local flag="${!((i+1))}"
+      if [ "$flag" = "--arg" ]; then
+        local name="${!((i+2))}"
+        local val="${!((i+3))}"
+        jq_args+=(--arg "$name" "$val")
+        if [ -n "$fields" ]; then fields="$fields, "; fi
+        fields="${fields}${name}: \$${name}"
+        i=$((i + 3))
+      elif [ "$flag" = "--argjson" ]; then
+        local name="${!((i+2))}"
+        local val="${!((i+3))}"
+        jq_args+=(--argjson "$name" "$val")
+        if [ -n "$fields" ]; then fields="$fields, "; fi
+        fields="${fields}${name}: \$${name}"
+        i=$((i + 3))
+      else
+        i=$((i + 1))
+      fi
+    done
+    jq -n -c "${jq_args[@]}" "{$fields}" 2>/dev/null
+  else
+    node "$_JSON_HELPER" construct "$@"
+  fi
+}
+
+# --- Field updates ---
+
+# Update a field on stdin JSON. Usage: echo '{"k":"v"}' | json_update_field "k" "new_v"
+json_update_field() {
+  local field="$1" value="$2"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -c --arg v "$value" ".$field = \$v" 2>/dev/null
+  else
+    node "$_JSON_HELPER" update-field "$field" "$value"
+  fi
+}
+
+# Update a field with a JSON value. Usage: echo '{}' | json_update_field_json "k" '42'
+json_update_field_json() {
+  local field="$1" value="$2"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -c --argjson v "$value" ".$field = \$v" 2>/dev/null
+  else
+    node "$_JSON_HELPER" update-field "$field" "$value" --json
+  fi
+}
+
+# --- Slurp operations ---
+
+# Slurp JSONL file, sort by field desc, output as JSON array.
+# Usage: json_slurp_sort "file.jsonl" "confidence" 30
+json_slurp_sort() {
+  local file="$1" field="$2" limit="${3:-30}"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -s "sort_by(.$field) | reverse | .[0:$limit]" "$file" 2>/dev/null
+  else
+    node "$_JSON_HELPER" slurp-sort "$file" "$field" "$limit"
+  fi
+}
+
+# Slurp JSONL file, sort by field desc, output as JSONL (one line per entry).
+# Usage: json_slurp_cap "file.jsonl" "confidence" 100
+json_slurp_cap() {
+  local file="$1" field="$2" limit="${3:-100}"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -c '.' "$file" | jq -s "sort_by(.$field) | reverse | .[0:$limit][]" 2>/dev/null
+  else
+    node "$_JSON_HELPER" slurp-cap "$file" "$field" "$limit"
+  fi
+}
+
+# --- Array operations ---
+
+# Get length of array at path. Usage: echo '{"obs":[1,2]}' | json_array_length "observations"
+json_array_length() {
+  local path="$1"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq ".$path | length" 2>/dev/null
+  else
+    node "$_JSON_HELPER" array-length "$path"
+  fi
+}
+
+# Get item at index from array. Usage: echo '{"obs":[{},{}]}' | json_array_item "observations" 0
+json_array_item() {
+  local path="$1" index="$2"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -c ".${path}[$index]" 2>/dev/null
+  else
+    node "$_JSON_HELPER" array-item "$path" "$index"
+  fi
+}
+
+# --- Transcript extraction ---
+
+# Extract text messages from Claude message JSON. Usage: echo '{"message":...}' | json_extract_messages
+json_extract_messages() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -r 'if .message.content then
+      [.message.content[] | select(.type == "text") | .text] | join("\n")
+    else "" end' 2>/dev/null
+  else
+    node "$_JSON_HELPER" extract-text-messages
+  fi
+}
+
+# --- Evidence merging ---
+
+# Merge two evidence arrays. Usage: echo '[[old], [new]]' | json_merge_evidence
+json_merge_evidence() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -c 'flatten | unique | .[0:10]' 2>/dev/null
+  else
+    node "$_JSON_HELPER" merge-evidence
+  fi
+}
+
+# --- Hook output envelopes ---
+
+# Build SessionStart output. Usage: json_session_output "$CONTEXT"
+json_session_output() {
+  local ctx="$1"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -n --arg ctx "$ctx" '{
+      "hookSpecificOutput": {
+        "hookEventName": "SessionStart",
+        "additionalContext": $ctx
+      }
+    }'
+  else
+    node "$_JSON_HELPER" session-output "$ctx"
+  fi
+}
+
+# Build UserPromptSubmit output. Usage: json_prompt_output "$CONTEXT"
+json_prompt_output() {
+  local ctx="$1"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -n --arg ctx "$ctx" '{
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": $ctx
+      }
+    }'
+  else
+    node "$_JSON_HELPER" prompt-output "$ctx"
+  fi
+}
+
+# Build pre-compact backup JSON. Usage: json_backup_construct --arg ts X --arg branch Y ...
+json_backup_construct() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -n "$@" '{timestamp: $ts, trigger: "pre-compact", memory_snapshot: $memory, git: {branch: $branch, status: $status, log: $log, diff_stat: $diff}}'
+  else
+    node "$_JSON_HELPER" backup-construct "$@"
+  fi
+}
+
+# --- Learning-specific ---
+
+# Extract created artifacts from learning log. Usage: json_learning_created "learning-log.jsonl"
+json_learning_created() {
+  local file="$1"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -s '
+      [.[] | select(.status == "created" and .artifact_path != null and .artifact_path != "")]
+      | {
+        commands: [.[] | select(.type == "workflow") | {
+          name: (.artifact_path | split("/") | last | rtrimstr(".md")),
+          conf: (.confidence * 10 | floor / 10 | tostring)
+        }] | .[0:5],
+        skills: [.[] | select(.type == "procedural") | {
+          name: (.artifact_path | capture("learned-(?<n>[^/]+)") | .n // ""),
+          conf: (.confidence * 10 | floor / 10 | tostring)
+        }] | .[0:5]
+      }
+    ' "$file" 2>/dev/null
+  else
+    node "$_JSON_HELPER" learning-created "$file"
+  fi
+}
+
+# Find new artifacts since epoch. Usage: json_learning_new "learning-log.jsonl" "$LAST_NOTIFIED"
+json_learning_new() {
+  local file="$1" since="$2"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -s --arg since "$since" '
+      [.[] | select(.status == "created" and .last_seen != null)]
+      | map(
+        if .type == "workflow" then
+          "NEW: /learned/\(.artifact_path | split("/") | last | rtrimstr(".md")) command created from repeated workflow"
+        else
+          "NEW: \(.artifact_path | capture("learned-(?<n>[^/]+)") | .n // "") skill created from procedural knowledge"
+        end
+      ) | join("\n")
+    ' "$file" 2>/dev/null
+  else
+    node "$_JSON_HELPER" learning-new "$file" "$since"
+  fi
+}
+
+# Build observation JSON. Usage: json_obs_construct --arg id X --arg type Y ...
+json_obs_construct() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -n -c "$@" '{id: $id, type: $type, pattern: $pattern, confidence: $confidence, observations: $observations, first_seen: $first_seen, last_seen: $last_seen, status: $status, evidence: $evidence, details: $details}'
+  else
+    node "$_JSON_HELPER" obs-construct "$@"
+  fi
+}
+
+# Build observation JSON with artifact_path. Usage: json_obs_construct_full --arg id X ...
+json_obs_construct_full() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -n -c "$@" '{id: $id, type: $type, pattern: $pattern, confidence: $confidence, observations: $observations, first_seen: $first_seen, last_seen: $last_seen, status: $status, evidence: $evidence, details: $details, artifact_path: $artifact_path}'
+  else
+    node "$_JSON_HELPER" obs-construct "$@"
+  fi
+}
