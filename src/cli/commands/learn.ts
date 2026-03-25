@@ -366,8 +366,8 @@ export const learnCommand = new Command('learn')
 
       const maxRuns = await p.text({
         message: 'Maximum background runs per day',
-        placeholder: '10',
-        defaultValue: '10',
+        placeholder: '5',
+        defaultValue: '5',
         validate: (v) => {
           const n = Number(v);
           if (isNaN(n) || n < 1 || n > 50) return 'Enter a number between 1 and 50';

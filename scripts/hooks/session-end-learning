@@ -11,12 +11,20 @@
 #
 set -euo pipefail
 
-CWD="${1:-}"
-CLAUDE_BIN="${2:-claude}"
-
 # --- Guard clauses (break feedback loop from background claude sessions) ---
 [ "${DEVFLOW_BG_LEARNER:-}" = "1" ] && exit 0
 [ "${DEVFLOW_BG_UPDATER:-}" = "1" ] && exit 0
+
+# Source json-parse library (must be available before reading stdin JSON)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=json-parse
+. "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+# Read hook input from stdin (Claude passes JSON with cwd, session_id, etc.)
+INPUT=$(cat)
+
+CWD=$(echo "$INPUT" | json_field "cwd" "")
 [ -z "$CWD" ] && exit 0
 
 MEMORY_DIR="$CWD/.memory"
@@ -26,15 +34,9 @@ MEMORY_DIR="$CWD/.memory"
 LEARNING_CONFIG="$MEMORY_DIR/learning.json"
 [ ! -f "$LEARNING_CONFIG" ] && exit 0
 
-# Source json-parse library
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=json-parse
-. "$SCRIPT_DIR/json-parse"
-
-# Check JSON tools available
-if [ "$_HAS_JQ" != "true" ] && [ "$_HAS_NODE" != "true" ]; then
-  exit 0
-fi
+# Resolve claude binary
+CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
+[ -z "$CLAUDE_BIN" ] && exit 0
 
 # --- Config ---
 ENABLED=$(json_field "enabled" "false" < "$LEARNING_CONFIG")
@@ -66,14 +68,18 @@ if [ ! -d "$PROJECTS_DIR" ]; then
   exit 0
 fi
 
-# Find the most recent session transcript
-TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
-if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
-  log "No transcript found"
-  exit 0
+# Extract session ID from hook JSON (preferred), fall back to most recent transcript
+SESSION_ID=$(echo "$INPUT" | json_field "session_id" "")
+if [ -n "$SESSION_ID" ] && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
+  TRANSCRIPT="$PROJECTS_DIR/${SESSION_ID}.jsonl"
+else
+  TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
+  if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
+    log "No transcript found"
+    exit 0
+  fi
+  SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
 fi
-
-SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
 log "Session: $SESSION_ID"
 
 # --- Session depth check (min 3 user turns) ---
@@ -101,8 +107,8 @@ reinforce_loaded_artifacts() {
 
   while IFS= read -r line; do
     local status artifact_path
-    status=$(echo "$line" | json_field "status" "")
-    artifact_path=$(echo "$line" | json_field "artifact_path" "")
+    status=$(echo "$line" | json_field "status" "" || true)
+    artifact_path=$(echo "$line" | json_field "artifact_path" "" || true)
 
     if [ "$status" = "created" ] && [ -n "$artifact_path" ]; then
       # Extract slug from path

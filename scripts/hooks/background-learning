@@ -396,9 +396,9 @@ run_sonnet_analysis() {
   if ! wait "$CLAUDE_PID" 2>/dev/null; then
     EXIT_CODE=$?
     if [ "$EXIT_CODE" -gt 128 ]; then
-      log "Analysis timed out (killed after ${TIMEOUT}s) for session $SESSION_ID"
+      log "Analysis timed out (killed after ${TIMEOUT}s)"
     else
-      log "Analysis failed for session $SESSION_ID (exit code $EXIT_CODE)"
+      log "Analysis failed (exit code $EXIT_CODE)"
     fi
     rm -f "$RESPONSE_FILE"
     kill "$WATCHDOG_PID" 2>/dev/null || true
@@ -718,7 +718,7 @@ fi
 process_observations
 create_artifacts
 
-increment_daily_counter
+# Note: daily counter already incremented by session-end-learning before spawning us
 log "Learning analysis complete (batch mode)"
 
 exit 0
