@@ -1,4 +1,4 @@
-# DevFlow: The Most Advanced Agentic Toolkit for Generating Production-Grade Code
+# DevFlow: The Most Advanced Agentic Development Toolkit for Production-Grade Code
 
 [![npm version](https://img.shields.io/npm/v/devflow-kit)](https://www.npmjs.com/package/devflow-kit)
 [![CI](https://github.com/dean0x/devflow/actions/workflows/ci.yml/badge.svg)](https://github.com/dean0x/devflow/actions/workflows/ci.yml)
@@ -340,7 +340,7 @@ npx devflow-kit skills unshadow core-patterns
 
 | Tool | Role | What It Does |
 |------|------|-------------|
-| **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Compresses code, test output, build output, and git output for optimal LLM reasoning |
+| **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing across 12 languages, command rewriting, test/build/git output compression |
 | **DevFlow** | Quality Orchestration | 18 parallel reviewers, working memory, self-learning, composable plugin system |
 | **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | Orchestration at scale. Karpathy optimization loops, multi-agent pipelines, DAG dependencies, autoscaling |
 
