@@ -31,6 +31,8 @@ export interface LearningConfig {
   throttle_minutes: number;
   model: string;
   debug: boolean;
+  /** Number of observations processed per learning run. Default 3, adaptive 5 at 15+ observations. */
+  batch_size: number;
 }
 
 /**
@@ -56,14 +58,19 @@ const LEGACY_HOOK_MARKER = 'stop-update-learning';
 
 /**
  * Add the learning SessionEnd hook to settings JSON.
- * Idempotent — returns unchanged JSON if hook already exists.
+ * Idempotent — returns unchanged JSON if current hook already exists.
+ * Self-upgrading — removes legacy Stop hook before adding SessionEnd hook.
  */
 export function addLearningHook(settingsJson: string, devflowDir: string): string {
-  const settings: Settings = JSON.parse(settingsJson);
+  const hookState = hasLearningHook(settingsJson);
 
-  if (hasLearningHook(settingsJson)) {
+  if (hookState === 'current') {
     return settingsJson;
   }
+
+  // Remove any legacy Stop hooks before adding the new SessionEnd hook
+  const cleanedJson = removeLearningHook(settingsJson);
+  const settings: Settings = JSON.parse(cleanedJson);
 
   if (!settings.hooks) {
     settings.hooks = {};
@@ -127,17 +134,28 @@ export function removeLearningHook(settingsJson: string): string {
 
 /**
  * Check if the learning hook is registered in settings JSON.
+ * Returns 'current' for SessionEnd hook, 'legacy' for old Stop hook, or false if absent.
  */
-export function hasLearningHook(settingsJson: string): boolean {
+export function hasLearningHook(settingsJson: string): 'current' | 'legacy' | false {
   const settings: Settings = JSON.parse(settingsJson);
 
-  if (!settings.hooks?.SessionEnd) {
-    return false;
+  const hasSessionEnd = settings.hooks?.SessionEnd?.some((matcher) =>
+    matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
+  ) ?? false;
+
+  if (hasSessionEnd) {
+    return 'current';
   }
 
-  return settings.hooks.SessionEnd.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
-  );
+  const hasLegacyStop = settings.hooks?.Stop?.some((matcher) =>
+    matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER)),
+  ) ?? false;
+
+  if (hasLegacyStop) {
+    return 'legacy';
+  }
+
+  return false;
 }
 
 /**
@@ -183,11 +201,16 @@ export function loadAndCountObservations(logContent: string): {
 
 /**
  * Format a human-readable status summary for learning state.
+ * hookState: 'current' (SessionEnd), 'legacy' (old Stop hook), or false (disabled).
  */
-export function formatLearningStatus(observations: LearningObservation[], hookEnabled: boolean): string {
+export function formatLearningStatus(observations: LearningObservation[], hookState: 'current' | 'legacy' | false): string {
   const lines: string[] = [];
 
-  lines.push(`Self-learning: ${hookEnabled ? 'enabled' : 'disabled'}`);
+  if (hookState === 'legacy') {
+    lines.push('Self-learning: enabled (legacy — run `devflow learn --disable && devflow learn --enable` to upgrade)');
+  } else {
+    lines.push(`Self-learning: ${hookState ? 'enabled' : 'disabled'}`);
+  }
 
   if (observations.length === 0) {
     lines.push('Observations: none');
@@ -212,7 +235,7 @@ export function formatLearningStatus(observations: LearningObservation[], hookEn
  * Skips fields with wrong types; swallows parse errors.
  */
 // SYNC: Config loading duplicated in scripts/hooks/background-learning load_config()
-// Synced fields: max_daily_runs, throttle_minutes, model, debug
+// Synced fields: max_daily_runs, throttle_minutes, model, debug, batch_size
 export function applyConfigLayer(config: LearningConfig, json: string): LearningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
@@ -221,6 +244,7 @@ export function applyConfigLayer(config: LearningConfig, json: string): Learning
       throttle_minutes: typeof raw.throttle_minutes === 'number' ? raw.throttle_minutes : config.throttle_minutes,
       model: typeof raw.model === 'string' ? raw.model : config.model,
       debug: typeof raw.debug === 'boolean' ? raw.debug : config.debug,
+      batch_size: typeof raw.batch_size === 'number' ? raw.batch_size : config.batch_size,
     };
   } catch {
     return { ...config };
@@ -237,6 +261,7 @@ export function loadLearningConfig(globalJson: string | null, projectJson: strin
     throttle_minutes: 5,
     model: 'sonnet',
     debug: false,
+    batch_size: 3,
   };
 
   if (globalJson) config = applyConfigLayer(config, globalJson);
@@ -298,7 +323,7 @@ export const learnCommand = new Command('learn')
 
     // --- --status ---
     if (options.status) {
-      const hookEnabled = hasLearningHook(settingsContent);
+      const hookState = hasLearningHook(settingsContent);
       const cwd = process.cwd();
       const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
 
@@ -311,7 +336,7 @@ export const learnCommand = new Command('learn')
         // No log file yet
       }
 
-      const status = formatLearningStatus(observations, hookEnabled);
+      const status = formatLearningStatus(observations, hookState);
       p.log.info(status);
       if (invalidCount > 0) {
         p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
@@ -416,6 +441,21 @@ export const learnCommand = new Command('learn')
         return;
       }
 
+      const batchSize = await p.text({
+        message: 'Observations per learning run (adaptive: 5 at 15+ observations)',
+        placeholder: '3',
+        defaultValue: '3',
+        validate: (v) => {
+          const n = Number(v);
+          if (isNaN(n) || n < 1 || n > 20) return 'Enter a number between 1 and 20';
+          return undefined;
+        },
+      });
+      if (p.isCancel(batchSize)) {
+        p.cancel('Configuration cancelled.');
+        return;
+      }
+
       const scope = await p.select({
         message: 'Configuration scope',
         options: [
@@ -433,6 +473,7 @@ export const learnCommand = new Command('learn')
         throttle_minutes: Number(throttle),
         model: String(model),
         debug: !!debugMode,
+        batch_size: Number(batchSize),
       };
 
       const configJson = JSON.stringify(config, null, 2) + '\n';
@@ -528,13 +569,18 @@ export const learnCommand = new Command('learn')
     }
 
     if (options.enable) {
+      const priorState = hasLearningHook(settingsContent);
       const updated = addLearningHook(settingsContent, devflowDir);
       if (updated === settingsContent) {
         p.log.info('Self-learning already enabled');
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('Self-learning enabled — SessionEnd hook registered');
+      if (priorState === 'legacy') {
+        p.log.success('Self-learning upgraded — legacy Stop hook replaced with SessionEnd hook');
+      } else {
+        p.log.success('Self-learning enabled — SessionEnd hook registered');
+      }
       p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
     }
 
