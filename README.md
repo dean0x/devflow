@@ -236,7 +236,8 @@ DevFlow creates project documentation in `.docs/` and working memory in `.memory
 ├── learning-log.jsonl        # Learning observations (JSONL)
 ├── learning.json             # Project-level learning config
 ├── .learning-runs-today      # Daily run counter
-├── .learning-last-trigger    # Throttle marker
+├── .learning-session-count   # Session IDs pending batch (one per line)
+├── .learning-batch-ids       # Session IDs for current batch run
 ├── .learning-notified-at     # New artifact notification marker
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
