@@ -147,41 +147,6 @@ decay_factor() {
   esac
 }
 
-# --- Transcript Extraction ---
-
-extract_user_messages() {
-  local encoded_cwd
-  encoded_cwd=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
-  local transcript="$HOME/.claude/projects/-${encoded_cwd}/${SESSION_ID}.jsonl"
-
-  if [ ! -f "$transcript" ]; then
-    log "Transcript not found at $transcript"
-    return 1
-  fi
-
-  # Extract ALL user text messages, skip tool_result blocks
-  USER_MESSAGES=$(grep '"type":"user"' "$transcript" 2>/dev/null \
-    | while IFS= read -r line; do echo "$line" | json_extract_messages; done \
-    | grep -v '^$')
-
-  # Truncate to 12,000 chars
-  if [ ${#USER_MESSAGES} -gt 12000 ]; then
-    USER_MESSAGES="${USER_MESSAGES:0:12000}... [truncated]"
-  fi
-
-  if [ -z "$USER_MESSAGES" ]; then
-    log "No user text content found in transcript"
-    return 1
-  fi
-
-  if [ ${#USER_MESSAGES} -lt 200 ]; then
-    log "Insufficient content for pattern detection (${#USER_MESSAGES} chars, min 200)"
-    return 1
-  fi
-
-  return 0
-}
-
 # --- Batch Transcript Extraction ---
 
 extract_batch_messages() {

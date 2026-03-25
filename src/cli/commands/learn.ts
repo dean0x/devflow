@@ -100,33 +100,19 @@ export function removeLearningHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
   let changed = false;
 
-  // Remove from SessionEnd (current)
-  if (settings.hooks?.SessionEnd) {
-    const before = settings.hooks.SessionEnd.length;
-    settings.hooks.SessionEnd = settings.hooks.SessionEnd.filter(
-      (matcher) => !matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
+  function removeFromEvent(event: 'SessionEnd' | 'Stop', marker: string): void {
+    const matchers = settings.hooks?.[event];
+    if (!matchers) return;
+    const before = matchers.length;
+    settings.hooks![event] = matchers.filter(
+      (m) => !m.hooks.some((h) => h.command.includes(marker)),
     );
-    if (settings.hooks.SessionEnd.length < before) {
-      changed = true;
-    }
-    if (settings.hooks.SessionEnd.length === 0) {
-      delete settings.hooks.SessionEnd;
-    }
+    if (settings.hooks![event]!.length < before) changed = true;
+    if (settings.hooks![event]!.length === 0) delete settings.hooks![event];
   }
 
-  // Remove from Stop (legacy cleanup)
-  if (settings.hooks?.Stop) {
-    const before = settings.hooks.Stop.length;
-    settings.hooks.Stop = settings.hooks.Stop.filter(
-      (matcher) => !matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER)),
-    );
-    if (settings.hooks.Stop.length < before) {
-      changed = true;
-    }
-    if (settings.hooks.Stop.length === 0) {
-      delete settings.hooks.Stop;
-    }
-  }
+  removeFromEvent('SessionEnd', LEARNING_HOOK_MARKER);
+  removeFromEvent('Stop', LEGACY_HOOK_MARKER);
 
   if (!changed) {
     return settingsJson;

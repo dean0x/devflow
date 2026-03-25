@@ -14,9 +14,9 @@ set -euo pipefail
 CWD="${1:-}"
 CLAUDE_BIN="${2:-claude}"
 
-# --- Guard clauses ---
-[ -n "${BG_LEARNER:-}" ] && exit 0
-[ -n "${BG_UPDATER:-}" ] && exit 0
+# --- Guard clauses (break feedback loop from background claude sessions) ---
+[ "${DEVFLOW_BG_LEARNER:-}" = "1" ] && exit 0
+[ "${DEVFLOW_BG_UPDATER:-}" = "1" ] && exit 0
 [ -z "$CWD" ] && exit 0
 
 MEMORY_DIR="$CWD/.memory"
@@ -44,11 +44,9 @@ DEBUG=$(json_field "debug" "false" < "$LEARNING_CONFIG")
 MAX_DAILY=$(json_field "max_daily_runs" "5" < "$LEARNING_CONFIG")
 BATCH_SIZE=$(json_field "batch_size" "3" < "$LEARNING_CONFIG")
 
-# Project slug for logs
-PROJECT_SLUG=$(echo "$CWD" | sed 's|/|_|g; s|^_||')
-LOG_DIR="$HOME/.devflow/logs/$PROJECT_SLUG"
-mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/.learning-update.log"
+# Log path (shared helper — consistent slug with background-learning)
+. "$SCRIPT_DIR/log-paths"
+LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 
 log() {
   if [ "$DEBUG" = "true" ]; then
@@ -118,16 +116,7 @@ reinforce_loaded_artifacts() {
       fi
 
       if echo "$loaded" | grep -qF "$slug" 2>/dev/null; then
-        if [ "$_HAS_JQ" = "true" ]; then
-          line=$(echo "$line" | jq -c --arg ts "$now_iso" '.last_seen = $ts')
-        else
-          # Node fallback: simple string replacement
-          if echo "$line" | grep -q '"last_seen"' 2>/dev/null; then
-            line=$(echo "$line" | sed "s/\"last_seen\":\"[^\"]*\"/\"last_seen\":\"$now_iso\"/")
-          else
-            line=$(echo "$line" | sed "s/}$/,\"last_seen\":\"$now_iso\"}/")
-          fi
-        fi
+        line=$(echo "$line" | json_update_field "last_seen" "$now_iso")
         updated=true
         log "Reinforced: $slug"
       fi
@@ -175,14 +164,14 @@ fi
 
 # --- Batch is full: prepare to spawn background learner ---
 
-# Daily cap check
+# Daily cap check — tab-separated format: "DATE\tCOUNT" (matches background-learning)
 RUNS_FILE="$MEMORY_DIR/.learning-runs-today"
 TODAY=$(date '+%Y-%m-%d')
 RUNS_TODAY=0
 if [ -f "$RUNS_FILE" ]; then
-  RUNS_DATE=$(head -1 "$RUNS_FILE" 2>/dev/null || echo "")
+  RUNS_DATE=$(cut -f1 "$RUNS_FILE")
   if [ "$RUNS_DATE" = "$TODAY" ]; then
-    RUNS_TODAY=$(tail -1 "$RUNS_FILE" 2>/dev/null || echo "0")
+    RUNS_TODAY=$(cut -f2 "$RUNS_FILE")
   fi
 fi
 
@@ -196,14 +185,13 @@ cp "$SESSION_COUNT_FILE" "$BATCH_IDS_FILE"
 # Reset session counter
 rm -f "$SESSION_COUNT_FILE"
 
-# Update daily run count
-echo "$TODAY" > "$RUNS_FILE"
-echo "$((RUNS_TODAY + 1))" >> "$RUNS_FILE"
+# Update daily run count (tab-separated: "DATE\tCOUNT")
+printf '%s\t%d\n' "$TODAY" "$((RUNS_TODAY + 1))" > "$RUNS_FILE"
 
 log "Triggering batch learning (${CURRENT_COUNT} sessions)"
 
 # Spawn background learner
-BG_LEARNER=1 nohup bash "$SCRIPT_DIR/background-learning" "$CWD" "--batch" "$CLAUDE_BIN" \
+DEVFLOW_BG_LEARNER=1 nohup bash "$SCRIPT_DIR/background-learning" "$CWD" "--batch" "$CLAUDE_BIN" \
   >> "$LOG_FILE" 2>&1 &
 
 exit 0

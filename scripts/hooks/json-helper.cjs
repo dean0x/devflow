@@ -72,6 +72,15 @@ function parseJsonl(file) {
   }).filter(Boolean);
 }
 
+/** Extract artifact display name from its file path. */
+function artifactName(obs) {
+  const parts = (obs.artifact_path || '').split('/');
+  if (obs.type === 'workflow') {
+    return (parts.pop() || '').replace(/\.md$/, '');
+  }
+  return parts.length >= 2 ? parts[parts.length - 2] : '';
+}
+
 function parseArgs(argList) {
   const result = {};
   const jsonArgs = {};
@@ -287,45 +296,28 @@ try {
 
       const created = parsed.filter(o => o.status === 'created' && o.artifact_path);
 
-      const commands = created
-        .filter(o => o.type === 'workflow')
-        .slice(0, 5)
-        .map(o => {
-          const name = o.artifact_path.split('/').pop().replace(/\.md$/, '');
-          const conf = (Math.floor(o.confidence * 10) / 10).toString();
-          return { name, conf };
-        });
+      const formatEntry = o => ({
+        name: artifactName(o),
+        conf: (Math.floor(o.confidence * 10) / 10).toString(),
+      });
 
-      const skills = created
-        .filter(o => o.type === 'procedural')
-        .slice(0, 5)
-        .map(o => {
-          const parts = o.artifact_path.split('/');
-          const name = parts.length >= 2 ? parts[parts.length - 2] : '';
-          const conf = (Math.floor(o.confidence * 10) / 10).toString();
-          return { name, conf };
-        });
+      const commands = created.filter(o => o.type === 'workflow').slice(0, 5).map(formatEntry);
+      const skills = created.filter(o => o.type === 'procedural').slice(0, 5).map(formatEntry);
 
       console.log(JSON.stringify({ commands, skills }));
       break;
     }
 
     case 'learning-new': {
-      // Find new artifacts since epoch
       const file = args[0];
-      // since_epoch argument unused in current implementation — always show created
       const parsed = parseJsonl(file);
 
       const created = parsed.filter(o => o.status === 'created' && o.last_seen);
       const messages = created.map(o => {
-        if (o.type === 'workflow') {
-          const name = o.artifact_path.split('/').pop().replace(/\.md$/, '');
-          return `NEW: /self-learning/${name} command created from repeated workflow`;
-        } else {
-          const parts = o.artifact_path.split('/');
-          const name = parts.length >= 2 ? parts[parts.length - 2] : '';
-          return `NEW: ${name} skill created from procedural knowledge`;
-        }
+        const name = artifactName(o);
+        return o.type === 'workflow'
+          ? `NEW: /self-learning/${name} command created from repeated workflow`
+          : `NEW: ${name} skill created from procedural knowledge`;
       });
 
       console.log(messages.join('\n'));
