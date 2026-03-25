@@ -16,10 +16,8 @@ CLAUDE_BIN="$3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/json-parse"
 
-_PROJECT_SLUG=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
-_LOG_DIR="$HOME/.devflow/logs/$_PROJECT_SLUG"
-mkdir -p "$_LOG_DIR"
-LOG_FILE="$_LOG_DIR/.learning-update.log"
+source "$SCRIPT_DIR/log-paths"
+LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 LOCK_DIR="$CWD/.memory/.learning.lock"
 LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
 
@@ -251,9 +249,9 @@ build_sonnet_prompt() {
   fi
   # Filter out contaminated entries with empty required fields
   if [ "$_HAS_JQ" = "true" ]; then
-    EXISTING_OBS=$(echo "$EXISTING_OBS" | jq -c '[.[] | select(.id != "" and .type != "" and .pattern != "")]')
+    EXISTING_OBS=$(echo "$EXISTING_OBS" | jq -c '[.[] | select(.id != "" and (.id | startswith("obs_")) and (.type == "workflow" or .type == "procedural") and .pattern != "")]')
   else
-    EXISTING_OBS=$(echo "$EXISTING_OBS" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(JSON.stringify(d.filter(o=>o.id&&o.type&&o.pattern)))")
+    EXISTING_OBS=$(echo "$EXISTING_OBS" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(JSON.stringify(d.filter(o=>o.id&&o.id.startsWith('obs_')&&(o.type==='workflow'||o.type==='procedural')&&o.pattern)))")
   fi
 
   PROMPT="You are a pattern detection agent. Analyze the user's session messages to identify repeated workflows and procedural knowledge.

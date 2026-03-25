@@ -214,8 +214,9 @@ A background agent runs on session stop (same as Working Memory) and analyzes yo
 | `devflow learn --disable` | Remove the learning hook |
 | `devflow learn --status` | Show learning status and observation counts |
 | `devflow learn --list` | Show all observations sorted by confidence |
-| `devflow learn --configure` | Interactive configuration (model, throttle, daily cap) |
+| `devflow learn --configure` | Interactive configuration (model, throttle, daily cap, debug) |
 | `devflow learn --clear` | Reset all observations |
+| `devflow learn --purge` | Remove invalid/corrupted entries from learning log |
 
 Observations accumulate in `.memory/learning-log.jsonl` with confidence scores and temporal decay. You can edit or delete any generated artifacts — they are never overwritten.
 

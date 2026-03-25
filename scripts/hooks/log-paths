@@ -1,0 +1,12 @@
+#!/bin/bash
+# Shared log path computation for DevFlow hooks.
+# Source this file to get devflow_log_dir function.
+
+devflow_log_dir() {
+  local cwd="$1"
+  local slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
+  local dir="$HOME/.devflow/logs/$slug"
+  mkdir -p "$dir"
+  chmod 700 "$dir"
+  echo "$dir"
+}

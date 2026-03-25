@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Self-learning system: detects repeated workflows and creates slash commands/skills automatically
+- **Learning**: `devflow learn --purge` command to remove invalid entries from learning log
+- **Learning**: debug logging mode (`devflow learn --configure`) — logs to `~/.devflow/logs/`
+
+### Fixed
+- **Learning**: reject observations with empty id/type/pattern fields (validation + auto-purge on migration)
 
 ---
 

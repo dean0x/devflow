@@ -17,10 +17,8 @@ CLAUDE_BIN="$4"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/json-parse"
 
-_PROJECT_SLUG=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
-_LOG_DIR="$HOME/.devflow/logs/$_PROJECT_SLUG"
-mkdir -p "$_LOG_DIR"
-LOG_FILE="$_LOG_DIR/.working-memory-update.log"
+source "$SCRIPT_DIR/log-paths"
+LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
 LOCK_DIR="$CWD/.memory/.working-memory.lock"
 
 # --- Logging ---
@@ -30,7 +28,8 @@ log() {
 }
 
 rotate_log() {
-  if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE")" -gt 100 ]; then
+  if [ ! -f "$LOG_FILE" ]; then return; fi
+  if [ "$(wc -l < "$LOG_FILE")" -gt 100 ]; then
     tail -50 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
   fi
 }

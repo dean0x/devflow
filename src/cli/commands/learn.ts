@@ -165,6 +165,19 @@ export function parseLearningLog(logContent: string): LearningObservation[] {
 }
 
 /**
+ * Parse a JSONL log and return valid observations plus the count of invalid entries.
+ * Centralises the raw-line-count + parse pattern used by --status, --list, and --purge.
+ */
+export function loadAndCountObservations(logContent: string): {
+  observations: LearningObservation[];
+  invalidCount: number;
+} {
+  const rawLines = logContent.split('\n').filter(l => l.trim()).length;
+  const observations = parseLearningLog(logContent);
+  return { observations, invalidCount: rawLines - observations.length };
+}
+
+/**
  * Format a human-readable status summary for learning state.
  */
 export function formatLearningStatus(observations: LearningObservation[], hookEnabled: boolean): string {
@@ -286,18 +299,16 @@ export const learnCommand = new Command('learn')
       const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
 
       let observations: LearningObservation[] = [];
-      let rawLineCount = 0;
+      let invalidCount = 0;
       try {
         const logContent = await fs.readFile(logPath, 'utf-8');
-        rawLineCount = logContent.split('\n').filter(l => l.trim()).length;
-        observations = parseLearningLog(logContent);
+        ({ observations, invalidCount } = loadAndCountObservations(logContent));
       } catch {
         // No log file yet
       }
 
       const status = formatLearningStatus(observations, hookEnabled);
       p.log.info(status);
-      const invalidCount = rawLineCount - observations.length;
       if (invalidCount > 0) {
         p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
       }
@@ -310,11 +321,10 @@ export const learnCommand = new Command('learn')
       const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
 
       let observations: LearningObservation[] = [];
-      let rawLineCount = 0;
+      let invalidCount = 0;
       try {
         const logContent = await fs.readFile(logPath, 'utf-8');
-        rawLineCount = logContent.split('\n').filter(l => l.trim()).length;
-        observations = parseLearningLog(logContent);
+        ({ observations, invalidCount } = loadAndCountObservations(logContent));
       } catch {
         p.log.info('No observations yet. Learning log not found.');
         return;
@@ -339,9 +349,8 @@ export const learnCommand = new Command('learn')
           `[${typeIcon}] ${color.cyan(obs.pattern)} (${conf}% | ${obs.observations}x | ${statusIcon})`,
         );
       }
-      const listInvalidCount = rawLineCount - observations.length;
-      if (listInvalidCount > 0) {
-        p.log.warn(`Note: ${listInvalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
+      if (invalidCount > 0) {
+        p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
       }
       p.outro(color.dim(`${observations.length} observation(s) total`));
       return;
@@ -454,18 +463,16 @@ export const learnCommand = new Command('learn')
         return;
       }
 
-      const rawLines = logContent.split('\n').filter(l => l.trim());
-      const validObservations = parseLearningLog(logContent);
-      const invalidCount = rawLines.length - validObservations.length;
+      const { observations, invalidCount } = loadAndCountObservations(logContent);
 
       if (invalidCount === 0) {
         p.log.info('No invalid entries found. Learning log is clean.');
         return;
       }
 
-      const validLines = validObservations.map(o => JSON.stringify(o));
+      const validLines = observations.map(o => JSON.stringify(o));
       await fs.writeFile(logPath, validLines.join('\n') + (validLines.length ? '\n' : ''), 'utf-8');
-      p.log.success(`Purged ${invalidCount} invalid entry(ies). ${validObservations.length} valid observation(s) remain.`);
+      p.log.success(`Purged ${invalidCount} invalid entry(ies). ${observations.length} valid observation(s) remain.`);
       return;
     }
 
