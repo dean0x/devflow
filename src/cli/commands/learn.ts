@@ -270,6 +270,28 @@ export function loadLearningConfig(globalJson: string | null, projectJson: strin
   return config;
 }
 
+/**
+ * Read and parse observations from the learning log file.
+ * Returns empty results if the file does not exist.
+ */
+async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
+  try {
+    const logContent = await fs.readFile(logPath, 'utf-8');
+    return loadAndCountObservations(logContent);
+  } catch {
+    return { observations: [], invalidCount: 0 };
+  }
+}
+
+/**
+ * Warn the user if invalid entries were found in the learning log.
+ */
+function warnIfInvalid(invalidCount: number): void {
+  if (invalidCount > 0) {
+    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
+  }
+}
+
 interface LearnOptions {
   enable?: boolean;
   disable?: boolean;
@@ -321,36 +343,24 @@ export const learnCommand = new Command('learn')
       settingsContent = '{}';
     }
 
+    // Shared log path for --status, --list, --purge, --clear
+    const logPath = path.join(process.cwd(), '.memory', 'learning-log.jsonl');
+
     // --- --status ---
     if (options.status) {
       const hookState = hasLearningHook(settingsContent);
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
-      let observations: LearningObservation[] = [];
-      let invalidCount = 0;
-      try {
-        const logContent = await fs.readFile(logPath, 'utf-8');
-        ({ observations, invalidCount } = loadAndCountObservations(logContent));
-      } catch {
-        // No log file yet
-      }
+      const { observations, invalidCount } = await readObservations(logPath);
 
       const status = formatLearningStatus(observations, hookState);
       p.log.info(status);
-      if (invalidCount > 0) {
-        p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
-      }
+      warnIfInvalid(invalidCount);
       return;
     }
 
     // --- --list ---
     if (options.list) {
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
-      let observations: LearningObservation[] = [];
-      let invalidCount = 0;
+      let observations: LearningObservation[];
+      let invalidCount: number;
       try {
         const logContent = await fs.readFile(logPath, 'utf-8');
         ({ observations, invalidCount } = loadAndCountObservations(logContent));
@@ -378,9 +388,7 @@ export const learnCommand = new Command('learn')
           `[${typeIcon}] ${color.cyan(obs.pattern)} (${conf}% | ${obs.observations}x | ${statusIcon})`,
         );
       }
-      if (invalidCount > 0) {
-        p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
-      }
+      warnIfInvalid(invalidCount);
       p.outro(color.dim(`${observations.length} observation(s) total`));
       return;
     }
@@ -471,8 +479,8 @@ export const learnCommand = new Command('learn')
       const config: LearningConfig = {
         max_daily_runs: Number(maxRuns),
         throttle_minutes: Number(throttle),
-        model: String(model),
-        debug: !!debugMode,
+        model: model as string,
+        debug: debugMode,
         batch_size: Number(batchSize),
       };
 
@@ -497,9 +505,6 @@ export const learnCommand = new Command('learn')
 
     // --- --purge ---
     if (options.purge) {
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
       let logContent: string;
       try {
         logContent = await fs.readFile(logPath, 'utf-8');
@@ -523,9 +528,6 @@ export const learnCommand = new Command('learn')
 
     // --- --clear ---
     if (options.clear) {
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
       try {
         await fs.access(logPath);
       } catch {
