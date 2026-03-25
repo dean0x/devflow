@@ -31,7 +31,10 @@ source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
 # Logging (shared log file with background updater; [stop-hook] prefix distinguishes)
 MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
-LOG_FILE="$CWD/.memory/.working-memory-update.log"
+_PROJECT_SLUG=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
+_LOG_DIR="$HOME/.devflow/logs/$_PROJECT_SLUG"
+mkdir -p "$_LOG_DIR"
+LOG_FILE="$_LOG_DIR/.working-memory-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
 
 # Throttle: skip if stop hook was triggered within the last 2 minutes

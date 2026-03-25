@@ -346,6 +346,55 @@ describe('migrateMemoryFiles', () => {
     await expect(fs.access(path.join(docsDir, '.working-memory-last-trigger'))).rejects.toThrow();
     await expect(fs.access(path.join(docsDir, '.working-memory.lock'))).rejects.toThrow();
   });
+
+  it('migrates debug logs from .memory/ to ~/.devflow/logs/', async () => {
+    const memoryDir = path.join(tmpDir, '.memory');
+    await fs.writeFile(path.join(memoryDir, '.learning-update.log'), 'learning log');
+    await fs.writeFile(path.join(memoryDir, '.working-memory-update.log'), 'memory log');
+
+    const count = await migrateMemoryFiles(false, tmpDir);
+    expect(count).toBe(2);
+
+    // Old files should be gone
+    await expect(fs.access(path.join(memoryDir, '.learning-update.log'))).rejects.toThrow();
+    await expect(fs.access(path.join(memoryDir, '.working-memory-update.log'))).rejects.toThrow();
+
+    // New files should exist at ~/.devflow/logs/{slug}/
+    const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
+    const logsDir = path.join(os.homedir(), '.devflow', 'logs', slug);
+    const learningLog = await fs.readFile(path.join(logsDir, '.learning-update.log'), 'utf-8');
+    expect(learningLog).toBe('learning log');
+    const memoryLog = await fs.readFile(path.join(logsDir, '.working-memory-update.log'), 'utf-8');
+    expect(memoryLog).toBe('memory log');
+
+    // Cleanup migrated files
+    await fs.rm(logsDir, { recursive: true, force: true });
+  });
+
+  it('auto-purges invalid learning observations during migration', async () => {
+    const memoryDir = path.join(tmpDir, '.memory');
+    const validEntry = JSON.stringify({ id: 'obs_abc123', type: 'workflow', pattern: 'real' });
+    const emptyId = JSON.stringify({ id: '', type: 'workflow', pattern: 'bad' });
+    const emptyPattern = JSON.stringify({ id: 'obs_def456', type: 'procedural', pattern: '' });
+    const malformed = 'not json';
+
+    await fs.writeFile(
+      path.join(memoryDir, 'learning-log.jsonl'),
+      [validEntry, emptyId, emptyPattern, malformed].join('\n') + '\n',
+    );
+
+    await migrateMemoryFiles(false, tmpDir);
+
+    const content = await fs.readFile(path.join(memoryDir, 'learning-log.jsonl'), 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim());
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).id).toBe('obs_abc123');
+  });
+
+  it('skips auto-purge when no learning-log.jsonl exists', async () => {
+    // Should not throw
+    await expect(migrateMemoryFiles(false, tmpDir)).resolves.toBe(0);
+  });
 });
 
 describe('knowledge file format', () => {

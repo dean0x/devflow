@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as p from '@clack/prompts';
-import { getManagedSettingsPath } from './paths.js';
+import { getManagedSettingsPath, getDevFlowDirectory } from './paths.js';
 
 /**
  * Type guard for Node.js system errors with error codes.
@@ -598,8 +598,38 @@ export async function migrateMemoryFiles(verbose: boolean, cwd?: string): Promis
     await fs.rmdir(path.join(docsDir, '.working-memory.lock'));
   } catch { /* doesn't exist or not empty */ }
 
+  // Migrate debug logs from .memory/ to ~/.devflow/logs/
+  const slug = root.replace(/^\//, '').replace(/\//g, '-');
+  const logsDir = path.join(getDevFlowDirectory(), 'logs', slug);
+  const logMigrations = ['.learning-update.log', '.working-memory-update.log'];
+  for (const name of logMigrations) {
+    const oldPath = path.join(memoryDir, name);
+    try {
+      await fs.access(oldPath);
+      await fs.mkdir(logsDir, { recursive: true });
+      await fs.rename(oldPath, path.join(logsDir, name));
+      migrated++;
+    } catch { /* doesn't exist, skip */ }
+  }
+
+  // Purge invalid learning observations (empty id/type/pattern)
+  const logPath = path.join(memoryDir, 'learning-log.jsonl');
+  try {
+    const content = await fs.readFile(logPath, 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim());
+    const valid = lines.filter(line => {
+      try {
+        const obj = JSON.parse(line) as Record<string, unknown>;
+        return obj.id && obj.type && obj.pattern;
+      } catch { return false; }
+    });
+    if (valid.length < lines.length) {
+      await fs.writeFile(logPath, valid.join('\n') + (valid.length ? '\n' : ''), 'utf-8');
+    }
+  } catch { /* no log file */ }
+
   if (migrated > 0 && verbose) {
-    p.log.success(`Migrated ${migrated} memory file(s) from .docs/ to .memory/`);
+    p.log.success(`Migrated ${migrated} file(s) to new locations`);
   }
 
   return migrated;

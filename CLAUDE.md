@@ -97,14 +97,17 @@ Working memory files live in a dedicated `.memory/` directory:
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each session)
 ├── backup.json               # Pre-compact git state snapshot
 ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
-├── learning.json             # Project-level learning config (max runs, throttle, model)
+├── learning.json             # Project-level learning config (max runs, throttle, model, debug)
 ├── .learning-runs-today      # Daily run counter (date + count)
-├── .learning-update.log      # Background learning agent log
 ├── .learning-last-trigger    # Throttle marker (epoch timestamp)
 ├── .learning-notified-at     # New artifact notification marker (epoch timestamp)
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
     └── pitfalls.md            # Known pitfalls (PF-NNN, area-specific gotchas)
+
+~/.devflow/logs/{project-slug}/
+├── .learning-update.log      # Background learning agent log
+└── .working-memory-update.log # Background memory updater log
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
