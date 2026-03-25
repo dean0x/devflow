@@ -124,17 +124,6 @@ json_update_field_json() {
 
 # --- Slurp operations ---
 
-# Slurp JSONL file, sort by field desc, output as JSON array.
-# Usage: json_slurp_sort "file.jsonl" "confidence" 30
-json_slurp_sort() {
-  local file="$1" field="$2" limit="${3:-30}"
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -s "sort_by(.$field) | reverse | .[0:$limit]" "$file" 2>/dev/null
-  else
-    node "$_JSON_HELPER" slurp-sort "$file" "$field" "$limit"
-  fi
-}
-
 # Slurp JSONL file, sort by field desc, output as JSONL (one line per entry).
 # Usage: json_slurp_cap "file.jsonl" "confidence" 100
 json_slurp_cap() {
@@ -180,17 +169,6 @@ json_extract_messages() {
     else "" end' 2>/dev/null
   else
     node "$_JSON_HELPER" extract-text-messages
-  fi
-}
-
-# --- Evidence merging ---
-
-# Merge two evidence arrays. Usage: echo '[[old], [new]]' | json_merge_evidence
-json_merge_evidence() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -c 'flatten | unique | .[0:10]' 2>/dev/null
-  else
-    node "$_JSON_HELPER" merge-evidence
   fi
 }
 
@@ -275,23 +253,5 @@ json_learning_new() {
     ' "$file" 2>/dev/null
   else
     node "$_JSON_HELPER" learning-new "$file" "$since"
-  fi
-}
-
-# Build observation JSON. Usage: json_obs_construct --arg id X --arg type Y ...
-json_obs_construct() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -n -c "$@" '{id: $id, type: $type, pattern: $pattern, confidence: $confidence, observations: $observations, first_seen: $first_seen, last_seen: $last_seen, status: $status, evidence: $evidence, details: $details}'
-  else
-    node "$_JSON_HELPER" obs-construct "$@"
-  fi
-}
-
-# Build observation JSON with artifact_path. Usage: json_obs_construct_full --arg id X ...
-json_obs_construct_full() {
-  if [ "$_HAS_JQ" = "true" ]; then
-    jq -n -c "$@" '{id: $id, type: $type, pattern: $pattern, confidence: $confidence, observations: $observations, first_seen: $first_seen, last_seen: $last_seen, status: $status, evidence: $evidence, details: $details, artifact_path: $artifact_path}'
-  else
-    node "$_JSON_HELPER" obs-construct "$@"
   fi
 }

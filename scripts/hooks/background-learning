@@ -20,6 +20,7 @@ source "$SCRIPT_DIR/log-paths"
 LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 LOCK_DIR="$CWD/.memory/.learning.lock"
 LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
+RESPONSE_FILE="$CWD/.memory/.learning-response.tmp"
 
 # --- Logging ---
 
@@ -81,6 +82,8 @@ acquire_lock() {
 
 cleanup() {
   rmdir "$LOCK_DIR" 2>/dev/null || true
+  rm -f "$CWD/.memory/learning-log.jsonl.tmp" 2>/dev/null || true
+  rm -f "$RESPONSE_FILE" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -126,16 +129,6 @@ check_daily_cap() {
     fi
   fi
   return 0
-}
-
-# --- Temporal Decay ---
-
-decay_factor() {
-  case $1 in
-    0) echo "100";; 1) echo "90";; 2) echo "81";;
-    3) echo "73";; 4) echo "66";; 5) echo "59";;
-    *) echo "53";;  # floor for 6+ periods
-  esac
 }
 
 # --- Batch Transcript Extraction ---
@@ -225,62 +218,13 @@ ${session_msgs}"
   return 0
 }
 
-# --- Temporal Decay Pass ---
+# --- Temporal Decay ---
 
 apply_temporal_decay() {
-  if [ ! -f "$LEARNING_LOG" ]; then return; fi
-
-  NOW_EPOCH=$(date +%s)
-  TEMP_FILE="$LEARNING_LOG.tmp"
-
-  if [ "$_HAS_JQ" = "true" ]; then
-    # Single-pass jq: apply decay to all entries at once
-    jq -c --argjson now "$NOW_EPOCH" '
-      def decay_factor(p): if p <= 0 then 1.0 elif p == 1 then 0.90 elif p == 2 then 0.81
-        elif p == 3 then 0.73 elif p == 4 then 0.66 elif p == 5 then 0.59 else 0.53 end;
-      def parse_epoch: split("T")[0] | split("-") | map(tonumber) |
-        ((.[0] - 1970) * 365.25 * 86400 + (.[1] - 1) * 30.44 * 86400 + (.[2] - 1) * 86400) | floor;
-      if .last_seen and .last_seen != "" then
-        (.last_seen | parse_epoch) as $last_epoch |
-        ((($now - $last_epoch) / 86400) | floor) as $days |
-        (($days / 30) | floor) as $periods |
-        if $periods > 0 then
-          decay_factor($periods) as $factor |
-          ((.confidence * $factor * 100 | round) / 100) as $new_conf |
-          if ($new_conf * 100) < 10 then empty
-          else .confidence = $new_conf end
-        else . end
-      else . end
-    ' "$LEARNING_LOG" > "$TEMP_FILE" 2>/dev/null
-    mv "$TEMP_FILE" "$LEARNING_LOG"
-  else
-    # Node fallback: single-pass processing
-    node -e "
-      const fs = require('fs');
-      const lines = fs.readFileSync('$LEARNING_LOG','utf8').trim().split('\n').filter(Boolean);
-      const now = $NOW_EPOCH;
-      const factors = [1.0, 0.90, 0.81, 0.73, 0.66, 0.59, 0.53];
-      const results = [];
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          if (obj.last_seen) {
-            const lastEpoch = Math.floor(new Date(obj.last_seen).getTime() / 1000);
-            const days = Math.floor((now - lastEpoch) / 86400);
-            const periods = Math.floor(days / 30);
-            if (periods > 0) {
-              const factor = periods < factors.length ? factors[periods] : 0.53;
-              const newConf = Math.round(obj.confidence * factor * 100) / 100;
-              if (newConf * 100 < 10) continue;
-              obj.confidence = newConf;
-            }
-          }
-          results.push(JSON.stringify(obj));
-        } catch {}
-      }
-      fs.writeFileSync('$LEARNING_LOG', results.join('\n') + '\n');
-    " 2>/dev/null
-  fi
+  [ ! -f "$LEARNING_LOG" ] && return
+  local result
+  result=$(node "$_JSON_HELPER" temporal-decay "$LEARNING_LOG" 2>> "$LOG_FILE") || return
+  [ "$DEBUG" = "true" ] && log "Decay: $result"
 }
 
 # --- Entry Cap ---
@@ -299,19 +243,8 @@ cap_entries() {
 # --- Prompt Construction ---
 
 build_sonnet_prompt() {
-  EXISTING_OBS=""
-  if [ -f "$LEARNING_LOG" ]; then
-    EXISTING_OBS=$(json_slurp_sort "$LEARNING_LOG" "confidence" 30 || echo "[]")
-  fi
-  if [ -z "$EXISTING_OBS" ]; then
-    EXISTING_OBS="[]"
-  fi
-  # Filter out contaminated entries with empty required fields
-  if [ "$_HAS_JQ" = "true" ]; then
-    EXISTING_OBS=$(echo "$EXISTING_OBS" | jq -c '[.[] | select(.id != "" and (.id | startswith("obs_")) and (.type == "workflow" or .type == "procedural") and .pattern != "")]')
-  else
-    EXISTING_OBS=$(echo "$EXISTING_OBS" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(JSON.stringify(d.filter(o=>o.id&&o.id.startsWith('obs_')&&(o.type==='workflow'||o.type==='procedural')&&o.pattern)))")
-  fi
+  EXISTING_OBS=$(node "$_JSON_HELPER" filter-observations "$LEARNING_LOG" confidence 30 2>> "$LOG_FILE" || echo "[]")
+  [ -z "$EXISTING_OBS" ] && EXISTING_OBS="[]"
 
   PROMPT="You are a pattern detection agent. Analyze the user's session messages to identify repeated workflows and procedural knowledge.
 
@@ -421,7 +354,6 @@ run_sonnet_analysis() {
   log "--- Sending to claude -p --model $MODEL ---"
 
   TIMEOUT=180
-  RESPONSE_FILE="$CWD/.memory/.learning-response.tmp"
 
   DEVFLOW_BG_UPDATER=1 DEVFLOW_BG_LEARNER=1 "$CLAUDE_BIN" -p \
     --model "$MODEL" \
@@ -457,303 +389,45 @@ run_sonnet_analysis() {
     return 1
   fi
 
-  RESPONSE=$(cat "$RESPONSE_FILE")
-  rm -f "$RESPONSE_FILE"
-
   # Debug: log raw response
   if [ "$DEBUG" = "true" ]; then
     log "--- DEBUG: Raw model response ---"
-    log "$RESPONSE"
+    cat "$RESPONSE_FILE" >> "$LOG_FILE"
     log "--- DEBUG: End raw response ---"
   fi
 
-  # Strip markdown fences if present
+  # Read response, strip markdown fences, validate, write back for Node operations
+  local RESPONSE
+  RESPONSE=$(cat "$RESPONSE_FILE")
   RESPONSE=$(echo "$RESPONSE" | sed '1s/^```json$//' | sed '1s/^```$//' | sed '$s/^```$//')
 
-  # Validate JSON
   if ! echo "$RESPONSE" | json_valid; then
     log "Invalid JSON response from model — skipping"
     log "--- Raw response ---"
     log "$RESPONSE"
     log "--- End raw response ---"
+    rm -f "$RESPONSE_FILE"
     return 1
   fi
 
+  echo "$RESPONSE" > "$RESPONSE_FILE"
   return 0
 }
 
 # --- Process Observations ---
 
-# Validate observation fields. Sets OBS_ID, OBS_TYPE, OBS_PATTERN, OBS_EVIDENCE, OBS_DETAILS.
-# Returns 1 if invalid (caller should skip).
-validate_observation() {
-  local obs_json="$1" obs_index="$2"
-
-  OBS_ID=$(echo "$obs_json" | json_field "id" "")
-  OBS_TYPE=$(echo "$obs_json" | json_field "type" "")
-  OBS_PATTERN=$(echo "$obs_json" | json_field "pattern" "")
-  OBS_DETAILS=$(echo "$obs_json" | json_field "details" "")
-
-  # Evidence needs to stay as JSON array for merging later
-  if [ "$_HAS_JQ" = "true" ]; then
-    OBS_EVIDENCE=$(echo "$obs_json" | jq -c '.evidence' 2>/dev/null)
-  else
-    OBS_EVIDENCE=$(echo "$obs_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(JSON.stringify(d.evidence||[]))" 2>/dev/null)
-  fi
-
-  if [ -z "$OBS_ID" ] || [ -z "$OBS_TYPE" ] || [ -z "$OBS_PATTERN" ]; then
-    log "Skipping observation $obs_index: empty required field (id='$OBS_ID' type='$OBS_TYPE')"
-    return 1
-  fi
-  if [ "$OBS_TYPE" != "workflow" ] && [ "$OBS_TYPE" != "procedural" ]; then
-    log "Skipping observation $obs_index: invalid type '$OBS_TYPE'"
-    return 1
-  fi
-  case "$OBS_ID" in
-    obs_*) ;;
-    *) log "Skipping observation $obs_index: invalid id format '$OBS_ID'"; return 1 ;;
-  esac
-
-  return 0
-}
-
-# Compute confidence score from observation count.
-# Sets CONF_RAW (integer 0-95) and CONF (decimal string e.g. "0.66").
-calculate_confidence() {
-  local count="$1"
-  local required=3
-  CONF_RAW=$((count * 100 / required))
-  if [ "$CONF_RAW" -gt 95 ]; then CONF_RAW=95; fi
-  CONF=$(echo "$CONF_RAW" | awk '{printf "%.2f", $1 / 100}')
-}
-
-# Check temporal spread and determine observation status.
-# Computes epoch once and checks both "observing" and "ready" thresholds.
-# Sets STATUS.
-check_temporal_spread() {
-  local first_seen="$1" conf_raw="$2" current_status="$3"
-
-  STATUS="$current_status"
-  if [ "$STATUS" = "created" ]; then return; fi
-
-  if [ "$conf_raw" -lt 70 ]; then return; fi
-
-  local first_epoch
-  first_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$first_seen" +%s 2>/dev/null \
-    || date -d "$first_seen" +%s 2>/dev/null \
-    || echo "0")
-  local now_epoch
-  now_epoch=$(date +%s)
-  local spread=$((now_epoch - first_epoch))
-
-  if [ "$spread" -ge 86400 ]; then
-    STATUS="ready"
-  else
-    STATUS="observing"
-  fi
-}
-
 process_observations() {
-  log "--- Processing response ---"
-
-  OBS_COUNT=$(echo "$RESPONSE" | json_array_length "observations")
-  if [ "$OBS_COUNT" -le 0 ]; then
-    log "No observations in response"
-    return
-  fi
-  NOW_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-
-  for i in $(seq 0 $((OBS_COUNT - 1))); do
-    local OBS
-    OBS=$(echo "$RESPONSE" | json_array_item "observations" "$i")
-
-    if ! validate_observation "$OBS" "$i"; then
-      continue
-    fi
-
-    # Check if observation already exists
-    EXISTING_LINE=""
-    if [ -f "$LEARNING_LOG" ]; then
-      EXISTING_LINE=$(grep -F "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | head -1)
-    fi
-
-    if [ -n "$EXISTING_LINE" ]; then
-      # Update existing: increment count, update last_seen, merge evidence
-      OLD_COUNT=$(echo "$EXISTING_LINE" | json_field "observations" "0")
-      NEW_COUNT=$((OLD_COUNT + 1))
-      FIRST_SEEN=$(echo "$EXISTING_LINE" | json_field "first_seen" "")
-      if [ "$_HAS_JQ" = "true" ]; then
-        OLD_EVIDENCE=$(echo "$EXISTING_LINE" | jq -c '.evidence' 2>/dev/null)
-      else
-        OLD_EVIDENCE=$(echo "$EXISTING_LINE" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(JSON.stringify(d.evidence||[]))" 2>/dev/null)
-      fi
-      MERGED_EVIDENCE=$(echo "[$OLD_EVIDENCE, $OBS_EVIDENCE]" | json_merge_evidence)
-
-      calculate_confidence "$NEW_COUNT"
-
-      local CURRENT_STATUS
-      CURRENT_STATUS=$(echo "$EXISTING_LINE" | json_field "status" "")
-      ARTIFACT_PATH=$(echo "$EXISTING_LINE" | json_field "artifact_path" "")
-
-      check_temporal_spread "$FIRST_SEEN" "$CONF_RAW" "$CURRENT_STATUS"
-
-      # Build updated entry
-      UPDATED=$(json_obs_construct_full \
-        --arg id "$OBS_ID" \
-        --arg type "$OBS_TYPE" \
-        --arg pattern "$OBS_PATTERN" \
-        --argjson confidence "$CONF" \
-        --argjson observations "$NEW_COUNT" \
-        --arg first_seen "$FIRST_SEEN" \
-        --arg last_seen "$NOW_ISO" \
-        --arg status "$STATUS" \
-        --argjson evidence "$MERGED_EVIDENCE" \
-        --arg details "$OBS_DETAILS" \
-        --arg artifact_path "$ARTIFACT_PATH")
-
-      # Replace line in file
-      TEMP_LOG="$LEARNING_LOG.tmp"
-      grep -vF "\"id\":\"$OBS_ID\"" "$LEARNING_LOG" > "$TEMP_LOG" 2>/dev/null || true
-      echo "$UPDATED" >> "$TEMP_LOG"
-      mv "$TEMP_LOG" "$LEARNING_LOG"
-
-      log "Updated observation $OBS_ID: count=$NEW_COUNT confidence=$CONF status=$STATUS"
-    else
-      # New observation (both types start at 0.33 = 1/3)
-      CONF="0.33"
-
-      NEW_ENTRY=$(json_obs_construct \
-        --arg id "$OBS_ID" \
-        --arg type "$OBS_TYPE" \
-        --arg pattern "$OBS_PATTERN" \
-        --argjson confidence "$CONF" \
-        --argjson observations 1 \
-        --arg first_seen "$NOW_ISO" \
-        --arg last_seen "$NOW_ISO" \
-        --arg status "observing" \
-        --argjson evidence "$OBS_EVIDENCE" \
-        --arg details "$OBS_DETAILS")
-
-      echo "$NEW_ENTRY" >> "$LEARNING_LOG"
-      log "New observation $OBS_ID: type=$OBS_TYPE confidence=$CONF"
-    fi
-  done
+  local result
+  result=$(node "$_JSON_HELPER" process-observations "$RESPONSE_FILE" "$LEARNING_LOG" 2>> "$LOG_FILE") || return
+  [ "$DEBUG" = "true" ] && log "Observations: $result"
 }
 
 # --- Create Artifacts ---
 
-# Write a command artifact file with frontmatter.
-write_command_artifact() {
-  local art_path="$1" art_desc="$2" art_content="$3" art_date="$4" art_conf="$5" art_obs_n="$6"
-  printf '%s\n' "---" \
-    "description: \"$art_desc\"" \
-    "# devflow-learning: auto-generated ($art_date, confidence: $art_conf, obs: $art_obs_n)" \
-    "---" \
-    "" > "$art_path"
-  printf '%s\n' "$art_content" >> "$art_path"
-}
-
-# Write a skill artifact file with frontmatter.
-write_skill_artifact() {
-  local art_path="$1" art_name="$2" art_desc="$3" art_content="$4" art_date="$5" art_conf="$6" art_obs_n="$7"
-  printf '%s\n' "---" \
-    "name: self-learning:$art_name" \
-    "description: \"$art_desc\"" \
-    "user-invocable: false" \
-    "allowed-tools: Read, Grep, Glob" \
-    "# devflow-learning: auto-generated ($art_date, confidence: $art_conf, obs: $art_obs_n)" \
-    "---" \
-    "" > "$art_path"
-  printf '%s\n' "$art_content" >> "$art_path"
-}
-
 create_artifacts() {
-  ART_COUNT=$(echo "$RESPONSE" | json_array_length "artifacts")
-  if [ "$ART_COUNT" -le 0 ]; then
-    return
-  fi
-
-  for i in $(seq 0 $((ART_COUNT - 1))); do
-    ART=$(echo "$RESPONSE" | json_array_item "artifacts" "$i")
-    ART_OBS_ID=$(echo "$ART" | json_field "observation_id" "")
-    ART_TYPE=$(echo "$ART" | json_field "type" "")
-    ART_NAME=$(echo "$ART" | json_field "name" "")
-    ART_DESC=$(echo "$ART" | json_field "description" "")
-    ART_CONTENT=$(echo "$ART" | json_field "content" "")
-
-    # Sanitize ART_NAME — strict kebab-case allowlist (model-generated input)
-    ART_NAME=$(echo "$ART_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-' | head -c 50)
-    if [ -z "$ART_NAME" ]; then
-      log "Skipping artifact with empty/invalid name"
-      continue
-    fi
-
-    # Escape double quotes in description for YAML frontmatter safety
-    ART_DESC=$(echo "$ART_DESC" | sed 's/"/\\"/g' | tr -d '\n')
-
-    # Check the observation's status — only create if ready
-    if [ -f "$LEARNING_LOG" ]; then
-      OBS_STATUS=$(grep -F "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | json_field "status" "")
-      if [ "$OBS_STATUS" != "ready" ]; then
-        log "Skipping artifact for $ART_OBS_ID (status: $OBS_STATUS, need: ready)"
-        continue
-      fi
-    fi
-
-    if [ "$ART_TYPE" = "command" ]; then
-      ART_DIR="$CWD/.claude/commands/self-learning"
-      ART_PATH="$ART_DIR/$ART_NAME.md"
-    else
-      ART_DIR="$CWD/.claude/skills/$ART_NAME"
-      ART_PATH="$ART_DIR/SKILL.md"
-    fi
-
-    # Never overwrite existing files (user customization preserved)
-    if [ -f "$ART_PATH" ]; then
-      log "Artifact already exists at $ART_PATH — skipping"
-      continue
-    fi
-
-    mkdir -p "$ART_DIR"
-
-    # Precompute metadata (safe — our own data, not model-generated)
-    ART_DATE=$(date +%Y-%m-%d)
-    ART_CONF=$(grep -F "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | json_field "confidence" "0")
-    ART_OBS_N=$(grep -F "\"id\":\"$ART_OBS_ID\"" "$LEARNING_LOG" 2>/dev/null | json_field "observations" "0")
-
-    # Write artifact with learning marker (printf %s prevents shell expansion)
-    if [ "$ART_TYPE" = "command" ]; then
-      write_command_artifact "$ART_PATH" "$ART_DESC" "$ART_CONTENT" "$ART_DATE" "$ART_CONF" "$ART_OBS_N"
-    else
-      write_skill_artifact "$ART_PATH" "$ART_NAME" "$ART_DESC" "$ART_CONTENT" "$ART_DATE" "$ART_CONF" "$ART_OBS_N"
-    fi
-
-    # Single-pass status update: update matching observation in learning log
-    if [ "$_HAS_JQ" = "true" ]; then
-      TEMP_LOG="$LEARNING_LOG.tmp"
-      jq -c --arg obs_id "$ART_OBS_ID" --arg art_path "$ART_PATH" '
-        if .id == $obs_id then .status = "created" | .artifact_path = $art_path else . end
-      ' "$LEARNING_LOG" > "$TEMP_LOG" 2>/dev/null
-      mv "$TEMP_LOG" "$LEARNING_LOG"
-    else
-      TEMP_LOG="$LEARNING_LOG.tmp"
-      node -e "
-        const fs = require('fs');
-        const lines = fs.readFileSync('$LEARNING_LOG','utf8').trim().split('\n').filter(Boolean);
-        const out = lines.map(l => {
-          try {
-            const o = JSON.parse(l);
-            if (o.id === '$ART_OBS_ID') { o.status = 'created'; o.artifact_path = '$ART_PATH'; }
-            return JSON.stringify(o);
-          } catch { return l; }
-        });
-        fs.writeFileSync('$LEARNING_LOG.tmp', out.join('\n') + '\n');
-      " 2>/dev/null
-      mv "$TEMP_LOG" "$LEARNING_LOG"
-    fi
-
-    log "Created artifact: $ART_PATH"
-  done
+  local result
+  result=$(node "$_JSON_HELPER" create-artifacts "$RESPONSE_FILE" "$LEARNING_LOG" "$CWD" 2>> "$LOG_FILE") || return
+  [ "$DEBUG" = "true" ] && log "Artifacts: $result"
 }
 
 # --- Main ---
@@ -812,6 +486,9 @@ fi
 # Process observations and create artifacts
 process_observations
 create_artifacts
+
+# Clean up response file
+rm -f "$RESPONSE_FILE"
 
 # Note: daily counter already incremented by session-end-learning before spawning us
 log "Learning analysis complete (batch mode)"
