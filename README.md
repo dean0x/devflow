@@ -204,14 +204,14 @@ Working memory is **per-project** — scoped to each repo's `.memory/` directory
 
 DevFlow detects repeated workflows and procedural knowledge across your sessions and automatically creates slash commands and skills.
 
-A background agent runs on session stop (same as Working Memory) and analyzes your session transcript for patterns. When a pattern is observed enough times (3 for workflows with 24h+ temporal spread, 2 for procedural knowledge), it creates an artifact:
+A background agent runs on session end, batching every 3 sessions (5 at 15+ observations) to analyze transcripts for patterns. When a pattern is observed enough times (3 observations with 24h+ temporal spread for both types), it creates an artifact:
 
-- **Workflow patterns** become slash commands at `.claude/commands/learned/`
-- **Procedural patterns** become skills at `.claude/skills/learned-*/`
+- **Workflow patterns** become slash commands at `.claude/commands/self-learning/`
+- **Procedural patterns** become skills at `.claude/skills/{slug}/`
 
 | Command | Description |
 |---------|-------------|
-| `devflow learn --enable` | Register the learning Stop hook |
+| `devflow learn --enable` | Register the learning SessionEnd hook |
 | `devflow learn --disable` | Remove the learning hook |
 | `devflow learn --status` | Show learning status and observation counts |
 | `devflow learn --list` | Show all observations sorted by confidence |

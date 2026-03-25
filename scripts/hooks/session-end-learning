@@ -1,0 +1,209 @@
+#!/bin/bash
+# SessionEnd hook: learning system trigger with 3-session batching
+# Replaces stop-update-learning (which ran on every Stop)
+#
+# Flow:
+#   1. Guard clauses (skip if background process, no JSON tools, etc.)
+#   2. Session depth check (skip if < 3 user turns)
+#   3. Reinforce loaded self-learning artifacts (local grep, no LLM)
+#   4. Batch counting: accumulate session IDs, trigger background learner at batch size
+#   5. Daily cap enforcement
+#
+set -euo pipefail
+
+CWD="${1:-}"
+CLAUDE_BIN="${2:-claude}"
+
+# --- Guard clauses ---
+[ -n "${BG_LEARNER:-}" ] && exit 0
+[ -n "${BG_UPDATER:-}" ] && exit 0
+[ -z "$CWD" ] && exit 0
+
+MEMORY_DIR="$CWD/.memory"
+[ ! -d "$MEMORY_DIR" ] && exit 0
+
+# Learning config
+LEARNING_CONFIG="$MEMORY_DIR/learning.json"
+[ ! -f "$LEARNING_CONFIG" ] && exit 0
+
+# Source json-parse library
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=json-parse
+. "$SCRIPT_DIR/json-parse"
+
+# Check JSON tools available
+if [ "$_HAS_JQ" != "true" ] && [ "$_HAS_NODE" != "true" ]; then
+  exit 0
+fi
+
+# --- Config ---
+ENABLED=$(json_field "enabled" "false" < "$LEARNING_CONFIG")
+[ "$ENABLED" != "true" ] && exit 0
+
+DEBUG=$(json_field "debug" "false" < "$LEARNING_CONFIG")
+MAX_DAILY=$(json_field "max_daily_runs" "5" < "$LEARNING_CONFIG")
+BATCH_SIZE=$(json_field "batch_size" "3" < "$LEARNING_CONFIG")
+
+# Project slug for logs
+PROJECT_SLUG=$(echo "$CWD" | sed 's|/|_|g; s|^_||')
+LOG_DIR="$HOME/.devflow/logs/$PROJECT_SLUG"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/.learning-update.log"
+
+log() {
+  if [ "$DEBUG" = "true" ]; then
+    echo "[$(date '+%H:%M:%S')] session-end-learning: $1" >> "$LOG_FILE"
+  fi
+}
+
+log "SessionEnd hook triggered"
+
+# --- Find transcript ---
+# Encode CWD for Claude's project path
+ENCODED_CWD=$(echo "$CWD" | sed 's|/|-|g')
+PROJECTS_DIR="$HOME/.claude/projects/$ENCODED_CWD"
+
+if [ ! -d "$PROJECTS_DIR" ]; then
+  log "No projects dir: $PROJECTS_DIR"
+  exit 0
+fi
+
+# Find the most recent session transcript
+TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
+if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
+  log "No transcript found"
+  exit 0
+fi
+
+SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+log "Session: $SESSION_ID"
+
+# --- Session depth check (min 3 user turns) ---
+USER_TURNS=$(grep -c '"type":"user"' "$TRANSCRIPT" 2>/dev/null || echo "0")
+if [ "$USER_TURNS" -lt 3 ]; then
+  log "Shallow session ($USER_TURNS turns), skipping"
+  exit 0
+fi
+log "Session depth: $USER_TURNS turns"
+
+# --- Reinforcement: update last_seen for loaded self-learning artifacts ---
+reinforce_loaded_artifacts() {
+  local learning_log="$MEMORY_DIR/learning-log.jsonl"
+  [ ! -f "$learning_log" ] && return
+
+  # Grep transcript for self-learning skill/command references
+  local loaded
+  loaded=$(grep -oE 'self-learning[:/][a-z0-9-]+' "$TRANSCRIPT" 2>/dev/null | sort -u || true)
+  [ -z "$loaded" ] && return
+
+  local now_iso
+  now_iso=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  local updated=false
+  local temp_log="${learning_log}.tmp"
+
+  while IFS= read -r line; do
+    local status artifact_path
+    status=$(echo "$line" | json_field "status" "")
+    artifact_path=$(echo "$line" | json_field "artifact_path" "")
+
+    if [ "$status" = "created" ] && [ -n "$artifact_path" ]; then
+      # Extract slug from path
+      local slug
+      if echo "$artifact_path" | grep -q '/commands/' 2>/dev/null; then
+        # Command: .claude/commands/self-learning/{name}.md -> extract {name}
+        slug=$(basename "$artifact_path" .md)
+      else
+        # Skill: .claude/skills/{slug}/SKILL.md -> extract {slug}
+        slug=$(basename "$(dirname "$artifact_path")")
+      fi
+
+      if echo "$loaded" | grep -qF "$slug" 2>/dev/null; then
+        if [ "$_HAS_JQ" = "true" ]; then
+          line=$(echo "$line" | jq -c --arg ts "$now_iso" '.last_seen = $ts')
+        else
+          # Node fallback: simple string replacement
+          if echo "$line" | grep -q '"last_seen"' 2>/dev/null; then
+            line=$(echo "$line" | sed "s/\"last_seen\":\"[^\"]*\"/\"last_seen\":\"$now_iso\"/")
+          else
+            line=$(echo "$line" | sed "s/}$/,\"last_seen\":\"$now_iso\"}/")
+          fi
+        fi
+        updated=true
+        log "Reinforced: $slug"
+      fi
+    fi
+    echo "$line"
+  done < "$learning_log" > "$temp_log"
+
+  if [ "$updated" = "true" ]; then
+    mv "$temp_log" "$learning_log"
+  else
+    rm -f "$temp_log"
+  fi
+}
+
+reinforce_loaded_artifacts
+
+# --- 3-session batching ---
+SESSION_COUNT_FILE="$MEMORY_DIR/.learning-session-count"
+BATCH_IDS_FILE="$MEMORY_DIR/.learning-batch-ids"
+
+# Adaptive batch size: 5 if >=15 observations, otherwise default
+OBS_TOTAL=0
+if [ -f "$MEMORY_DIR/learning-log.jsonl" ]; then
+  OBS_TOTAL=$(wc -l < "$MEMORY_DIR/learning-log.jsonl" | tr -d ' ')
+fi
+if [ "$OBS_TOTAL" -ge 15 ]; then
+  BATCH_SIZE=5
+  log "Adaptive batch size: 5 (${OBS_TOTAL} observations)"
+fi
+
+# Append this session ID (deduplicate)
+if [ -f "$SESSION_COUNT_FILE" ] && grep -qF "$SESSION_ID" "$SESSION_COUNT_FILE" 2>/dev/null; then
+  log "Session already counted, skipping"
+  exit 0
+fi
+
+echo "$SESSION_ID" >> "$SESSION_COUNT_FILE"
+CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
+log "Session count: $CURRENT_COUNT / $BATCH_SIZE"
+
+if [ "$CURRENT_COUNT" -lt "$BATCH_SIZE" ]; then
+  log "Batch not full yet ($CURRENT_COUNT < $BATCH_SIZE), waiting"
+  exit 0
+fi
+
+# --- Batch is full: prepare to spawn background learner ---
+
+# Daily cap check
+RUNS_FILE="$MEMORY_DIR/.learning-runs-today"
+TODAY=$(date '+%Y-%m-%d')
+RUNS_TODAY=0
+if [ -f "$RUNS_FILE" ]; then
+  RUNS_DATE=$(head -1 "$RUNS_FILE" 2>/dev/null || echo "")
+  if [ "$RUNS_DATE" = "$TODAY" ]; then
+    RUNS_TODAY=$(tail -1 "$RUNS_FILE" 2>/dev/null || echo "0")
+  fi
+fi
+
+if [ "$RUNS_TODAY" -ge "$MAX_DAILY" ]; then
+  log "Daily cap reached ($RUNS_TODAY >= $MAX_DAILY), skipping"
+  exit 0
+fi
+
+# Write batch IDs file for background-learning to consume
+cp "$SESSION_COUNT_FILE" "$BATCH_IDS_FILE"
+# Reset session counter
+rm -f "$SESSION_COUNT_FILE"
+
+# Update daily run count
+echo "$TODAY" > "$RUNS_FILE"
+echo "$((RUNS_TODAY + 1))" >> "$RUNS_FILE"
+
+log "Triggering batch learning (${CURRENT_COUNT} sessions)"
+
+# Spawn background learner
+BG_LEARNER=1 nohup bash "$SCRIPT_DIR/background-learning" "$CWD" "--batch" "$CLAUDE_BIN" \
+  >> "$LOG_FILE" 2>&1 &
+
+exit 0

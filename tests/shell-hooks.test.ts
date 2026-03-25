@@ -10,6 +10,7 @@ const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
   'background-learning',
+  'session-end-learning',
   'stop-update-learning',
   'background-memory-update',
   'stop-update-memory',
@@ -279,8 +280,8 @@ describe('json-helper.js operations', () => {
 
     try {
       fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/path/learned/deploy-flow.md', confidence: 0.95 }),
-        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/path/learned-debug-hooks/SKILL.md', confidence: 0.8 }),
+        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/path/self-learning/deploy-flow.md', confidence: 0.95 }),
+        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/path/debug-hooks/SKILL.md', confidence: 0.8 }),
         JSON.stringify({ id: 'obs_3', type: 'workflow', status: 'observing', confidence: 0.3 }),
       ].join('\n'));
 

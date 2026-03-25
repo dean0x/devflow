@@ -174,7 +174,9 @@ json_array_item() {
 json_extract_messages() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r 'if .message.content then
-      [.message.content[] | select(.type == "text") | .text] | join("\n")
+      if (.message.content | type) == "string" then .message.content
+      else [.message.content[] | select(.type == "text") | .text] | join("\n")
+      end
     else "" end' 2>/dev/null
   else
     node "$_JSON_HELPER" extract-text-messages
@@ -247,7 +249,7 @@ json_learning_created() {
           conf: (.confidence * 10 | floor / 10 | tostring)
         }] | .[0:5],
         skills: [.[] | select(.type == "procedural") | {
-          name: (.artifact_path | capture("learned-(?<n>[^/]+)") | .n // ""),
+          name: (.artifact_path | split("/") | .[-2]),
           conf: (.confidence * 10 | floor / 10 | tostring)
         }] | .[0:5]
       }
@@ -265,9 +267,9 @@ json_learning_new() {
       [.[] | select(.status == "created" and .last_seen != null)]
       | map(
         if .type == "workflow" then
-          "NEW: /learned/\(.artifact_path | split("/") | last | rtrimstr(".md")) command created from repeated workflow"
+          "NEW: /self-learning/\(.artifact_path | split("/") | last | rtrimstr(".md")) command created from repeated workflow"
         else
-          "NEW: \(.artifact_path | capture("learned-(?<n>[^/]+)") | .n // "") skill created from procedural knowledge"
+          "NEW: \(.artifact_path | split("/") | .[-2]) skill created from procedural knowledge"
         end
       ) | join("\n")
     ' "$file" 2>/dev/null

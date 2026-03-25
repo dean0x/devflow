@@ -16,9 +16,9 @@ describe('addLearningHook', () => {
     const result = addLearningHook('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-learning');
-    expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(10);
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
+    expect(settings.hooks.SessionEnd[0].hooks[0].timeout).toBe(10);
   });
 
   it('adds alongside existing hooks (Stop hooks from memory)', () => {
@@ -30,9 +30,9 @@ describe('addLearningHook', () => {
     const result = addLearningHook(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(2);
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
-    expect(settings.hooks.Stop[1].hooks[0].command).toContain('stop-update-learning');
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
   });
 
   it('is idempotent — does not add duplicate', () => {
@@ -45,10 +45,10 @@ describe('addLearningHook', () => {
   it('uses correct path via run-hook wrapper', () => {
     const result = addLearningHook('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
-    const command = settings.hooks.Stop[0].hooks[0].command;
+    const command = settings.hooks.SessionEnd[0].hooks[0].command;
 
     expect(command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
-    expect(command).toContain('stop-update-learning');
+    expect(command).toContain('session-end-learning');
   });
 
   it('preserves other settings', () => {
@@ -61,26 +61,26 @@ describe('addLearningHook', () => {
 
     expect(settings.statusLine.command).toBe('statusline.sh');
     expect(settings.env.SOME_VAR).toBe('1');
-    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
   });
 
-  it('adds alongside existing Stop hooks', () => {
+  it('adds alongside existing SessionEnd hooks', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: 'other-stop.sh' }] }],
+        SessionEnd: [{ hooks: [{ type: 'command', command: 'other-session-end.sh' }] }],
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
       },
     });
     const result = addLearningHook(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(2);
+    expect(settings.hooks.SessionEnd).toHaveLength(2);
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
   });
 });
 
 describe('removeLearningHook', () => {
-  it('removes learning hook', () => {
+  it('removes learning hook from SessionEnd', () => {
     const withHook = addLearningHook('{}', '/home/user/.devflow');
     const result = removeLearningHook(withHook);
     const settings = JSON.parse(result);
@@ -88,27 +88,27 @@ describe('removeLearningHook', () => {
     expect(settings.hooks).toBeUndefined();
   });
 
-  it('preserves memory Stop hooks', () => {
+  it('preserves other SessionEnd hooks', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: 'other-session-end-hook' }] },
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
         ],
       },
     });
     const result = removeLearningHook(input);
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    expect(settings.hooks.SessionEnd[0].hooks[0].command).toBe('other-session-end-hook');
   });
 
   it('cleans empty hooks object when last hook removed', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
         ],
       },
     });
@@ -122,8 +122,8 @@ describe('removeLearningHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
-        Stop: [
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
         ],
       },
     });
@@ -131,7 +131,7 @@ describe('removeLearningHook', () => {
     const settings = JSON.parse(result);
 
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.Stop).toBeUndefined();
+    expect(settings.hooks.SessionEnd).toBeUndefined();
   });
 
   it('is idempotent', () => {
@@ -144,30 +144,8 @@ describe('removeLearningHook', () => {
 
     expect(result).toBe(input);
   });
-});
 
-describe('hasLearningHook', () => {
-  it('returns true when present', () => {
-    const withHook = addLearningHook('{}', '/home/user/.devflow');
-    expect(hasLearningHook(withHook)).toBe(true);
-  });
-
-  it('returns false when absent', () => {
-    expect(hasLearningHook('{}')).toBe(false);
-  });
-
-  it('returns false for non-learning Stop hooks', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-        ],
-      },
-    });
-    expect(hasLearningHook(input)).toBe(false);
-  });
-
-  it('returns true among other Stop hooks', () => {
+  it('cleans up legacy Stop entries', () => {
     const input = JSON.stringify({
       hooks: {
         Stop: [
@@ -176,7 +154,73 @@ describe('hasLearningHook', () => {
         ],
       },
     });
+    const result = removeLearningHook(input);
+    const settings = JSON.parse(result);
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
+  });
+
+  it('cleans both SessionEnd and legacy Stop', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/session-end-learning' }] },
+        ],
+        Stop: [
+          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
+          { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
+        ],
+      },
+    });
+    const result = removeLearningHook(input);
+    const settings = JSON.parse(result);
+    expect(settings.hooks.SessionEnd).toBeUndefined();
+    expect(settings.hooks.Stop).toHaveLength(1);
+  });
+});
+
+describe('hasLearningHook', () => {
+  it('returns true when present on SessionEnd', () => {
+    const withHook = addLearningHook('{}', '/home/user/.devflow');
+    expect(hasLearningHook(withHook)).toBe(true);
+  });
+
+  it('returns false when absent', () => {
+    expect(hasLearningHook('{}')).toBe(false);
+  });
+
+  it('returns false for non-learning SessionEnd hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: 'some-other-hook' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe(false);
+  });
+
+  it('returns true among other SessionEnd hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: 'some-other-hook' }] },
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
+        ],
+      },
+    });
     expect(hasLearningHook(input)).toBe(true);
+  });
+
+  it('returns false for legacy Stop hook only', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe(false);
   });
 });
 
@@ -260,7 +304,7 @@ describe('formatLearningStatus', () => {
 describe('loadLearningConfig', () => {
   it('returns defaults when no config files', () => {
     const config = loadLearningConfig(null, null);
-    expect(config.max_daily_runs).toBe(10);
+    expect(config.max_daily_runs).toBe(5);
     expect(config.throttle_minutes).toBe(5);
     expect(config.model).toBe('sonnet');
     expect(config.debug).toBe(false);
@@ -285,7 +329,7 @@ describe('loadLearningConfig', () => {
   it('handles partial override (only some fields)', () => {
     const projectJson = JSON.stringify({ throttle_minutes: 15 });
     const config = loadLearningConfig(null, projectJson);
-    expect(config.max_daily_runs).toBe(10); // default
+    expect(config.max_daily_runs).toBe(5); // default
     expect(config.throttle_minutes).toBe(15); // overridden
     expect(config.model).toBe('sonnet'); // default
   });

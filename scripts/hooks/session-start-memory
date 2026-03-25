@@ -143,13 +143,13 @@ if [ -f "$LEARNING_LOG" ]; then
   LEARNED_SKILLS=""
   if [ -n "$LEARNED_JSON" ]; then
     if [ "$_HAS_JQ" = "true" ]; then
-      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | jq -r '.commands | map("/learned/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
+      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | jq -r '.commands | map("/self-learning/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
       LEARNED_SKILLS=$(echo "$LEARNED_JSON" | jq -r '.skills | map("\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
     else
       # Node fallback: parse the JSON and format
       LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        console.log(d.commands.map(c=>\"/learned/\"+c.name+\" (\"+c.conf+\")\").join(', '));
+        console.log(d.commands.map(c=>\"/self-learning/\"+c.name+\" (\"+c.conf+\")\").join(', '));
       " 2>/dev/null)
       LEARNED_SKILLS=$(echo "$LEARNED_JSON" | node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
@@ -169,7 +169,7 @@ Commands: $LEARNED_COMMANDS"
 Skills: $LEARNED_SKILLS"
     fi
     LEARNED_SECTION="$LEARNED_SECTION
-Edit or delete: .claude/commands/learned/ and .claude/skills/"
+Edit or delete: .claude/commands/self-learning/ and .claude/skills/"
 
     # Check for new artifacts since last notification (single jq -s pass)
     LAST_NOTIFIED=0

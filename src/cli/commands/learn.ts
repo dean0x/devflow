@@ -51,10 +51,11 @@ export function isLearningObservation(obj: unknown): obj is LearningObservation 
     && typeof o.details === 'string';
 }
 
-const LEARNING_HOOK_MARKER = 'stop-update-learning';
+const LEARNING_HOOK_MARKER = 'session-end-learning';
+const LEGACY_HOOK_MARKER = 'stop-update-learning';
 
 /**
- * Add the learning Stop hook to settings JSON.
+ * Add the learning SessionEnd hook to settings JSON.
  * Idempotent — returns unchanged JSON if hook already exists.
  */
 export function addLearningHook(settingsJson: string, devflowDir: string): string {
@@ -68,7 +69,7 @@ export function addLearningHook(settingsJson: string, devflowDir: string): strin
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' stop-update-learning';
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-end-learning';
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -80,38 +81,55 @@ export function addLearningHook(settingsJson: string, devflowDir: string): strin
     ],
   };
 
-  if (!settings.hooks.Stop) {
-    settings.hooks.Stop = [];
+  if (!settings.hooks.SessionEnd) {
+    settings.hooks.SessionEnd = [];
   }
 
-  settings.hooks.Stop.push(newEntry);
+  settings.hooks.SessionEnd.push(newEntry);
 
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * Remove the learning Stop hook from settings JSON.
+ * Remove the learning hook from settings JSON.
+ * Checks BOTH SessionEnd (new) and Stop (legacy cleanup).
  * Idempotent — returns unchanged JSON if hook not present.
- * Preserves other Stop hooks. Cleans empty arrays/objects.
+ * Preserves other hooks. Cleans empty arrays/objects.
  */
 export function removeLearningHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
+  let changed = false;
 
-  if (!settings.hooks?.Stop) {
-    return settingsJson;
+  // Remove from SessionEnd (current)
+  if (settings.hooks?.SessionEnd) {
+    const before = settings.hooks.SessionEnd.length;
+    settings.hooks.SessionEnd = settings.hooks.SessionEnd.filter(
+      (matcher) => !matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
+    );
+    if (settings.hooks.SessionEnd.length < before) {
+      changed = true;
+    }
+    if (settings.hooks.SessionEnd.length === 0) {
+      delete settings.hooks.SessionEnd;
+    }
   }
 
-  const before = settings.hooks.Stop.length;
-  settings.hooks.Stop = settings.hooks.Stop.filter(
-    (matcher) => !matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
-  );
-
-  if (settings.hooks.Stop.length === before) {
-    return settingsJson;
+  // Remove from Stop (legacy cleanup)
+  if (settings.hooks?.Stop) {
+    const before = settings.hooks.Stop.length;
+    settings.hooks.Stop = settings.hooks.Stop.filter(
+      (matcher) => !matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER)),
+    );
+    if (settings.hooks.Stop.length < before) {
+      changed = true;
+    }
+    if (settings.hooks.Stop.length === 0) {
+      delete settings.hooks.Stop;
+    }
   }
 
-  if (settings.hooks.Stop.length === 0) {
-    delete settings.hooks.Stop;
+  if (!changed) {
+    return settingsJson;
   }
 
   if (settings.hooks && Object.keys(settings.hooks).length === 0) {
@@ -127,11 +145,11 @@ export function removeLearningHook(settingsJson: string): string {
 export function hasLearningHook(settingsJson: string): boolean {
   const settings: Settings = JSON.parse(settingsJson);
 
-  if (!settings.hooks?.Stop) {
+  if (!settings.hooks?.SessionEnd) {
     return false;
   }
 
-  return settings.hooks.Stop.some((matcher) =>
+  return settings.hooks.SessionEnd.some((matcher) =>
     matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
   );
 }
@@ -229,7 +247,7 @@ export function applyConfigLayer(config: LearningConfig, json: string): Learning
  */
 export function loadLearningConfig(globalJson: string | null, projectJson: string | null): LearningConfig {
   let config: LearningConfig = {
-    max_daily_runs: 10,
+    max_daily_runs: 5,
     throttle_minutes: 5,
     model: 'sonnet',
     debug: false,
@@ -253,7 +271,7 @@ interface LearnOptions {
 
 export const learnCommand = new Command('learn')
   .description('Enable or disable self-learning (workflow detection + auto-commands)')
-  .option('--enable', 'Register Stop hook for self-learning')
+  .option('--enable', 'Register SessionEnd hook for self-learning')
   .option('--disable', 'Remove self-learning hook')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all observations sorted by confidence')
@@ -509,10 +527,12 @@ export const learnCommand = new Command('learn')
     let devflowDir: string;
     try {
       const settings: Settings = JSON.parse(settingsContent);
-      // Try to extract devflowDir from existing hooks (e.g., Stop hook path)
+      // Try to extract devflowDir from existing hooks (SessionEnd first, Stop fallback)
+      const sessionEndHook = settings.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command;
       const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
-      if (stopHook) {
-        const hookBinary = stopHook.split(' ')[0];
+      const hookCommand = sessionEndHook || stopHook;
+      if (hookCommand) {
+        const hookBinary = hookCommand.split(' ')[0];
         devflowDir = path.resolve(hookBinary, '..', '..', '..');
       } else {
         devflowDir = getDevFlowDirectory();
@@ -528,7 +548,7 @@ export const learnCommand = new Command('learn')
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('Self-learning enabled — Stop hook registered');
+      p.log.success('Self-learning enabled — SessionEnd hook registered');
       p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
     }
 

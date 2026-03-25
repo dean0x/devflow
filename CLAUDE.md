@@ -40,7 +40,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Stop hook → reads last turn from session transcript (`~/.claude/projects/{encoded-cwd}/{session_id}.jsonl`), spawns background `claude -p --model haiku` to update `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`; throttled: skips if triggered <2min ago; concurrent sessions serialize via mkdir-based lock). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
 
-**Self-Learning**: A Stop hook (`stop-update-learning`) spawns a background `claude -p --model sonnet` to detect repeated workflows and procedural knowledge from session transcripts. Observations accumulate in `.memory/learning-log.jsonl` with confidence scores, temporal decay, and daily run caps. When confidence thresholds are met (3 observations for workflows with 24h+ temporal spread, 2 for procedural), artifacts are auto-created as slash commands (`.claude/commands/learned/`) or skills (`.claude/skills/learned-*/`). Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`. Configurable model/throttle/caps/debug via `devflow learn --configure`. Debug logs stored at `~/.devflow/logs/{project-slug}/`. Use `devflow learn --purge` to remove invalid observations.
+**Self-Learning**: A SessionEnd hook (`session-end-learning`) accumulates session IDs and triggers a background `claude -p --model sonnet` every 3 sessions (5 at 15+ observations) to detect repeated workflows and procedural knowledge from batch transcripts. Observations accumulate in `.memory/learning-log.jsonl` with confidence scores, temporal decay, and daily run caps. When confidence thresholds are met (3 observations with 24h+ temporal spread for both workflow and procedural types), artifacts are auto-created as slash commands (`.claude/commands/self-learning/`) or skills (`.claude/skills/{slug}/`). Loaded artifacts are reinforced locally (no LLM) on each session end. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`. Configurable model/throttle/caps/debug via `devflow learn --configure`. Debug logs stored at `~/.devflow/logs/{project-slug}/`. Use `devflow learn --purge` to remove invalid observations.
 
 ## Project Structure
 
@@ -51,7 +51,7 @@ devflow/
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start, pre-compact, ambient-prompt, stop-update-learning, background-learning)
+│   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start, pre-compact, ambient-prompt, session-end-learning, background-learning)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
@@ -99,7 +99,8 @@ Working memory files live in a dedicated `.memory/` directory:
 ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
 ├── learning.json             # Project-level learning config (max runs, throttle, model, debug)
 ├── .learning-runs-today      # Daily run counter (date + count)
-├── .learning-last-trigger    # Throttle marker (epoch timestamp)
+├── .learning-session-count   # Session IDs pending batch (one per line)
+├── .learning-batch-ids       # Session IDs for current batch run
 ├── .learning-notified-at     # New artifact notification marker (epoch timestamp)
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)

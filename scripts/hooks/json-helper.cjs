@@ -167,6 +167,10 @@ try {
     case 'extract-text-messages': {
       const input = JSON.parse(readStdin());
       const content = input?.message?.content;
+      if (typeof content === 'string') {
+        console.log(content);
+        break;
+      }
       if (!Array.isArray(content)) {
         console.log('');
         break;
@@ -296,8 +300,8 @@ try {
         .filter(o => o.type === 'procedural')
         .slice(0, 5)
         .map(o => {
-          const match = o.artifact_path.match(/learned-([^/]+)/);
-          const name = match ? match[1] : '';
+          const parts = o.artifact_path.split('/');
+          const name = parts.length >= 2 ? parts[parts.length - 2] : '';
           const conf = (Math.floor(o.confidence * 10) / 10).toString();
           return { name, conf };
         });
@@ -316,10 +320,10 @@ try {
       const messages = created.map(o => {
         if (o.type === 'workflow') {
           const name = o.artifact_path.split('/').pop().replace(/\.md$/, '');
-          return `NEW: /learned/${name} command created from repeated workflow`;
+          return `NEW: /self-learning/${name} command created from repeated workflow`;
         } else {
-          const match = o.artifact_path.match(/learned-([^/]+)/);
-          const name = match ? match[1] : '';
+          const parts = o.artifact_path.split('/');
+          const name = parts.length >= 2 ? parts[parts.length - 2] : '';
           return `NEW: ${name} skill created from procedural knowledge`;
         }
       });

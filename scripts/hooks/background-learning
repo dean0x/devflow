@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # Background Learning Agent
-# Called by stop-update-learning as a detached background process.
-# Reads user messages from the session transcript, then uses a fresh `claude -p`
+# Called by session-end-learning as a detached background process.
+# Reads user messages from session transcripts (batch mode), then uses a fresh `claude -p`
 # invocation with Sonnet to detect patterns and update learning-log.jsonl.
 # On failure: logs error, does nothing (missing patterns are better than fake data).
 
 set -e
 
 CWD="$1"
-SESSION_ID="$2"
-CLAUDE_BIN="$3"
+MODE="${2:---batch}"
+CLAUDE_BIN="${3:-claude}"
 
 # Source JSON parsing helpers (jq with node fallback)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -92,13 +92,13 @@ load_config() {
   GLOBAL_CONFIG="$HOME/.devflow/learning.json"
   PROJECT_CONFIG="$CWD/.memory/learning.json"
   # Defaults
-  MAX_DAILY_RUNS=10
+  MAX_DAILY_RUNS=5
   THROTTLE_MINUTES=5
   MODEL="sonnet"
   DEBUG="false"
   # Apply global
   if [ -f "$GLOBAL_CONFIG" ]; then
-    MAX_DAILY_RUNS=$(json_field_file "$GLOBAL_CONFIG" "max_daily_runs" "10")
+    MAX_DAILY_RUNS=$(json_field_file "$GLOBAL_CONFIG" "max_daily_runs" "5")
     THROTTLE_MINUTES=$(json_field_file "$GLOBAL_CONFIG" "throttle_minutes" "5")
     MODEL=$(json_field_file "$GLOBAL_CONFIG" "model" "sonnet")
     DEBUG=$(json_field_file "$GLOBAL_CONFIG" "debug" "false")
@@ -182,6 +182,70 @@ extract_user_messages() {
   return 0
 }
 
+# --- Batch Transcript Extraction ---
+
+extract_batch_messages() {
+  local encoded_cwd
+  encoded_cwd=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
+  local projects_dir="$HOME/.claude/projects/-${encoded_cwd}"
+  local batch_file="$CWD/.memory/.learning-batch-ids"
+
+  if [ ! -f "$batch_file" ]; then
+    log "No batch IDs file found"
+    return 1
+  fi
+
+  USER_MESSAGES=""
+  local session_count=0
+
+  while IFS= read -r sid; do
+    [ -z "$sid" ] && continue
+    local transcript="${projects_dir}/${sid}.jsonl"
+    if [ ! -f "$transcript" ]; then
+      log "Transcript not found for session $sid"
+      continue
+    fi
+
+    local session_msgs
+    session_msgs=$(grep '"type":"user"' "$transcript" 2>/dev/null \
+      | while IFS= read -r line; do echo "$line" | json_extract_messages; done \
+      | grep -v '^$' || true)
+
+    if [ -n "$session_msgs" ]; then
+      if [ -n "$USER_MESSAGES" ]; then
+        USER_MESSAGES="${USER_MESSAGES}
+--- Session ${sid} ---
+${session_msgs}"
+      else
+        USER_MESSAGES="--- Session ${sid} ---
+${session_msgs}"
+      fi
+      session_count=$((session_count + 1))
+    fi
+  done < "$batch_file"
+
+  # Clean up batch file after reading
+  rm -f "$batch_file"
+
+  # Truncate to 30,000 chars (multi-session)
+  if [ ${#USER_MESSAGES} -gt 30000 ]; then
+    USER_MESSAGES="${USER_MESSAGES:0:30000}... [truncated]"
+  fi
+
+  if [ -z "$USER_MESSAGES" ]; then
+    log "No user text content found in batch transcripts"
+    return 1
+  fi
+
+  if [ ${#USER_MESSAGES} -lt 200 ]; then
+    log "Insufficient content for pattern detection (${#USER_MESSAGES} chars, min 200)"
+    return 1
+  fi
+
+  log "Extracted messages from $session_count session(s)"
+  return 0
+}
+
 # --- Temporal Decay Pass ---
 
 apply_temporal_decay() {
@@ -259,7 +323,7 @@ build_sonnet_prompt() {
 EXISTING OBSERVATIONS (for deduplication — reuse IDs for matching patterns):
 $EXISTING_OBS
 
-USER MESSAGES FROM THIS SESSION:
+USER MESSAGES FROM RECENT SESSIONS:
 $USER_MESSAGES
 
 Detect two types of patterns:
@@ -269,8 +333,8 @@ Detect two types of patterns:
    - Temporal spread requirement: first_seen and last_seen must be 24h+ apart
 
 2. PROCEDURAL patterns: Knowledge about how to accomplish specific tasks (e.g., debugging hook failures, configuring specific tools). These become skills.
-   - Required observations for artifact creation: 2
-   - No temporal spread requirement
+   - Required observations for artifact creation: 3 (same as workflows)
+   - Temporal spread requirement: first_seen and last_seen must be 24h+ apart (same as workflows)
 
 Rules:
 - If an existing observation matches a pattern from this session, report it with the SAME id so the count can be incremented
@@ -280,6 +344,45 @@ Rules:
 - Quote specific evidence from user messages that supports each observation
 - Only report patterns that are clearly distinct — do not create near-duplicate observations
 - If no patterns detected, return {\"observations\": [], \"artifacts\": []}
+
+SKILL TEMPLATE (required structure when creating skill artifacts):
+
+---
+name: self-learning:{slug}
+description: \"This skill should be used when {specific trigger context}\"
+user-invocable: false
+allowed-tools: Read, Grep, Glob
+---
+
+# {Title}
+
+{One-line summary.}
+
+## Iron Law
+
+> **{SINGLE RULE IN ALL CAPS}**
+>
+> {2-3 sentence core principle.}
+
+---
+
+## When This Skill Activates
+
+- {Trigger condition 1}
+- {Trigger condition 2}
+
+## {Pattern Section}
+
+{Practical patterns, rules, or procedures.}
+
+COMMAND TEMPLATE (when creating command artifacts):
+Standard markdown with description frontmatter.
+
+NAMING RULES:
+- Skill names: self-learning:{slug} (e.g., self-learning:debug-hooks)
+- Skill descriptions MUST start with \"This skill should be used when...\"
+- Do NOT include project-specific prefixes in the slug
+- Keep slugs short and descriptive (2-3 words kebab-case)
 
 Output ONLY the JSON object. No markdown fences, no explanation.
 
@@ -378,6 +481,10 @@ process_observations() {
   log "--- Processing response ---"
 
   OBS_COUNT=$(echo "$RESPONSE" | json_array_length "observations")
+  if [ "$OBS_COUNT" -le 0 ]; then
+    log "No observations in response"
+    return
+  fi
   NOW_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
   for i in $(seq 0 $((OBS_COUNT - 1))); do
@@ -425,19 +532,15 @@ process_observations() {
       fi
       MERGED_EVIDENCE=$(echo "[$OLD_EVIDENCE, $OBS_EVIDENCE]" | json_merge_evidence)
 
-      # Calculate confidence
-      if [ "$OBS_TYPE" = "workflow" ]; then
-        REQUIRED=3
-      else
-        REQUIRED=2
-      fi
+      # Calculate confidence (both types require 3 observations)
+      REQUIRED=3
       CONF_RAW=$((NEW_COUNT * 100 / REQUIRED))
       if [ "$CONF_RAW" -gt 95 ]; then CONF_RAW=95; fi
       CONF=$(echo "$CONF_RAW" | awk '{printf "%.2f", $1 / 100}')
 
-      # Check temporal spread for workflows
+      # Check temporal spread (applies to BOTH workflow and procedural)
       STATUS=$(echo "$EXISTING_LINE" | json_field "status" "")
-      if [ "$OBS_TYPE" = "workflow" ] && [ "$STATUS" != "created" ]; then
+      if [ "$STATUS" != "created" ]; then
         FIRST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$FIRST_SEEN" +%s 2>/dev/null \
           || date -d "$FIRST_SEEN" +%s 2>/dev/null \
           || echo "0")
@@ -448,19 +551,15 @@ process_observations() {
         fi
       fi
 
-      # Determine status
+      # Determine status (temporal spread required for both types)
       ARTIFACT_PATH=$(echo "$EXISTING_LINE" | json_field "artifact_path" "")
       if [ "$STATUS" != "created" ] && [ "$CONF_RAW" -ge 70 ]; then
-        if [ "$OBS_TYPE" = "workflow" ]; then
-          FIRST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$FIRST_SEEN" +%s 2>/dev/null \
-            || date -d "$FIRST_SEEN" +%s 2>/dev/null \
-            || echo "0")
-          NOW_EPOCH=$(date +%s)
-          SPREAD=$((NOW_EPOCH - FIRST_EPOCH))
-          if [ "$SPREAD" -ge 86400 ]; then
-            STATUS="ready"
-          fi
-        else
+        FIRST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$FIRST_SEEN" +%s 2>/dev/null \
+          || date -d "$FIRST_SEEN" +%s 2>/dev/null \
+          || echo "0")
+        NOW_EPOCH=$(date +%s)
+        SPREAD=$((NOW_EPOCH - FIRST_EPOCH))
+        if [ "$SPREAD" -ge 86400 ]; then
           STATUS="ready"
         fi
       fi
@@ -487,12 +586,8 @@ process_observations() {
 
       log "Updated observation $OBS_ID: count=$NEW_COUNT confidence=$CONF status=$STATUS"
     else
-      # New observation
-      if [ "$OBS_TYPE" = "workflow" ]; then
-        CONF="0.33"
-      else
-        CONF="0.50"
-      fi
+      # New observation (both types start at 0.33 = 1/3)
+      CONF="0.33"
 
       NEW_ENTRY=$(json_obs_construct \
         --arg id "$OBS_ID" \
@@ -516,6 +611,9 @@ process_observations() {
 
 create_artifacts() {
   ART_COUNT=$(echo "$RESPONSE" | json_array_length "artifacts")
+  if [ "$ART_COUNT" -le 0 ]; then
+    return
+  fi
 
   for i in $(seq 0 $((ART_COUNT - 1))); do
     ART=$(echo "$RESPONSE" | json_array_item "artifacts" "$i")
@@ -542,10 +640,10 @@ create_artifacts() {
     fi
 
     if [ "$ART_TYPE" = "command" ]; then
-      ART_DIR="$CWD/.claude/commands/learned"
+      ART_DIR="$CWD/.claude/commands/self-learning"
       ART_PATH="$ART_DIR/$ART_NAME.md"
     else
-      ART_DIR="$CWD/.claude/skills/learned-$ART_NAME"
+      ART_DIR="$CWD/.claude/skills/$ART_NAME"
       ART_PATH="$ART_DIR/SKILL.md"
     fi
 
@@ -573,8 +671,10 @@ create_artifacts() {
       printf '%s\n' "$ART_CONTENT" >> "$ART_PATH"
     else
       printf '%s\n' "---" \
-        "name: learned-$ART_NAME" \
+        "name: self-learning:$ART_NAME" \
         "description: \"$ART_DESC\"" \
+        "user-invocable: false" \
+        "allowed-tools: Read, Grep, Glob" \
         "# devflow-learning: auto-generated ($ART_DATE, confidence: $ART_CONF, obs: $ART_OBS_N)" \
         "---" \
         "" > "$ART_PATH"
@@ -601,14 +701,14 @@ create_artifacts() {
 # Wait for parent session to flush transcript
 sleep 3
 
-log "Starting learning analysis for session $SESSION_ID"
+log "Starting learning analysis (mode: $MODE)"
 
 # Break stale locks from previous zombie processes
 break_stale_lock
 
 # Acquire lock
 if ! acquire_lock; then
-  log "Lock timeout after 90s — skipping for session $SESSION_ID"
+  log "Lock timeout after 90s — skipping"
   trap - EXIT
   exit 0
 fi
@@ -621,9 +721,9 @@ if ! check_daily_cap; then
   exit 0
 fi
 
-# Extract user messages
+# Extract user messages (batch mode reads from .learning-batch-ids)
 USER_MESSAGES=""
-if ! extract_user_messages; then
+if ! extract_batch_messages; then
   log "No messages to analyze — skipping"
   exit 0
 fi
@@ -654,6 +754,6 @@ process_observations
 create_artifacts
 
 increment_daily_counter
-log "Learning analysis complete for session $SESSION_ID"
+log "Learning analysis complete (batch mode)"
 
 exit 0
