@@ -1,0 +1,242 @@
+#!/bin/bash
+# SessionEnd hook: learning system trigger with 3-session batching
+# Replaces stop-update-learning (which ran on every Stop)
+#
+# Flow:
+#   1. Guard clauses (skip if background process, no JSON tools, etc.)
+#   2. Session depth check (skip if < 3 user turns)
+#   3. Reinforce loaded self-learning artifacts (local grep, no LLM)
+#   4. Batch counting: accumulate session IDs, trigger background learner at batch size
+#   5. Daily cap enforcement
+#
+set -e
+
+# --- Guard clauses (break feedback loop from background claude sessions) ---
+[ "${DEVFLOW_BG_LEARNER:-}" = "1" ] && exit 0
+[ "${DEVFLOW_BG_UPDATER:-}" = "1" ] && exit 0
+
+# Source json-parse library (must be available before reading stdin JSON)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=json-parse
+source "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+# Read hook input from stdin (Claude passes JSON with cwd, session_id, etc.)
+INPUT=$(cat)
+
+CWD=$(echo "$INPUT" | json_field "cwd" "")
+[ -z "$CWD" ] && exit 0
+
+MEMORY_DIR="$CWD/.memory"
+[ ! -d "$MEMORY_DIR" ] && exit 0
+
+# Learning config
+LEARNING_CONFIG="$MEMORY_DIR/learning.json"
+[ ! -f "$LEARNING_CONFIG" ] && exit 0
+
+# Resolve claude binary
+CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
+[ -z "$CLAUDE_BIN" ] && exit 0
+
+# --- Config ---
+ENABLED=$(json_field "enabled" "false" < "$LEARNING_CONFIG")
+[ "$ENABLED" != "true" ] && exit 0
+
+DEBUG=$(json_field "debug" "false" < "$LEARNING_CONFIG")
+MAX_DAILY=$(json_field "max_daily_runs" "5" < "$LEARNING_CONFIG")
+BATCH_SIZE=$(json_field "batch_size" "3" < "$LEARNING_CONFIG")
+
+# Log path (shared helper — consistent slug with background-learning)
+source "$SCRIPT_DIR/log-paths"
+LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
+
+log() {
+  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] session-end-learning: $1" >> "$LOG_FILE"
+}
+
+log "SessionEnd hook triggered"
+
+# --- Find transcript ---
+# Encode CWD for Claude's project path
+ENCODED_CWD=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
+PROJECTS_DIR="$HOME/.claude/projects/-${ENCODED_CWD}"
+
+if [ ! -d "$PROJECTS_DIR" ]; then
+  log "No projects dir: $PROJECTS_DIR"
+  exit 0
+fi
+
+# Extract session ID from hook JSON (preferred), fall back to most recent transcript
+SESSION_ID=$(echo "$INPUT" | json_field "session_id" "")
+if [ -n "$SESSION_ID" ] && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
+  TRANSCRIPT="$PROJECTS_DIR/${SESSION_ID}.jsonl"
+else
+  TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
+  if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
+    log "No transcript found"
+    exit 0
+  fi
+  SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+fi
+log "Session: $SESSION_ID"
+
+# --- Session depth check (min 3 user turns) ---
+USER_TURNS=$(grep -c '"type":"user"' "$TRANSCRIPT" 2>/dev/null || echo "0")
+if [ "$USER_TURNS" -lt 3 ]; then
+  log "Shallow session ($USER_TURNS turns), skipping"
+  exit 0
+fi
+log "Session depth: $USER_TURNS turns"
+
+# --- Reinforcement: update last_seen for loaded self-learning artifacts ---
+reinforce_loaded_artifacts() {
+  local learning_log="$MEMORY_DIR/learning-log.jsonl"
+  [ ! -f "$learning_log" ] && return
+
+  # Grep transcript for self-learning skill/command references
+  local loaded
+  loaded=$(grep -oE 'self-learning[:/][a-z0-9-]+' "$TRANSCRIPT" 2>/dev/null | sort -u || true)
+  [ -z "$loaded" ] && return
+
+  local now_iso
+  now_iso=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+  # Convert loaded slugs to a regex-safe pipe-delimited list for single-pass matching
+  local slugs_pattern
+  slugs_pattern=$(echo "$loaded" | sed 's|self-learning[:/]||' | paste -sd '|' -)
+  [ -z "$slugs_pattern" ] && return
+
+  # Single-pass: use jq if available, otherwise node
+  local temp_log="${learning_log}.tmp"
+  if [ "$_HAS_JQ" = "true" ]; then
+    local updated
+    updated=$(jq -c --arg now "$now_iso" --arg slugs "$slugs_pattern" '
+      def extract_slug:
+        .artifact_path as $p |
+        if ($p | contains("/commands/")) then ($p | split("/") | last | rtrimstr(".md"))
+        else ($p | split("/") | .[-2])
+        end;
+      if .status == "created" and .artifact_path != null and .artifact_path != "" then
+        extract_slug as $slug |
+        if ($slugs | split("|") | any(. == $slug)) then .last_seen = $now | . + {"_reinforced": true}
+        else .
+        end
+      else .
+      end
+    ' "$learning_log" 2>/dev/null)
+
+    if echo "$updated" | grep -qF '"_reinforced":true' 2>/dev/null; then
+      # Strip the internal marker and write back
+      echo "$updated" | jq -c 'del(._reinforced)' > "$temp_log" 2>/dev/null
+      mv "$temp_log" "$learning_log"
+      # Log which slugs were reinforced
+      echo "$updated" | jq -r 'select(._reinforced == true) | .artifact_path' 2>/dev/null | while IFS= read -r path; do
+        log "Reinforced: $(basename "$(dirname "$path")")"
+      done
+    else
+      rm -f "$temp_log"
+    fi
+  else
+    # Node fallback: process entire file at once
+    node -e "
+      const fs = require('fs');
+      const lines = fs.readFileSync('/dev/stdin', 'utf8').trim().split('\n').filter(Boolean);
+      const slugs = process.argv[1].split('|');
+      const now = process.argv[2];
+      let updated = false;
+      const result = lines.map(line => {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.status === 'created' && obj.artifact_path) {
+            const slug = obj.artifact_path.includes('/commands/')
+              ? obj.artifact_path.split('/').pop().replace(/\.md$/, '')
+              : obj.artifact_path.split('/').slice(-2, -1)[0];
+            if (slugs.includes(slug)) {
+              obj.last_seen = now;
+              updated = true;
+            }
+          }
+          return JSON.stringify(obj);
+        } catch (e) { return line; }
+      });
+      if (updated) {
+        fs.writeFileSync(process.argv[3], result.join('\n') + '\n');
+      }
+    " "$slugs_pattern" "$now_iso" "$learning_log" < "$learning_log"
+  fi
+}
+
+reinforce_loaded_artifacts
+
+# --- 3-session batching ---
+
+run_batch_check() {
+  SESSION_COUNT_FILE="$MEMORY_DIR/.learning-session-count"
+  BATCH_IDS_FILE="$MEMORY_DIR/.learning-batch-ids"
+
+  # Adaptive batch size: 5 if >=15 observations, otherwise default
+  OBS_TOTAL=0
+  if [ -f "$MEMORY_DIR/learning-log.jsonl" ]; then
+    OBS_TOTAL=$(wc -l < "$MEMORY_DIR/learning-log.jsonl" | tr -d ' ')
+  fi
+  if [ "$OBS_TOTAL" -ge 15 ]; then
+    BATCH_SIZE=5
+    log "Adaptive batch size: 5 (${OBS_TOTAL} observations)"
+  fi
+
+  # Validate session ID format before appending
+  if ! echo "$SESSION_ID" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+    log "Invalid session ID: $SESSION_ID"
+    return
+  fi
+
+  # Append this session ID (deduplicate)
+  if [ -f "$SESSION_COUNT_FILE" ] && grep -qF "$SESSION_ID" "$SESSION_COUNT_FILE" 2>/dev/null; then
+    log "Session already counted, skipping"
+    return
+  fi
+
+  echo "$SESSION_ID" >> "$SESSION_COUNT_FILE"
+  CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
+  log "Session count: $CURRENT_COUNT / $BATCH_SIZE"
+
+  if [ "$CURRENT_COUNT" -lt "$BATCH_SIZE" ]; then
+    log "Batch not full yet ($CURRENT_COUNT < $BATCH_SIZE), waiting"
+    return
+  fi
+
+  # --- Batch is full: prepare to spawn background learner ---
+
+  # Daily cap check — tab-separated format: "DATE\tCOUNT" (matches background-learning)
+  RUNS_FILE="$MEMORY_DIR/.learning-runs-today"
+  TODAY=$(date '+%Y-%m-%d')
+  RUNS_TODAY=0
+  if [ -f "$RUNS_FILE" ]; then
+    RUNS_DATE=$(cut -f1 "$RUNS_FILE")
+    if [ "$RUNS_DATE" = "$TODAY" ]; then
+      RUNS_TODAY=$(cut -f2 "$RUNS_FILE")
+    fi
+  fi
+
+  if [ "$RUNS_TODAY" -ge "$MAX_DAILY" ]; then
+    log "Daily cap reached ($RUNS_TODAY >= $MAX_DAILY), skipping"
+    return
+  fi
+
+  # Atomically hand off batch IDs to background-learning (mv is atomic on same filesystem)
+  mv "$SESSION_COUNT_FILE" "$BATCH_IDS_FILE"
+
+  # Update daily run count (tab-separated: "DATE\tCOUNT")
+  printf '%s\t%d\n' "$TODAY" "$((RUNS_TODAY + 1))" > "$RUNS_FILE"
+
+  log "Triggering batch learning (${CURRENT_COUNT} sessions)"
+
+  # Spawn background learner
+  DEVFLOW_BG_LEARNER=1 nohup bash "$SCRIPT_DIR/background-learning" "$CWD" "--batch" "$CLAUDE_BIN" \
+    >> "$LOG_FILE" 2>&1 &
+  disown
+}
+
+run_batch_check
+
+exit 0

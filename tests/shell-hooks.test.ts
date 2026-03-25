@@ -10,6 +10,7 @@ const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
   'background-learning',
+  'session-end-learning',
   'stop-update-learning',
   'background-memory-update',
   'stop-update-memory',
@@ -35,31 +36,6 @@ describe('shell hook syntax checks', () => {
 });
 
 describe('background-learning pure functions', () => {
-  it('decay_factor returns correct values for all periods', () => {
-    const expected: Record<string, string> = {
-      '0': '100', '1': '90', '2': '81',
-      '3': '73', '4': '66', '5': '59',
-      '6': '53', '10': '53', '99': '53',
-    };
-
-    for (const [input, output] of Object.entries(expected)) {
-      const result = execSync(
-        `bash -c '
-          decay_factor() {
-            case $1 in
-              0) echo "100";; 1) echo "90";; 2) echo "81";;
-              3) echo "73";; 4) echo "66";; 5) echo "59";;
-              *) echo "53";;
-            esac
-          }
-          decay_factor ${input}
-        '`,
-        { stdio: 'pipe' },
-      ).toString().trim();
-      expect(result).toBe(output);
-    }
-  });
-
   it('check_daily_cap respects counter file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
     const counterFile = path.join(tmpDir, '.learning-runs-today');
@@ -192,6 +168,19 @@ describe('json-helper.js operations', () => {
     expect(result).toBe('Hello world\nSecond message');
   });
 
+  it('extract-text-messages handles plain string content', () => {
+    const input = JSON.stringify({
+      message: {
+        content: 'plain string message',
+      },
+    });
+    const result = execSync(
+      `echo '${input.replace(/'/g, "'\\''")}' | node "${JSON_HELPER}" extract-text-messages`,
+      { stdio: 'pipe' },
+    ).toString().trim();
+    expect(result).toBe('plain string message');
+  });
+
   it('merge-evidence flattens, dedupes, and limits', () => {
     const input = JSON.stringify([['a', 'b', 'c'], ['b', 'c', 'd']]);
     const result = execSync(
@@ -279,8 +268,8 @@ describe('json-helper.js operations', () => {
 
     try {
       fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/path/learned/deploy-flow.md', confidence: 0.95 }),
-        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/path/learned-debug-hooks/SKILL.md', confidence: 0.8 }),
+        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95 }),
+        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/.claude/skills/debug-hooks/SKILL.md', confidence: 0.8 }),
         JSON.stringify({ id: 'obs_3', type: 'workflow', status: 'observing', confidence: 0.3 }),
       ].join('\n'));
 
@@ -296,6 +285,811 @@ describe('json-helper.js operations', () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('learning-new outputs new artifact notifications with self-learning prefix', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95, last_seen: '2026-03-22T00:00:00Z' }),
+        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/.claude/skills/debug-hooks/SKILL.md', confidence: 0.8, last_seen: '2026-03-22T00:00:00Z' }),
+        JSON.stringify({ id: 'obs_3', type: 'workflow', status: 'observing', confidence: 0.3, last_seen: '2026-03-22T00:00:00Z' }),
+      ].join('\n'));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" learning-new "${file}" 0`,
+        { stdio: 'pipe' },
+      ).toString().trim();
+      const lines = result.split('\n');
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toContain('self-learning/deploy-flow');
+      expect(lines[0]).toContain('command created');
+      expect(lines[1]).toContain('debug-hooks');
+      expect(lines[1]).toContain('skill created');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('json-helper.cjs temporal-decay', () => {
+  it('applies decay to old entries', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+    try {
+      const oldDate = new Date(Date.now() - 35 * 86400000).toISOString();
+      fs.writeFileSync(file, JSON.stringify({
+        id: 'obs_test1', confidence: 0.66, last_seen: oldDate,
+      }) + '\n');
+
+      const result = execSync(
+        `node "${JSON_HELPER}" temporal-decay "${file}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.decayed).toBe(1);
+
+      const updated = fs.readFileSync(file, 'utf8').trim();
+      const entry = JSON.parse(updated);
+      expect(entry.confidence).toBeLessThan(0.66);
+      expect(entry.confidence).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes entries below threshold', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+    try {
+      const oldDate = new Date(Date.now() - 200 * 86400000).toISOString();
+      fs.writeFileSync(file, JSON.stringify({
+        id: 'obs_test1', confidence: 0.15, last_seen: oldDate,
+      }) + '\n');
+
+      const result = execSync(
+        `node "${JSON_HELPER}" temporal-decay "${file}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.removed).toBe(1);
+
+      const content = fs.readFileSync(file, 'utf8').trim();
+      expect(content).toBe('');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves fresh entries', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+    try {
+      const recentDate = new Date().toISOString();
+      fs.writeFileSync(file, JSON.stringify({
+        id: 'obs_test1', confidence: 0.66, last_seen: recentDate,
+      }) + '\n');
+
+      const result = execSync(
+        `node "${JSON_HELPER}" temporal-decay "${file}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.decayed).toBe(0);
+      expect(counts.removed).toBe(0);
+
+      const entry = JSON.parse(fs.readFileSync(file, 'utf8').trim());
+      expect(entry.confidence).toBe(0.66);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('handles missing file gracefully', () => {
+    const result = execSync(
+      `node "${JSON_HELPER}" temporal-decay "/tmp/nonexistent-devflow-test-${Date.now()}.jsonl"`,
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    ).toString().trim();
+    const counts = JSON.parse(result);
+    expect(counts.removed).toBe(0);
+    expect(counts.decayed).toBe(0);
+  });
+
+  it('handles empty file', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(file, '');
+      const result = execSync(
+        `node "${JSON_HELPER}" temporal-decay "${file}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.removed).toBe(0);
+      expect(counts.decayed).toBe(0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns correct counts for mixed entries', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+    try {
+      const old35 = new Date(Date.now() - 35 * 86400000).toISOString();
+      const old200 = new Date(Date.now() - 200 * 86400000).toISOString();
+      const recent = new Date().toISOString();
+      fs.writeFileSync(file, [
+        JSON.stringify({ id: 'obs_a', confidence: 0.66, last_seen: old35 }),
+        JSON.stringify({ id: 'obs_b', confidence: 0.15, last_seen: old200 }),
+        JSON.stringify({ id: 'obs_c', confidence: 0.95, last_seen: recent }),
+      ].join('\n') + '\n');
+
+      const result = execSync(
+        `node "${JSON_HELPER}" temporal-decay "${file}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.decayed).toBe(1);
+      expect(counts.removed).toBe(1);
+
+      const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+      expect(lines).toHaveLength(2);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('json-helper.cjs process-observations', () => {
+  it('creates new observations', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [{
+          id: 'obs_abc123', type: 'workflow', pattern: 'test pattern',
+          evidence: ['evidence1'], details: 'test details',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.created).toBe(1);
+      expect(counts.updated).toBe(0);
+
+      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+      expect(entry.id).toBe('obs_abc123');
+      expect(entry.confidence).toBe(0.33);
+      expect(entry.status).toBe('observing');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('updates existing observations', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'old pattern',
+        confidence: 0.33, observations: 1,
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
+        status: 'observing', evidence: ['old evidence'], details: 'old',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [{
+          id: 'obs_abc123', type: 'workflow', pattern: 'updated pattern',
+          evidence: ['new evidence'], details: 'updated',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.updated).toBe(1);
+
+      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+      expect(entry.observations).toBe(2);
+      expect(entry.confidence).toBe(0.66);
+      expect(entry.evidence).toContain('old evidence');
+      expect(entry.evidence).toContain('new evidence');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips observations with missing fields', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [
+          { id: 'obs_abc123', type: 'workflow' },
+        ],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.skipped).toBe(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips observations with invalid type', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [
+          { id: 'obs_abc123', type: 'invalid', pattern: 'test' },
+        ],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.skipped).toBe(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips observations with invalid id format', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [
+          { id: 'bad_id', type: 'workflow', pattern: 'test' },
+        ],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.skipped).toBe(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('calculates confidence correctly from count', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.66, observations: 2,
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
+        status: 'observing', evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [] }],
+      }));
+
+      execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+
+      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+      expect(entry.confidence).toBe(0.95);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('sets ready on temporal spread', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.66, observations: 2,
+        first_seen: twoDaysAgo, last_seen: twoDaysAgo,
+        status: 'observing', evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [] }],
+      }));
+
+      execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+
+      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+      expect(entry.status).toBe('ready');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves created status', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3,
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
+        status: 'created', evidence: [], details: '',
+        artifact_path: '/some/path.md',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: ['new'] }],
+      }));
+
+      execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+
+      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+      expect(entry.status).toBe('created');
+      expect(entry.observations).toBe(4);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('handles missing log file by creating it', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [{
+          id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [],
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.created).toBe(1);
+      expect(fs.existsSync(logFile)).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns correct counts for mixed operations', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_exist1', type: 'workflow', pattern: 'existing',
+        confidence: 0.33, observations: 1,
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
+        status: 'observing', evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        observations: [
+          { id: 'obs_exist1', type: 'workflow', pattern: 'existing', evidence: [] },
+          { id: 'obs_new001', type: 'procedural', pattern: 'new pattern', evidence: [] },
+          { id: 'bad', type: 'workflow', pattern: 'test' },
+        ],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.updated).toBe(1);
+      expect(counts.created).toBe(1);
+      expect(counts.skipped).toBe(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('json-helper.cjs create-artifacts', () => {
+  it('creates command with correct frontmatter', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'deploy flow',
+        confidence: 0.95, observations: 3, status: 'ready',
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'deploy-flow', description: 'Deploy workflow',
+          content: '# Deploy Flow\nDeploy the app.',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.created).toHaveLength(1);
+
+      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'deploy-flow.md');
+      expect(fs.existsSync(artPath)).toBe(true);
+      const content = fs.readFileSync(artPath, 'utf8');
+      expect(content).toContain('description: "Deploy workflow"');
+      expect(content).toContain('devflow-learning: auto-generated');
+      expect(content).toContain('# Deploy Flow');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates skill with correct frontmatter', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'procedural', pattern: 'debug hooks',
+        confidence: 0.95, observations: 3, status: 'ready',
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'skill',
+          name: 'debug-hooks', description: 'Debug hook issues',
+          content: '# Debug Hooks\nHow to debug hooks.',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.created).toHaveLength(1);
+
+      const artPath = path.join(tmpDir, '.claude', 'skills', 'debug-hooks', 'SKILL.md');
+      expect(fs.existsSync(artPath)).toBe(true);
+      const content = fs.readFileSync(artPath, 'utf8');
+      expect(content).toContain('name: self-learning:debug-hooks');
+      expect(content).toContain('user-invocable: false');
+      expect(content).toContain('allowed-tools: Read, Grep, Glob');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips non-ready observations', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.33, observations: 1, status: 'observing',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'test-cmd', description: 'Test', content: 'Test',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.skipped).toBe(1);
+      expect(counts.created).toHaveLength(0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips empty or invalid names', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3, status: 'ready',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: '!!!', description: 'Test', content: 'Test',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.skipped).toBe(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('never overwrites existing files', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3, status: 'ready',
+        evidence: [], details: '',
+      }) + '\n');
+
+      const artDir = path.join(tmpDir, '.claude', 'commands', 'self-learning');
+      fs.mkdirSync(artDir, { recursive: true });
+      fs.writeFileSync(path.join(artDir, 'existing.md'), 'USER CONTENT');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'existing', description: 'Test', content: 'New content',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.skipped).toBe(1);
+
+      const content = fs.readFileSync(path.join(artDir, 'existing.md'), 'utf8');
+      expect(content).toBe('USER CONTENT');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('sanitizes artifact name', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3, status: 'ready',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'My Cool_Command!@#', description: 'Test', content: 'Test',
+        }],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.created).toHaveLength(1);
+      expect(counts.created[0]).toContain('mycoolcommand');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('updates observation status in log', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3, status: 'ready',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'test-cmd', description: 'Test', content: 'Test',
+        }],
+      }));
+
+      execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+
+      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+      expect(entry.status).toBe('created');
+      expect(entry.artifact_path).toContain('test-cmd.md');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('escapes description quotes', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3, status: 'ready',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'test-cmd', description: 'A "quoted" description', content: 'Test',
+        }],
+      }));
+
+      execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+
+      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'test-cmd.md');
+      const content = fs.readFileSync(artPath, 'utf8');
+      expect(content).toContain('description: "A \\"quoted\\" description"');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns created paths', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, [
+        JSON.stringify({
+          id: 'obs_abc123', type: 'workflow', pattern: 'test1',
+          confidence: 0.95, observations: 3, status: 'ready',
+          evidence: [], details: '',
+        }),
+        JSON.stringify({
+          id: 'obs_def456', type: 'procedural', pattern: 'test2',
+          confidence: 0.95, observations: 3, status: 'ready',
+          evidence: [], details: '',
+        }),
+      ].join('\n') + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [
+          { observation_id: 'obs_abc123', type: 'command', name: 'cmd1', description: 'Cmd 1', content: 'C1' },
+          { observation_id: 'obs_def456', type: 'skill', name: 'skill1', description: 'Skill 1', content: 'S1' },
+        ],
+      }));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const counts = JSON.parse(result);
+      expect(counts.created).toHaveLength(2);
+      expect(counts.created[0]).toContain('cmd1.md');
+      expect(counts.created[1]).toContain('SKILL.md');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('json-helper.cjs filter-observations', () => {
+  it('returns valid entries as sorted array', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ id: 'obs_a', type: 'workflow', pattern: 'p1', confidence: 0.3 }),
+        JSON.stringify({ id: 'obs_b', type: 'procedural', pattern: 'p2', confidence: 0.9 }),
+        JSON.stringify({ id: 'obs_c', type: 'workflow', pattern: 'p3', confidence: 0.5 }),
+      ].join('\n') + '\n');
+
+      const result = execSync(
+        `node "${JSON_HELPER}" filter-observations "${file}" confidence 2`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const parsed = JSON.parse(result);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0].id).toBe('obs_b');
+      expect(parsed[1].id).toBe('obs_c');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('filters out malformed entries', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ id: 'obs_valid', type: 'workflow', pattern: 'valid', confidence: 0.5 }),
+        JSON.stringify({ id: 'bad_id', type: 'workflow', pattern: 'bad id' }),
+        JSON.stringify({ id: 'obs_notype', pattern: 'no type' }),
+        JSON.stringify({ id: 'obs_nopattern', type: 'workflow' }),
+        'not json at all',
+      ].join('\n') + '\n');
+
+      const result = execSync(
+        `node "${JSON_HELPER}" filter-observations "${file}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      ).toString().trim();
+      const parsed = JSON.parse(result);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].id).toBe('obs_valid');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns empty array for missing file', () => {
+    const result = execSync(
+      `node "${JSON_HELPER}" filter-observations "/tmp/nonexistent-devflow-test-${Date.now()}.jsonl"`,
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    ).toString().trim();
+    expect(result).toBe('[]');
+  });
+});
+
+describe('session-end-learning structure', () => {
+  it('is included in bash -n syntax checks', () => {
+    expect(HOOK_SCRIPTS).toContain('session-end-learning');
+  });
+
+  it('starts with bash shebang and sources json-parse', () => {
+    const scriptPath = path.join(HOOKS_DIR, 'session-end-learning');
+    const content = fs.readFileSync(scriptPath, 'utf8');
+    const lines = content.split('\n');
+    expect(lines[0]).toBe('#!/bin/bash');
+    expect(content).toContain('source "$SCRIPT_DIR/json-parse"');
   });
 });
 

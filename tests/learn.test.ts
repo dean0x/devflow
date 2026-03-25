@@ -4,6 +4,7 @@ import {
   removeLearningHook,
   hasLearningHook,
   parseLearningLog,
+  loadAndCountObservations,
   formatLearningStatus,
   loadLearningConfig,
   isLearningObservation,
@@ -16,9 +17,9 @@ describe('addLearningHook', () => {
     const result = addLearningHook('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-learning');
-    expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(10);
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
+    expect(settings.hooks.SessionEnd[0].hooks[0].timeout).toBe(10);
   });
 
   it('adds alongside existing hooks (Stop hooks from memory)', () => {
@@ -30,9 +31,9 @@ describe('addLearningHook', () => {
     const result = addLearningHook(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(2);
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
-    expect(settings.hooks.Stop[1].hooks[0].command).toContain('stop-update-learning');
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
   });
 
   it('is idempotent — does not add duplicate', () => {
@@ -45,10 +46,10 @@ describe('addLearningHook', () => {
   it('uses correct path via run-hook wrapper', () => {
     const result = addLearningHook('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
-    const command = settings.hooks.Stop[0].hooks[0].command;
+    const command = settings.hooks.SessionEnd[0].hooks[0].command;
 
     expect(command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
-    expect(command).toContain('stop-update-learning');
+    expect(command).toContain('session-end-learning');
   });
 
   it('preserves other settings', () => {
@@ -61,26 +62,66 @@ describe('addLearningHook', () => {
 
     expect(settings.statusLine.command).toBe('statusline.sh');
     expect(settings.env.SOME_VAR).toBe('1');
-    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
   });
 
-  it('adds alongside existing Stop hooks', () => {
+  it('adds alongside existing SessionEnd hooks', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: 'other-stop.sh' }] }],
+        SessionEnd: [{ hooks: [{ type: 'command', command: 'other-session-end.sh' }] }],
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
       },
     });
     const result = addLearningHook(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(2);
+    expect(settings.hooks.SessionEnd).toHaveLength(2);
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+  });
+
+  it('self-upgrades legacy Stop hook to SessionEnd', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
+          { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
+        ],
+      },
+    });
+    const result = addLearningHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Legacy Stop learning hook removed, memory hook preserved
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
+    // New SessionEnd hook added
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
+  });
+
+  it('self-upgrades legacy Stop hook and preserves other events', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
+        ],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+      },
+    });
+    const result = addLearningHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Legacy Stop hook removed entirely (was the only Stop entry)
+    expect(settings.hooks.Stop).toBeUndefined();
+    // New SessionEnd hook added
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    // Other hooks preserved
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
   });
 });
 
 describe('removeLearningHook', () => {
-  it('removes learning hook', () => {
+  it('removes learning hook from SessionEnd', () => {
     const withHook = addLearningHook('{}', '/home/user/.devflow');
     const result = removeLearningHook(withHook);
     const settings = JSON.parse(result);
@@ -88,27 +129,27 @@ describe('removeLearningHook', () => {
     expect(settings.hooks).toBeUndefined();
   });
 
-  it('preserves memory Stop hooks', () => {
+  it('preserves other SessionEnd hooks', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: 'other-session-end-hook' }] },
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
         ],
       },
     });
     const result = removeLearningHook(input);
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
+    expect(settings.hooks.SessionEnd).toHaveLength(1);
+    expect(settings.hooks.SessionEnd[0].hooks[0].command).toBe('other-session-end-hook');
   });
 
   it('cleans empty hooks object when last hook removed', () => {
     const input = JSON.stringify({
       hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
         ],
       },
     });
@@ -122,8 +163,8 @@ describe('removeLearningHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
-        Stop: [
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
         ],
       },
     });
@@ -131,7 +172,7 @@ describe('removeLearningHook', () => {
     const settings = JSON.parse(result);
 
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.Stop).toBeUndefined();
+    expect(settings.hooks.SessionEnd).toBeUndefined();
   });
 
   it('is idempotent', () => {
@@ -144,16 +185,97 @@ describe('removeLearningHook', () => {
 
     expect(result).toBe(input);
   });
+
+  it('cleans up legacy Stop entries', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    const result = removeLearningHook(input);
+    const settings = JSON.parse(result);
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
+  });
+
+  it('cleans both SessionEnd and legacy Stop', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/session-end-learning' }] },
+        ],
+        Stop: [
+          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
+          { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
+        ],
+      },
+    });
+    const result = removeLearningHook(input);
+    const settings = JSON.parse(result);
+    expect(settings.hooks.SessionEnd).toBeUndefined();
+    expect(settings.hooks.Stop).toHaveLength(1);
+  });
 });
 
 describe('hasLearningHook', () => {
-  it('returns true when present', () => {
+  it('returns current when present on SessionEnd', () => {
     const withHook = addLearningHook('{}', '/home/user/.devflow');
-    expect(hasLearningHook(withHook)).toBe(true);
+    expect(hasLearningHook(withHook)).toBe('current');
   });
 
   it('returns false when absent', () => {
     expect(hasLearningHook('{}')).toBe(false);
+  });
+
+  it('returns false for non-learning SessionEnd hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: 'some-other-hook' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe(false);
+  });
+
+  it('returns current among other SessionEnd hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: 'some-other-hook' }] },
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe('current');
+  });
+
+  it('returns legacy for Stop hook with stop-update-learning', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe('legacy');
+  });
+
+  it('returns current when both SessionEnd and legacy Stop present', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
+        ],
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
+        ],
+      },
+    });
+    expect(hasLearningHook(input)).toBe('current');
   });
 
   it('returns false for non-learning Stop hooks', () => {
@@ -165,18 +287,6 @@ describe('hasLearningHook', () => {
       },
     });
     expect(hasLearningHook(input)).toBe(false);
-  });
-
-  it('returns true among other Stop hooks', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
-        ],
-      },
-    });
-    expect(hasLearningHook(input)).toBe(true);
   });
 });
 
@@ -218,15 +328,75 @@ describe('parseLearningLog', () => {
   });
 });
 
+describe('loadAndCountObservations', () => {
+  it('counts mixed valid and invalid lines', () => {
+    const valid = JSON.stringify({
+      id: 'obs_1', type: 'workflow', pattern: 'p1',
+      confidence: 0.5, observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    });
+    const invalid = 'not json at all';
+    const incomplete = JSON.stringify({ id: 'obs_2', type: 'workflow' });
+    const log = [valid, invalid, incomplete].join('\n');
+    const result = loadAndCountObservations(log);
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0].id).toBe('obs_1');
+    expect(result.invalidCount).toBe(2);
+  });
+
+  it('returns zero invalid count for all-valid lines', () => {
+    const lines = [
+      JSON.stringify({
+        id: 'obs_1', type: 'workflow', pattern: 'p1',
+        confidence: 0.5, observations: 1, first_seen: 't',
+        last_seen: 't', status: 'observing', evidence: [], details: 'd',
+      }),
+      JSON.stringify({
+        id: 'obs_2', type: 'procedural', pattern: 'p2',
+        confidence: 0.8, observations: 2, first_seen: 't',
+        last_seen: 't', status: 'ready', evidence: ['e1'], details: 'd2',
+      }),
+    ].join('\n');
+    const result = loadAndCountObservations(lines);
+    expect(result.observations).toHaveLength(2);
+    expect(result.invalidCount).toBe(0);
+  });
+
+  it('handles empty input', () => {
+    const result = loadAndCountObservations('');
+    expect(result.observations).toHaveLength(0);
+    expect(result.invalidCount).toBe(0);
+  });
+
+  it('calculates invalidCount as rawLines minus valid observations', () => {
+    const valid = JSON.stringify({
+      id: 'obs_1', type: 'workflow', pattern: 'p1',
+      confidence: 0.5, observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    });
+    const log = [valid, 'bad1', 'bad2', 'bad3'].join('\n');
+    const result = loadAndCountObservations(log);
+    expect(result.observations).toHaveLength(1);
+    expect(result.invalidCount).toBe(3);
+  });
+});
+
 describe('formatLearningStatus', () => {
-  it('shows enabled state', () => {
-    const result = formatLearningStatus([], true);
+  it('shows enabled state for current hook', () => {
+    const result = formatLearningStatus([], 'current');
     expect(result).toContain('enabled');
+    expect(result).not.toContain('legacy');
   });
 
   it('shows disabled state', () => {
     const result = formatLearningStatus([], false);
     expect(result).toContain('disabled');
+  });
+
+  it('shows legacy upgrade message for legacy hook', () => {
+    const result = formatLearningStatus([], 'legacy');
+    expect(result).toContain('legacy');
+    expect(result).toContain('devflow learn --disable && devflow learn --enable');
   });
 
   it('shows observation counts', () => {
@@ -235,7 +405,7 @@ describe('formatLearningStatus', () => {
       { id: 'obs_2', type: 'procedural', pattern: 'p2', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
       { id: 'obs_3', type: 'workflow', pattern: 'p3', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'ready', evidence: [], details: 'd' },
     ];
-    const result = formatLearningStatus(observations, true);
+    const result = formatLearningStatus(observations, 'current');
     expect(result).toContain('3 total');
     expect(result).toContain('Workflows: 2');
     expect(result).toContain('Procedural: 1');
@@ -246,13 +416,13 @@ describe('formatLearningStatus', () => {
       { id: 'obs_1', type: 'workflow', pattern: 'p1', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '/path' },
       { id: 'obs_2', type: 'procedural', pattern: 'p2', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
     ];
-    const result = formatLearningStatus(observations, true);
+    const result = formatLearningStatus(observations, 'current');
     expect(result).toContain('1 promoted');
     expect(result).toContain('1 observing');
   });
 
   it('handles empty observations', () => {
-    const result = formatLearningStatus([], true);
+    const result = formatLearningStatus([], 'current');
     expect(result).toContain('none');
   });
 });
@@ -260,10 +430,11 @@ describe('formatLearningStatus', () => {
 describe('loadLearningConfig', () => {
   it('returns defaults when no config files', () => {
     const config = loadLearningConfig(null, null);
-    expect(config.max_daily_runs).toBe(10);
+    expect(config.max_daily_runs).toBe(5);
     expect(config.throttle_minutes).toBe(5);
     expect(config.model).toBe('sonnet');
     expect(config.debug).toBe(false);
+    expect(config.batch_size).toBe(3);
   });
 
   it('loads global config', () => {
@@ -272,6 +443,7 @@ describe('loadLearningConfig', () => {
     expect(config.max_daily_runs).toBe(20);
     expect(config.throttle_minutes).toBe(5); // default preserved
     expect(config.model).toBe('haiku');
+    expect(config.batch_size).toBe(3); // default preserved
   });
 
   it('project config overrides global', () => {
@@ -285,9 +457,21 @@ describe('loadLearningConfig', () => {
   it('handles partial override (only some fields)', () => {
     const projectJson = JSON.stringify({ throttle_minutes: 15 });
     const config = loadLearningConfig(null, projectJson);
-    expect(config.max_daily_runs).toBe(10); // default
+    expect(config.max_daily_runs).toBe(5); // default
     expect(config.throttle_minutes).toBe(15); // overridden
     expect(config.model).toBe('sonnet'); // default
+  });
+
+  it('loads batch_size from config', () => {
+    const projectJson = JSON.stringify({ batch_size: 5 });
+    const config = loadLearningConfig(null, projectJson);
+    expect(config.batch_size).toBe(5);
+  });
+
+  it('ignores non-numeric batch_size', () => {
+    const projectJson = JSON.stringify({ batch_size: 'large' });
+    const config = loadLearningConfig(null, projectJson);
+    expect(config.batch_size).toBe(3); // default preserved
   });
 });
 
@@ -395,35 +579,47 @@ describe('parseLearningLog — type guard filtering', () => {
 
 describe('applyConfigLayer — immutability', () => {
   it('returns new object without mutating input', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
     const result = applyConfigLayer(original, JSON.stringify({ max_daily_runs: 20 }));
     expect(result.max_daily_runs).toBe(20);
     expect(original.max_daily_runs).toBe(10); // not mutated
   });
 
   it('returns copy on invalid JSON', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
     const result = applyConfigLayer(original, 'not json');
     expect(result).toEqual(original);
     expect(result).not.toBe(original); // different reference
   });
 
   it('ignores wrong-typed fields', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
     const result = applyConfigLayer(original, JSON.stringify({ max_daily_runs: 'lots', model: 42 }));
     expect(result.max_daily_runs).toBe(10);
     expect(result.model).toBe('sonnet');
   });
 
   it('applies debug field when boolean', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
     const result = applyConfigLayer(original, JSON.stringify({ debug: true }));
     expect(result.debug).toBe(true);
   });
 
   it('ignores debug field when non-boolean', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
     const result = applyConfigLayer(original, JSON.stringify({ debug: 'yes' }));
     expect(result.debug).toBe(false);
+  });
+
+  it('applies batch_size field when number', () => {
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
+    const result = applyConfigLayer(original, JSON.stringify({ batch_size: 5 }));
+    expect(result.batch_size).toBe(5);
+  });
+
+  it('ignores batch_size field when non-number', () => {
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
+    const result = applyConfigLayer(original, JSON.stringify({ batch_size: 'large' }));
+    expect(result.batch_size).toBe(3);
   });
 });

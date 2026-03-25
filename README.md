@@ -1,4 +1,4 @@
-# DevFlow: The Most Advanced Agentic Development Toolkit
+# DevFlow: The Most Advanced Agentic Development Toolkit for Production-Grade Code
 
 [![npm version](https://img.shields.io/npm/v/devflow-kit)](https://www.npmjs.com/package/devflow-kit)
 [![CI](https://github.com/dean0x/devflow/actions/workflows/ci.yml/badge.svg)](https://github.com/dean0x/devflow/actions/workflows/ci.yml)
@@ -36,6 +36,7 @@ Claude Code is powerful. DevFlow makes it extraordinary.
 - **Parallel debugging** with competing hypotheses investigated simultaneously
 - **35 quality skills** with 9 auto-activating core, 8 language/ecosystem, plus specialized review and orchestration skills
 - **Ambient mode** that classifies intent and loads proportional skill sets automatically
+- **Fully composable plugin system** where every feature is a plugin. Install only what you need. No bloat, no take-it-or-leave-it bundles.
 
 ## Quick Start
 
@@ -203,14 +204,14 @@ Working memory is **per-project** — scoped to each repo's `.memory/` directory
 
 DevFlow detects repeated workflows and procedural knowledge across your sessions and automatically creates slash commands and skills.
 
-A background agent runs on session stop (same as Working Memory) and analyzes your session transcript for patterns. When a pattern is observed enough times (3 for workflows with 24h+ temporal spread, 2 for procedural knowledge), it creates an artifact:
+A background agent runs on session end, batching every 3 sessions (5 at 15+ observations) to analyze transcripts for patterns. When a pattern is observed enough times (3 observations with 24h+ temporal spread for both types), it creates an artifact:
 
-- **Workflow patterns** become slash commands at `.claude/commands/learned/`
-- **Procedural patterns** become skills at `.claude/skills/learned-*/`
+- **Workflow patterns** become slash commands at `.claude/commands/self-learning/`
+- **Procedural patterns** become skills at `.claude/skills/{slug}/`
 
 | Command | Description |
 |---------|-------------|
-| `devflow learn --enable` | Register the learning Stop hook |
+| `devflow learn --enable` | Register the learning SessionEnd hook |
 | `devflow learn --disable` | Remove the learning hook |
 | `devflow learn --status` | Show learning status and observation counts |
 | `devflow learn --list` | Show all observations sorted by confidence |
@@ -235,7 +236,8 @@ DevFlow creates project documentation in `.docs/` and working memory in `.memory
 ├── learning-log.jsonl        # Learning observations (JSONL)
 ├── learning.json             # Project-level learning config
 ├── .learning-runs-today      # Daily run counter
-├── .learning-last-trigger    # Throttle marker
+├── .learning-session-count   # Session IDs pending batch (one per line)
+├── .learning-batch-ids       # Session IDs for current batch run
 ├── .learning-notified-at     # New artifact notification marker
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
@@ -339,8 +341,8 @@ npx devflow-kit skills unshadow core-patterns
 
 | Tool | Role | What It Does |
 |------|------|-------------|
-| **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Compresses code, test output, build output, and git output for optimal LLM reasoning |
-| **DevFlow** | Quality Orchestration | 18 parallel reviewers, working memory, self-learning, production-grade lifecycle workflows |
+| **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing across 12 languages, command rewriting, test/build/git output compression |
+| **DevFlow** | Quality Orchestration | 18 parallel reviewers, working memory, self-learning, composable plugin system |
 | **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | Orchestration at scale. Karpathy optimization loops, multi-agent pipelines, DAG dependencies, autoscaling |
 
 Skim optimizes what your AI sees. DevFlow enforces how it works. Backbeat scales everything across agents. No other stack covers all three.

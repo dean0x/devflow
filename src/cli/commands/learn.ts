@@ -31,6 +31,8 @@ export interface LearningConfig {
   throttle_minutes: number;
   model: string;
   debug: boolean;
+  /** Number of observations processed per learning run. Default 3, adaptive 5 at 15+ observations. */
+  batch_size: number;
 }
 
 /**
@@ -51,24 +53,30 @@ export function isLearningObservation(obj: unknown): obj is LearningObservation 
     && typeof o.details === 'string';
 }
 
-const LEARNING_HOOK_MARKER = 'stop-update-learning';
+const LEARNING_HOOK_MARKER = 'session-end-learning';
+const LEGACY_HOOK_MARKER = 'stop-update-learning';
 
 /**
- * Add the learning Stop hook to settings JSON.
- * Idempotent — returns unchanged JSON if hook already exists.
+ * Add the learning SessionEnd hook to settings JSON.
+ * Idempotent — returns unchanged JSON if current hook already exists.
+ * Self-upgrading — removes legacy Stop hook before adding SessionEnd hook.
  */
 export function addLearningHook(settingsJson: string, devflowDir: string): string {
-  const settings: Settings = JSON.parse(settingsJson);
+  const hookState = hasLearningHook(settingsJson);
 
-  if (hasLearningHook(settingsJson)) {
+  if (hookState === 'current') {
     return settingsJson;
   }
+
+  // Remove any legacy Stop hooks before adding the new SessionEnd hook
+  const cleanedJson = removeLearningHook(settingsJson);
+  const settings: Settings = JSON.parse(cleanedJson);
 
   if (!settings.hooks) {
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' stop-update-learning';
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-end-learning';
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -80,38 +88,41 @@ export function addLearningHook(settingsJson: string, devflowDir: string): strin
     ],
   };
 
-  if (!settings.hooks.Stop) {
-    settings.hooks.Stop = [];
+  if (!settings.hooks.SessionEnd) {
+    settings.hooks.SessionEnd = [];
   }
 
-  settings.hooks.Stop.push(newEntry);
+  settings.hooks.SessionEnd.push(newEntry);
 
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * Remove the learning Stop hook from settings JSON.
+ * Remove the learning hook from settings JSON.
+ * Checks BOTH SessionEnd (new) and Stop (legacy cleanup).
  * Idempotent — returns unchanged JSON if hook not present.
- * Preserves other Stop hooks. Cleans empty arrays/objects.
+ * Preserves other hooks. Cleans empty arrays/objects.
  */
 export function removeLearningHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
+  let changed = false;
 
-  if (!settings.hooks?.Stop) {
-    return settingsJson;
+  function removeFromEvent(event: 'SessionEnd' | 'Stop', marker: string): void {
+    const matchers = settings.hooks?.[event];
+    if (!matchers) return;
+    const before = matchers.length;
+    settings.hooks![event] = matchers.filter(
+      (m) => !m.hooks.some((h) => h.command.includes(marker)),
+    );
+    if (settings.hooks![event]!.length < before) changed = true;
+    if (settings.hooks![event]!.length === 0) delete settings.hooks![event];
   }
 
-  const before = settings.hooks.Stop.length;
-  settings.hooks.Stop = settings.hooks.Stop.filter(
-    (matcher) => !matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
-  );
+  removeFromEvent('SessionEnd', LEARNING_HOOK_MARKER);
+  removeFromEvent('Stop', LEGACY_HOOK_MARKER);
 
-  if (settings.hooks.Stop.length === before) {
+  if (!changed) {
     return settingsJson;
-  }
-
-  if (settings.hooks.Stop.length === 0) {
-    delete settings.hooks.Stop;
   }
 
   if (settings.hooks && Object.keys(settings.hooks).length === 0) {
@@ -123,17 +134,28 @@ export function removeLearningHook(settingsJson: string): string {
 
 /**
  * Check if the learning hook is registered in settings JSON.
+ * Returns 'current' for SessionEnd hook, 'legacy' for old Stop hook, or false if absent.
  */
-export function hasLearningHook(settingsJson: string): boolean {
+export function hasLearningHook(settingsJson: string): 'current' | 'legacy' | false {
   const settings: Settings = JSON.parse(settingsJson);
 
-  if (!settings.hooks?.Stop) {
-    return false;
+  const hasSessionEnd = settings.hooks?.SessionEnd?.some((matcher) =>
+    matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
+  ) ?? false;
+
+  if (hasSessionEnd) {
+    return 'current';
   }
 
-  return settings.hooks.Stop.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
-  );
+  const hasLegacyStop = settings.hooks?.Stop?.some((matcher) =>
+    matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER)),
+  ) ?? false;
+
+  if (hasLegacyStop) {
+    return 'legacy';
+  }
+
+  return false;
 }
 
 /**
@@ -179,11 +201,16 @@ export function loadAndCountObservations(logContent: string): {
 
 /**
  * Format a human-readable status summary for learning state.
+ * hookState: 'current' (SessionEnd), 'legacy' (old Stop hook), or false (disabled).
  */
-export function formatLearningStatus(observations: LearningObservation[], hookEnabled: boolean): string {
+export function formatLearningStatus(observations: LearningObservation[], hookState: 'current' | 'legacy' | false): string {
   const lines: string[] = [];
 
-  lines.push(`Self-learning: ${hookEnabled ? 'enabled' : 'disabled'}`);
+  if (hookState === 'legacy') {
+    lines.push('Self-learning: enabled (legacy — run `devflow learn --disable && devflow learn --enable` to upgrade)');
+  } else {
+    lines.push(`Self-learning: ${hookState ? 'enabled' : 'disabled'}`);
+  }
 
   if (observations.length === 0) {
     lines.push('Observations: none');
@@ -208,7 +235,7 @@ export function formatLearningStatus(observations: LearningObservation[], hookEn
  * Skips fields with wrong types; swallows parse errors.
  */
 // SYNC: Config loading duplicated in scripts/hooks/background-learning load_config()
-// Synced fields: max_daily_runs, throttle_minutes, model, debug
+// Synced fields: max_daily_runs, throttle_minutes, model, debug, batch_size
 export function applyConfigLayer(config: LearningConfig, json: string): LearningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
@@ -217,6 +244,7 @@ export function applyConfigLayer(config: LearningConfig, json: string): Learning
       throttle_minutes: typeof raw.throttle_minutes === 'number' ? raw.throttle_minutes : config.throttle_minutes,
       model: typeof raw.model === 'string' ? raw.model : config.model,
       debug: typeof raw.debug === 'boolean' ? raw.debug : config.debug,
+      batch_size: typeof raw.batch_size === 'number' ? raw.batch_size : config.batch_size,
     };
   } catch {
     return { ...config };
@@ -229,16 +257,39 @@ export function applyConfigLayer(config: LearningConfig, json: string): Learning
  */
 export function loadLearningConfig(globalJson: string | null, projectJson: string | null): LearningConfig {
   let config: LearningConfig = {
-    max_daily_runs: 10,
+    max_daily_runs: 5,
     throttle_minutes: 5,
     model: 'sonnet',
     debug: false,
+    batch_size: 3,
   };
 
   if (globalJson) config = applyConfigLayer(config, globalJson);
   if (projectJson) config = applyConfigLayer(config, projectJson);
 
   return config;
+}
+
+/**
+ * Read and parse observations from the learning log file.
+ * Returns empty results if the file does not exist.
+ */
+async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
+  try {
+    const logContent = await fs.readFile(logPath, 'utf-8');
+    return loadAndCountObservations(logContent);
+  } catch {
+    return { observations: [], invalidCount: 0 };
+  }
+}
+
+/**
+ * Warn the user if invalid entries were found in the learning log.
+ */
+function warnIfInvalid(invalidCount: number): void {
+  if (invalidCount > 0) {
+    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
+  }
 }
 
 interface LearnOptions {
@@ -253,7 +304,7 @@ interface LearnOptions {
 
 export const learnCommand = new Command('learn')
   .description('Enable or disable self-learning (workflow detection + auto-commands)')
-  .option('--enable', 'Register Stop hook for self-learning')
+  .option('--enable', 'Register SessionEnd hook for self-learning')
   .option('--disable', 'Remove self-learning hook')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all observations sorted by confidence')
@@ -292,36 +343,24 @@ export const learnCommand = new Command('learn')
       settingsContent = '{}';
     }
 
+    // Shared log path for --status, --list, --purge, --clear
+    const logPath = path.join(process.cwd(), '.memory', 'learning-log.jsonl');
+
     // --- --status ---
     if (options.status) {
-      const hookEnabled = hasLearningHook(settingsContent);
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
+      const hookState = hasLearningHook(settingsContent);
+      const { observations, invalidCount } = await readObservations(logPath);
 
-      let observations: LearningObservation[] = [];
-      let invalidCount = 0;
-      try {
-        const logContent = await fs.readFile(logPath, 'utf-8');
-        ({ observations, invalidCount } = loadAndCountObservations(logContent));
-      } catch {
-        // No log file yet
-      }
-
-      const status = formatLearningStatus(observations, hookEnabled);
+      const status = formatLearningStatus(observations, hookState);
       p.log.info(status);
-      if (invalidCount > 0) {
-        p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
-      }
+      warnIfInvalid(invalidCount);
       return;
     }
 
     // --- --list ---
     if (options.list) {
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
-      let observations: LearningObservation[] = [];
-      let invalidCount = 0;
+      let observations: LearningObservation[];
+      let invalidCount: number;
       try {
         const logContent = await fs.readFile(logPath, 'utf-8');
         ({ observations, invalidCount } = loadAndCountObservations(logContent));
@@ -349,9 +388,7 @@ export const learnCommand = new Command('learn')
           `[${typeIcon}] ${color.cyan(obs.pattern)} (${conf}% | ${obs.observations}x | ${statusIcon})`,
         );
       }
-      if (invalidCount > 0) {
-        p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
-      }
+      warnIfInvalid(invalidCount);
       p.outro(color.dim(`${observations.length} observation(s) total`));
       return;
     }
@@ -362,8 +399,8 @@ export const learnCommand = new Command('learn')
 
       const maxRuns = await p.text({
         message: 'Maximum background runs per day',
-        placeholder: '10',
-        defaultValue: '10',
+        placeholder: '5',
+        defaultValue: '5',
         validate: (v) => {
           const n = Number(v);
           if (isNaN(n) || n < 1 || n > 50) return 'Enter a number between 1 and 50';
@@ -412,6 +449,21 @@ export const learnCommand = new Command('learn')
         return;
       }
 
+      const batchSize = await p.text({
+        message: 'Observations per learning run (adaptive: 5 at 15+ observations)',
+        placeholder: '3',
+        defaultValue: '3',
+        validate: (v) => {
+          const n = Number(v);
+          if (isNaN(n) || n < 1 || n > 20) return 'Enter a number between 1 and 20';
+          return undefined;
+        },
+      });
+      if (p.isCancel(batchSize)) {
+        p.cancel('Configuration cancelled.');
+        return;
+      }
+
       const scope = await p.select({
         message: 'Configuration scope',
         options: [
@@ -427,8 +479,9 @@ export const learnCommand = new Command('learn')
       const config: LearningConfig = {
         max_daily_runs: Number(maxRuns),
         throttle_minutes: Number(throttle),
-        model: String(model),
-        debug: !!debugMode,
+        model: model as string,
+        debug: debugMode,
+        batch_size: Number(batchSize),
       };
 
       const configJson = JSON.stringify(config, null, 2) + '\n';
@@ -452,9 +505,6 @@ export const learnCommand = new Command('learn')
 
     // --- --purge ---
     if (options.purge) {
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
       let logContent: string;
       try {
         logContent = await fs.readFile(logPath, 'utf-8');
@@ -478,9 +528,6 @@ export const learnCommand = new Command('learn')
 
     // --- --clear ---
     if (options.clear) {
-      const cwd = process.cwd();
-      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
       try {
         await fs.access(logPath);
       } catch {
@@ -509,10 +556,12 @@ export const learnCommand = new Command('learn')
     let devflowDir: string;
     try {
       const settings: Settings = JSON.parse(settingsContent);
-      // Try to extract devflowDir from existing hooks (e.g., Stop hook path)
+      // Try to extract devflowDir from existing hooks (SessionEnd first, Stop fallback)
+      const sessionEndHook = settings.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command;
       const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
-      if (stopHook) {
-        const hookBinary = stopHook.split(' ')[0];
+      const hookCommand = sessionEndHook || stopHook;
+      if (hookCommand) {
+        const hookBinary = hookCommand.split(' ')[0];
         devflowDir = path.resolve(hookBinary, '..', '..', '..');
       } else {
         devflowDir = getDevFlowDirectory();
@@ -522,13 +571,18 @@ export const learnCommand = new Command('learn')
     }
 
     if (options.enable) {
+      const priorState = hasLearningHook(settingsContent);
       const updated = addLearningHook(settingsContent, devflowDir);
       if (updated === settingsContent) {
         p.log.info('Self-learning already enabled');
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('Self-learning enabled — Stop hook registered');
+      if (priorState === 'legacy') {
+        p.log.success('Self-learning upgraded — legacy Stop hook replaced with SessionEnd hook');
+      } else {
+        p.log.success('Self-learning enabled — SessionEnd hook registered');
+      }
       p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
     }
 

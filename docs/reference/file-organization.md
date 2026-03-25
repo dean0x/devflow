@@ -47,7 +47,8 @@ devflow/
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
 │       ├── ambient-prompt           # UserPromptSubmit hook: ambient skill injection
-│       ├── stop-update-learning     # Stop hook: triggers background learning
+│       ├── session-end-learning      # SessionEnd hook: batched learning trigger
+│       ├── stop-update-learning     # Stop hook: deprecated stub (upgrade via devflow learn)
 │       ├── background-learning      # Background: pattern detection via Sonnet
 │       ├── json-helper.cjs           # Node.js jq-equivalent operations
 │       └── json-parse               # Shell wrapper: jq with node fallback
@@ -154,7 +155,7 @@ Included settings:
 
 Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
 
-A fourth hook (`stop-update-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
+A fourth hook (`session-end-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
 
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|

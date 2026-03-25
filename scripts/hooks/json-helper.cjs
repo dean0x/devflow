@@ -20,12 +20,15 @@
 //   slurp-cap <file> <field> <limit>      Read JSONL, sort by field desc, output limit lines
 //   array-length <path>                   Get length of array at dotted path in stdin JSON
 //   array-item <path> <index>             Get item at index from array at path in stdin JSON
-//   obs-construct <json-args>             Build observation JSON from key=value pairs
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   learning-created <file>               Extract created artifacts from learning log
 //   learning-new <file> <since_epoch>     Find new artifacts since epoch
+//   temporal-decay <file>                 Apply temporal decay to learning log entries
+//   process-observations <resp> <log>     Merge model observations into learning log
+//   create-artifacts <resp> <log> <dir>   Create command/skill files from ready observations
+//   filter-observations <file> [sort] [n] Filter valid observations, sort desc, limit
 
 'use strict';
 
@@ -36,8 +39,10 @@ const op = process.argv[2];
 const args = process.argv.slice(3);
 
 /**
- * Resolve and validate a file path argument. Returns the resolved absolute path.
- * Rejects paths containing '..' traversal sequences for defense-in-depth.
+ * Resolve a file path argument to an absolute path.
+ * Note: path.resolve() normalizes away '..' segments, so the includes check
+ * only catches the rare case of literal '..' in a directory name after resolution.
+ * Primary value is ensuring all file operations use absolute paths.
  */
 function safePath(filePath) {
   const resolved = path.resolve(filePath);
@@ -70,6 +75,47 @@ function parseJsonl(file) {
   return lines.map(l => {
     try { return JSON.parse(l); } catch { return null; }
   }).filter(Boolean);
+}
+
+// --- Learning system constants ---
+const DECAY_FACTORS = [1.0, 0.90, 0.81, 0.73, 0.66, 0.59, 0.53];
+const CONFIDENCE_FLOOR = 0.10;
+const DECAY_PERIOD_DAYS = 30;
+const REQUIRED_OBSERVATIONS = 3;
+const TEMPORAL_SPREAD_SECS = 86400;
+
+function learningLog(msg) {
+  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  process.stderr.write(`[${ts}] ${msg}\n`);
+}
+
+function writeJsonlAtomic(file, entries) {
+  const tmp = file + '.tmp';
+  const content = entries.length > 0
+    ? entries.map(e => JSON.stringify(e)).join('\n') + '\n'
+    : '';
+  fs.writeFileSync(tmp, content);
+  fs.renameSync(tmp, file);
+}
+
+function calculateConfidence(count) {
+  const raw = Math.floor(count * 100 / REQUIRED_OBSERVATIONS);
+  return Math.min(raw, 95) / 100;
+}
+
+function mergeEvidence(oldEvidence, newEvidence) {
+  const flat = [...(oldEvidence || []), ...(newEvidence || [])];
+  const unique = [...new Set(flat)];
+  return unique.slice(0, 10);
+}
+
+/** Extract artifact display name from its file path. */
+function artifactName(obs) {
+  const parts = (obs.artifact_path || '').split('/');
+  if (obs.type === 'workflow') {
+    return (parts.pop() || '').replace(/\.md$/, '');
+  }
+  return parts.length >= 2 ? parts[parts.length - 2] : '';
 }
 
 function parseArgs(argList) {
@@ -167,6 +213,10 @@ try {
     case 'extract-text-messages': {
       const input = JSON.parse(readStdin());
       const content = input?.message?.content;
+      if (typeof content === 'string') {
+        console.log(content);
+        break;
+      }
       if (!Array.isArray(content)) {
         console.log('');
         break;
@@ -231,13 +281,6 @@ try {
       break;
     }
 
-    case 'obs-construct': {
-      // Build an observation JSON from --arg/--argjson pairs
-      const data = parseArgs(args);
-      console.log(JSON.stringify(data));
-      break;
-    }
-
     case 'session-output': {
       const ctx = args[0];
       console.log(JSON.stringify({
@@ -283,48 +326,273 @@ try {
 
       const created = parsed.filter(o => o.status === 'created' && o.artifact_path);
 
-      const commands = created
-        .filter(o => o.type === 'workflow')
-        .slice(0, 5)
-        .map(o => {
-          const name = o.artifact_path.split('/').pop().replace(/\.md$/, '');
-          const conf = (Math.floor(o.confidence * 10) / 10).toString();
-          return { name, conf };
-        });
+      const formatEntry = o => ({
+        name: artifactName(o),
+        conf: (Math.floor(o.confidence * 10) / 10).toString(),
+      });
 
-      const skills = created
-        .filter(o => o.type === 'procedural')
-        .slice(0, 5)
-        .map(o => {
-          const match = o.artifact_path.match(/learned-([^/]+)/);
-          const name = match ? match[1] : '';
-          const conf = (Math.floor(o.confidence * 10) / 10).toString();
-          return { name, conf };
-        });
+      const commands = created.filter(o => o.type === 'workflow').slice(0, 5).map(formatEntry);
+      const skills = created.filter(o => o.type === 'procedural').slice(0, 5).map(formatEntry);
 
       console.log(JSON.stringify({ commands, skills }));
       break;
     }
 
     case 'learning-new': {
-      // Find new artifacts since epoch
       const file = args[0];
-      // since_epoch argument unused in current implementation — always show created
       const parsed = parseJsonl(file);
 
       const created = parsed.filter(o => o.status === 'created' && o.last_seen);
       const messages = created.map(o => {
-        if (o.type === 'workflow') {
-          const name = o.artifact_path.split('/').pop().replace(/\.md$/, '');
-          return `NEW: /learned/${name} command created from repeated workflow`;
-        } else {
-          const match = o.artifact_path.match(/learned-([^/]+)/);
-          const name = match ? match[1] : '';
-          return `NEW: ${name} skill created from procedural knowledge`;
-        }
+        const name = artifactName(o);
+        return o.type === 'workflow'
+          ? `NEW: /self-learning/${name} command created from repeated workflow`
+          : `NEW: ${name} skill created from procedural knowledge`;
       });
 
       console.log(messages.join('\n'));
+      break;
+    }
+
+    case 'temporal-decay': {
+      const file = safePath(args[0]);
+      if (!fs.existsSync(file)) {
+        console.log(JSON.stringify({ removed: 0, decayed: 0 }));
+        break;
+      }
+      const entries = parseJsonl(file);
+      const now = Date.now() / 1000;
+      let removed = 0;
+      let decayed = 0;
+      const results = [];
+      for (const entry of entries) {
+        if (entry.last_seen) {
+          const lastDate = new Date(entry.last_seen);
+          if (isNaN(lastDate.getTime())) {
+            learningLog(`Warning: invalid date in ${entry.id || 'unknown'}: ${entry.last_seen}`);
+            results.push(entry);
+            continue;
+          }
+          const lastEpoch = lastDate.getTime() / 1000;
+          const days = Math.floor((now - lastEpoch) / 86400);
+          const periods = Math.floor(days / DECAY_PERIOD_DAYS);
+          if (periods > 0) {
+            const factor = periods < DECAY_FACTORS.length
+              ? DECAY_FACTORS[periods] : DECAY_FACTORS[DECAY_FACTORS.length - 1];
+            const newConf = Math.round(entry.confidence * factor * 100) / 100;
+            if (newConf < CONFIDENCE_FLOOR) {
+              removed++;
+              learningLog(`Removed ${entry.id || 'unknown'}: confidence ${newConf} below threshold`);
+              continue;
+            }
+            entry.confidence = newConf;
+            decayed++;
+          }
+        }
+        results.push(entry);
+      }
+      writeJsonlAtomic(file, results);
+      learningLog(`Temporal decay: removed=${removed}, decayed=${decayed}`);
+      console.log(JSON.stringify({ removed, decayed }));
+      break;
+    }
+
+    case 'process-observations': {
+      const responseFile = safePath(args[0]);
+      const logFile = safePath(args[1]);
+      const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
+      const observations = response.observations || [];
+
+      let logEntries = [];
+      if (fs.existsSync(logFile)) {
+        logEntries = parseJsonl(logFile);
+      }
+      const logMap = new Map(logEntries.map(e => [e.id, e]));
+      const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+      let updated = 0, created = 0, skipped = 0;
+
+      for (let i = 0; i < observations.length; i++) {
+        const obs = observations[i];
+        if (!obs.id || !obs.type || !obs.pattern) {
+          learningLog(`Skipping observation ${i}: missing required field (id='${obs.id || ''}' type='${obs.type || ''}')`);
+          skipped++;
+          continue;
+        }
+        if (obs.type !== 'workflow' && obs.type !== 'procedural') {
+          learningLog(`Skipping observation ${i}: invalid type '${obs.type}'`);
+          skipped++;
+          continue;
+        }
+        if (!obs.id.startsWith('obs_')) {
+          learningLog(`Skipping observation ${i}: invalid id format '${obs.id}'`);
+          skipped++;
+          continue;
+        }
+
+        const existing = logMap.get(obs.id);
+        if (existing) {
+          const newCount = (existing.observations || 0) + 1;
+          existing.observations = newCount;
+          existing.evidence = mergeEvidence(existing.evidence || [], obs.evidence || []);
+          existing.confidence = calculateConfidence(newCount);
+          existing.last_seen = nowIso;
+          if (obs.pattern) existing.pattern = obs.pattern;
+          if (obs.details) existing.details = obs.details;
+
+          if (existing.status !== 'created') {
+            if (existing.confidence >= 0.70 && existing.first_seen) {
+              const firstDate = new Date(existing.first_seen);
+              if (!isNaN(firstDate.getTime())) {
+                const spread = Date.now() / 1000 - firstDate.getTime() / 1000;
+                existing.status = spread >= TEMPORAL_SPREAD_SECS ? 'ready' : 'observing';
+              }
+            }
+          }
+
+          learningLog(`Updated ${obs.id}: confidence ${existing.confidence}, status ${existing.status}`);
+          updated++;
+        } else {
+          const newEntry = {
+            id: obs.id,
+            type: obs.type,
+            pattern: obs.pattern,
+            confidence: 0.33,
+            observations: 1,
+            first_seen: nowIso,
+            last_seen: nowIso,
+            status: 'observing',
+            evidence: obs.evidence || [],
+            details: obs.details || '',
+          };
+          logMap.set(obs.id, newEntry);
+          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=0.33`);
+          created++;
+        }
+      }
+
+      const logDir = path.dirname(logFile);
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+      writeJsonlAtomic(logFile, Array.from(logMap.values()));
+      console.log(JSON.stringify({ updated, created, skipped }));
+      break;
+    }
+
+    case 'create-artifacts': {
+      const responseFile = safePath(args[0]);
+      const logFile = safePath(args[1]);
+      const baseDir = safePath(args[2]);
+      const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
+      const artifacts = response.artifacts || [];
+
+      if (artifacts.length === 0) {
+        console.log(JSON.stringify({ created: [], skipped: 0 }));
+        break;
+      }
+
+      let logEntries = [];
+      if (fs.existsSync(logFile)) {
+        logEntries = parseJsonl(logFile);
+      }
+      const logMap = new Map(logEntries.map(e => [e.id, e]));
+      const createdPaths = [];
+      let skippedCount = 0;
+      const artDate = new Date().toISOString().slice(0, 10);
+
+      for (const art of artifacts) {
+        let name = (art.name || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 50);
+        if (!name) {
+          learningLog('Skipping artifact with empty/invalid name');
+          skippedCount++;
+          continue;
+        }
+
+        const obs = logMap.get(art.observation_id);
+        if (!obs || obs.status !== 'ready') {
+          learningLog(`Skipping artifact for ${art.observation_id} (status: ${obs ? obs.status : 'not found'}, need: ready)`);
+          skippedCount++;
+          continue;
+        }
+
+        let artDir, artPath;
+        if (art.type === 'command') {
+          artDir = path.join(baseDir, '.claude', 'commands', 'self-learning');
+          artPath = path.join(artDir, `${name}.md`);
+        } else {
+          artDir = path.join(baseDir, '.claude', 'skills', name);
+          artPath = path.join(artDir, 'SKILL.md');
+        }
+
+        if (fs.existsSync(artPath)) {
+          learningLog(`Artifact already exists at ${artPath} — skipping`);
+          skippedCount++;
+          continue;
+        }
+
+        const desc = (art.description || '').replace(/"/g, '\\"');
+        const conf = obs.confidence || 0;
+        const obsN = obs.observations || 0;
+
+        fs.mkdirSync(artDir, { recursive: true });
+
+        let content;
+        if (art.type === 'command') {
+          content = [
+            '---',
+            `description: "${desc}"`,
+            `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
+            '---',
+            '',
+            art.content || '',
+            '',
+          ].join('\n');
+        } else {
+          content = [
+            '---',
+            `name: self-learning:${name}`,
+            `description: "${desc}"`,
+            'user-invocable: false',
+            'allowed-tools: Read, Grep, Glob',
+            `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
+            '---',
+            '',
+            art.content || '',
+            '',
+          ].join('\n');
+        }
+
+        fs.writeFileSync(artPath, content);
+        obs.status = 'created';
+        obs.artifact_path = artPath;
+        learningLog(`Created artifact: ${artPath}`);
+        createdPaths.push(artPath);
+      }
+
+      if (createdPaths.length > 0) {
+        writeJsonlAtomic(logFile, Array.from(logMap.values()));
+      }
+
+      console.log(JSON.stringify({ created: createdPaths, skipped: skippedCount }));
+      break;
+    }
+
+    case 'filter-observations': {
+      const file = args[0];
+      const sortField = args[1] || 'confidence';
+      const limit = parseInt(args[2]) || 30;
+      if (!fs.existsSync(safePath(file))) {
+        console.log('[]');
+        break;
+      }
+      const entries = parseJsonl(file);
+      const valid = entries.filter(e =>
+        e.id && e.id.startsWith('obs_') &&
+        (e.type === 'workflow' || e.type === 'procedural') &&
+        e.pattern
+      );
+      valid.sort((a, b) => (b[sortField] || 0) - (a[sortField] || 0));
+      console.log(JSON.stringify(valid.slice(0, limit)));
       break;
     }
 
