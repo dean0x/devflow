@@ -30,6 +30,7 @@ export interface LearningConfig {
   max_daily_runs: number;
   throttle_minutes: number;
   model: string;
+  debug: boolean;
 }
 
 /**
@@ -38,9 +39,9 @@ export interface LearningConfig {
 export function isLearningObservation(obj: unknown): obj is LearningObservation {
   if (typeof obj !== 'object' || obj === null) return false;
   const o = obj as Record<string, unknown>;
-  return typeof o.id === 'string'
+  return typeof o.id === 'string' && o.id.length > 0
     && (o.type === 'workflow' || o.type === 'procedural')
-    && typeof o.pattern === 'string'
+    && typeof o.pattern === 'string' && o.pattern.length > 0
     && typeof o.confidence === 'number'
     && typeof o.observations === 'number'
     && typeof o.first_seen === 'string'
@@ -164,6 +165,19 @@ export function parseLearningLog(logContent: string): LearningObservation[] {
 }
 
 /**
+ * Parse a JSONL log and return valid observations plus the count of invalid entries.
+ * Centralises the raw-line-count + parse pattern used by --status, --list, and --purge.
+ */
+export function loadAndCountObservations(logContent: string): {
+  observations: LearningObservation[];
+  invalidCount: number;
+} {
+  const rawLines = logContent.split('\n').filter(l => l.trim()).length;
+  const observations = parseLearningLog(logContent);
+  return { observations, invalidCount: rawLines - observations.length };
+}
+
+/**
  * Format a human-readable status summary for learning state.
  */
 export function formatLearningStatus(observations: LearningObservation[], hookEnabled: boolean): string {
@@ -194,6 +208,7 @@ export function formatLearningStatus(observations: LearningObservation[], hookEn
  * Skips fields with wrong types; swallows parse errors.
  */
 // SYNC: Config loading duplicated in scripts/hooks/background-learning load_config()
+// Synced fields: max_daily_runs, throttle_minutes, model, debug
 export function applyConfigLayer(config: LearningConfig, json: string): LearningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
@@ -201,6 +216,7 @@ export function applyConfigLayer(config: LearningConfig, json: string): Learning
       max_daily_runs: typeof raw.max_daily_runs === 'number' ? raw.max_daily_runs : config.max_daily_runs,
       throttle_minutes: typeof raw.throttle_minutes === 'number' ? raw.throttle_minutes : config.throttle_minutes,
       model: typeof raw.model === 'string' ? raw.model : config.model,
+      debug: typeof raw.debug === 'boolean' ? raw.debug : config.debug,
     };
   } catch {
     return { ...config };
@@ -216,6 +232,7 @@ export function loadLearningConfig(globalJson: string | null, projectJson: strin
     max_daily_runs: 10,
     throttle_minutes: 5,
     model: 'sonnet',
+    debug: false,
   };
 
   if (globalJson) config = applyConfigLayer(config, globalJson);
@@ -231,6 +248,7 @@ interface LearnOptions {
   list?: boolean;
   configure?: boolean;
   clear?: boolean;
+  purge?: boolean;
 }
 
 export const learnCommand = new Command('learn')
@@ -241,8 +259,9 @@ export const learnCommand = new Command('learn')
   .option('--list', 'Show all observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard')
   .option('--clear', 'Reset learning log (removes all observations)')
+  .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear;
+    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.purge;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -251,7 +270,8 @@ export const learnCommand = new Command('learn')
         `${color.cyan('devflow learn --status')}      Show learning status\n` +
         `${color.cyan('devflow learn --list')}        Show all observations\n` +
         `${color.cyan('devflow learn --configure')}   Configuration wizard\n` +
-        `${color.cyan('devflow learn --clear')}       Reset learning log`,
+        `${color.cyan('devflow learn --clear')}       Reset learning log\n` +
+        `${color.cyan('devflow learn --purge')}       Remove invalid entries`,
         'Usage',
       );
       p.outro(color.dim('Detects repeated workflows and creates slash commands automatically'));
@@ -279,15 +299,19 @@ export const learnCommand = new Command('learn')
       const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
 
       let observations: LearningObservation[] = [];
+      let invalidCount = 0;
       try {
         const logContent = await fs.readFile(logPath, 'utf-8');
-        observations = parseLearningLog(logContent);
+        ({ observations, invalidCount } = loadAndCountObservations(logContent));
       } catch {
         // No log file yet
       }
 
       const status = formatLearningStatus(observations, hookEnabled);
       p.log.info(status);
+      if (invalidCount > 0) {
+        p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
+      }
       return;
     }
 
@@ -297,9 +321,10 @@ export const learnCommand = new Command('learn')
       const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
 
       let observations: LearningObservation[] = [];
+      let invalidCount = 0;
       try {
         const logContent = await fs.readFile(logPath, 'utf-8');
-        observations = parseLearningLog(logContent);
+        ({ observations, invalidCount } = loadAndCountObservations(logContent));
       } catch {
         p.log.info('No observations yet. Learning log not found.');
         return;
@@ -323,6 +348,9 @@ export const learnCommand = new Command('learn')
         p.log.info(
           `[${typeIcon}] ${color.cyan(obs.pattern)} (${conf}% | ${obs.observations}x | ${statusIcon})`,
         );
+      }
+      if (invalidCount > 0) {
+        p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
       }
       p.outro(color.dim(`${observations.length} observation(s) total`));
       return;
@@ -375,6 +403,15 @@ export const learnCommand = new Command('learn')
         return;
       }
 
+      const debugMode = await p.confirm({
+        message: 'Enable debug logging? (logs session content excerpts to ~/.devflow/logs/)',
+        initialValue: false,
+      });
+      if (p.isCancel(debugMode)) {
+        p.cancel('Configuration cancelled.');
+        return;
+      }
+
       const scope = await p.select({
         message: 'Configuration scope',
         options: [
@@ -391,6 +428,7 @@ export const learnCommand = new Command('learn')
         max_daily_runs: Number(maxRuns),
         throttle_minutes: Number(throttle),
         model: String(model),
+        debug: !!debugMode,
       };
 
       const configJson = JSON.stringify(config, null, 2) + '\n';
@@ -409,6 +447,32 @@ export const learnCommand = new Command('learn')
       }
 
       p.outro(color.green('Configuration saved.'));
+      return;
+    }
+
+    // --- --purge ---
+    if (options.purge) {
+      const cwd = process.cwd();
+      const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
+
+      let logContent: string;
+      try {
+        logContent = await fs.readFile(logPath, 'utf-8');
+      } catch {
+        p.log.info('No learning log to purge.');
+        return;
+      }
+
+      const { observations, invalidCount } = loadAndCountObservations(logContent);
+
+      if (invalidCount === 0) {
+        p.log.info('No invalid entries found. Learning log is clean.');
+        return;
+      }
+
+      const validLines = observations.map(o => JSON.stringify(o));
+      await fs.writeFile(logPath, validLines.join('\n') + (validLines.length ? '\n' : ''), 'utf-8');
+      p.log.success(`Purged ${invalidCount} invalid entry(ies). ${observations.length} valid observation(s) remain.`);
       return;
     }
 

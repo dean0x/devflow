@@ -40,7 +40,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Stop hook → reads last turn from session transcript (`~/.claude/projects/{encoded-cwd}/{session_id}.jsonl`), spawns background `claude -p --model haiku` to update `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`; throttled: skips if triggered <2min ago; concurrent sessions serialize via mkdir-based lock). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
 
-**Self-Learning**: A Stop hook (`stop-update-learning`) spawns a background `claude -p --model sonnet` to detect repeated workflows and procedural knowledge from session transcripts. Observations accumulate in `.memory/learning-log.jsonl` with confidence scores, temporal decay, and daily run caps. When confidence thresholds are met (3 observations for workflows with 24h+ temporal spread, 2 for procedural), artifacts are auto-created as slash commands (`.claude/commands/learned/`) or skills (`.claude/skills/learned-*/`). Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`. Configurable model/throttle/caps via `devflow learn --configure`.
+**Self-Learning**: A Stop hook (`stop-update-learning`) spawns a background `claude -p --model sonnet` to detect repeated workflows and procedural knowledge from session transcripts. Observations accumulate in `.memory/learning-log.jsonl` with confidence scores, temporal decay, and daily run caps. When confidence thresholds are met (3 observations for workflows with 24h+ temporal spread, 2 for procedural), artifacts are auto-created as slash commands (`.claude/commands/learned/`) or skills (`.claude/skills/learned-*/`). Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`. Configurable model/throttle/caps/debug via `devflow learn --configure`. Debug logs stored at `~/.devflow/logs/{project-slug}/`. Use `devflow learn --purge` to remove invalid observations.
 
 ## Project Structure
 
@@ -97,14 +97,17 @@ Working memory files live in a dedicated `.memory/` directory:
 ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each session)
 ├── backup.json               # Pre-compact git state snapshot
 ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
-├── learning.json             # Project-level learning config (max runs, throttle, model)
+├── learning.json             # Project-level learning config (max runs, throttle, model, debug)
 ├── .learning-runs-today      # Daily run counter (date + count)
-├── .learning-update.log      # Background learning agent log
 ├── .learning-last-trigger    # Throttle marker (epoch timestamp)
 ├── .learning-notified-at     # New artifact notification marker (epoch timestamp)
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
     └── pitfalls.md            # Known pitfalls (PF-NNN, area-specific gotchas)
+
+~/.devflow/logs/{project-slug}/
+├── .learning-update.log      # Background learning agent log
+└── .working-memory-update.log # Background memory updater log
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.

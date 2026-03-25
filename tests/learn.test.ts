@@ -263,6 +263,7 @@ describe('loadLearningConfig', () => {
     expect(config.max_daily_runs).toBe(10);
     expect(config.throttle_minutes).toBe(5);
     expect(config.model).toBe('sonnet');
+    expect(config.debug).toBe(false);
   });
 
   it('loads global config', () => {
@@ -342,6 +343,14 @@ describe('isLearningObservation', () => {
     const { details, ...rest } = validObs;
     expect(isLearningObservation(rest)).toBe(false);
   });
+
+  it('rejects empty id', () => {
+    expect(isLearningObservation({ ...validObs, id: '' })).toBe(false);
+  });
+
+  it('rejects empty pattern', () => {
+    expect(isLearningObservation({ ...validObs, pattern: '' })).toBe(false);
+  });
 });
 
 describe('parseLearningLog — type guard filtering', () => {
@@ -360,27 +369,61 @@ describe('parseLearningLog — type guard filtering', () => {
     const result = parseLearningLog(log);
     expect(result).toHaveLength(0);
   });
+
+  it('filters out entries with empty id or pattern', () => {
+    const valid = JSON.stringify({
+      id: 'obs_abc123', type: 'workflow', pattern: 'real pattern',
+      confidence: 0.5, observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    });
+    const emptyId = JSON.stringify({
+      id: '', type: 'workflow', pattern: 'some pattern',
+      confidence: 0.5, observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    });
+    const emptyPattern = JSON.stringify({
+      id: 'obs_def456', type: 'procedural', pattern: '',
+      confidence: 0.5, observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    });
+    const log = [valid, emptyId, emptyPattern].join('\n');
+    const result = parseLearningLog(log);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('obs_abc123');
+  });
 });
 
 describe('applyConfigLayer — immutability', () => {
   it('returns new object without mutating input', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet' };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
     const result = applyConfigLayer(original, JSON.stringify({ max_daily_runs: 20 }));
     expect(result.max_daily_runs).toBe(20);
     expect(original.max_daily_runs).toBe(10); // not mutated
   });
 
   it('returns copy on invalid JSON', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet' };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
     const result = applyConfigLayer(original, 'not json');
     expect(result).toEqual(original);
     expect(result).not.toBe(original); // different reference
   });
 
   it('ignores wrong-typed fields', () => {
-    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet' };
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
     const result = applyConfigLayer(original, JSON.stringify({ max_daily_runs: 'lots', model: 42 }));
     expect(result.max_daily_runs).toBe(10);
     expect(result.model).toBe('sonnet');
+  });
+
+  it('applies debug field when boolean', () => {
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
+    const result = applyConfigLayer(original, JSON.stringify({ debug: true }));
+    expect(result.debug).toBe(true);
+  });
+
+  it('ignores debug field when non-boolean', () => {
+    const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false };
+    const result = applyConfigLayer(original, JSON.stringify({ debug: 'yes' }));
+    expect(result.debug).toBe(false);
   });
 });

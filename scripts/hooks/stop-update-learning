@@ -32,7 +32,8 @@ fi
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
 # Logging
-LOG_FILE="$CWD/.memory/.learning-update.log"
+source "$SCRIPT_DIR/log-paths"
+LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
 
 # Throttle: skip if triggered within configured throttle window
