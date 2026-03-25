@@ -1,4 +1,4 @@
-# DevFlow: The Most Advanced Agentic Development Toolkit
+# DevFlow: The Most Advanced Agentic Toolkit for Generating Production-Grade Code
 
 [![npm version](https://img.shields.io/npm/v/devflow-kit)](https://www.npmjs.com/package/devflow-kit)
 [![CI](https://github.com/dean0x/devflow/actions/workflows/ci.yml/badge.svg)](https://github.com/dean0x/devflow/actions/workflows/ci.yml)
@@ -36,6 +36,7 @@ Claude Code is powerful. DevFlow makes it extraordinary.
 - **Parallel debugging** with competing hypotheses investigated simultaneously
 - **35 quality skills** with 9 auto-activating core, 8 language/ecosystem, plus specialized review and orchestration skills
 - **Ambient mode** that classifies intent and loads proportional skill sets automatically
+- **Fully composable plugin system** where every feature is a plugin. Install only what you need. No bloat, no take-it-or-leave-it bundles.
 
 ## Quick Start
 
@@ -340,7 +341,7 @@ npx devflow-kit skills unshadow core-patterns
 | Tool | Role | What It Does |
 |------|------|-------------|
 | **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Compresses code, test output, build output, and git output for optimal LLM reasoning |
-| **DevFlow** | Quality Orchestration | 18 parallel reviewers, working memory, self-learning, production-grade lifecycle workflows |
+| **DevFlow** | Quality Orchestration | 18 parallel reviewers, working memory, self-learning, composable plugin system |
 | **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | Orchestration at scale. Karpathy optimization loops, multi-agent pipelines, DAG dependencies, autoscaling |
 
 Skim optimizes what your AI sees. DevFlow enforces how it works. Backbeat scales everything across agents. No other stack covers all three.
