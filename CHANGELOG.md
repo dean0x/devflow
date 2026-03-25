@@ -12,8 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Learning**: `devflow learn --purge` command to remove invalid entries from learning log
 - **Learning**: debug logging mode (`devflow learn --configure`) — logs to `~/.devflow/logs/`
 
+### Changed
+- **Learning**: Moved from Stop → SessionEnd hook with 3-session batching (adaptive: 5 at 15+ observations)
+- **Learning**: Raised procedural thresholds from 2 to 3 observations with 24h+ temporal spread for both types
+- **Learning**: Reduced default `max_daily_runs` from 10 to 5
+- **Learning**: Renamed artifact paths: `commands/learned/` → `commands/self-learning/`, `skills/learned-{name}/` → `skills/{name}/`
+- **Learning**: Skill artifacts now include `user-invocable: false`, Iron Law section, and `self-learning:` name prefix
+
 ### Fixed
 - **Learning**: reject observations with empty id/type/pattern fields (validation + auto-purge on migration)
+- **Learning**: Handle string-typed `.message.content` in transcript extraction (was only handling arrays)
+- **Learning**: Eliminate empty-array loop noise when Sonnet returns no observations
+- **Learning**: Race condition in batch file handoff (atomic `mv` replaces `cp`+`rm`)
+- **Learning**: `--enable` now auto-upgrades legacy Stop hook to SessionEnd
+- **Learning**: `--status` detects legacy hook and shows upgrade instructions
 
 ---
 

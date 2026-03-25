@@ -51,7 +51,7 @@ devflow/
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start, pre-compact, ambient-prompt, session-end-learning, background-learning)
+│   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start, pre-compact, ambient-prompt, session-end-learning, stop-update-learning [deprecated], background-learning)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
