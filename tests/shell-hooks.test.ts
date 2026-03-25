@@ -193,6 +193,19 @@ describe('json-helper.js operations', () => {
     expect(result).toBe('Hello world\nSecond message');
   });
 
+  it('extract-text-messages handles plain string content', () => {
+    const input = JSON.stringify({
+      message: {
+        content: 'plain string message',
+      },
+    });
+    const result = execSync(
+      `echo '${input.replace(/'/g, "'\\''")}' | node "${JSON_HELPER}" extract-text-messages`,
+      { stdio: 'pipe' },
+    ).toString().trim();
+    expect(result).toBe('plain string message');
+  });
+
   it('merge-evidence flattens, dedupes, and limits', () => {
     const input = JSON.stringify([['a', 'b', 'c'], ['b', 'c', 'd']]);
     const result = execSync(
@@ -280,8 +293,8 @@ describe('json-helper.js operations', () => {
 
     try {
       fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/path/self-learning/deploy-flow.md', confidence: 0.95 }),
-        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/path/debug-hooks/SKILL.md', confidence: 0.8 }),
+        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95 }),
+        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/.claude/skills/debug-hooks/SKILL.md', confidence: 0.8 }),
         JSON.stringify({ id: 'obs_3', type: 'workflow', status: 'observing', confidence: 0.3 }),
       ].join('\n'));
 
@@ -297,6 +310,46 @@ describe('json-helper.js operations', () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('learning-new outputs new artifact notifications with self-learning prefix', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'learning.jsonl');
+
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95, last_seen: '2026-03-22T00:00:00Z' }),
+        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/.claude/skills/debug-hooks/SKILL.md', confidence: 0.8, last_seen: '2026-03-22T00:00:00Z' }),
+        JSON.stringify({ id: 'obs_3', type: 'workflow', status: 'observing', confidence: 0.3, last_seen: '2026-03-22T00:00:00Z' }),
+      ].join('\n'));
+
+      const result = execSync(
+        `node "${JSON_HELPER}" learning-new "${file}" 0`,
+        { stdio: 'pipe' },
+      ).toString().trim();
+      const lines = result.split('\n');
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toContain('self-learning/deploy-flow');
+      expect(lines[0]).toContain('command created');
+      expect(lines[1]).toContain('debug-hooks');
+      expect(lines[1]).toContain('skill created');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('session-end-learning structure', () => {
+  it('is included in bash -n syntax checks', () => {
+    expect(HOOK_SCRIPTS).toContain('session-end-learning');
+  });
+
+  it('starts with bash shebang and sources json-parse', () => {
+    const scriptPath = path.join(HOOKS_DIR, 'session-end-learning');
+    const content = fs.readFileSync(scriptPath, 'utf8');
+    const lines = content.split('\n');
+    expect(lines[0]).toBe('#!/bin/bash');
+    expect(content).toContain('source "$SCRIPT_DIR/json-parse"');
   });
 });
 

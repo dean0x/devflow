@@ -4,6 +4,7 @@ import {
   removeLearningHook,
   hasLearningHook,
   parseLearningLog,
+  loadAndCountObservations,
   formatLearningStatus,
   loadLearningConfig,
   isLearningObservation,
@@ -324,6 +325,59 @@ describe('parseLearningLog', () => {
     const result = parseLearningLog(log);
     expect(result).toHaveLength(1);
     expect(result[0].pattern).toBe('deploy flow');
+  });
+});
+
+describe('loadAndCountObservations', () => {
+  it('counts mixed valid and invalid lines', () => {
+    const valid = JSON.stringify({
+      id: 'obs_1', type: 'workflow', pattern: 'p1',
+      confidence: 0.5, observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    });
+    const invalid = 'not json at all';
+    const incomplete = JSON.stringify({ id: 'obs_2', type: 'workflow' });
+    const log = [valid, invalid, incomplete].join('\n');
+    const result = loadAndCountObservations(log);
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0].id).toBe('obs_1');
+    expect(result.invalidCount).toBe(2);
+  });
+
+  it('returns zero invalid count for all-valid lines', () => {
+    const lines = [
+      JSON.stringify({
+        id: 'obs_1', type: 'workflow', pattern: 'p1',
+        confidence: 0.5, observations: 1, first_seen: 't',
+        last_seen: 't', status: 'observing', evidence: [], details: 'd',
+      }),
+      JSON.stringify({
+        id: 'obs_2', type: 'procedural', pattern: 'p2',
+        confidence: 0.8, observations: 2, first_seen: 't',
+        last_seen: 't', status: 'ready', evidence: ['e1'], details: 'd2',
+      }),
+    ].join('\n');
+    const result = loadAndCountObservations(lines);
+    expect(result.observations).toHaveLength(2);
+    expect(result.invalidCount).toBe(0);
+  });
+
+  it('handles empty input', () => {
+    const result = loadAndCountObservations('');
+    expect(result.observations).toHaveLength(0);
+    expect(result.invalidCount).toBe(0);
+  });
+
+  it('calculates invalidCount as rawLines minus valid observations', () => {
+    const valid = JSON.stringify({
+      id: 'obs_1', type: 'workflow', pattern: 'p1',
+      confidence: 0.5, observations: 1, first_seen: 't',
+      last_seen: 't', status: 'observing', evidence: [], details: 'd',
+    });
+    const log = [valid, 'bad1', 'bad2', 'bad3'].join('\n');
+    const result = loadAndCountObservations(log);
+    expect(result.observations).toHaveLength(1);
+    expect(result.invalidCount).toBe(3);
   });
 });
 
