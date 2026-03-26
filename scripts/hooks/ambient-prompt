@@ -26,22 +26,24 @@ if [[ "$PROMPT" == /* ]]; then
   exit 0
 fi
 
-# Skip single-word confirmations (< 2 words)
+# Skip short prompts (< 2 words) — confirmations, single words
 WORD_COUNT=$(printf '%s' "$PROMPT" | wc -w | tr -d ' ')
 if [ "$WORD_COUNT" -lt 2 ]; then
   exit 0
 fi
 
-# Normalize to lowercase for matching
-PROMPT_LOWER=$(printf '%s' "$PROMPT" | tr '[:upper:]' '[:lower:]')
-
-# Fast-path: git operations are always QUICK — skip preamble
-if printf '%s' "$PROMPT_LOWER" | grep -qE '^(commit|push|pull|merge|rebase|cherry-pick|squash|tag|stash)|create (a )?pr|open (a )?pr'; then
-  exit 0
-fi
-
-# Inject classification preamble
-# SYNC: must match tests/integration/helpers.ts AMBIENT_PREAMBLE
-PREAMBLE="AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, your FIRST tool calls MUST be Skill tool invocations for each selected skill — before writing ANY text about the task."
+# Self-contained classification preamble with skill mappings.
+# No fast-path filtering — the LLM handles QUICK classification reliably and
+# shell-level regex was causing false positives that silently broke ambient mode.
+# SYNC: must match tests/ambient.test.ts preamble drift detection
+PREAMBLE="AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review: load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture: load skills+agents. Prefer GUIDED for code changes.
+GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
+IMPLEMENT → test-driven-development, implementation-patterns, search-first
+DEBUG → core-patterns, test-patterns
+REVIEW → self-review, core-patterns
+PLAN → implementation-patterns, core-patterns
+Also add if file type matches: typescript, react, go, java, python, rust, input-validation, security-patterns, frontend-design
+ORCHESTRATED also add: implementation-orchestration / debug-orchestration / plan-orchestration
+State: Ambient: INTENT/DEPTH. Loading: skills. Then proceed."
 
 json_prompt_output "$PREAMBLE"

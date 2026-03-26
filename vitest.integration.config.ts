@@ -7,8 +7,7 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     restoreMocks: true,
-    testTimeout: 60000,
-    retry: 2,
+    testTimeout: 300000,
   },
   resolve: {
     alias: {

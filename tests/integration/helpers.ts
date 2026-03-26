@@ -15,27 +15,43 @@ export function isClaudeAvailable(): boolean {
   }
 }
 
-// SYNC: must match scripts/hooks/ambient-prompt line 43
+// SYNC: must match scripts/hooks/ambient-prompt PREAMBLE structure
 const AMBIENT_PREAMBLE =
-  'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, your FIRST tool calls MUST be Skill tool invocations for each selected skill — before writing ANY text about the task.';
+  `AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review: load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture: load skills+agents. Prefer GUIDED for code changes.
+GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
+IMPLEMENT → test-driven-development, implementation-patterns, search-first
+DEBUG → core-patterns, test-patterns
+REVIEW → self-review, core-patterns
+PLAN → implementation-patterns, core-patterns
+Also add if file type matches: typescript, react, go, java, python, rust, input-validation, security-patterns, frontend-design
+ORCHESTRATED also add: implementation-orchestration / debug-orchestration / plan-orchestration
+State: Ambient: INTENT/DEPTH. Loading: skills. Then proceed.`;
+
+/** Structured result from a claude -p invocation */
+export interface ClaudeResult {
+  /** Final text output */
+  text: string;
+  /** Tool calls that were denied by permission system */
+  permissionDenials: Array<{ toolName: string; toolInput: Record<string, unknown> }>;
+  /** Whether the invocation succeeded */
+  success: boolean;
+}
 
 /**
  * Run a prompt through claude CLI in non-interactive mode.
- * Injects the ambient preamble via --append-system-prompt since
- * UserPromptSubmit hooks don't fire in -p (non-interactive) mode.
- * Returns the text output.
+ * Uses JSON output to capture permission_denials (Skill tool invocation attempts).
  */
-export function runClaude(prompt: string, options?: { timeout?: number; ambient?: boolean }): string {
-  const timeout = options?.timeout ?? 30000;
+export function runClaude(prompt: string, options?: { timeout?: number; ambient?: boolean }): ClaudeResult {
+  const timeout = options?.timeout ?? 60000;
   const ambient = options?.ambient ?? true;
 
-  const args = ['-p', '--output-format', 'text', '--model', 'haiku'];
+  const args = ['-p', '--output-format', 'json', '--model', 'haiku'];
   if (ambient) {
     args.push('--append-system-prompt', AMBIENT_PREAMBLE);
   }
   args.push(prompt);
 
-  const result = execFileSync(
+  const raw = execFileSync(
     'claude',
     args,
     {
@@ -45,53 +61,103 @@ export function runClaude(prompt: string, options?: { timeout?: number; ambient?
     },
   );
 
-  return result.trim();
+  const json = JSON.parse(raw.trim());
+  const denials = (json.permission_denials ?? []).map((d: { tool_name: string; tool_input: Record<string, unknown> }) => ({
+    toolName: d.tool_name,
+    toolInput: d.tool_input,
+  }));
+
+  return {
+    text: json.result ?? '',
+    permissionDenials: denials,
+    success: !json.is_error,
+  };
 }
 
 /**
- * Assert that output contains a classification marker (case-insensitive).
- * Classification markers look like: "Ambient: IMPLEMENT/GUIDED"
+ * Run a prompt with retries for non-deterministic classification tests.
+ * Returns the first result where the predicate passes, or the last result if none pass.
  */
+export function runClaudeWithRetry(
+  prompt: string,
+  predicate: (result: ClaudeResult) => boolean,
+  options?: { timeout?: number; maxAttempts?: number },
+): { result: ClaudeResult; attempts: number; passed: boolean } {
+  const maxAttempts = options?.maxAttempts ?? 3;
+  const timeout = options?.timeout ?? 60000;
+
+  let lastResult: ClaudeResult | null = null;
+
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      const result = runClaude(prompt, { timeout });
+      lastResult = result;
+      if (predicate(result)) {
+        return { result, attempts: i, passed: true };
+      }
+    } catch {
+      // Timeout or other transient error — continue to next attempt
+    }
+  }
+
+  // All attempts failed or didn't match predicate
+  const fallback: ClaudeResult = lastResult ?? { text: '', permissionDenials: [], success: false };
+  return { result: fallback, attempts: maxAttempts, passed: false };
+}
+
+// --- Classification helpers (text output) ---
+
 export function hasClassification(output: string): boolean {
   return CLASSIFICATION_PATTERN.test(output);
 }
 
-/**
- * Assert that output does NOT contain a classification marker.
- * QUICK responses should be silent — no classification output.
- */
 export function isQuietResponse(output: string): boolean {
   return !hasClassification(output);
 }
 
-/**
- * Extract the intent from a classification marker.
- */
 export function extractIntent(output: string): string | null {
   const match = output.match(CLASSIFICATION_PATTERN);
   return match ? match[1].toUpperCase() : null;
 }
 
-/**
- * Extract the depth from a classification marker.
- */
 export function extractDepth(output: string): string | null {
   const match = output.match(CLASSIFICATION_PATTERN);
   return match ? match[2].toUpperCase() : null;
 }
 
-/**
- * Check if the output contains a "Loading:" marker indicating skills were loaded.
- */
 export function hasSkillLoading(output: string): boolean {
   return LOADING_PATTERN.test(output);
 }
 
-/**
- * Extract the list of skill names from a "Loading:" marker.
- */
 export function extractLoadedSkills(output: string): string[] {
   const match = output.match(LOADING_PATTERN);
   if (!match) return [];
   return match[0].replace(/^loading:\s*/i, '').split(',').map(s => s.trim());
+}
+
+// --- Skill invocation helpers (permission_denials) ---
+
+/**
+ * Extract Skill tool invocation attempts from permission denials.
+ * In -p mode, Skill tool calls appear as denials since they require permission.
+ */
+export function getSkillInvocations(result: ClaudeResult): string[] {
+  return result.permissionDenials
+    .filter(d => d.toolName === 'Skill')
+    .map(d => (d.toolInput as { skill: string }).skill)
+    .filter(Boolean);
+}
+
+/**
+ * Check if the model attempted to load any skills via the Skill tool.
+ */
+export function hasSkillInvocations(result: ClaudeResult): boolean {
+  return getSkillInvocations(result).length > 0;
+}
+
+/**
+ * Check if a specific skill was invoked (or attempted).
+ */
+export function hasSkillInvocation(result: ClaudeResult, skillName: string): boolean {
+  return getSkillInvocations(result).includes(skillName);
 }
