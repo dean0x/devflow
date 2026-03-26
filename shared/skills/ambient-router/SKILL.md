@@ -9,6 +9,8 @@ user-invocable: false
 
 Classify user intent and auto-load relevant skills. Zero overhead for simple requests, skill loading + optional agent orchestration for substantive work.
 
+**Note:** The UserPromptSubmit hook injects a self-contained classification preamble on every prompt with compact rules and skill mappings. After context compaction, this SKILL.md may be dropped — the preamble is the reliable fallback that ensures classification and skill loading continue to work.
+
 ## Iron Law
 
 > **PROPORTIONAL RESPONSE MATCHED TO SCOPE**
@@ -34,7 +36,7 @@ Determine what the user is trying to do from their prompt.
 | **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" | "where is the config?", "explain this function" |
 | **CHAT** | greetings, meta-questions, confirmations, short responses | "thanks", "yes", "what can you do?" |
 
-**Ambiguous prompts:** Default to the lowest-overhead classification. "Update the README" → QUICK. Git operations like "commit this" → QUICK.
+**Ambiguous prompts:** "Update the README" → QUICK. Git operations like "commit this" → QUICK. Code-change prompts without clear scope → GUIDED (not QUICK).
 
 ## Step 2: Classify Depth
 
@@ -55,7 +57,7 @@ Determine how much enforcement the prompt warrants.
 | **PLAN** | Focused question about specific area/pattern | System-level architecture, multi-module design |
 | **REVIEW** | Always GUIDED | — |
 
-**Classification conservatism:** Default to QUICK. Only classify GUIDED/ORCHESTRATED when the prompt has clear task scope. When choosing between GUIDED and ORCHESTRATED, prefer GUIDED — escalate only when scope clearly exceeds main-session capacity.
+**Classification conservatism:** When choosing between GUIDED and ORCHESTRATED, prefer GUIDED — escalate only when scope clearly exceeds main-session capacity. When choosing between QUICK and GUIDED, prefer GUIDED if the prompt involves code changes (implement, debug, fix, add, create code). Reserve QUICK for truly zero-overhead prompts: chat, exploration, git ops, config changes, trivial edits.
 
 ## Step 3: Select Skills
 

@@ -248,20 +248,42 @@ describe('skill loading helpers', () => {
 });
 
 describe('preamble drift detection', () => {
-  it('ambient-prompt PREAMBLE matches helpers.ts AMBIENT_PREAMBLE', async () => {
+  it('ambient-prompt PREAMBLE contains required classification elements', async () => {
     const hookPath = path.resolve(__dirname, '../scripts/hooks/ambient-prompt');
     const hookContent = await fs.readFile(hookPath, 'utf-8');
 
-    // Extract the PREAMBLE string from the shell script
+    // Extract the PREAMBLE string from the shell script (may be multiline)
     const match = hookContent.match(/PREAMBLE="([^"]+)"/);
     expect(match).not.toBeNull();
     const shellPreamble = match![1];
 
-    // The helpers.ts AMBIENT_PREAMBLE is used by extractIntent/extractDepth etc.
-    // We verify it indirectly by checking the shell script value matches expected.
-    const expectedPreamble =
-      'AMBIENT MODE ACTIVE: Before responding, silently classify this prompt using the ambient-router skill already in your session context. If QUICK, respond normally without stating classification. If GUIDED or ORCHESTRATED, your FIRST tool calls MUST be Skill tool invocations for each selected skill — before writing ANY text about the task.';
+    // The preamble must be self-contained with classification rules AND skill mappings.
+    // Verify structural elements rather than exact string match to allow wording refinement.
+    expect(shellPreamble).toContain('AMBIENT MODE');
 
-    expect(shellPreamble).toBe(expectedPreamble);
+    // Must contain depth definitions
+    expect(shellPreamble).toContain('QUICK');
+    expect(shellPreamble).toContain('GUIDED');
+    expect(shellPreamble).toContain('ORCHESTRATED');
+
+    // Must contain skill mappings for each intent
+    expect(shellPreamble).toContain('IMPLEMENT');
+    expect(shellPreamble).toContain('DEBUG');
+    expect(shellPreamble).toContain('REVIEW');
+    expect(shellPreamble).toContain('PLAN');
+
+    // Must reference core skills by name
+    expect(shellPreamble).toContain('implementation-patterns');
+    expect(shellPreamble).toContain('test-driven-development');
+    expect(shellPreamble).toContain('core-patterns');
+    expect(shellPreamble).toContain('self-review');
+    expect(shellPreamble).toContain('search-first');
+
+    // Must instruct Skill tool invocation
+    expect(shellPreamble).toContain('Skill tool');
+
+    // Must include classification output format
+    expect(shellPreamble).toContain('Ambient:');
+    expect(shellPreamble).toContain('Loading:');
   });
 });
