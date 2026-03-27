@@ -12,12 +12,14 @@ import * as path from 'path';
  * Returns 'none' when no features are enabled.
  */
 export function formatFeatures(features: ManifestData['features']): string {
-  return [
+  const parts = [
     features.teams ? 'teams' : null,
     features.ambient ? 'ambient' : null,
     features.memory ? 'memory' : null,
     features.hud ? 'hud' : null,
-  ].filter(Boolean).join(', ') || 'none';
+    features.flags?.length ? `flags: ${features.flags.length}` : null,
+  ].filter(Boolean);
+  return parts.join(', ') || 'none';
 }
 
 /**

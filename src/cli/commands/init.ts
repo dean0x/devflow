@@ -43,6 +43,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
+ * Classify the safe-delete installation state based on the installed version
+ * in the user's shell profile.
+ */
+export function classifySafeDeleteState(
+  installedVersion: number,
+  currentVersion: number,
+): 'current' | 'outdated' | 'missing' {
+  if (installedVersion === currentVersion) return 'current';
+  if (installedVersion > 0) return 'outdated';
+  return 'missing';
+}
+
+/**
  * Parse a comma-separated plugin selection string into normalized plugin names.
  * Validates against known plugins; returns invalid names as errors.
  */
@@ -275,6 +288,11 @@ export const initCommand = new Command('init')
     // ╰──────────────────────────────────────────────────────────╯
 
     // Determine setup mode: --recommended, --advanced, interactive prompt, or non-TTY default
+    if (options.recommended && options.advanced) {
+      p.log.error('Cannot use both --recommended and --advanced. Pick one.');
+      process.exit(1);
+    }
+
     let useRecommended: boolean;
     if (options.recommended) {
       useRecommended = true;
@@ -311,6 +329,9 @@ export const initCommand = new Command('init')
     let discoveredProjects: string[] = [];
     let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
     let safeDeleteBlock: string | null = null;
+    // Default to 'user' mode: recommended path skips managed-settings to avoid a
+    // sudo prompt in non-interactive / quick-setup contexts. Advanced mode offers
+    // the managed option explicitly with a confirmation step.
     let securityMode: SecurityMode = 'user';
     let managedSettingsConfirmed = false;
 
@@ -331,25 +352,28 @@ export const initCommand = new Command('init')
       if (options.learn !== undefined) learnEnabled = options.learn;
       if (options.hud !== undefined) hudEnabled = options.hud;
 
-      // .claudeignore: discover projects for user scope
-      if (earlyGitRoot && scope === 'user') {
-        discoveredProjects = await discoverProjectGitRoots();
-      }
-
-      // Safe-delete: auto-install if trash CLI detected, auto-upgrade if older version
+      // Compute safe-delete block synchronously so we know whether to fetch installed version
       if (profilePath && safeDeleteAvailable) {
         const trashCmd = safeDeleteInfo.command;
         safeDeleteBlock = generateSafeDeleteBlock(shell, process.platform, trashCmd);
-        if (safeDeleteBlock) {
-          const installedVersion = await getInstalledVersion(profilePath);
-          if (installedVersion === SAFE_DELETE_BLOCK_VERSION) {
-            safeDeleteAction = 'skip';
-          } else if (installedVersion > 0) {
-            safeDeleteAction = 'upgrade';
-          } else {
-            safeDeleteAction = 'install';
-          }
-        }
+      }
+
+      // Run independent I/O in parallel: project discovery + safe-delete version check
+      const needsDiscovery = earlyGitRoot && scope === 'user';
+      const needsVersionCheck = safeDeleteBlock && profilePath;
+
+      const [discoveredResult, installedVersionResult] = await Promise.all([
+        needsDiscovery ? discoverProjectGitRoots() : Promise.resolve([]),
+        needsVersionCheck ? getInstalledVersion(profilePath) : Promise.resolve(0),
+      ]);
+
+      if (needsDiscovery) {
+        discoveredProjects = discoveredResult;
+      }
+
+      if (needsVersionCheck) {
+        const state = classifySafeDeleteState(installedVersionResult, SAFE_DELETE_BLOCK_VERSION);
+        safeDeleteAction = state === 'current' ? 'skip' : state === 'outdated' ? 'upgrade' : 'install';
       }
 
       // Print summary
@@ -369,6 +393,13 @@ export const initCommand = new Command('init')
 
     } else {
       // ── Advanced path: full interactive flow ──
+
+      // Advanced mode requires a TTY for interactive prompts. In non-TTY
+      // environments, fall back to --recommended or pass explicit flags.
+      if (!process.stdin.isTTY) {
+        p.log.error('--advanced requires an interactive terminal. Use --recommended or pass explicit flags (e.g., --teams, --no-ambient).');
+        process.exit(1);
+      }
 
       // Respect explicit CLI flags — skip prompt when flag is set
       if (options.teams !== undefined) {
@@ -567,9 +598,10 @@ export const initCommand = new Command('init')
 
         if (safeDeleteBlock) {
           const installedVersion = await getInstalledVersion(profilePath);
-          if (installedVersion === SAFE_DELETE_BLOCK_VERSION) {
+          const state = classifySafeDeleteState(installedVersion, SAFE_DELETE_BLOCK_VERSION);
+          if (state === 'current') {
             safeDeleteAction = 'skip';
-          } else if (installedVersion > 0) {
+          } else if (state === 'outdated') {
             safeDeleteAction = 'upgrade';
           } else {
             p.note(
@@ -920,7 +952,7 @@ export const initCommand = new Command('init')
         p.log.info('Restart your shell or run: ' + color.cyan(`source ${profilePath}`));
       } else if (safeDeleteAvailable && safeDeleteBlock) {
         const installedVersion = await getInstalledVersion(profilePath);
-        if (installedVersion === SAFE_DELETE_BLOCK_VERSION) {
+        if (classifySafeDeleteState(installedVersion, SAFE_DELETE_BLOCK_VERSION) === 'current') {
           p.log.info(`Safe-delete already configured in ${color.dim(profilePath)}`);
         }
       } else if (!safeDeleteAvailable && safeDeleteInfo.installHint) {
