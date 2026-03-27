@@ -12,7 +12,7 @@ import { readManifest, writeManifest } from '../utils/manifest.js';
  */
 async function resolveEnabledFlags(devflowDir: string): Promise<string[]> {
   const manifest = await readManifest(devflowDir);
-  if (manifest && manifest.features.flags.length > 0) {
+  if (manifest) {
     return manifest.features.flags;
   }
   return getDefaultFlags();
@@ -26,6 +26,8 @@ async function updateSettingsFlags(claudeDir: string, flagIds: string[]): Promis
   let content: string;
   try {
     content = await fs.readFile(settingsPath, 'utf-8');
+    // Validate that content is parseable JSON before passing to stripFlags/applyFlags
+    JSON.parse(content);
   } catch {
     content = '{}';
   }
@@ -50,7 +52,7 @@ async function updateManifestFlags(devflowDir: string, flagIds: string[]): Promi
  * Exits with error if any IDs are unknown.
  */
 function parseFlagIds(input: string): string[] {
-  const ids = input.split(',').map((s: string) => s.trim());
+  const ids = input.split(',').map((s: string) => s.trim()).filter(Boolean);
   const invalid = ids.filter(id => !FLAG_REGISTRY.some(f => f.id === id));
 
   if (invalid.length > 0) {
@@ -62,13 +64,20 @@ function parseFlagIds(input: string): string[] {
   return ids;
 }
 
+interface FlagsOptions {
+  enable?: string;
+  disable?: string;
+  status?: boolean;
+  list?: boolean;
+}
+
 export const flagsCommand = new Command('flags')
   .description('Manage Claude Code feature flags')
   .option('--enable <ids>', 'Enable flag(s), comma-separated')
   .option('--disable <ids>', 'Disable flag(s), comma-separated')
   .option('--status', 'Show current flag states')
   .option('--list', 'List all available flags')
-  .action(async (options) => {
+  .action(async (options: FlagsOptions) => {
     const claudeDir = getClaudeDirectory();
     const devflowDir = getDevFlowDirectory();
 
@@ -97,7 +106,7 @@ export const flagsCommand = new Command('flags')
     }
 
     if (options.enable) {
-      const ids = parseFlagIds(options.enable as string);
+      const ids = parseFlagIds(options.enable);
       const current = await resolveEnabledFlags(devflowDir);
       const updated = [...new Set([...current, ...ids])];
 
@@ -111,7 +120,7 @@ export const flagsCommand = new Command('flags')
     }
 
     if (options.disable) {
-      const ids = parseFlagIds(options.disable as string);
+      const ids = parseFlagIds(options.disable);
       const current = await resolveEnabledFlags(devflowDir);
       const toDisable = new Set(ids);
       const updated = current.filter(id => !toDisable.has(id));
