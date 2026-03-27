@@ -42,6 +42,10 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Self-Learning**: A SessionEnd hook (`session-end-learning`) accumulates session IDs and triggers a background `claude -p --model sonnet` every 3 sessions (5 at 15+ observations) to detect repeated workflows and procedural knowledge from batch transcripts. Observations accumulate in `.memory/learning-log.jsonl` with confidence scores, temporal decay, and daily run caps. When confidence thresholds are met (3 observations with 24h+ temporal spread for both workflow and procedural types), artifacts are auto-created as slash commands (`.claude/commands/self-learning/`) or skills (`.claude/skills/{slug}/`). Loaded artifacts are reinforced locally (no LLM) on each session end. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`. Configurable model/throttle/caps/debug via `devflow learn --configure`. Debug logs stored at `~/.devflow/logs/{project-slug}/`. Use `devflow learn --purge` to remove invalid observations.
 
+**Claude Code Flags**: Typed registry (`src/cli/utils/flags.ts`) for managing Claude Code feature flags (env vars and top-level settings). Pure functions `applyFlags`/`stripFlags`/`getDefaultFlags` follow the `applyTeamsConfig`/`stripTeamsConfig` pattern. Initial flags: `tool-search`, `lsp`, `clear-context-on-plan` (default ON), `brief`, `disable-1m-context` (default OFF). Manageable via `devflow flags --enable/--disable/--status/--list`. Stored in manifest `features.flags: string[]`.
+
+**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learn ON, HUD ON, teams OFF, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list.
+
 ## Project Structure
 
 ```
@@ -52,7 +56,7 @@ devflow/
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start, pre-compact, ambient-prompt, session-end-learning, stop-update-learning [deprecated], background-learning)
-├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn)
+├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, flags)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
 └── .memory/                # Working memory files — per-project

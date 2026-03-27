@@ -17,6 +17,7 @@ import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
+import { stripFlags } from '../utils/flags.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -394,11 +395,12 @@ export const uninstallCommand = new Command('uninstall')
           const settingsPath = path.join(paths.claudeDir, 'settings.json');
           const originalContent = await fs.readFile(settingsPath, 'utf-8');
 
-          // Remove all DevFlow hooks in one pass (idempotent)
+          // Remove all DevFlow hooks and flags in one pass (idempotent)
           let settingsContent = removeAmbientHook(originalContent);
           settingsContent = removeMemoryHooks(settingsContent);
           settingsContent = removeLearningHook(settingsContent);
           settingsContent = removeHudStatusLine(settingsContent);
+          settingsContent = stripFlags(settingsContent);
 
           if (settingsContent !== originalContent) {
             await fs.writeFile(settingsPath, settingsContent, 'utf-8');

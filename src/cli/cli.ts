@@ -12,6 +12,7 @@ import { memoryCommand } from './commands/memory.js';
 import { skillsCommand } from './commands/skills.js';
 import { hudCommand } from './commands/hud.js';
 import { learnCommand } from './commands/learn.js';
+import { flagsCommand } from './commands/flags.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,6 +40,7 @@ program.addCommand(memoryCommand);
 program.addCommand(skillsCommand);
 program.addCommand(hudCommand);
 program.addCommand(learnCommand);
+program.addCommand(flagsCommand);
 
 // Handle no command
 program.action(() => {

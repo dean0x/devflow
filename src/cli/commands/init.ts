@@ -30,6 +30,7 @@ import { addLearningHook, removeLearningHook } from './learn.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
+import { getDefaultFlags, applyFlags, stripFlags, FLAG_REGISTRY } from '../utils/flags.js';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
@@ -72,6 +73,8 @@ interface InitOptions {
   learn?: boolean;
   hud?: boolean;
   hudOnly?: boolean;
+  recommended?: boolean;
+  advanced?: boolean;
 }
 
 export const initCommand = new Command('init')
@@ -90,6 +93,8 @@ export const initCommand = new Command('init')
   .option('--hud', 'Enable HUD (git info, context usage, session stats)')
   .option('--no-hud', 'Disable HUD status line')
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
+  .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
+  .option('--advanced', 'Show all configuration prompts')
   .action(async (options: InitOptions) => {
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
@@ -196,7 +201,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true, learn: false },
+          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -265,166 +270,282 @@ export const initCommand = new Command('init')
       selectedPlugins = pluginSelection as string[];
     }
 
-    // Agent Teams variant selection
-    let teamsEnabled: boolean;
-    if (options.teams !== undefined) {
-      teamsEnabled = options.teams;
+    // ╭──────────────────────────────────────────────────────────╮
+    // │  Setup mode: Recommended vs Advanced                     │
+    // ╰──────────────────────────────────────────────────────────╯
+
+    // Determine setup mode: --recommended, --advanced, interactive prompt, or non-TTY default
+    let useRecommended: boolean;
+    if (options.recommended) {
+      useRecommended = true;
+    } else if (options.advanced) {
+      useRecommended = false;
     } else if (!process.stdin.isTTY) {
-      teamsEnabled = false;
+      useRecommended = true;
     } else {
-      p.note(
-        'Agent Teams enable peer debate between agents — adversarial\n' +
-        'review, competing hypotheses in debugging, and consensus-driven\n' +
-        'exploration. Experimental: may be unstable.',
-        'Agent Teams',
-      );
-      const teamsChoice = await p.select({
-        message: 'Enable Agent Teams?',
+      const modeChoice = await p.select({
+        message: 'Setup mode',
         options: [
-          { value: false, label: 'Not yet', hint: 'Recommended' },
-          { value: true, label: 'Yes', hint: 'Experimental' },
+          { value: 'recommended', label: 'Recommended', hint: 'sensible defaults, quick setup' },
+          { value: 'advanced', label: 'Advanced', hint: 'configure each option individually' },
         ],
       });
-      if (p.isCancel(teamsChoice)) {
+      if (p.isCancel(modeChoice)) {
         p.cancel('Installation cancelled.');
         process.exit(0);
       }
-      teamsEnabled = teamsChoice as boolean;
+      useRecommended = modeChoice === 'recommended';
     }
 
-    // Ambient mode selection
-    let ambientEnabled: boolean;
-    if (options.ambient !== undefined) {
-      ambientEnabled = options.ambient;
-    } else if (!process.stdin.isTTY) {
-      ambientEnabled = true;
-    } else {
-      p.note(
-        'Auto-classifies every prompt by intent and depth. Loads relevant\n' +
-        'skills automatically and escalates to full agent pipelines\n' +
-        '(review, debug, implement) when the task warrants it.\n\n' +
-        'Adds a small amount of context to each prompt for classification.',
-        'Ambient Mode',
-      );
-      const ambientChoice = await p.select({
-        message: 'Enable ambient mode?',
-        options: [
-          { value: true, label: 'Yes', hint: 'Recommended' },
-          { value: false, label: 'No', hint: 'Manual skill loading via slash commands' },
-        ],
-      });
-      if (p.isCancel(ambientChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-      ambientEnabled = ambientChoice as boolean;
-    }
-
-    // Working memory selection (defaults ON — foundational feature)
-    let memoryEnabled: boolean;
-    if (options.memory !== undefined) {
-      memoryEnabled = options.memory;
-    } else if (!process.stdin.isTTY) {
-      memoryEnabled = true;
-    } else {
-      p.note(
-        'Preserves session context across /clear, restarts, and context\n' +
-        'compaction. Clear your session at any point and resume right\n' +
-        'where you left off.\n\n' +
-        'Runs a background agent on session stop that consumes additional\n' +
-        'tokens. Consider skipping if token usage is a concern.',
-        'Working Memory',
-      );
-      const memoryChoice = await p.confirm({
-        message: 'Enable working memory? (Recommended)',
-        initialValue: true,
-      });
-      if (p.isCancel(memoryChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-      memoryEnabled = memoryChoice;
-    }
-
-    // Self-learning selection (defaults ON — foundational feature)
-    let learnEnabled: boolean;
-    if (options.learn !== undefined) {
-      learnEnabled = options.learn;
-    } else if (!process.stdin.isTTY) {
-      learnEnabled = true;
-    } else {
-      p.note(
-        'Detects repeated workflows and creates slash commands\n' +
-        'automatically. Runs a background agent on session stop\n' +
-        'that consumes additional tokens.',
-        'Self-Learning',
-      );
-      const learnChoice = await p.confirm({
-        message: 'Enable self-learning? (Recommended)',
-        initialValue: true,
-      });
-      if (p.isCancel(learnChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-      learnEnabled = learnChoice;
-    }
-
-    // HUD selection (yes/no)
-    let hudEnabled: boolean;
-    if (options.hud !== undefined) {
-      hudEnabled = options.hud;
-    } else if (!process.stdin.isTTY) {
-      hudEnabled = true;
-    } else {
-      p.note(
-        'The HUD displays git branch, context usage, and session stats\n' +
-        'in the Claude Code status bar. Configurable via devflow hud.',
-        'HUD',
-      );
-      const hudChoice = await p.confirm({
-        message: 'Enable HUD? (Recommended)',
-        initialValue: true,
-      });
-      if (p.isCancel(hudChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-      hudEnabled = hudChoice;
-    }
-
-    // .claudeignore prompt (needs early git detection)
+    // Early git detection (needed by both paths)
     const earlyGitRoot = await getGitRoot();
-    let claudeignoreEnabled = true;
+
+    // Feature decisions — defaults for recommended, prompts for advanced
+    let teamsEnabled = false;
+    let ambientEnabled = true;
+    let memoryEnabled = true;
+    let learnEnabled = true;
+    let hudEnabled = true;
+    let enabledFlags = getDefaultFlags();
+    let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
-    if (earlyGitRoot && process.stdin.isTTY) {
-      if (scope === 'user') {
-        // User scope: discover all projects and offer batch install
+    let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
+    let safeDeleteBlock: string | null = null;
+    let securityMode: SecurityMode = 'user';
+    let managedSettingsConfirmed = false;
+
+    // Safe-delete detection (both paths need this)
+    const platform = detectPlatform();
+    const shell = detectShell();
+    const safeDeleteInfo = getSafeDeleteInfo(platform);
+    const safeDeleteAvailable = hasSafeDelete(platform);
+    const profilePath = getProfilePath(shell);
+
+    if (useRecommended) {
+      // ── Recommended path: apply all defaults silently ──
+
+      // Respect explicit CLI flags even in recommended mode
+      if (options.teams !== undefined) teamsEnabled = options.teams;
+      if (options.ambient !== undefined) ambientEnabled = options.ambient;
+      if (options.memory !== undefined) memoryEnabled = options.memory;
+      if (options.learn !== undefined) learnEnabled = options.learn;
+      if (options.hud !== undefined) hudEnabled = options.hud;
+
+      // .claudeignore: discover projects for user scope
+      if (earlyGitRoot && scope === 'user') {
         discoveredProjects = await discoverProjectGitRoots();
-        p.note(
-          'Scans all projects Claude has worked on and creates a\n' +
-          '.claudeignore in each git repository. Excludes secrets,\n' +
-          'API keys, dependencies, and build artifacts from context.',
-          '.claudeignore',
-        );
-        if (discoveredProjects.length > 0) {
-          const maxShow = 5;
-          const projectLines = discoveredProjects.slice(0, maxShow).join('\n');
-          const overflow = discoveredProjects.length > maxShow
-            ? `\n... (${discoveredProjects.length - maxShow} more)`
-            : '';
-          p.note(projectLines + overflow, `Discovered ${discoveredProjects.length} projects`);
-          const claudeignoreChoice = await p.confirm({
-            message: `Install .claudeignore to ${discoveredProjects.length} projects? (Recommended)`,
-            initialValue: true,
-          });
-          if (p.isCancel(claudeignoreChoice)) {
-            p.cancel('Installation cancelled.');
-            process.exit(0);
+      }
+
+      // Safe-delete: auto-install if trash CLI detected, auto-upgrade if older version
+      if (profilePath && safeDeleteAvailable) {
+        const trashCmd = safeDeleteInfo.command;
+        safeDeleteBlock = generateSafeDeleteBlock(shell, process.platform, trashCmd);
+        if (safeDeleteBlock) {
+          const installedVersion = await getInstalledVersion(profilePath);
+          if (installedVersion === SAFE_DELETE_BLOCK_VERSION) {
+            safeDeleteAction = 'skip';
+          } else if (installedVersion > 0) {
+            safeDeleteAction = 'upgrade';
+          } else {
+            safeDeleteAction = 'install';
           }
-          claudeignoreEnabled = claudeignoreChoice;
+        }
+      }
+
+      // Print summary
+      const defaultFlagCount = enabledFlags.length;
+      const summaryLines = [
+        `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
+        `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
+        `Self-learning:   ${learnEnabled ? 'enabled' : 'disabled'}`,
+        `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
+        `Agent Teams:     ${teamsEnabled ? 'enabled' : 'disabled'}`,
+        `Claude Code flags: ${defaultFlagCount} enabled`,
+        `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
+        `${safeDeleteAction !== 'skip' ? 'Safe delete:     installed' : ''}`,
+      ].filter(l => l.trim()).join('\n');
+
+      p.note(summaryLines + `\n\nCustomize later: ${color.cyan('devflow init --advanced')}`, 'Recommended settings applied');
+
+    } else {
+      // ── Advanced path: full interactive flow ──
+
+      // Respect explicit CLI flags — skip prompt when flag is set
+      if (options.teams !== undefined) {
+        teamsEnabled = options.teams;
+      } else {
+        p.note(
+          'Agent Teams enable peer debate between agents — adversarial\n' +
+          'review, competing hypotheses in debugging, and consensus-driven\n' +
+          'exploration. Experimental: may be unstable.',
+          'Agent Teams',
+        );
+        const teamsChoice = await p.select({
+          message: 'Enable Agent Teams?',
+          options: [
+            { value: false, label: 'Not yet', hint: 'Recommended' },
+            { value: true, label: 'Yes', hint: 'Experimental' },
+          ],
+        });
+        if (p.isCancel(teamsChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        teamsEnabled = teamsChoice as boolean;
+      }
+
+      if (options.ambient !== undefined) {
+        ambientEnabled = options.ambient;
+      } else {
+        p.note(
+          'Auto-classifies every prompt by intent and depth. Loads relevant\n' +
+          'skills automatically and escalates to full agent pipelines\n' +
+          '(review, debug, implement) when the task warrants it.\n\n' +
+          'Adds a small amount of context to each prompt for classification.',
+          'Ambient Mode',
+        );
+        const ambientChoice = await p.select({
+          message: 'Enable ambient mode?',
+          options: [
+            { value: true, label: 'Yes', hint: 'Recommended' },
+            { value: false, label: 'No', hint: 'Manual skill loading via slash commands' },
+          ],
+        });
+        if (p.isCancel(ambientChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        ambientEnabled = ambientChoice as boolean;
+      }
+
+      if (options.memory !== undefined) {
+        memoryEnabled = options.memory;
+      } else {
+        p.note(
+          'Preserves session context across /clear, restarts, and context\n' +
+          'compaction. Clear your session at any point and resume right\n' +
+          'where you left off.\n\n' +
+          'Runs a background agent on session stop that consumes additional\n' +
+          'tokens. Consider skipping if token usage is a concern.',
+          'Working Memory',
+        );
+        const memoryChoice = await p.confirm({
+          message: 'Enable working memory? (Recommended)',
+          initialValue: true,
+        });
+        if (p.isCancel(memoryChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        memoryEnabled = memoryChoice;
+      }
+
+      if (options.learn !== undefined) {
+        learnEnabled = options.learn;
+      } else {
+        p.note(
+          'Detects repeated workflows and creates slash commands\n' +
+          'automatically. Runs a background agent on session stop\n' +
+          'that consumes additional tokens.',
+          'Self-Learning',
+        );
+        const learnChoice = await p.confirm({
+          message: 'Enable self-learning? (Recommended)',
+          initialValue: true,
+        });
+        if (p.isCancel(learnChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        learnEnabled = learnChoice;
+      }
+
+      if (options.hud !== undefined) {
+        hudEnabled = options.hud;
+      } else {
+        p.note(
+          'The HUD displays git branch, context usage, and session stats\n' +
+          'in the Claude Code status bar. Configurable via devflow hud.',
+          'HUD',
+        );
+        const hudChoice = await p.confirm({
+          message: 'Enable HUD? (Recommended)',
+          initialValue: true,
+        });
+        if (p.isCancel(hudChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        hudEnabled = hudChoice;
+      }
+
+      // Claude Code flags multiselect (advanced only)
+      if (process.stdin.isTTY) {
+        const flagChoices = FLAG_REGISTRY.map(f => ({
+          value: f.id,
+          label: f.label,
+          hint: f.description,
+        }));
+        const flagDefaults = getDefaultFlags();
+
+        const flagSelection = await p.multiselect({
+          message: 'Claude Code flags',
+          options: flagChoices,
+          initialValues: flagDefaults,
+          required: false,
+        });
+
+        if (p.isCancel(flagSelection)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        enabledFlags = flagSelection as string[];
+      }
+
+      // .claudeignore prompt
+      if (earlyGitRoot) {
+        if (scope === 'user') {
+          discoveredProjects = await discoverProjectGitRoots();
+          p.note(
+            'Scans all projects Claude has worked on and creates a\n' +
+            '.claudeignore in each git repository. Excludes secrets,\n' +
+            'API keys, dependencies, and build artifacts from context.',
+            '.claudeignore',
+          );
+          if (discoveredProjects.length > 0) {
+            const maxShow = 5;
+            const projectLines = discoveredProjects.slice(0, maxShow).join('\n');
+            const overflow = discoveredProjects.length > maxShow
+              ? `\n... (${discoveredProjects.length - maxShow} more)`
+              : '';
+            p.note(projectLines + overflow, `Discovered ${discoveredProjects.length} projects`);
+            const claudeignoreChoice = await p.confirm({
+              message: `Install .claudeignore to ${discoveredProjects.length} projects? (Recommended)`,
+              initialValue: true,
+            });
+            if (p.isCancel(claudeignoreChoice)) {
+              p.cancel('Installation cancelled.');
+              process.exit(0);
+            }
+            claudeignoreEnabled = claudeignoreChoice;
+          } else {
+            const claudeignoreChoice = await p.confirm({
+              message: 'Create .claudeignore? (Recommended)',
+              initialValue: true,
+            });
+            if (p.isCancel(claudeignoreChoice)) {
+              p.cancel('Installation cancelled.');
+              process.exit(0);
+            }
+            claudeignoreEnabled = claudeignoreChoice;
+          }
         } else {
-          // No projects discovered — fall back to current project only
+          p.note(
+            'Creates a .claudeignore in this project that excludes\n' +
+            'secrets, API keys, dependencies, and build artifacts from\n' +
+            'Claude\'s context window.',
+            '.claudeignore',
+          );
           const claudeignoreChoice = await p.confirm({
             message: 'Create .claudeignore? (Recommended)',
             initialValue: true,
@@ -436,119 +557,90 @@ export const initCommand = new Command('init')
           claudeignoreEnabled = claudeignoreChoice;
         }
       } else {
-        // Local scope: single-project note
-        p.note(
-          'Creates a .claudeignore in this project that excludes\n' +
-          'secrets, API keys, dependencies, and build artifacts from\n' +
-          'Claude\'s context window.',
-          '.claudeignore',
-        );
-        const claudeignoreChoice = await p.confirm({
-          message: 'Create .claudeignore? (Recommended)',
-          initialValue: true,
-        });
-        if (p.isCancel(claudeignoreChoice)) {
-          p.cancel('Installation cancelled.');
-          process.exit(0);
-        }
-        claudeignoreEnabled = claudeignoreChoice;
+        claudeignoreEnabled = false;
       }
-    } else if (!earlyGitRoot) {
-      claudeignoreEnabled = false;
-    }
 
-    // Safe-delete detection + prompt (all detection early, action deferred)
-    const platform = detectPlatform();
-    const shell = detectShell();
-    const safeDeleteInfo = getSafeDeleteInfo(platform);
-    const safeDeleteAvailable = hasSafeDelete(platform);
-    const profilePath = getProfilePath(shell);
+      // Safe-delete detection + prompt (advanced only)
+      if (process.stdin.isTTY && profilePath && safeDeleteAvailable) {
+        const trashCmd = safeDeleteInfo.command;
+        safeDeleteBlock = generateSafeDeleteBlock(shell, process.platform, trashCmd);
 
-    let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
-    let safeDeleteBlock: string | null = null;
+        if (safeDeleteBlock) {
+          const installedVersion = await getInstalledVersion(profilePath);
+          if (installedVersion === SAFE_DELETE_BLOCK_VERSION) {
+            safeDeleteAction = 'skip';
+          } else if (installedVersion > 0) {
+            safeDeleteAction = 'upgrade';
+          } else {
+            p.note(
+              'Overrides rm to use your system trash CLI instead of permanent\n' +
+              'deletion. Prevents accidental data loss from rm -rf.',
+              'Safe Delete',
+            );
+            const safeDeleteConfirm = await p.confirm({
+              message: `Install safe-delete to ${profilePath}? (uses ${trashCmd ?? 'recycle bin'})`,
+              initialValue: true,
+            });
 
-    if (process.stdin.isTTY && profilePath && safeDeleteAvailable) {
-      const trashCmd = safeDeleteInfo.command;
-      safeDeleteBlock = generateSafeDeleteBlock(shell, process.platform, trashCmd);
-
-      if (safeDeleteBlock) {
-        const installedVersion = await getInstalledVersion(profilePath);
-        if (installedVersion === SAFE_DELETE_BLOCK_VERSION) {
-          safeDeleteAction = 'skip'; // already current
-        } else if (installedVersion > 0) {
-          safeDeleteAction = 'upgrade'; // auto-upgrade, no prompt needed
-        } else {
-          // Fresh install — prompt
-          p.note(
-            'Overrides rm to use your system trash CLI instead of permanent\n' +
-            'deletion. Prevents accidental data loss from rm -rf.',
-            'Safe Delete',
-          );
-          const safeDeleteConfirm = await p.confirm({
-            message: `Install safe-delete to ${profilePath}? (uses ${trashCmd ?? 'recycle bin'})`,
-            initialValue: true,
-          });
-
-          if (!p.isCancel(safeDeleteConfirm) && safeDeleteConfirm) {
-            safeDeleteAction = 'install';
+            if (!p.isCancel(safeDeleteConfirm) && safeDeleteConfirm) {
+              safeDeleteAction = 'install';
+            }
           }
         }
       }
-    }
 
-    // Security deny list placement (user scope + TTY only — last prompt before install)
-    let securityMode: SecurityMode = 'user';
-    if (scope === 'user' && process.stdin.isTTY) {
-      p.note(
-        'DevFlow includes a security deny list that blocks dangerous\n' +
-        'commands (rm -rf, sudo, eval, etc). It can be installed as a\n' +
-        'read-only system file or in your editable settings.json.',
-        'Security Deny List',
-      );
-      const securityChoice = await p.select({
-        message: 'How should DevFlow install the deny list?',
-        options: [
-          { value: 'managed', label: 'Managed settings', hint: 'Recommended — read-only, cannot be overridden' },
-          { value: 'user', label: 'User settings', hint: 'Editable in settings.json' },
-        ],
-      });
+      // Security deny list placement (user scope + TTY only)
+      if (scope === 'user' && process.stdin.isTTY) {
+        p.note(
+          'DevFlow includes a security deny list that blocks dangerous\n' +
+          'commands (rm -rf, sudo, eval, etc). It can be installed as a\n' +
+          'read-only system file or in your editable settings.json.',
+          'Security Deny List',
+        );
+        const securityChoice = await p.select({
+          message: 'How should DevFlow install the deny list?',
+          options: [
+            { value: 'managed', label: 'Managed settings', hint: 'Recommended — read-only, cannot be overridden' },
+            { value: 'user', label: 'User settings', hint: 'Editable in settings.json' },
+          ],
+        });
 
-      if (p.isCancel(securityChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
+        if (p.isCancel(securityChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+
+        securityMode = securityChoice as SecurityMode;
       }
 
-      securityMode = securityChoice as SecurityMode;
-    }
+      // Managed settings sudo confirmation (last interactive step)
+      if (securityMode === 'managed') {
+        p.note(
+          'This writes a read-only security deny list to a system directory\n' +
+          'and may prompt for your password (sudo).\n\n' +
+          'Not sure about this? Paste this into another Claude Code session:\n\n' +
+          '  "I\'m installing DevFlow and it wants to write a\n' +
+          '   managed-settings.json file using sudo. Review the source\n' +
+          '   at https://github.com/dean0x/devflow and tell me if\n' +
+          '   it\'s safe."',
+          'Managed Settings',
+        );
 
-    // Managed settings sudo confirmation (last interactive step — may prompt for password)
-    let managedSettingsConfirmed = false;
-    if (securityMode === 'managed') {
-      p.note(
-        'This writes a read-only security deny list to a system directory\n' +
-        'and may prompt for your password (sudo).\n\n' +
-        'Not sure about this? Paste this into another Claude Code session:\n\n' +
-        '  "I\'m installing DevFlow and it wants to write a\n' +
-        '   managed-settings.json file using sudo. Review the source\n' +
-        '   at https://github.com/dean0x/devflow and tell me if\n' +
-        '   it\'s safe."',
-        'Managed Settings',
-      );
+        const sudoChoice = await p.select({
+          message: 'Continue with managed settings?',
+          options: [
+            { value: 'yes', label: 'Yes, continue', hint: 'May prompt for your password' },
+            { value: 'no', label: 'No, fall back to settings.json', hint: 'Editable user settings instead' },
+          ],
+        });
 
-      const sudoChoice = await p.select({
-        message: 'Continue with managed settings?',
-        options: [
-          { value: 'yes', label: 'Yes, continue', hint: 'May prompt for your password' },
-          { value: 'no', label: 'No, fall back to settings.json', hint: 'Editable user settings instead' },
-        ],
-      });
+        if (p.isCancel(sudoChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
 
-      if (p.isCancel(sudoChoice)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
+        managedSettingsConfirmed = sudoChoice === 'yes';
       }
-
-      managedSettingsConfirmed = sudoChoice === 'yes';
     }
 
     // ╭──────────────────────────────────────────────────────────╮
@@ -727,6 +819,10 @@ export const initCommand = new Command('init')
         ? addHudStatusLine(content, devflowDir)
         : removeHudStatusLine(content);
 
+      // Claude Code flags — strip all managed keys, then re-apply selected flags
+      content = stripFlags(content);
+      content = applyFlags(content, enabledFlags);
+
       if (content !== original) {
         await fs.writeFile(settingsPath, content, 'utf-8');
         if (verbose) {
@@ -864,7 +960,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, flags: enabledFlags },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };
