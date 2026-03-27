@@ -137,25 +137,33 @@ async function detectBaseBranch(
   }
 
   // Layer 2: HEAD reflog — look for "checkout: moving from X to branch"
-  const headLog = await gitExec(
-    ['reflog', 'show', 'HEAD', '--format=%gs'],
-    cwd,
-  );
-  const escapedBranch = branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const checkoutPattern = new RegExp(
-    `checkout: moving from (\\S+) to ${escapedBranch}`,
-  );
-  for (const line of headLog.split('\n')) {
-    const match = line.match(checkoutPattern);
-    if (match) {
-      const candidate = match[1];
-      // Skip raw commit hashes and the current branch
-      if (candidate === branch || /^[0-9a-f]{7,}$/.test(candidate)) continue;
-      const exists = await gitExec(
-        ['rev-parse', '--verify', candidate],
-        cwd,
-      );
-      if (exists) return candidate;
+  // Skip for protected branches: reflog shows "moved from feature-branch to main" which is
+  // never the correct base for main. Protected branches should use Layer 4 (origin/main).
+  const protectedBranches = [
+    'main', 'master', 'develop', 'integration',
+    'production', 'staging', 'trunk', 'release', 'stable',
+  ];
+  if (!protectedBranches.includes(branch)) {
+    const headLog = await gitExec(
+      ['reflog', 'show', 'HEAD', '--format=%gs'],
+      cwd,
+    );
+    const escapedBranch = branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const checkoutPattern = new RegExp(
+      `checkout: moving from (\\S+) to ${escapedBranch}`,
+    );
+    for (const line of headLog.split('\n')) {
+      const match = line.match(checkoutPattern);
+      if (match) {
+        const candidate = match[1];
+        // Skip raw commit hashes and the current branch
+        if (candidate === branch || /^[0-9a-f]{7,}$/.test(candidate)) continue;
+        const exists = await gitExec(
+          ['rev-parse', '--verify', candidate],
+          cwd,
+        );
+        if (exists) return candidate;
+      }
     }
   }
 
@@ -170,13 +178,13 @@ async function detectBaseBranch(
   }
 
   // Layer 4: main/master fallback (skip if already on that branch — use remote tracking instead)
+  // Protected branches compare against their own remote tracking ref
+  if (protectedBranches.includes(branch)) {
+    const remote = await gitExec(['rev-parse', '--verify', `origin/${branch}`], cwd);
+    if (remote) return `origin/${branch}`;
+  }
   for (const candidate of ['main', 'master']) {
-    if (candidate === branch) {
-      // On main/master itself — compare against remote tracking branch
-      const remote = await gitExec(['rev-parse', '--verify', `origin/${candidate}`], cwd);
-      if (remote) return `origin/${candidate}`;
-      continue;
-    }
+    if (candidate === branch) continue;
     const exists = await gitExec(['rev-parse', '--verify', candidate], cwd);
     if (exists) return candidate;
   }
