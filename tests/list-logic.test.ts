@@ -32,6 +32,35 @@ describe('formatFeatures', () => {
     const features: ManifestData['features'] = { teams: true, ambient: false, memory: true };
     expect(formatFeatures(features)).toBe('teams, memory');
   });
+
+  it('includes flags count when flags are present', () => {
+    const features: ManifestData['features'] = {
+      teams: true, ambient: false, memory: false, hud: false, learn: false,
+      flags: ['tool-search', 'lsp', 'clear-context-on-plan'],
+    };
+    expect(formatFeatures(features)).toBe('teams, flags: 3');
+  });
+
+  it('omits flags when flags array is empty', () => {
+    const features: ManifestData['features'] = {
+      teams: true, ambient: false, memory: false, hud: false, learn: false,
+      flags: [],
+    };
+    expect(formatFeatures(features)).toBe('teams');
+  });
+
+  it('shows only flags when no boolean features are enabled', () => {
+    const features: ManifestData['features'] = {
+      teams: false, ambient: false, memory: false, hud: false, learn: false,
+      flags: ['lsp'],
+    };
+    expect(formatFeatures(features)).toBe('flags: 1');
+  });
+
+  it('handles missing flags gracefully for legacy manifests', () => {
+    const features = { teams: true, ambient: false, memory: false } as ManifestData['features'];
+    expect(formatFeatures(features)).toBe('teams');
+  });
 });
 
 describe('resolveScope', () => {
