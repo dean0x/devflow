@@ -2,7 +2,6 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -40,7 +39,7 @@ export { addLearningHook, removeLearningHook, hasLearningHook } from './learn.js
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 /**
  * Classify the safe-delete installation state based on the installed version
@@ -363,17 +362,17 @@ export const initCommand = new Command('init')
       const needsVersionCheck = safeDeleteBlock && profilePath;
 
       const [discoveredResult, installedVersionResult] = await Promise.all([
-        needsDiscovery ? discoverProjectGitRoots() : Promise.resolve([]),
+        needsDiscovery ? discoverProjectGitRoots() : Promise.resolve([] as string[]),
         needsVersionCheck ? getInstalledVersion(profilePath) : Promise.resolve(0),
       ]);
 
-      if (needsDiscovery) {
-        discoveredProjects = discoveredResult;
-      }
+      discoveredProjects = discoveredResult;
 
       if (needsVersionCheck) {
         const state = classifySafeDeleteState(installedVersionResult, SAFE_DELETE_BLOCK_VERSION);
-        safeDeleteAction = state === 'current' ? 'skip' : state === 'outdated' ? 'upgrade' : 'install';
+        if (state === 'current') safeDeleteAction = 'skip';
+        else if (state === 'outdated') safeDeleteAction = 'upgrade';
+        else safeDeleteAction = 'install';
       }
 
       // Print summary

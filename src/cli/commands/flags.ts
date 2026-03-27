@@ -52,7 +52,7 @@ async function updateManifestFlags(devflowDir: string, flagIds: string[]): Promi
  * Exits with error if any IDs are unknown.
  */
 function parseFlagIds(input: string): string[] {
-  const ids = input.split(',').map((s: string) => s.trim()).filter(Boolean);
+  const ids = input.split(',').map(s => s.trim()).filter(Boolean);
   const invalid = ids.filter(id => !FLAG_REGISTRY.some(f => f.id === id));
 
   if (invalid.length > 0) {
