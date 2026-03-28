@@ -21,6 +21,7 @@
   "skills": [
     "agent-teams",
     "git-safety",
-    "knowledge-persistence"
+    "knowledge-persistence",
+    "worktree-support"
   ]
 }

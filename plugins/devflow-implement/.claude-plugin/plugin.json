@@ -30,6 +30,7 @@
     "agent-teams",
     "implementation-patterns",
     "knowledge-persistence",
-    "self-review"
+    "self-review",
+    "worktree-support"
   ]
 }

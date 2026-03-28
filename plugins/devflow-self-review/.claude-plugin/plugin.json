@@ -21,6 +21,7 @@
   ],
   "skills": [
     "self-review",
-    "core-patterns"
+    "core-patterns",
+    "worktree-support"
   ]
 }

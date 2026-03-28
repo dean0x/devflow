@@ -33,6 +33,7 @@
     "regression-patterns",
     "review-methodology",
     "security-patterns",
-    "test-patterns"
+    "test-patterns",
+    "worktree-support"
   ]
 }
