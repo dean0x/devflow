@@ -1,8 +1,8 @@
 ---
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
-model: inherit
-skills: core-patterns, git-safety, implementation-patterns, git-workflow, test-patterns, test-driven-development, search-first, input-validation
+model: sonnet
+skills: core-patterns, git-safety, implementation-patterns, git-workflow, test-patterns, test-driven-development, search-first, input-validation, worktree-support
 ---
 
 # Coder Agent
@@ -22,13 +22,7 @@ You receive from orchestrator:
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
 
-## Worktree Support (Optional)
-
-If `WORKTREE_PATH` is provided:
-- Prefix git commands: `git -C {WORKTREE_PATH} ...`
-- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
-- Resolve source files: `{WORKTREE_PATH}/{file}`
-- If omitted, use cwd (default behavior unchanged).
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
 
 **Sequential execution context** (when part of multi-Coder chain):
 - **PRIOR_PHASE_SUMMARY**: Implementation summary from previous Coder (see format below)
@@ -45,6 +39,7 @@ If `WORKTREE_PATH` is provided:
    - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
    - If `.memory/knowledge/decisions.md` exists, read it. Apply prior architectural decisions relevant to this task. Avoid contradicting accepted decisions without documenting a new ADR.
    - If `.memory/knowledge/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
+   - If `.docs/handoff.md` exists, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
 2. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
    - `backend` (TypeScript): Read `~/.claude/skills/typescript/SKILL.md`, `~/.claude/skills/input-validation/SKILL.md`

@@ -2,7 +2,7 @@
 name: Git
 description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
 model: haiku
-skills: github-patterns, git-safety, git-workflow
+skills: github-patterns, git-safety, git-workflow, worktree-support
 ---
 
 # Git Agent
@@ -15,13 +15,7 @@ The orchestrator provides:
 - **OPERATION**: Which task to perform
 - **Operation-specific parameters**: See each operation below
 
-## Worktree Support (Optional)
-
-If `WORKTREE_PATH` is provided:
-- Prefix all git commands: `git -C {WORKTREE_PATH} ...`
-- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
-- Resolve source files: `{WORKTREE_PATH}/{file}`
-- If omitted, use cwd (default behavior unchanged).
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Operations
 
@@ -44,7 +38,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 **Input:** `WORKTREE_PATH` (optional)
 
 **Process:**
-1. Verify on feature branch (not main/master/develop) - error if not
+1. Verify on feature branch (not main/master/develop/release/*/staging/production) - error if not
 2. Check for uncommitted changes - if any, create atomic commit using `git-workflow` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
 4. Check if PR exists - if not, create PR using `git-workflow` patterns
@@ -79,7 +73,7 @@ Pre-flight validation for `/resolve`. Checks branch state without modifications.
 **Input:** `WORKTREE_PATH` (optional)
 
 **Process:**
-1. Verify on feature branch (not main/master/develop) - error if not
+1. Verify on feature branch (not main/master/develop/release/*/staging/production) - error if not
 2. Verify working directory is clean - error if uncommitted changes
 3. Get current branch name
 4. Derive branch-slug (replace `/` with `-`)
@@ -187,9 +181,10 @@ Create inline PR comments for blocking and should-fix issues from code review.
 3. Extract issues - only comment on blocking (CRITICAL/HIGH) and should-fix (HIGH/MEDIUM)
 4. Skip pre-existing issues (these go to tech debt)
 5. Deduplicate issues by file:line
-6. **Check for existing comments**: Before creating each inline comment, fetch existing PR review comments via `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments`. Skip creating a new comment if an existing comment already targets the same file and line — avoids duplicate comments across incremental reviews.
+6. **Deduplicate efficiently**: Fetch all existing PR review comments once via `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments`. Build a lookup set of `{path}:{line}` pairs from the response. For each new comment, check the lookup — skip if already present. This replaces per-comment checking.
 7. Create inline comments for lines in diff; consolidate others into summary comment
 8. Include 1-second delay between API calls for rate limiting
+9. **Rate limit awareness**: Before posting a batch of comments, check `X-RateLimit-Remaining` from the last API response header. If remaining < 50: warn user and reduce posting rate (add 3s delay between calls). If remaining < 10: stop posting, report which comments were skipped due to rate limits.
 
 **Output:**
 ```markdown

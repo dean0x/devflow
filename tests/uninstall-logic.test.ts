@@ -51,6 +51,15 @@ describe('computeAssetsToRemove', () => {
     expect(commands.length).toBeGreaterThan(0);
   });
 
+  it('retains review-methodology when code-review uninstalled (ambient declares it)', () => {
+    const reviewPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-code-review')!;
+    const { skills } = computeAssetsToRemove([reviewPlugin], DEVFLOW_PLUGINS);
+    // review-methodology is also declared by devflow-ambient, so it must NOT be removed
+    expect(skills).not.toContain('review-methodology');
+    // security-patterns is also declared by devflow-ambient
+    expect(skills).not.toContain('security-patterns');
+  });
+
   it('handles custom plugin lists', () => {
     const plugins: PluginDefinition[] = [
       { name: 'a', description: '', commands: ['/a'], agents: ['shared', 'only-a'], skills: ['shared-skill', 'only-a-skill'] },

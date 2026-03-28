@@ -1,8 +1,8 @@
 ---
 name: Simplifier
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
-skills: core-patterns
-model: inherit
+skills: core-patterns, worktree-support
+model: sonnet
 ---
 
 # Simplifier Agent
@@ -15,12 +15,7 @@ You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Coder output (optional)
 
-## Worktree Support (Optional)
-
-If `WORKTREE_PATH` is provided:
-- Prefix git commands: `git -C {WORKTREE_PATH} ...`
-- Resolve source files: `{WORKTREE_PATH}/{file}`
-- If omitted, use cwd (default behavior unchanged).
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Responsibilities
 

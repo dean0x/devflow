@@ -1,8 +1,8 @@
 ---
 name: Reviewer
 description: Universal code review agent with parameterized focus. Dynamically loads pattern skill for assigned focus area.
-model: inherit
-skills: review-methodology
+model: opus
+skills: review-methodology, worktree-support
 ---
 
 # Reviewer Agent
@@ -17,13 +17,7 @@ The orchestrator provides:
 - **Output path**: Where to save findings (e.g., `.docs/reviews/{branch}/{timestamp}/{focus}.md`)
 - **DIFF_COMMAND** (optional): Specific diff command to use (e.g., `git diff {sha}...HEAD` for incremental reviews). If not provided, default to `git diff {base_branch}...HEAD`.
 
-## Worktree Support (Optional)
-
-If `WORKTREE_PATH` is provided:
-- Prefix git commands: `git -C {WORKTREE_PATH} ...`
-- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
-- Resolve source files: `{WORKTREE_PATH}/{file}`
-- If omitted, use cwd (default behavior unchanged).
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Focus Areas
 

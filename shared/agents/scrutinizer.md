@@ -1,8 +1,8 @@
 ---
 name: Scrutinizer
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Coder completes.
-model: inherit
-skills: self-review, core-patterns
+model: opus
+skills: self-review, core-patterns, worktree-support
 ---
 
 # Scrutinizer Agent
@@ -15,12 +15,7 @@ You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Coder output
 
-## Worktree Support (Optional)
-
-If `WORKTREE_PATH` is provided:
-- Prefix git commands: `git -C {WORKTREE_PATH} ...`
-- Resolve source files: `{WORKTREE_PATH}/{file}`
-- If omitted, use cwd (default behavior unchanged).
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Responsibilities
 

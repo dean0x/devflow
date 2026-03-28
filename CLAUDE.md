@@ -50,7 +50,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 35 skills (single source of truth)
+├── shared/skills/          # 39 skills (single source of truth)
 ├── shared/agents/          # 10 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
@@ -126,6 +126,12 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Incremental Reviews**: `/code-review` writes reports into timestamped subdirectories (`YYYY-MM-DD_HHMM`) and tracks HEAD SHA in `.last-review-head` for incremental diffs. Second review only diffs from last reviewed commit. `/resolve` defaults to latest timestamped directory. Both commands auto-discover git worktrees and process all reviewable branches in parallel.
 
+**Coder Handoff Artifact**: Sequential Coder phases write `.docs/handoff.md` after each phase. Survives context compaction (unlike PRIOR_PHASE_SUMMARY). Every Coder reads it on startup. Deleted by implementation-orchestration after pipeline completes.
+
+**Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files. This ensures orchestration skills (review-orchestration, resolve-orchestration) can spawn agents that depend on skills from other plugins. Only commands and agents remain plugin-specific.
+
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, shepherd), Sonnet for execution agents (coder, simplifier, resolver, skimmer), Haiku for I/O agents (git, synthesizer, validator).
+
 ## Agent & Command Roster
 
 **Orchestration commands** (spawn agents, never do agent work in main session):
@@ -140,6 +146,8 @@ Working memory files live in a dedicated `.memory/` directory:
 **Shared agents** (10): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, shepherd, scrutinizer, validator
 
 **Plugin-specific agents** (1): claude-md-auditor
+
+**Ambient orchestration skills** (6): implementation-orchestration, debug-orchestration, plan-orchestration, review-orchestration, resolve-orchestration, pipeline-orchestration. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
 **Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
@@ -174,7 +182,6 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore
 ## Critical Rules
 
 ### Git Safety
-- Always use `rm -f .git/index.lock &&` before git operations
 - Run git commands sequentially, never in parallel
 - Never force push without explicit user request
 

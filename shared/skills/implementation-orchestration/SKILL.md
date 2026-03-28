@@ -59,6 +59,8 @@ Spawn `Task(subagent_type="Coder")` with input variables:
 
 If Coder returns **BLOCKED**, halt the pipeline and report to user.
 
+**Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.docs/handoff.md` using the Write tool. The next Coder reads this on startup (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
+
 ## Phase 4: FILES_CHANGED Detection
 
 After Coder completes, detect changed files:
@@ -82,6 +84,8 @@ Run sequentially — each gate must pass before the next:
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
 
 ## Phase 6: Completion
+
+Cleanup: delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
 
 Report results:
 - Commits created (from Coder)

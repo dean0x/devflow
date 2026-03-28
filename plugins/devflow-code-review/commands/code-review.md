@@ -21,16 +21,13 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 #### Step 0a: Discover Worktrees
 
-1. Run `git worktree list --porcelain` to discover all worktrees
-2. For each worktree, extract path and branch
-3. **Filter to reviewable worktrees:**
-   - Must be on a named branch (skip detached HEAD)
-   - Must NOT be on a protected branch (main, master, develop, release/*, staging, production)
-   - Must NOT be mid-rebase or mid-merge (check `git -C {path} status` for "rebase in progress" / "merging")
-4. **If `--path` flag provided:** use only that worktree, skip discovery
-5. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
-6. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
-7. **Deduplicate by branch:** if two worktrees are on the same branch, use only the first worktree's path
+1. **Discover reviewable worktrees** using the `worktree-support` skill discovery algorithm:
+   - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
+   - See `~/.claude/skills/worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+2. **If `--path` flag provided:** use only that worktree, skip discovery
+   **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
+3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
+4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
@@ -117,7 +114,7 @@ Task(subagent_type="Reviewer", run_in_background=false):
 Follow 6-step process from review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-DIFF_COMMAND: git diff {DIFF_RANGE}  (use this instead of default base_branch...HEAD)
+DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 

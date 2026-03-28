@@ -36,15 +36,20 @@ fi
 # No fast-path filtering — the LLM handles QUICK classification reliably and
 # shell-level regex was causing false positives that silently broke ambient mode.
 # SYNC: must match tests/ambient.test.ts preamble drift detection
-PREAMBLE="AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review: load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture: load skills+agents. Prefer GUIDED for code changes.
+PREAMBLE="AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review(small scope): load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture/review(full/branch/PR)/resolve/pipeline: load skills+agents. Prefer GUIDED for code changes.
+REVIEW depth: continuation-aware (match prior IMPLEMENT depth) or signal-word based (full/branch/PR→ORCHESTRATED, check this/specific file→GUIDED).
+RESOLVE: always ORCHESTRATED. PIPELINE (end-to-end/implement and review): always ORCHESTRATED.
 MULTI_WORKTREE: all worktrees/branches, each worktree, review everything, resolve all → ORCHESTRATED. Follow code-review/resolve command flow (auto-discovers worktrees).
 GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
 IMPLEMENT → test-driven-development, implementation-patterns, search-first
 DEBUG → core-patterns, test-patterns
-REVIEW → self-review, core-patterns
+REVIEW/GUIDED → self-review, core-patterns
+REVIEW/ORCHESTRATED → review-orchestration
+RESOLVE → resolve-orchestration, core-patterns
+PIPELINE → pipeline-orchestration, implementation-patterns
 PLAN → implementation-patterns, core-patterns
 Also add if file type matches: typescript, react, go, java, python, rust, input-validation, security-patterns, frontend-design
-ORCHESTRATED also add: implementation-orchestration / debug-orchestration / plan-orchestration
+ORCHESTRATED also add: implementation-orchestration / debug-orchestration / plan-orchestration / review-orchestration / resolve-orchestration / pipeline-orchestration
 State: Ambient: INTENT/DEPTH. Loading: skills. Then proceed."
 
 json_prompt_output "$PREAMBLE"

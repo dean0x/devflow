@@ -2,7 +2,7 @@
 name: Synthesizer
 description: Combines outputs from multiple agents into actionable summaries (modes: exploration, planning, review)
 model: haiku
-skills: review-methodology, docs-framework
+skills: review-methodology, docs-framework, worktree-support
 ---
 
 # Synthesizer Agent
@@ -16,13 +16,7 @@ The orchestrator provides:
 - **Agent outputs**: Results from parallel agents to synthesize
 - **Output path**: Where to save synthesis (if applicable)
 
-## Worktree Support (Optional)
-
-If `WORKTREE_PATH` is provided:
-- Prefix git commands: `git -C {WORKTREE_PATH} ...`
-- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
-- Resolve source files: `{WORKTREE_PATH}/{file}`
-- If omitted, use cwd (default behavior unchanged).
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
 
 ---
 
@@ -136,7 +130,7 @@ Analyze 3 axes to determine strategy:
 Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 
 **Process:**
-1. Read all review reports from `${REVIEW_BASE_DIR}/*.md` (exclude your own output `review-summary.*.md`)
+1. Read all review reports from `${REVIEW_BASE_DIR}/*.md` (exclude `review-summary.md` and `resolution-summary.md`)
 2. Extract confidence percentages from each finding
 3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%)
 <!-- Confidence threshold also in: shared/agents/reviewer.md, plugins/devflow-code-review/commands/code-review.md -->

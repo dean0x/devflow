@@ -21,16 +21,13 @@ Run a comprehensive code review of the current branch by spawning a review team 
 
 #### Step 0a: Discover Worktrees
 
-1. Run `git worktree list --porcelain` to discover all worktrees
-2. For each worktree, extract path and branch
-3. **Filter to reviewable worktrees:**
-   - Must be on a named branch (skip detached HEAD)
-   - Must NOT be on a protected branch (main, master, develop, release/*, staging, production)
-   - Must NOT be mid-rebase or mid-merge (check `git -C {path} status` for "rebase in progress" / "merging")
-4. **If `--path` flag provided:** use only that worktree, skip discovery
-5. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
-6. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
-7. **Deduplicate by branch:** if two worktrees are on the same branch, use only the first worktree's path
+1. **Discover reviewable worktrees** using the `worktree-support` skill discovery algorithm:
+   - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
+   - See `~/.claude/skills/worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+2. **If `--path` flag provided:** use only that worktree, skip discovery
+   **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
+3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
+4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
@@ -122,7 +119,7 @@ Spawn review teammates with self-contained prompts:
     1. Read your skill: `Read ~/.claude/skills/security-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    4. Get the diff: `git {-C worktree_path} diff {DIFF_RANGE}`
+    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from review-methodology
     6. Focus: injection, auth bypass, crypto misuse, OWASP vulnerabilities
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
@@ -137,7 +134,7 @@ Spawn review teammates with self-contained prompts:
     1. Read your skill: `Read ~/.claude/skills/architecture-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    4. Get the diff: `git {-C worktree_path} diff {DIFF_RANGE}`
+    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from review-methodology
     6. Focus: SOLID violations, coupling, layering issues, modularity problems
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
@@ -152,7 +149,7 @@ Spawn review teammates with self-contained prompts:
     1. Read your skill: `Read ~/.claude/skills/performance-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    4. Get the diff: `git {-C worktree_path} diff {DIFF_RANGE}`
+    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from review-methodology
     6. Focus: N+1 queries, memory leaks, algorithm issues, I/O bottlenecks
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
@@ -171,7 +168,7 @@ Spawn review teammates with self-contained prompts:
        - `Read ~/.claude/skills/regression-patterns/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
-    4. Get the diff: `git {-C worktree_path} diff {DIFF_RANGE}`
+    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from review-methodology
     6. Focus: complexity, test gaps, pattern violations, regressions, naming
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
@@ -341,7 +338,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Worktree pre-flight fails | Report failure, continue with other worktrees |
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Multi-worktree with Agent Teams | Process worktrees sequentially (one team per session) |
-| Duplicate PR comments | Git agent checks for existing comments at same file:line |
+| Many worktrees (5+) | Report count and proceed — user manages their worktree count |
+| Duplicate PR comments | Git agent checks for existing comments at same file:line before creating |
 
 ## Backwards Compatibility
 

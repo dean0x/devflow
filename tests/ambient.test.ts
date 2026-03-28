@@ -270,7 +270,12 @@ describe('preamble drift detection', () => {
     expect(shellPreamble).toContain('IMPLEMENT');
     expect(shellPreamble).toContain('DEBUG');
     expect(shellPreamble).toContain('REVIEW');
+    expect(shellPreamble).toContain('RESOLVE');
+    expect(shellPreamble).toContain('PIPELINE');
     expect(shellPreamble).toContain('PLAN');
+
+    // Must contain multi-worktree awareness
+    expect(shellPreamble).toContain('MULTI_WORKTREE');
 
     // Must reference core skills by name
     expect(shellPreamble).toContain('implementation-patterns');
@@ -278,6 +283,14 @@ describe('preamble drift detection', () => {
     expect(shellPreamble).toContain('core-patterns');
     expect(shellPreamble).toContain('self-review');
     expect(shellPreamble).toContain('search-first');
+
+    // Must reference all 6 orchestration skills
+    expect(shellPreamble).toContain('implementation-orchestration');
+    expect(shellPreamble).toContain('debug-orchestration');
+    expect(shellPreamble).toContain('plan-orchestration');
+    expect(shellPreamble).toContain('review-orchestration');
+    expect(shellPreamble).toContain('resolve-orchestration');
+    expect(shellPreamble).toContain('pipeline-orchestration');
 
     // Must instruct Skill tool invocation
     expect(shellPreamble).toContain('Skill tool');

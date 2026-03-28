@@ -21,15 +21,14 @@ Process issues from code review reports: validate them (false positive check), a
 
 #### Step 0a: Discover Worktrees
 
-1. Run `git worktree list --porcelain` to discover all worktrees
-2. For each worktree, extract path and branch
-3. **Filter to resolvable worktrees:**
-   - Must be on a named branch (skip detached HEAD)
-   - Must NOT be on a protected branch (main, master, develop, release/*, staging, production)
-   - Must have unresolved reviews (latest review directory has no `resolution-summary.md`)
-4. **If `--path` flag provided:** use only that worktree, skip discovery
-5. **If only 1 resolvable worktree** (the common case): proceed as single-worktree flow — zero behavior change
-6. **If multiple resolvable worktrees:** report "Found N worktrees with unresolved reviews: {list}" and proceed with multi-worktree flow
+1. **Discover resolvable worktrees** using the `worktree-support` skill discovery algorithm:
+   - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
+   - See `~/.claude/skills/worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+   - Additional filter: must have unresolved reviews (latest review directory has no `resolution-summary.md`)
+2. **If `--path` flag provided:** use only that worktree, skip discovery
+   **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
+3. **If only 1 resolvable worktree** (the common case): proceed as single-worktree flow — zero behavior change
+4. **If multiple resolvable worktrees:** report "Found N worktrees with unresolved reviews: {list}" and proceed with multi-worktree flow
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 

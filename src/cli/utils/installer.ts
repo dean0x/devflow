@@ -161,7 +161,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     }
   }
 
-  // Install each selected plugin (with deduplication)
+  // Install commands and agents from selected plugins (with deduplication)
   for (const plugin of plugins) {
     const pluginSourceDir = path.join(pluginsDir, plugin.name);
 
@@ -205,29 +205,27 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
         }
       }
     } catch { /* no agents directory */ }
+  }
 
-    // Install skills (deduplicated, respects shadows)
-    const skillsSource = path.join(pluginSourceDir, 'skills');
+  // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
+  // Skills are tiny markdown files — universal install ensures orchestration skills
+  // can spawn agents that depend on skills from other plugins.
+  for (const [skillName, ownerPlugin] of skillsMap) {
+    const skillSource = path.join(pluginsDir, ownerPlugin, 'skills', skillName);
     try {
-      const skillDirs = await fs.readdir(skillsSource, { withFileTypes: true });
-      for (const skillDir of skillDirs) {
-        if (skillDir.isDirectory()) {
-          if (skillsMap.get(skillDir.name) === plugin.name) {
-            // Skip copy for shadowed skills — user has a personal override
-            const shadowDir = path.join(devflowDir, 'skills', skillDir.name);
-            try {
-              const stat = await fs.stat(shadowDir);
-              if (stat.isDirectory()) continue;
-            } catch { /* no shadow — proceed with copy */ }
-            const skillTarget = path.join(claudeDir, 'skills', skillDir.name);
-            await copyDirectory(
-              path.join(skillsSource, skillDir.name),
-              skillTarget,
-            );
-          }
-        }
-      }
-    } catch { /* no skills directory */ }
+      const stat = await fs.stat(skillSource);
+      if (!stat.isDirectory()) continue;
+    } catch { continue; /* skill dir doesn't exist in built plugin */ }
+
+    // Skip copy for shadowed skills — user has a personal override
+    const shadowDir = path.join(devflowDir, 'skills', skillName);
+    try {
+      const stat = await fs.stat(shadowDir);
+      if (stat.isDirectory()) continue;
+    } catch { /* no shadow — proceed with copy */ }
+
+    const skillTarget = path.join(claudeDir, 'skills', skillName);
+    await copyDirectory(skillSource, skillTarget);
   }
 
   // Install scripts (always from root scripts/ directory)
