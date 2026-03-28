@@ -24,7 +24,7 @@ Claude Code is powerful. DevFlow makes it extraordinary.
 
 **Self-learning workflows.** DevFlow watches how you work and auto-creates slash commands and skills from repeated patterns. It literally gets smarter the more you use it, detecting workflow patterns across sessions and generating reusable artifacts.
 
-35 quality skills. 10 shared agents. Full lifecycle from specification to PR. One `npx devflow-kit init`.
+39 quality skills. 10 shared agents. Full lifecycle from specification to PR. One `npx devflow-kit init`.
 
 ## Features
 
@@ -34,8 +34,9 @@ Claude Code is powerful. DevFlow makes it extraordinary.
 - **Long-term project knowledge** with architectural decisions and known pitfalls that persist and inform reviews
 - **Full-lifecycle implementation** from spec to explore to plan to code to validate to refine in one command
 - **Parallel debugging** with competing hypotheses investigated simultaneously
-- **35 quality skills** with 9 auto-activating core, 8 language/ecosystem, plus specialized review and orchestration skills
+- **39 quality skills** with 9 auto-activating core, 8 language/ecosystem, plus specialized review and orchestration skills
 - **Ambient mode** that classifies intent and loads proportional skill sets automatically
+- **Model strategy** with explicit model assignments — Opus for analysis agents (reviewer, scrutinizer, shepherd), Sonnet for execution agents (coder, resolver, simplifier), Haiku for I/O agents (git, synthesizer, validator)
 - **Fully composable plugin system** where every feature is a plugin. Install only what you need. No bloat, no take-it-or-leave-it bundles.
 
 ## Quick Start
@@ -114,9 +115,8 @@ Produces a root cause analysis report with confidence level.
 Processes issues from `/code-review`:
 
 - Validates each issue is real (not false positive)
-- Assesses risk of fixing (low vs high)
-- Fixes low-risk issues immediately
-- Defers high-risk issues to tech debt backlog
+- Standard fixes applied directly, careful fixes (public API, shared state) get test-first treatment
+- Only defers to tech debt when complete architectural overhaul is needed
 
 ## Auto-Activating Skills
 
