@@ -4,6 +4,7 @@ import {
   getAllSkillNames,
   getAllAgentNames,
   buildAssetMaps,
+  buildFullSkillsMap,
   type PluginDefinition,
 } from '../src/cli/plugins.js';
 
@@ -83,6 +84,33 @@ describe('buildAssetMaps', () => {
     expect(agentsMap.get('shared-agent')).toBe('first');
     expect(skillsMap.size).toBe(1);
     expect(agentsMap.size).toBe(1);
+  });
+});
+
+describe('buildFullSkillsMap', () => {
+  it('includes skills from ALL plugins regardless of selection', () => {
+    const fullMap = buildFullSkillsMap();
+    // Must include skills from optional plugins too
+    expect(fullMap.has('accessibility')).toBe(true);
+    expect(fullMap.has('typescript')).toBe(true);
+    expect(fullMap.has('go')).toBe(true);
+    // Must include all orchestration skills
+    expect(fullMap.has('review-orchestration')).toBe(true);
+    expect(fullMap.has('resolve-orchestration')).toBe(true);
+    expect(fullMap.has('pipeline-orchestration')).toBe(true);
+  });
+
+  it('covers more skills than buildAssetMaps with only non-optional plugins', () => {
+    const nonOptional = DEVFLOW_PLUGINS.filter(p => !p.optional);
+    const { skillsMap: partialMap } = buildAssetMaps(nonOptional);
+    const fullMap = buildFullSkillsMap();
+    expect(fullMap.size).toBeGreaterThan(partialMap.size);
+  });
+
+  it('matches getAllSkillNames count', () => {
+    const fullMap = buildFullSkillsMap();
+    const allNames = getAllSkillNames();
+    expect(fullMap.size).toBe(allNames.length);
   });
 });
 
@@ -167,6 +195,25 @@ describe('optional plugin flag', () => {
     expect(names).not.toContain('devflow-audit-claude');
     // But it still exists in the registry (installable via --plugin=audit-claude)
     expect(DEVFLOW_PLUGINS.find(p => p.name === 'devflow-audit-claude')).toBeDefined();
+  });
+
+  it('devflow-ambient declares review/resolve skill dependencies', () => {
+    const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
+    expect(ambient).toBeDefined();
+    // Ambient must declare review skills so uninstalling code-review doesn't break ambient review
+    expect(ambient!.skills).toContain('review-methodology');
+    expect(ambient!.skills).toContain('security-patterns');
+    // Ambient must declare orchestration skills
+    expect(ambient!.skills).toContain('review-orchestration');
+    expect(ambient!.skills).toContain('resolve-orchestration');
+    expect(ambient!.skills).toContain('pipeline-orchestration');
+    // Ambient must declare resolve dependencies
+    expect(ambient!.skills).toContain('implementation-patterns');
+    expect(ambient!.skills).toContain('knowledge-persistence');
+    // Ambient must declare all needed agents
+    expect(ambient!.agents).toContain('git');
+    expect(ambient!.agents).toContain('synthesizer');
+    expect(ambient!.agents).toContain('resolver');
   });
 
   it('devflow-core-skills does not contain language/ecosystem skills', () => {

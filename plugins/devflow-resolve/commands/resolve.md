@@ -4,35 +4,69 @@ description: Process review issues - validate, assess risk, fix low-risk issues,
 
 # Resolve Command
 
-Process issues from code review reports: validate them (false positive check), assess risk for FIX vs TECH_DEBT decision, and implement fixes for low-risk issues.
+Process issues from code review reports: validate them (false positive check), assess risk for FIX vs TECH_DEBT decision, and implement fixes for low-risk issues. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
 
 ## Usage
 
 ```
-/resolve           (resolve issues on current branch)
-/resolve #42       (resolve issues for specific PR)
+/resolve                        (resolve latest review on current branch — or all worktrees)
+/resolve #42                    (resolve issues for specific PR)
+/resolve --review 2026-03-28_0900  (resolve a specific review run by timestamp)
+/resolve --path /path/to/worktree  (resolve a specific worktree only)
 ```
 
 ## Phases
 
-### Phase 0: Pre-Flight (Git Agent)
+### Phase 0: Worktree Discovery & Pre-Flight
 
-Spawn Git agent to validate branch state:
+#### Step 0a: Discover Worktrees
+
+1. **Discover resolvable worktrees** using the `worktree-support` skill discovery algorithm:
+   - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
+   - See `~/.claude/skills/worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+   - Additional filter: must have unresolved reviews (latest review directory has no `resolution-summary.md`)
+2. **If `--path` flag provided:** use only that worktree, skip discovery
+   **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
+3. **If only 1 resolvable worktree** (the common case): proceed as single-worktree flow — zero behavior change
+4. **If multiple resolvable worktrees:** report "Found N worktrees with unresolved reviews: {list}" and proceed with multi-worktree flow
+
+#### Step 0b: Per-Worktree Pre-Flight (Git Agent)
+
+For each resolvable worktree, spawn Git agent:
 
 ```
 Task(subagent_type="Git", run_in_background=false):
 "OPERATION: validate-branch
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Check feature branch, clean working directory, reviews exist.
 Return: branch, branch-slug, PR#, review count"
 ```
 
-**If BLOCKED:** Stop and report the blocker to user. If no reviews found, suggest `/code-review` first.
+In multi-worktree mode, spawn all pre-flight agents **in a single message** (parallel).
 
-**Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` for use in subsequent phases.
+**If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` first. In multi-worktree mode, report the failure but continue with other worktrees.
+
+**Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` per worktree.
+
+#### Step 0c: Target Review Directory
+
+For each worktree:
+
+1. List directories in `{worktree}/.docs/reviews/{branch-slug}/`
+2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
+3. **Otherwise:** sort directories by name (timestamps are naturally sortable), select the latest that contains `review-summary.md` (complete review)
+4. **If latest directory already has `resolution-summary.md`:** skip worktree — already resolved. Report: "Latest review already resolved. Run /code-review for a new review first."
+5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.docs/reviews/{branch-slug}/`, read them directly (backwards compatible)
+
+Set `TARGET_DIR` to the selected review directory path.
 
 ### Phase 1: Parse Issues
 
-Read all review reports from `.docs/reviews/{branch-slug}/*.md` and extract:
+Read review reports from `{TARGET_DIR}/*.md` and extract:
+
+**Exclude from issue extraction:**
+- `review-summary.md` (synthesizer output, not individual findings)
+- `resolution-summary.md` (if it exists from a previous partial run)
 
 **Include only:**
 - Blocking issues (CRITICAL, HIGH)
@@ -77,6 +111,7 @@ Task(subagent_type="Resolver"):
 "ISSUES: [{issue1}, {issue2}, ...]
 BRANCH: {branch-slug}
 BATCH_ID: batch-{n}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Validate, decide FIX vs TECH_DEBT, implement fixes"
 ```
 
@@ -90,7 +125,9 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-### Phase 6: Record Pitfalls (from tech debt deferrals)
+### Phase 6: Record Pitfalls (Sequential)
+
+**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
 For each issue deferred as TECH_DEBT:
 1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
@@ -104,31 +141,35 @@ If any fixes were made, spawn Simplifier agent to refine the changed code:
 ```
 Task(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
 FILES_CHANGED: {list of files modified by Resolvers}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
-### Phase 8: Manage Tech Debt
+### Phase 8: Manage Tech Debt (Sequential)
+
+**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
 If any issues were deferred, spawn Git agent:
 
 ```
 Task(subagent_type="Git"):
 "OPERATION: manage-debt
-REVIEW_DIR: .docs/reviews/{branch-slug}/
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+REVIEW_DIR: {TARGET_DIR}
 TIMESTAMP: {timestamp}
-Note: Deferred issues from resolution are already in resolution-summary.{timestamp}.md"
+Note: Deferred issues from resolution are already in resolution-summary.md"
 ```
 
 ### Phase 9: Report
 
-**Write the resolution summary** to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md` using Write tool, then display:
+**Write the resolution summary** to `{TARGET_DIR}/resolution-summary.md` using Write tool, then display:
 
 ```
 ## Resolution Summary
 
 **Branch**: {branch}
-**Reviews Processed**: {n} reports
+**Reviews Processed**: {n} reports from {TARGET_DIR}
 **Total Issues**: {n}
 
 ### Results
@@ -146,19 +187,23 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 - {n} items added to backlog
 
 ### Artifacts
-- Resolution report: .docs/reviews/{branch}/resolution-summary.{timestamp}.md
+- Resolution report: {TARGET_DIR}/resolution-summary.md
 ```
+
+In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Architecture
 
 ```
 /resolve (orchestrator - spawns agents only)
 │
-├─ Phase 0: Pre-flight
-│  └─ Git agent (validate-branch)
+├─ Phase 0: Worktree Discovery & Pre-flight
+│  ├─ Step 0a: git worktree list → filter resolvable
+│  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel]
+│  └─ Step 0c: Target latest review directory per worktree
 │
-├─ Phase 1: Parse issues
-│  └─ Extract Blocking + Should-Fix (skip Pre-existing)
+├─ Phase 1: Parse issues from TARGET_DIR
+│  └─ Extract Blocking + Should-Fix (skip Pre-existing, exclude summaries)
 │
 ├─ Phase 2: Analyze dependencies
 │  └─ Build dependency graph
@@ -174,15 +219,15 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 ├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred, blocked
 │
-├─ Phase 6: Record Pitfalls (inline, from tech debt deferrals)
+├─ Phase 6: Record Pitfalls (SEQUENTIAL across worktrees)
 │
 ├─ Phase 7: Simplify
 │  └─ Simplifier agent (refine fixes)
 │
-├─ Phase 8: Git agent (manage-debt)
+├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 9: Display resolution summary
+└─ Phase 9: Write resolution-summary.md + display results
 ```
 
 ## Edge Cases
@@ -194,6 +239,11 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
 | No actionable issues | Report "No issues to resolve" (all were pre-existing or LOW) |
+| Incomplete review directory (no review-summary.md) | Skip — resolve only targets complete reviews |
+| Latest review already resolved | Skip worktree, report suggestion to run /code-review first |
+| Legacy flat layout (no subdirectories) | Read flat *.md files directly (backwards compatible) |
+| `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
+| Worktree pre-flight fails | Report failure, continue with other worktrees |
 
 ## Principles
 
@@ -203,16 +253,19 @@ Note: Deferred issues from resolution are already in resolution-summary.{timesta
 4. **Conservative risk** - When Resolvers are unsure, defer to tech debt
 5. **Honest reporting** - Display agent outputs directly
 6. **Complete tracking** - Every issue gets a decision recorded
+7. **Latest review by default** - Only process the most recent complete review
+8. **Auto-discover worktrees** - One command handles all resolvable branches
 
 ## Output Artifact
 
-Written by orchestrator in Phase 9 to `.docs/reviews/{branch-slug}/resolution-summary.{timestamp}.md`:
+Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary
 
 **Branch**: {branch} -> {base}
 **Date**: {timestamp}
+**Review**: {TARGET_DIR}
 **Command**: /resolve
 
 ## Statistics

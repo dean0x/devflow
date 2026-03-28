@@ -32,6 +32,9 @@ Determine what the user is trying to do from their prompt.
 | **IMPLEMENT** | "add", "create", "implement", "build", "write", "make" | "add a login form", "create an API endpoint" |
 | **DEBUG** | "fix", "bug", "broken", "failing", "error", "why does" | "fix the auth error", "why is this test failing" |
 | **REVIEW** | "check", "look at", "review", "is this ok", "any issues" | "check this function", "any issues with this?" |
+| **RESOLVE** | "resolve", "fix review issues", "address feedback", "fix findings" | "resolve the review issues", "fix the findings" |
+| **PIPELINE** | "end to end", "implement and review", "build and review", "full pipeline" | "implement this end to end", "build and review this" |
+| **MULTI_WORKTREE** | "all worktrees/branches", "each worktree/branch", "review everything", "resolve all" | "review all my worktrees", "resolve all branches", "review everything that needs review" |
 | **PLAN** | "how should", "design", "architecture", "approach", "strategy" | "how should I structure auth?", "what's the approach for caching?" |
 | **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" | "where is the config?", "explain this function" |
 | **CHAT** | greetings, meta-questions, confirmations, short responses | "thanks", "yes", "what can you do?" |
@@ -45,8 +48,8 @@ Determine how much enforcement the prompt warrants.
 | Depth | Criteria | Action |
 |-------|----------|--------|
 | **QUICK** | CHAT intent. EXPLORE intent. Git/devops operations (commit, push, merge, branch, pr, deploy, reinstall). Single-word continuations. Small edits, config changes, trivial single-file tweaks. | Respond normally. Zero overhead. Do not state classification. |
-| **GUIDED** | IMPLEMENT with small scope (≤2 files, single module). DEBUG with clear error location (stack trace, specific file, known function). PLAN for focused design questions (specific area/pattern). REVIEW (always GUIDED). | Load skills via Skill tool. Main session implements directly. Spawn Simplifier after code changes. State classification. |
-| **ORCHESTRATED** | IMPLEMENT with larger scope (>2 files, multi-module, complex). DEBUG with vague/cross-cutting bug (no clear location, multiple possible causes). PLAN for system-level architecture (caching layer, auth system, multi-module design). | Load skills via Skill tool, then orchestrate agents per Step 5. State classification. |
+| **GUIDED** | IMPLEMENT with small scope (≤2 files, single module). DEBUG with clear error location (stack trace, specific file, known function). PLAN for focused design questions (specific area/pattern). REVIEW (small scope — see below). | Load skills via Skill tool. Main session implements directly. Spawn Simplifier after code changes. State classification. |
+| **ORCHESTRATED** | IMPLEMENT with larger scope (>2 files, multi-module, complex). DEBUG with vague/cross-cutting bug (no clear location, multiple possible causes). PLAN for system-level architecture (caching layer, auth system, multi-module design). REVIEW (large scope — see below). RESOLVE (always). PIPELINE (always). | Load skills via Skill tool, then orchestrate agents per Step 5. State classification. |
 
 **Scope-based decision criteria:**
 
@@ -55,7 +58,10 @@ Determine how much enforcement the prompt warrants.
 | **IMPLEMENT** | ≤2 files, single module, clear task | >2 files, multi-module, complex |
 | **DEBUG** | Clear error with known location (stack trace, specific file) | Vague/cross-cutting bug, multiple possible causes |
 | **PLAN** | Focused question about specific area/pattern | System-level architecture, multi-module design |
-| **REVIEW** | Always GUIDED | — |
+| **REVIEW** | Continuation: match prior IMPLEMENT depth. Standalone: "check this"/"review this file" → GUIDED | Continuation: match prior IMPLEMENT depth. Standalone: "full review"/"branch review"/"PR review" → ORCHESTRATED |
+| **RESOLVE** | — | Always ORCHESTRATED |
+| **PIPELINE** | — | Always ORCHESTRATED |
+| **MULTI_WORKTREE** | Always ORCHESTRATED — triggers code-review/resolve command flow | — |
 
 **Classification conservatism:** When choosing between GUIDED and ORCHESTRATED, prefer GUIDED — escalate only when scope clearly exceeds main-session capacity. When choosing between QUICK and GUIDED, prefer GUIDED if the prompt involves code changes (implement, debug, fix, add, create code). Reserve QUICK for truly zero-overhead prompts: chat, exploration, git ops, config changes, trivial edits.
 
@@ -79,8 +85,11 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 | **IMPLEMENT** | implementation-orchestration, implementation-patterns | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
 | **DEBUG** | debug-orchestration, core-patterns | git-safety (if git operations involved) |
 | **PLAN** | plan-orchestration, implementation-patterns, core-patterns | — |
+| **REVIEW** | review-orchestration | — (reviewers load their own pattern skills) |
+| **RESOLVE** | resolve-orchestration, core-patterns | — |
+| **PIPELINE** | pipeline-orchestration, implementation-patterns | — |
 
-**Excluded from ambient** (review-command-only): review-methodology, complexity-patterns, consistency-patterns, database-patterns, dependencies-patterns, documentation-patterns, regression-patterns, architecture-patterns, accessibility, performance-patterns.
+**Excluded from ambient loading** (loaded by agents internally): review-methodology, complexity-patterns, consistency-patterns, database-patterns, dependencies-patterns, documentation-patterns, regression-patterns, architecture-patterns, accessibility, performance-patterns. These skills are always installed (universal skill installation) but loaded by Reviewer agents at runtime, not by the router.
 
 See `references/skill-catalog.md` for the full skill-to-intent mapping with file pattern triggers.
 
@@ -109,7 +118,7 @@ to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 | **IMPLEMENT** | Implement directly with loaded skills. Follow TDD cycle. | Spawn Simplifier on changed files. |
 | **DEBUG** | Investigate directly — reproduce bug, diagnose from stack trace/error, fix. | Spawn Simplifier on changed files. |
 | **PLAN** | Explore relevant code and design directly. The area is focused enough for main session. | No Simplifier (no code changes). |
-| **REVIEW** | Review directly with loaded skills. | No Simplifier. |
+| **REVIEW** | Review directly with loaded skills (self-review in main session). | No Simplifier. |
 
 ## Step 5: Orchestrate Agents (ORCHESTRATED depth only)
 
@@ -120,6 +129,11 @@ After loading skills via Step 3-4, execute the agent pipeline for the classified
 | **IMPLEMENT** | Follow implementation-orchestration skill pipeline: pre-flight → plan synthesis → Coder → quality gates |
 | **DEBUG** | Follow debug-orchestration skill pipeline: hypotheses → parallel Explores → convergence → report → offer fix |
 | **PLAN** | Follow plan-orchestration skill pipeline: Skimmer → Explores → Plan agent → gap validation |
+| **REVIEW** | Follow review-orchestration skill pipeline: pre-flight → incremental detection → parallel reviewers → synthesis |
+| **RESOLVE** | Follow resolve-orchestration skill pipeline: find review → parse issues → batch → parallel resolvers → simplify |
+| **PIPELINE** | Follow pipeline-orchestration skill pipeline: implement → gate → review → gate → resolve |
+| **MULTI_WORKTREE + REVIEW** | Follow `devflow:code-review` command flow (auto-discovers worktrees natively) |
+| **MULTI_WORKTREE + RESOLVE** | Follow `devflow:resolve` command flow (auto-discovers worktrees natively) |
 | **EXPLORE** | No agents — respond in main session |
 | **CHAT** | No agents — respond in main session |
 
@@ -143,5 +157,12 @@ After loading skills via Step 3-4, execute the agent pipeline for the classified
 | User explicitly requests no enforcement | Respect immediately — classify as QUICK |
 | Prompt references specific DevFlow command | Skip ambient — the command has its own orchestration |
 | Scope ambiguous between GUIDED and ORCHESTRATED | Default to GUIDED; escalate if complexity emerges during work |
-| REVIEW intent | Always GUIDED — single Reviewer focus, no orchestration pipeline |
+| REVIEW after IMPLEMENT/GUIDED | GUIDED (continuation — match prior depth) |
+| REVIEW after IMPLEMENT/ORCHESTRATED | ORCHESTRATED (continuation — match prior depth) |
+| REVIEW standalone, large scope ("full review", "branch", "PR") | ORCHESTRATED |
+| REVIEW standalone, small scope ("check this", specific file) | GUIDED |
+| REVIEW standalone, ambiguous | GUIDED (conservative) |
+| RESOLVE intent | Always ORCHESTRATED |
+| PIPELINE intent | Always ORCHESTRATED |
+| MULTI_WORKTREE intent | Always ORCHESTRATED — follow code-review/resolve command flow which auto-discovers worktrees |
 | Multiple triggers per session | Each runs independently; context compaction handles accumulation |

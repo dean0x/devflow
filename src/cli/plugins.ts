@@ -38,42 +38,64 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow with exploration, planning, and coding',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
-    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'self-review'],
+    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'self-review', 'worktree-support'],
   },
   {
     name: 'devflow-code-review',
     description: 'Comprehensive code review with parallel specialized agents',
     commands: ['/code-review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['agent-teams', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'knowledge-persistence', 'performance-patterns', 'regression-patterns', 'review-methodology', 'security-patterns', 'test-patterns'],
+    skills: ['agent-teams', 'architecture-patterns', 'complexity-patterns', 'consistency-patterns', 'database-patterns', 'dependencies-patterns', 'documentation-patterns', 'knowledge-persistence', 'performance-patterns', 'regression-patterns', 'review-methodology', 'security-patterns', 'test-patterns', 'worktree-support'],
   },
   {
     name: 'devflow-resolve',
     description: 'Process and fix code review issues with risk assessment',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'security-patterns'],
+    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'security-patterns', 'worktree-support'],
   },
   {
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation using agent teams',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
-    skills: ['agent-teams', 'git-safety', 'knowledge-persistence'],
+    skills: ['agent-teams', 'git-safety', 'knowledge-persistence', 'worktree-support'],
   },
   {
     name: 'devflow-self-review',
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
-    skills: ['self-review', 'core-patterns'],
+    skills: ['self-review', 'core-patterns', 'worktree-support'],
   },
   {
     name: 'devflow-ambient',
     description: 'Ambient mode — intent classification with proportional agent orchestration',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'shepherd', 'skimmer', 'reviewer'],
-    skills: ['ambient-router', 'implementation-orchestration', 'debug-orchestration', 'plan-orchestration'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'shepherd', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
+    skills: [
+      'ambient-router',
+      'implementation-orchestration',
+      'debug-orchestration',
+      'plan-orchestration',
+      'review-orchestration',
+      'resolve-orchestration',
+      'pipeline-orchestration',
+      'review-methodology',
+      'security-patterns',
+      'architecture-patterns',
+      'performance-patterns',
+      'complexity-patterns',
+      'consistency-patterns',
+      'regression-patterns',
+      'test-patterns',
+      'database-patterns',
+      'dependencies-patterns',
+      'documentation-patterns',
+      'implementation-patterns',
+      'knowledge-persistence',
+      'worktree-support',
+    ],
   },
   {
     name: 'devflow-audit-claude',
@@ -251,4 +273,22 @@ export function buildAssetMaps(plugins: PluginDefinition[]): {
     }
   }
   return { skillsMap, agentsMap };
+}
+
+/**
+ * Build a skills map from ALL plugins (regardless of selection).
+ * Skills are tiny markdown files — always install all of them so orchestration
+ * skills (review-orchestration, resolve-orchestration) can spawn agents that
+ * depend on skills from other plugins.
+ */
+export function buildFullSkillsMap(): Map<string, string> {
+  const skillsMap = new Map<string, string>();
+  for (const plugin of DEVFLOW_PLUGINS) {
+    for (const skill of plugin.skills) {
+      if (!skillsMap.has(skill)) {
+        skillsMap.set(skill, plugin.name);
+      }
+    }
+  }
+  return skillsMap;
 }

@@ -22,12 +22,32 @@
     "scrutinizer",
     "shepherd",
     "skimmer",
-    "reviewer"
+    "reviewer",
+    "git",
+    "synthesizer",
+    "resolver"
   ],
   "skills": [
     "ambient-router",
     "implementation-orchestration",
     "debug-orchestration",
-    "plan-orchestration"
+    "plan-orchestration",
+    "review-orchestration",
+    "resolve-orchestration",
+    "pipeline-orchestration",
+    "review-methodology",
+    "security-patterns",
+    "architecture-patterns",
+    "performance-patterns",
+    "complexity-patterns",
+    "consistency-patterns",
+    "regression-patterns",
+    "test-patterns",
+    "database-patterns",
+    "dependencies-patterns",
+    "documentation-patterns",
+    "implementation-patterns",
+    "knowledge-persistence",
+    "worktree-support"
   ]
 }

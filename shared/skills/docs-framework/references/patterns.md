@@ -11,8 +11,13 @@ Correct patterns for DevFlow documentation artifacts with templates and helper f
 ```
 .docs/
 ├── reviews/{branch-slug}/          # Code review reports per branch
-│   ├── {type}-report.{timestamp}.md
-│   └── review-summary.{timestamp}.md
+│   ├── .last-review-head           # HEAD SHA of last completed review
+│   ├── {timestamp}/                # Timestamped review directory
+│   │   ├── {focus}.md              # Reviewer reports (security.md, architecture.md, etc.)
+│   │   ├── review-summary.md       # Synthesizer output
+│   │   └── resolution-summary.md   # Written by /resolve (if run)
+│   └── {timestamp}/                # Incremental review
+│       └── ...
 ├── design/                         # Implementation plans
 │   └── {topic-slug}.{timestamp}.md
 ├── status/                         # Development logs
@@ -32,14 +37,41 @@ Correct patterns for DevFlow documentation artifacts with templates and helper f
 └── CATCH_UP.md
 ```
 
-**With Reviews:**
+**With Reviews (single review):**
 ```
 .docs/
 ├── reviews/feat-auth/
-│   ├── security-report.2025-01-05_1430.md
-│   └── review-summary.2025-01-05_1430.md
+│   ├── .last-review-head
+│   └── 2025-01-05_1430/
+│       ├── security.md
+│       ├── architecture.md
+│       ├── performance.md
+│       ├── complexity.md
+│       ├── consistency.md
+│       ├── regression.md
+│       ├── tests.md
+│       └── review-summary.md
 ├── status/
 │   ├── 2025-01-05_1430.md
+│   └── INDEX.md
+└── CATCH_UP.md
+```
+
+**With Multiple Reviews (incremental):**
+```
+.docs/
+├── reviews/feat-auth/
+│   ├── .last-review-head
+│   ├── 2025-01-05_1430/
+│   │   ├── security.md
+│   │   ├── ...
+│   │   ├── review-summary.md
+│   │   └── resolution-summary.md
+│   └── 2025-01-06_0900/
+│       ├── security.md
+│       ├── ...
+│       └── review-summary.md
+├── status/
 │   └── INDEX.md
 └── CATCH_UP.md
 ```
@@ -103,13 +135,15 @@ Always UPPERCASE, overwritten or appended:
 - `INDEX.md` - Chronological log index
 - `KNOWLEDGE_BASE.md` - Searchable debug solutions
 
-### Artifact Files (lowercase + timestamp)
+### Artifact Files (lowercase)
 
-Always lowercase with timestamp:
+Always lowercase:
 
 - `2025-01-05_1430.md` - Status log
-- `security-report.2025-01-05_1430.md` - Review report
-- `review-summary.2025-01-05_1430.md` - Combined summary
+- `security.md` - Review report (in timestamped directory)
+- `review-summary.md` - Combined summary (in timestamped directory)
+- `resolution-summary.md` - Resolution summary (in timestamped directory)
+- `.last-review-head` - SHA marker for incremental reviews
 - `jwt-authentication.2025-01-05_1430.md` - Design doc
 
 ---
@@ -169,14 +203,15 @@ get_status_path() {
     get_doc_path "status" "${timestamp}.md"
 }
 
-# Create review report path
+# Create timestamped review directory and return path for a focus report
 get_review_path() {
-    local type="$1"
+    local focus="$1"
     local branch_slug
     local timestamp
     branch_slug=$(get_branch_slug)
     timestamp=$(get_timestamp)
-    get_doc_path "reviews/$branch_slug" "${type}-report.${timestamp}.md"
+    ensure_docs_dir "reviews/$branch_slug/$timestamp"
+    echo ".docs/reviews/$branch_slug/$timestamp/${focus}.md"
 }
 ```
 

@@ -20,7 +20,7 @@ import {
   migrateMemoryFiles,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook } from './ambient.js';
@@ -749,7 +749,11 @@ export const initCommand = new Command('init')
       pluginsToInstall.push(ambientPlugin);
     }
 
-    const { skillsMap, agentsMap } = buildAssetMaps(pluginsToInstall);
+    // Skills: install ALL from ALL plugins (skills are tiny markdown files;
+    // orchestration skills need skills from other plugins to function)
+    const skillsMap = buildFullSkillsMap();
+    // Agents: install only from selected plugins
+    const { agentsMap } = buildAssetMaps(pluginsToInstall);
 
     // Install: try native CLI first, fall back to file copy
     const cliAvailable = isClaudeCliAvailable();

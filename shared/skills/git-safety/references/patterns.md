@@ -116,7 +116,7 @@ git push -u origin $(git branch --show-current)
 ## Protected Branch Check
 
 ```bash
-PROTECTED_BRANCHES="main master develop"
+PROTECTED_BRANCHES="main master develop staging production"
 
 check_protected_branch() {
     local branch="$1"
@@ -126,6 +126,10 @@ check_protected_branch() {
             return 1
         fi
     done
+    # Check release/* glob
+    case "$branch" in
+        release/*) echo "ERROR: Cannot force push to $branch"; return 1 ;;
+    esac
     return 0
 }
 ```

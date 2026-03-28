@@ -21,6 +21,10 @@ This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Exclude
 
 ---
 
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
 ## Phase 1: Hypothesize
 
 Analyze the bug description, error messages, and conversation context. Generate 3-5 hypotheses that are:

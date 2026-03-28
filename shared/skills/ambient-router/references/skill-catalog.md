@@ -40,6 +40,27 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | self-review | Always for REVIEW | GUIDED | Any code file |
 | core-patterns | Always for REVIEW | GUIDED | Any code file |
 | test-patterns | Test files in scope | GUIDED | `*.test.*`, `*.spec.*` |
+| review-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates multi-agent review pipeline |
+
+**REVIEW depth is continuation-aware**: If the prior classification in the same conversation was IMPLEMENT/GUIDED → REVIEW stays GUIDED. If prior was IMPLEMENT/ORCHESTRATED → REVIEW becomes ORCHESTRATED. Standalone REVIEW uses signal words: "full review"/"branch review"/"PR review" → ORCHESTRATED, "check this"/"review this file" → GUIDED. Ambiguous → GUIDED.
+
+### RESOLVE Intent
+
+| Skill | When to Load | Depth | File Patterns |
+|-------|-------------|-------|---------------|
+| resolve-orchestration | Always for RESOLVE | ORCHESTRATED | Any — orchestrates issue resolution pipeline |
+| core-patterns | Always for RESOLVE | ORCHESTRATED | Any code file |
+
+RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resolver agents and Simplifier.
+
+### PIPELINE Intent
+
+| Skill | When to Load | Depth | File Patterns |
+|-------|-------------|-------|---------------|
+| pipeline-orchestration | Always for PIPELINE | ORCHESTRATED | Any — meta-orchestrator for implement → review → resolve |
+| implementation-patterns | Always for PIPELINE | ORCHESTRATED | Any code file |
+
+PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with user gates.
 
 ### PLAN Intent
 
@@ -49,9 +70,9 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | implementation-patterns | Always for PLAN | GUIDED + ORCHESTRATED | Any planning context |
 | core-patterns | Always for PLAN | GUIDED + ORCHESTRATED | System design discussions |
 
-## Skills Excluded from Ambient
+## Skills Excluded from Ambient Router Loading
 
-These skills are loaded only by explicit DevFlow commands (primarily `/code-review`):
+These skills are always installed (universal skill installation) but loaded by agents internally at runtime, not by the ambient router. Reviewer agents load their pattern skill based on their focus area:
 
 - review-methodology — Full review process (6-step, 3-category classification)
 - complexity-patterns — Cyclomatic complexity, deep nesting analysis
@@ -64,10 +85,23 @@ These skills are loaded only by explicit DevFlow commands (primarily `/code-revi
 - accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - performance-patterns — N+1 queries, memory leaks, caching opportunities
 
+## Multi-Worktree Detection
+
+When the user's prompt contains multi-worktree signals ("all worktrees", "all branches", "each worktree", "review everything", "resolve all"), classify as MULTI_WORKTREE intent combined with REVIEW or RESOLVE. This always routes to ORCHESTRATED depth.
+
+| Signal | Combined Intent | Action |
+|--------|----------------|--------|
+| "review all worktrees/branches" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow (auto-discovers worktrees) |
+| "resolve all worktrees/branches" | MULTI_WORKTREE + RESOLVE | Follow `devflow:resolve` command flow (auto-discovers worktrees) |
+| "review everything that needs review" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow |
+| "run code review on each branch" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow |
+
+No additional skills needed — the code-review and resolve commands handle all orchestration internally, including worktree discovery, incremental detection, and parallel agent spawning.
+
 ## Selection Limits
 
 - **Maximum 3 knowledge skills** per ambient response (primary + up to 2 secondary)
-- **Orchestration skills** (implementation-orchestration, debug-orchestration, plan-orchestration) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
+- **Orchestration skills** (implementation-orchestration, debug-orchestration, plan-orchestration, review-orchestration, resolve-orchestration, pipeline-orchestration) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
 - **Primary skills** are always loaded for the classified intent at both GUIDED and ORCHESTRATED depth
 - **Secondary skills** are loaded only when file patterns match conversation context
 - **GUIDED depth** loads knowledge skills only (no orchestration skills) — main session works directly
