@@ -15,16 +15,24 @@ The orchestrator provides:
 - **OPERATION**: Which task to perform
 - **Operation-specific parameters**: See each operation below
 
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix all git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- If omitted, use cwd (default behavior unchanged).
+
 ## Operations
 
 | Operation | Purpose | Key Parameters |
 |-----------|---------|----------------|
-| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | - |
-| `validate-branch` | Pre-flight for /resolve: check branch state | - |
+| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | `WORKTREE_PATH` (optional) |
+| `validate-branch` | Pre-flight for /resolve: check branch state | `WORKTREE_PATH` (optional) |
 | `setup-task` | Create feature branch and fetch issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
-| `comment-pr` | Create PR inline comments for review findings | `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP` |
-| `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP` |
+| `comment-pr` | Create PR inline comments for review findings | `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
+| `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT` |
 
 ---
@@ -33,7 +41,7 @@ The orchestrator provides:
 
 Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code review.
 
-**Input:** None (uses current branch)
+**Input:** `WORKTREE_PATH` (optional)
 
 **Process:**
 1. Verify on feature branch (not main/master/develop) - error if not
@@ -68,14 +76,14 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 
 Pre-flight validation for `/resolve`. Checks branch state without modifications.
 
-**Input:** None (uses current branch)
+**Input:** `WORKTREE_PATH` (optional)
 
 **Process:**
 1. Verify on feature branch (not main/master/develop) - error if not
 2. Verify working directory is clean - error if uncommitted changes
 3. Get current branch name
 4. Derive branch-slug (replace `/` with `-`)
-5. Check if reviews exist at `.docs/reviews/{branch-slug}/`
+5. Check if reviews exist at `{WORKTREE_PATH}/.docs/reviews/{branch-slug}/` (or `.docs/reviews/{branch-slug}/` if no WORKTREE_PATH)
 6. If PR# context provided, fetch PR details
 
 **Output:**
@@ -171,16 +179,17 @@ Fetch comprehensive issue details for implementation planning.
 
 Create inline PR comments for blocking and should-fix issues from code review.
 
-**Input:** `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP`
+**Input:** `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional)
 
 **Process:**
 1. Get PR context (head SHA, changed files, diff)
-2. Read review reports from `${REVIEW_BASE_DIR}/*.md`
+2. Read review reports from `${REVIEW_BASE_DIR}/*.md` (exclude `review-summary.md` and `resolution-summary.md`)
 3. Extract issues - only comment on blocking (CRITICAL/HIGH) and should-fix (HIGH/MEDIUM)
 4. Skip pre-existing issues (these go to tech debt)
 5. Deduplicate issues by file:line
-6. Create inline comments for lines in diff; consolidate others into summary comment
-7. Include 1-second delay between API calls for rate limiting
+6. **Check for existing comments**: Before creating each inline comment, fetch existing PR review comments via `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments`. Skip creating a new comment if an existing comment already targets the same file and line — avoids duplicate comments across incremental reviews.
+7. Create inline comments for lines in diff; consolidate others into summary comment
+8. Include 1-second delay between API calls for rate limiting
 
 **Output:**
 ```markdown
@@ -189,7 +198,8 @@ Create inline PR comments for blocking and should-fix issues from code review.
 
 ### Inline Comments
 - Created: {n}
-- Skipped: {n} (lines not in diff)
+- Skipped (already exists): {n}
+- Skipped (lines not in diff): {n}
 
 ### Summary Comment
 {Created | Not needed}
@@ -201,7 +211,7 @@ Create inline PR comments for blocking and should-fix issues from code review.
 
 Update tech debt backlog with pre-existing issues from code review.
 
-**Input:** `REVIEW_DIR`, `TIMESTAMP`
+**Input:** `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional)
 
 **Process:**
 1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
@@ -257,7 +267,7 @@ Create a GitHub release with version tag.
 
 1. **Rate limit aware** - Always throttle API calls (1s delay between comments)
 2. **Fail gracefully** - Log errors but continue with remaining operations
-3. **Deduplicate** - Never spam duplicate comments or issues
+3. **Deduplicate** - Never spam duplicate comments or issues; check for existing comments before creating
 4. **Actionable output** - Every response includes next steps
 5. **Clear attribution** - Include Claude Code footer on PR comments
 6. **Be decisive** - Make confident choices about categorization

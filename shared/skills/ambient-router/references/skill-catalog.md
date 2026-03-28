@@ -64,6 +64,19 @@ These skills are loaded only by explicit DevFlow commands (primarily `/code-revi
 - accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - performance-patterns — N+1 queries, memory leaks, caching opportunities
 
+## Multi-Worktree Detection
+
+When the user's prompt contains multi-worktree signals ("all worktrees", "all branches", "each worktree", "review everything", "resolve all"), classify as MULTI_WORKTREE intent combined with REVIEW or RESOLVE. This always routes to ORCHESTRATED depth.
+
+| Signal | Combined Intent | Action |
+|--------|----------------|--------|
+| "review all worktrees/branches" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow (auto-discovers worktrees) |
+| "resolve all worktrees/branches" | MULTI_WORKTREE + RESOLVE | Follow `devflow:resolve` command flow (auto-discovers worktrees) |
+| "review everything that needs review" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow |
+| "run code review on each branch" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow |
+
+No additional skills needed — the code-review and resolve commands handle all orchestration internally, including worktree discovery, incremental detection, and parallel agent spawning.
+
 ## Selection Limits
 
 - **Maximum 3 knowledge skills** per ambient response (primary + up to 2 secondary)

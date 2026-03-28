@@ -16,6 +16,14 @@ You receive from orchestrator:
 - **BRANCH**: Current branch slug
 - **BATCH_ID**: Identifier for this batch of issues
 
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- If omitted, use cwd (default behavior unchanged).
+
 ## Responsibilities
 
 1. **Validate each issue**: Read file context (30 lines around the line number). Check:

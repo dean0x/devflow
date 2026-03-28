@@ -15,6 +15,14 @@ You receive from orchestrator:
 - **FILES_CHANGED**: List of modified files
 - **VALIDATION_SCOPE**: `full` | `changed-only` (hints for test filtering if supported)
 
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- Run validation commands from worktree directory: `cd {WORKTREE_PATH} && ...`
+- If omitted, use cwd (default behavior unchanged).
+
 ## Responsibilities
 
 1. **Discover validation commands**: Check package.json scripts, Makefile, Cargo.toml, or similar for available commands

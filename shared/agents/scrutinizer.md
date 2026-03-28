@@ -15,6 +15,13 @@ You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Coder output
 
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- If omitted, use cwd (default behavior unchanged).
+
 ## Responsibilities
 
 1. **Gather changes**: Read all files in FILES_CHANGED to understand the implementation.

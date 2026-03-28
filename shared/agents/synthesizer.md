@@ -16,6 +16,14 @@ The orchestrator provides:
 - **Agent outputs**: Results from parallel agents to synthesize
 - **Output path**: Where to save synthesis (if applicable)
 
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- If omitted, use cwd (default behavior unchanged).
+
 ---
 
 ## Mode: Exploration
@@ -153,7 +161,7 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 **Output:**
 **CRITICAL**: Write the summary to disk using the Write tool:
 1. Create directory: `mkdir -p ${REVIEW_BASE_DIR}`
-2. Write to `${REVIEW_BASE_DIR}/review-summary.${TIMESTAMP}.md` using Write tool
+2. Write to `${REVIEW_BASE_DIR}/review-summary.md` using Write tool (the directory name provides the timestamp)
 3. Confirm file written in final message
 
 Report format:

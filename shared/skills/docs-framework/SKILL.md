@@ -26,8 +26,14 @@ All generated documentation lives under `.docs/` in the project root:
 ```
 .docs/
 ├── reviews/{branch-slug}/              # Code review reports per branch
-│   ├── {type}-report.{timestamp}.md
-│   └── review-summary.{timestamp}.md
+│   ├── .last-review-head              # HEAD SHA of last completed review (for incremental)
+│   ├── {timestamp}/                   # Timestamped review directory (YYYY-MM-DD_HHMM)
+│   │   ├── {focus}.md                 # Reviewer report (e.g., security.md, architecture.md)
+│   │   ├── review-summary.md          # Synthesizer output
+│   │   └── resolution-summary.md      # Written by /resolve (if run)
+│   └── {timestamp}/                   # Second review (incremental)
+│       ├── {focus}.md
+│       └── review-summary.md
 ├── status/                             # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
@@ -71,7 +77,10 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 | Type | Pattern | Example |
 |------|---------|---------|
 | Special indexes | `UPPERCASE.md` | `WORKING-MEMORY.md`, `INDEX.md` |
-| Reports | `{type}-report.{timestamp}.md` | `security-report.2025-12-26_1430.md` |
+| Review reports | `{focus}.md` in timestamped dir | `2025-12-26_1430/security.md` |
+| Review summary | `review-summary.md` in timestamped dir | `2025-12-26_1430/review-summary.md` |
+| Resolution summary | `resolution-summary.md` in timestamped dir | `2025-12-26_1430/resolution-summary.md` |
+| Review head marker | `.last-review-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
 
 ---
@@ -97,7 +106,10 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 
 | Agent | Output Location | Behavior |
 |-------|-----------------|----------|
-| Reviewer | `.docs/reviews/{branch-slug}/{type}-report.{timestamp}.md` | Creates new |
+| Reviewer | `.docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
+| Synthesizer (review) | `.docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in timestamped dir |
+| Resolver | `.docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Creates new in timestamped dir |
+| Code-review cmd | `.docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
 | Knowledge (decisions) | `.memory/knowledge/decisions.md` | Append-only (ADR-NNN sequential IDs) |
 | Knowledge (pitfalls) | `.memory/knowledge/pitfalls.md` | Append-only (PF-NNN sequential IDs) |

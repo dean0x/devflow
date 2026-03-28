@@ -4,37 +4,70 @@ description: Comprehensive branch review using specialized sub-agents for PR rea
 
 # Code Review Command
 
-Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments.
+Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments. Supports incremental reviews, timestamped report directories, and multi-worktree auto-discovery.
 
 ## Usage
 
 ```
-/code-review           (review current branch)
+/code-review           (review current branch — or all worktrees if multiple found)
 /code-review #42       (review specific PR)
+/code-review --full    (force full-branch review, ignore previous review state)
+/code-review --path /path/to/worktree  (review a specific worktree only)
 ```
 
 ## Phases
 
-### Phase 0: Pre-Flight (Git Agent)
+### Phase 0: Worktree Discovery & Pre-Flight
 
-Spawn Git agent to validate and prepare branch:
+#### Step 0a: Discover Worktrees
+
+1. Run `git worktree list --porcelain` to discover all worktrees
+2. For each worktree, extract path and branch
+3. **Filter to reviewable worktrees:**
+   - Must be on a named branch (skip detached HEAD)
+   - Must NOT be on a protected branch (main, master, develop, release/*, staging, production)
+   - Must NOT be mid-rebase or mid-merge (check `git -C {path} status` for "rebase in progress" / "merging")
+4. **If `--path` flag provided:** use only that worktree, skip discovery
+5. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
+6. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
+7. **Deduplicate by branch:** if two worktrees are on the same branch, use only the first worktree's path
+
+#### Step 0b: Per-Worktree Pre-Flight (Git Agent)
+
+For each reviewable worktree, spawn Git agent:
 
 ```
 Task(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, branch-slug, PR#"
 ```
 
-**If BLOCKED:** Stop and report the blocker to user.
+In multi-worktree mode, spawn all pre-flight agents **in a single message** (parallel).
 
-**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number` for use in subsequent phases.
+**If BLOCKED:** In single-worktree mode, stop and report. In multi-worktree mode, report the failure but continue with other worktrees.
 
+**Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number` per worktree.
 
+#### Step 0c: Incremental Detection & Timestamp Setup
+
+For each worktree:
+
+1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
+2. Create timestamped review directory: `mkdir -p {worktree}/.docs/reviews/{branch-slug}/{timestamp}/`
+3. Check if `{worktree}/.docs/reviews/{branch-slug}/.last-review-head` exists:
+   - **If yes AND `--full` NOT set:**
+     - Read the SHA from the file
+     - Verify reachable: `git -C {worktree} cat-file -t {sha}` (handles rebases — if unreachable, fallback to full)
+     - Check if SHA == current HEAD → if so, skip review: "No new commits since last review. Use --full for a full re-review."
+     - Set `DIFF_RANGE` to `{last-review-sha}...HEAD`
+   - **If no (first review), or `--full`:**
+     - Set `DIFF_RANGE` to `{base_branch}...HEAD`
 
 ### Phase 1: Analyze Changed Files
 
-Detect file types in diff to determine conditional reviews:
+Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews:
 
 | Condition | Adds Review |
 |-----------|-------------|
@@ -83,43 +116,58 @@ Task(subagent_type="Reviewer", run_in_background=false):
 "Review focusing on {focus}. Apply {focus}-patterns.
 Follow 6-step process from review-methodology.
 PR: #{pr_number}, Base: {base_branch}
-IMPORTANT: Write report to .docs/reviews/{branch-slug}/{focus}.md using Write tool"
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+DIFF_COMMAND: git diff {DIFF_RANGE}  (use this instead of default base_branch...HEAD)
+IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
+
+In multi-worktree mode, spawn ALL reviewers for ALL worktrees in one parallel message.
 
 ### Phase 3: Synthesis (Parallel)
 
-**WAIT** for Phase 2, then spawn 3 agents **in a single message**:
+**WAIT** for Phase 2, then spawn agents per worktree **in a single message**:
 
-**Git Agent (PR Comments)**:
+**Git Agent (PR Comments)** per worktree:
 ```
 Task(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
-Read reviews from .docs/reviews/{branch-slug}/
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+Read reviews from {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/
 <!-- Confidence threshold also in: shared/agents/reviewer.md, shared/agents/synthesizer.md -->
 Create inline PR comments for findings with ≥80% confidence only.
 Lower-confidence suggestions (60-79%) go in the summary comment, not as inline comments.
-Deduplicate findings across reviewers, consolidate skipped into summary."
+Deduplicate findings across reviewers, consolidate skipped into summary.
+Check for existing inline comments at same file:line before creating new ones to avoid duplicates."
 ```
 
-**Synthesizer Agent**:
+**Synthesizer Agent** per worktree:
 ```
 Task(subagent_type="Synthesizer", run_in_background=false):
 "Mode: review
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+REVIEW_BASE_DIR: {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}
+TIMESTAMP: {timestamp}
 Aggregate findings, determine merge recommendation
-Output: .docs/reviews/{branch-slug}/review-summary.{timestamp}.md"
+Output: {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
 ```
 
-### Phase 4: Report
+### Phase 4: Write Review Head Marker & Report
 
-Display results from all agents:
-- Merge recommendation (from Synthesizer)
-- Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
-- PR comments created/skipped (from Git)
-- Artifact paths
+Per worktree, after successful completion:
+1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
+2. Display results from all agents:
+   - Merge recommendation (from Synthesizer)
+   - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
+   - PR comments created/skipped (from Git)
+   - Artifact paths
 
-### Phase 5: Record Pitfalls (if blocking issues found)
+In multi-worktree mode, report results per worktree.
 
-If the review summary contains CRITICAL or HIGH blocking issues:
+### Phase 5: Record Pitfalls (Sequential)
+
+**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
+
+Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
 1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
 2. Source field: `/code-review {branch}`
 3. Skip entirely if no CRITICAL/HIGH blocking issues
@@ -129,30 +177,53 @@ If the review summary contains CRITICAL or HIGH blocking issues:
 ```
 /code-review (orchestrator - spawns agents only)
 │
-├─ Phase 0: Pre-flight
-│  └─ Git agent (ensure-pr-ready)
+├─ Phase 0: Worktree Discovery & Pre-flight
+│  ├─ Step 0a: git worktree list → filter reviewable
+│  ├─ Step 0b: Git agent (ensure-pr-ready) per worktree [parallel]
+│  └─ Step 0c: Incremental detection + timestamp setup per worktree
 │
-├─ Phase 1: Analyze changed files
+├─ Phase 1: Analyze changed files per worktree
 │  └─ Detect file types for conditional reviews
 │
-├─ Phase 2: Reviews (PARALLEL)
-│  ├─ Reviewer: security
-│  ├─ Reviewer: architecture
-│  ├─ Reviewer: performance
-│  ├─ Reviewer: complexity
-│  ├─ Reviewer: consistency
-│  ├─ Reviewer: regression
-│  ├─ Reviewer: tests
-│  └─ Reviewer: [conditional: typescript, react, a11y, design, go, java, python, rust, database, deps, docs]
+├─ Phase 2: Reviews (PARALLEL — all worktrees in one message)
+│  ├─ Reviewer: security (per worktree)
+│  ├─ Reviewer: architecture (per worktree)
+│  ├─ Reviewer: performance (per worktree)
+│  ├─ Reviewer: complexity (per worktree)
+│  ├─ Reviewer: consistency (per worktree)
+│  ├─ Reviewer: regression (per worktree)
+│  ├─ Reviewer: tests (per worktree)
+│  └─ Reviewer: [conditional per worktree]
 │
-├─ Phase 3: Synthesis (PARALLEL)
-│  ├─ Git agent (comment-pr)
+├─ Phase 3: Synthesis (PARALLEL per worktree)
+│  ├─ Git agent (comment-pr with dedup)
 │  └─ Synthesizer agent (mode: review)
 │
-├─ Phase 4: Display results
+├─ Phase 4: Write .last-review-head + display results per worktree
 │
-└─ Phase 5: Record Pitfalls (inline, if blocking issues)
+└─ Phase 5: Record Pitfalls (SEQUENTIAL across worktrees)
 ```
+
+## Edge Cases
+
+| Case | Handling |
+|------|----------|
+| No new commits since last review | Skip review, report: "No new commits since last review. Use --full for a full re-review." |
+| Rebase invalidates `.last-review-head` SHA | `git cat-file -t` check fails → fallback to full diff |
+| Same-minute review collision | `mkdir` fails → retry with seconds appended (`YYYY-MM-DD_HHMMSS`) |
+| Worktree in detached HEAD | Filtered out (no branch name → not reviewable) |
+| Worktree mid-rebase or mid-merge | Filtered out by status check |
+| Two worktrees on same branch | Deduplicate by branch — review once, use first worktree's path |
+| Worktree on protected branch | Filtered out (not reviewable) |
+| Worktree pre-flight fails | Report failure, continue with other worktrees |
+| `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
+| Many worktrees (5+) | Report count and proceed — user manages their worktree count |
+| Duplicate PR comments | Git agent checks for existing comments at same file:line before creating |
+
+## Backwards Compatibility
+
+- **Single worktree**: Auto-discovery finds only one worktree → proceeds exactly as before. Zero behavior change.
+- **Legacy flat layout**: If `.docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
 
 ## Principles
 
@@ -161,3 +232,5 @@ If the review summary contains CRITICAL or HIGH blocking issues:
 3. **Git agent for git work** - All git operations go through Git agent
 4. **Clear ownership** - Each agent owns its output completely
 5. **Honest reporting** - Display agent outputs directly
+6. **Incremental by default** - Only review new changes unless `--full` specified
+7. **Auto-discover worktrees** - One command handles all reviewable branches

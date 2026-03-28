@@ -32,6 +32,7 @@ Determine what the user is trying to do from their prompt.
 | **IMPLEMENT** | "add", "create", "implement", "build", "write", "make" | "add a login form", "create an API endpoint" |
 | **DEBUG** | "fix", "bug", "broken", "failing", "error", "why does" | "fix the auth error", "why is this test failing" |
 | **REVIEW** | "check", "look at", "review", "is this ok", "any issues" | "check this function", "any issues with this?" |
+| **MULTI_WORKTREE** | "all worktrees/branches", "each worktree/branch", "review everything", "resolve all" | "review all my worktrees", "resolve all branches", "review everything that needs review" |
 | **PLAN** | "how should", "design", "architecture", "approach", "strategy" | "how should I structure auth?", "what's the approach for caching?" |
 | **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" | "where is the config?", "explain this function" |
 | **CHAT** | greetings, meta-questions, confirmations, short responses | "thanks", "yes", "what can you do?" |
@@ -56,6 +57,7 @@ Determine how much enforcement the prompt warrants.
 | **DEBUG** | Clear error with known location (stack trace, specific file) | Vague/cross-cutting bug, multiple possible causes |
 | **PLAN** | Focused question about specific area/pattern | System-level architecture, multi-module design |
 | **REVIEW** | Always GUIDED | — |
+| **MULTI_WORKTREE** | Always ORCHESTRATED — triggers code-review/resolve command flow | — |
 
 **Classification conservatism:** When choosing between GUIDED and ORCHESTRATED, prefer GUIDED — escalate only when scope clearly exceeds main-session capacity. When choosing between QUICK and GUIDED, prefer GUIDED if the prompt involves code changes (implement, debug, fix, add, create code). Reserve QUICK for truly zero-overhead prompts: chat, exploration, git ops, config changes, trivial edits.
 
@@ -120,6 +122,8 @@ After loading skills via Step 3-4, execute the agent pipeline for the classified
 | **IMPLEMENT** | Follow implementation-orchestration skill pipeline: pre-flight → plan synthesis → Coder → quality gates |
 | **DEBUG** | Follow debug-orchestration skill pipeline: hypotheses → parallel Explores → convergence → report → offer fix |
 | **PLAN** | Follow plan-orchestration skill pipeline: Skimmer → Explores → Plan agent → gap validation |
+| **MULTI_WORKTREE + REVIEW** | Follow `devflow:code-review` command flow (auto-discovers worktrees natively) |
+| **MULTI_WORKTREE + RESOLVE** | Follow `devflow:resolve` command flow (auto-discovers worktrees natively) |
 | **EXPLORE** | No agents — respond in main session |
 | **CHAT** | No agents — respond in main session |
 
@@ -144,4 +148,5 @@ After loading skills via Step 3-4, execute the agent pipeline for the classified
 | Prompt references specific DevFlow command | Skip ambient — the command has its own orchestration |
 | Scope ambiguous between GUIDED and ORCHESTRATED | Default to GUIDED; escalate if complexity emerges during work |
 | REVIEW intent | Always GUIDED — single Reviewer focus, no orchestration pipeline |
+| MULTI_WORKTREE intent | Always ORCHESTRATED — follow code-review/resolve command flow which auto-discovers worktrees |
 | Multiple triggers per session | Each runs independently; context compaction handles accumulation |

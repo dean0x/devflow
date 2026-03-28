@@ -21,6 +21,10 @@ This is a lightweight variant of the Plan phase in `/implement` for ambient ORCH
 
 ---
 
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
 ## Phase 1: Orient
 
 Spawn `Task(subagent_type="Skimmer")` to get codebase overview relevant to the planning question:

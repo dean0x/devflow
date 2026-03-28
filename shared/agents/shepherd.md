@@ -17,6 +17,13 @@ You receive from orchestrator:
 - **FILES_CHANGED**: List of modified files from Coder output
 - **ACCEPTANCE_CRITERIA**: Extracted acceptance criteria (if any)
 
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- If omitted, use cwd (default behavior unchanged).
+
 ## Responsibilities
 
 1. **Understand intent**: Read ORIGINAL_REQUEST and EXECUTION_PLAN to understand what was requested

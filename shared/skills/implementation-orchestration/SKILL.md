@@ -38,6 +38,10 @@ Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
 
 Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
 
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
 ## Phase 3: Coder Execution
 
 Record git SHA before first Coder: `git rev-parse HEAD`

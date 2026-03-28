@@ -22,6 +22,14 @@ You receive from orchestrator:
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
 
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- If omitted, use cwd (default behavior unchanged).
+
 **Sequential execution context** (when part of multi-Coder chain):
 - **PRIOR_PHASE_SUMMARY**: Implementation summary from previous Coder (see format below)
 - **FILES_FROM_PRIOR_PHASE**: Files created that must be read and understood

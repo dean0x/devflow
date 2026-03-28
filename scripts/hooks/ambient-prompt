@@ -37,6 +37,7 @@ fi
 # shell-level regex was causing false positives that silently broke ambient mode.
 # SYNC: must match tests/ambient.test.ts preamble drift detection
 PREAMBLE="AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review: load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture: load skills+agents. Prefer GUIDED for code changes.
+MULTI_WORKTREE: all worktrees/branches, each worktree, review everything, resolve all → ORCHESTRATED. Follow code-review/resolve command flow (auto-discovers worktrees).
 GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
 IMPLEMENT → test-driven-development, implementation-patterns, search-first
 DEBUG → core-patterns, test-patterns

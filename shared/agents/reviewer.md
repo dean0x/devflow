@@ -14,7 +14,16 @@ You are a universal code review agent. Your focus area is specified in the promp
 The orchestrator provides:
 - **Focus**: Which review type to perform
 - **Branch context**: What changes to review
-- **Output path**: Where to save findings (e.g., `.docs/reviews/{branch}/{focus}.md`)
+- **Output path**: Where to save findings (e.g., `.docs/reviews/{branch}/{timestamp}/{focus}.md`)
+- **DIFF_COMMAND** (optional): Specific diff command to use (e.g., `git diff {sha}...HEAD` for incremental reviews). If not provided, default to `git diff {base_branch}...HEAD`.
+
+## Worktree Support (Optional)
+
+If `WORKTREE_PATH` is provided:
+- Prefix git commands: `git -C {WORKTREE_PATH} ...`
+- Resolve `.docs/` paths: `{WORKTREE_PATH}/.docs/...`
+- Resolve source files: `{WORKTREE_PATH}/{file}`
+- If omitted, use cwd (default behavior unchanged).
 
 ## Focus Areas
 
