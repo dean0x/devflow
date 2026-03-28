@@ -118,7 +118,7 @@ DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORK
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, spawn ALL reviewers for ALL worktrees in one parallel message.
+In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 7-18 reviewers per worktree across multiple worktrees simultaneously overwhelms the system.
 
 ### Phase 3: Synthesis (Parallel)
 
@@ -182,21 +182,22 @@ Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
 ├─ Phase 1: Analyze changed files per worktree
 │  └─ Detect file types for conditional reviews
 │
-├─ Phase 2: Reviews (PARALLEL — all worktrees in one message)
-│  ├─ Reviewer: security (per worktree)
-│  ├─ Reviewer: architecture (per worktree)
-│  ├─ Reviewer: performance (per worktree)
-│  ├─ Reviewer: complexity (per worktree)
-│  ├─ Reviewer: consistency (per worktree)
-│  ├─ Reviewer: regression (per worktree)
-│  ├─ Reviewer: tests (per worktree)
-│  └─ Reviewer: [conditional per worktree]
-│
-├─ Phase 3: Synthesis (PARALLEL per worktree)
-│  ├─ Git agent (comment-pr with dedup)
-│  └─ Synthesizer agent (mode: review)
-│
-├─ Phase 4: Write .last-review-head + display results per worktree
+├─ Per worktree (SEQUENTIAL — one worktree at a time):
+│  │
+│  ├─ Phase 1: Analyze changed files
+│  │  └─ Detect file types for conditional reviews
+│  │
+│  ├─ Phase 2: Reviews (PARALLEL within worktree)
+│  │  ├─ Reviewer: security
+│  │  ├─ Reviewer: architecture, performance, complexity
+│  │  ├─ Reviewer: consistency, regression, tests
+│  │  └─ Reviewer: [conditional]
+│  │
+│  ├─ Phase 3: Synthesis (PARALLEL within worktree)
+│  │  ├─ Git agent (comment-pr with dedup)
+│  │  └─ Synthesizer agent (mode: review)
+│  │
+│  └─ Phase 4: Write .last-review-head + display results
 │
 └─ Phase 5: Record Pitfalls (SEQUENTIAL across worktrees)
 ```

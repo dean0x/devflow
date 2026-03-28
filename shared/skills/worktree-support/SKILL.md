@@ -85,7 +85,7 @@ All components (agents, commands, skills) must use this exact list when checking
 |-----------|----------|
 | 0 reviewable worktrees | Error: no reviewable branches found |
 | 1 worktree (common case) | Single-worktree flow, zero behavior change |
-| 2+ worktrees | Report count, process all in parallel where possible |
+| 2+ worktrees | Report count, process worktrees **sequentially** (one at a time) |
 | 5+ worktrees | Report count and proceed — user manages their worktree count |
 | `--path` flag provided | Use only that worktree, skip discovery |
 | Same branch in 2 worktrees | Deduplicate — review once using first worktree's path |
