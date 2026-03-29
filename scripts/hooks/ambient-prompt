@@ -41,15 +41,15 @@ REVIEW depth: continuation-aware (match prior IMPLEMENT depth) or signal-word ba
 RESOLVE: always ORCHESTRATED. PIPELINE (end-to-end/implement and review): always ORCHESTRATED.
 MULTI_WORKTREE: all worktrees/branches, each worktree, review everything, resolve all → ORCHESTRATED. Follow code-review/resolve command flow (auto-discovers worktrees).
 GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
-IMPLEMENT → test-driven-development, implementation-patterns, search-first
-DEBUG → core-patterns, test-patterns
-REVIEW/GUIDED → self-review, core-patterns
-REVIEW/ORCHESTRATED → review-orchestration
-RESOLVE → resolve-orchestration, core-patterns
-PIPELINE → pipeline-orchestration, implementation-patterns
-PLAN → implementation-patterns, core-patterns
-Also add if file type matches: typescript, react, go, java, python, rust, input-validation, security-patterns, frontend-design
-ORCHESTRATED also add: implementation-orchestration / debug-orchestration / plan-orchestration / review-orchestration / resolve-orchestration / pipeline-orchestration
+IMPLEMENT → devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first
+DEBUG → devflow:core-patterns, devflow:test-patterns
+REVIEW/GUIDED → devflow:self-review, devflow:core-patterns
+REVIEW/ORCHESTRATED → devflow:review-orchestration
+RESOLVE → devflow:resolve-orchestration, devflow:core-patterns
+PIPELINE → devflow:pipeline-orchestration, devflow:implementation-patterns
+PLAN → devflow:implementation-patterns, devflow:core-patterns
+Also add if file type matches: devflow:typescript, devflow:react, devflow:go, devflow:java, devflow:python, devflow:rust, devflow:input-validation, devflow:security-patterns, devflow:frontend-design
+ORCHESTRATED also add: devflow:implementation-orchestration / devflow:debug-orchestration / devflow:plan-orchestration / devflow:review-orchestration / devflow:resolve-orchestration / devflow:pipeline-orchestration
 State: Ambient: INTENT/DEPTH. Loading: skills. Then proceed."
 
 json_prompt_output "$PREAMBLE"

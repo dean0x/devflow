@@ -62,7 +62,7 @@ devflow/
 └── .memory/                # Working memory files — per-project
 ```
 
-**Install paths**: Commands → `~/.claude/commands/devflow/`, Agents → `~/.claude/agents/devflow/`, Skills → `~/.claude/skills/` (flat), Scripts → `~/.devflow/scripts/`
+**Install paths**: Commands → `~/.claude/commands/devflow/`, Agents → `~/.claude/agents/devflow/`, Skills → `~/.claude/skills/devflow:*/` (namespaced), Scripts → `~/.devflow/scripts/`
 
 ## Development Loop
 
@@ -128,7 +128,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Coder Handoff Artifact**: Sequential Coder phases write `.docs/handoff.md` after each phase. Survives context compaction (unlike PRIOR_PHASE_SUMMARY). Every Coder reads it on startup. Deleted by implementation-orchestration after pipeline completes.
 
-**Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files. This ensures orchestration skills (review-orchestration, resolve-orchestration) can spawn agents that depend on skills from other plugins. Only commands and agents remain plugin-specific.
+**Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `shared/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
 **Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, shepherd), Sonnet for execution agents (coder, simplifier, resolver, skimmer), Haiku for I/O agents (git, synthesizer, validator).
 

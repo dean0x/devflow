@@ -8,7 +8,7 @@ import color from 'picocolors';
 import { getInstallationPaths, getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { isClaudeCliAvailable } from '../utils/cli.js';
-import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, getAllSkillNames, LEGACY_SKILL_NAMES, prefixSkillName, type PluginDefinition } from '../plugins.js';
 import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
 import { removeLearningHook } from './learn.js';
@@ -529,19 +529,22 @@ async function removeAllDevFlow(
     }
   }
 
-  // Remove all DevFlow skills (current + legacy)
+  // Remove all DevFlow skills: prefixed (devflow:name), unprefixed (name), and legacy (devflow-name)
   const allSkillNames = [...getAllSkillNames(), ...LEGACY_SKILL_NAMES];
   const skillsDir = path.join(claudeDir, 'skills');
 
   let skillsRemoved = 0;
   for (const skillName of allSkillNames) {
+    // Remove prefixed variant (devflow:name) — current naming
     try {
-      const skillPath = path.join(skillsDir, skillName);
-      await fs.rm(skillPath, { recursive: true, force: true });
+      await fs.rm(path.join(skillsDir, prefixSkillName(skillName)), { recursive: true, force: true });
       skillsRemoved++;
-    } catch {
-      // Skill might not exist
-    }
+    } catch { /* Skill might not exist */ }
+    // Remove unprefixed/legacy variant (name or devflow-name)
+    try {
+      await fs.rm(path.join(skillsDir, skillName), { recursive: true, force: true });
+      skillsRemoved++;
+    } catch { /* Skill might not exist */ }
   }
 
   if (skillsRemoved > 0 && verbose) {
@@ -595,13 +598,15 @@ async function removeSelectedPlugins(
 
   const skillsDir = path.join(claudeDir, 'skills');
   for (const skill of skills) {
+    // Remove both prefixed (devflow:name) and unprefixed (name) variants
+    try {
+      await fs.rm(path.join(skillsDir, prefixSkillName(skill)), { recursive: true, force: true });
+    } catch { /* Skill might not exist */ }
     try {
       await fs.rm(path.join(skillsDir, skill), { recursive: true, force: true });
-      if (verbose) {
-        p.log.success(`Removed skill ${skill}`);
-      }
-    } catch {
-      // Skill might not exist
+    } catch { /* Skill might not exist */ }
+    if (verbose) {
+      p.log.success(`Removed skill ${skill}`);
     }
   }
 }

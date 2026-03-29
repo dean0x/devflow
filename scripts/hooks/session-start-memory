@@ -205,8 +205,8 @@ fi
 
 # Inject ambient-router SKILL.md directly into context so Claude doesn't need a Read call.
 # Only injects when ambient mode is enabled (UserPromptSubmit hook present in settings).
-AMBIENT_SKILL_PATH="$HOME/.claude/skills/ambient-router/SKILL.md"
-[ ! -f "$AMBIENT_SKILL_PATH" ] && AMBIENT_SKILL_PATH="$CWD/.claude/skills/ambient-router/SKILL.md"
+AMBIENT_SKILL_PATH="$HOME/.claude/skills/devflow:ambient-router/SKILL.md"
+[ ! -f "$AMBIENT_SKILL_PATH" ] && AMBIENT_SKILL_PATH="$CWD/.claude/skills/devflow:ambient-router/SKILL.md"
 
 SETTINGS_FILE="$HOME/.claude/settings.json"
 if [ -f "$AMBIENT_SKILL_PATH" ] && [ -f "$SETTINGS_FILE" ] && grep -q "ambient-prompt" "$SETTINGS_FILE" 2>/dev/null; then

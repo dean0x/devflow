@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: sonnet
-skills: core-patterns, git-safety, implementation-patterns, git-workflow, test-patterns, test-driven-development, search-first, input-validation, worktree-support
+skills: devflow:core-patterns, devflow:git-safety, devflow:implementation-patterns, devflow:git-workflow, devflow:test-patterns, devflow:test-driven-development, devflow:search-first, devflow:input-validation, devflow:worktree-support
 ---
 
 # Coder Agent
@@ -22,7 +22,7 @@ You receive from orchestrator:
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 **Sequential execution context** (when part of multi-Coder chain):
 - **PRIOR_PHASE_SUMMARY**: Implementation summary from previous Coder (see format below)
@@ -42,13 +42,13 @@ You receive from orchestrator:
    - If `.docs/handoff.md` exists, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
 2. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
-   - `backend` (TypeScript): Read `~/.claude/skills/typescript/SKILL.md`, `~/.claude/skills/input-validation/SKILL.md`
-   - `backend` (Go): Read `~/.claude/skills/go/SKILL.md`
-   - `backend` (Java): Read `~/.claude/skills/java/SKILL.md`
-   - `backend` (Python): Read `~/.claude/skills/python/SKILL.md`
-   - `backend` (Rust): Read `~/.claude/skills/rust/SKILL.md`
-   - `frontend`: Read `~/.claude/skills/react/SKILL.md`, `~/.claude/skills/typescript/SKILL.md`, `~/.claude/skills/accessibility/SKILL.md`, `~/.claude/skills/frontend-design/SKILL.md`
-   - `tests`: Read `~/.claude/skills/test-patterns/SKILL.md`, `~/.claude/skills/typescript/SKILL.md`
+   - `backend` (TypeScript): Read `~/.claude/skills/devflow:typescript/SKILL.md`, `~/.claude/skills/devflow:input-validation/SKILL.md`
+   - `backend` (Go): Read `~/.claude/skills/devflow:go/SKILL.md`
+   - `backend` (Java): Read `~/.claude/skills/devflow:java/SKILL.md`
+   - `backend` (Python): Read `~/.claude/skills/devflow:python/SKILL.md`
+   - `backend` (Rust): Read `~/.claude/skills/devflow:rust/SKILL.md`
+   - `frontend`: Read `~/.claude/skills/devflow:react/SKILL.md`, `~/.claude/skills/devflow:typescript/SKILL.md`, `~/.claude/skills/devflow:accessibility/SKILL.md`, `~/.claude/skills/devflow:frontend-design/SKILL.md`
+   - `tests`: Read `~/.claude/skills/devflow:test-patterns/SKILL.md`, `~/.claude/skills/devflow:typescript/SKILL.md`
    - `fullstack`: Combine backend + frontend skills
    - If a Read fails (skill not installed), skip it silently and continue.
 

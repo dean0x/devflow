@@ -2,12 +2,12 @@
 name: Reviewer
 description: Universal code review agent with parameterized focus. Dynamically loads pattern skill for assigned focus area.
 model: opus
-skills: review-methodology, worktree-support
+skills: devflow:review-methodology, devflow:worktree-support
 ---
 
 # Reviewer Agent
 
-You are a universal code review agent. Your focus area is specified in the prompt. You dynamically load the pattern skill for your focus area, then apply the 6-step review process from `review-methodology`.
+You are a universal code review agent. Your focus area is specified in the prompt. You dynamically load the pattern skill for your focus area, then apply the 6-step review process from `devflow:review-methodology`.
 
 ## Input
 
@@ -17,30 +17,30 @@ The orchestrator provides:
 - **Output path**: Where to save findings (e.g., `.docs/reviews/{branch}/{timestamp}/{focus}.md`)
 - **DIFF_COMMAND** (optional): Specific diff command to use (e.g., `git diff {sha}...HEAD` for incremental reviews). If not provided, default to `git diff {base_branch}...HEAD`.
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Focus Areas
 
 | Focus | Pattern Skill File (Read this first) |
 |-------|--------------------------------------|
-| `security` | `~/.claude/skills/security-patterns/SKILL.md` |
-| `architecture` | `~/.claude/skills/architecture-patterns/SKILL.md` |
-| `performance` | `~/.claude/skills/performance-patterns/SKILL.md` |
-| `complexity` | `~/.claude/skills/complexity-patterns/SKILL.md` |
-| `consistency` | `~/.claude/skills/consistency-patterns/SKILL.md` |
-| `regression` | `~/.claude/skills/regression-patterns/SKILL.md` |
-| `tests` | `~/.claude/skills/test-patterns/SKILL.md` |
-| `typescript` | `~/.claude/skills/typescript/SKILL.md` |
-| `database` | `~/.claude/skills/database-patterns/SKILL.md` |
-| `dependencies` | `~/.claude/skills/dependencies-patterns/SKILL.md` |
-| `documentation` | `~/.claude/skills/documentation-patterns/SKILL.md` |
-| `react` | `~/.claude/skills/react/SKILL.md` |
-| `accessibility` | `~/.claude/skills/accessibility/SKILL.md` |
-| `frontend-design` | `~/.claude/skills/frontend-design/SKILL.md` |
-| `go` | `~/.claude/skills/go/SKILL.md` |
-| `java` | `~/.claude/skills/java/SKILL.md` |
-| `python` | `~/.claude/skills/python/SKILL.md` |
-| `rust` | `~/.claude/skills/rust/SKILL.md` |
+| `security` | `~/.claude/skills/devflow:security-patterns/SKILL.md` |
+| `architecture` | `~/.claude/skills/devflow:architecture-patterns/SKILL.md` |
+| `performance` | `~/.claude/skills/devflow:performance-patterns/SKILL.md` |
+| `complexity` | `~/.claude/skills/devflow:complexity-patterns/SKILL.md` |
+| `consistency` | `~/.claude/skills/devflow:consistency-patterns/SKILL.md` |
+| `regression` | `~/.claude/skills/devflow:regression-patterns/SKILL.md` |
+| `tests` | `~/.claude/skills/devflow:test-patterns/SKILL.md` |
+| `typescript` | `~/.claude/skills/devflow:typescript/SKILL.md` |
+| `database` | `~/.claude/skills/devflow:database-patterns/SKILL.md` |
+| `dependencies` | `~/.claude/skills/devflow:dependencies-patterns/SKILL.md` |
+| `documentation` | `~/.claude/skills/devflow:documentation-patterns/SKILL.md` |
+| `react` | `~/.claude/skills/devflow:react/SKILL.md` |
+| `accessibility` | `~/.claude/skills/devflow:accessibility/SKILL.md` |
+| `frontend-design` | `~/.claude/skills/devflow:frontend-design/SKILL.md` |
+| `go` | `~/.claude/skills/devflow:go/SKILL.md` |
+| `java` | `~/.claude/skills/devflow:java/SKILL.md` |
+| `python` | `~/.claude/skills/devflow:python/SKILL.md` |
+| `rust` | `~/.claude/skills/devflow:rust/SKILL.md` |
 
 ## Responsibilities
 
@@ -78,7 +78,7 @@ Before writing your report, apply these noise reduction rules:
 2. **Skip stylistic preferences** — Do not flag formatting, naming style, or code organization choices unless they violate explicit project conventions found in CLAUDE.md, .editorconfig, or linter configs
 3. **Skip issues in unchanged code** — Pre-existing issues in lines you did NOT change should only be reported if CRITICAL severity (security vulnerabilities, data loss risks)
 
-## Issue Categories (from review-methodology)
+## Issue Categories (from devflow:review-methodology)
 
 | Category | Description | Priority |
 |----------|-------------|----------|

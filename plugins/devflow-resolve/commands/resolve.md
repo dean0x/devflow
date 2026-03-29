@@ -23,7 +23,7 @@ Process issues from code review reports: validate them (false positive check), a
 
 1. **Discover resolvable worktrees** using the `worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
-   - See `~/.claude/skills/worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+   - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
    - Additional filter: must have unresolved reviews (latest review directory has no `resolution-summary.md`)
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
@@ -130,7 +130,7 @@ Aggregate from all Resolvers:
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
 For each issue deferred as TECH_DEBT:
-1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
 2. Source field: `/resolve {branch}`
 3. Skip entirely if no TECH_DEBT deferrals
 

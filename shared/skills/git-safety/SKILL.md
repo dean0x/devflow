@@ -112,9 +112,8 @@ See `references/commands.md` for extended recovery and stash workflows.
 
 | Skill | Use For |
 |-------|---------|
-| `commit` | Commit message format, atomic grouping |
-| `pull-request` | PR descriptions, size assessment |
-| `github-patterns` | GitHub API, rate limits, releases |
+| `devflow:git-workflow` | Commit messages, atomic grouping, PR descriptions |
+| `devflow:github-patterns` | GitHub API, rate limits, releases |
 
 ## Extended References
 

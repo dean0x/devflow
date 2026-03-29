@@ -116,7 +116,7 @@ Every PR description MUST include these sections:
 
 ## Safety Checks
 
-Before staging files, apply sensitive file detection and content scanning patterns from `git-safety` skill.
+Before staging files, apply sensitive file detection and content scanning patterns from `devflow:git-safety` skill.
 
 ## Pre-Commit Checklist
 
@@ -154,5 +154,5 @@ For extended examples and templates:
 
 | Skill | Use For |
 |-------|---------|
-| `git-safety` | Lock handling, sequential ops, sensitive file detection |
-| `github-patterns` | GitHub API, rate limits, PR comments, releases |
+| `devflow:git-safety` | Lock handling, sequential ops, sensitive file detection |
+| `devflow:github-patterns` | GitHub API, rate limits, PR comments, releases |

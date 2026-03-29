@@ -347,7 +347,7 @@ Display completion summary with phase status, PR info, and next steps.
 ### Phase 15: Record Decisions (if any)
 
 If the Coder's report includes Key Decisions with architectural significance:
-1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
+1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
 2. Source field: `/implement {TASK_ID}`
 3. Skip entirely if no architectural decisions were made
 

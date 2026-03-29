@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Database Patterns
 
-Domain expertise for database design and optimization. Use alongside `review-methodology` for complete database reviews.
+Domain expertise for database design and optimization. Use alongside `devflow:review-methodology` for complete database reviews.
 
 ## Iron Law
 

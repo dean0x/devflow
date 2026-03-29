@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Security Patterns
 
-Domain expertise for security vulnerability detection. Use alongside `review-methodology` for complete security reviews.
+Domain expertise for security vulnerability detection. Use alongside `devflow:review-methodology` for complete security reviews.
 
 ## Iron Law
 

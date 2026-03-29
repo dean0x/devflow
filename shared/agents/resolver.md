@@ -2,7 +2,7 @@
 name: Resolver
 description: Validates review issues, implements fixes with risk-proportional care. Tech debt only for architectural overhauls.
 model: sonnet
-skills: core-patterns, git-safety, implementation-patterns, git-workflow, worktree-support
+skills: devflow:core-patterns, devflow:git-safety, devflow:implementation-patterns, devflow:git-workflow, devflow:worktree-support
 ---
 
 # Resolver Agent
@@ -16,7 +16,7 @@ You receive from orchestrator:
 - **BRANCH**: Current branch slug
 - **BATCH_ID**: Identifier for this batch of issues
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Responsibilities
 

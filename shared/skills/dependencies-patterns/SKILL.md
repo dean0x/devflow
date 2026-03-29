@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Dependencies Patterns
 
-Domain expertise for dependency management and security analysis. Use alongside `review-methodology` for complete dependency reviews.
+Domain expertise for dependency management and security analysis. Use alongside `devflow:review-methodology` for complete dependency reviews.
 
 ## Iron Law
 

@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Regression Patterns
 
-Domain expertise for detecting functionality regressions and validating implementation intent. Use alongside `review-methodology` for complete regression reviews.
+Domain expertise for detecting functionality regressions and validating implementation intent. Use alongside `devflow:review-methodology` for complete regression reviews.
 
 ## Iron Law
 

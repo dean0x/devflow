@@ -136,7 +136,7 @@ Produce the final report:
 ### Phase 6: Record Pitfall (if root cause found)
 
 If root cause was identified with HIGH or MEDIUM confidence:
-1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
 2. Source field: `/debug {bug description}`
 
 ## Architecture

@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Architecture Patterns
 
-Domain expertise for software architecture and design pattern analysis. Use alongside `review-methodology` for complete architecture reviews.
+Domain expertise for software architecture and design pattern analysis. Use alongside `devflow:review-methodology` for complete architecture reviews.
 
 ## Iron Law
 

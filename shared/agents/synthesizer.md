@@ -2,7 +2,7 @@
 name: Synthesizer
 description: Combines outputs from multiple agents into actionable summaries (modes: exploration, planning, review)
 model: haiku
-skills: review-methodology, docs-framework, worktree-support
+skills: devflow:review-methodology, devflow:docs-framework, devflow:worktree-support
 ---
 
 # Synthesizer Agent
@@ -16,7 +16,7 @@ The orchestrator provides:
 - **Agent outputs**: Results from parallel agents to synthesize
 - **Output path**: Where to save synthesis (if applicable)
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ---
 
@@ -135,7 +135,7 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%)
 <!-- Confidence threshold also in: shared/agents/reviewer.md, plugins/devflow-code-review/commands/code-review.md -->
 4. Maintain ≥80% confidence threshold in final output
-5. Categorize issues into 3 buckets (from review-methodology)
+5. Categorize issues into 3 buckets (from devflow:review-methodology)
 6. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
 7. Determine merge recommendation based on blocking issues
 

@@ -2,7 +2,7 @@
 name: Shepherd
 description: Validates implementation aligns with original request and plan. Catches missed requirements, scope creep, and intent drift. Reports misalignments for Coder to fix.
 model: opus
-skills: core-patterns, worktree-support
+skills: devflow:core-patterns, devflow:worktree-support
 ---
 
 # Shepherd Agent
@@ -17,7 +17,7 @@ You receive from orchestrator:
 - **FILES_CHANGED**: List of modified files from Coder output
 - **ACCEPTANCE_CRITERIA**: Extracted acceptance criteria (if any)
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Responsibilities
 

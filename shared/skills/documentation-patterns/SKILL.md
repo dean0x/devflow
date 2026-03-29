@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Documentation Patterns
 
-Domain expertise for documentation quality and alignment. Use alongside `review-methodology` for complete documentation reviews.
+Domain expertise for documentation quality and alignment. Use alongside `devflow:review-methodology` for complete documentation reviews.
 
 ## Iron Law
 

@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import type { PluginDefinition } from '../plugins.js';
-import { DEVFLOW_PLUGINS } from '../plugins.js';
+import { DEVFLOW_PLUGINS, prefixSkillName } from '../plugins.js';
 
 /**
  * Minimal spinner interface matching @clack/prompts spinner().
@@ -131,6 +131,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   } = options;
 
   // Clean old DevFlow files before installing (only for full install)
+  spinner.message('Cleaning old files...');
   if (!isPartialInstall) {
     const oldDirs = [
       path.join(claudeDir, 'commands', 'devflow'),
@@ -155,6 +156,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
         const stat = await fs.stat(shadowDir);
         if (stat.isDirectory()) continue;
       } catch { /* no shadow — proceed with cleanup */ }
+      // Remove both prefixed (current) and unprefixed (legacy) directories
+      try {
+        await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
+      } catch { /* ignore */ }
       try {
         await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
       } catch { /* ignore */ }
@@ -162,6 +167,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   }
 
   // Install commands and agents from selected plugins (with deduplication)
+  spinner.message('Installing commands and agents...');
   for (const plugin of plugins) {
     const pluginSourceDir = path.join(pluginsDir, plugin.name);
 
@@ -210,6 +216,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
   // Skills are tiny markdown files — universal install ensures orchestration skills
   // can spawn agents that depend on skills from other plugins.
+  spinner.message('Installing skills...');
   for (const [skillName, ownerPlugin] of skillsMap) {
     const skillSource = path.join(pluginsDir, ownerPlugin, 'skills', skillName);
     try {
@@ -217,18 +224,27 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
       if (!stat.isDirectory()) continue;
     } catch { continue; /* skill dir doesn't exist in built plugin */ }
 
-    // Skip copy for shadowed skills — user has a personal override
+    // Shadow check: ~/.devflow/skills/{unprefixed-name}/
+    // If shadowed, copy user's version instead of DevFlow source
     const shadowDir = path.join(devflowDir, 'skills', skillName);
+    const prefixedName = prefixSkillName(skillName);
+    const skillTarget = path.join(claudeDir, 'skills', prefixedName);
+
+    let isShadowed = false;
     try {
       const stat = await fs.stat(shadowDir);
-      if (stat.isDirectory()) continue;
-    } catch { /* no shadow — proceed with copy */ }
+      isShadowed = stat.isDirectory();
+    } catch { /* no shadow */ }
 
-    const skillTarget = path.join(claudeDir, 'skills', skillName);
-    await copyDirectory(skillSource, skillTarget);
+    if (isShadowed) {
+      await copyDirectory(shadowDir, skillTarget);
+    } else {
+      await copyDirectory(skillSource, skillTarget);
+    }
   }
 
   // Install scripts (always from root scripts/ directory)
+  spinner.message('Installing scripts...');
   const scriptsSource = path.join(rootDir, 'scripts');
   const scriptsTarget = path.join(devflowDir, 'scripts');
   try {

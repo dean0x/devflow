@@ -2,7 +2,7 @@
 name: Validator
 description: Dedicated agent for running validation commands (build, typecheck, lint, test). Reports pass/fail with structured failure details - never fixes.
 model: haiku
-skills: test-patterns, worktree-support
+skills: devflow:test-patterns, devflow:worktree-support
 ---
 
 # Validator Agent
@@ -15,7 +15,7 @@ You receive from orchestrator:
 - **FILES_CHANGED**: List of modified files
 - **VALIDATION_SCOPE**: `full` | `changed-only` (hints for test filtering if supported)
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Responsibilities
 

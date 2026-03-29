@@ -104,16 +104,16 @@ This methodology is used by the **Reviewer** agent with different focus areas:
 
 | Focus | Pattern Skill |
 |-------|---------------|
-| `security` | security-patterns |
-| `performance` | performance-patterns |
-| `architecture` | architecture-patterns |
-| `tests` | test-patterns |
-| `consistency` | consistency-patterns |
-| `complexity` | complexity-patterns |
-| `regression` | regression-patterns |
-| `dependencies` | dependencies-patterns |
-| `documentation` | documentation-patterns |
-| `typescript` | typescript |
-| `database` | database-patterns |
+| `security` | devflow:security-patterns |
+| `performance` | devflow:performance-patterns |
+| `architecture` | devflow:architecture-patterns |
+| `tests` | devflow:test-patterns |
+| `consistency` | devflow:consistency-patterns |
+| `complexity` | devflow:complexity-patterns |
+| `regression` | devflow:regression-patterns |
+| `dependencies` | devflow:dependencies-patterns |
+| `documentation` | devflow:documentation-patterns |
+| `typescript` | devflow:typescript |
+| `database` | devflow:database-patterns |
 
 The Reviewer agent loads all pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.

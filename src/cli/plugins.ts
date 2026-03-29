@@ -3,6 +3,29 @@
  */
 
 /**
+ * Namespace prefix for DevFlow skills installed to ~/.claude/skills/.
+ * Skills are installed as `devflow:{skill-name}` to avoid collisions with
+ * other plugin ecosystems. Source dirs in shared/skills/ stay unprefixed.
+ */
+export const SKILL_NAMESPACE = 'devflow:';
+
+/**
+ * Add the `devflow:` namespace prefix to a bare skill name.
+ * No-op if already prefixed.
+ */
+export function prefixSkillName(name: string): string {
+  return name.startsWith(SKILL_NAMESPACE) ? name : `${SKILL_NAMESPACE}${name}`;
+}
+
+/**
+ * Strip the `devflow:` namespace prefix from a skill name.
+ * No-op if not prefixed.
+ */
+export function unprefixSkillName(name: string): string {
+  return name.startsWith(SKILL_NAMESPACE) ? name.slice(SKILL_NAMESPACE.length) : name;
+}
+
+/**
  * Plugin definition with metadata
  */
 export interface PluginDefinition {
@@ -222,6 +245,46 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'commit',
   'pull-request',
   'tests-patterns',
+  // v2.0.0 namespace migration: bare names from pre-namespace installs
+  'core-patterns',
+  'docs-framework',
+  'git-safety',
+  'git-workflow',
+  'github-patterns',
+  'input-validation',
+  'search-first',
+  'test-driven-development',
+  'test-patterns',
+  'agent-teams',
+  'implementation-patterns',
+  'knowledge-persistence',
+  'self-review',
+  'worktree-support',
+  'architecture-patterns',
+  'complexity-patterns',
+  'consistency-patterns',
+  'database-patterns',
+  'dependencies-patterns',
+  'documentation-patterns',
+  'performance-patterns',
+  'regression-patterns',
+  'review-methodology',
+  'security-patterns',
+  'ambient-router',
+  'implementation-orchestration',
+  'debug-orchestration',
+  'plan-orchestration',
+  'review-orchestration',
+  'resolve-orchestration',
+  'pipeline-orchestration',
+  'typescript',
+  'react',
+  'accessibility',
+  'frontend-design',
+  'go',
+  'java',
+  'python',
+  'rust',
 ];
 
 /**

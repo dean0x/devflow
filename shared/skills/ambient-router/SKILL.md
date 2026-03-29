@@ -73,23 +73,23 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | test-driven-development, implementation-patterns, search-first | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
-| **DEBUG** | core-patterns, test-patterns | git-safety (if git operations involved) |
-| **PLAN** | implementation-patterns, core-patterns | — |
-| **REVIEW** | self-review, core-patterns | test-patterns |
+| **IMPLEMENT** | devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:frontend-design (CSS/UI), devflow:input-validation (forms/API), devflow:security-patterns (auth/crypto) |
+| **DEBUG** | devflow:core-patterns, devflow:test-patterns | devflow:git-safety (if git operations involved) |
+| **PLAN** | devflow:implementation-patterns, devflow:core-patterns | — |
+| **REVIEW** | devflow:self-review, devflow:core-patterns | devflow:test-patterns |
 
 ### ORCHESTRATED-depth skills
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | implementation-orchestration, implementation-patterns | typescript (.ts), react (.tsx/.jsx), go (.go), java (.java), python (.py), rust (.rs), frontend-design (CSS/UI), input-validation (forms/API), security-patterns (auth/crypto) |
-| **DEBUG** | debug-orchestration, core-patterns | git-safety (if git operations involved) |
-| **PLAN** | plan-orchestration, implementation-patterns, core-patterns | — |
-| **REVIEW** | review-orchestration | — (reviewers load their own pattern skills) |
-| **RESOLVE** | resolve-orchestration, core-patterns | — |
-| **PIPELINE** | pipeline-orchestration, implementation-patterns | — |
+| **IMPLEMENT** | devflow:implementation-orchestration, devflow:implementation-patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:frontend-design (CSS/UI), devflow:input-validation (forms/API), devflow:security-patterns (auth/crypto) |
+| **DEBUG** | devflow:debug-orchestration, devflow:core-patterns | devflow:git-safety (if git operations involved) |
+| **PLAN** | devflow:plan-orchestration, devflow:implementation-patterns, devflow:core-patterns | — |
+| **REVIEW** | devflow:review-orchestration | — (reviewers load their own pattern skills) |
+| **RESOLVE** | devflow:resolve-orchestration, devflow:core-patterns | — |
+| **PIPELINE** | devflow:pipeline-orchestration, devflow:implementation-patterns | — |
 
-**Excluded from ambient loading** (loaded by agents internally): review-methodology, complexity-patterns, consistency-patterns, database-patterns, dependencies-patterns, documentation-patterns, regression-patterns, architecture-patterns, accessibility, performance-patterns. These skills are always installed (universal skill installation) but loaded by Reviewer agents at runtime, not by the router.
+**Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity-patterns, devflow:consistency-patterns, devflow:database-patterns, devflow:dependencies-patterns, devflow:documentation-patterns, devflow:regression-patterns, devflow:architecture-patterns, devflow:accessibility, devflow:performance-patterns. These skills are always installed (universal skill installation) but loaded by Reviewer agents at runtime, not by the router.
 
 See `references/skill-catalog.md` for the full skill-to-intent mapping with file pattern triggers.
 
@@ -108,8 +108,8 @@ to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 </IMPORTANT>
 
 - **QUICK:** Respond directly. No preamble, no classification statement.
-- **GUIDED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first.` Then work directly in main session. After code changes, spawn Simplifier on changed files.
-- **ORCHESTRATED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/ORCHESTRATED. Loading: implementation-orchestration, implementation-patterns.` Then follow Step 5 for agent orchestration.
+- **GUIDED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/GUIDED. Loading: devflow:implementation-patterns, devflow:search-first.` Then work directly in main session. After code changes, spawn Simplifier on changed files.
+- **ORCHESTRATED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/ORCHESTRATED. Loading: devflow:implementation-orchestration, devflow:implementation-patterns.` Then follow Step 5 for agent orchestration.
 
 ### GUIDED Behavior by Intent
 
@@ -126,12 +126,12 @@ After loading skills via Step 3-4, execute the agent pipeline for the classified
 
 | Intent | Pipeline |
 |--------|----------|
-| **IMPLEMENT** | Follow implementation-orchestration skill pipeline: pre-flight → plan synthesis → Coder → quality gates |
-| **DEBUG** | Follow debug-orchestration skill pipeline: hypotheses → parallel Explores → convergence → report → offer fix |
-| **PLAN** | Follow plan-orchestration skill pipeline: Skimmer → Explores → Plan agent → gap validation |
-| **REVIEW** | Follow review-orchestration skill pipeline: pre-flight → incremental detection → parallel reviewers → synthesis |
-| **RESOLVE** | Follow resolve-orchestration skill pipeline: find review → parse issues → batch → parallel resolvers → simplify |
-| **PIPELINE** | Follow pipeline-orchestration skill pipeline: implement → gate → review → gate → resolve |
+| **IMPLEMENT** | Follow devflow:implementation-orchestration skill pipeline: pre-flight → plan synthesis → Coder → quality gates |
+| **DEBUG** | Follow devflow:debug-orchestration skill pipeline: hypotheses → parallel Explores → convergence → report → offer fix |
+| **PLAN** | Follow devflow:plan-orchestration skill pipeline: Skimmer → Explores → Plan agent → gap validation |
+| **REVIEW** | Follow devflow:review-orchestration skill pipeline: pre-flight → incremental detection → parallel reviewers → synthesis |
+| **RESOLVE** | Follow devflow:resolve-orchestration skill pipeline: find review → parse issues → batch → parallel resolvers → simplify |
+| **PIPELINE** | Follow devflow:pipeline-orchestration skill pipeline: implement → gate → review → gate → resolve |
 | **MULTI_WORKTREE + REVIEW** | Follow `devflow:code-review` command flow (auto-discovers worktrees natively) |
 | **MULTI_WORKTREE + RESOLVE** | Follow `devflow:resolve` command flow (auto-discovers worktrees natively) |
 | **EXPLORE** | No agents — respond in main session |

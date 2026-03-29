@@ -1,7 +1,7 @@
 import { execSync, execFileSync } from 'child_process';
 
 const CLASSIFICATION_PATTERN = /ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
-const LOADING_PATTERN = /loading:\s*[\w-]+(?:,\s*[\w-]+)*/i;
+const LOADING_PATTERN = /loading:\s*[\w:-]+(?:,\s*[\w:-]+)*/i;
 
 /**
  * Check if the `claude` CLI is available on this machine.
@@ -19,12 +19,12 @@ export function isClaudeAvailable(): boolean {
 const AMBIENT_PREAMBLE =
   `AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review: load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture: load skills+agents. Prefer GUIDED for code changes.
 GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
-IMPLEMENT → test-driven-development, implementation-patterns, search-first
-DEBUG → core-patterns, test-patterns
-REVIEW → self-review, core-patterns
-PLAN → implementation-patterns, core-patterns
-Also add if file type matches: typescript, react, go, java, python, rust, input-validation, security-patterns, frontend-design
-ORCHESTRATED also add: implementation-orchestration / debug-orchestration / plan-orchestration
+IMPLEMENT → devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first
+DEBUG → devflow:core-patterns, devflow:test-patterns
+REVIEW → devflow:self-review, devflow:core-patterns
+PLAN → devflow:implementation-patterns, devflow:core-patterns
+Also add if file type matches: devflow:typescript, devflow:react, devflow:go, devflow:java, devflow:python, devflow:rust, devflow:input-validation, devflow:security-patterns, devflow:frontend-design
+ORCHESTRATED also add: devflow:implementation-orchestration / devflow:debug-orchestration / devflow:plan-orchestration
 State: Ambient: INTENT/DEPTH. Loading: skills. Then proceed.`;
 
 /** Structured result from a claude -p invocation */

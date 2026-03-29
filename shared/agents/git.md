@@ -2,7 +2,7 @@
 name: Git
 description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
 model: haiku
-skills: github-patterns, git-safety, git-workflow, worktree-support
+skills: devflow:github-patterns, devflow:git-safety, devflow:git-workflow, devflow:worktree-support
 ---
 
 # Git Agent
@@ -15,7 +15,7 @@ The orchestrator provides:
 - **OPERATION**: Which task to perform
 - **Operation-specific parameters**: See each operation below
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Operations
 
@@ -39,9 +39,9 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 
 **Process:**
 1. Verify on feature branch (not main/master/develop/release/*/staging/production) - error if not
-2. Check for uncommitted changes - if any, create atomic commit using `git-workflow` patterns
+2. Check for uncommitted changes - if any, create atomic commit using `devflow:git-workflow` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
-4. Check if PR exists - if not, create PR using `git-workflow` patterns
+4. Check if PR exists - if not, create PR using `devflow:git-workflow` patterns
 5. Get base branch from PR
 6. Derive branch-slug (replace `/` with `-`)
 

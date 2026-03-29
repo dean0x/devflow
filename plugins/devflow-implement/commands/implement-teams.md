@@ -68,7 +68,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "architecture-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -82,7 +82,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "integration-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -96,7 +96,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "reusable-code-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -110,7 +110,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "edge-case-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -175,7 +175,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "implementation-planner"
   Prompt: |
     You are planning implementation for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 4}
     3. Your deliverable: Step-by-step coding approach with specific files
@@ -186,7 +186,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "testing-planner"
   Prompt: |
     You are planning the test strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/test-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:test-patterns/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 4}
     3. Your deliverable: Test strategy — unit tests, integration tests,
@@ -197,7 +197,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "risk-planner"
   Prompt: |
     You are assessing risk and execution strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 4}
     3. Your deliverable: Risk assessment, rollback strategy, and execution
@@ -534,7 +534,7 @@ Display completion summary with phase status, PR info, and next steps.
 ### Phase 15: Record Decisions (if any)
 
 If the Coder's report includes Key Decisions with architectural significance:
-1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
+1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
 2. Source field: `/implement {TASK_ID}`
 3. Skip entirely if no architectural decisions were made
 

@@ -2,7 +2,7 @@
 name: Skimmer
 description: Codebase orientation using rskim to identify relevant files, functions, and patterns for a feature or task
 tools: ["Bash", "Read"]
-skills: knowledge-persistence, worktree-support
+skills: devflow:knowledge-persistence, devflow:worktree-support
 model: sonnet
 ---
 
@@ -15,7 +15,7 @@ You are a codebase orientation specialist. You use `npx rskim` exclusively for c
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What feature/task needs to be implemented or understood
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Workflow
 

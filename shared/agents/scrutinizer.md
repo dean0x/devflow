@@ -2,7 +2,7 @@
 name: Scrutinizer
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Coder completes.
 model: opus
-skills: self-review, core-patterns, worktree-support
+skills: devflow:self-review, devflow:core-patterns, devflow:worktree-support
 ---
 
 # Scrutinizer Agent
@@ -15,7 +15,7 @@ You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Coder output
 
-**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `worktree-support` skill for path resolution. If omitted, use cwd.
+**Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 ## Responsibilities
 

@@ -64,7 +64,7 @@ Present root cause analysis:
 
 Ask user via AskUserQuestion: "Want me to implement this fix?"
 
-- **YES** → Implement the fix directly in main session using GUIDED approach: load implementation-patterns, search-first, and test-driven-development skills, then code the fix. Spawn `Task(subagent_type="Simplifier")` on changed files after.
+- **YES** → Implement the fix directly in main session using GUIDED approach: load devflow:implementation-patterns, devflow:search-first, and devflow:test-driven-development skills, then code the fix. Spawn `Task(subagent_type="Simplifier")` on changed files after.
 - **NO** → Done. Report stands as documentation.
 
 ## Error Handling
