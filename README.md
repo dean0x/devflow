@@ -311,14 +311,14 @@ Session context is saved and restored automatically via Working Memory hooks —
 
 ### Skill Shadowing
 
-Override any DevFlow skill with your own version. Shadowed skills survive `devflow init` — they won't be overwritten on reinstall or upgrade.
+Override any DevFlow skill with your own version. Shadowed skills survive `devflow init` — your version is copied to the install target on each init instead of DevFlow's.
 
 ```bash
 # Create a personal override (copies current version as reference)
 npx devflow-kit skills shadow core-patterns
 
 # Edit your override
-vim ~/.claude/skills/core-patterns/SKILL.md
+vim ~/.devflow/skills/core-patterns/SKILL.md
 
 # List all overrides
 npx devflow-kit skills list-shadowed

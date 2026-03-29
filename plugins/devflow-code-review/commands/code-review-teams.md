@@ -21,9 +21,9 @@ Run a comprehensive code review of the current branch by spawning a review team 
 
 #### Step 0a: Discover Worktrees
 
-1. **Discover reviewable worktrees** using the `worktree-support` skill discovery algorithm:
+1. **Discover reviewable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
-   - See `~/.claude/skills/worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+   - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
 3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
@@ -80,7 +80,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
 
-**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before adding a conditional perspective, use Read to check if `~/.claude/skills/{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that perspective** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before adding a conditional perspective, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that perspective** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Spawn Review Team
 
@@ -116,11 +116,11 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/security-patterns/SKILL.md`
-    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:security-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from review-methodology
+    5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: injection, auth bypass, crypto misuse, OWASP vulnerabilities
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
     8. Include file:line references for every finding
@@ -131,11 +131,11 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/architecture-patterns/SKILL.md`
-    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:architecture-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from review-methodology
+    5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: SOLID violations, coupling, layering issues, modularity problems
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
     8. Include file:line references for every finding
@@ -146,11 +146,11 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/performance-patterns/SKILL.md`
-    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:performance-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from review-methodology
+    5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: N+1 queries, memory leaks, algorithm issues, I/O bottlenecks
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
     8. Include file:line references for every finding
@@ -162,14 +162,14 @@ Spawn review teammates with self-contained prompts:
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
     1. Read your skills:
-       - `Read ~/.claude/skills/complexity-patterns/SKILL.md`
-       - `Read ~/.claude/skills/consistency-patterns/SKILL.md`
-       - `Read ~/.claude/skills/test-patterns/SKILL.md`
-       - `Read ~/.claude/skills/regression-patterns/SKILL.md`
-    2. Read review methodology: `Read ~/.claude/skills/review-methodology/SKILL.md`
+       - `Read ~/.claude/skills/devflow:complexity-patterns/SKILL.md`
+       - `Read ~/.claude/skills/devflow:consistency-patterns/SKILL.md`
+       - `Read ~/.claude/skills/devflow:test-patterns/SKILL.md`
+       - `Read ~/.claude/skills/devflow:regression-patterns/SKILL.md`
+    2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from review-methodology
+    5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: complexity, test gaps, pattern violations, regressions, naming
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
     8. Include file:line references for every finding
@@ -264,7 +264,7 @@ Per worktree, after successful completion:
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
 Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
-1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
 2. Source field: `/code-review {branch}`
 3. Skip entirely if no CRITICAL/HIGH blocking issues
 

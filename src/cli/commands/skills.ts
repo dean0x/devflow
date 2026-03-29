@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { getAllSkillNames } from '../plugins.js';
+import { getAllSkillNames, prefixSkillName, unprefixSkillName } from '../plugins.js';
 import { copyDirectory } from '../utils/installer.js';
 
 /**
@@ -23,7 +23,7 @@ async function dirExists(dirPath: string): Promise<boolean> {
  * Get the shadow directory for a skill.
  */
 function getShadowDir(devflowDir: string, skillName: string): string {
-  return path.join(devflowDir, 'skills', skillName);
+  return path.join(devflowDir, 'skills', unprefixSkillName(skillName));
 }
 
 /**
@@ -65,45 +65,51 @@ export const skillsCommand = new Command('skills')
         process.exit(1);
       }
 
-      if (!allSkills.includes(name)) {
-        p.log.error(`Unknown skill: ${name}`);
+      // Accept both bare and prefixed input
+      const bareName = unprefixSkillName(name);
+
+      if (!allSkills.includes(bareName)) {
+        p.log.error(`Unknown skill: ${bareName}`);
         p.log.info(`Available skills: ${allSkills.join(', ')}`);
         process.exit(1);
       }
 
-      const installedSkillDir = path.join(claudeDir, 'skills', name);
+      const prefixedName = prefixSkillName(bareName);
+      const installedSkillDir = path.join(claudeDir, 'skills', prefixedName);
       if (!await dirExists(installedSkillDir)) {
-        p.log.error(`Skill not installed: ${name}. Run devflow init first.`);
+        p.log.error(`Skill not installed: ${prefixedName}. Run devflow init first.`);
         process.exit(1);
       }
 
-      const shadowDir = getShadowDir(devflowDir, name);
+      const shadowDir = getShadowDir(devflowDir, bareName);
       if (await dirExists(shadowDir)) {
-        p.log.info(`${name} is already shadowed`);
+        p.log.info(`${bareName} is already shadowed`);
         return;
       }
 
-      // Create shadow directory and copy original as reference backup
+      // Create shadow directory (unprefixed) and copy original as reference backup
       await fs.mkdir(path.join(devflowDir, 'skills'), { recursive: true });
       await copyDirectory(installedSkillDir, shadowDir);
 
-      p.log.success(`Shadowed ${color.cyan(name)}`);
-      p.log.info(`Edit ${color.dim(path.join(claudeDir, 'skills', name, 'SKILL.md'))} — it won't be overwritten on next init.`);
+      p.log.success(`Shadowed ${color.cyan(bareName)}`);
+      p.log.info(`Edit ${color.dim(path.join(shadowDir, 'SKILL.md'))} then run devflow init to apply.`);
     } else if (action === 'unshadow') {
       if (!name) {
         p.log.error('Skill name required. Usage: devflow skills unshadow <name>');
         process.exit(1);
       }
 
-      const shadowDir = getShadowDir(devflowDir, name);
+      // Accept both bare and prefixed input
+      const bareName = unprefixSkillName(name);
+      const shadowDir = getShadowDir(devflowDir, bareName);
       if (!await dirExists(shadowDir)) {
-        p.log.info(`${name} is not shadowed`);
+        p.log.info(`${bareName} is not shadowed`);
         return;
       }
 
       await fs.rm(shadowDir, { recursive: true, force: true });
 
-      p.log.success(`Unshadowed ${color.cyan(name)}`);
+      p.log.success(`Unshadowed ${color.cyan(bareName)}`);
       p.log.info('Run devflow init to restore DevFlow\'s version.');
     } else if (action === 'list-shadowed') {
       const shadowed = await listShadowed(devflowDir);

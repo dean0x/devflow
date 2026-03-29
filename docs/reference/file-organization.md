@@ -104,7 +104,7 @@ The `skills` and `agents` arrays declare which shared assets this plugin needs. 
 |-------|------|-------|
 | Commands | `~/.claude/commands/devflow/` | Namespaced |
 | Agents | `~/.claude/agents/devflow/` | Namespaced |
-| Skills | `~/.claude/skills/` | Flat (auto-discovery) |
+| Skills | `~/.claude/skills/devflow:*/` | Namespaced (`devflow:` prefix) |
 | Scripts | `~/.devflow/scripts/` | Helper scripts |
 | Hooks | `~/.devflow/scripts/hooks/` | Working Memory hooks |
 | Settings | `~/.claude/settings.json` | DevFlow configuration |

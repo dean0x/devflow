@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Consistency Patterns
 
-Domain expertise for code consistency and unnecessary simplification detection. Use alongside `review-methodology` for complete consistency reviews.
+Domain expertise for code consistency and unnecessary simplification detection. Use alongside `devflow:review-methodology` for complete consistency reviews.
 
 ## Iron Law
 

@@ -911,12 +911,12 @@ export const initCommand = new Command('init')
 
     // Managed settings (last install step — sudo may prompt for password)
     if (securityMode === 'managed' && managedSettingsConfirmed) {
-      s.stop('Installing managed settings (may prompt for password)');
+      s.stop('Configuring managed settings (may prompt for sudo password)...');
       const managed = await installManagedSettings(rootDir, verbose);
       if (!managed) {
         p.log.warn('Managed settings write failed — falling back to user settings');
       }
-      s.start('Finalizing');
+      s.start('Finalizing installation...');
     }
 
     s.stop('Installation complete');

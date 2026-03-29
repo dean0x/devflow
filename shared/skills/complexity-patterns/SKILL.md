@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Complexity Patterns
 
-Domain expertise for code complexity and maintainability analysis. Use alongside `review-methodology` for complete complexity reviews.
+Domain expertise for code complexity and maintainability analysis. Use alongside `devflow:review-methodology` for complete complexity reviews.
 
 ## Iron Law
 

@@ -25,7 +25,7 @@ Classification statement must warn about scope:
 
 ## Phase 1: Implement
 
-Follow implementation-orchestration pipeline (Phases 1-6).
+Follow devflow:implementation-orchestration pipeline (Phases 1-6).
 
 If implementation returns **BLOCKED**: halt entire pipeline, report blocker.
 
@@ -41,7 +41,7 @@ Use AskUserQuestion:
 
 ## Phase 3: Review
 
-Follow review-orchestration pipeline (Phases 1-6).
+Follow devflow:review-orchestration pipeline (Phases 1-6).
 
 Report review results (merge recommendation, issue counts).
 
@@ -58,7 +58,7 @@ If **no blocking issues**:
 
 ## Phase 5: Resolve
 
-Follow resolve-orchestration pipeline (Phases 1-6).
+Follow devflow:resolve-orchestration pipeline (Phases 1-6).
 
 ## Phase 6: Summary
 

@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob
 
 # Performance Patterns
 
-Domain expertise for performance optimization and bottleneck detection. Use alongside `review-methodology` for complete performance reviews.
+Domain expertise for performance optimization and bottleneck detection. Use alongside `devflow:review-methodology` for complete performance reviews.
 
 ## Iron Law
 

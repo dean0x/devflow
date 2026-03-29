@@ -185,8 +185,8 @@ describe('hasAmbientHook', () => {
 
 describe('classification helpers', () => {
   it('detects classification marker', () => {
-    expect(hasClassification('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe(true);
-    expect(hasClassification('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe(true);
+    expect(hasClassification('Ambient: IMPLEMENT/GUIDED. Loading: devflow:core-patterns.')).toBe(true);
+    expect(hasClassification('Ambient: DEBUG/ORCHESTRATED. Loading: devflow:debug-orchestration.')).toBe(true);
   });
 
   it('returns false when no classification', () => {
@@ -200,17 +200,17 @@ describe('classification helpers', () => {
   });
 
   it('extracts intent', () => {
-    expect(extractIntent('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe('IMPLEMENT');
-    expect(extractIntent('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe('DEBUG');
-    expect(extractIntent('Ambient: REVIEW/GUIDED. Loading: self-review.')).toBe('REVIEW');
-    expect(extractIntent('Ambient: PLAN/GUIDED. Loading: core-patterns.')).toBe('PLAN');
+    expect(extractIntent('Ambient: IMPLEMENT/GUIDED. Loading: devflow:core-patterns.')).toBe('IMPLEMENT');
+    expect(extractIntent('Ambient: DEBUG/ORCHESTRATED. Loading: devflow:debug-orchestration.')).toBe('DEBUG');
+    expect(extractIntent('Ambient: REVIEW/GUIDED. Loading: devflow:self-review.')).toBe('REVIEW');
+    expect(extractIntent('Ambient: PLAN/GUIDED. Loading: devflow:core-patterns.')).toBe('PLAN');
     expect(extractIntent('Ambient: EXPLORE/QUICK')).toBe('EXPLORE');
     expect(extractIntent('Ambient: CHAT/QUICK')).toBe('CHAT');
   });
 
   it('extracts depth', () => {
-    expect(extractDepth('Ambient: IMPLEMENT/GUIDED. Loading: core-patterns.')).toBe('GUIDED');
-    expect(extractDepth('Ambient: DEBUG/ORCHESTRATED. Loading: debug-orchestration.')).toBe('ORCHESTRATED');
+    expect(extractDepth('Ambient: IMPLEMENT/GUIDED. Loading: devflow:core-patterns.')).toBe('GUIDED');
+    expect(extractDepth('Ambient: DEBUG/ORCHESTRATED. Loading: devflow:debug-orchestration.')).toBe('ORCHESTRATED');
   });
 
   it('returns null for missing classification', () => {
@@ -221,8 +221,8 @@ describe('classification helpers', () => {
 
 describe('skill loading helpers', () => {
   it('detects Loading marker', () => {
-    expect(hasSkillLoading('Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first.')).toBe(true);
-    expect(hasSkillLoading('Loading: core-patterns')).toBe(true);
+    expect(hasSkillLoading('Ambient: IMPLEMENT/GUIDED. Loading: devflow:implementation-patterns, devflow:search-first.')).toBe(true);
+    expect(hasSkillLoading('Loading: devflow:core-patterns')).toBe(true);
   });
 
   it('returns false when no Loading marker', () => {
@@ -231,14 +231,14 @@ describe('skill loading helpers', () => {
   });
 
   it('extracts single skill', () => {
-    expect(extractLoadedSkills('Loading: core-patterns')).toEqual(['core-patterns']);
+    expect(extractLoadedSkills('Loading: devflow:core-patterns')).toEqual(['devflow:core-patterns']);
   });
 
   it('extracts multiple skills', () => {
-    expect(extractLoadedSkills('Ambient: IMPLEMENT/GUIDED. Loading: implementation-patterns, search-first, typescript.')).toEqual([
-      'implementation-patterns',
-      'search-first',
-      'typescript',
+    expect(extractLoadedSkills('Ambient: IMPLEMENT/GUIDED. Loading: devflow:implementation-patterns, devflow:search-first, devflow:typescript.')).toEqual([
+      'devflow:implementation-patterns',
+      'devflow:search-first',
+      'devflow:typescript',
     ]);
   });
 
@@ -277,20 +277,20 @@ describe('preamble drift detection', () => {
     // Must contain multi-worktree awareness
     expect(shellPreamble).toContain('MULTI_WORKTREE');
 
-    // Must reference core skills by name
-    expect(shellPreamble).toContain('implementation-patterns');
-    expect(shellPreamble).toContain('test-driven-development');
-    expect(shellPreamble).toContain('core-patterns');
-    expect(shellPreamble).toContain('self-review');
-    expect(shellPreamble).toContain('search-first');
+    // Must reference core skills with devflow: namespace prefix
+    expect(shellPreamble).toContain('devflow:implementation-patterns');
+    expect(shellPreamble).toContain('devflow:test-driven-development');
+    expect(shellPreamble).toContain('devflow:core-patterns');
+    expect(shellPreamble).toContain('devflow:self-review');
+    expect(shellPreamble).toContain('devflow:search-first');
 
-    // Must reference all 6 orchestration skills
-    expect(shellPreamble).toContain('implementation-orchestration');
-    expect(shellPreamble).toContain('debug-orchestration');
-    expect(shellPreamble).toContain('plan-orchestration');
-    expect(shellPreamble).toContain('review-orchestration');
-    expect(shellPreamble).toContain('resolve-orchestration');
-    expect(shellPreamble).toContain('pipeline-orchestration');
+    // Must reference all 6 orchestration skills with namespace prefix
+    expect(shellPreamble).toContain('devflow:implementation-orchestration');
+    expect(shellPreamble).toContain('devflow:debug-orchestration');
+    expect(shellPreamble).toContain('devflow:plan-orchestration');
+    expect(shellPreamble).toContain('devflow:review-orchestration');
+    expect(shellPreamble).toContain('devflow:resolve-orchestration');
+    expect(shellPreamble).toContain('devflow:pipeline-orchestration');
 
     // Must instruct Skill tool invocation
     expect(shellPreamble).toContain('Skill tool');

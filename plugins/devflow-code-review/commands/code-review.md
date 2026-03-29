@@ -21,9 +21,9 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 #### Step 0a: Discover Worktrees
 
-1. **Discover reviewable worktrees** using the `worktree-support` skill discovery algorithm:
+1. **Discover reviewable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
-   - See `~/.claude/skills/worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
+   - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
 2. **If `--path` flag provided:** use only that worktree, skip discovery
    **`--path` validation**: Before proceeding, verify the path exists as a directory and appears in `git worktree list` output. If not: report error and stop.
 3. **If only 1 reviewable worktree** (the common case): proceed as single-worktree flow — zero behavior change
@@ -80,7 +80,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
 
-**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, use Read to check if `~/.claude/skills/{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Run Reviews (Parallel)
 
@@ -88,30 +88,30 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
-| security | ✓ | security-patterns |
-| architecture | ✓ | architecture-patterns |
-| performance | ✓ | performance-patterns |
-| complexity | ✓ | complexity-patterns |
-| consistency | ✓ | consistency-patterns |
-| regression | ✓ | regression-patterns |
-| tests | ✓ | test-patterns |
-| typescript | conditional | typescript |
-| react | conditional | react |
-| accessibility | conditional | accessibility |
-| frontend-design | conditional | frontend-design |
-| go | conditional | go |
-| java | conditional | java |
-| python | conditional | python |
-| rust | conditional | rust |
-| database | conditional | database-patterns |
-| dependencies | conditional | dependencies-patterns |
-| documentation | conditional | documentation-patterns |
+| security | ✓ | devflow:security-patterns |
+| architecture | ✓ | devflow:architecture-patterns |
+| performance | ✓ | devflow:performance-patterns |
+| complexity | ✓ | devflow:complexity-patterns |
+| consistency | ✓ | devflow:consistency-patterns |
+| regression | ✓ | devflow:regression-patterns |
+| tests | ✓ | devflow:test-patterns |
+| typescript | conditional | devflow:typescript |
+| react | conditional | devflow:react |
+| accessibility | conditional | devflow:accessibility |
+| frontend-design | conditional | devflow:frontend-design |
+| go | conditional | devflow:go |
+| java | conditional | devflow:java |
+| python | conditional | devflow:python |
+| rust | conditional | devflow:rust |
+| database | conditional | devflow:database-patterns |
+| dependencies | conditional | devflow:dependencies-patterns |
+| documentation | conditional | devflow:documentation-patterns |
 
 Each Reviewer invocation (all in one message, **NOT background**):
 ```
 Task(subagent_type="Reviewer", run_in_background=false):
-"Review focusing on {focus}. Apply {focus}-patterns.
-Follow 6-step process from review-methodology.
+"Review focusing on {focus}. Apply devflow:{focus}-patterns.
+Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
@@ -165,7 +165,7 @@ In multi-worktree mode, report results per worktree.
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
 Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
-1. Read `~/.claude/skills/knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
+1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
 2. Source field: `/code-review {branch}`
 3. Skip entirely if no CRITICAL/HIGH blocking issues
 
