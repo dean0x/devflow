@@ -130,9 +130,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     spinner,
   } = options;
 
-  // Clean old DevFlow files before installing (only for full install)
+  // Clean old DevFlow files before installing
   spinner.message('Cleaning old files...');
   if (!isPartialInstall) {
+    // Commands and agents are plugin-scoped — only wipe on full install
     const oldDirs = [
       path.join(claudeDir, 'commands', 'devflow'),
       path.join(claudeDir, 'agents', 'devflow'),
@@ -142,23 +143,25 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
         await fs.rm(dir, { recursive: true, force: true });
       } catch { /* ignore */ }
     }
+  }
 
-    const allSkills = new Set<string>();
-    for (const plugin of DEVFLOW_PLUGINS) {
-      for (const skill of plugin.skills) {
-        allSkills.add(skill);
-      }
+  // Skills are universally installed — always clean both naming variants
+  // to prevent duplicates (bare + prefixed) on upgrade or partial install
+  const allSkills = new Set<string>();
+  for (const plugin of DEVFLOW_PLUGINS) {
+    for (const skill of plugin.skills) {
+      allSkills.add(skill);
     }
-    for (const skill of allSkills) {
-      // Always remove legacy unprefixed directory
-      try {
-        await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
-      } catch { /* ignore */ }
-      // Always remove prefixed directory (will be re-created during install phase)
-      try {
-        await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
-      } catch { /* ignore */ }
-    }
+  }
+  for (const skill of allSkills) {
+    // Remove legacy unprefixed directory
+    try {
+      await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
+    } catch { /* ignore */ }
+    // Remove prefixed directory (will be re-created during install phase)
+    try {
+      await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
+    } catch { /* ignore */ }
   }
 
   // Install commands and agents from selected plugins (with deduplication)

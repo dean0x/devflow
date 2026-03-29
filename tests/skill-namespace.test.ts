@@ -226,21 +226,35 @@ describe('installViaFileCopy skill lifecycle', () => {
     expect(content).toBe('source content');
   });
 
-  it('partial install skips cleanup (preserves existing dirs)', async () => {
-    // Seed existing legacy install
-    const legacyDir = path.join(claudeDir, 'skills', testSkillName);
+  it('partial install still cleans skill dirs (skills are universal)', async () => {
+    // Use a real skill name so cleanup loop finds it
+    const realSkill = 'core-patterns';
+    const legacyDir = path.join(claudeDir, 'skills', realSkill);
     await fs.mkdir(legacyDir, { recursive: true });
     await fs.writeFile(path.join(legacyDir, 'SKILL.md'), 'legacy');
 
     await seedPlugin(testSkillName, 'new content');
     await runInstall({ isPartialInstall: true });
 
-    // Legacy dir should still exist (cleanup was skipped)
-    const legacyContent = await fs.readFile(path.join(legacyDir, 'SKILL.md'), 'utf-8');
-    expect(legacyContent).toBe('legacy');
-    // Prefixed dir should also be installed
+    // Legacy bare-named dir should be gone (skill cleanup always runs)
+    await expect(fs.stat(legacyDir)).rejects.toThrow();
+    // Prefixed dir for test skill should be installed
     const installed = path.join(claudeDir, 'skills', `devflow:${testSkillName}`, 'SKILL.md');
     expect(await fs.readFile(installed, 'utf-8')).toBe('new content');
+  });
+
+  it('partial install preserves commands and agents dirs', async () => {
+    // Seed existing command dir
+    const commandsDir = path.join(claudeDir, 'commands', 'devflow');
+    await fs.mkdir(commandsDir, { recursive: true });
+    await fs.writeFile(path.join(commandsDir, 'existing.md'), 'keep me');
+
+    await seedPlugin(testSkillName, 'content');
+    await runInstall({ isPartialInstall: true });
+
+    // Commands dir should still exist (only wiped on full install)
+    const content = await fs.readFile(path.join(commandsDir, 'existing.md'), 'utf-8');
+    expect(content).toBe('keep me');
   });
 
   it('full shadow cycle: install → shadow → reinstall uses shadow', async () => {
