@@ -23,7 +23,7 @@ async function dirExists(dirPath: string): Promise<boolean> {
  * Get the shadow directory for a skill.
  */
 function getShadowDir(devflowDir: string, skillName: string): string {
-  return path.join(devflowDir, 'skills', skillName);
+  return path.join(devflowDir, 'skills', unprefixSkillName(skillName));
 }
 
 /**

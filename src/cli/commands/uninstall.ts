@@ -530,25 +530,29 @@ async function removeAllDevFlow(
   }
 
   // Remove all DevFlow skills: prefixed (devflow:name), unprefixed (name), and legacy (devflow-name)
-  const allSkillNames = [...getAllSkillNames(), ...LEGACY_SKILL_NAMES];
+  const allSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
   const skillsDir = path.join(claudeDir, 'skills');
 
   let skillsRemoved = 0;
   for (const skillName of allSkillNames) {
     // Remove prefixed variant (devflow:name) — current naming
+    const prefixedPath = path.join(skillsDir, prefixSkillName(skillName));
     try {
-      await fs.rm(path.join(skillsDir, prefixSkillName(skillName)), { recursive: true, force: true });
+      await fs.stat(prefixedPath);
+      await fs.rm(prefixedPath, { recursive: true, force: true });
       skillsRemoved++;
-    } catch { /* Skill might not exist */ }
+    } catch { /* Skill doesn't exist */ }
     // Remove unprefixed/legacy variant (name or devflow-name)
+    const barePath = path.join(skillsDir, skillName);
     try {
-      await fs.rm(path.join(skillsDir, skillName), { recursive: true, force: true });
+      await fs.stat(barePath);
+      await fs.rm(barePath, { recursive: true, force: true });
       skillsRemoved++;
-    } catch { /* Skill might not exist */ }
+    } catch { /* Skill doesn't exist */ }
   }
 
   if (skillsRemoved > 0 && verbose) {
-    p.log.success(`Removed ${skillsRemoved} DevFlow skills`);
+    p.log.success(`Removed ${skillsRemoved} DevFlow skill directories`);
   }
 
   // Also remove old nested skills structure if it exists
@@ -598,13 +602,17 @@ async function removeSelectedPlugins(
 
   const skillsDir = path.join(claudeDir, 'skills');
   for (const skill of skills) {
-    // Remove both prefixed (devflow:name) and unprefixed (name) variants
-    try {
-      await fs.rm(path.join(skillsDir, prefixSkillName(skill)), { recursive: true, force: true });
-    } catch { /* Skill might not exist */ }
-    try {
-      await fs.rm(path.join(skillsDir, skill), { recursive: true, force: true });
-    } catch { /* Skill might not exist */ }
+    // Remove all naming variants: prefixed (devflow:name), unprefixed (name), and legacy (devflow-name)
+    const variants = [
+      prefixSkillName(skill),
+      skill,
+      `devflow-${skill}`,
+    ];
+    for (const variant of variants) {
+      try {
+        await fs.rm(path.join(skillsDir, variant), { recursive: true, force: true });
+      } catch { /* Skill might not exist */ }
+    }
     if (verbose) {
       p.log.success(`Removed skill ${skill}`);
     }

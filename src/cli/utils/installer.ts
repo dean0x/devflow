@@ -150,18 +150,13 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
       }
     }
     for (const skill of allSkills) {
-      // Skip cleanup for shadowed skills — user has a personal override
-      const shadowDir = path.join(devflowDir, 'skills', skill);
-      try {
-        const stat = await fs.stat(shadowDir);
-        if (stat.isDirectory()) continue;
-      } catch { /* no shadow — proceed with cleanup */ }
-      // Remove both prefixed (current) and unprefixed (legacy) directories
-      try {
-        await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
-      } catch { /* ignore */ }
+      // Always remove legacy unprefixed directory
       try {
         await fs.rm(path.join(claudeDir, 'skills', skill), { recursive: true, force: true });
+      } catch { /* ignore */ }
+      // Always remove prefixed directory (will be re-created during install phase)
+      try {
+        await fs.rm(path.join(claudeDir, 'skills', prefixSkillName(skill)), { recursive: true, force: true });
       } catch { /* ignore */ }
     }
   }
@@ -225,7 +220,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     } catch { continue; /* skill dir doesn't exist in built plugin */ }
 
     // Shadow check: ~/.devflow/skills/{unprefixed-name}/
-    // If shadowed, copy user's version instead of DevFlow source
+    // If shadowed with actual content, copy user's version instead of DevFlow source
     const shadowDir = path.join(devflowDir, 'skills', skillName);
     const prefixedName = prefixSkillName(skillName);
     const skillTarget = path.join(claudeDir, 'skills', prefixedName);
@@ -233,7 +228,10 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     let isShadowed = false;
     try {
       const stat = await fs.stat(shadowDir);
-      isShadowed = stat.isDirectory();
+      if (stat.isDirectory()) {
+        const entries = await fs.readdir(shadowDir);
+        isShadowed = entries.length > 0;
+      }
     } catch { /* no shadow */ }
 
     if (isShadowed) {
