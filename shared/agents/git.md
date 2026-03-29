@@ -210,7 +210,7 @@ Update tech debt backlog with pre-existing issues from code review.
 
 **Process:**
 1. Find or create "Tech Debt Backlog" issue with `tech-debt` label
-2. Check issue body size; archive if > 60000 chars (per github-patterns)
+2. Check issue body size; archive if > 60000 chars (per devflow:github-patterns)
 3. Extract pre-existing issues (Category 3) from review reports
 4. Deduplicate against existing items using semantic matching
 5. Remove items that have been fixed (verify in codebase)

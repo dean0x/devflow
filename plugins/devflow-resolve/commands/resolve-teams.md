@@ -21,7 +21,7 @@ Process issues from code review reports: validate them (false positive check), a
 
 #### Step 0a: Discover Worktrees
 
-1. **Discover resolvable worktrees** using the `worktree-support` skill discovery algorithm:
+1. **Discover resolvable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
    - Additional filter: must have unresolved reviews (latest review directory has no `resolution-summary.md`)

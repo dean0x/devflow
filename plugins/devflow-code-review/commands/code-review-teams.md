@@ -21,7 +21,7 @@ Run a comprehensive code review of the current branch by spawning a review team 
 
 #### Step 0a: Discover Worktrees
 
-1. **Discover reviewable worktrees** using the `worktree-support` skill discovery algorithm:
+1. **Discover reviewable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
 2. **If `--path` flag provided:** use only that worktree, skip discovery

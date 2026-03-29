@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Git Workflow
 
-Atomic commits and honest PR descriptions. Complements git-safety with commit and PR-specific patterns.
+Atomic commits and honest PR descriptions. Complements devflow:git-safety with commit and PR-specific patterns.
 
 ## Iron Law
 
