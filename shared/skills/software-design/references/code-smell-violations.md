@@ -1,10 +1,14 @@
 # Code Smell Violations Reference
 
-Extended examples of fake solutions, unlabeled workarounds, deceptive code, and magic values. Absorbed from the former `code-smell` skill into `core-patterns`.
+Extended examples of fake solutions, unlabeled workarounds, deceptive code, and magic values.
+All examples cite `references/sources.md`.
 
 ---
 
-## 1. Hardcoded Data (FAKE SOLUTIONS)
+## 1. Hardcoded Data (FAKE SOLUTIONS) [10]
+
+"Clean Code" [10] identifies this as a fundamental form of deception. Martin's maxim
+"don't lie to your colleagues" applies equally to code that pretends to be real.
 
 ### Violation: Mock data masquerading as real functionality
 
@@ -18,9 +22,10 @@ async function fetchRecommendations(userId: string): Promise<Product[]> {
 }
 ```
 
-**Problem**: Returns static data instead of fetching from actual service.
+**Problem**: Returns static data instead of fetching from actual service. Caller has no idea
+this is a fake [10].
 
-### Correct: Honest implementation with Result type
+### Correct: Honest implementation with Result type [1]
 
 ```typescript
 async function getUserProfile(userId: string): Promise<Result<UserProfile, Error>> {
@@ -44,7 +49,10 @@ async function getUserProfileMock(userId: string): Promise<UserProfile> {
 
 ---
 
-## 2. Missing Labels (UNDOCUMENTED WORKAROUNDS)
+## 2. Missing Labels (UNDOCUMENTED WORKAROUNDS) [13]
+
+Hickey's "Simple Made Easy" [13] defines complecting as interleaving concerns.
+Undocumented workarounds complect the accidental with the essential.
 
 ### Violation: Temporary fix without documentation
 
@@ -55,7 +63,7 @@ async function syncData() {
 }
 ```
 
-### Correct: Clearly labeled workaround
+### Correct: Clearly labeled workaround with rationale
 
 ```typescript
 function processPayment(amount: number): boolean {
@@ -67,13 +75,14 @@ function processPayment(amount: number): boolean {
 }
 ```
 
-### Correct: Documented hack with rationale
+### Correct: Documented hack with root cause
 
 ```typescript
 async function syncData() {
   // HACK: Sleep required due to race condition in legacy sync system
   // Root cause: Event system doesn't guarantee order
   // Proper fix: Implement event sequencing (3-week effort)
+  // Ticket: SYNC-789
   await sleep(1000);
   await performSync();
 }
@@ -81,9 +90,12 @@ async function syncData() {
 
 ---
 
-## 3. Fake Functionality (DECEPTIVE CODE)
+## 3. Fake Functionality (DECEPTIVE CODE) [10]
 
-### Violation: Fake error handling
+"Clean Code" Ch.7 [10] specifically warns against functions that pretend to work.
+Result types [1] give us an honest way to say "not implemented yet."
+
+### Violation: Fake error handling with swallowed exception
 
 ```typescript
 async function sendEmail(to: string, subject: string, body: string): Promise<void> {
@@ -91,12 +103,12 @@ async function sendEmail(to: string, subject: string, body: string): Promise<voi
     // TODO: Implement SMTP
     console.log(`Email sent to ${to}`);
   } catch (error) {
-    // Ignore errors
+    // Ignore errors — caller thinks this worked [10]
   }
 }
 ```
 
-### Correct: Honest unimplemented function
+### Correct: Honest unimplemented function [1]
 
 ```typescript
 function validateEmail(email: string): Result<boolean, Error> {
@@ -109,20 +121,24 @@ function validateEmail(email: string): Result<boolean, Error> {
 
 ---
 
-## 4. Magic Values (UNEXPLAINED CONSTANTS)
+## 4. Magic Values (UNEXPLAINED CONSTANTS) [9]
+
+Bloch's "Effective Java" Item 72 [9] identifies unexplained constants as a readability
+and maintenance hazard. Named constants make the domain model explicit [2].
 
 ### Violation: Magic numbers
 
 ```typescript
 function calculateDiscount(price: number, userLevel: number): number {
-  if (userLevel >= 5) return price * 0.15;
+  if (userLevel >= 5) return price * 0.15;  // What is 5? What is 0.15? [9]
   return 0;
 }
 ```
 
-### Correct: Named constants with documentation
+### Correct: Named constants with documentation [2][9]
 
 ```typescript
+// Domain constants named for their business meaning [2]
 const USER_LEVEL_THRESHOLD = { PREMIUM: 5 } as const;
 const DISCOUNT_RATE = { PREMIUM: 0.15 } as const;
 
@@ -134,11 +150,40 @@ function calculateDiscount(price: number, userLevel: number): number {
 
 ---
 
+## 5. Type Escape Hatches (BYPASSING THE TYPE SYSTEM) [4][22]
+
+Minsky's "Making Illegal States Unrepresentable" [4] and TypeScript strict mode [22]
+are both undermined by unchecked type assertions.
+
+### Violation: as-casting without validation
+
+```typescript
+// VIOLATION: Bypasses all type safety [4][22]
+const user = response.data as User;  // No runtime check
+const name = user!.profile!.name!;   // Assumes structure that may not exist [22]
+```
+
+### Correct: Schema validation at boundary [12]
+
+```typescript
+// Parse, don't validate [12] — schema enforces the shape at the boundary
+const userResult = UserSchema.safeParse(response.data);
+if (!userResult.success) {
+  return Err({ type: 'InvalidResponse', details: userResult.error });
+}
+const user = userResult.data;  // Typed and verified [12]
+```
+
+---
+
 ## Detection Quick Reference
 
 Code passes smell check when:
-- No hardcoded return data in business logic
-- All workarounds have required labels (HACK:, MOCK:, TODO:, TEMPORARY:, NOT-PRODUCTION:, ARCHITECTURE EXCEPTION:)
-- All fake/mock code clearly marked
-- Magic values extracted to named constants
-- Functions do what their names promise
+
+- No hardcoded return data in business logic [10]
+- All workarounds have required labels (`HACK:` `MOCK:` `TODO:` `TEMPORARY:` `NOT-PRODUCTION:` `ARCHITECTURE EXCEPTION:`) [13]
+- All fake/mock code clearly marked [10]
+- Magic values extracted to named constants [9]
+- Functions do what their names promise [10]
+- No unchecked type assertions [4][22]
+- No swallowed exceptions [1][10]

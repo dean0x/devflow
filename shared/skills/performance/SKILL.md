@@ -13,91 +13,90 @@ Domain expertise for performance optimization and bottleneck detection. Use alon
 
 > **MEASURE BEFORE OPTIMIZING**
 >
-> Premature optimization is the root of all evil. Profile first, then optimize. Every
-> performance claim requires benchmarks. "It feels slow" is not a metric. O(n) with small n
-> beats O(1) with huge constants. Optimize for the real bottleneck, not the imagined one.
+> Profile first, optimize second. Every performance claim requires benchmarks. Brendan
+> Gregg's USE Method [1] (Utilization, Saturation, Errors) and Tom Wilkie's RED Method [2]
+> (Rate, Errors, Duration) are the systematic starting points — not guesswork.
+> Gil Tene's coordinated omission warning [8]: averages lie — monitor P99, not mean latency.
+
+---
+
+## Measurement Foundation [1][2][7][8][9]
+
+| Method | For | Measures |
+|--------|-----|---------|
+| USE Method [1] | System resources | Utilization, Saturation, Errors per resource |
+| RED Method [2] | Services | Rate, Errors, Duration per endpoint |
+| Flame Graphs [9] | CPU hot paths | Widest frames = hottest code — optimize those |
+| HDR Histogram [8] | Latency | Full distribution without coordinated omission |
+
+**Latency hierarchy** [7]: L1 cache ~1ns · L2 ~4ns · L3 ~40ns · RAM ~100ns · SSD ~100µs · Network (DC) ~500µs · HDD ~10ms. Knowing these prevents optimizing the wrong layer [4].
 
 ---
 
 ## Performance Categories
 
-### 1. Algorithmic Issues
+### 1. Algorithmic Issues [5][12]
 
-**N+1 Query Problem** - Database query inside a loop.
+**N+1 Query Problem** — database query inside a loop. O(n) round-trips [5].
 
 ```typescript
-// VIOLATION: 1 + N queries
+// VIOLATION: 1 + N queries — O(n) round-trips [5]
 for (const user of users) {
   user.orders = await db.orders.findByUserId(user.id);
 }
 
-// CORRECT: Batch query with Map lookup
+// CORRECT: Batch query with Map lookup — O(1) per access [5]
 const orders = await db.orders.findAll({ where: { userId: userIds } });
 const ordersByUser = new Map(groupBy(orders, 'userId'));
 users.forEach(u => u.orders = ordersByUser.get(u.id) || []);
 ```
 
-**O(n^2) Patterns** - Nested loops or linear search in loop.
+**O(n²) Patterns** — linear search inside a loop [12].
 
 ```typescript
-// VIOLATION: includes() is O(n), called n times
+// VIOLATION: Array.includes is O(n), called n times → O(n²) [12]
 items.filter(item => selected.includes(item.id));
 
-// CORRECT: Use Set for O(1) lookup
+// CORRECT: Set lookup is O(1) → total O(n) [12]
 const selectedSet = new Set(selected);
 items.filter(item => selectedSet.has(item.id));
 ```
 
-### 2. Memory Issues
+### 2. Memory Issues [4][10]
 
-**Memory Leaks** - Resources not cleaned up.
+**Memory Leaks** — resources not cleaned up. Hidden by GC until OOM [4].
+**Cache line false sharing** — hot fields on the same 64-byte line cause inter-core invalidation in high-throughput code [4][10].
+**Unbounded caches** — collections that grow forever. Use LRU with a `max` limit [4].
+
+### 3. I/O Issues [3][16]
+
+**Blocking Operations** — synchronous I/O in request path blocks the event loop [3][16].
 
 ```typescript
-// VIOLATION: Listener never removed
-window.addEventListener('resize', this.handleResize);
-
-// CORRECT: Track and cleanup
-this.cleanup = () => window.removeEventListener('resize', this.handleResize);
+const config = fs.readFileSync('./config.json');           // VIOLATION [3]
+const config = await fs.promises.readFile('./config.json'); // CORRECT [16]
 ```
 
-**Unbounded Caches** - Collections that grow forever.
+**Sequential When Parallel Possible** — independent operations run serially [5].
 
 ```typescript
-// VIOLATION: Cache grows indefinitely
-const cache = new Map<string, Result>();
-
-// CORRECT: LRU cache with limit
-const cache = new LRU<string, Result>({ max: 1000 });
-```
-
-### 3. I/O Issues
-
-**Blocking Operations** - Synchronous I/O in request path.
-
-```typescript
-// VIOLATION: Blocks event loop
-const config = fs.readFileSync('./config.json');
-
-// CORRECT: Async I/O
-const config = await fs.promises.readFile('./config.json');
-```
-
-**Sequential When Parallel Possible** - Independent operations run serially.
-
-```typescript
-// VIOLATION: Sequential execution
-const user = await getUser(id);
-const orders = await getOrders(id);
-
-// CORRECT: Parallel execution
+// VIOLATION: total = sum of all [5]
+const user = await getUser(id); const orders = await getOrders(id);
+// CORRECT: total = max of all
 const [user, orders] = await Promise.all([getUser(id), getOrders(id)]);
 ```
 
-### 4. Database Issues
+### 4. Database Issues [20]
 
-Missing indexes, SELECT *, missing pagination. See `references/violations.md`.
+Missing indexes, SELECT *, OFFSET pagination on large tables, LIKE with leading wildcard. See `references/violations.md`.
 
-### 5. Frontend Issues
+### 5. Frontend / Web Vitals [6][17][21]
+
+| Metric | Good | Poor | Measures |
+|--------|------|------|---------|
+| LCP [6] | < 2.5s | > 4s | Largest element load |
+| INP [21] | < 200ms | > 500ms | Input responsiveness |
+| CLS [6] | < 0.1 | > 0.25 | Layout stability |
 
 Unnecessary re-renders, missing virtualization, missing code splitting. See `references/violations.md`.
 
@@ -105,50 +104,32 @@ Unnecessary re-renders, missing virtualization, missing code splitting. See `ref
 
 ## Extended References
 
-For comprehensive examples and detection techniques:
-
 | Reference | Content |
 |-----------|---------|
-| `references/violations.md` | Extended violation examples by category |
-| `references/patterns.md` | Correct implementation patterns |
+| `references/sources.md` | Full bibliography (25 sources) |
+| `references/violations.md` | Extended violations with citations [n] |
+| `references/patterns.md` | Correct patterns with citations [n] |
 | `references/detection.md` | Grep commands, profiling, CI integration |
 
 ---
 
 ## Severity Guidelines
 
-| Severity | Criteria | Examples |
-|----------|----------|----------|
-| **CRITICAL** | Severe degradation, production risk | N+1 with unbounded data, memory leaks, blocking I/O in handlers |
-| **HIGH** | Significant impact | Sequential async, SELECT *, unbounded caches, missing pagination |
-| **MEDIUM** | Moderate concern | Suboptimal algorithm (small data), missing memoization |
-| **LOW** | Minor opportunity | Micro-optimizations, premature optimization candidates |
-
----
-
-## Performance Metrics Reference
-
-| Operation | Good | Warning | Critical |
-|-----------|------|---------|----------|
-| API response | < 100ms | 100-500ms | > 500ms |
-| Database query | < 10ms | 10-100ms | > 100ms |
-| Page load (FCP) | < 1s | 1-2.5s | > 2.5s |
-| Memory per request | < 10MB | 10-50MB | > 50MB |
-| Bundle size | < 200KB | 200-500KB | > 500KB |
+| Severity | Examples |
+|----------|----------|
+| **CRITICAL** | N+1 with unbounded data [5], memory leaks [4], blocking I/O in handlers [3] |
+| **HIGH** | Sequential async [5], SELECT * [20], unbounded caches [4], LCP > 4s [6] |
+| **MEDIUM** | Suboptimal algorithm on small data [12], missing memoization, INP > 200ms [21] |
+| **LOW** | Micro-optimizations, premature optimization candidates [1] |
 
 ---
 
 ## Quick Detection
 
 ```bash
-# N+1 patterns (await in loop)
-grep -rn "for.*await\|\.forEach.*async" --include="*.ts"
-
-# Synchronous I/O
-grep -rn "readFileSync\|writeFileSync" --include="*.ts"
-
-# SELECT *
-grep -rn "SELECT \*" --include="*.ts" --include="*.sql"
+grep -rn "for.*await\|\.forEach.*async" --include="*.ts"  # N+1
+grep -rn "readFileSync\|writeFileSync" --include="*.ts"   # Sync I/O
+grep -rn "SELECT \*" --include="*.ts" --include="*.sql"   # SELECT *
 ```
 
 See `references/detection.md` for comprehensive detection patterns.

@@ -1,15 +1,18 @@
 # Extended Correct Pattern Examples
 
 Additional examples of correct implementations beyond the core examples in SKILL.md.
+All patterns cite `references/sources.md`.
 
 ---
 
-## Result Types - Extended Patterns
+## Result Types — Extended Patterns [1][5][6]
 
-### Chaining Results
+### Chaining Results [1]
+
+The two-track railway model [1]: happy path stays on track, errors short-circuit.
 
 ```typescript
-// Chain multiple Result operations
+// Chain multiple Result operations — each step short-circuits on error [1]
 function processUserOrder(
   userId: string,
   orderId: string
@@ -26,25 +29,25 @@ function processUserOrder(
   return processPayment(orderResult.value);
 }
 
-// Using pipe helper
+// Using pipe helper for cleaner composition [1][20]
 const pipe = <T, E>(...fns: Array<(r: Result<T, E>) => Result<T, E>>) =>
   (initial: Result<T, E>) => fns.reduce((r, fn) => r.ok ? fn(r) : r, initial);
 
-// Map over Result
+// Monadic map — functor law [5][6]
 const map = <T, U, E>(fn: (value: T) => U) =>
   (result: Result<T, E>): Result<U, E> =>
     result.ok ? Ok(fn(result.value)) : result;
 
-// FlatMap for Result chains
+// Monadic flatMap (bind) — monad law [5][6]
 const flatMap = <T, U, E>(fn: (value: T) => Result<U, E>) =>
   (result: Result<T, E>): Result<U, E> =>
     result.ok ? fn(result.value) : result;
 ```
 
-### Async Result Patterns
+### Async Result Patterns [1][18]
 
 ```typescript
-// Async function returning Result
+// Async function returning Result — boundary catch converts exceptions [11]
 async function fetchUser(id: string): Promise<Result<User, FetchError>> {
   try {
     const response = await fetch(`/api/users/${id}`);
@@ -68,33 +71,16 @@ async function fetchAllUsers(ids: string[]): Promise<Result<User[], FetchError>>
 
   return Ok(results.map(r => r.value));
 }
-
-// Parallel with partial success
-async function fetchUsersPartial(ids: string[]): Promise<{
-  successes: User[];
-  failures: Array<{ id: string; error: FetchError }>;
-}> {
-  const results = await Promise.all(
-    ids.map(async id => ({ id, result: await fetchUser(id) }))
-  );
-
-  return {
-    successes: results.filter(r => r.result.ok).map(r => r.result.value),
-    failures: results
-      .filter(r => !r.result.ok)
-      .map(r => ({ id: r.id, error: r.result.error }))
-  };
-}
 ```
 
 ---
 
-## Dependency Injection - Extended Patterns
+## Dependency Injection — Extended Patterns [3]
 
-### Factory Pattern with DI
+### Factory Pattern with DI [3]
 
 ```typescript
-// Factory that creates configured instances
+// Factory that creates configured instances [3]
 interface ServiceFactory {
   createUserService(): UserService;
   createOrderService(): OrderService;
@@ -116,7 +102,7 @@ class ProductionServiceFactory implements ServiceFactory {
   }
 }
 
-// Test factory with mocks
+// Test factory with mocks — setup is trivial with DI [3]
 class TestServiceFactory implements ServiceFactory {
   createUserService(): UserService {
     return new UserService(mockDb, mockEmailer, mockLogger);
@@ -128,10 +114,10 @@ class TestServiceFactory implements ServiceFactory {
 }
 ```
 
-### Functional DI Pattern
+### Functional DI Pattern [3][20]
 
 ```typescript
-// Dependencies as function parameters
+// Dependencies as function parameters — partial application [20]
 type CreateUser = (
   db: Database,
   emailer: EmailService
@@ -146,56 +132,43 @@ const createUser: CreateUser = (db, emailer) => async (data) => {
   return Ok(user);
 };
 
-// Partial application for context
+// Partial application for production context
 const createUserWithDeps = createUser(productionDb, productionEmailer);
-const result = await createUserWithDeps(userData);
 ```
 
-### Interface Segregation
+### Interface Segregation [3]
 
 ```typescript
-// Small, focused interfaces
+// Small, focused interfaces — depend only on what you need [3]
 interface UserReader {
   findById(id: string): Promise<User | null>;
-  findByEmail(email: string): Promise<User | null>;
 }
 
 interface UserWriter {
   create(data: UserData): Promise<User>;
   update(id: string, data: Partial<UserData>): Promise<User>;
-  delete(id: string): Promise<void>;
 }
 
-// Service depends only on what it needs
+// Query service needs only read operations
 class UserQueryService {
-  constructor(private reader: UserReader) {}  // Only needs read operations
+  constructor(private reader: UserReader) {}
 
   async getUser(id: string): Promise<Result<User, NotFoundError>> {
     const user = await this.reader.findById(id);
     return user ? Ok(user) : Err({ type: 'NotFound', id });
   }
 }
-
-class UserCommandService {
-  constructor(
-    private reader: UserReader,
-    private writer: UserWriter
-  ) {}  // Needs both for validation and writing
-}
 ```
 
 ---
 
-## Immutability - Extended Patterns
+## Immutability — Extended Patterns [7][14]
 
-### Deep Updates
+### Deep Updates [7]
 
 ```typescript
-// Immutable deep update
-function updateNestedAddress(
-  user: User,
-  city: string
-): User {
+// Immutable deep update — each level creates a new object [7][14]
+function updateNestedAddress(user: User, city: string): User {
   return {
     ...user,
     address: {
@@ -204,26 +177,12 @@ function updateNestedAddress(
     }
   };
 }
-
-// Using immer for complex updates
-import { produce } from 'immer';
-
-function updateOrderItem(
-  order: Order,
-  itemId: string,
-  quantity: number
-): Order {
-  return produce(order, draft => {
-    const item = draft.items.find(i => i.id === itemId);
-    if (item) item.quantity = quantity;
-  });
-}
 ```
 
-### Immutable Collections
+### Immutable Collections [14]
 
 ```typescript
-// Immutable array operations
+// Immutable array operations — return new arrays [14]
 function removeItem<T>(items: T[], index: number): T[] {
   return [...items.slice(0, index), ...items.slice(index + 1)];
 }
@@ -235,70 +194,34 @@ function insertItem<T>(items: T[], index: number, item: T): T[] {
 function updateItem<T>(items: T[], index: number, item: T): T[] {
   return items.map((existing, i) => i === index ? item : existing);
 }
-
-// Immutable object operations
-function omit<T extends object, K extends keyof T>(
-  obj: T,
-  ...keys: K[]
-): Omit<T, K> {
-  const result = { ...obj };
-  for (const key of keys) {
-    delete result[key];
-  }
-  return result;
-}
-
-function pick<T extends object, K extends keyof T>(
-  obj: T,
-  ...keys: K[]
-): Pick<T, K> {
-  const result = {} as Pick<T, K>;
-  for (const key of keys) {
-    result[key] = obj[key];
-  }
-  return result;
-}
 ```
 
 ---
 
-## Pure Functions - Extended Patterns
+## Pure Functions — Extended Patterns [8][11]
 
-### Dependency Injection for Impurity
+### Dependency Injection for Impurity [3][8]
 
 ```typescript
-// Inject impure dependencies
-interface Clock {
-  now(): Date;
-}
+// Inject impure dependencies to keep the function pure relative to its inputs [3][8]
+interface Clock { now(): Date; }
+interface RandomGenerator { next(): number; }
 
-interface RandomGenerator {
-  next(): number;
-}
-
-// Function becomes pure relative to its inputs
 function generateToken(random: RandomGenerator, length: number): string {
   return Array.from({ length }, () =>
     Math.floor(random.next() * 36).toString(36)
   ).join('');
 }
 
-// Easy to test
-const mockRandom: RandomGenerator = {
-  next: () => 0.5  // Deterministic
-};
-const token = generateToken(mockRandom, 10);  // Always same result
-
-// Production usage
-const productionRandom: RandomGenerator = {
-  next: () => Math.random()
-};
+// Deterministic in tests — no mocking framework needed [8]
+const mockRandom: RandomGenerator = { next: () => 0.5 };
+const token = generateToken(mockRandom, 10);
 ```
 
-### Separating Pure Logic
+### Separating Pure Logic [11]
 
 ```typescript
-// Pure: business logic
+// PURE CORE: all business logic, no I/O [11]
 function calculateOrderTotal(
   items: OrderItem[],
   discount: Discount | null,
@@ -308,28 +231,19 @@ function calculateOrderTotal(
   const discountAmount = discount ? applyDiscount(subtotal, discount) : 0;
   const taxableAmount = subtotal - discountAmount;
   const tax = taxableAmount * taxRate;
-
-  return {
-    subtotal,
-    discount: discountAmount,
-    tax,
-    total: taxableAmount + tax
-  };
+  return { subtotal, discount: discountAmount, tax, total: taxableAmount + tax };
 }
 
-// Impure: I/O wrapper
+// IMPERATIVE SHELL: I/O wrapper [11]
 async function processOrder(orderId: string): Promise<Result<Order, Error>> {
-  // I/O: fetch data
   const order = await orderRepository.findById(orderId);
   if (!order) return Err({ type: 'NotFound' });
 
   const discount = await discountService.getActive(order.customerId);
   const taxRate = await taxService.getRate(order.shippingAddress);
 
-  // Pure: calculation
+  // Pure calculation — testable without any I/O setup
   const total = calculateOrderTotal(order.items, discount, taxRate);
-
-  // I/O: persist
   const updated = await orderRepository.update(orderId, { total });
   return Ok(updated);
 }
@@ -337,144 +251,49 @@ async function processOrder(orderId: string): Promise<Result<Order, Error>> {
 
 ---
 
-## Error Types - Extended Patterns
+## Error Types — Extended Patterns [1][2]
 
-### Hierarchical Error Types
+### Hierarchical Error Types [2]
+
+Constrained types make invalid errors impossible [2].
 
 ```typescript
-// Base error type
+// Base error union — exhaustive [1][2]
 type AppError =
   | ValidationError
   | BusinessError
   | InfrastructureError;
 
-// Validation errors
 type ValidationError =
   | { type: 'RequiredField'; field: string }
   | { type: 'InvalidFormat'; field: string; expected: string }
   | { type: 'OutOfRange'; field: string; min?: number; max?: number };
 
-// Business errors
 type BusinessError =
   | { type: 'InsufficientFunds'; available: number; required: number }
-  | { type: 'ItemOutOfStock'; itemId: string; available: number }
-  | { type: 'OrderCancelled'; orderId: string; reason: string };
+  | { type: 'ItemOutOfStock'; itemId: string; available: number };
 
-// Infrastructure errors
 type InfrastructureError =
   | { type: 'DatabaseError'; operation: string; message: string }
-  | { type: 'NetworkError'; endpoint: string; status?: number }
-  | { type: 'TimeoutError'; operation: string; durationMs: number };
+  | { type: 'NetworkError'; endpoint: string; status?: number };
 ```
 
-### Error Conversion
+### Error Conversion at Boundaries [11]
 
 ```typescript
-// Convert between error types at boundaries
+// Convert domain errors to HTTP at the boundary — only place that throws [11]
 function toHttpError(error: AppError): HttpError {
   switch (error.type) {
-    // Validation -> 400
     case 'RequiredField':
     case 'InvalidFormat':
     case 'OutOfRange':
       return { status: 400, message: formatValidationError(error) };
-
-    // Business -> 422
     case 'InsufficientFunds':
     case 'ItemOutOfStock':
-    case 'OrderCancelled':
       return { status: 422, message: formatBusinessError(error) };
-
-    // Infrastructure -> 500/503
     case 'DatabaseError':
     case 'NetworkError':
       return { status: 503, message: 'Service temporarily unavailable' };
-    case 'TimeoutError':
-      return { status: 504, message: 'Request timed out' };
-  }
-}
-```
-
----
-
-## Resource Cleanup - Extended Patterns
-
-### Resource Pool Pattern
-
-```typescript
-// Connection pool with proper cleanup
-class ConnectionPool {
-  private connections: DbConnection[] = [];
-  private available: DbConnection[] = [];
-
-  async acquire(): Promise<DbConnection> {
-    if (this.available.length > 0) {
-      return this.available.pop()!;
-    }
-    const conn = await this.createConnection();
-    this.connections.push(conn);
-    return conn;
-  }
-
-  release(conn: DbConnection): void {
-    this.available.push(conn);
-  }
-
-  async close(): Promise<void> {
-    await Promise.all(this.connections.map(c => c.close()));
-    this.connections = [];
-    this.available = [];
-  }
-}
-
-// Usage with automatic release
-async function withConnection<T>(
-  pool: ConnectionPool,
-  fn: (conn: DbConnection) => Promise<T>
-): Promise<T> {
-  const conn = await pool.acquire();
-  try {
-    return await fn(conn);
-  } finally {
-    pool.release(conn);
-  }
-}
-```
-
-### Subscription Management
-
-```typescript
-// Subscription manager for cleanup
-class SubscriptionManager {
-  private subscriptions: Array<() => void> = [];
-
-  add(unsubscribe: () => void): void {
-    this.subscriptions.push(unsubscribe);
-  }
-
-  cleanup(): void {
-    for (const unsub of this.subscriptions) {
-      unsub();
-    }
-    this.subscriptions = [];
-  }
-}
-
-// Usage in component/service lifecycle
-class DataService {
-  private subscriptions = new SubscriptionManager();
-
-  initialize(): void {
-    this.subscriptions.add(
-      eventBus.on('user-updated', this.handleUserUpdate)
-    );
-    this.subscriptions.add(
-      socket.on('message', this.handleMessage)
-    );
-  }
-
-  dispose(): void {
-    this.subscriptions.cleanup();
   }
 }
 ```
@@ -483,7 +302,7 @@ class DataService {
 
 ## Language-Specific Patterns
 
-### Python Result Pattern
+### Python Result Pattern [17][8]
 
 ```python
 from dataclasses import dataclass
@@ -492,7 +311,7 @@ from typing import Generic, TypeVar, Union
 T = TypeVar('T')
 E = TypeVar('E')
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # Immutable by default [7]
 class Ok(Generic[T]):
     value: T
     ok: bool = True
@@ -511,10 +330,10 @@ def create_user(data: dict) -> Result[User, ValidationError]:
     return Ok(User(**data))
 ```
 
-### Go Result Pattern
+### Go Result Pattern [9]
 
 ```go
-// Using tuple returns (idiomatic Go)
+// Idiomatic Go: tuple returns express success/failure without exceptions [9]
 func CreateUser(data UserData) (*User, error) {
     if err := validate(data); err != nil {
         return nil, fmt.Errorf("validation failed: %w", err)
@@ -522,55 +341,19 @@ func CreateUser(data UserData) (*User, error) {
     user := buildUser(data)
     return &user, nil
 }
-
-// Custom Result type for complex cases
-type Result[T any] struct {
-    Value T
-    Err   error
-}
-
-func (r Result[T]) IsOk() bool {
-    return r.Err == nil
-}
-
-func Ok[T any](value T) Result[T] {
-    return Result[T]{Value: value}
-}
-
-func Fail[T any](err error) Result[T] {
-    return Result[T]{Err: err}
-}
 ```
 
-### Rust Result Pattern
+### Rust Result Pattern [8]
 
 ```rust
-use std::result::Result;
-
 #[derive(Debug)]
 enum UserError {
     ValidationFailed(String),
     NotFound(String),
-    DatabaseError(String),
 }
 
 fn create_user(data: &UserData) -> Result<User, UserError> {
     validate(data).map_err(|e| UserError::ValidationFailed(e.to_string()))?;
-
-    let user = User::from(data);
-    Ok(user)
-}
-
-// With custom error trait
-impl std::error::Error for UserError {}
-
-impl std::fmt::Display for UserError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            UserError::ValidationFailed(msg) => write!(f, "Validation failed: {}", msg),
-            UserError::NotFound(id) => write!(f, "User not found: {}", id),
-            UserError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
-        }
-    }
+    Ok(User::from(data))
 }
 ```

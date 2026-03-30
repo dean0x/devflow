@@ -1,14 +1,15 @@
-# Performance Correct Patterns
+# Performance — Correct Patterns
 
 Extended correct patterns for performance optimization. Reference from main SKILL.md.
+Citations reference `sources.md`.
 
-## Algorithmic Solutions
+## Algorithmic Solutions [5][12]
 
-### N+1 Query Solutions
+### N+1 Query Solutions [5]
 
-**ORM Eager Loading**
+**ORM Eager Loading** — single query with JOIN instead of N round-trips [5]
 ```typescript
-// CORRECT: Include related data in single query
+// CORRECT: Include related data in single query [5]
 const posts = await Post.findAll({
   include: [
     { model: User, as: 'author' },
@@ -17,9 +18,9 @@ const posts = await Post.findAll({
 });
 ```
 
-**GraphQL DataLoader**
+**GraphQL DataLoader** — batch and cache per request [5]
 ```typescript
-// CORRECT: Batch and cache with DataLoader
+// CORRECT: Batch and cache with DataLoader [5]
 const userLoader = new DataLoader(async (ids) => {
   const users = await db.users.findAll({ where: { id: ids } });
   return ids.map(id => users.find(u => u.id === id));
@@ -32,9 +33,9 @@ const resolvers = {
 };
 ```
 
-**Batch Query with Map**
+**Batch Query with Map** — O(1) lookup after single fetch [5][12]
 ```typescript
-// CORRECT: Single query, map results
+// CORRECT: Single query, O(1) map lookup per result [5][12]
 async function enrichOrders(orders: Order[]) {
   const customerIds = [...new Set(orders.map(o => o.customerId))];
   const customers = await db.customers.findByIds(customerIds);
@@ -47,20 +48,20 @@ async function enrichOrders(orders: Order[]) {
 }
 ```
 
-### Efficient Algorithm Patterns
+### Efficient Algorithm Patterns [12]
 
-**Set for Lookup**
+**Set for O(1) Lookup** — replaces O(n) array scan [12]
 ```typescript
-// CORRECT: O(n+m) instead of O(n*m)
+// CORRECT: O(n+m) instead of O(n*m) [12]
 function findCommon(list1: string[], list2: string[]) {
   const set = new Set(list2);
   return list1.filter(item => set.has(item));
 }
 ```
 
-**Map for Grouping**
+**Map for Single-Pass Grouping** [12]
 ```typescript
-// CORRECT: Single pass grouping
+// CORRECT: Single pass grouping — O(n) [12]
 function groupBy<T, K extends string>(items: T[], keyFn: (item: T) => K) {
   const groups = new Map<K, T[]>();
   for (const item of items) {
@@ -73,14 +74,14 @@ function groupBy<T, K extends string>(items: T[], keyFn: (item: T) => K) {
 }
 ```
 
-**Efficient String Building**
+**Efficient String Building** — avoid O(n²) string copies [12]
 ```typescript
-// CORRECT: Array join instead of string concat
+// CORRECT: Array join instead of string concat [12]
 function buildCsv(rows: string[][]): string {
   return rows.map(row => row.join(',')).join('\n');
 }
 
-// Or for very large data: streaming
+// For very large data: streaming — O(1) memory [12]
 function* streamCsv(rows: string[][]): Generator<string> {
   for (const row of rows) {
     yield row.join(',') + '\n';
@@ -88,9 +89,9 @@ function* streamCsv(rows: string[][]): Generator<string> {
 }
 ```
 
-**Proper Queue Implementation**
+**Proper Queue Implementation** — O(1) dequeue with circular buffer [12]
 ```typescript
-// CORRECT: O(1) dequeue with circular buffer or linked list
+// CORRECT: O(1) dequeue — no reindexing [12]
 class Queue<T> {
   private items: T[] = [];
   private head = 0;
@@ -117,13 +118,13 @@ class Queue<T> {
 
 ---
 
-## Database Solutions
+## Database Solutions [20]
 
-### Indexing Strategies
+### Indexing Strategies [20]
 
-**Composite Index for Range Queries**
+**Composite Index for Range Queries** [20]
 ```sql
--- CORRECT: Index supports both equality and range
+-- CORRECT: Index supports both equality and range [20]
 CREATE INDEX idx_orders_customer_date ON orders(customer_id, created_at DESC);
 
 -- Efficient query
@@ -133,39 +134,36 @@ ORDER BY created_at DESC
 LIMIT 10;
 ```
 
-**Covering Index**
+**Covering Index** — query satisfied from index alone [20]
 ```sql
--- CORRECT: Index includes all needed columns
+-- CORRECT: Index includes all needed columns [20]
 CREATE INDEX idx_users_status_email ON users(status) INCLUDE (email, name);
 
--- Query satisfied entirely from index
+-- Query satisfied entirely from index — no heap fetch
 SELECT email, name FROM users WHERE status = 'active';
 ```
 
-**Partial Index for Common Filters**
+**Partial Index for Common Filters** [20]
 ```sql
--- CORRECT: Index only relevant rows
+-- CORRECT: Index only relevant rows — smaller, faster [20]
 CREATE INDEX idx_orders_pending ON orders(created_at)
 WHERE status = 'pending';
-
--- Efficient for common query pattern
-SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at;
 ```
 
-### Efficient Query Patterns
+### Efficient Query Patterns [20]
 
-**Select Specific Columns**
+**Select Specific Columns** — avoids fetching unused data [20]
 ```typescript
-// CORRECT: Only fetch needed data
+// CORRECT: Only fetch needed data [20]
 const users = await db.query(
   'SELECT id, name, email FROM users WHERE status = ?',
   ['active']
 );
 ```
 
-**Cursor-Based Pagination**
+**Cursor-Based Pagination** — efficient for large datasets [20]
 ```typescript
-// CORRECT: Efficient for large datasets
+// CORRECT: Cursor pagination — O(log n) vs OFFSET O(n) [20]
 async function getOrdersPage(cursor?: string, limit = 20) {
   const query = cursor
     ? 'SELECT * FROM orders WHERE id > ? ORDER BY id LIMIT ?'
@@ -182,9 +180,9 @@ async function getOrdersPage(cursor?: string, limit = 20) {
 }
 ```
 
-**Batch Processing Large Tables**
+**Batch Processing Large Tables** [20]
 ```typescript
-// CORRECT: Process in chunks to avoid memory issues
+// CORRECT: Process in chunks to avoid memory issues [20]
 async function processAllOrders(batchSize = 1000) {
   let cursor: string | null = null;
 
@@ -198,13 +196,13 @@ async function processAllOrders(batchSize = 1000) {
 
 ---
 
-## Memory Solutions
+## Memory Solutions [4][10]
 
-### Cleanup Patterns
+### Cleanup Patterns [4]
 
-**Event Listener Cleanup**
+**Event Listener Cleanup** — track and remove on unmount [4]
 ```typescript
-// CORRECT: Track and cleanup listeners
+// CORRECT: Track and cleanup listeners [4]
 class Component {
   private cleanupFns: (() => void)[] = [];
 
@@ -221,9 +219,9 @@ class Component {
 }
 ```
 
-**AbortController for Async Cleanup**
+**AbortController for Async Cleanup** [3]
 ```typescript
-// CORRECT: Cancel pending operations
+// CORRECT: Cancel pending operations on unmount [3]
 class DataFetcher {
   private controller?: AbortController;
 
@@ -241,9 +239,9 @@ class DataFetcher {
 }
 ```
 
-**Weak References for Caches**
+**Weak References for Caches** — allow GC to reclaim entries [4]
 ```typescript
-// CORRECT: Allow GC to reclaim cached objects
+// CORRECT: WeakMap allows GC to reclaim cached objects [4]
 const cache = new WeakMap<object, ComputedResult>();
 
 function getOrCompute(key: object): ComputedResult {
@@ -256,35 +254,42 @@ function getOrCompute(key: object): ComputedResult {
 }
 ```
 
-### Allocation Optimization
+### Cache Line Awareness [4][10]
 
-**Efficient Object Accumulation**
+High-throughput code: keep hot mutable data in separate 64-byte cache lines to avoid
+false sharing between CPU cores [4][10]. The LMAX Disruptor demonstrates this with
+sequence number padding [10].
+
 ```typescript
-// CORRECT: Direct property assignment
+// CORRECT: Pad hot fields to prevent false sharing [10]
+class RingBuffer {
+  // Pad each cursor to its own cache line (64 bytes)
+  private readonly producerCursor = new Int64Array(
+    new SharedArrayBuffer(64)  // 64-byte aligned
+  );
+  private readonly consumerCursor = new Int64Array(
+    new SharedArrayBuffer(64)
+  );
+}
+```
+
+### Allocation Optimization [4][12]
+
+**Efficient Object Accumulation** — direct assignment, no spreading in hot loops [12]
+```typescript
+// CORRECT: Direct property assignment — no intermediate allocations [12]
 function indexById<T extends { id: string }>(items: T[]): Record<string, T> {
   const result: Record<string, T> = {};
   for (const item of items) {
-    result[item.id] = item;  // No spreading
+    result[item.id] = item;
   }
   return result;
 }
 ```
 
-**Pre-allocated Arrays**
+**Streaming for Large Data** — O(1) memory regardless of input size [4]
 ```typescript
-// CORRECT: Single allocation when size known
-function processItems(items: Item[]): ProcessedItem[] {
-  const results = new Array<ProcessedItem>(items.length);
-  for (let i = 0; i < items.length; i++) {
-    results[i] = process(items[i]);
-  }
-  return results;
-}
-```
-
-**Streaming for Large Data**
-```typescript
-// CORRECT: Process without loading all into memory
+// CORRECT: Process without loading all into memory [4]
 async function* readLargeFile(path: string): AsyncGenerator<string> {
   const stream = createReadStream(path);
   const rl = readline.createInterface({ input: stream });
@@ -293,22 +298,17 @@ async function* readLargeFile(path: string): AsyncGenerator<string> {
     yield line;
   }
 }
-
-// Usage
-for await (const line of readLargeFile('huge.csv')) {
-  processLine(line);  // Constant memory usage
-}
 ```
 
 ---
 
-## I/O Solutions
+## I/O Solutions [3][16]
 
-### Async Patterns
+### Async Patterns [3][16]
 
-**Async File Operations**
+**Async File Operations** — non-blocking I/O frees event loop [16]
 ```typescript
-// CORRECT: Non-blocking I/O
+// CORRECT: Non-blocking I/O [16]
 import fs from 'fs/promises';
 
 async function readConfig() {
@@ -316,9 +316,9 @@ async function readConfig() {
 }
 ```
 
-**Worker Threads for CPU-Intensive**
+**Worker Threads for CPU-Intensive Work** — offload off the event loop [16]
 ```typescript
-// CORRECT: Offload to worker
+// CORRECT: Offload CPU work to worker thread [16]
 import { Worker } from 'worker_threads';
 
 async function hashPassword(password: string): Promise<string> {
@@ -332,11 +332,11 @@ async function hashPassword(password: string): Promise<string> {
 }
 ```
 
-### Parallelism Patterns
+### Parallelism Patterns [5]
 
-**Promise.all for Independent Operations**
+**Promise.all for Independent Operations** [5]
 ```typescript
-// CORRECT: Parallel independent fetches
+// CORRECT: Parallel independent fetches — total time = max(fetches) [5]
 async function loadDashboard(userId: string) {
   const [user, orders, notifications] = await Promise.all([
     getUser(userId),
@@ -347,9 +347,9 @@ async function loadDashboard(userId: string) {
 }
 ```
 
-**Controlled Concurrency**
+**Controlled Concurrency** — avoid overwhelming downstream services [11]
 ```typescript
-// CORRECT: Limit parallel operations
+// CORRECT: Limit parallel operations — prevent overload [11]
 async function processAll(items: Item[], concurrency = 5) {
   const results: Result[] = [];
   const executing: Promise<void>[] = [];
@@ -371,30 +371,33 @@ async function processAll(items: Item[], concurrency = 5) {
 }
 ```
 
-**Promise.allSettled for Fault Tolerance**
-```typescript
-// CORRECT: Continue despite failures
-async function fetchAllWithFallback(urls: string[]) {
-  const results = await Promise.allSettled(urls.map(url => fetch(url)));
+---
 
-  return results.map((result, i) => ({
-    url: urls[i],
-    success: result.status === 'fulfilled',
-    data: result.status === 'fulfilled' ? result.value : null,
-    error: result.status === 'rejected' ? result.reason : null
-  }));
+## Frontend Solutions [6][14][15]
+
+### Core Web Vitals Optimization [6][17]
+
+**LCP Optimization** — largest visible element must load fast [6]
+```html
+<!-- CORRECT: Preload LCP image — tells browser early [6] -->
+<link rel="preload" as="image" href="/hero.webp" fetchpriority="high" />
+```
+
+**INP Optimization** — interactions must complete within 200ms [21]
+```typescript
+// CORRECT: Yield to browser between heavy tasks [21]
+async function handleClick() {
+  processFirstChunk();
+  await scheduler.yield();  // Let browser render, process input
+  processSecondChunk();
 }
 ```
 
----
+### React Optimization Patterns [15]
 
-## Frontend Solutions
-
-### React Optimization Patterns
-
-**Memoized Callbacks**
+**Memoized Callbacks** — stable function reference prevents child re-renders
 ```tsx
-// CORRECT: Stable function reference
+// CORRECT: Stable function reference [15]
 function UserList({ users, onSelect }: Props) {
   const handleSelect = useCallback((userId: string) => {
     onSelect(userId);
@@ -404,31 +407,49 @@ function UserList({ users, onSelect }: Props) {
 }
 ```
 
-**Memoized Computed Values**
+**Memoized Computed Values** [15]
 ```tsx
-// CORRECT: Only recompute when dependencies change
+// CORRECT: Only recompute when dependencies change [15]
 function Dashboard({ data }: Props) {
   const stats = useMemo(() => computeExpensiveStats(data), [data]);
   return <Stats data={stats} />;
 }
 ```
 
-**Component Memoization**
+**Virtualized Lists** — render only visible rows [14]
 ```tsx
-// CORRECT: Skip re-render if props unchanged
-const UserCard = memo(function UserCard({ user }: Props) {
+// CORRECT: Only render visible items — O(viewport) not O(n) [14]
+import { useVirtualizer } from '@tanstack/react-virtual';
+
+function VirtualList({ items }: Props) {
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 35
+  });
+
   return (
-    <div>
-      <h3>{user.name}</h3>
-      <p>{user.email}</p>
+    <div ref={parentRef} style={{ height: '400px', overflow: 'auto' }}>
+      <div style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map(virtualRow => (
+          <div
+            key={virtualRow.key}
+            style={{ position: 'absolute', top: virtualRow.start, height: virtualRow.size }}
+          >
+            {items[virtualRow.index].name}
+          </div>
+        ))}
+      </div>
     </div>
   );
-});
+}
 ```
 
-**Lazy Loading**
+**Lazy Loading for Code Splitting** [14][18]
 ```tsx
-// CORRECT: Load on demand
+// CORRECT: Load on demand — reduces initial bundle [14][18]
 const HeavyChart = lazy(() => import('./HeavyChart'));
 
 function Dashboard() {
@@ -447,57 +468,49 @@ function Dashboard() {
 }
 ```
 
-**Virtualized Lists**
-```tsx
-// CORRECT: Only render visible items
-import { useVirtualizer } from '@tanstack/react-virtual';
+---
 
-function VirtualList({ items }: Props) {
-  const parentRef = useRef<HTMLDivElement>(null);
+## Measurement Patterns [1][2][8][9]
 
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 35
-  });
+### USE Method Application [1]
 
-  return (
-    <div ref={parentRef} style={{ height: '400px', overflow: 'auto' }}>
-      <div style={{ height: virtualizer.getTotalSize() }}>
-        {virtualizer.getVirtualItems().map(virtualRow => (
-          <div
-            key={virtualRow.key}
-            style={{
-              position: 'absolute',
-              top: virtualRow.start,
-              height: virtualRow.size
-            }}
-          >
-            {items[virtualRow.index].name}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+For each system resource: CPU, memory, disk, network:
+1. **Utilization** — time resource was busy (e.g., CPU at 80%)
+2. **Saturation** — degree of queuing beyond capacity (e.g., run-queue > 0)
+3. **Errors** — error events (e.g., network retransmits)
+
+### Flame Graph Interpretation [9]
+
+Widest frames at top = hottest call paths. Optimize the widest towers, not the tallest stacks.
+
+### HDR Histogram for Latency [8]
+
+```typescript
+// CORRECT: HDR histogram captures full distribution without coordinated omission [8]
+import { Histogram } from 'hdr-histogram-js';
+
+const histogram = new Histogram(1, 3_600_000, 3);  // 1ns to 1hr, 3 sig figs
+
+function recordLatency(startNs: bigint) {
+  const latencyNs = Number(process.hrtime.bigint() - startNs);
+  histogram.recordValue(latencyNs);
 }
+
+// Report meaningful percentiles
+console.log(`P50: ${histogram.getValueAtPercentile(50)}ns`);
+console.log(`P99: ${histogram.getValueAtPercentile(99)}ns`);
+console.log(`P999: ${histogram.getValueAtPercentile(99.9)}ns`);
 ```
 
-**Debounced Input**
-```tsx
-// CORRECT: Debounce expensive operations
-function SearchInput({ onSearch }: Props) {
-  const [value, setValue] = useState('');
+### Node.js Performance Measurement [16]
 
-  const debouncedSearch = useMemo(
-    () => debounce((term: string) => onSearch(term), 300),
-    [onSearch]
-  );
+```typescript
+// CORRECT: Use performance.mark for operation timing [16]
+performance.mark('op:start');
+await doExpensiveOperation();
+performance.mark('op:end');
+performance.measure('expensive-op', 'op:start', 'op:end');
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setValue(e.target.value);
-    debouncedSearch(e.target.value);
-  };
-
-  return <input value={value} onChange={handleChange} />;
-}
+const [entry] = performance.getEntriesByName('expensive-op');
+console.log(`Duration: ${entry.duration}ms`);
 ```
