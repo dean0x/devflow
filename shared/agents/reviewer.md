@@ -26,14 +26,14 @@ The orchestrator provides:
 | `security` | `~/.claude/skills/devflow:security/SKILL.md` |
 | `architecture` | `~/.claude/skills/devflow:architecture/SKILL.md` |
 | `performance` | `~/.claude/skills/devflow:performance/SKILL.md` |
-| `complexity` | `~/.claude/skills/devflow:complexity-patterns/SKILL.md` |
-| `consistency` | `~/.claude/skills/devflow:consistency-patterns/SKILL.md` |
-| `regression` | `~/.claude/skills/devflow:regression-patterns/SKILL.md` |
-| `tests` | `~/.claude/skills/devflow:testing/SKILL.md` |
+| `complexity` | `~/.claude/skills/devflow:complexity/SKILL.md` |
+| `consistency` | `~/.claude/skills/devflow:consistency/SKILL.md` |
+| `regression` | `~/.claude/skills/devflow:regression/SKILL.md` |
+| `testing` | `~/.claude/skills/devflow:testing/SKILL.md` |
 | `typescript` | `~/.claude/skills/devflow:typescript/SKILL.md` |
-| `database` | `~/.claude/skills/devflow:database-patterns/SKILL.md` |
-| `dependencies` | `~/.claude/skills/devflow:dependencies-patterns/SKILL.md` |
-| `documentation` | `~/.claude/skills/devflow:documentation-patterns/SKILL.md` |
+| `database` | `~/.claude/skills/devflow:database/SKILL.md` |
+| `dependencies` | `~/.claude/skills/devflow:dependencies/SKILL.md` |
+| `documentation` | `~/.claude/skills/devflow:documentation/SKILL.md` |
 | `react` | `~/.claude/skills/devflow:react/SKILL.md` |
 | `accessibility` | `~/.claude/skills/devflow:accessibility/SKILL.md` |
 | `ui-design` | `~/.claude/skills/devflow:ui-design/SKILL.md` |
@@ -154,7 +154,7 @@ Report format for `{output_path}`:
 
 | Focus | Condition |
 |-------|-----------|
-| security, architecture, performance, complexity, consistency, tests, regression | Always |
+| security, architecture, performance, complexity, consistency, testing, regression | Always |
 | typescript | If .ts/.tsx files changed |
 | database | If migration/schema files changed |
 | documentation | If docs changed |

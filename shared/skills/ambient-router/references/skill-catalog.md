@@ -75,12 +75,12 @@ PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with
 These skills are always installed (universal skill installation) but loaded by agents internally at runtime, not by the ambient router. Reviewer agents load their pattern skill based on their focus area:
 
 - devflow:review-methodology — Full review process (6-step, 3-category classification)
-- devflow:complexity-patterns — Cyclomatic complexity, deep nesting analysis
-- devflow:consistency-patterns — Naming convention, pattern deviation detection
-- devflow:database-patterns — Index analysis, query optimization, migration safety
-- devflow:dependencies-patterns — CVE detection, license audit, outdated packages
-- devflow:documentation-patterns — Doc drift, stale comments, missing API docs
-- devflow:regression-patterns — Lost functionality, broken exports, behavioral changes
+- devflow:complexity — Cyclomatic complexity, deep nesting analysis
+- devflow:consistency — Naming convention, pattern deviation detection
+- devflow:database — Index analysis, query optimization, migration safety
+- devflow:dependencies — CVE detection, license audit, outdated packages
+- devflow:documentation — Doc drift, stale comments, missing API docs
+- devflow:regression — Lost functionality, broken exports, behavioral changes
 - devflow:architecture — SOLID analysis, coupling detection, layering issues
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - devflow:performance — N+1 queries, memory leaks, caching opportunities

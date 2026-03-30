@@ -108,12 +108,12 @@ This methodology is used by the **Reviewer** agent with different focus areas:
 | `performance` | devflow:performance |
 | `architecture` | devflow:architecture |
 | `testing` | devflow:testing |
-| `consistency` | devflow:consistency-patterns |
-| `complexity` | devflow:complexity-patterns |
-| `regression` | devflow:regression-patterns |
-| `dependencies` | devflow:dependencies-patterns |
-| `documentation` | devflow:documentation-patterns |
+| `consistency` | devflow:consistency |
+| `complexity` | devflow:complexity |
+| `regression` | devflow:regression |
+| `dependencies` | devflow:dependencies |
+| `documentation` | devflow:documentation |
 | `typescript` | devflow:typescript |
-| `database` | devflow:database-patterns |
+| `database` | devflow:database |
 
 The Reviewer agent loads all pattern skills and applies the relevant one based on the focus area specified in its invocation prompt.

@@ -92,7 +92,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 - **Security**: vulnerabilities, injection, auth, crypto issues
 - **Architecture**: SOLID violations, coupling, layering, modularity
 - **Performance**: queries, algorithms, caching, I/O bottlenecks
-- **Quality**: complexity, tests, consistency, regression, naming
+- **Quality**: complexity, testing, consistency, regression, naming
 
 **Conditional perspectives (based on changed files):**
 - **TypeScript**: type safety, generics, utility types (if .ts/.tsx changed)
@@ -162,10 +162,10 @@ Spawn review teammates with self-contained prompts:
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
     1. Read your skills:
-       - `Read ~/.claude/skills/devflow:complexity-patterns/SKILL.md`
-       - `Read ~/.claude/skills/devflow:consistency-patterns/SKILL.md`
+       - `Read ~/.claude/skills/devflow:complexity/SKILL.md`
+       - `Read ~/.claude/skills/devflow:consistency/SKILL.md`
        - `Read ~/.claude/skills/devflow:testing/SKILL.md`
-       - `Read ~/.claude/skills/devflow:regression-patterns/SKILL.md`
+       - `Read ~/.claude/skills/devflow:regression/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`

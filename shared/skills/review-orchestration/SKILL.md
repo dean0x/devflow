@@ -63,7 +63,7 @@ Detect conditional reviewers from file types:
 Spawn all reviewers in a single message (parallel execution):
 
 **7 core reviewers** (always):
-- security, architecture, performance, complexity, consistency, tests, regression
+- security, architecture, performance, complexity, consistency, testing, regression
 
 **Conditional reviewers** (from Phase 3 file analysis):
 - typescript, react, database, dependencies, documentation, go, java, python, rust, accessibility, ui-design

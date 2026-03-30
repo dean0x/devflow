@@ -91,10 +91,10 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | security | ✓ | devflow:security |
 | architecture | ✓ | devflow:architecture |
 | performance | ✓ | devflow:performance |
-| complexity | ✓ | devflow:complexity-patterns |
-| consistency | ✓ | devflow:consistency-patterns |
-| regression | ✓ | devflow:regression-patterns |
-| tests | ✓ | devflow:testing |
+| complexity | ✓ | devflow:complexity |
+| consistency | ✓ | devflow:consistency |
+| regression | ✓ | devflow:regression |
+| testing | ✓ | devflow:testing |
 | typescript | conditional | devflow:typescript |
 | react | conditional | devflow:react |
 | accessibility | conditional | devflow:accessibility |
@@ -103,9 +103,9 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | java | conditional | devflow:java |
 | python | conditional | devflow:python |
 | rust | conditional | devflow:rust |
-| database | conditional | devflow:database-patterns |
-| dependencies | conditional | devflow:dependencies-patterns |
-| documentation | conditional | devflow:documentation-patterns |
+| database | conditional | devflow:database |
+| dependencies | conditional | devflow:dependencies |
+| documentation | conditional | devflow:documentation |
 
 Each Reviewer invocation (all in one message, **NOT background**):
 ```
@@ -190,7 +190,7 @@ Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
 │  ├─ Phase 2: Reviews (PARALLEL within worktree)
 │  │  ├─ Reviewer: security
 │  │  ├─ Reviewer: architecture, performance, complexity
-│  │  ├─ Reviewer: consistency, regression, tests
+│  │  ├─ Reviewer: consistency, regression, testing
 │  │  └─ Reviewer: [conditional]
 │  │
 │  ├─ Phase 3: Synthesis (PARALLEL within worktree)

@@ -33,13 +33,13 @@ Domain expertise for Reviewer agent focus areas. Loaded dynamically based on rev
 | `security` | Injection, auth, crypto, OWASP vulnerabilities | `security` |
 | `architecture` | SOLID violations, coupling, layering, modularity | `architecture` |
 | `performance` | Algorithms, N+1, memory, I/O, caching | `performance` |
-| `complexity-patterns` | Cyclomatic complexity, readability, maintainability | `complexity` |
-| `consistency-patterns` | Pattern violations, simplification, truncation | `consistency` |
-| `testing` | Coverage, quality, brittle tests, mocking, test design | `tests` |
-| `database-patterns` | Schema, queries, migrations, indexes | `database` |
-| `documentation-patterns` | Docs quality, alignment, code-comment drift | `documentation` |
-| `dependencies-patterns` | CVEs, versions, licenses, supply chain | `dependencies` |
-| `regression-patterns` | Lost functionality, broken behavior, migrations | `regression` |
+| `complexity` | Cyclomatic complexity, readability, maintainability | `complexity` |
+| `consistency` | Pattern violations, simplification, truncation | `consistency` |
+| `testing` | Coverage, quality, brittle tests, mocking, test design | `testing` |
+| `database` | Schema, queries, migrations, indexes | `database` |
+| `documentation` | Docs quality, alignment, code-comment drift | `documentation` |
+| `dependencies` | CVEs, versions, licenses, supply chain | `dependencies` |
+| `regression` | Lost functionality, broken behavior, migrations | `regression` |
 
 ### Tier 2: Specialized Skills
 
@@ -71,7 +71,7 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 Skills activate through two guaranteed mechanisms:
 
 1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
-2. **Reviewer dynamic read** — The Reviewer agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=tests` → `testing/SKILL.md`).
+2. **Reviewer dynamic read** — The Reviewer agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
 
 Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
 

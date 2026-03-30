@@ -792,9 +792,8 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
     for (const skill of manifest.skills ?? []) {
       if (NON_FOCUS_SKILLS.has(skill)) continue;
 
-      // Strip -patterns suffix to get the focus area name used in the table
-      // e.g. security-patterns → security, testing → tests (special case)
-      const focusName = skill === 'testing' ? 'tests' : skill.replace(/-patterns$/, '');
+      // Focus name equals the skill name directly — all skills match focus 1:1
+      const focusName = skill;
 
       // The reviewer Focus Areas table should mention this focus name
       expect(
