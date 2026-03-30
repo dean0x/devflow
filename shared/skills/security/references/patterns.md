@@ -1,19 +1,19 @@
-# Security Correct Patterns
+# Security — Correct Patterns
 
-Extended correct patterns for security implementation. Reference from main SKILL.md.
+Extended correct patterns for security implementation with literature citations.
 
 ## Injection Prevention
 
-### SQL Injection Prevention
+### SQL Injection Prevention [1][6]
 ```typescript
-// SECURE: Parameterized queries
+// SECURE: Parameterized queries — never interpolate user data [6]
 const user = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
 const result = await db.query('SELECT * FROM products WHERE name LIKE $1', [`%${search}%`]);
 ```
 
-### NoSQL Injection Prevention
+### NoSQL Injection Prevention [1][6]
 ```typescript
-// SECURE: Coerce to string
+// SECURE: Coerce to string — reject operator objects
 const username = String(req.body.username);
 const user = await db.users.findOne({ username });
 
@@ -22,28 +22,22 @@ const escaped = userInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 db.users.find({ name: { $regex: escaped } });
 ```
 
-### Command Injection Prevention
+### Command Injection Prevention [6][9]
 ```typescript
-// SECURE: Use execFile with arguments array
-execFile('ls', [userInput]);  // Arguments are escaped
+// SECURE: Use execFile with arguments array — OS escapes args [9]
+execFile('ls', [userInput]);
 spawn('convert', [filename, 'output.png']);
 
-// SECURE: Validate input format
+// SECURE: Validate input format before use
 const hostnamePattern = /^[a-zA-Z0-9.-]+$/;
-if (!hostnamePattern.test(hostname)) {
-  throw new Error('Invalid hostname');
-}
-const args = ['-c', '4', hostname];
-spawn('ping', args);
+if (!hostnamePattern.test(hostname)) throw new Error('Invalid hostname');
+spawn('ping', ['-c', '4', hostname]);
 ```
 
-### Path Traversal Prevention
+### Path Traversal Prevention [1][6]
 ```typescript
-// SECURE: Normalize and validate path
-const file = path.basename(req.params.filename);  // Strip directory
-const requestedPath = path.normalize(
-  path.join('./uploads', path.basename(req.params.filename))
-);
+// SECURE: Normalize and validate path stays within upload dir
+const requestedPath = path.normalize(path.join('./uploads', path.basename(req.params.filename)));
 const absoluteUploads = path.resolve('./uploads');
 const absoluteRequested = path.resolve(requestedPath);
 
@@ -53,7 +47,7 @@ if (!absoluteRequested.startsWith(absoluteUploads + path.sep)) {
 fs.readFile(absoluteRequested);
 ```
 
-### LDAP Injection Prevention
+### LDAP Injection Prevention [6][9]
 ```typescript
 // SECURE: Escape LDAP special characters
 function escapeLDAP(str: string): string {
@@ -63,445 +57,215 @@ const filter = `(uid=${escapeLDAP(username)})`;
 ldap.search(baseDN, filter);
 ```
 
-### Template Injection Prevention
+### Template Injection Prevention [1][20]
 ```typescript
-// SECURE: Never build templates from user input
+// SECURE: Never build templates from user input — pass data as context only
 const template = 'Hello <%= name %>!';
 ejs.render(template, { name: req.body.name });
-```
-
-### Header Injection Prevention
-```typescript
-// SECURE: Validate or encode header values
-const safeInput = encodeURIComponent(userInput);
-res.setHeader('Location', `/user/${safeInput}`);
 ```
 
 ---
 
 ## Authentication Patterns
 
-### Password Validation
+### Password Validation [2][7]
 ```typescript
 import { z } from 'zod';
 
+// NIST 800-63 minimum: 15-char passphrase or 12-char with complexity [7]
 const PasswordSchema = z.string()
   .min(12, 'Password must be at least 12 characters')
-  .max(128, 'Password cannot exceed 128 characters')
-  .regex(/[A-Z]/, 'Password must contain uppercase letter')
-  .regex(/[a-z]/, 'Password must contain lowercase letter')
-  .regex(/[0-9]/, 'Password must contain number')
-  .regex(/[^A-Za-z0-9]/, 'Password must contain special character');
-
-// Check against breach databases
-import { pwnedPassword } from 'hibp';
+  .max(128)
+  .regex(/[A-Z]/).regex(/[a-z]/).regex(/[0-9]/).regex(/[^A-Za-z0-9]/);
 
 async function validatePassword(password: string): Promise<Result<void, Error>> {
   const schemaResult = PasswordSchema.safeParse(password);
   if (!schemaResult.success) {
     return { ok: false, error: new Error(schemaResult.error.message) };
   }
-
+  // Check against breach databases (HaveIBeenPwned) [7]
   const breachCount = await pwnedPassword(password);
-  if (breachCount > 0) {
-    return { ok: false, error: new Error('Password found in breach database') };
-  }
-
+  if (breachCount > 0) return { ok: false, error: new Error('Password found in breach database') };
   return { ok: true, value: undefined };
 }
 ```
 
-### Secure Session Management
+### Secure Session Management [4][7]
 ```typescript
-// SECURE: httpOnly cookie with secure flags
+// SECURE: httpOnly + Secure + SameSite cookie [4][16]
 res.cookie('session', token, {
   httpOnly: true,
   secure: true,
-  sameSite: 'strict',
-  maxAge: 3600000  // 1 hour
+  sameSite: 'strict',  // CSRF prevention [16]
+  maxAge: 3600000      // 1 hour
 });
 
-// Cryptographically random session ID
-const sessionId = crypto.randomBytes(32).toString('hex');
-
-// Session rotation on privilege change
+// Rotate session ID on privilege change to prevent session fixation [4][7]
 async function login(userId: string, res: Response): Promise<void> {
   const newSessionId = crypto.randomBytes(32).toString('hex');
-
-  // Invalidate old session
   await sessionStore.destroy(req.sessionID);
-
-  // Create new session with new ID
-  await sessionStore.create(newSessionId, {
-    userId,
-    createdAt: Date.now(),
-    lastAccess: Date.now()
-  });
-
-  res.cookie('session', newSessionId, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'strict',
-    maxAge: 3600000
-  });
-}
-
-// Session timeout with sliding window
-async function validateSession(sessionId: string): Promise<Result<Session, Error>> {
-  const session = await sessionStore.get(sessionId);
-
-  if (!session) {
-    return { ok: false, error: new Error('Session not found') };
-  }
-
-  const MAX_IDLE_TIME = 30 * 60 * 1000; // 30 minutes
-  const MAX_SESSION_AGE = 24 * 60 * 60 * 1000; // 24 hours
-
-  const now = Date.now();
-
-  if (now - session.lastAccess > MAX_IDLE_TIME) {
-    await sessionStore.destroy(sessionId);
-    return { ok: false, error: new Error('Session expired (idle)') };
-  }
-
-  if (now - session.createdAt > MAX_SESSION_AGE) {
-    await sessionStore.destroy(sessionId);
-    return { ok: false, error: new Error('Session expired (max age)') };
-  }
-
-  // Update last access for sliding window
-  await sessionStore.update(sessionId, { lastAccess: now });
-
-  return { ok: true, value: session };
+  await sessionStore.create(newSessionId, { userId, createdAt: Date.now(), lastAccess: Date.now() });
+  res.cookie('session', newSessionId, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 3600000 });
 }
 ```
 
-### Secure JWT Handling
+### Secure JWT Handling [17]
 ```typescript
-// SECURE: Proper JWT configuration
+// SECURE: Explicit algorithm, expiry, issuer — RFC 8725 requirements [17]
 jwt.sign(payload, process.env.JWT_SECRET, {
-  algorithm: 'HS256',
+  algorithm: 'HS256',  // pin algorithm — prevents "none" and RS→HS confusion [17]
   expiresIn: '15m',
   issuer: 'myapp'
 });
 
 jwt.verify(token, secret, {
-  algorithms: ['HS256'],  // Explicitly specify
+  algorithms: ['HS256'],  // allowlist — block algorithm substitution [17]
   issuer: 'myapp'
 });
 
-// Refresh token pattern
-interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
-}
-
+// Refresh token rotation — store JTI for revocation [17]
 async function createTokenPair(userId: string): Promise<TokenPair> {
-  const accessToken = jwt.sign(
-    { userId, type: 'access' },
-    process.env.JWT_ACCESS_SECRET,
-    { algorithm: 'HS256', expiresIn: '15m' }
-  );
-
+  const accessToken = jwt.sign({ userId, type: 'access' }, process.env.JWT_ACCESS_SECRET,
+    { algorithm: 'HS256', expiresIn: '15m' });
   const refreshToken = jwt.sign(
     { userId, type: 'refresh', jti: crypto.randomUUID() },
-    process.env.JWT_REFRESH_SECRET,
-    { algorithm: 'HS256', expiresIn: '7d' }
-  );
-
+    process.env.JWT_REFRESH_SECRET, { algorithm: 'HS256', expiresIn: '7d' });
   // Store refresh token hash for revocation
-  await tokenStore.save({
-    jti: jwt.decode(refreshToken).jti,
-    userId,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-  });
-
+  await tokenStore.save({ jti: jwt.decode(refreshToken).jti, userId,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) });
   return { accessToken, refreshToken };
-}
-
-async function refreshTokens(refreshToken: string): Promise<Result<TokenPair, Error>> {
-  try {
-    const payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET, {
-      algorithms: ['HS256']
-    });
-
-    // Check if token is revoked
-    const stored = await tokenStore.find(payload.jti);
-    if (!stored) {
-      return { ok: false, error: new Error('Token revoked') };
-    }
-
-    // Revoke old refresh token
-    await tokenStore.delete(payload.jti);
-
-    // Issue new token pair
-    return { ok: true, value: await createTokenPair(payload.userId) };
-  } catch (error) {
-    return { ok: false, error: error as Error };
-  }
 }
 ```
 
-### Authorization Patterns
+### Authorization Patterns [2][4]
 ```typescript
-// SECURE: Layered auth middleware
-app.delete('/api/users/:id',
-  requireAuth,
-  requireRole('admin'),
-  async (req, res) => {
-    await deleteUser(req.params.id);
-  }
-);
-
-// Role-Based Access Control (RBAC)
+// RBAC: Role-Based Access Control [4]
 type Permission = 'read' | 'write' | 'delete' | 'admin';
-
-interface Role {
-  name: string;
-  permissions: Permission[];
-}
-
-const ROLES: Record<string, Role> = {
-  viewer: { name: 'viewer', permissions: ['read'] },
-  editor: { name: 'editor', permissions: ['read', 'write'] },
-  admin: { name: 'admin', permissions: ['read', 'write', 'delete', 'admin'] }
+const ROLES: Record<string, Permission[]> = {
+  viewer: ['read'],
+  editor: ['read', 'write'],
+  admin: ['read', 'write', 'delete', 'admin']
 };
 
 function requirePermission(...required: Permission[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const userRole = ROLES[req.user.role];
-
-    if (!userRole) {
-      return res.status(403).json({ error: 'Invalid role' });
-    }
-
-    const hasAll = required.every(p => userRole.permissions.includes(p));
-
-    if (!hasAll) {
+    const userPerms = ROLES[req.user.role] ?? [];
+    if (!required.every(p => userPerms.includes(p))) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
-
     next();
   };
 }
 
-// Usage
-app.delete('/api/posts/:id', requireAuth, requirePermission('delete'), handler);
-
-// Attribute-Based Access Control (ABAC)
-interface AccessPolicy {
-  resource: string;
-  action: string;
-  conditions: (user: User, resource: Resource) => boolean;
-}
-
-const policies: AccessPolicy[] = [
-  {
-    resource: 'post',
-    action: 'delete',
-    conditions: (user, post) =>
-      user.role === 'admin' || post.authorId === user.id
-  },
-  {
-    resource: 'comment',
-    action: 'edit',
-    conditions: (user, comment) =>
-      comment.authorId === user.id &&
-      Date.now() - comment.createdAt < 15 * 60 * 1000 // 15 min window
-  }
+// ABAC: Attribute-Based Access Control for ownership checks [2]
+const policies = [
+  { resource: 'post', action: 'delete',
+    check: (user: User, post: Post) => user.role === 'admin' || post.authorId === user.id }
 ];
-
-function checkAccess(user: User, resource: Resource, action: string): boolean {
-  const policy = policies.find(
-    p => p.resource === resource.type && p.action === action
-  );
-
-  if (!policy) {
-    return false; // Deny by default
-  }
-
-  return policy.conditions(user, resource);
-}
 ```
 
 ---
 
 ## Cryptography Patterns
 
-### Secret Management
+### Secret Management [4][8]
 ```typescript
-// SECURE: Environment variables with validation
-import { z } from 'zod';
-
+// SECURE: Validate secrets schema at startup — fail fast [8]
 const SecretsSchema = z.object({
   DB_PASSWORD: z.string().min(20),
-  API_KEY: z.string().regex(/^sk-(live|test)-[a-zA-Z0-9]{32}$/),
   JWT_SECRET: z.string().min(64),
-  ENCRYPTION_KEY: z.string().length(64) // 32 bytes hex-encoded
+  ENCRYPTION_KEY: z.string().length(64)
 });
 
 function loadSecrets(): Result<Secrets, Error> {
   const result = SecretsSchema.safeParse(process.env);
-  if (!result.success) {
-    return { ok: false, error: new Error('Invalid secrets configuration') };
-  }
+  if (!result.success) return { ok: false, error: new Error('Invalid secrets configuration') };
   return { ok: true, value: result.data };
-}
-
-// AWS Secrets Manager
-import { SecretsManager } from '@aws-sdk/client-secrets-manager';
-
-async function getSecret(secretId: string): Promise<Result<string, Error>> {
-  const client = new SecretsManager({ region: 'us-east-1' });
-
-  try {
-    const response = await client.getSecretValue({ SecretId: secretId });
-    if (!response.SecretString) {
-      return { ok: false, error: new Error('Secret not found') };
-    }
-    return { ok: true, value: response.SecretString };
-  } catch (error) {
-    return { ok: false, error: error as Error };
-  }
 }
 ```
 
-### Password Hashing
+### Password Hashing [24]
 ```typescript
-// SECURE: Argon2id (recommended)
+// SECURE: Argon2id — PHC winner, memory-hard, side-channel resistant [24]
 import argon2 from 'argon2';
 
 async function hashPassword(password: string): Promise<string> {
   return argon2.hash(password, {
     type: argon2.argon2id,
     memoryCost: 65536,  // 64 MB
-    timeCost: 3,        // 3 iterations
-    parallelism: 4      // 4 parallel threads
+    timeCost: 3,
+    parallelism: 4
   });
 }
 
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return argon2.verify(hash, password);
-}
-
-// SECURE: bcrypt (widely supported)
+// SECURE: bcrypt cost ≥12 — widely supported alternative [24]
 import bcrypt from 'bcrypt';
-
-async function hashPassword(password: string): Promise<string> {
-  const COST_FACTOR = 12; // Minimum for production
-  return bcrypt.hash(password, COST_FACTOR);
+async function hashPasswordBcrypt(password: string): Promise<string> {
+  return bcrypt.hash(password, 12);
 }
 ```
 
-### Key Derivation
+### Authenticated Encryption [25]
 ```typescript
-// SECURE: Derive key using scrypt
-async function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    crypto.scrypt(password, salt, 32, (err, key) => {
-      if (err) reject(err);
-      else resolve(key);
-    });
-  });
-}
-
-// Usage
-const salt = crypto.randomBytes(16);
-const key = await deriveKey(password, salt);
-const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-```
-
-### Secure Random Generation
-```typescript
-// SECURE: Cryptographic random
-const token = crypto.randomBytes(32).toString('hex');
-const id = crypto.randomUUID();
-const code = crypto.randomInt(100000, 1000000);
-
-// Secure token generation
-function generateToken(bytes: number = 32): string {
-  return crypto.randomBytes(bytes).toString('hex');
-}
-
-// Secure numeric code (e.g., 2FA)
-function generateOTP(digits: number = 6): string {
-  const max = Math.pow(10, digits);
-  const min = Math.pow(10, digits - 1);
-  return crypto.randomInt(min, max).toString();
-}
-
-// Secure API key generation
-function generateApiKey(): string {
-  const prefix = 'sk';
-  const env = process.env.NODE_ENV === 'production' ? 'live' : 'test';
-  const random = crypto.randomBytes(24).toString('base64url');
-  return `${prefix}_${env}_${random}`;
-}
-
-// Secure password reset token
-function generateResetToken(): { token: string; hash: string; expires: Date } {
-  const token = crypto.randomBytes(32).toString('hex');
-  const hash = crypto.createHash('sha256').update(token).digest('hex');
-  const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
-  return { token, hash, expires };
-}
-```
-
-### Authenticated Encryption
-```typescript
-// SECURE: AES-256-GCM (authenticated encryption)
-interface EncryptedData {
-  ciphertext: string;
-  iv: string;
-  authTag: string;
-}
-
+// SECURE: AES-256-GCM — authenticated encryption prevents tampering [25]
 function encrypt(plaintext: string, key: Buffer): EncryptedData {
-  const iv = crypto.randomBytes(12); // 96-bit IV for GCM
+  const iv = crypto.randomBytes(12);  // 96-bit IV for GCM
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-
   let ciphertext = cipher.update(plaintext, 'utf8', 'hex');
   ciphertext += cipher.final('hex');
-
-  const authTag = cipher.getAuthTag();
-
-  return {
-    ciphertext,
-    iv: iv.toString('hex'),
-    authTag: authTag.toString('hex')
-  };
-}
-
-function decrypt(data: EncryptedData, key: Buffer): string {
-  const decipher = crypto.createDecipheriv(
-    'aes-256-gcm',
-    key,
-    Buffer.from(data.iv, 'hex')
-  );
-
-  decipher.setAuthTag(Buffer.from(data.authTag, 'hex'));
-
-  let plaintext = decipher.update(data.ciphertext, 'hex', 'utf8');
-  plaintext += decipher.final('utf8');
-
-  return plaintext;
+  return { ciphertext, iv: iv.toString('hex'), authTag: cipher.getAuthTag().toString('hex') };
 }
 ```
 
-### Timing-Safe Comparison
+### Timing-Safe Comparison [25]
 ```typescript
-// SECURE: Constant-time comparison
+// SECURE: Constant-time comparison — prevents timing oracle attacks [25]
 import { timingSafeEqual } from 'crypto';
 
 function verifyToken(provided: string, stored: string): boolean {
-  if (provided.length !== stored.length) {
-    return false;
-  }
-
-  return timingSafeEqual(
-    Buffer.from(provided),
-    Buffer.from(stored)
-  );
+  if (provided.length !== stored.length) return false;
+  return timingSafeEqual(Buffer.from(provided), Buffer.from(stored));
 }
+```
+
+### Secure Random Generation [25]
+```typescript
+const token = crypto.randomBytes(32).toString('hex');  // session tokens
+const id = crypto.randomUUID();                        // IDs
+const code = crypto.randomInt(100000, 1000000);        // OTP codes
+```
+
+---
+
+## Headers & CSP [10][15]
+
+```typescript
+// Content-Security-Policy: nonce-based CSP preferred over unsafe-inline [15]
+const nonce = crypto.randomBytes(16).toString('base64');
+res.setHeader('Content-Security-Policy',
+  `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self'`);
+
+// HSTS: preload after testing [10]
+res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+res.setHeader('X-Content-Type-Options', 'nosniff');
+res.setHeader('X-Frame-Options', 'DENY');
+res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+```
+
+## Subresource Integrity (SRI) [18]
+```html
+<!-- SECURE: Verify CDN assets by hash — prevents CDN compromise [18] -->
+<script src="https://cdn.example.com/lib.js"
+  integrity="sha384-ABC123..." crossorigin="anonymous"></script>
+```
+
+## Supply Chain [12][13]
+```bash
+# Pin exact versions
+npm install --save-exact lodash@4.17.21
+
+# Generate provenance with Sigstore in CI [13]
+cosign sign --key cosign.key artifact.tar.gz
+
+# SLSA Level 2+: hermetic build with provenance attestation [12]
 ```

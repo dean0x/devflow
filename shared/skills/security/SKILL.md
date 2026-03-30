@@ -85,35 +85,31 @@ Sigstore/SLSA provenance in CI/CD to verify artifact integrity [12][13].
 
 | Reference | Content |
 |-----------|---------|
-| `references/injection.md` | NoSQL, command, path traversal, LDAP, template injection |
-| `references/auth.md` | Password policy, session management, JWT, RBAC/ABAC |
-| `references/crypto.md` | Secret management, weak crypto, encryption, timing attacks |
-| `references/detection.md` | All grep patterns for automated scanning |
-
----
+| `references/sources.md` | Full bibliography (25 sources) |
+| `references/patterns.md` | Correct patterns with citations |
+| `references/violations.md` | Violation examples with citations |
+| `references/detection.md` | Grep patterns for automated scanning |
 
 ## Severity Guidelines
 
 | Level | Criteria | Examples |
 |-------|----------|----------|
 | **CRITICAL** | Immediate exploitation | SQL injection in auth, RCE, hardcoded admin creds |
-| **HIGH** | Significant risk | XSS, broken access control, weak crypto, CSRF |
-| **MEDIUM** | Moderate with conditions | Missing headers, permissive CORS, missing rate limits |
-| **LOW** | Minor improvement | Outdated deps (no CVE), suboptimal CSP |
+| **HIGH** | Significant risk | XSS [1], broken access control, weak crypto, CSRF [16] |
+| **MEDIUM** | Moderate with conditions | Missing headers [10], permissive CORS, missing rate limits [11] |
+| **LOW** | Minor improvement | Outdated deps (no CVE), suboptimal CSP [15] |
 
----
-
-## OWASP Reference
+## OWASP Top 10 Reference [1]
 
 | ID | Category | Examples |
 |----|----------|----------|
 | A01 | Broken Access Control | Missing auth, IDOR, privilege escalation |
-| A02 | Cryptographic Failures | Weak hashing, hardcoded secrets |
-| A03 | Injection | SQL, NoSQL, command, XSS |
-| A04 | Insecure Design | Missing rate limits, mass assignment |
-| A05 | Security Misconfiguration | Debug enabled, missing headers |
-| A06 | Vulnerable Components | Outdated deps with known CVEs |
-| A07 | Auth Failures | Weak passwords, session issues |
-| A08 | Data Integrity Failures | Untrusted deserialization |
-| A09 | Logging Failures | Missing security logs |
-| A10 | SSRF | Unvalidated URLs in server requests |
+| A02 | Cryptographic Failures | Weak hashing [24], hardcoded secrets |
+| A03 | Injection | SQL, NoSQL, command, XSS [6] |
+| A04 | Insecure Design | Missing rate limits, mass assignment [11] |
+| A05 | Security Misconfiguration | Debug enabled, missing headers [10][15] |
+| A06 | Vulnerable Components | Outdated deps, supply chain risks [12] |
+| A07 | Auth Failures | Weak passwords [7], session issues, JWT misuse [17] |
+| A08 | Data Integrity Failures | Untrusted deserialization, no SRI [18] |
+| A09 | Logging Failures | Missing security event logs [8] |
+| A10 | SSRF | Unvalidated URLs in server requests [11] |
