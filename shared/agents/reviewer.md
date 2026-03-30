@@ -29,7 +29,7 @@ The orchestrator provides:
 | `complexity` | `~/.claude/skills/devflow:complexity-patterns/SKILL.md` |
 | `consistency` | `~/.claude/skills/devflow:consistency-patterns/SKILL.md` |
 | `regression` | `~/.claude/skills/devflow:regression-patterns/SKILL.md` |
-| `testing` | `~/.claude/skills/devflow:testing/SKILL.md` |
+| `tests` | `~/.claude/skills/devflow:testing/SKILL.md` |
 | `typescript` | `~/.claude/skills/devflow:typescript/SKILL.md` |
 | `database` | `~/.claude/skills/devflow:database-patterns/SKILL.md` |
 | `dependencies` | `~/.claude/skills/devflow:dependencies-patterns/SKILL.md` |
@@ -154,7 +154,7 @@ Report format for `{output_path}`:
 
 | Focus | Condition |
 |-------|-----------|
-| security, architecture, performance, complexity, consistency, testing, regression | Always |
+| security, architecture, performance, complexity, consistency, tests, regression | Always |
 | typescript | If .ts/.tsx files changed |
 | database | If migration/schema files changed |
 | documentation | If docs changed |

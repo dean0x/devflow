@@ -606,7 +606,7 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
 
       // Strip -patterns suffix to get the focus area name used in the table
       // e.g. security-patterns → security, test-patterns → tests (special case)
-      const focusName = skill === 'test-patterns' ? 'tests' : skill.replace(/-patterns$/, '');
+      const focusName = skill === 'testing' ? 'tests' : skill.replace(/-patterns$/, '');
 
       // The reviewer Focus Areas table should mention this focus name
       expect(
