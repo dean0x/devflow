@@ -24,7 +24,7 @@
     "agent-teams",
     "implementation-patterns",
     "knowledge-persistence",
-    "security-patterns",
+    "security",
     "worktree-support"
   ]
 }

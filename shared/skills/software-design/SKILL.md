@@ -1,5 +1,5 @@
 ---
-name: core-patterns
+name: software-design
 description: This skill should be used when the user asks to "handle errors", "inject dependencies", "return Result", "make it immutable", "compose with pipes", or implements business logic, error handling, or service composition. Provides Result type patterns, dependency injection, immutability by default, pipe composition, and structured logging for robust application architecture.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, AskUserQuestion

@@ -1,5 +1,5 @@
 ---
-name: security-patterns
+name: security
 description: This skill should be used when reviewing code for injection flaws, auth bypasses, or hardcoded secrets.
 user-invocable: false
 allowed-tools: Read, Grep, Glob

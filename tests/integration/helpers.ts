@@ -20,10 +20,10 @@ const AMBIENT_PREAMBLE =
   `AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review: load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture: load skills+agents. Prefer GUIDED for code changes.
 GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
 IMPLEMENT → devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first
-DEBUG → devflow:core-patterns, devflow:test-patterns
-REVIEW → devflow:self-review, devflow:core-patterns
-PLAN → devflow:implementation-patterns, devflow:core-patterns
-Also add if file type matches: devflow:typescript, devflow:react, devflow:go, devflow:java, devflow:python, devflow:rust, devflow:input-validation, devflow:security-patterns, devflow:frontend-design
+DEBUG → devflow:software-design, devflow:testing
+REVIEW → devflow:self-review, devflow:software-design
+PLAN → devflow:implementation-patterns, devflow:software-design
+Also add if file type matches: devflow:typescript, devflow:react, devflow:go, devflow:java, devflow:python, devflow:rust, devflow:boundary-validation, devflow:security, devflow:ui-design
 ORCHESTRATED also add: devflow:implementation-orchestration / devflow:debug-orchestration / devflow:plan-orchestration
 State: Ambient: INTENT/DEPTH. Loading: skills. Then proceed.`;
 

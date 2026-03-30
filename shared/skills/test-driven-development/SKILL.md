@@ -122,7 +122,7 @@ When implementing any feature under ambient IMPLEMENT/GUIDED or IMPLEMENT/ORCHES
 - **QUICK depth** — Ambient classified as QUICK (chat, exploration, trivial edits)
 - **Non-code tasks** — Documentation, configuration, CI changes
 - **Exploratory prototyping** — User explicitly says "just spike this" or "prototype"
-- **Existing test suite changes** — Modifying tests themselves (devflow:test-patterns skill applies instead)
+- **Existing test suite changes** — Modifying tests themselves (devflow:testing skill applies instead)
 
 When skipping TDD, never rationalize. State clearly: "Skipping TDD because: [specific reason from list above]."
 

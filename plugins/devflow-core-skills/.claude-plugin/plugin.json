@@ -18,14 +18,14 @@
   ],
   "agents": [],
   "skills": [
-    "core-patterns",
+    "software-design",
     "docs-framework",
     "git-safety",
     "git-workflow",
     "github-patterns",
-    "input-validation",
+    "boundary-validation",
     "search-first",
     "test-driven-development",
-    "test-patterns"
+    "testing"
   ]
 }

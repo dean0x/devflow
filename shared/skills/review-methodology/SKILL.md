@@ -104,10 +104,10 @@ This methodology is used by the **Reviewer** agent with different focus areas:
 
 | Focus | Pattern Skill |
 |-------|---------------|
-| `security` | devflow:security-patterns |
-| `performance` | devflow:performance-patterns |
-| `architecture` | devflow:architecture-patterns |
-| `tests` | devflow:test-patterns |
+| `security` | devflow:security |
+| `performance` | devflow:performance |
+| `architecture` | devflow:architecture |
+| `testing` | devflow:testing |
 | `consistency` | devflow:consistency-patterns |
 | `complexity` | devflow:complexity-patterns |
 | `regression` | devflow:regression-patterns |

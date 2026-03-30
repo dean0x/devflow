@@ -73,23 +73,23 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:frontend-design (CSS/UI), devflow:input-validation (forms/API), devflow:security-patterns (auth/crypto) |
-| **DEBUG** | devflow:core-patterns, devflow:test-patterns | devflow:git-safety (if git operations involved) |
-| **PLAN** | devflow:implementation-patterns, devflow:core-patterns | — |
-| **REVIEW** | devflow:self-review, devflow:core-patterns | devflow:test-patterns |
+| **IMPLEMENT** | devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
+| **DEBUG** | devflow:software-design, devflow:testing | devflow:git-safety (if git operations involved) |
+| **PLAN** | devflow:implementation-patterns, devflow:software-design | — |
+| **REVIEW** | devflow:self-review, devflow:software-design | devflow:testing |
 
 ### ORCHESTRATED-depth skills
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | devflow:implementation-orchestration, devflow:implementation-patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:frontend-design (CSS/UI), devflow:input-validation (forms/API), devflow:security-patterns (auth/crypto) |
-| **DEBUG** | devflow:debug-orchestration, devflow:core-patterns | devflow:git-safety (if git operations involved) |
-| **PLAN** | devflow:plan-orchestration, devflow:implementation-patterns, devflow:core-patterns | — |
+| **IMPLEMENT** | devflow:implementation-orchestration, devflow:implementation-patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
+| **DEBUG** | devflow:debug-orchestration, devflow:software-design | devflow:git-safety (if git operations involved) |
+| **PLAN** | devflow:plan-orchestration, devflow:implementation-patterns, devflow:software-design | — |
 | **REVIEW** | devflow:review-orchestration | — (reviewers load their own pattern skills) |
-| **RESOLVE** | devflow:resolve-orchestration, devflow:core-patterns | — |
+| **RESOLVE** | devflow:resolve-orchestration, devflow:software-design | — |
 | **PIPELINE** | devflow:pipeline-orchestration, devflow:implementation-patterns | — |
 
-**Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity-patterns, devflow:consistency-patterns, devflow:database-patterns, devflow:dependencies-patterns, devflow:documentation-patterns, devflow:regression-patterns, devflow:architecture-patterns, devflow:accessibility, devflow:performance-patterns. These skills are always installed (universal skill installation) but loaded by Reviewer agents at runtime, not by the router.
+**Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity-patterns, devflow:consistency-patterns, devflow:database-patterns, devflow:dependencies-patterns, devflow:documentation-patterns, devflow:regression-patterns, devflow:architecture, devflow:accessibility, devflow:performance. These skills are always installed (universal skill installation) but loaded by Reviewer agents at runtime, not by the router.
 
 See `references/skill-catalog.md` for the full skill-to-intent mapping with file pattern triggers.
 
