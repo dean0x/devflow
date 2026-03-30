@@ -278,6 +278,6 @@ const validation = schema.safeParse(input);
 
 This skill works with:
 
-- **devflow:core-patterns**: Ensures validation uses Result types, catches fake/incomplete validation
-- **devflow:test-patterns**: Validates boundary tests exist
-- **devflow:security-patterns**: Broader security review context
+- **devflow:software-design**: Ensures validation uses Result types, catches fake/incomplete validation
+- **devflow:testing**: Validates boundary tests exist
+- **devflow:security**: Broader security review context

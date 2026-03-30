@@ -47,12 +47,12 @@ npx devflow-kit init --plugin=implement
 - `validator` - Build/test validation
 
 ### Skills (10)
-- `core-patterns` - Result types, DI, immutability, workaround labeling
+- `software-design` - Result types, DI, immutability, workaround labeling
 - `git-safety` - Safe git operations
 - `git-workflow` - Atomic commits, PR descriptions
 - `implementation-patterns` - CRUD, API, events
-- `test-patterns` - Test quality, coverage
-- `input-validation` - Boundary validation
+- `testing` - Test quality, coverage
+- `boundary-validation` - Boundary validation
 - `self-review` - 9-pillar framework
 - `typescript` - TypeScript patterns
 - `react` - React patterns

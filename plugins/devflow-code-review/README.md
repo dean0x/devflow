@@ -49,13 +49,13 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 
 ### Skills (11)
 - `review-methodology` - 6-step review process
-- `security-patterns` - Security vulnerabilities
-- `architecture-patterns` - Design patterns
-- `performance-patterns` - Performance issues
+- `security` - Security vulnerabilities
+- `architecture` - Design patterns
+- `performance` - Performance issues
 - `complexity-patterns` - Complexity metrics
 - `consistency-patterns` - Pattern violations
 - `regression-patterns` - Regression detection
-- `test-patterns` - Test quality
+- `testing` - Test quality
 - `database-patterns` - Database issues
 - `dependencies-patterns` - Dependency management
 - `documentation-patterns` - Documentation quality

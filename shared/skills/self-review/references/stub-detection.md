@@ -2,7 +2,7 @@
 
 Placeholder implementations that compile but don't deliver real functionality. Flag as **P0-Functionality** issues.
 
-Cross-reference: `core-patterns/references/code-smell-violations.md` covers hardcoded data and fake functionality labeling. This file focuses on structural stub patterns.
+Cross-reference: `software-design/references/code-smell-violations.md` covers hardcoded data and fake functionality labeling. This file focuses on structural stub patterns.
 
 ---
 
