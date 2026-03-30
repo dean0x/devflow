@@ -7,8 +7,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// NOTE: Intentional sync I/O throughout. This test file only reads static fixture files
+// from the local repo during test discovery — no async I/O benefit, and sync keeps every
+// test function synchronous (simpler assertions, no `await` boilerplate).
 import { readFileSync, readdirSync, statSync } from 'fs';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import { getAllSkillNames, DEVFLOW_PLUGINS } from '../src/cli/plugins.js';
 
@@ -77,6 +79,41 @@ function extractTableFirstColumnNames(content: string): string[] {
 function extractRelativeSkillRefs(content: string): string[] {
   const matches = content.matchAll(/(?:^|[`\s])([\w-]+)\/references\/[\w-]+\.md/gm);
   return [...matches].map(m => m[1]);
+}
+
+/**
+ * Scan a single file for stale V2-renamed skill name occurrences.
+ *
+ * Returns an array of violation strings (one per match) of the form
+ * `"{relFile}:{lineNumber}: found old skill name '{oldName}' as string literal"`.
+ * Returns an empty array when the file is clean.
+ */
+function findStaleNameOccurrences(
+  relFile: string,
+  filePath: string,
+  oldSkillNames: [string, RegExp][],
+  allowlistPatterns: RegExp[],
+): string[] {
+  const content = readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n');
+  const violations: string[] = [];
+
+  for (const [oldName, pattern] of oldSkillNames) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (allowlistPatterns.some(p => p.test(line))) continue;
+      // Reset stateful regex lastIndex before each line test
+      pattern.lastIndex = 0;
+      if (!pattern.test(line)) continue;
+      // Skip lines that reference the name under a devflow: prefix (caught by other tests)
+      if (new RegExp(`devflow:${oldName.replace(/-/g, '\\-')}`).test(line)) continue;
+      violations.push(
+        `tests/${relFile}:${i + 1}: found old skill name '${oldName}' as string literal — should use V2 name`,
+      );
+    }
+  }
+
+  return violations;
 }
 
 // ---------------------------------------------------------------------------
@@ -712,23 +749,10 @@ describe('Test infrastructure skill references', () => {
       if (ALLOWLIST_FILES.has(basename)) continue;
 
       const filePath = path.join(testsDir, relFile);
-      const content = readFileSync(filePath, 'utf-8');
-      const lines = content.split('\n');
+      const violations = findStaleNameOccurrences(relFile, filePath, OLD_SKILL_NAMES, ALLOWLIST_PATTERNS);
 
-      for (const [oldName, pattern] of OLD_SKILL_NAMES) {
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          if (ALLOWLIST_PATTERNS.some(p => p.test(line))) continue;
-          // Reset regex lastIndex for each line
-          pattern.lastIndex = 0;
-          if (pattern.test(line)) {
-            // Check if this is in a devflow: prefix context (already caught by other tests) — skip
-            if (new RegExp(`devflow:${oldName.replace(/-/g, '\\-')}`).test(line)) continue;
-            expect.unreachable(
-              `tests/${relFile}:${i + 1}: found old skill name '${oldName}' as string literal — should use V2 name`,
-            );
-          }
-        }
+      for (const violation of violations) {
+        expect.unreachable(violation);
       }
     }
   });
@@ -866,9 +890,11 @@ describe('Cross-component runtime alignment', () => {
 
     // Extract core reviewer list: "- security, architecture, performance, ..."
     const coreMatch = orchContent.match(/^\*\*7 core reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
-    expect(coreMatch, 'review-orchestration should list 7 core reviewers').toBeTruthy();
+    if (!coreMatch) {
+      expect.unreachable('review-orchestration should list 7 core reviewers');
+    }
 
-    const coreReviewers = coreMatch![1].split(',').map(s => s.trim());
+    const coreReviewers = coreMatch[1].split(',').map(s => s.trim());
     expect(coreReviewers.length, 'should have 7 core reviewers').toBe(7);
 
     for (const focus of coreReviewers) {
@@ -887,9 +913,11 @@ describe('Cross-component runtime alignment', () => {
 
     // Extract conditional reviewer list: "- typescript, react, database, ..."
     const condMatch = orchContent.match(/^\*\*Conditional reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
-    expect(condMatch, 'review-orchestration should list conditional reviewers').toBeTruthy();
+    if (!condMatch) {
+      expect.unreachable('review-orchestration should list conditional reviewers');
+    }
 
-    const condReviewers = condMatch![1].split(',').map(s => s.trim());
+    const condReviewers = condMatch[1].split(',').map(s => s.trim());
 
     for (const focus of condReviewers) {
       expect(
