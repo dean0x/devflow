@@ -5,6 +5,8 @@ import {
   getAllAgentNames,
   buildAssetMaps,
   buildFullSkillsMap,
+  SHADOW_RENAMES,
+  LEGACY_SKILL_NAMES,
   type PluginDefinition,
 } from '../src/cli/plugins.js';
 
@@ -222,6 +224,31 @@ describe('optional plugin flag', () => {
     const movedSkills = ['typescript', 'react', 'accessibility', 'ui-design'];
     for (const skill of movedSkills) {
       expect(coreSkills!.skills, `core-skills should not contain '${skill}'`).not.toContain(skill);
+    }
+  });
+});
+
+describe('SHADOW_RENAMES consistency', () => {
+  it('every old name in SHADOW_RENAMES appears in LEGACY_SKILL_NAMES (bare, devflow- or devflow: prefixed)', () => {
+    for (const [oldName] of SHADOW_RENAMES) {
+      const inLegacy =
+        LEGACY_SKILL_NAMES.includes(oldName) ||
+        LEGACY_SKILL_NAMES.includes(`devflow-${oldName}`) ||
+        LEGACY_SKILL_NAMES.includes(`devflow:${oldName}`);
+      expect(
+        inLegacy,
+        `SHADOW_RENAMES old name '${oldName}' must appear in LEGACY_SKILL_NAMES (bare, devflow- or devflow: prefixed)`,
+      ).toBe(true);
+    }
+  });
+
+  it('every new name in SHADOW_RENAMES is a known skill in getAllSkillNames()', () => {
+    const allSkills = getAllSkillNames();
+    for (const [, newName] of SHADOW_RENAMES) {
+      expect(
+        allSkills,
+        `SHADOW_RENAMES new name '${newName}' must appear in getAllSkillNames()`,
+      ).toContain(newName);
     }
   });
 });

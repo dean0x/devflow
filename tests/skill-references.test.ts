@@ -99,6 +99,8 @@ function findStaleNameOccurrences(
   const violations: string[] = [];
 
   for (const [oldName, pattern] of oldSkillNames) {
+    // Precompute the devflow: prefix check regex per old name (not per line)
+    const prefixedPattern = new RegExp(`devflow:${oldName}`);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (allowlistPatterns.some(p => p.test(line))) continue;
@@ -106,7 +108,7 @@ function findStaleNameOccurrences(
       pattern.lastIndex = 0;
       if (!pattern.test(line)) continue;
       // Skip lines that reference the name under a devflow: prefix (caught by other tests)
-      if (new RegExp(`devflow:${oldName.replace(/-/g, '\\-')}`).test(line)) continue;
+      if (prefixedPattern.test(line)) continue;
       violations.push(
         `tests/${relFile}:${i + 1}: found old skill name '${oldName}' as string literal — should use V2 name`,
       );
