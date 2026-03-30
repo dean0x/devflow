@@ -1,0 +1,490 @@
+/**
+ * Skill reference integrity tests.
+ *
+ * Design principle: rename-proof. ALL tests derive the valid skill set from
+ * getAllSkillNames() at runtime — never hardcoded. Adding or renaming a skill
+ * in plugins.ts automatically updates what these tests consider valid.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync, statSync } from 'fs';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import { getAllSkillNames, DEVFLOW_PLUGINS } from '../src/cli/plugins.js';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
+
+// ---------------------------------------------------------------------------
+// Utility functions
+// ---------------------------------------------------------------------------
+
+/** Extract devflow:name prefixed references from file content. */
+function extractPrefixedRefs(content: string): string[] {
+  const matches = content.matchAll(/devflow:([\w-]+)/g);
+  return [...matches].map(m => m[1]);
+}
+
+/** Extract install path references (~/.claude/skills/devflow:NAME/SKILL.md). */
+function extractInstallPaths(content: string): string[] {
+  const matches = content.matchAll(/~\/\.claude\/skills\/devflow:([\w-]+)\/SKILL\.md/g);
+  return [...matches].map(m => m[1]);
+}
+
+/** Extract source directory path references (shared/skills/NAME/). */
+function extractSourceDirRefs(content: string): string[] {
+  const matches = content.matchAll(/shared\/skills\/([\w-]+)\//g);
+  return [...matches].map(m => m[1]);
+}
+
+/** Parse frontmatter skills line: `skills: devflow:a, devflow:b` → ['a', 'b']. */
+function parseFrontmatterSkills(content: string): string[] {
+  const match = content.match(/^skills:\s*(.+)$/m);
+  if (!match) return [];
+  return match[1].split(',').map(s => s.trim().replace(/^devflow:/, ''));
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * References that appear with devflow: prefix but are NOT skills —
+ * they are command names or slash-command shortcuts.
+ */
+const COMMAND_REFS = new Set([
+  'code-review',
+  'resolve',
+  'debug',
+  'implement',
+  'specify',
+  'self-review',  // NOTE: self-review IS a skill too, but it also appears as a command ref in skill-catalog.md tables
+  'audit-claude',
+]);
+
+/**
+ * Plugin names (without devflow- prefix) that might appear as devflow:NAME
+ * references in documentation but are not skills.
+ */
+const PLUGIN_NAMES = new Set(DEVFLOW_PLUGINS.map(p => p.name.replace(/^devflow-/, '')));
+
+/** Filter a list of extracted names: remove command refs and plugin-name-only refs. */
+function filterNonSkillRefs(names: string[]): string[] {
+  return names.filter(name => !COMMAND_REFS.has(name) && !PLUGIN_NAMES.has(name));
+}
+
+// ---------------------------------------------------------------------------
+// Format 1: Plugin manifests
+// ---------------------------------------------------------------------------
+
+describe('Format 1: Plugin manifest skill arrays', () => {
+  it('every skill in plugin.json skills[] exists in canonical set', async () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const manifestPath = path.join(ROOT, 'plugins', plugin.name, '.claude-plugin', 'plugin.json');
+      let manifest: { skills?: string[] };
+      try {
+        manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+      } catch {
+        // Plugin may not have a manifest (optional plugins without files) — skip
+        continue;
+      }
+
+      for (const skill of manifest.skills ?? []) {
+        expect(
+          canonicalSkills.has(skill),
+          `plugin ${plugin.name}: skill '${skill}' in plugin.json is not in canonical getAllSkillNames() — stale manifest or missing plugin registration`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('plugin.json skills[] matches plugins.ts skills[] for every plugin', async () => {
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const manifestPath = path.join(ROOT, 'plugins', plugin.name, '.claude-plugin', 'plugin.json');
+      let manifest: { skills?: string[] };
+      try {
+        manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+      } catch {
+        continue;
+      }
+
+      const manifestSkills = new Set(manifest.skills ?? []);
+      const registrySkills = new Set(plugin.skills);
+
+      for (const skill of manifestSkills) {
+        expect(
+          registrySkills.has(skill),
+          `plugin ${plugin.name}: skill '${skill}' is in plugin.json but missing from plugins.ts`,
+        ).toBe(true);
+      }
+
+      for (const skill of registrySkills) {
+        expect(
+          manifestSkills.has(skill),
+          `plugin ${plugin.name}: skill '${skill}' is in plugins.ts but missing from plugin.json`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 2: Agent frontmatter
+// ---------------------------------------------------------------------------
+
+describe('Format 2: Agent frontmatter skills', () => {
+  it('every skill in shared agent frontmatter exists in canonical set', async () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const agentFiles = readdirSync(path.join(ROOT, 'shared', 'agents')).filter(f => f.endsWith('.md'));
+
+    for (const file of agentFiles) {
+      const filePath = path.join(ROOT, 'shared', 'agents', file);
+      const content = readFileSync(filePath, 'utf-8');
+      const skillNames = parseFrontmatterSkills(content);
+
+      for (const skill of skillNames) {
+        expect(
+          canonicalSkills.has(skill),
+          `shared/agents/${file}: frontmatter skill '${skill}' is not in canonical getAllSkillNames()`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 3: Agent install paths
+// ---------------------------------------------------------------------------
+
+describe('Format 3: Agent install path references', () => {
+  it('all ~/.claude/skills/devflow:NAME/SKILL.md paths in reviewer.md are canonical', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const content = readFileSync(path.join(ROOT, 'shared', 'agents', 'reviewer.md'), 'utf-8');
+    const refs = extractInstallPaths(content);
+
+    expect(refs.length, 'reviewer.md should have at least one install path reference').toBeGreaterThan(0);
+
+    for (const ref of refs) {
+      expect(
+        canonicalSkills.has(ref),
+        `shared/agents/reviewer.md: install path '~/.claude/skills/devflow:${ref}/SKILL.md' — '${ref}' is not in canonical getAllSkillNames()`,
+      ).toBe(true);
+    }
+  });
+
+  it('all ~/.claude/skills/devflow:NAME/SKILL.md paths in coder.md are canonical', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const content = readFileSync(path.join(ROOT, 'shared', 'agents', 'coder.md'), 'utf-8');
+    const refs = extractInstallPaths(content);
+
+    expect(refs.length, 'coder.md should have at least one install path reference').toBeGreaterThan(0);
+
+    for (const ref of refs) {
+      expect(
+        canonicalSkills.has(ref),
+        `shared/agents/coder.md: install path '~/.claude/skills/devflow:${ref}/SKILL.md' — '${ref}' is not in canonical getAllSkillNames()`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 4: Source directory paths
+// ---------------------------------------------------------------------------
+
+describe('Format 4: Source directory path references', () => {
+  /**
+   * Template placeholders like `shared/skills/skill-name/` or
+   * `shared/skills/{name}/` are not real skill names — filter them.
+   */
+  function isPlaceholder(name: string): boolean {
+    return name.includes('{') || name === 'skill-name';
+  }
+
+  it('all shared/skills/NAME/ references in CLAUDE.md are canonical', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const content = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf-8');
+    const refs = extractSourceDirRefs(content).filter(r => !isPlaceholder(r));
+
+    for (const ref of refs) {
+      expect(
+        canonicalSkills.has(ref),
+        `CLAUDE.md: source path 'shared/skills/${ref}/' — '${ref}' is not in canonical getAllSkillNames()`,
+      ).toBe(true);
+    }
+  });
+
+  it('all shared/skills/NAME/ references in docs/reference/ are canonical', async () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const refDir = path.join(ROOT, 'docs', 'reference');
+    const docFiles = readdirSync(refDir).filter(f => f.endsWith('.md'));
+
+    for (const file of docFiles) {
+      const filePath = path.join(refDir, file);
+      const content = readFileSync(filePath, 'utf-8');
+      const refs = extractSourceDirRefs(content).filter(r => !isPlaceholder(r));
+
+      for (const ref of refs) {
+        expect(
+          canonicalSkills.has(ref),
+          `docs/reference/${file}: source path 'shared/skills/${ref}/' — '${ref}' is not in canonical getAllSkillNames()`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 5: Ambient hook preamble
+// ---------------------------------------------------------------------------
+
+describe('Format 5: Ambient hook preamble skill references', () => {
+  it('all devflow:NAME references in ambient-prompt hook are canonical or command refs', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+
+    // Hook has no .sh extension — check both variants for robustness
+    let content: string;
+    const hookPath = path.join(ROOT, 'scripts', 'hooks', 'ambient-prompt');
+    const hookPathSh = path.join(ROOT, 'scripts', 'hooks', 'ambient-prompt.sh');
+    try {
+      content = readFileSync(hookPath, 'utf-8');
+    } catch {
+      content = readFileSync(hookPathSh, 'utf-8');
+    }
+
+    const allRefs = extractPrefixedRefs(content);
+    const skillRefs = filterNonSkillRefs(allRefs);
+
+    for (const ref of skillRefs) {
+      expect(
+        canonicalSkills.has(ref),
+        `scripts/hooks/ambient-prompt: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 6: Command files
+// ---------------------------------------------------------------------------
+
+describe('Format 6: Plugin command file skill references', () => {
+  it('all devflow:NAME references in command files are canonical or command refs', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const commandsDir = path.join(ROOT, 'plugins', plugin.name, 'commands');
+      let files: string[];
+      try {
+        files = readdirSync(commandsDir).filter(f => f.endsWith('.md'));
+      } catch {
+        continue; // Plugin has no commands dir
+      }
+
+      for (const file of files) {
+        const filePath = path.join(commandsDir, file);
+        const content = readFileSync(filePath, 'utf-8');
+        const allRefs = extractPrefixedRefs(content);
+        const skillRefs = filterNonSkillRefs(allRefs);
+
+        for (const ref of skillRefs) {
+          expect(
+            canonicalSkills.has(ref),
+            `plugins/${plugin.name}/commands/${file}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 7: Documentation tables
+// ---------------------------------------------------------------------------
+
+describe('Format 7: Documentation table skill references', () => {
+  it('all devflow:NAME references in plugin READMEs are canonical or command refs', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const readmePath = path.join(ROOT, 'plugins', plugin.name, 'README.md');
+      let content: string;
+      try {
+        content = readFileSync(readmePath, 'utf-8');
+      } catch {
+        continue; // Plugin may not have README
+      }
+
+      const allRefs = extractPrefixedRefs(content);
+      const skillRefs = filterNonSkillRefs(allRefs);
+
+      for (const ref of skillRefs) {
+        expect(
+          canonicalSkills.has(ref),
+          `plugins/${plugin.name}/README.md: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('all devflow:NAME references in docs/reference/skills-architecture.md are canonical or command refs', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    let content: string;
+    try {
+      content = readFileSync(path.join(ROOT, 'docs', 'reference', 'skills-architecture.md'), 'utf-8');
+    } catch {
+      return; // File may not exist yet
+    }
+
+    const allRefs = extractPrefixedRefs(content);
+    const skillRefs = filterNonSkillRefs(allRefs);
+
+    for (const ref of skillRefs) {
+      expect(
+        canonicalSkills.has(ref),
+        `docs/reference/skills-architecture.md: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 8: Skill cross-references
+// ---------------------------------------------------------------------------
+
+describe('Format 8: Skill cross-references within shared/skills/', () => {
+  it('all devflow:NAME references in SKILL.md files are canonical or command refs', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const skillsDir = path.join(ROOT, 'shared', 'skills');
+    const skillDirs = readdirSync(skillsDir);
+
+    for (const skillDir of skillDirs) {
+      const skillMdPath = path.join(skillsDir, skillDir, 'SKILL.md');
+      let content: string;
+      try {
+        content = readFileSync(skillMdPath, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      const allRefs = extractPrefixedRefs(content);
+      const skillRefs = filterNonSkillRefs(allRefs);
+
+      for (const ref of skillRefs) {
+        expect(
+          canonicalSkills.has(ref),
+          `shared/skills/${skillDir}/SKILL.md: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('all devflow:NAME references in skill references/ files are canonical or command refs', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const skillsDir = path.join(ROOT, 'shared', 'skills');
+    const skillDirs = readdirSync(skillsDir);
+
+    for (const skillDir of skillDirs) {
+      const refsDir = path.join(skillsDir, skillDir, 'references');
+      let refFiles: string[];
+      try {
+        refFiles = readdirSync(refsDir).filter(f => f.endsWith('.md'));
+      } catch {
+        continue; // No references/ directory
+      }
+
+      for (const file of refFiles) {
+        const filePath = path.join(refsDir, file);
+        const content = readFileSync(filePath, 'utf-8');
+        const allRefs = extractPrefixedRefs(content);
+        const skillRefs = filterNonSkillRefs(allRefs);
+
+        for (const ref of skillRefs) {
+          expect(
+            canonicalSkills.has(ref),
+            `shared/skills/${skillDir}/references/${file}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Additional: Test infrastructure
+// ---------------------------------------------------------------------------
+
+describe('Test infrastructure skill references', () => {
+  it('all devflow:NAME references in tests/*.ts are canonical or command refs', async () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const testsDir = path.join(ROOT, 'tests');
+    const testFiles = readdirSync(testsDir).filter(f =>
+      f.endsWith('.ts') &&
+      // Exclude this file itself — it contains regex patterns and jsdoc that produce false positives
+      f !== 'skill-references.test.ts'
+    );
+
+    for (const file of testFiles) {
+      const filePath = path.join(testsDir, file);
+      const stat = statSync(filePath);
+      if (!stat.isFile()) continue;
+
+      const content = readFileSync(filePath, 'utf-8');
+      const allRefs = extractPrefixedRefs(content);
+      const skillRefs = filterNonSkillRefs(allRefs);
+
+      for (const ref of skillRefs) {
+        expect(
+          canonicalSkills.has(ref),
+          `tests/${file}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Additional: Completeness check
+// ---------------------------------------------------------------------------
+
+describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
+  it('reviewer Focus Areas covers all skills in code-review plugin.json skills[]', () => {
+    const manifestPath = path.join(
+      ROOT,
+      'plugins',
+      'devflow-code-review',
+      '.claude-plugin',
+      'plugin.json',
+    );
+
+    const manifest: { skills?: string[] } = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+
+    // These meta-skills don't correspond to reviewer focus areas
+    const NON_FOCUS_SKILLS = new Set([
+      'agent-teams',
+      'knowledge-persistence',
+      'review-methodology',
+      'worktree-support',
+    ]);
+
+    const reviewerContent = readFileSync(
+      path.join(ROOT, 'shared', 'agents', 'reviewer.md'),
+      'utf-8',
+    );
+
+    for (const skill of manifest.skills ?? []) {
+      if (NON_FOCUS_SKILLS.has(skill)) continue;
+
+      // Strip -patterns suffix to get the focus area name used in the table
+      // e.g. security-patterns → security, test-patterns → tests (special case)
+      const focusName = skill === 'test-patterns' ? 'tests' : skill.replace(/-patterns$/, '');
+
+      // The reviewer Focus Areas table should mention this focus name
+      expect(
+        reviewerContent.includes(`| ${focusName} |`) || reviewerContent.includes(`| \`${focusName}\` |`),
+        `reviewer.md Focus Areas table is missing focus '${focusName}' (from code-review plugin skill '${skill}')`,
+      ).toBe(true);
+    }
+  });
+});
