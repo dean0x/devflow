@@ -10,6 +10,7 @@ import {
   stripTeamsConfig,
   mergeDenyList,
   discoverProjectGitRoots,
+  migrateShadowOverrides,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
@@ -618,5 +619,94 @@ describe('installClaudeignore return value', () => {
     // Should not overwrite existing file
     const content = await fs.readFile(path.join(gitRoot, '.claudeignore'), 'utf-8');
     expect(content).toBe('# existing');
+  });
+});
+
+describe('migrateShadowOverrides', () => {
+  let tmpDir: string;
+  let devflowDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-shadow-test-'));
+    devflowDir = path.join(tmpDir, 'devflow');
+    await fs.mkdir(path.join(devflowDir, 'skills'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('renames old shadow directory to new name', async () => {
+    const oldShadow = path.join(devflowDir, 'skills', 'core-patterns');
+    await fs.mkdir(oldShadow, { recursive: true });
+    await fs.writeFile(path.join(oldShadow, 'SKILL.md'), '# Custom override');
+
+    const result = await migrateShadowOverrides(devflowDir);
+
+    expect(result.migrated).toBe(1);
+    expect(result.warnings).toEqual([]);
+
+    // Old should be gone
+    await expect(fs.access(oldShadow)).rejects.toThrow();
+    // New should exist with content
+    const content = await fs.readFile(
+      path.join(devflowDir, 'skills', 'software-design', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(content).toBe('# Custom override');
+  });
+
+  it('warns but does not overwrite when both old and new exist', async () => {
+    const oldShadow = path.join(devflowDir, 'skills', 'test-patterns');
+    const newShadow = path.join(devflowDir, 'skills', 'testing');
+    await fs.mkdir(oldShadow, { recursive: true });
+    await fs.mkdir(newShadow, { recursive: true });
+    await fs.writeFile(path.join(oldShadow, 'SKILL.md'), '# Old');
+    await fs.writeFile(path.join(newShadow, 'SKILL.md'), '# New');
+
+    const result = await migrateShadowOverrides(devflowDir);
+
+    expect(result.migrated).toBe(0);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('test-patterns');
+    expect(result.warnings[0]).toContain('testing');
+
+    // New should be unchanged
+    const content = await fs.readFile(path.join(newShadow, 'SKILL.md'), 'utf-8');
+    expect(content).toBe('# New');
+  });
+
+  it('does nothing when no old shadows exist', async () => {
+    const result = await migrateShadowOverrides(devflowDir);
+
+    expect(result.migrated).toBe(0);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('migrates multiple shadows in one pass', async () => {
+    for (const oldName of ['core-patterns', 'security-patterns', 'frontend-design']) {
+      const dir = path.join(devflowDir, 'skills', oldName);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, 'SKILL.md'), `# ${oldName}`);
+    }
+
+    const result = await migrateShadowOverrides(devflowDir);
+
+    expect(result.migrated).toBe(3);
+    // Verify new names exist
+    for (const newName of ['software-design', 'security', 'ui-design']) {
+      await expect(fs.access(path.join(devflowDir, 'skills', newName))).resolves.toBeUndefined();
+    }
+  });
+
+  it('handles missing skills directory gracefully', async () => {
+    // Use a devflowDir without a skills/ subdirectory
+    const emptyDir = path.join(tmpDir, 'empty');
+    await fs.mkdir(emptyDir, { recursive: true });
+
+    const result = await migrateShadowOverrides(emptyDir);
+
+    expect(result.migrated).toBe(0);
+    expect(result.warnings).toEqual([]);
   });
 });

@@ -20,7 +20,7 @@ import {
   migrateMemoryFiles,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, SHADOW_RENAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook } from './ambient.js';
@@ -52,6 +52,38 @@ export function classifySafeDeleteState(
   if (installedVersion === currentVersion) return 'current';
   if (installedVersion > 0) return 'outdated';
   return 'missing';
+}
+
+/**
+ * Migrate shadow skill overrides from old V2 skill names to new names.
+ * Pure function suitable for testing — requires only the devflowDir path.
+ */
+export async function migrateShadowOverrides(devflowDir: string): Promise<{ migrated: number; warnings: string[] }> {
+  const shadowsRoot = path.join(devflowDir, 'skills');
+  let migrated = 0;
+  const warnings: string[] = [];
+
+  for (const [oldName, newName] of SHADOW_RENAMES) {
+    const oldShadow = path.join(shadowsRoot, oldName);
+    const newShadow = path.join(shadowsRoot, newName);
+    try {
+      await fs.access(oldShadow);
+      // Old shadow exists — migrate if new doesn't exist yet
+      try {
+        await fs.access(newShadow);
+        // Both exist — warn, don't overwrite
+        warnings.push(`Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`);
+      } catch {
+        // New doesn't exist — rename
+        await fs.rename(oldShadow, newShadow);
+        migrated++;
+      }
+    } catch {
+      // Old shadow doesn't exist — nothing to migrate
+    }
+  }
+
+  return { migrated, warnings };
 }
 
 /**
@@ -817,6 +849,15 @@ export const initCommand = new Command('init')
     }
     if (staleCommandsRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
+    }
+
+    // Migrate shadow overrides from old V2 skill names to new names
+    const shadowsMigrated = await migrateShadowOverrides(devflowDir);
+    if (shadowsMigrated.migrated > 0) {
+      p.log.info(`Migrated ${shadowsMigrated.migrated} shadow override(s) to V2 names`);
+    }
+    for (const warning of shadowsMigrated.warnings) {
+      p.log.warn(warning);
     }
 
     // === Settings & hooks (all automatic based on collected choices) ===
