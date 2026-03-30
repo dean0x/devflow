@@ -49,7 +49,7 @@ npx devflow-kit init --plugin=resolve
 ### Skills (5)
 - `software-design` - Result types, DI
 - `git-safety` - Safe git operations
-- `commit` - Atomic commit patterns
+- `git-workflow` - Atomic commit patterns
 - `implementation-patterns` - Implementation guidance
 - `security` - Security fix patterns
 

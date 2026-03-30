@@ -43,6 +43,42 @@ function parseFrontmatterSkills(content: string): string[] {
   return match[1].split(',').map(s => s.trim().replace(/^devflow:/, ''));
 }
 
+/**
+ * Extract bare backtick-quoted skill names from the "Skills" section of a markdown file.
+ * Matches table rows (`| \`name\` |`) and list items (`- \`name\``).
+ */
+function extractSkillSectionNames(content: string): string[] {
+  const match = content.match(/^#{2,3}\s+Skills(?:\s*\(\d+\))?.*$/m);
+  if (!match || match.index === undefined) return [];
+  const start = match.index + match[0].length;
+  const rest = content.slice(start);
+  const nextHeader = rest.match(/^#{2,3}\s+\S/m);
+  const section = nextHeader?.index !== undefined ? rest.slice(0, nextHeader.index) : rest;
+  const names: string[] = [];
+  for (const m of section.matchAll(/^[-|]\s*`([\w-]+)`/gm)) {
+    names.push(m[1]);
+  }
+  return names;
+}
+
+/** Extract first-column backtick-quoted names from markdown tables. */
+function extractTableFirstColumnNames(content: string): string[] {
+  const names: string[] = [];
+  for (const m of content.matchAll(/^\|\s*`([\w-]+)`\s*\|/gm)) {
+    names.push(m[1]);
+  }
+  return names;
+}
+
+/**
+ * Extract relative skill-directory cross-references.
+ * Pattern: `skill-name/references/file.md` — the first path component is a skill name.
+ */
+function extractRelativeSkillRefs(content: string): string[] {
+  const matches = content.matchAll(/(?:^|[`\s])([\w-]+)\/references\/[\w-]+\.md/gm);
+  return [...matches].map(m => m[1]);
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -239,28 +275,29 @@ describe('Format 4: Source directory path references', () => {
 // Format 5: Ambient hook preamble
 // ---------------------------------------------------------------------------
 
-describe('Format 5: Ambient hook preamble skill references', () => {
-  it('all devflow:NAME references in ambient-prompt hook are canonical or command refs', () => {
+describe('Format 5: Hook script skill references', () => {
+  it('all devflow:NAME references in hook scripts are canonical or command refs', () => {
     const canonicalSkills = new Set(getAllSkillNames());
+    const hooksDir = path.join(ROOT, 'scripts', 'hooks');
+    const hookFiles = readdirSync(hooksDir).filter(f => {
+      const fullPath = path.join(hooksDir, f);
+      return statSync(fullPath).isFile();
+    });
 
-    // Hook has no .sh extension — check both variants for robustness
-    let content: string;
-    const hookPath = path.join(ROOT, 'scripts', 'hooks', 'ambient-prompt');
-    const hookPathSh = path.join(ROOT, 'scripts', 'hooks', 'ambient-prompt.sh');
-    try {
-      content = readFileSync(hookPath, 'utf-8');
-    } catch {
-      content = readFileSync(hookPathSh, 'utf-8');
-    }
+    expect(hookFiles.length, 'should find at least one hook script').toBeGreaterThan(0);
 
-    const allRefs = extractPrefixedRefs(content);
-    const skillRefs = filterNonSkillRefs(allRefs);
+    for (const file of hookFiles) {
+      const filePath = path.join(hooksDir, file);
+      const content = readFileSync(filePath, 'utf-8');
+      const allRefs = extractPrefixedRefs(content);
+      const skillRefs = filterNonSkillRefs(allRefs);
 
-    for (const ref of skillRefs) {
-      expect(
-        canonicalSkills.has(ref),
-        `scripts/hooks/ambient-prompt: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
-      ).toBe(true);
+      for (const ref of skillRefs) {
+        expect(
+          canonicalSkills.has(ref),
+          `scripts/hooks/${file}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+        ).toBe(true);
+      }
     }
   });
 });
@@ -404,6 +441,97 @@ describe('Format 8: Skill cross-references within shared/skills/', () => {
           expect(
             canonicalSkills.has(ref),
             `shared/skills/${skillDir}/references/${file}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 9: Bare backtick-quoted skill names in README skill sections
+// ---------------------------------------------------------------------------
+
+describe('Format 9: Bare skill names in README "Skills" sections', () => {
+  it('every bare backtick skill name in plugin README "Skills" sections is canonical', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const readmePath = path.join(ROOT, 'plugins', plugin.name, 'README.md');
+      let content: string;
+      try {
+        content = readFileSync(readmePath, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      const bareNames = extractSkillSectionNames(content);
+      for (const name of bareNames) {
+        expect(
+          canonicalSkills.has(name),
+          `plugins/${plugin.name}/README.md: bare skill name '${name}' in Skills section is not in canonical getAllSkillNames()`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 10: Bare skill names in skills-architecture.md tables
+// ---------------------------------------------------------------------------
+
+describe('Format 10: Bare skill names in skills-architecture.md tables', () => {
+  it('every first-column backtick name in skills-architecture.md is canonical', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    let content: string;
+    try {
+      content = readFileSync(path.join(ROOT, 'docs', 'reference', 'skills-architecture.md'), 'utf-8');
+    } catch {
+      return;
+    }
+
+    const tableNames = extractTableFirstColumnNames(content);
+    expect(tableNames.length, 'should find backtick names in table rows').toBeGreaterThan(0);
+
+    for (const name of tableNames) {
+      expect(
+        canonicalSkills.has(name),
+        `docs/reference/skills-architecture.md: table entry '${name}' is not in canonical getAllSkillNames()`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 11: Relative skill-directory cross-references
+// ---------------------------------------------------------------------------
+
+describe('Format 11: Relative skill-directory cross-references in skill reference docs', () => {
+  it('skill-name/references/file.md cross-references point to canonical skills', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const skillsDir = path.join(ROOT, 'shared', 'skills');
+    const skillDirs = readdirSync(skillsDir);
+
+    for (const skillDir of skillDirs) {
+      const refsDir = path.join(skillsDir, skillDir, 'references');
+      let refFiles: string[];
+      try {
+        refFiles = readdirSync(refsDir).filter(f => f.endsWith('.md'));
+      } catch {
+        continue;
+      }
+
+      for (const file of refFiles) {
+        const filePath = path.join(refsDir, file);
+        const content = readFileSync(filePath, 'utf-8');
+        const crossRefs = extractRelativeSkillRefs(content);
+
+        for (const ref of crossRefs) {
+          // Skip self-references (same skill directory)
+          if (ref === skillDir) continue;
+          expect(
+            canonicalSkills.has(ref),
+            `shared/skills/${skillDir}/references/${file}: cross-reference '${ref}/references/...' — '${ref}' is not in canonical getAllSkillNames()`,
           ).toBe(true);
         }
       }
