@@ -793,12 +793,9 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
       if (NON_FOCUS_SKILLS.has(skill)) continue;
 
       // Focus name equals the skill name directly — all skills match focus 1:1
-      const focusName = skill;
-
-      // The reviewer Focus Areas table should mention this focus name
       expect(
-        reviewerContent.includes(`| ${focusName} |`) || reviewerContent.includes(`| \`${focusName}\` |`),
-        `reviewer.md Focus Areas table is missing focus '${focusName}' (from code-review plugin skill '${skill}')`,
+        reviewerContent.includes(`| ${skill} |`) || reviewerContent.includes(`| \`${skill}\` |`),
+        `reviewer.md Focus Areas table is missing focus '${skill}' (from code-review plugin skill '${skill}')`,
       ).toBe(true);
     }
   });

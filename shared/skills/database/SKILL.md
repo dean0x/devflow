@@ -1,5 +1,5 @@
 ---
-name: database-patterns
+name: database
 description: This skill should be used when reviewing database queries, migrations, indexes, or schema changes.
 user-invocable: false
 allowed-tools: Read, Grep, Glob

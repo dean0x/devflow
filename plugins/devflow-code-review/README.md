@@ -32,7 +32,7 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 | complexity | Cyclomatic complexity, readability |
 | consistency | Pattern violations, style drift |
 | regression | Lost functionality, broken behavior |
-| tests | Coverage gaps, brittle tests |
+| testing | Coverage gaps, brittle tests |
 | database | Schema issues, slow queries |
 | dependencies | CVEs, outdated packages |
 | documentation | Doc drift, stale comments |

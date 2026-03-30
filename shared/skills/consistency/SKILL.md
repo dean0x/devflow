@@ -1,5 +1,5 @@
 ---
-name: consistency-patterns
+name: consistency
 description: This skill should be used when reviewing code for naming convention violations, pattern deviations, or inconsistent API styles.
 user-invocable: false
 allowed-tools: Read, Grep, Glob

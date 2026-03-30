@@ -307,18 +307,12 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'database',
   'dependencies',
   'documentation',
-  // v2.0.0 skill renames: 6 remaining -patterns suffix removals
-  'complexity-patterns',
+  // v2.0.0 skill renames: prefixed old names for the 6 remaining -patterns suffix removals
   'devflow:complexity-patterns',
-  'consistency-patterns',
   'devflow:consistency-patterns',
-  'regression-patterns',
   'devflow:regression-patterns',
-  'database-patterns',
   'devflow:database-patterns',
-  'dependencies-patterns',
   'devflow:dependencies-patterns',
-  'documentation-patterns',
   'devflow:documentation-patterns',
 ];
 

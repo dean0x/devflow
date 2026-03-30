@@ -1,5 +1,5 @@
 ---
-name: complexity-patterns
+name: complexity
 description: This skill should be used when reviewing code for high cyclomatic complexity, deep nesting, or long functions.
 user-invocable: false
 allowed-tools: Read, Grep, Glob

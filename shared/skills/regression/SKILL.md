@@ -1,5 +1,5 @@
 ---
-name: regression-patterns
+name: regression
 description: This skill should be used when reviewing changes that may remove exports, change signatures, or alter behavior.
 user-invocable: false
 allowed-tools: Read, Grep, Glob

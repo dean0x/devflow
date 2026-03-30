@@ -1,5 +1,5 @@
 ---
-name: documentation-patterns
+name: documentation
 description: This skill should be used when reviewing for documentation drift, missing API docs, or stale comments.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
