@@ -190,37 +190,94 @@ describe('Format 2: Agent frontmatter skills', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Format 3: Agent install paths
+// Format 3: Install path references (~/.claude/skills/devflow:NAME/)
 // ---------------------------------------------------------------------------
 
-describe('Format 3: Agent install path references', () => {
-  it('all ~/.claude/skills/devflow:NAME/SKILL.md paths in reviewer.md are canonical', () => {
+describe('Format 3: Install path references', () => {
+  it('all install paths in shared agents are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
-    const content = readFileSync(path.join(ROOT, 'shared', 'agents', 'reviewer.md'), 'utf-8');
-    const refs = extractInstallPaths(content);
+    const agentsDir = path.join(ROOT, 'shared', 'agents');
+    const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
-    expect(refs.length, 'reviewer.md should have at least one install path reference').toBeGreaterThan(0);
+    let totalRefs = 0;
+    for (const file of agentFiles) {
+      const content = readFileSync(path.join(agentsDir, file), 'utf-8');
+      const refs = extractInstallPaths(content);
+      totalRefs += refs.length;
 
-    for (const ref of refs) {
-      expect(
-        canonicalSkills.has(ref),
-        `shared/agents/reviewer.md: install path '~/.claude/skills/devflow:${ref}/SKILL.md' — '${ref}' is not in canonical getAllSkillNames()`,
-      ).toBe(true);
+      for (const ref of refs) {
+        expect(
+          canonicalSkills.has(ref),
+          `shared/agents/${file}: install path 'devflow:${ref}' is not canonical`,
+        ).toBe(true);
+      }
     }
+
+    // reviewer.md + coder.md alone have 20+ install path refs
+    expect(totalRefs, 'shared agents should have install path references').toBeGreaterThan(15);
   });
 
-  it('all ~/.claude/skills/devflow:NAME/SKILL.md paths in coder.md are canonical', () => {
+  it('all install paths in plugin command files are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
-    const content = readFileSync(path.join(ROOT, 'shared', 'agents', 'coder.md'), 'utf-8');
-    const refs = extractInstallPaths(content);
+    let totalRefs = 0;
 
-    expect(refs.length, 'coder.md should have at least one install path reference').toBeGreaterThan(0);
+    for (const plugin of DEVFLOW_PLUGINS) {
+      const commandsDir = path.join(ROOT, 'plugins', plugin.name, 'commands');
+      let files: string[];
+      try {
+        files = readdirSync(commandsDir).filter(f => f.endsWith('.md'));
+      } catch {
+        continue;
+      }
 
-    for (const ref of refs) {
-      expect(
-        canonicalSkills.has(ref),
-        `shared/agents/coder.md: install path '~/.claude/skills/devflow:${ref}/SKILL.md' — '${ref}' is not in canonical getAllSkillNames()`,
-      ).toBe(true);
+      for (const file of files) {
+        const content = readFileSync(path.join(commandsDir, file), 'utf-8');
+        const refs = extractInstallPaths(content);
+        totalRefs += refs.length;
+
+        for (const ref of refs) {
+          expect(
+            canonicalSkills.has(ref),
+            `plugins/${plugin.name}/commands/${file}: install path 'devflow:${ref}' is not canonical`,
+          ).toBe(true);
+        }
+      }
+    }
+
+    // debug, implement, code-review, resolve commands all have install paths
+    expect(totalRefs, 'command files should have install path references').toBeGreaterThan(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format 3b: Shadow path references (~/.devflow/skills/NAME/)
+// ---------------------------------------------------------------------------
+
+/** Extract skill names from shadow path references: ~/.devflow/skills/NAME/ */
+function extractShadowPaths(content: string): string[] {
+  const matches = content.matchAll(/~\/\.devflow\/skills\/([\w-]+)\//g);
+  return [...matches].map(m => m[1]);
+}
+
+describe('Format 3b: Shadow path references', () => {
+  function isPlaceholder(name: string): boolean {
+    return name.includes('{') || name === 'name';
+  }
+
+  it('all ~/.devflow/skills/NAME/ paths in docs are canonical', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+
+    // Check README.md and CLAUDE.md — the files known to reference shadow paths
+    for (const file of ['README.md', 'CLAUDE.md']) {
+      const content = readFileSync(path.join(ROOT, file), 'utf-8');
+      const refs = extractShadowPaths(content).filter(r => !isPlaceholder(r));
+
+      for (const ref of refs) {
+        expect(
+          canonicalSkills.has(ref),
+          `${file}: shadow path '~/.devflow/skills/${ref}/' — '${ref}' is not in canonical getAllSkillNames()`,
+        ).toBe(true);
+      }
     }
   });
 });
