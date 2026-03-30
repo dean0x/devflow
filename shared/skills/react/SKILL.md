@@ -15,89 +15,41 @@ activation:
 
 # React Patterns
 
-Reference for React-specific patterns, component design, hooks, and performance optimization.
+Reference for React-specific patterns with citations. Sources in `references/sources.md`.
 
 ## Iron Law
 
-> **COMPOSITION OVER PROPS**
+> **COMPOSITION OVER PROPS** [2][4][12]
 >
 > Use children and compound components, not prop drilling. If a component has >5 props,
 > it's doing too much. Split it. If you're passing data through 3+ levels, use context
 > or composition. Props are for configuration, not data plumbing.
+> "Before You memo(), try solving it with composition." — Dan Abramov [4]
 
 ## When This Skill Activates
 
-- Working with React codebases
-- Creating components and hooks
-- Managing state and side effects
-- Optimizing render performance
+- Working with React codebases (.tsx, .jsx) — components, hooks, contexts, performance
 
 ---
 
-## Component Patterns
+## Component Structure [1][2]
 
-### Functional Component Structure
+**Functional component order**: hooks → derived state → handlers → return. [1]
 
-```tsx
-export function UserCard({ user, className }: UserCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false); // 1. Hooks first
-  const displayName = user.firstName + ' ' + user.lastName; // 2. Derived state
-  const handleToggle = () => setIsExpanded((prev) => !prev); // 3. Handlers
-  return ( // 4. Render
-    <div className={cn('user-card', className)}>
-      <h3>{displayName}</h3>
-      {isExpanded && <UserDetails user={user} />}
-      <button onClick={handleToggle}>{isExpanded ? 'Collapse' : 'Expand'}</button>
-    </div>
-  );
-}
-```
-
-### Composition Over Props
+**Compound components** share structure through children, not props: [2][4]
 
 ```tsx
 function Card({ children }: { children: React.ReactNode }) {
   return <div className="card">{children}</div>;
 }
-Card.Header = ({ children }) => <div className="card-header">{children}</div>;
-Card.Body = ({ children }) => <div className="card-body">{children}</div>;
-
-// Usage - flexible, not rigid props
-<Card>
-  <Card.Header><h2>Title</h2></Card.Header>
-  <Card.Body><p>Content</p></Card.Body>
-</Card>
+Card.Header = ({ children }: { children: React.ReactNode }) =>
+  <div className="card-header">{children}</div>;
 ```
 
----
-
-## Hook Patterns
-
-```tsx
-function useLocalStorage<T>(key: string, initialValue: T) {
-  const [value, setValue] = useState<T>(() => {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : initialValue;
-  });
-  useEffect(() => localStorage.setItem(key, JSON.stringify(value)), [key, value]);
-  return [value, setValue] as const;
-}
-```
-
----
-
-## State Management
+**Context** for shared state across distant components — eliminates prop drilling: [1][2]
 
 ```tsx
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const login = async (creds: Credentials) => setUser(await authApi.login(creds));
-  const logout = () => { authApi.logout(); setUser(null); };
-  return <AuthContext value={{ user, login, logout }}>{children}</AuthContext>;
-}
-
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
@@ -107,170 +59,85 @@ export function useAuth() {
 
 ---
 
-## Performance
+## Hooks [3][16][24]
+
+Hooks must be called at the **top level** — never inside conditions, loops, or nested functions. [16][24]
+Effects synchronize with external systems; they are not lifecycle methods. [3]
+Every effect that subscribes must return a cleanup function. Deps must be complete — never omit to suppress warnings. [3]
+
+See `references/hooks.md` for rules of hooks, custom hooks, useReducer, and effect anti-patterns.
+
+---
+
+## Performance [3][4][5][17]
+
+The React Compiler (2024) handles many memoizations automatically [17]. For manual
+optimization, follow this priority: [4]
+
+1. **Composition first** — "before you memo(), try passing children down" [4]
+2. **Extract primitives** for `useEffect` deps — avoid object/array literals [3]
+3. **`useMemo`** for expensive computations; **`useCallback`** for stable handlers [3]
+4. **`React.memo`** only when parent has stable, memoized callbacks [4]
+5. **Virtualize** long lists (react-window) [5]; **lazy-load** heavy components [5]
 
 ```tsx
-function UserList({ users, filter }: { users: User[]; filter: string }) {
-  const filtered = useMemo(() => users.filter((u) => u.name.includes(filter)), [users, filter]);
-  const onClick = useCallback(() => console.log('Clicked'), []);
-  return <ul>{filtered.map((u) => <MemoItem key={u.id} user={u} onClick={onClick} />)}</ul>;
-}
-const MemoItem = memo(({ user }: { user: User }) => <li>{user.name}</li>);
+const [user, orders] = await Promise.all([fetchUser(id), fetchOrders(id)]); // parallel [1]
+const filtered = useMemo(() => users.filter(u => u.name.includes(q)), [users, q]); // derived [13]
+const selectedSet = useMemo(() => new Set(selected), [selected]); // O(1) lookup [5]
 ```
 
 ---
 
-## Async Parallelization
+## State Architecture [1][14]
 
-```tsx
-// CORRECT: Independent fetches run in parallel
-async function loadDashboard(userId: string) {
-  const [user, orders, preferences] = await Promise.all([
-    fetchUser(userId),
-    fetchOrders(userId),
-    fetchPreferences(userId),
-  ]);
-  return { user, orders, preferences };
-}
+| Pattern | When to Use | Source |
+|---------|-------------|--------|
+| `useState` | Simple, independent values | [1] |
+| `useReducer` | Complex state with multiple transitions | [14] |
+| Context | Shared state across distant components | [1][2] |
+| Server Components | Server-only data; zero bundle impact | [6][7] |
 
-// VIOLATION: Sequential fetches (3x slower)
-async function loadDashboardSlow(userId: string) {
-  const user = await fetchUser(userId);
-  const orders = await fetchOrders(userId);
-  const preferences = await fetchPreferences(userId);
-  return { user, orders, preferences };
-}
-```
+Server Components render on the server and stream to the client — no `useEffect`
+or API route required for data fetching. [6][7]
 
 ---
 
-## Bundle Size
+## Key Anti-Patterns [3][13]
 
-```tsx
-// CORRECT: Direct imports (tree-shakable)
-import { Button } from '@/components/Button';
-import { Card } from '@/components/Card';
-
-// VIOLATION: Barrel imports (imports entire library)
-import { Button, Card } from '@/components';
-
-// CORRECT: Dynamic import for heavy components
-const Chart = lazy(() => import('./Chart'));
-const Editor = lazy(() => import('./Editor'));
-
-function Dashboard() {
-  return (
-    <Suspense fallback={<Skeleton />}>
-      {showChart && <Chart data={data} />}
-    </Suspense>
-  );
-}
-```
-
----
-
-## Re-render Optimization
-
-```tsx
-// CORRECT: Primitive deps (stable references)
-useEffect(() => {
-  fetchData(userId, isActive);
-}, [userId, isActive]); // primitives don't cause unnecessary runs
-
-// VIOLATION: Object/array deps (new reference every render)
-useEffect(() => {
-  fetchData(options);
-}, [options]); // { page: 1 } !== { page: 1 }
-
-// CORRECT: Stable callback with useCallback
-const handleClick = useCallback((id: string) => {
-  setSelected(id);
-}, []); // no deps = stable reference
-
-// VIOLATION: Inline function (new reference every render)
-<List onItemClick={(id) => setSelected(id)} />
-```
-
----
-
-## Image Optimization
-
-```tsx
-// CORRECT: Optimized image with all attributes
-<img
-  src={url}
-  alt={description}
-  width={400}
-  height={300}
-  loading="lazy"
-  decoding="async"
-  style={{ aspectRatio: '4/3' }}
-/>
-
-// VIOLATION: Unoptimized image
-<img src={url} />  // No dimensions, no lazy loading, layout shift
-```
-
----
-
-## Data Structure Performance
-
-```tsx
-// CORRECT: Set for O(1) membership checks
-const selectedIds = new Set(selected);
-const isSelected = (id: string) => selectedIds.has(id);
-
-// VIOLATION: Array.includes is O(n)
-const isSelected = (id: string) => selected.includes(id);
-
-// CORRECT: Map for key-value lookups
-const usersById = new Map(users.map(u => [u.id, u]));
-const getUser = (id: string) => usersById.get(id);
-
-// VIOLATION: Array.find is O(n)
-const getUser = (id: string) => users.find(u => u.id === id);
-```
-
----
-
-## Anti-Patterns
-
-```tsx
-// BAD: Derived state in useState | GOOD: useMemo
-const filtered = useMemo(() => items.filter(i => i.active), [items]);
-
-// BAD: Missing dependency | GOOD: Include all deps
-useEffect(() => { fetchData(userId); }, [userId]);
-
-// BAD: State update in render | GOOD: Use effect
-useEffect(() => { setState(value); }, [value]);
-```
+| Anti-Pattern | Correct Approach | Source |
+|-------------|-----------------|--------|
+| Derived state in `useState` + `useEffect` | Compute with `useMemo` during render | [13] |
+| Object/array literal in `useEffect` deps | Extract to primitives | [3] |
+| Missing cleanup in `useEffect` | Always return cleanup function | [3] |
+| Prop drilling (3+ levels) | Context or composition | [2][4] |
+| Barrel imports | Direct named imports (tree-shakable) | [5] |
+| `Array.find`/`includes` in render loops | `Map`/`Set` via `useMemo` | [5] |
+| Index as list key | Use stable unique IDs | [1] |
 
 ---
 
 ## Extended References
 
-- `references/patterns.md` - Render props, reducers, virtualization, lazy loading
-- `references/hooks.md` - useQuery, useDebouncedValue, usePrevious, useClickOutside
-- `references/forms.md` - Controlled forms, validation hooks, multi-step forms
-- `references/error-handling.md` - Error boundaries, async error handling
+- `references/sources.md` — Full bibliography (24 sources)
+- `references/patterns.md` — Extended correct patterns with citations
+- `references/violations.md` — Extended violation examples with citations
+- `references/hooks.md` — Hook rules, custom hooks, useEffect deep-dive, utilities
+- `references/forms.md` — Controlled/uncontrolled, validation, Server Actions
+- `references/error-handling.md` — Error boundaries, Suspense, async error states
 
 ---
 
 ## Checklist
 
-- [ ] Hooks at top level only
-- [ ] All useEffect deps included
-- [ ] useCallback for handlers passed to children
-- [ ] useMemo for expensive computations
-- [ ] Context at appropriate level
-- [ ] Error boundaries around risky components
-- [ ] Keys on list items (not index)
-- [ ] Loading/error states handled
-- [ ] Accessibility (aria-*, role)
-- [ ] Independent fetches parallelized with Promise.all
-- [ ] No barrel imports (direct imports for tree-shaking)
-- [ ] Large components lazy-loaded
-- [ ] Object/array deps avoided in useEffect (use primitives)
-- [ ] Set/Map used for lookups instead of Array.includes/find
-- [ ] Images have dimensions, lazy loading, and aspect-ratio
+- [ ] Hooks at top level — no conditions or loops [16][24]
+- [ ] All `useEffect` deps included; cleanup returned [3]
+- [ ] `useCallback` for handlers to memoized children; `useMemo` for expensive values [4]
+- [ ] Context at appropriate level — no prop drilling [2]
+- [ ] Error boundaries around risky components [1]
+- [ ] Unique stable keys on list items — not index [1]
+- [ ] Loading and error states handled [13]
+- [ ] Accessibility: `aria-*`, `role`, labels on form inputs [21][22]
+- [ ] Independent fetches parallelized with `Promise.all` [1]
+- [ ] Direct imports — no barrel imports; lazy-load heavy components [5]
+- [ ] `Set`/`Map` for O(1) lookups instead of `Array.includes`/`find` [5]
+- [ ] Images have explicit dimensions, lazy loading, and aspect-ratio [23]
