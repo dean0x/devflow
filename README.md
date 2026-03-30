@@ -124,14 +124,14 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 
 | Skill | Triggers When |
 |-------|---------------|
-| `core-patterns` | Implementing business logic, error handling |
+| `software-design` | Implementing business logic, error handling |
 | `docs-framework` | Creating documentation artifacts in .docs/ |
 | `git-safety` | Rebasing, force-pushing, merge conflicts |
 | `git-workflow` | Staging files, creating commits, PRs |
 | `github-patterns` | GitHub API operations, PR comments, releases |
 | `test-driven-development` | Implementing new features (RED-GREEN-REFACTOR) |
-| `test-patterns` | Writing or modifying tests |
-| `input-validation` | Creating API endpoints |
+| `testing` | Writing or modifying tests |
+| `boundary-validation` | Creating API endpoints |
 | `search-first` | Adding utilities, helpers, or infrastructure code |
 
 ## Language & Ecosystem Plugins
@@ -143,7 +143,7 @@ Optional plugins for language-specific patterns. Install only what you need:
 | `devflow-typescript` | `typescript` | Working in TypeScript codebases |
 | `devflow-react` | `react` | Working with React components |
 | `devflow-accessibility` | `accessibility` | Creating UI components, forms |
-| `devflow-frontend-design` | `frontend-design` | Working with CSS, styling |
+| `devflow-frontend-design` | `ui-design` | Working with CSS, styling |
 | `devflow-go` | `go` | Working in Go codebases |
 | `devflow-python` | `python` | Working in Python codebases |
 | `devflow-java` | `java` | Working in Java codebases |
@@ -315,16 +315,16 @@ Override any DevFlow skill with your own version. Shadowed skills survive `devfl
 
 ```bash
 # Create a personal override (copies current version as reference)
-npx devflow-kit skills shadow core-patterns
+npx devflow-kit skills shadow software-design
 
 # Edit your override
-vim ~/.devflow/skills/core-patterns/SKILL.md
+vim ~/.devflow/skills/software-design/SKILL.md
 
 # List all overrides
 npx devflow-kit skills list-shadowed
 
 # Remove override (next init restores DevFlow's version)
-npx devflow-kit skills unshadow core-patterns
+npx devflow-kit skills unshadow software-design
 ```
 
 ### Uninstall Options

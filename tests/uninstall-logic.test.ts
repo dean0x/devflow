@@ -56,8 +56,8 @@ describe('computeAssetsToRemove', () => {
     const { skills } = computeAssetsToRemove([reviewPlugin], DEVFLOW_PLUGINS);
     // review-methodology is also declared by devflow-ambient, so it must NOT be removed
     expect(skills).not.toContain('review-methodology');
-    // security-patterns is also declared by devflow-ambient
-    expect(skills).not.toContain('security-patterns');
+    // security is also declared by devflow-ambient
+    expect(skills).not.toContain('security');
   });
 
   it('handles custom plugin lists', () => {
@@ -94,11 +94,11 @@ describe('formatDryRunPlan', () => {
 
   it('omits empty sections', () => {
     const plan = formatDryRunPlan({
-      skills: ['core-patterns'],
+      skills: ['software-design'],
       agents: [],
       commands: [],
     });
-    expect(plan).toContain('core-patterns');
+    expect(plan).toContain('software-design');
     expect(plan).not.toContain('Agents');
     expect(plan).not.toContain('Commands');
   });
@@ -115,7 +115,7 @@ describe('formatDryRunPlan', () => {
 
   it('deduplicates skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
-      skills: ['core-patterns', 'core-patterns', 'test-patterns'],
+      skills: ['software-design', 'software-design', 'testing'],
       agents: ['coder', 'coder'],
       commands: ['/implement', '/implement'],
     });

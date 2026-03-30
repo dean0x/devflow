@@ -27,13 +27,13 @@ describe('SKILL_NAMESPACE', () => {
 
 describe('prefixSkillName', () => {
   it('adds devflow: prefix to bare name', () => {
-    expect(prefixSkillName('core-patterns')).toBe('devflow:core-patterns');
+    expect(prefixSkillName('software-design')).toBe('devflow:software-design');
     expect(prefixSkillName('typescript')).toBe('devflow:typescript');
     expect(prefixSkillName('go')).toBe('devflow:go');
   });
 
   it('is a no-op for already-prefixed names', () => {
-    expect(prefixSkillName('devflow:core-patterns')).toBe('devflow:core-patterns');
+    expect(prefixSkillName('devflow:software-design')).toBe('devflow:software-design');
     expect(prefixSkillName('devflow:go')).toBe('devflow:go');
   });
 
@@ -44,12 +44,12 @@ describe('prefixSkillName', () => {
 
 describe('unprefixSkillName', () => {
   it('strips devflow: prefix', () => {
-    expect(unprefixSkillName('devflow:core-patterns')).toBe('core-patterns');
+    expect(unprefixSkillName('devflow:software-design')).toBe('software-design');
     expect(unprefixSkillName('devflow:typescript')).toBe('typescript');
   });
 
   it('is a no-op for bare names', () => {
-    expect(unprefixSkillName('core-patterns')).toBe('core-patterns');
+    expect(unprefixSkillName('software-design')).toBe('software-design');
     expect(unprefixSkillName('go')).toBe('go');
   });
 
@@ -62,7 +62,7 @@ describe('unprefixSkillName', () => {
   });
 
   it('roundtrips with prefixSkillName', () => {
-    const names = ['core-patterns', 'security-patterns', 'go', 'react'];
+    const names = ['software-design', 'security', 'go', 'react'];
     for (const name of names) {
       expect(unprefixSkillName(prefixSkillName(name))).toBe(name);
     }
@@ -90,13 +90,13 @@ describe('hasShadow normalizes prefixed names', () => {
   });
 
   it('detects shadow with bare name', async () => {
-    await fs.mkdir(path.join(tmpDir, 'skills', 'core-patterns'), { recursive: true });
-    expect(await hasShadow('core-patterns', tmpDir)).toBe(true);
+    await fs.mkdir(path.join(tmpDir, 'skills', 'software-design'), { recursive: true });
+    expect(await hasShadow('software-design', tmpDir)).toBe(true);
   });
 
   it('detects shadow with prefixed name', async () => {
-    await fs.mkdir(path.join(tmpDir, 'skills', 'core-patterns'), { recursive: true });
-    expect(await hasShadow('devflow:core-patterns', tmpDir)).toBe(true);
+    await fs.mkdir(path.join(tmpDir, 'skills', 'software-design'), { recursive: true });
+    expect(await hasShadow('devflow:software-design', tmpDir)).toBe(true);
   });
 
   it('returns false when no shadow exists', async () => {
@@ -168,7 +168,7 @@ describe('installViaFileCopy skill lifecycle', () => {
 
   it('removes legacy unprefixed dir during cleanup', async () => {
     // Use a real skill name from DEVFLOW_PLUGINS so cleanup loop finds it
-    const realSkill = 'core-patterns';
+    const realSkill = 'software-design';
     const legacyDir = path.join(claudeDir, 'skills', realSkill);
     await fs.mkdir(legacyDir, { recursive: true });
     await fs.writeFile(path.join(legacyDir, 'SKILL.md'), 'legacy');
@@ -182,7 +182,7 @@ describe('installViaFileCopy skill lifecycle', () => {
 
   it('cleanup removes stale prefixed dir and reinstalls fresh', async () => {
     // Use a real skill name so the cleanup loop processes it
-    const realSkill = 'core-patterns';
+    const realSkill = 'software-design';
     const oldPrefixed = path.join(claudeDir, 'skills', `devflow:${realSkill}`);
     await fs.mkdir(oldPrefixed, { recursive: true });
     await fs.writeFile(path.join(oldPrefixed, 'SKILL.md'), 'old');
@@ -228,7 +228,7 @@ describe('installViaFileCopy skill lifecycle', () => {
 
   it('partial install still cleans skill dirs (skills are universal)', async () => {
     // Use a real skill name so cleanup loop finds it
-    const realSkill = 'core-patterns';
+    const realSkill = 'software-design';
     const legacyDir = path.join(claudeDir, 'skills', realSkill);
     await fs.mkdir(legacyDir, { recursive: true });
     await fs.writeFile(path.join(legacyDir, 'SKILL.md'), 'legacy');
