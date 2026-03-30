@@ -186,7 +186,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "testing-planner"
   Prompt: |
     You are planning the test strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:test-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:testing/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 4}
     3. Your deliverable: Test strategy — unit tests, integration tests,
