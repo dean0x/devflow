@@ -540,24 +540,41 @@ describe('Format 11: Relative skill-directory cross-references in skill referenc
 });
 
 // ---------------------------------------------------------------------------
-// Additional: Test infrastructure
+// Additional: Test infrastructure (recursive — covers tests/integration/)
 // ---------------------------------------------------------------------------
 
+/** Recursively collect .ts files under a directory, returning paths relative to baseDir. */
+function collectTsFiles(dir: string, baseDir: string): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const fullPath = path.join(dir, entry);
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      results.push(...collectTsFiles(fullPath, baseDir));
+    } else if (stat.isFile() && entry.endsWith('.ts')) {
+      results.push(path.relative(baseDir, fullPath));
+    }
+  }
+  return results;
+}
+
 describe('Test infrastructure skill references', () => {
-  it('all devflow:NAME references in tests/*.ts are canonical or command refs', async () => {
+  it('all devflow:NAME references in tests/**/*.ts are canonical or command refs', async () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const testsDir = path.join(ROOT, 'tests');
-    const testFiles = readdirSync(testsDir).filter(f =>
-      f.endsWith('.ts') &&
+    const testFiles = collectTsFiles(testsDir, testsDir).filter(f =>
       // Exclude this file itself — it contains regex patterns and jsdoc that produce false positives
       f !== 'skill-references.test.ts'
     );
 
-    for (const file of testFiles) {
-      const filePath = path.join(testsDir, file);
-      const stat = statSync(filePath);
-      if (!stat.isFile()) continue;
+    // Verify we actually scan subdirectories (integration helpers must be included)
+    expect(
+      testFiles.some(f => f.startsWith('integration/')),
+      'recursive scan must include tests/integration/ files',
+    ).toBe(true);
 
+    for (const relFile of testFiles) {
+      const filePath = path.join(testsDir, relFile);
       const content = readFileSync(filePath, 'utf-8');
       const allRefs = extractPrefixedRefs(content);
       const skillRefs = filterNonSkillRefs(allRefs);
@@ -565,8 +582,96 @@ describe('Test infrastructure skill references', () => {
       for (const ref of skillRefs) {
         expect(
           canonicalSkills.has(ref),
-          `tests/${file}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
+          `tests/${relFile}: devflow:${ref} is not in canonical getAllSkillNames() and not a known command ref`,
         ).toBe(true);
+      }
+    }
+  });
+
+  it('AMBIENT_PREAMBLE skill refs in tests/integration/helpers.ts exist in actual hook preamble', () => {
+    const helpersPath = path.join(ROOT, 'tests', 'integration', 'helpers.ts');
+    const helpersContent = readFileSync(helpersPath, 'utf-8');
+    const hookPath = path.join(ROOT, 'scripts', 'hooks', 'ambient-prompt');
+    const hookContent = readFileSync(hookPath, 'utf-8');
+
+    const helpersRefs = extractPrefixedRefs(helpersContent);
+    const hookRefs = extractPrefixedRefs(hookContent);
+    const hookSkillSet = new Set(hookRefs);
+
+    expect(helpersRefs.length, 'helpers.ts AMBIENT_PREAMBLE should have skill refs').toBeGreaterThan(5);
+
+    const skillRefs = filterNonSkillRefs(helpersRefs);
+    for (const ref of skillRefs) {
+      expect(
+        hookSkillSet.has(ref),
+        `tests/integration/helpers.ts AMBIENT_PREAMBLE has 'devflow:${ref}' but scripts/hooks/ambient-prompt does not — preamble drift`,
+      ).toBe(true);
+    }
+  });
+
+  it('no old V2-renamed skill names appear as string literals in test data', () => {
+    const testsDir = path.join(ROOT, 'tests');
+    const testFiles = collectTsFiles(testsDir, testsDir).filter(f =>
+      // Exclude this file — it has old names in regexes/comments by design
+      f !== 'skill-references.test.ts'
+    );
+
+    // Old bare skill names from the V2 rename
+    const OLD_SKILL_NAMES: [string, RegExp][] = [
+      // Matches `core-patterns` as a skill ref (in devflow: prefix context),
+      // but not as a substring of `devflow-core-patterns` (legacy names list)
+      ['core-patterns', /(?<!devflow-)(?<![\w])core-patterns(?![\w])/g],
+      ['test-patterns', /(?<!devflow-)(?<![\w])test-patterns(?![\w])/g],
+      ['security-patterns', /(?<!devflow-)(?<![\w])security-patterns(?![\w])/g],
+      ['architecture-patterns', /(?<!devflow-)(?<![\w])architecture-patterns(?![\w])/g],
+      ['performance-patterns', /(?<!devflow-)(?<![\w])performance-patterns(?![\w])/g],
+      // input-validation: exclude when in HTML/form context (rare in test files)
+      ['input-validation', /(?<!devflow-)(?<![\w])input-validation(?![\w])/g],
+      // frontend-design: exclude when preceded by `devflow-` (plugin name)
+      ['frontend-design', /(?<!devflow-)(?<![\w])frontend-design(?![\w])/g],
+    ];
+
+    // Known allowlist: lines containing migration test data, legacy references, or comments about old names.
+    // Also allow test assertion lines like `expect(...).toContain('old-name')` in shadow migration tests.
+    const ALLOWLIST_PATTERNS = [
+      /LEGACY_SKILL_NAMES/,
+      /SHADOW_RENAMES/,
+      /old.?name/i,
+      /legacy/i,
+      /shadow/i,
+      /[Mm]igrat/,
+      /v2\.0\.0.*rename/i,
+      /\/\/ Old/i,
+    ];
+
+    // Files whose tests intentionally use old skill names as test data
+    const ALLOWLIST_FILES = new Set([
+      'init-logic.test.ts',
+    ]);
+
+    for (const relFile of testFiles) {
+      // Skip files that intentionally use old names as migration test data
+      const basename = path.basename(relFile);
+      if (ALLOWLIST_FILES.has(basename)) continue;
+
+      const filePath = path.join(testsDir, relFile);
+      const content = readFileSync(filePath, 'utf-8');
+      const lines = content.split('\n');
+
+      for (const [oldName, pattern] of OLD_SKILL_NAMES) {
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (ALLOWLIST_PATTERNS.some(p => p.test(line))) continue;
+          // Reset regex lastIndex for each line
+          pattern.lastIndex = 0;
+          if (pattern.test(line)) {
+            // Check if this is in a devflow: prefix context (already caught by other tests) — skip
+            if (new RegExp(`devflow:${oldName.replace(/-/g, '\\-')}`).test(line)) continue;
+            expect.unreachable(
+              `tests/${relFile}:${i + 1}: found old skill name '${oldName}' as string literal — should use V2 name`,
+            );
+          }
+        }
       }
     }
   });
