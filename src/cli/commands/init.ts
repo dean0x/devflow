@@ -54,36 +54,45 @@ export function classifySafeDeleteState(
   return 'missing';
 }
 
+async function shadowExists(p: string): Promise<boolean> {
+  return fs.access(p).then(() => true, () => false);
+}
+
 /**
  * Migrate shadow skill overrides from old V2 skill names to new names.
  * Pure function suitable for testing — requires only the devflowDir path.
  */
 export async function migrateShadowOverrides(devflowDir: string): Promise<{ migrated: number; warnings: string[] }> {
   const shadowsRoot = path.join(devflowDir, 'skills');
-  let migrated = 0;
-  const warnings: string[] = [];
 
-  for (const [oldName, newName] of SHADOW_RENAMES) {
-    const oldShadow = path.join(shadowsRoot, oldName);
-    const newShadow = path.join(shadowsRoot, newName);
-    try {
-      await fs.access(oldShadow);
-      // Old shadow exists — migrate if new doesn't exist yet
-      try {
-        await fs.access(newShadow);
-        // Both exist — warn, don't overwrite
-        warnings.push(`Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`);
-      } catch {
-        // New doesn't exist — rename
-        await fs.rename(oldShadow, newShadow);
-        migrated++;
+  const results = await Promise.all(
+    SHADOW_RENAMES.map(async ([oldName, newName]) => {
+      const oldShadow = path.join(shadowsRoot, oldName);
+      const newShadow = path.join(shadowsRoot, newName);
+
+      if (!(await shadowExists(oldShadow))) {
+        // Old shadow doesn't exist — nothing to migrate
+        return { migrated: 0, warning: null };
       }
-    } catch {
-      // Old shadow doesn't exist — nothing to migrate
-    }
-  }
 
-  return { migrated, warnings };
+      if (await shadowExists(newShadow)) {
+        // Both exist — warn, don't overwrite
+        return {
+          migrated: 0,
+          warning: `Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`,
+        };
+      }
+
+      // New doesn't exist — rename
+      await fs.rename(oldShadow, newShadow);
+      return { migrated: 1, warning: null };
+    }),
+  );
+
+  return {
+    migrated: results.reduce((sum, r) => sum + r.migrated, 0),
+    warnings: results.flatMap(r => (r.warning ? [r.warning] : [])),
+  };
 }
 
 /**
