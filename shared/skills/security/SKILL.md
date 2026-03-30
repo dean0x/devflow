@@ -15,106 +15,69 @@ Domain expertise for security vulnerability detection. Use alongside `devflow:re
 >
 > Every user input, URL parameter, header, and cookie is an attack vector. Use parameterized
 > queries always. Escape output always. Validate schemas always. "This field is internal"
-> is not a defense. Defense in depth, not wishful thinking.
-
----
+> is not a defense. Defense in depth, not wishful thinking. [1][6]
 
 ## Vulnerability Categories
 
-### 1. Input Validation & Injection
+### 1. Input Validation & Injection [1][6]
 
-**SQL Injection**
+**SQL Injection** — parameterize, never interpolate:
 ```typescript
-// VULNERABLE
-const query = `SELECT * FROM users WHERE email = '${email}'`;
-
-// SECURE
+// VULNERABLE: const query = `SELECT * FROM users WHERE email = '${email}'`;
 await db.execute("SELECT * FROM users WHERE email = ?", [email]);
 ```
 
-**XSS (Cross-Site Scripting)**
+**XSS** — text content, never innerHTML:
 ```typescript
-// VULNERABLE
-element.innerHTML = userInput;
-
-// SECURE
-element.textContent = userInput;
+element.textContent = userInput;  // not: element.innerHTML = userInput
 ```
 
-> See `references/injection.md` for NoSQL, command injection, path traversal patterns.
+> `references/patterns.md` — NoSQL, command injection, path traversal, LDAP injection.
 
-### 2. Authentication & Authorization
+### 2. Authentication & Authorization [1][2][7]
 
-**Missing Auth Checks**
 ```typescript
-// VULNERABLE
-app.delete('/api/users/:id', async (req, res) => {
-  await deleteUser(req.params.id);  // No auth!
-});
+// VULNERABLE: no auth middleware
+app.delete('/api/users/:id', async (req, res) => { await deleteUser(req.params.id); });
 
-// SECURE
+// SECURE: layered auth
 app.delete('/api/users/:id', requireAuth, requireRole('admin'), handler);
 ```
 
-> See `references/auth.md` for password policies, session management, JWT patterns.
+NIST 800-63 minimum: 15-char passphrase or 12-char complex, phishing-resistant MFA [7].
+JWT: pin algorithm explicitly, set `expiresIn`, store refresh tokens server-side [17].
 
-### 3. Cryptography & Secrets
+### 3. Cryptography & Secrets [5][24][25]
 
-**Hardcoded Secrets**
 ```typescript
-// VULNERABLE
-const API_KEY = 'sk-abc123xyz789';
-
-// SECURE
-const API_KEY = process.env.API_KEY;
+const API_KEY = process.env.API_KEY;           // not: hardcoded literal
+const token = crypto.randomBytes(32).toString('hex');  // not: Math.random()
 ```
 
-**Insecure Random**
-```typescript
-// VULNERABLE
-const token = Math.random().toString(36);
+Password hashing: Argon2id (preferred) or bcrypt cost ≥12 [24]. Encrypt with AES-256-GCM
+(authenticated). Compare secrets with `crypto.timingSafeEqual`, never `===` [25].
 
-// SECURE
-const token = crypto.randomBytes(32).toString('hex');
-```
-
-> See `references/crypto.md` for weak crypto detection, encryption patterns.
-
-### 4. Configuration & Headers
+### 4. Configuration & Headers [10][15][16]
 
 ```typescript
-// REQUIRED: Use helmet or set manually
 app.use(helmet());
-res.setHeader('Content-Security-Policy', "default-src 'self'");
-res.setHeader('X-Frame-Options', 'DENY');
-res.setHeader('Strict-Transport-Security', 'max-age=31536000');
-
-// CORS: Never use origin: '*'
+res.setHeader('Content-Security-Policy', "default-src 'self'");  // [15]
+res.setHeader('Strict-Transport-Security', 'max-age=31536000');  // [10]
 app.use(cors({ origin: ['https://myapp.com'], credentials: true }));
 ```
 
-### 5. Business Logic
+SameSite=Strict cookies prevent CSRF [16]. SRI hashes prevent CDN tampering [18].
 
-**Race Conditions**
-```typescript
-// VULNERABLE
-if (balance >= amount) await withdraw(userId, amount);
+### 5. Business Logic & API Security [1][3][11]
 
-// SECURE: Use transactions with row locks
-await db.transaction(async (tx) => {
-  const balance = await tx.getBalance(userId, { forUpdate: true });
-  if (balance >= amount) await tx.withdraw(userId, amount);
-});
-```
+Race conditions: wrap check-then-act in database transactions with row locks.
+Mass assignment: explicitly allowlist fields — never `User.create(req.body)` [11].
+OWASP API Top 10 [11]: Broken Object Auth (API1), Excessive Data Exposure (API3), SSRF (API7).
 
-**Mass Assignment**
-```typescript
-// VULNERABLE
-await User.create(req.body);  // All fields accepted!
+### 6. Supply Chain [12][13]
 
-// SECURE: Explicitly list allowed fields
-await User.create({ email: req.body.email, name: req.body.name });
-```
+Pin dependencies to exact versions. Require SRI for CDN assets [18]. Use
+Sigstore/SLSA provenance in CI/CD to verify artifact integrity [12][13].
 
 ---
 
