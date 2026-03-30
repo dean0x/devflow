@@ -95,8 +95,10 @@ export function runClaudeWithRetry(
       if (predicate(result)) {
         return { result, attempts: i, passed: true };
       }
-    } catch {
-      // Timeout or other transient error — continue to next attempt
+    } catch (err) {
+      // Rethrow on final attempt so non-transient errors (e.g. SyntaxError) surface
+      if (i === maxAttempts) throw err;
+      // Otherwise treat as transient and retry
     }
   }
 
