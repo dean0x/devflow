@@ -1,10 +1,15 @@
 # Async Python Patterns
 
 Deep-dive on async Python programming. Reference from main SKILL.md.
+All citations reference `sources.md`.
 
-## Core asyncio Patterns
+## Core asyncio Patterns [16][1]
 
-### Basic Async Function
+asyncio implements the Reactor pattern — a single-threaded event loop dispatches
+callbacks when I/O completes [16]. Ramalho's Part V of Fluent Python covers the
+design in depth [1].
+
+### Basic Async Function [16]
 
 ```python
 import asyncio
@@ -17,7 +22,10 @@ async def fetch_user(user_id: str) -> User:
             return User.model_validate(data)
 ```
 
-### Concurrent Execution with gather
+### Concurrent Execution with gather [16][1]
+
+`asyncio.gather` runs independent coroutines concurrently — Ramalho's "spinner"
+example demonstrates that gather returns when ALL tasks complete [1]:
 
 ```python
 async def load_dashboard(user_id: str) -> Dashboard:
@@ -30,9 +38,13 @@ async def load_dashboard(user_id: str) -> Dashboard:
     return Dashboard(user=user, orders=orders, preferences=preferences)
 ```
 
-## Structured Concurrency with TaskGroup
+## Structured Concurrency with TaskGroup [16]
 
-### TaskGroup for Safe Concurrency (Python 3.11+)
+### TaskGroup for Safe Concurrency (Python 3.11+) [16]
+
+`asyncio.TaskGroup` is the structured concurrency primitive introduced in
+Python 3.11. It cancels all sibling tasks when one raises, preventing leaked
+coroutines [16]:
 
 ```python
 async def process_batch(items: list[Item]) -> list[Result]:
@@ -49,7 +61,10 @@ async def process_and_collect(item: Item, results: list[Result]) -> None:
     results.append(result)
 ```
 
-### Error Handling with TaskGroup
+### Error Handling with TaskGroup [16]
+
+TaskGroup cancels all tasks if one raises — wrap individual tasks for per-item
+error collection [16]:
 
 ```python
 async def resilient_batch(items: list[Item]) -> tuple[list[Result], list[Error]]:
@@ -71,7 +86,10 @@ async def resilient_batch(items: list[Item]) -> tuple[list[Result], list[Error]]
     return results, errors
 ```
 
-## Async Generators
+## Async Generators [1][16]
+
+Ramalho covers async generators in depth — they enable streaming without loading
+all results into memory [1]:
 
 ### Streaming Results
 
@@ -89,7 +107,7 @@ async for record in stream_results("SELECT * FROM events WHERE type = ?", ("clic
     await process(record)
 ```
 
-### Async Generator with Cleanup
+### Async Generator with Cleanup [1]
 
 ```python
 async def paginated_fetch(url: str, page_size: int = 100) -> AsyncGenerator[Item, None]:
@@ -103,7 +121,10 @@ async def paginated_fetch(url: str, page_size: int = 100) -> AsyncGenerator[Item
         page += 1
 ```
 
-## Semaphore for Rate Limiting
+## Semaphore for Rate Limiting [16][10]
+
+asyncio Semaphore provides bounded concurrency — Beazley & Jones Cookbook
+shows this pattern for controlling outbound request volume [10][16]:
 
 ### Bounded Concurrency
 
@@ -118,9 +139,11 @@ async def fetch_all(urls: list[str], max_concurrent: int = 10) -> list[Response]
     return await asyncio.gather(*[bounded_fetch(url) for url in urls])
 ```
 
-## aiohttp Patterns
+## aiohttp Patterns [16]
 
 ### Client Session Management
+
+Session reuse amortizes connection overhead across many requests [16]:
 
 ```python
 from contextlib import asynccontextmanager
@@ -147,7 +170,10 @@ async def fetch_user_with_session(
         return User.model_validate(data)
 ```
 
-## Timeout Patterns
+## Timeout Patterns [16]
+
+`asyncio.timeout` (Python 3.11+) replaces the `wait_for` pattern for per-operation
+timeouts [16]:
 
 ### Per-Operation Timeout
 
@@ -162,34 +188,40 @@ async def fetch_with_timeout(url: str, timeout_seconds: float = 5.0) -> dict[str
 
 ## Anti-Patterns
 
-### Blocking Calls in Async Code
+### Blocking Calls in Async Code [16][2]
+
+Slatkin's Item 62 and asyncio docs both flag synchronous I/O inside async functions
+as blocking the event loop for all other coroutines [2][16]:
 
 ```python
-# VIOLATION: Blocks the event loop
+# VIOLATION: Blocks the event loop [16]
 async def bad_fetch(url: str) -> str:
     import requests
     return requests.get(url).text  # Blocks entire event loop!
 
-# CORRECT: Use async library or run in executor
+# CORRECT: Use async library or run in executor [16]
 async def good_fetch(url: str) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             return await response.text()
 
-# CORRECT: Offload blocking call to thread pool
+# CORRECT: Offload blocking call to thread pool [16]
 async def run_blocking(func: Callable[..., R], *args: Any) -> R:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, func, *args)
 ```
 
-### Fire-and-Forget Without Error Handling
+### Fire-and-Forget Without Error Handling [16][1]
+
+Ramalho and asyncio docs both warn that `create_task` without a done callback
+silently discards exceptions [1][16]:
 
 ```python
-# VIOLATION: Exception silently lost
+# VIOLATION: Exception silently lost [16]
 async def bad_handler(event: Event) -> None:
     asyncio.create_task(send_notification(event))  # Error vanishes
 
-# CORRECT: Track the task and handle errors
+# CORRECT: Track the task and handle errors [16]
 async def good_handler(event: Event) -> None:
     task = asyncio.create_task(send_notification(event))
     task.add_done_callback(handle_task_exception)
@@ -199,17 +231,20 @@ def handle_task_exception(task: asyncio.Task[Any]) -> None:
         logger.error("Background task failed", exc_info=task.exception())
 ```
 
-### Sequential When Parallel Is Safe
+### Sequential When Parallel Is Safe [16][1]
+
+Ramalho's dashboard example (Fluent Python Ch. 21) benchmarks sequential vs
+concurrent fetching — 3 sequential awaits take 3x longer than gather [1]:
 
 ```python
-# VIOLATION: Unnecessarily sequential — 3x slower
+# VIOLATION: Unnecessarily sequential — 3x slower [1]
 async def slow_load(user_id: str) -> Dashboard:
     user = await fetch_user(user_id)
     orders = await fetch_orders(user_id)
     prefs = await fetch_preferences(user_id)
     return Dashboard(user=user, orders=orders, preferences=prefs)
 
-# CORRECT: Concurrent — ~1x latency
+# CORRECT: Concurrent — ~1x latency [1][16]
 async def fast_load(user_id: str) -> Dashboard:
     user, orders, prefs = await asyncio.gather(
         fetch_user(user_id),
