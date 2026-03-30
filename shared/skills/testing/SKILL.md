@@ -14,170 +14,126 @@ activation:
     - "node_modules/**"
 ---
 
-# Test Patterns
+# Testing Patterns
 
 ## Iron Law
 
-> **TESTS VALIDATE BEHAVIOR, NOT IMPLEMENTATION**
+> **TESTS VALIDATE BEHAVIOR, NOT IMPLEMENTATION** [4][8]
 >
-> A test should fail when behavior breaks, not when implementation changes. If refactoring
-> breaks tests without changing behavior, the tests are wrong. Mock boundaries, not internals.
-> Test the contract, not the code. If tests are hard to write, the design is wrong — fix the
-> architecture, not the tests.
+> A test should fail when behavior breaks, not when implementation changes. Mock at
+> boundaries, not internals. Test the contract, not the code path. If tests are hard to
+> write, the design is wrong — fix the architecture, not the tests. [3][8]
+
+---
+
+## Testing Shapes [6][7][10]
+
+| Shape | Guidance |
+|-------|---------|
+| Pyramid [6] | Many unit → fewer integration → fewest E2E |
+| Trophy [7] | Integration tests give best ROI for UI-heavy code |
+| Google [4] | 70% unit / 20% integration / 10% E2E; avoid E2E excess [12] |
+
+---
+
+## Test Doubles Taxonomy [1][9]
+
+| Type | When to Use | Example |
+|------|------------|---------|
+| **Dummy** | Fill unused parameters | `null`, empty object |
+| **Stub** | Return canned data, no assertions | `getRate: () => 0.1` |
+| **Spy** | Record calls, assert after | `jest.spyOn()` on public methods |
+| **Mock** | Pre-programmed expectations | `expect(fn).toHaveBeenCalledWith(x)` |
+| **Fake** | Working substitute (in-memory DB) | `InMemoryUserRepo` |
+
+"Mock roles, not objects" — mock interfaces you own, never third-party internals [3][9].
 
 ---
 
 ## Test Design Red Flags
 
-### 1. Complex Setup
-
-**RED FLAG**: Test setup >10 lines means the design is wrong.
-
-```typescript
-// VIOLATION: Too many dependencies
-beforeEach(async () => {
-  mockDb = new MockDatabase();
-  await mockDb.connect();
-  mockCache = new MockCache();
-  // ... 10+ more lines
-  service = new UserService(mockDb, mockCache, mockLogger, mockConfig);
-});
-
-// CORRECT: Simple setup
-it('should return Ok with valid data', () => {
-  const result = createUser({ name: 'test', email: 'test@example.com' });
-  expect(result.ok).toBe(true);
-});
-```
-
-**Detection**: `beforeEach` >10 lines, multiple mocks, async setup, database seeding
-
-### 2. Repetitive Boilerplate
-
-**RED FLAG**: Same pattern repeated >3 times means the API is wrong.
+| Red Flag | Symptom | Root Cause | Fix |
+|----------|---------|-----------|-----|
+| Complex setup >10 lines [8] | `beforeEach` with 6+ mocks | Too many dependencies | Split service; use fakes [1][4] |
+| Repetitive try/catch [8] | Same pattern >3 times | API throws, not Result | Migrate to Result types [4] |
+| Nested mock structures [1][3] | `mockDb.orders.create: jest.fn()` | Tight coupling | Extract interface; use fake [9] |
+| Spying on private methods [8] | `jest.spyOn(obj as any, '_method')` | Tests implementation | Assert observable output [4] |
 
 ```typescript
-// VIOLATION: Try/catch everywhere
-try { await api.createUser(data); fail(); } catch (e) { expect(e.status).toBe(400); }
+// VIOLATION: Tests private implementation [8]
+jest.spyOn(cart as any, 'updateTotal');
+expect(spy).toHaveBeenCalled();   // Tests HOW
 
-// CORRECT: Result types eliminate repetition
-const result = createUser(invalidData);
-expect(result.ok).toBe(false);
-expect(result.error.type).toBe('ValidationError');
-```
-
-### 3. Difficult Mocking
-
-**RED FLAG**: Mock setup >20 lines means dependencies are wrong.
-
-```typescript
-// VIOLATION: Nested mock structures
-mockDb = { transaction: jest.fn(), orders: { create: jest.fn(), update: jest.fn() } };
-
-// CORRECT: Pure functions need no mocking
-const result = processOrder(order);
-expect(result.ok).toBe(true);
-```
-
-### 4. Implementation Testing
-
-**RED FLAG**: Testing internals means tests are fragile.
-
-```typescript
-// VIOLATION: Spying on private methods
-const spy = jest.spyOn(cart as any, 'updateTotal');
-expect(spy).toHaveBeenCalled();
-
-// CORRECT: Test observable behavior
-expect(cart.getTotal()).toBe(10);
+// CORRECT: Tests observable behavior [4]
+cart.addItem({ id: '1', price: 10 });
+expect(cart.getTotal()).toBe(10); // Tests WHAT
 ```
 
 ---
 
-## Coverage & Review
+## Property-Based Testing [5][14]
 
-### Coverage Issues
+State invariants; let the framework generate inputs and shrink failures [5]:
 
-- **Untested new code**: New functions/branches without corresponding tests
-- **Missing edge cases**: Only happy path tested, no error paths
-- **Missing error paths**: `throw`/`reject` in source without matching test assertions
+```typescript
+// fast-check: property must hold for all valid inputs [14]
+fc.assert(fc.property(fc.string(), (s) => decode(encode(s)) === s));
+```
 
-### Test Quality Issues
-
-- **Brittle tests**: Testing HOW (mock call verification) not WHAT (outcome)
-- **Unclear test names**: `it('test1')` instead of `it('validates email format on creation')`
-- **Missing AAA structure**: Mixed arrange/act/assert without clear separation
-
-### Mocking Issues
-
-- **Over-mocking**: Everything mocked, nothing actually tested
-- **Mocking third-party internals**: Mock at your own interface boundary instead
+Use for: parsers/serializers, arithmetic, sorting, state machines [5][13][14].
 
 ---
 
-## Severity Guidelines
+## Flaky Tests [11][18]
+
+| Root Cause | Fix |
+|-----------|-----|
+| Async/timing races | Use fake timers; `await` all async ops [19] |
+| Order dependencies | Each test self-contained; fresh state [4] |
+| Shared mutable state | Reset in `afterEach`; use DI [4] |
+
+Quarantine flaky tests immediately — a suite that sometimes passes is worse than no suite [11].
+
+---
+
+## Coverage & Severity [4][8]
 
 | Severity | Criteria |
 |----------|----------|
-| **CRITICAL** | Tests pass but don't verify behavior; critical paths untested; tests mock everything |
-| **HIGH** | Missing error path coverage; flaky tests; extremely slow (>10s); >10 line setup |
-| **MEDIUM** | Some edge cases missing; weak assertions; unclear structure |
-| **LOW** | Organization could improve; naming could be clearer |
+| **CRITICAL** | Tests don't verify behavior; critical paths untested; everything mocked [4] |
+| **HIGH** | Missing error paths; flaky tests [11]; slow (>10s); setup >10 lines [8] |
+| **MEDIUM** | Missing edge cases; weak assertions; unclear AAA structure [17] |
+| **LOW** | Organization; naming clarity |
 
 ---
 
-## Test Suite Safety
+## Test Suite Safety [19]
 
 ```typescript
-// vitest.config.ts / jest.config.js
-{ fileParallelism: false, maxWorkers: 1, testTimeout: 10000 }
-```
-
-```bash
-NODE_OPTIONS="--max-old-space-size=512" npm test
+{ fileParallelism: false, maxWorkers: 1, testTimeout: 10000 }  // vitest / jest
 ```
 
 ---
 
 ## Extended References
 
-For comprehensive examples and detection patterns:
-
 | Reference | Contents |
 |-----------|----------|
-| `references/violations.md` | Full violation examples for all categories |
-| `references/patterns.md` | Correct test patterns and organization |
+| `references/sources.md` | Full bibliography (20 sources) |
+| `references/violations.md` | Extended violations with citations [1][4][8][11] |
+| `references/patterns.md` | Correct patterns with citations [1][2][5][14] |
 | `references/detection.md` | Bash commands for automated detection |
-| `references/report-template.md` | Full report format for documenting issues |
+| `references/report-template.md` | Report format for documenting issues |
 
 ---
 
-## Quality Gates
+## Quality Gates [4][8][17]
 
-Tests pass design review when:
-- [ ] Setup code <10 lines per test file
-- [ ] No repetitive try/catch or error handling patterns
-- [ ] Mocking requires <5 lines of setup
-- [ ] No spying on private methods or internal state
-- [ ] Tests verify behavior, not implementation details
-- [ ] Pure business logic testable without mocks
-- [ ] New code has corresponding tests
-- [ ] All branches covered (happy path + errors + edge cases)
-- [ ] Test names describe expected behavior
-- [ ] Tests follow Arrange-Act-Assert structure
-- [ ] No real delays (use mocked timers)
-- [ ] No flaky patterns (race conditions, timing dependencies)
-
----
-
-## Review Checklist
-
-- [ ] New code has corresponding tests
-- [ ] All branches covered (happy path + errors + edge cases)
-- [ ] Tests verify behavior, not implementation
-- [ ] Test names describe expected behavior
-- [ ] Tests follow Arrange-Act-Assert structure
-- [ ] No real delays (use mocked timers)
-- [ ] Assertions are specific and meaningful
-- [ ] Mocking limited to boundaries (not internals)
-- [ ] No flaky patterns (race conditions, timing dependencies)
+- [ ] Setup <10 lines; use fakes over mocks for complex dependencies [1]
+- [ ] No spying on private methods or internal state [8]
+- [ ] Tests verify behavior, not implementation details [4]
+- [ ] All branches covered: happy path + errors + edge cases
+- [ ] Test names describe expected behavior [4]
+- [ ] Tests follow Arrange-Act-Assert structure [17]
+- [ ] No real delays — use fake timers [19]
+- [ ] No flaky patterns (race conditions, timing dependencies) [11][18]

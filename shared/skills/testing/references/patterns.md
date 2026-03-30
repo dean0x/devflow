@@ -1,23 +1,25 @@
-# Test Patterns - Correct Examples
+# Test Patterns — Correct Examples
 
-Reference for proper test patterns and approaches.
+Reference for proper test patterns and approaches. All citations reference `sources.md`.
 
 ---
 
 ## Simple Setup Patterns
 
-### Pure Function Testing
+### Pure Function Testing [8][4]
+
+Simple tests signal correct design — if setup is hard, the design is wrong [8]:
 
 ```typescript
-// CORRECT: Simple setup indicates good design
+// CORRECT: Simple setup indicates good design [4][8]
 describe('createUser', () => {
-  it('should return Ok with valid data', () => {
+  it('returns Ok with valid data', () => {
     const result = createUser({ name: 'test', email: 'test@example.com' });
     expect(result.ok).toBe(true);
     expect(result.value.name).toBe('test');
   });
 
-  it('should return Err with invalid email', () => {
+  it('returns Err with invalid email', () => {
     const result = createUser({ name: 'test', email: 'invalid' });
     expect(result.ok).toBe(false);
     expect(result.error.type).toBe('ValidationError');
@@ -27,40 +29,48 @@ describe('createUser', () => {
 
 ---
 
-## Minimal Mocking Patterns
+## Test Doubles — Right Tool for the Job [1][9]
 
-### Single Dependency Injection
+Meszaros taxonomy: use the simplest double that satisfies the test [1]:
 
 ```typescript
-// CORRECT: Single mock for focused test
-describe('OrderCalculator', () => {
-  it('should calculate total with tax', () => {
-    const taxService = { getRate: () => 0.1 }; // Simple mock
-    const calculator = new OrderCalculator(taxService);
-    const result = calculator.calculateTotal([
-      { price: 100, quantity: 2 },
-      { price: 50, quantity: 1 },
-    ]);
-    expect(result).toBe(275);
-  });
-});
+// Stub: returns canned data, no assertions [1][9]
+const taxService = { getRate: () => 0.1 };
+const calculator = new OrderCalculator(taxService);
+expect(calculator.calculateTotal([{ price: 100, quantity: 2 }])).toBe(220);
+
+// Fake: working in-memory implementation — preferred over mocks [1][3]
+const repo = new InMemoryUserRepo();
+const service = new UserService(repo);
+const result = await service.createUser({ name: 'Alice', email: 'alice@test.com' });
+expect(result.ok).toBe(true);
+expect(await repo.findByEmail('alice@test.com')).toBeDefined();
+
+// Spy: assert on public-boundary calls — never private methods [1][9]
+const emailSpy = jest.spyOn(emailService, 'send');
+await service.createUser(userData);
+expect(emailSpy).toHaveBeenCalledWith(expect.objectContaining({ to: userData.email }));
 ```
+
+"Mock roles, not objects" — define an interface, mock the interface, never the class [3].
 
 ---
 
-## Behavior-Focused Testing
+## Behavior-Focused Testing [4][8]
+
+Google SWE Book Ch.12: test observable behavior, not implementation details [4]:
 
 ```typescript
-// CORRECT: Testing behavior, not implementation
+// CORRECT: Testing behavior, not implementation [4]
 describe('ShoppingCart', () => {
-  it('should calculate correct total after adding items', () => {
+  it('calculates correct total after adding items', () => {
     const cart = new ShoppingCart();
     cart.addItem({ id: '1', price: 10 });
     cart.addItem({ id: '2', price: 20 });
     expect(cart.getTotal()).toBe(30);
   });
 
-  it('should be empty after clearing', () => {
+  it('is empty after clearing', () => {
     const cart = new ShoppingCart();
     cart.addItem({ id: '1', price: 10 });
     cart.clear();
@@ -72,9 +82,53 @@ describe('ShoppingCart', () => {
 
 ---
 
-## Coverage Patterns
+## Property-Based Testing [5][14]
+
+QuickCheck (2000) introduced the pattern: state properties, let the framework
+generate inputs [5]. fast-check ports this to TypeScript [14]:
+
+```typescript
+import fc from 'fast-check';
+
+// Property: encode then decode always recovers original [14]
+fc.assert(fc.property(
+  fc.string(),
+  (s) => decode(encode(s)) === s
+));
+
+// Property: sorted array is always ordered [5][14]
+fc.assert(fc.property(
+  fc.array(fc.integer()),
+  (arr) => {
+    const sorted = sort(arr);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i] > sorted[i + 1]) return false;
+    }
+    return true;
+  }
+));
+
+// Property: total always equals sum of line items [14]
+fc.assert(fc.property(
+  fc.array(fc.record({ price: fc.integer({ min: 0 }), qty: fc.integer({ min: 1 }) })),
+  (items) => {
+    const order = new Order(items);
+    const expected = items.reduce((s, i) => s + i.price * i.qty, 0);
+    return order.total() === expected;
+  }
+));
+```
+
+Use property tests for: parsers/serializers, arithmetic, sorting/filtering,
+state machines, encoding/decoding [5][13][14].
+
+---
+
+## Coverage Patterns [4]
 
 ### Branch Coverage
+
+Every conditional path needs a test [4]:
 
 ```typescript
 describe('calculateDiscount', () => {
@@ -87,66 +141,80 @@ describe('calculateDiscount', () => {
   it('returns 30% for VIP customers', () => {
     expect(calculateDiscount(100, 'vip')).toBe(30);
   });
+  it('returns 0 for unknown tier', () => {
+    expect(calculateDiscount(100, 'unknown')).toBe(0);
+  });
 });
 ```
 
-### Error Path Coverage
+### Error Path Coverage [4]
+
+Error paths are first-class behaviors; test them explicitly [4]:
 
 ```typescript
 describe('fetchUser', () => {
   it('returns user data on success', async () => { /* ... */ });
-  it('throws ApiError on 404', async () => {
+  it('returns Err on 404', async () => {
     api.get.mockResolvedValue({ ok: false, status: 404 });
-    await expect(fetchUser('123')).rejects.toThrow(ApiError);
+    const result = await fetchUser('123');
+    expect(result.ok).toBe(false);
+    expect(result.error.type).toBe('NotFound');
   });
-  it('handles network errors', async () => {
+  it('returns Err on network failure', async () => {
     api.get.mockRejectedValue(new Error('Network error'));
-    await expect(fetchUser('123')).rejects.toThrow('Network error');
+    const result = await fetchUser('123');
+    expect(result.ok).toBe(false);
   });
 });
 ```
 
 ---
 
-## Separation of Concerns Testing
+## Separation of Concerns [4][20]
+
+Rainsberger: split collaboration tests (with mocks) from contract tests (real
+behavior) to avoid integrated-test explosion [20]:
 
 ```typescript
-// CORRECT: Business logic tested without I/O
-describe('OrderPricing (pure logic)', () => {
-  it('should calculate subtotal', () => {
+// Pure business logic — no mocking needed [4][8]
+describe('OrderPricing (unit)', () => {
+  it('calculates subtotal', () => {
     const items = [{ price: 100, quantity: 2 }, { price: 50, quantity: 1 }];
     expect(calculateSubtotal(items)).toBe(250);
   });
-  it('should apply percentage discount', () => {
+  it('applies percentage discount', () => {
     expect(applyDiscount(100, { type: 'percent', value: 20 })).toBe(80);
   });
 });
 
-// Integration test for I/O wrapper
+// I/O wrapper — minimal real mock at boundary [1][3]
 describe('OrderService (integration)', () => {
-  it('should persist order and return result', async () => {
-    const mockRepo = { save: jest.fn().mockResolvedValue({ id: '1' }) };
-    const service = new OrderService(mockRepo);
+  it('persists order and returns result', async () => {
+    const repo = new InMemoryOrderRepo();  // Fake, not mock [1]
+    const service = new OrderService(repo);
     const result = await service.createOrder({ items: [{ price: 100, quantity: 1 }] });
     expect(result.ok).toBe(true);
+    expect(await repo.count()).toBe(1);
   });
 });
 ```
 
 ---
 
-## Parameterized Testing
+## Parameterized Testing [4][17]
+
+Reduce duplication while maintaining clear test names [4][17]:
 
 ```typescript
 describe('validateEmail', () => {
   const validEmails = ['test@example.com', 'user.name@domain.org', 'user+tag@example.co.uk'];
   const invalidEmails = ['', 'invalid', '@nodomain.com', 'spaces in@email.com'];
 
-  test.each(validEmails)('should accept valid email: %s', (email) => {
+  test.each(validEmails)('accepts valid email: %s', (email) => {
     expect(validateEmail(email).ok).toBe(true);
   });
 
-  test.each(invalidEmails)('should reject invalid email: %s', (email) => {
+  test.each(invalidEmails)('rejects invalid email: %s', (email) => {
     expect(validateEmail(email).ok).toBe(false);
   });
 });
@@ -154,26 +222,76 @@ describe('validateEmail', () => {
 
 ---
 
-## Boundary Mocking
+## Boundary Mocking [3][9]
+
+Wrap third-party libraries in your own interface — mock the interface, not the library [3][9]:
 
 ```typescript
-// CORRECT: Wrap third-party libraries in your own interface
+// Define your boundary interface [3]
 interface HttpClient {
-  get<T>(url: string): Promise<T>;
+  get<T>(url: string): Promise<Result<T, HttpError>>;
 }
 
-class MockHttpClient implements HttpClient {
-  private responses: Map<string, any> = new Map();
-  mockResponse(url: string, data: any) { this.responses.set(url, data); }
-  async get<T>(url: string): Promise<T> { return this.responses.get(url); }
+// Fake for tests — implements real interface [1]
+class FakeHttpClient implements HttpClient {
+  private responses = new Map<string, unknown>();
+  setResponse(url: string, data: unknown) { this.responses.set(url, data); }
+  async get<T>(url: string): Promise<Result<T, HttpError>> {
+    const data = this.responses.get(url);
+    return data ? Ok(data as T) : Err({ type: 'NotFound', url });
+  }
 }
 
-// Tests use MockHttpClient, production uses AxiosHttpClient
+// Production code uses AxiosHttpClient — tests use FakeHttpClient [9]
 ```
 
 ---
 
-## Test Organization
+## Flaky Test Prevention [11][18][19]
+
+Google found async issues are the #1 cause of flakiness [11]:
+
+```typescript
+// FLAKY: Race condition — event may not have fired [11][18]
+subscribe(callback);
+emit('update', { value: 1 });
+expect(callback).toHaveBeenCalled();
+
+// STABLE: Wait for the event explicitly [19]
+const received = new Promise(resolve => subscribe(data => resolve(data)));
+emit('update', { value: 1 });
+const data = await received;
+expect(data.value).toBe(1);
+
+// STABLE: Use fake timers for time-dependent code [19]
+vi.useFakeTimers();
+const promise = fetchWithRetry();
+vi.advanceTimersByTime(1000);
+await promise;
+```
+
+---
+
+## Characterization Tests for Legacy Code [16]
+
+Before modifying untested code, lock down current behavior first [16]:
+
+```typescript
+// Characterization test: documents what code currently does [16]
+// IMPORTANT: This may not be the CORRECT behavior — verify before removing
+it('returns -1 for unknown status (characterization test)', () => {
+  expect(parseStatus('UNKNOWN_CODE')).toBe(-1);
+});
+```
+
+These tests are safety nets during refactoring — they catch regressions
+regardless of whether the original behavior was intentional [16].
+
+---
+
+## Test Organization [4][17]
+
+Nested `describe` blocks scope setup and communicate intent [4]:
 
 ```typescript
 describe('UserService', () => {
@@ -181,40 +299,48 @@ describe('UserService', () => {
   let repo: InMemoryUserRepo;
 
   beforeEach(() => {
-    repo = new InMemoryUserRepo();
+    repo = new InMemoryUserRepo();     // Fake — not mock [1]
     service = new UserService(repo);
   });
 
   describe('create', () => {
     it('creates user with valid data', async () => { /* ... */ });
     it('rejects invalid email', async () => { /* ... */ });
+    it('rejects duplicate email', async () => { /* ... */ });
   });
 
   describe('update', () => {
     it('updates existing user', async () => { /* ... */ });
-    it('returns error for non-existent user', async () => { /* ... */ });
+    it('returns Err for non-existent user', async () => { /* ... */ });
   });
 });
 ```
 
 ---
 
-## Test Data Factories
+## Test Data Factories [4][8]
+
+Builder pattern for test data avoids setup bloat [4][8]:
 
 ```typescript
-// CORRECT: Factories for test data, not test setup
-const createTestUser = (overrides = {}): User => ({
+// Factory with sensible defaults and overrides
+const createTestUser = (overrides: Partial<User> = {}): User => ({
   id: 'test-id',
   name: 'Test User',
   email: 'test@example.com',
   role: 'user',
+  createdAt: new Date('2024-01-01'),
   ...overrides,
 });
 
 describe('UserPermissions', () => {
-  it('should allow admin to delete users', () => {
+  it('allows admin to delete users', () => {
     const admin = createTestUser({ role: 'admin' });
     expect(canDeleteUser(admin)).toBe(true);
+  });
+  it('prevents regular user from deleting users', () => {
+    const user = createTestUser({ role: 'user' });
+    expect(canDeleteUser(user)).toBe(false);
   });
 });
 ```
