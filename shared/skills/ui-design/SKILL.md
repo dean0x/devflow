@@ -16,239 +16,129 @@ activation:
     - "**/*.spec.*"
 ---
 
-# Frontend Design Patterns
+# UI Design Patterns
 
-Reference for intentional visual design, following Anthropic's 4 Dimensions framework. Focus on deliberate aesthetic choices over default slop.
+Reference for intentional visual design. Every choice must be justified. Sources in `references/sources.md`.
 
 ## Iron Law
 
-> **AESTHETICS MUST HAVE INTENT**
+> **AESTHETICS MUST HAVE INTENT** [4][11]
 >
 > Every visual choice must be justified. Default styles, copied gradients, and
 > "looks modern" are not justifications. If you cannot explain why a specific
 > font, color, or animation exists, it's design debt. Good design is invisible
-> because it serves purpose, not because it copies trends.
+> because it serves purpose — it satisfies mental models, not trends.
+> — Don Norman, *The Design of Everyday Things* [11]; Laws of UX [4]
 
 ## When This Skill Activates
 
-- Creating or styling UI components
-- Reviewing CSS, Tailwind, or styled-components
-- Discussing typography, color schemes, or layouts
-- Building design systems or component libraries
-- Evaluating visual consistency
+- Creating/styling UI components; reviewing CSS, Tailwind, or styled-components
+- Discussing typography, color schemes, layouts, or design systems
 
 ---
 
-## 1. Typography Intent
+## 1. Typography [6][7][10][19]
 
-### Font Personality Must Match Product
+Font choice must match product personality: developer tools → monospace (precision), documentation → serif (readability), marketing → distinctive display. [6][7][27]
 
-```css
-/* CORRECT: Deliberate choice with rationale */
-/* Product: Developer documentation - needs readability */
-font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+Use a **mathematical type scale** (1.25 major third ratio). All sizes relate harmonically. [10] Line length: 45–75 characters for body text; `line-height: 1.7` for prose, `1.2` for headings. [6][7]
 
-/* VIOLATION: Inter because "everyone uses it" */
-font-family: 'Inter', sans-serif; /* Why? What does it communicate? */
-```
-
-### Clear Hierarchy
-
-```css
-/* CORRECT: Distinct visual hierarchy */
-.heading-1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.02em; }
-.heading-2 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.01em; }
-.body { font-size: 1rem; font-weight: 400; line-height: 1.6; }
-.caption { font-size: 0.875rem; font-weight: 400; color: var(--text-muted); }
-
-/* VIOLATION: No hierarchy - everything similar */
-.text { font-size: 1rem; }
-.text-big { font-size: 1.1rem; }
-```
-
-### Line Height Tuning
-
-```css
-/* CORRECT: Context-appropriate line height */
-.heading { line-height: 1.2; }  /* Tight for short headings */
-.body { line-height: 1.6; }     /* Comfortable for reading */
-.code { line-height: 1.4; }     /* Balanced for code */
-
-/* VIOLATION: Universal line height */
-* { line-height: 1.5; }
-```
+Heading levels must differ in weight, tracking, and size — not size alone. [7][15] See `references/patterns.md` for scale values, font pairs, and heading styles.
 
 ---
 
-## 2. Color and Theme
+## 2. Color System [1][9][12][14]
 
-### Deliberate Palette
+**Three-layer token architecture** (Material Design 3 [1] + W3C Design Tokens spec [9]):
 
 ```css
-/* CORRECT: Semantic color system with clear purpose */
 :root {
-  --color-primary: #0066cc;     /* Actions, links - trust/stability */
-  --color-success: #0a6640;     /* Positive outcomes */
-  --color-warning: #b35900;     /* Attention needed */
-  --color-error: #c41e3a;       /* Errors, destructive */
-  --color-neutral-900: #1a1a1a; /* Primary text */
-  --color-neutral-500: #6b7280; /* Secondary text */
-  --color-neutral-100: #f5f5f5; /* Backgrounds */
+  --blue-600: #2563eb;                      /* Layer 1: Primitive */
+  --color-primary: var(--blue-600);         /* Layer 2: Semantic  */
+  --button-primary-bg: var(--color-primary);/* Layer 3: Component */
 }
-
-/* VIOLATION: Random hex values without system */
-.button { background: #4f46e5; }
-.link { color: #3b82f6; }
-.alert { background: #ef4444; }
 ```
 
-### Light/Dark as First-Class
+**Dark mode**: swap semantic tokens only — never invert or filter. [23]
+Elevation in dark mode is expressed via lightness, not shadows. [1][12]
 
-```css
-/* CORRECT: Design for both modes intentionally */
-:root {
-  --bg-primary: #ffffff;
-  --text-primary: #1a1a1a;
-}
+**Contrast**: 4.5:1 for normal text, 3:1 for large text and UI components. [14][26]
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-primary: #0f0f0f;
-    --text-primary: #f5f5f5;
-  }
-}
-
-/* VIOLATION: Dark mode as afterthought */
-.dark-mode { filter: invert(1); }
-```
+See `references/patterns.md` for dark surface hierarchy and accessible contrast examples.
 
 ---
 
-## 3. Motion and Animation
+## 3. Spacing [1][13][15]
 
-### State Communication
+4px/8px base grid — from Müller-Brockmann grid mathematics [13], adopted by Material Design [1].
+All padding/margin values must come from the scale: `--space-1` (4px) through `--space-24` (96px).
 
-```css
-/* CORRECT: Animation communicates state change */
-.button {
-  transition: transform 0.1s ease-out, background 0.15s ease;
-}
-.button:active {
-  transform: scale(0.98); /* Feedback: "I received your click" */
-}
+Gestalt proximity: larger gaps between sections, smaller gaps within — whitespace creates grouping. [5]
 
-/* VIOLATION: Animation for decoration */
-.button {
-  animation: pulse 2s infinite; /* Why is it pulsing? */
-}
-```
+**Violation**: `padding: 18px 22px` — magic number, off-grid. [15]
 
-### Consistent Timing
-
-```css
-/* CORRECT: Timing scale for consistency */
-:root {
-  --duration-fast: 100ms;   /* Micro-interactions */
-  --duration-normal: 200ms; /* Standard transitions */
-  --duration-slow: 300ms;   /* Complex animations */
-  --easing-default: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* VIOLATION: Random durations */
-.modal { transition: 0.35s; }
-.dropdown { transition: 0.2s; }
-.tooltip { transition: 0.15s; }
-```
-
-### Appropriate Duration
-
-| Element | Duration | Rationale |
-|---------|----------|-----------|
-| Hover states | 100-150ms | Immediate feedback |
-| Dropdowns | 150-200ms | Quick but perceptible |
-| Modals | 200-300ms | Significant context change |
-| Page transitions | 300-500ms | Major navigation |
+See `references/patterns.md` for full scale and component spacing hierarchy.
 
 ---
 
-## 4. Spatial Composition
+## 4. Motion [4][11][24]
 
-### Consistent Spacing Scale
+Animation must communicate state, not decorate. Fitts's Law: every interaction needs tactile feedback. [4][11]
 
-```css
-/* CORRECT: Mathematical spacing system */
-:root {
-  --space-1: 0.25rem;  /* 4px */
-  --space-2: 0.5rem;   /* 8px */
-  --space-3: 0.75rem;  /* 12px */
-  --space-4: 1rem;     /* 16px */
-  --space-6: 1.5rem;   /* 24px */
-  --space-8: 2rem;     /* 32px */
-  --space-12: 3rem;    /* 48px */
-}
+Define a timing system (`--duration-fast: 100ms`, `--duration-normal: 200ms`, `--duration-slow: 300ms`). [1]
+Never animate `all` — specify properties. Transitions over 500ms feel sluggish for UI. [4]
 
-/* VIOLATION: Magic numbers */
-.card { padding: 18px 22px; margin-bottom: 13px; }
-```
-
-### Whitespace With Purpose
-
-```css
-/* CORRECT: Whitespace creates visual grouping */
-.section { margin-bottom: var(--space-12); }
-.section-header { margin-bottom: var(--space-6); }
-.paragraph { margin-bottom: var(--space-4); }
-
-/* VIOLATION: Uniform spacing (no hierarchy) */
-* + * { margin-top: 1rem; }
-```
+**Required**: `@media (prefers-reduced-motion: reduce)` — WCAG 2.2 and vestibular accessibility. [24][26]
 
 ---
 
-## AI Slop Detection
+## 5. Component Hierarchy [1][3][5][15]
 
-Flag these patterns - they indicate thoughtless defaults:
+Atomic Design [3]: atoms → molecules → organisms. Components reference tokens; organisms compose molecules.
+
+**Elevation table** — radius and shadow signal interactivity, not decoration: [1][11][15]
+
+| Element | Radius | Shadow |
+|---------|--------|--------|
+| Badge/tag | 4px (`--radius-sm`) | none |
+| Button/input | 6px (`--radius-md`) | none |
+| Card (static) | 8px (`--radius-lg`) | `shadow-sm` |
+| Dropdown | 8px | `shadow-lg` |
+| Modal | 12px (`--radius-xl`) | `shadow-xl` |
+
+---
+
+## AI Slop Detection [4][11][15]
 
 | Pattern | Problem |
 |---------|---------|
-| Purple-to-pink gradient | Copied from templates without brand justification |
-| `font-family: Inter` without rationale | Default choice, not intentional |
-| Everything centered | No visual hierarchy or flow |
-| `rounded-xl` on everything | Border radius should vary by context |
-| Shadows on everything | Elevation should be meaningful |
-| Generic "hero section" with gradient | Template copy, not designed |
-| `animate-pulse` on buttons | Meaningless attention grab |
-| Glassmorphism everywhere | Trend following, not purpose |
+| Purple-to-pink gradient | No brand justification; copied template [15] |
+| `font-family: Inter` without rationale | Default, not intentional [6] |
+| Everything centered | No reading flow; violates hierarchy [30] |
+| `rounded-xl` everywhere | Radius must vary by component scale [1][15] |
+| Shadows on everything | Elevation loses meaning when ubiquitous [11] |
+| `animate-pulse` on buttons | Hick's Law: noise slows decisions [4] |
+| Glassmorphism everywhere | Trend, not purpose [15] |
 
 ---
 
 ## Extended References
 
-For additional patterns and examples:
-- `references/violations.md` - Extended design anti-patterns
-- `references/patterns.md` - Extended correct patterns
-- `references/detection.md` - Grep patterns for finding issues
-
----
-
-## Severity Guidelines
-
-| Severity | Criteria |
-|----------|----------|
-| CRITICAL | No design system (random values everywhere) |
-| HIGH | Inconsistent spacing/typography, broken dark mode |
-| MEDIUM | Missing hover states, poor visual hierarchy |
-| LOW | Could improve animation timing, minor inconsistencies |
+- `references/sources.md` — Full bibliography (30 sources)
+- `references/patterns.md` — Extended correct patterns with citations
+- `references/violations.md` — Extended violation examples with citations
+- `references/detection.md` — Grep patterns for finding issues
 
 ---
 
 ## Checklist
 
-- [ ] Typography choices have documented rationale
-- [ ] Color palette is semantic (not arbitrary hex)
-- [ ] Dark/light modes both intentionally designed
-- [ ] Spacing follows consistent scale
-- [ ] Animations communicate state (not decoration)
-- [ ] No "AI slop" patterns present
-- [ ] Visual hierarchy is clear
-- [ ] Responsive behavior is intentional
+- [ ] Typography scale is mathematical; font choice has documented rationale [6][10]
+- [ ] Color system uses 3-layer tokens (primitives → semantic → component) [1][9]
+- [ ] All text meets WCAG contrast minimums (4.5:1 / 3:1) [14][26]
+- [ ] Dark mode designed intentionally — no invert filter [23]
+- [ ] Spacing follows 4px/8px base grid — no magic numbers [1][13]
+- [ ] Animations communicate state; `prefers-reduced-motion` respected [24]
+- [ ] Component elevation (shadow, radius) signals interactivity level [1][11]
+- [ ] No AI slop patterns present [4][15]
+- [ ] Visual hierarchy via whitespace and spacing — not lines or boxes [5][30]
