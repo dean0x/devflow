@@ -1,433 +1,285 @@
-# TypeScript Violation Examples
+# TypeScript — Violations
 
-Extended violation patterns for TypeScript reviews. Reference from main SKILL.md.
+Extended violation patterns with literature citations.
+See `sources.md` for full bibliography.
+
+---
 
 ## Type Safety Violations
 
-### Using `any` Type
+### Using `any` Type [1, Item 43][4][17]
+
+"`any` is not just a hole in the type system — it's a hole that spreads."
+— Effective TypeScript [1, Item 43]. Every `any` disables checking for all
+values flowing through it.
 
 **Direct any usage**
 ```typescript
-// VIOLATION: any disables type checking
-function parse(json: string): any {
-  return JSON.parse(json);
-}
+// VIOLATION: any disables type checking [1, Item 43]
+function parse(json: string): any { return JSON.parse(json); }
 
-// VIOLATION: any parameter
-function process(data: any) {
-  console.log(data.name);  // No type safety
-}
+// VIOLATION: any parameter — no safety downstream [4]
+function process(data: any) { console.log(data.name); }
 
-// VIOLATION: any in generics
-function wrap<T = any>(value: T) {
-  return { value };
-}
+// VIOLATION: any default in generic [17]
+function wrap<T = any>(value: T) { return { value }; }
 ```
 
 **Implicit any**
 ```typescript
-// VIOLATION: Implicit any on parameter
-function greet(name) {  // name is implicitly any
-  return `Hello, ${name}`;
-}
+// VIOLATION: Implicit any on parameter (fails with noImplicitAny) [16]
+function greet(name) { return `Hello, ${name}`; }
 
-// VIOLATION: Implicit any in catch
-try {
-  riskyOperation();
-} catch (e) {  // e is any
-  console.log(e.message);
-}
+// VIOLATION: Implicit any in catch [1, Item 47]
+try { riskyOperation(); } catch (e) { console.log(e.message); }
 ```
 
-### Type Assertions Without Validation
+### Type Assertions Without Validation [1, Item 9]
 
-**Unsafe casts**
 ```typescript
-// VIOLATION: Casting without checking
+// VIOLATION: Casting without narrowing [1, Item 9]
 const user = data as User;  // data could be anything
-user.name.toUpperCase();    // Runtime error if data is wrong
 
-// VIOLATION: Double assertion bypass
-const value = data as unknown as SpecificType;  // Bypasses type checking
+// VIOLATION: Double-assertion bypass — opts out of entire type system
+const value = data as unknown as SpecificType;
 
-// VIOLATION: Non-null assertion on nullable
-function getName(user: User | null): string {
-  return user!.name;  // Will crash if user is null
-}
+// VIOLATION: Non-null assertion on nullable [4]
+function getName(user: User | null): string { return user!.name; }
 ```
 
-**Object index without type safety**
-```typescript
-// VIOLATION: Accessing unknown keys
-const value = obj[key];  // value is any
+### Non-Exhaustive Pattern Matching [1, Item 33]
 
-// VIOLATION: No validation on dynamic access
-function getField(obj: object, field: string) {
-  return (obj as any)[field];  // Unsafe dynamic access
-}
-```
-
-### Non-Exhaustive Pattern Matching
-
-**Missing switch cases**
 ```typescript
 type Status = 'pending' | 'active' | 'completed' | 'failed';
 
-// VIOLATION: Non-exhaustive switch
+// VIOLATION: Missing cases hidden by default [1, Item 33]
 function handleStatus(status: Status): string {
   switch (status) {
-    case 'pending':
-      return 'Waiting';
-    case 'active':
-      return 'Running';
+    case 'pending': return 'Waiting';
+    case 'active':  return 'Running';
     // Missing: 'completed' and 'failed'
   }
-  return 'Unknown';  // Hides missing cases
+  return 'Unknown'; // hides compile error when union grows
 }
-```
 
-**Incomplete discriminated union handling**
-```typescript
-type Result<T> = { ok: true; value: T } | { ok: false; error: Error };
-
-// VIOLATION: Only handling success
+// VIOLATION: Only handling success branch [1, Item 28]
 function process<T>(result: Result<T>): T {
-  if (result.ok) {
-    return result.value;
-  }
-  // Missing error handling - TypeScript won't catch this without strictness
+  if (result.ok) return result.value;
+  // error branch silently falls off — TypeScript won't error without strictNullChecks
 }
 ```
 
 ---
 
-## Type Guard Violations
+## Type Guard Violations [2][6]
 
-### Missing Type Narrowing
+### Missing or Incorrect Narrowing
 
-**Trusting unvalidated input**
 ```typescript
-// VIOLATION: No runtime validation
+// VIOLATION: Trusting unvalidated input [1, Item 43][25]
 function processUser(data: unknown) {
-  const user = data as User;  // Assumes data is User
-  console.log(user.name);     // Runtime error if not User
+  const user = data as User; // assumes shape, no check
+  console.log(user.name);    // runtime error if wrong
 }
 
-// VIOLATION: Checking only one property
+// VIOLATION: Incomplete predicate — checks presence but not type [2]
 function isUser(obj: unknown): obj is User {
   return typeof obj === 'object' && obj !== null && 'name' in obj;
-  // Missing: doesn't check 'name' is string, or other required properties
+  // Missing: typeof obj.name === 'string', other required properties
 }
-```
 
-**Incorrect type predicate**
-```typescript
-// VIOLATION: Predicate doesn't match check
+// VIOLATION: Predicate doesn't match its check [6]
 function isString(value: unknown): value is string {
-  return value !== null;  // Wrong check - doesn't verify it's a string!
-}
-
-// VIOLATION: Predicate allows invalid state
-function isPositiveNumber(value: unknown): value is number {
-  return typeof value === 'number';  // Doesn't check positive
+  return value !== null; // wrong — null passes, non-strings pass
 }
 ```
 
-### Unsafe instanceof Usage
+### Unsafe `instanceof` Usage [7]
 
-**instanceof with primitives**
 ```typescript
-// VIOLATION: instanceof doesn't work with primitives
+// VIOLATION: instanceof fails for primitive types [7]
 function isNumber(value: unknown): value is number {
-  return value instanceof Number;  // Fails for primitive numbers!
+  return value instanceof Number; // fails for primitive 42
 }
 
-// VIOLATION: Cross-realm instanceof issues
+// VIOLATION: instanceof fails across iframes/realms [7]
 function isArray(value: unknown): value is unknown[] {
-  return value instanceof Array;  // Fails across iframes/realms
+  return value instanceof Array; // use Array.isArray instead
 }
 ```
 
-### Missing Null Checks
+### Missing Null Checks [4][16]
 
-**Trusting optional properties**
 ```typescript
-// VIOLATION: No null check on optional
-interface Config {
-  timeout?: number;
+// VIOLATION: Optional property accessed without check [4]
+function getTimeout(config: { timeout?: number }): number {
+  return config.timeout * 1000; // Error: possibly undefined
 }
 
-function getTimeout(config: Config): number {
-  return config.timeout * 1000;  // Error: possibly undefined
-}
-
-// VIOLATION: Chained optional access without handling
+// VIOLATION: Chained access without null safety
 function getCity(user: User): string {
-  return user.address.city;  // Error if address is undefined
+  return user.address.city; // runtime error if address is undefined
 }
 ```
 
 ---
 
-## Utility Type Violations
+## Utility Type Violations [1, Items 14–16]
 
-### Manual Type Manipulation
+### Manual Reimplementation of Built-ins [1, Item 15]
 
-**Rewriting built-in utility types**
 ```typescript
-// VIOLATION: Reinventing Partial<T>
-type MyPartial<T> = {
-  [P in keyof T]?: T[P];
-};
+// VIOLATION: Reinventing Partial<T> [1, Item 15]
+type MyPartial<T> = { [P in keyof T]?: T[P] };
 
-// VIOLATION: Reinventing Pick<T, K>
-type MyPick<T, K extends keyof T> = {
-  [P in K]: T[P];
-};
-
-// VIOLATION: Manual readonly mapping
-type MyReadonly<T> = {
-  readonly [P in keyof T]: T[P];
-};
+// VIOLATION: Duplicating types instead of using Partial [1, Item 14]
+interface CreateUserInput { name: string; email: string; }
+interface UpdateUserInput { name?: string; email?: string; }
+// Should be: type UpdateUserInput = Partial<CreateUserInput>
 ```
 
-**Redundant type definitions**
+### Incorrect Generic Constraints [1, Item 50][6]
+
 ```typescript
-// VIOLATION: Duplicating existing type
-interface CreateUserInput {
-  name: string;
-  email: string;
-}
+// VIOLATION: No constraint — property access is unsafe [1, Item 50]
+function getProperty<T, K>(obj: T, key: K) { return obj[key]; }
 
-interface UpdateUserInput {  // Nearly identical to CreateUserInput
-  name?: string;
-  email?: string;
-}
-
-// Should use: type UpdateUserInput = Partial<CreateUserInput>
-```
-
-### Incorrect Generic Constraints
-
-**Missing constraints**
-```typescript
-// VIOLATION: No constraint on key access
-function getProperty<T, K>(obj: T, key: K) {
-  return obj[key];  // Error: K is not constrained to keyof T
-}
-
-// VIOLATION: Unconstrained generic with method call
-function callToString<T>(value: T): string {
-  return value.toString();  // Works but loses type info
-}
-```
-
-**Over-constrained generics**
-```typescript
-// VIOLATION: Constraint too narrow
+// VIOLATION: Over-constrained — prevents legitimate callers [1, Item 29]
 function merge<T extends { id: string }>(a: T, b: T): T {
-  return { ...a, ...b };
+  return { ...a, ...b }; // can't merge objects without 'id' even when not needed
 }
-// Can't merge objects without 'id' property even when not needed
 ```
 
-### Improper Mapped Types
+### Improper Mapped Types [6][19]
 
-**Losing optional/readonly modifiers**
 ```typescript
-// VIOLATION: Removes optionality
-type Transformed<T> = {
-  [P in keyof T]: string;  // Loses optional modifiers from T
-};
+// VIOLATION: Silently drops optional modifiers [6]
+type Transformed<T> = { [P in keyof T]: string };
+// All properties become required strings — original optionality lost
 
-// VIOLATION: Loses readonly
-type Mutable<T> = {
-  [P in keyof T]: T[P];  // Doesn't remove readonly, just copies
-};
+// VIOLATION: Doesn't remove readonly — looks like Mutable but isn't [6]
+type Mutable<T> = { [P in keyof T]: T[P] };
+// Must use { -readonly [P in keyof T]: T[P] }
 ```
 
 ---
 
-## Async Pattern Violations
+## Branded Type Omission [1, Item 37][22]
+
+Structural typing means two `string` aliases are interchangeable by default. Without
+branding, incorrect ID substitution compiles silently.
+
+```typescript
+// VIOLATION: Structural collision — UserId and OrderId both string [1, Item 37]
+type UserId  = string;
+type OrderId = string;
+
+function getUser(id: UserId): User { ... }
+
+declare const orderId: OrderId;
+getUser(orderId); // compiles! No protection against wrong-ID bugs
+
+// CORRECT: Branded types prevent silent substitution [1, Item 37][22]
+type UserId  = Brand<string, 'UserId'>;
+type OrderId = Brand<string, 'OrderId'>;
+getUser(orderId); // Error: OrderId not assignable to UserId
+```
+
+---
+
+## Async Pattern Violations [1, Item 25][2]
 
 ### Unhandled Promises
 
-**Fire-and-forget async calls**
 ```typescript
-// VIOLATION: Promise ignored
+// VIOLATION: Fire-and-forget — error silently lost [1, Item 25]
 async function processData() {
-  saveToDatabase(data);  // No await, no .catch()
-  console.log('Saved!'); // Lies - may not be saved
+  saveToDatabase(data); // no await, no .catch()
+  console.log('Saved!'); // lie — may not be saved
 }
 
-// VIOLATION: forEach with async
-ids.forEach(async (id) => {
-  await processItem(id);  // forEach doesn't wait!
-});
-// Code continues before any processing completes
+// VIOLATION: forEach with async — outer loop doesn't wait [6]
+ids.forEach(async (id) => { await processItem(id); });
 ```
 
-**Missing error handling**
+### Missing Error Handling
+
 ```typescript
-// VIOLATION: No catch on promise
+// VIOLATION: No catch on fetch — network errors unhandled [2]
 async function loadUser(id: string): Promise<User> {
   const response = await fetch(`/api/users/${id}`);
-  return response.json();  // No error handling for fetch failure
+  return response.json(); // throws on network failure, no type guard on JSON
 }
 
-// VIOLATION: catch swallows error
-async function process() {
-  try {
-    await riskyOperation();
-  } catch (e) {
-    console.log('Error');  // Error details lost
-  }
+// VIOLATION: Catch swallows error details [1, Item 47]
+try {
+  await riskyOperation();
+} catch (e) {
+  console.log('Error'); // e is unknown, message lost
 }
 ```
 
-### Race Conditions
+### Improper Async Patterns
 
-**Stale closure**
 ```typescript
-// VIOLATION: Closure captures stale value
-function createCounter() {
-  let count = 0;
-
-  return async () => {
-    count++;
-    await delay(100);
-    console.log(count);  // May not be the expected value
-  };
-}
-// Multiple calls will all log the same final value
-```
-
-**Uncancelled previous requests**
-```typescript
-// VIOLATION: Race condition with sequential requests
-class DataLoader {
-  async load(id: string) {
-    const data = await fetch(`/api/${id}`);
-    this.data = await data.json();  // Older slow request may overwrite newer fast one
-  }
-}
-```
-
-### Improper Async Iteration
-
-**await in loop when parallel is safe**
-```typescript
-// VIOLATION: Sequential when parallel is possible
+// VIOLATION: Sequential when parallel is possible [6]
 async function processAll(items: Item[]) {
   const results = [];
   for (const item of items) {
-    results.push(await process(item));  // Unnecessarily sequential
+    results.push(await process(item)); // one at a time unnecessarily
   }
   return results;
 }
 
-// VIOLATION: Blocking Promise.all with unbounded concurrency
+// VIOLATION: Unbounded Promise.all — overwhelms server [6]
 async function processAll(items: Item[]) {
   return Promise.all(items.map(item => fetchData(item)));
-  // Could overwhelm server with 1000s of concurrent requests
-}
-```
-
-**Mixing async patterns**
-```typescript
-// VIOLATION: Callback inside async function
-async function getData() {
-  fs.readFile('data.json', (err, data) => {
-    return JSON.parse(data);  // This return does nothing!
-  });
+  // 1000 items → 1000 concurrent requests
 }
 
-// VIOLATION: Not returning promise in .then()
-fetchData()
-  .then(data => {
-    processAsync(data);  // Should return this promise
-  })
-  .then(() => {
-    console.log('Done');  // Runs before processAsync completes
-  });
-```
-
-### Improper Promise Construction
-
-**Promise constructor anti-pattern**
-```typescript
-// VIOLATION: Wrapping async in Promise constructor
+// VIOLATION: Promise constructor anti-pattern [6]
 function fetchData(): Promise<Data> {
   return new Promise(async (resolve, reject) => {
+    // async executor — errors in the async body don't reject the promise
     const data = await fetch('/api/data');
     resolve(data);
   });
-  // Async executor is an anti-pattern - errors won't be caught properly
 }
 
-// VIOLATION: Unnecessary Promise wrapping
-function getValue(): Promise<number> {
-  return new Promise((resolve) => {
-    resolve(42);  // Just return Promise.resolve(42)
+// VIOLATION: Callback inside async — inner return does nothing [6]
+async function getData() {
+  fs.readFile('data.json', (err, data) => {
+    return JSON.parse(data); // this return is discarded
   });
-}
-```
-
-**Missing rejection handling**
-```typescript
-// VIOLATION: Unhandled rejection in Promise.all
-async function loadAll(ids: string[]) {
-  const results = await Promise.all(ids.map(id => fetch(`/api/${id}`)));
-  return results;
-  // One failure rejects entire batch, no partial results
 }
 ```
 
 ---
 
-## Module Violations
+## Module Violations [4][2]
 
 ### Circular Dependencies
 
-**Direct circular import**
 ```typescript
 // a.ts
 import { B } from './b';
 export class A { b = new B(); }
 
 // b.ts
-import { A } from './a';  // Circular!
+import { A } from './a'; // circular — loading order undefined
 export class B { a = new A(); }
 ```
 
-**Export-time side effects**
+### Import Anti-patterns [4]
+
 ```typescript
-// VIOLATION: Code runs on import
-export const config = loadConfig();  // Runs when imported
-
-// VIOLATION: Initializing singletons at module level
-export const db = new Database(connectionString);  // Can't be tested
-```
-
-### Import Anti-patterns
-
-**Importing everything**
-```typescript
-// VIOLATION: Import entire module
+// VIOLATION: Importing entire module — no tree-shaking [4]
 import * as utils from './utils';
-utils.formatDate(date);  // No tree-shaking
+utils.formatDate(date);
 
-// VIOLATION: Re-exporting with namespace
-export * as helpers from './helpers';  // Harder to trace dependencies
-```
+// VIOLATION: Side effects at module level — untestable [4]
+export const db = new Database(connectionString); // runs on every import
 
-**Dynamic import abuse**
-```typescript
-// VIOLATION: Dynamic import with variable path
-const module = await import(modulePath);  // Not statically analyzable
-
-// VIOLATION: Conditional static import
-if (condition) {
-  import { feature } from './feature';  // Syntax error - can't use in block
-}
+// VIOLATION: Value import for type-only usage — increases bundle [4]
+import { User } from './user'; // use: import type { User }
 ```
