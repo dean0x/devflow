@@ -787,6 +787,16 @@ export const initCommand = new Command('init')
     // Agents: install only from selected plugins
     const { agentsMap } = buildAssetMaps(pluginsToInstall);
 
+    // Migrate shadow overrides from old V2 skill names BEFORE install,
+    // so the installer's shadow check finds them at the new name
+    const shadowsMigrated = await migrateShadowOverrides(devflowDir);
+    if (shadowsMigrated.migrated > 0) {
+      p.log.info(`Migrated ${shadowsMigrated.migrated} shadow override(s) to V2 names`);
+    }
+    for (const warning of shadowsMigrated.warnings) {
+      p.log.warn(warning);
+    }
+
     // Install: try native CLI first, fall back to file copy
     const cliAvailable = isClaudeCliAvailable();
     const usedNativeCli = cliAvailable && installViaCli(pluginsToInstall, scope, s);
@@ -849,15 +859,6 @@ export const initCommand = new Command('init')
     }
     if (staleCommandsRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
-    }
-
-    // Migrate shadow overrides from old V2 skill names to new names
-    const shadowsMigrated = await migrateShadowOverrides(devflowDir);
-    if (shadowsMigrated.migrated > 0) {
-      p.log.info(`Migrated ${shadowsMigrated.migrated} shadow override(s) to V2 names`);
-    }
-    for (const warning of shadowsMigrated.warnings) {
-      p.log.warn(warning);
     }
 
     // === Settings & hooks (all automatic based on collected choices) ===

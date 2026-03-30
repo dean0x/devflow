@@ -15,7 +15,7 @@ import {
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
-import { DEVFLOW_PLUGINS, buildAssetMaps } from '../src/cli/plugins.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps, prefixSkillName } from '../src/cli/plugins.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -708,5 +708,109 @@ describe('migrateShadowOverrides', () => {
 
     expect(result.migrated).toBe(0);
     expect(result.warnings).toEqual([]);
+  });
+});
+
+describe('shadow migration → install ordering', () => {
+  let tmpDir: string;
+  let claudeDir: string;
+  let pluginsDir: string;
+  let rootDir: string;
+  let devflowDir: string;
+  const noopSpinner: Spinner = { start() {}, stop() {}, message() {} };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ordering-test-'));
+    claudeDir = path.join(tmpDir, 'claude');
+    pluginsDir = path.join(tmpDir, 'plugins');
+    rootDir = tmpDir;
+    devflowDir = path.join(tmpDir, 'devflow');
+
+    // Create required directories
+    await fs.mkdir(path.join(claudeDir, 'skills'), { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'skills'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('migration before install: shadow at old name is found after rename', async () => {
+    const skillName = 'software-design';
+    const oldName = 'core-patterns';
+    const shadowContent = '# User custom override';
+
+    // 1. Simulate old-name shadow (pre-V2 user override)
+    const oldShadow = path.join(devflowDir, 'skills', oldName);
+    await fs.mkdir(oldShadow, { recursive: true });
+    await fs.writeFile(path.join(oldShadow, 'SKILL.md'), shadowContent);
+
+    // 2. Create a source skill for the installer to use as fallback
+    const sourcePlugin = 'devflow-core-skills';
+    const sourceDir = path.join(pluginsDir, sourcePlugin, 'skills', skillName);
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'SKILL.md'), '# Source (should NOT be installed)');
+
+    // 3. Run migration FIRST (correct ordering)
+    const migration = await migrateShadowOverrides(devflowDir);
+    expect(migration.migrated).toBe(1);
+
+    // 4. Run install — should find shadow at new name
+    const skillsMap = new Map([[skillName, sourcePlugin]]);
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      pluginsDir,
+      rootDir,
+      devflowDir,
+      skillsMap,
+      agentsMap: new Map(),
+      isPartialInstall: true,
+      teamsEnabled: false,
+      spinner: noopSpinner,
+    });
+
+    // 5. Verify installed content is the shadow, not the source
+    const installedPath = path.join(claudeDir, 'skills', prefixSkillName(skillName), 'SKILL.md');
+    const installed = await fs.readFile(installedPath, 'utf-8');
+    expect(installed).toBe(shadowContent);
+  });
+
+  it('without migration: shadow at old name is missed by installer', async () => {
+    const skillName = 'software-design';
+    const oldName = 'core-patterns';
+    const shadowContent = '# User custom override';
+    const sourceContent = '# Source (fallback)';
+
+    // 1. Shadow at OLD name only (no migration)
+    const oldShadow = path.join(devflowDir, 'skills', oldName);
+    await fs.mkdir(oldShadow, { recursive: true });
+    await fs.writeFile(path.join(oldShadow, 'SKILL.md'), shadowContent);
+
+    // 2. Source skill
+    const sourcePlugin = 'devflow-core-skills';
+    const sourceDir = path.join(pluginsDir, sourcePlugin, 'skills', skillName);
+    await fs.mkdir(sourceDir, { recursive: true });
+    await fs.writeFile(path.join(sourceDir, 'SKILL.md'), sourceContent);
+
+    // 3. Skip migration — install directly (the old broken ordering)
+    const skillsMap = new Map([[skillName, sourcePlugin]]);
+    await installViaFileCopy({
+      plugins: [],
+      claudeDir,
+      pluginsDir,
+      rootDir,
+      devflowDir,
+      skillsMap,
+      agentsMap: new Map(),
+      isPartialInstall: true,
+      teamsEnabled: false,
+      spinner: noopSpinner,
+    });
+
+    // 4. Installed content is the SOURCE, not the shadow — user override lost
+    const installedPath = path.join(claudeDir, 'skills', prefixSkillName(skillName), 'SKILL.md');
+    const installed = await fs.readFile(installedPath, 'utf-8');
+    expect(installed).toBe(sourceContent);
   });
 });
