@@ -605,13 +605,183 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
       if (NON_FOCUS_SKILLS.has(skill)) continue;
 
       // Strip -patterns suffix to get the focus area name used in the table
-      // e.g. security-patterns → security, test-patterns → tests (special case)
+      // e.g. security-patterns → security, testing → tests (special case)
       const focusName = skill === 'testing' ? 'tests' : skill.replace(/-patterns$/, '');
 
       // The reviewer Focus Areas table should mention this focus name
       expect(
         reviewerContent.includes(`| ${focusName} |`) || reviewerContent.includes(`| \`${focusName}\` |`),
         `reviewer.md Focus Areas table is missing focus '${focusName}' (from code-review plugin skill '${skill}')`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-component runtime alignment
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the reviewer Focus Areas table into a map of focus → skill path.
+ * Expects rows like: | `focus` | `~/.claude/skills/devflow:skill/SKILL.md` |
+ */
+function parseReviewerFocusAreas(content: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const match of content.matchAll(/^\|\s*`([\w-]+)`\s*\|\s*`~\/\.claude\/skills\/devflow:([\w-]+)\/SKILL\.md`\s*\|/gm)) {
+    map.set(match[1], match[2]);
+  }
+  return map;
+}
+
+/**
+ * Parse the code-review command focus table into a map of focus → skill.
+ * Expects rows like: | focus | ✓ | devflow:skill |
+ */
+function parseCodeReviewFocusTable(content: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const match of content.matchAll(/^\|\s*([\w-]+)\s*\|\s*(?:✓|conditional)\s*\|\s*devflow:([\w-]+)\s*\|/gm)) {
+    map.set(match[1], match[2]);
+  }
+  return map;
+}
+
+describe('Cross-component runtime alignment', () => {
+  const reviewerContent = readFileSync(path.join(ROOT, 'shared', 'agents', 'reviewer.md'), 'utf-8');
+  const reviewerFocusAreas = parseReviewerFocusAreas(reviewerContent);
+
+  it('reviewer Focus Areas table has entries', () => {
+    expect(reviewerFocusAreas.size).toBeGreaterThan(10);
+  });
+
+  it('code-review command focus names exist in reviewer Focus Areas', () => {
+    const commandContent = readFileSync(
+      path.join(ROOT, 'plugins', 'devflow-code-review', 'commands', 'code-review.md'),
+      'utf-8',
+    );
+    const commandFocuses = parseCodeReviewFocusTable(commandContent);
+
+    expect(commandFocuses.size, 'code-review command should have focus entries').toBeGreaterThan(10);
+
+    for (const [focus] of commandFocuses) {
+      expect(
+        reviewerFocusAreas.has(focus),
+        `code-review command sends focus '${focus}' but reviewer Focus Areas table has no entry for it`,
+      ).toBe(true);
+    }
+  });
+
+  it('code-review command skill mappings match reviewer Focus Areas skill paths', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const commandContent = readFileSync(
+      path.join(ROOT, 'plugins', 'devflow-code-review', 'commands', 'code-review.md'),
+      'utf-8',
+    );
+    const commandFocuses = parseCodeReviewFocusTable(commandContent);
+
+    for (const [focus, commandSkill] of commandFocuses) {
+      // The command's pattern skill must be canonical
+      expect(
+        canonicalSkills.has(commandSkill),
+        `code-review command maps focus '${focus}' to 'devflow:${commandSkill}' which is not canonical`,
+      ).toBe(true);
+
+      // The reviewer's Focus Areas skill must match the command's skill
+      const reviewerSkill = reviewerFocusAreas.get(focus);
+      if (reviewerSkill) {
+        expect(
+          reviewerSkill,
+          `focus '${focus}': code-review says 'devflow:${commandSkill}' but reviewer says 'devflow:${reviewerSkill}'`,
+        ).toBe(commandSkill);
+      }
+    }
+  });
+
+  it('review-orchestration core reviewers exist in reviewer Focus Areas', () => {
+    const orchContent = readFileSync(
+      path.join(ROOT, 'shared', 'skills', 'review-orchestration', 'SKILL.md'),
+      'utf-8',
+    );
+
+    // Extract core reviewer list: "- security, architecture, performance, ..."
+    const coreMatch = orchContent.match(/^\*\*7 core reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
+    expect(coreMatch, 'review-orchestration should list 7 core reviewers').toBeTruthy();
+
+    const coreReviewers = coreMatch![1].split(',').map(s => s.trim());
+    expect(coreReviewers.length, 'should have 7 core reviewers').toBe(7);
+
+    for (const focus of coreReviewers) {
+      expect(
+        reviewerFocusAreas.has(focus),
+        `review-orchestration lists core reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
+      ).toBe(true);
+    }
+  });
+
+  it('review-orchestration conditional reviewers exist in reviewer Focus Areas', () => {
+    const orchContent = readFileSync(
+      path.join(ROOT, 'shared', 'skills', 'review-orchestration', 'SKILL.md'),
+      'utf-8',
+    );
+
+    // Extract conditional reviewer list: "- typescript, react, database, ..."
+    const condMatch = orchContent.match(/^\*\*Conditional reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
+    expect(condMatch, 'review-orchestration should list conditional reviewers').toBeTruthy();
+
+    const condReviewers = condMatch![1].split(',').map(s => s.trim());
+
+    for (const focus of condReviewers) {
+      expect(
+        reviewerFocusAreas.has(focus),
+        `review-orchestration lists conditional reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
+      ).toBe(true);
+    }
+  });
+
+  it('code-review command has no stale devflow:{focus}-patterns template', () => {
+    const commandContent = readFileSync(
+      path.join(ROOT, 'plugins', 'devflow-code-review', 'commands', 'code-review.md'),
+      'utf-8',
+    );
+
+    // This template was stale — it appended -patterns to every focus name
+    expect(
+      commandContent.includes('devflow:{focus}-patterns'),
+      'code-review command should not contain stale "devflow:{focus}-patterns" template',
+    ).toBe(false);
+  });
+
+  it('code-review-teams install paths reference canonical skills', () => {
+    const canonicalSkills = new Set(getAllSkillNames());
+    const teamsPath = path.join(ROOT, 'plugins', 'devflow-code-review', 'commands', 'code-review-teams.md');
+    let content: string;
+    try {
+      content = readFileSync(teamsPath, 'utf-8');
+    } catch {
+      return; // teams variant may not exist
+    }
+
+    const installPaths = extractInstallPaths(content);
+    for (const ref of installPaths) {
+      expect(
+        canonicalSkills.has(ref),
+        `code-review-teams.md: install path 'devflow:${ref}' is not canonical`,
+      ).toBe(true);
+    }
+  });
+
+  it('coder domain skill paths cover all language/ecosystem skills', () => {
+    const coderContent = readFileSync(path.join(ROOT, 'shared', 'agents', 'coder.md'), 'utf-8');
+    const coderInstallPaths = new Set(extractInstallPaths(coderContent));
+
+    // Language skills that should be loadable as domain skills
+    const languageSkills = ['typescript', 'react', 'go', 'java', 'python', 'rust'];
+    // Related skills that should be available for domain loading
+    const domainSkills = ['boundary-validation', 'accessibility', 'ui-design', 'testing'];
+
+    for (const skill of [...languageSkills, ...domainSkills]) {
+      expect(
+        coderInstallPaths.has(skill),
+        `coder.md domain skill section should reference 'devflow:${skill}' install path`,
       ).toBe(true);
     }
   });
