@@ -50,7 +50,7 @@ Extract: `worktree {path}`, `HEAD {sha}`, `branch refs/heads/{name}`
 Exclude:
 - **Bare worktrees** (no branch)
 - **Detached HEAD** (no named branch)
-- **Protected branches**: `main`, `master`, `develop`, `release/*`, `staging`, `production`
+- **Protected branches**: `main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`
 - **Mid-rebase or mid-merge**: check `git -C {path} status` for "rebase in progress" or "merging"
 
 ### Step 4: Check for Work
@@ -73,7 +73,7 @@ Return list of reviewable worktrees with path, branch, HEAD SHA.
 
 ## Protected Branches (Canonical List)
 
-`main`, `master`, `develop`, `release/*`, `staging`, `production`
+`main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`
 
 All components (agents, commands, skills) must use this exact list when checking for protected branches.
 

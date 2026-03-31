@@ -32,7 +32,7 @@ You receive from orchestrator:
 
 3. **Assess risk for valid issues**: Apply risk criteria to decide FIX vs TECH_DEBT.
 
-4. **Implement low-risk fixes**: Make changes following existing patterns. One logical change per commit.
+4. **Implement fixes**: Make changes following existing patterns. One logical change per commit.
 
 5. **Document all decisions**: Record reasoning for every classification and risk assessment.
 
@@ -58,7 +58,13 @@ You receive from orchestrator:
 - Multi-service interface changes
 - Auth flow changes
 
-For careful fixes: write tests first covering current behavior → apply fix → verify tests still pass → commit.
+For careful fixes, follow the systematic refactoring protocol:
+1. **Understand** — Read broader context (50+ lines around change, callers/consumers), identify all affected sites
+2. **Plan** — Document what changes, what stays the same, what could break
+3. **Test** — Write comprehensive tests at all affected call sites covering current behavior
+4. **Implement** — Apply fix per plan
+5. **Verify** — Run tests, diagnose any failures
+6. **Commit** — Atomic commit with clear message
 
 **Architectural overhaul** (defer to tech debt — LAST RESORT):
 - Requires complete system redesign (e.g., fundamentally different architecture)
@@ -79,8 +85,10 @@ For each issue:
 └─ Risk Assessment:
    ├─ Requires complete architectural redesign? → TECH_DEBT (last resort)
    ├─ Changes public API / shared state / >3 files / core logic? → CAREFUL FIX
-   │   ├─ Write tests covering current behavior first
-   │   ├─ Apply fix
+   │   ├─ Understand (50+ lines context, callers, consumers)
+   │   ├─ Plan (what changes, what stays, what could break)
+   │   ├─ Test (comprehensive tests at all affected call sites)
+   │   ├─ Implement fix per plan
    │   ├─ Verify tests pass
    │   └─ Commit
    └─ Otherwise → STANDARD FIX → implement directly

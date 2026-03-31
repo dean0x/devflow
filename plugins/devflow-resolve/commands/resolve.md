@@ -68,19 +68,16 @@ Read review reports from `{TARGET_DIR}/*.md` and extract:
 - `review-summary.md` (synthesizer output, not individual findings)
 - `resolution-summary.md` (if it exists from a previous partial run)
 
-**Include only:**
-- Blocking issues (CRITICAL, HIGH)
-- Should-Fix issues (HIGH, MEDIUM)
+**Include:** ALL issues from all categories and severities, including Suggestions.
 
-**Skip:**
-- Pre-existing issues (belong in tech debt, not resolution)
-- LOW severity (informational only)
+Issues are extracted from `{TARGET_DIR}` only — never cross-reference reviews from other worktrees.
 
 **Extract per issue:**
 - `id`: Generated from file:line:type
 - `file`: Full path
 - `line`: Line number
-- `severity`: CRITICAL/HIGH/MEDIUM
+- `severity`: CRITICAL/HIGH/MEDIUM/LOW
+- `category`: blocking/should-fix/pre-existing
 - `type`: Issue type from review
 - `description`: Problem statement
 - `suggested_fix`: From review report
@@ -114,6 +111,11 @@ BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Validate, decide FIX vs TECH_DEBT, implement fixes"
 ```
+
+> Resolvers follow a 3-tier risk approach:
+> - **Standard fixes** (null checks, validation, docs, logging, isolated security): applied directly
+> - **Careful fixes** (public API, shared state, >3 files, core logic): systematic refactoring — understand broader context, plan changes, test at all call sites, implement, verify, commit
+> - **Architectural overhaul** (complete system redesign, multi-service DB migrations): defer to tech debt — LAST RESORT, avoided at almost all costs
 
 For dependent batches, spawn sequentially and wait for completion before spawning dependents.
 
@@ -203,7 +205,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  └─ Step 0c: Target latest review directory per worktree
 │
 ├─ Phase 1: Parse issues from TARGET_DIR
-│  └─ Extract Blocking + Should-Fix (skip Pre-existing, exclude summaries)
+│  └─ Extract ALL issues (including Suggestions, exclude summaries)
 │
 ├─ Phase 2: Analyze dependencies
 │  └─ Build dependency graph
@@ -217,7 +219,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  └─ Resolver: Batch 3 (waits if depends on 1 or 2)
 │
 ├─ Phase 5: Collect results
-│  └─ Aggregate fixed, false positives, deferred, blocked
+│  └─ Aggregate fixed, false positives, deferred
 │
 ├─ Phase 6: Record Pitfalls (SEQUENTIAL across worktrees)
 │
@@ -238,7 +240,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
-| No actionable issues | Report "No issues to resolve" (all were pre-existing or LOW) |
+| No actionable issues | Report "No issues to resolve" |
 | Incomplete review directory (no review-summary.md) | Skip — resolve only targets complete reviews |
 | Latest review already resolved | Skip worktree, report suggestion to run /code-review first |
 | Legacy flat layout (no subdirectories) | Read flat *.md files directly (backwards compatible) |

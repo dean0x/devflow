@@ -24,7 +24,7 @@ After setup, DevFlow commands (`/code-review`, `/implement`, etc.) are available
 
 ```
 devflow/
-├── shared/skills/       # 35 skills (single source of truth)
+├── shared/skills/       # 37 skills (single source of truth)
 ├── shared/agents/       # 10 shared agents (single source of truth)
 ├── plugins/devflow-*/   # 17 plugins (8 core + 9 optional)
 ├── scripts/hooks/       # Working Memory hooks

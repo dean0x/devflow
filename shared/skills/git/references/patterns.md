@@ -52,7 +52,7 @@ fi
 ### Protected Branch Check
 
 ```bash
-PROTECTED_BRANCHES="main master develop staging production"
+PROTECTED_BRANCHES="main master develop integration trunk staging production"
 
 check_protected_branch() {
     local branch="$1"
