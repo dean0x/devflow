@@ -50,10 +50,10 @@ describe('skill frontmatter integrity', () => {
       const skillMd = path.join(ROOT, 'shared', 'skills', skill, 'SKILL.md');
       const content = await fs.readFile(skillMd, 'utf-8');
       const match = content.match(/^name:\s*(.+)$/m);
-      expect(match, `shared/skills/${skill}/SKILL.md should have a name: field in frontmatter`).toBeTruthy();
+      if (!match) expect.unreachable(`shared/skills/${skill}/SKILL.md should have a name: field in frontmatter`);
       expect(
-        match![1].trim(),
-        `shared/skills/${skill}/SKILL.md frontmatter name '${match![1].trim()}' does not match directory name '${skill}'`,
+        match[1].trim(),
+        `shared/skills/${skill}/SKILL.md frontmatter name '${match[1].trim()}' does not match directory name '${skill}'`,
       ).toBe(skill);
     }
   });
