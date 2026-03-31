@@ -2,7 +2,7 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: sonnet
-skills: devflow:software-design, devflow:git-safety, devflow:implementation-patterns, devflow:git-workflow, devflow:testing, devflow:test-driven-development, devflow:search-first, devflow:boundary-validation, devflow:worktree-support
+skills: devflow:software-design, devflow:git, devflow:implementation-patterns, devflow:testing, devflow:test-driven-development, devflow:search-first, devflow:boundary-validation, devflow:worktree-support
 ---
 
 # Coder Agent

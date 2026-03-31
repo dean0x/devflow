@@ -42,7 +42,7 @@ Requires Agent Teams feature:
 
 ### Skills
 - `agent-teams` - Team coordination patterns
-- `git-safety` - Safe git operations
+- `git` - Git safety, commits, GitHub API
 
 ## Output
 

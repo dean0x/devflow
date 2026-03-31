@@ -31,7 +31,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | devflow:debug-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates investigation pipeline |
 | devflow:software-design | Always for DEBUG | GUIDED + ORCHESTRATED | Any code file |
 | devflow:testing | Always for DEBUG (GUIDED) | GUIDED | Any code file |
-| devflow:git-safety | Git operations involved | GUIDED + ORCHESTRATED | User mentions git, rebase, merge, etc. |
+| devflow:git | Git operations involved | GUIDED + ORCHESTRATED | User mentions git, rebase, merge, etc. |
 
 ### REVIEW Intent
 

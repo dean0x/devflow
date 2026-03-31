@@ -47,7 +47,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins',
     commands: [],
     agents: [],
-    skills: ['software-design', 'docs-framework', 'git-safety', 'git-workflow', 'github-patterns', 'boundary-validation', 'search-first', 'test-driven-development', 'testing'],
+    skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'search-first', 'test-driven-development', 'testing'],
   },
   {
     name: 'devflow-specify',
@@ -82,7 +82,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Debugging workflows with competing hypothesis investigation using agent teams',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
-    skills: ['agent-teams', 'git-safety', 'knowledge-persistence', 'worktree-support'],
+    skills: ['agent-teams', 'git', 'knowledge-persistence', 'worktree-support'],
   },
   {
     name: 'devflow-self-review',
@@ -294,6 +294,7 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'devflow:architecture-patterns',
   'devflow:frontend-design',
   // v2.0.0 skill renames: new bare names (for pre-namespace installs that had old-name → new-name)
+  'git',
   'software-design',
   'boundary-validation',
   'testing',
@@ -323,6 +324,9 @@ export const LEGACY_SKILL_NAMES: string[] = [
  * This map drives migration of old shadow dirs to new names.
  */
 export const SHADOW_RENAMES: [string, string][] = [
+  ['git-safety', 'git'],
+  ['git-workflow', 'git'],
+  ['github-patterns', 'git'],
   ['core-patterns', 'software-design'],
   ['test-patterns', 'testing'],
   ['security-patterns', 'security'],

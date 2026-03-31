@@ -17,7 +17,7 @@ npx devflow-kit init --plugin=core-skills
 | Skill | Auto-Triggers When | What It Enforces |
 |-------|-------------------|------------------|
 | `software-design` | Business logic, error handling | Result types, DI, immutability, workaround labeling |
-| `git-workflow` | Staging files, creating commits, PRs | Atomic commits, message format, PR descriptions |
+| `git` | Git operations, commits, PRs, GitHub API | Sequential ops, atomic commits, PR descriptions, rate limiting |
 | `testing` | Tests written or modified | Test quality, setup complexity, behavior testing, coverage |
 | `boundary-validation` | API endpoints, external data handling | Boundary validation, parse-don't-validate |
 | `typescript` | TypeScript codebases | Type safety, generics, utility types |
@@ -34,7 +34,7 @@ Each skill enforces a non-negotiable principle:
 | Skill | Iron Law |
 |-------|----------|
 | `software-design` | NEVER THROW IN BUSINESS LOGIC |
-| `git-workflow` | ATOMIC COMMITS WITH HONEST DESCRIPTIONS |
+| `git` | NEVER RUN GIT COMMANDS IN PARALLEL |
 | `testing` | TESTS VALIDATE BEHAVIOR, NOT IMPLEMENTATION |
 | `boundary-validation` | ALL EXTERNAL DATA IS HOSTILE |
 | `typescript` | UNKNOWN OVER ANY |

@@ -10,7 +10,7 @@ devflow/
 │   └── marketplace.json
 ├── shared/
 │   ├── skills/                       # SINGLE SOURCE OF TRUTH (31 skills)
-│   │   ├── git-workflow/
+│   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
 │   │   ├── software-design/

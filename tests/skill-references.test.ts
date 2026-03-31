@@ -725,6 +725,10 @@ describe('Test infrastructure skill references', () => {
       ['input-validation', /(?<!devflow-)(?<![\w])input-validation(?![\w])/g],
       // frontend-design: exclude when preceded by `devflow-` (plugin name)
       ['frontend-design', /(?<!devflow-)(?<![\w])frontend-design(?![\w])/g],
+      // git consolidation: 3 old skills merged into `git`
+      ['git-safety', /(?<!devflow-)(?<![\w])git-safety(?![\w])/g],
+      ['git-workflow', /(?<!devflow-)(?<![\w])git-workflow(?![\w])/g],
+      ['github-patterns', /(?<!devflow-)(?<![\w])github-patterns(?![\w])/g],
     ];
 
     // Known allowlist: lines containing migration test data, legacy references, or comments about old names.

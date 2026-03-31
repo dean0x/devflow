@@ -126,9 +126,7 @@ The `devflow-core-skills` plugin provides quality enforcement skills that activa
 |-------|---------------|
 | `software-design` | Implementing business logic, error handling |
 | `docs-framework` | Creating documentation artifacts in .docs/ |
-| `git-safety` | Rebasing, force-pushing, merge conflicts |
-| `git-workflow` | Staging files, creating commits, PRs |
-| `github-patterns` | GitHub API operations, PR comments, releases |
+| `git` | Git operations, commits, PRs, GitHub API |
 | `test-driven-development` | Implementing new features (RED-GREEN-REFACTOR) |
 | `testing` | Writing or modifying tests |
 | `boundary-validation` | Creating API endpoints |

@@ -20,9 +20,7 @@
   "skills": [
     "software-design",
     "docs-framework",
-    "git-safety",
-    "git-workflow",
-    "github-patterns",
+    "git",
     "boundary-validation",
     "search-first",
     "test-driven-development",

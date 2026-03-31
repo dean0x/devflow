@@ -16,9 +16,7 @@ Shared patterns used by multiple agents.
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
 | `self-review` | 9-pillar self-review framework | Scrutinizer |
 | `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
-| `git-safety` | Git operations, lock handling, sequential ops | Coder, Git, Resolver |
-| `git-workflow` | Atomic commits, message format, PR descriptions, size assessment | Coder, Git, Resolver |
-| `github-patterns` | GitHub API patterns (rate limiting, PR comments, issues, releases) | Git |
+| `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
 | `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
 | `ambient-router` | Intent classification and proportional skill loading for ambient mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
@@ -82,7 +80,7 @@ The `activation: file-patterns` frontmatter is metadata for documentation purpos
 ```yaml
 ---
 name: Coder
-skills: software-design, git-safety, implementation-patterns, git-workflow, ...
+skills: software-design, git, implementation-patterns, ...
 ---
 ```
 
