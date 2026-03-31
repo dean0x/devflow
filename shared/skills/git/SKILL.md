@@ -11,11 +11,11 @@ Unified skill for safe git operations, atomic commits, honest PR descriptions, a
 
 ## Iron Law
 
-> **NEVER RUN GIT COMMANDS IN PARALLEL** [1][3]
+> **EVERY COMMIT TELLS AN HONEST, ATOMIC STORY** [1][3]
 >
-> All git operations MUST be sequential. Parallel git commands cause `.git/index.lock`
-> conflicts and risk index corruption. Use `&&` chains, never `&` backgrounding.
-> Wait for each command to complete before starting the next.
+> Each commit captures one logical change with a message that explains *what* changed
+> and *why*, not just *how*. Atomic commits make history reviewable, bisectable, and
+> revertable. Never bundle unrelated changes. Never write vague messages.
 
 ---
 

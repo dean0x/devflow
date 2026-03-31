@@ -84,41 +84,34 @@ export async function migrateShadowOverrides(devflowDir: string): Promise<{ migr
   // sequentially so check-then-rename is effectively atomic per target.
   const groupResults = await Promise.all(
     [...groups.values()].map(async (entries) => {
-      const groupMigrated: Array<{ migrated: number; warning: string | null }> = [];
+      let migrated = 0;
+      const warnings: string[] = [];
 
       for (const [oldName, newName] of entries) {
         const oldShadow = path.join(shadowsRoot, oldName);
         const newShadow = path.join(shadowsRoot, newName);
 
-        if (!(await shadowExists(oldShadow))) {
-          // Old shadow doesn't exist — nothing to migrate
-          groupMigrated.push({ migrated: 0, warning: null });
-          continue;
-        }
+        if (!(await shadowExists(oldShadow))) continue;
 
         if (await shadowExists(newShadow)) {
           // Target already exists (from a previous entry in this group or a
           // pre-existing user shadow) — warn, don't overwrite
-          groupMigrated.push({
-            migrated: 0,
-            warning: `Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`,
-          });
+          warnings.push(`Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`);
           continue;
         }
 
         // Target doesn't exist yet — rename
         await fs.rename(oldShadow, newShadow);
-        groupMigrated.push({ migrated: 1, warning: null });
+        migrated++;
       }
 
-      return groupMigrated;
+      return { migrated, warnings };
     }),
   );
 
-  const results = groupResults.flat();
   return {
-    migrated: results.reduce((sum, r) => sum + r.migrated, 0),
-    warnings: results.flatMap(r => (r.warning ? [r.warning] : [])),
+    migrated: groupResults.reduce((sum, r) => sum + r.migrated, 0),
+    warnings: groupResults.flatMap(r => r.warnings),
   };
 }
 

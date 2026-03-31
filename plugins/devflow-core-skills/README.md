@@ -34,7 +34,7 @@ Each skill enforces a non-negotiable principle:
 | Skill | Iron Law |
 |-------|----------|
 | `software-design` | NEVER THROW IN BUSINESS LOGIC |
-| `git` | NEVER RUN GIT COMMANDS IN PARALLEL |
+| `git` | EVERY COMMIT TELLS AN HONEST, ATOMIC STORY |
 | `testing` | TESTS VALIDATE BEHAVIOR, NOT IMPLEMENTATION |
 | `boundary-validation` | ALL EXTERNAL DATA IS HOSTILE |
 | `typescript` | UNKNOWN OVER ANY |
