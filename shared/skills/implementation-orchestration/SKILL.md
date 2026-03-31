@@ -2,7 +2,7 @@
 name: implementation-orchestration
 description: Agent orchestration for IMPLEMENT intent — pre-flight, Coder, quality gates
 user-invocable: false
-allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
+allowed-tools: Read, Grep, Glob, Bash, Task
 ---
 
 # Implementation Orchestration
@@ -26,8 +26,19 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 Detect branch type before spawning Coder:
 
 - **Work branches** (`feat/`, `fix/`, `chore/`, `refactor/`, `docs/` prefix): proceed on current branch.
-- **Protected branches** (`main`, `master`, `develop`, `release/*`, `staging`, `production`): ask user via AskUserQuestion with 2-3 suggested branch names following `{type}/{ticket}-{slug}` convention. Include ticket number if available from conversation context.
-- **If user declines branch creation**: proceed on the protected branch. Respect the user's choice.
+- **Protected branches** (`main`, `master`, `develop`, `release/*`, `staging`, `production`): record current branch as `BASE_BRANCH`, then spawn Git agent to auto-create a feature branch:
+
+```
+Task(subagent_type="Git"):
+"OPERATION: setup-task
+BASE_BRANCH: {current branch name}
+ISSUE_INPUT: {issue number if ticket mentioned in conversation, otherwise omit}
+TASK_DESCRIPTION: {task description from conversation context}
+Derive branch name from issue or description, create feature branch, and fetch issue if specified.
+Return the branch setup summary."
+```
+
+Capture `branch name` and `BASE_BRANCH` from Git agent output for use throughout the pipeline.
 
 ## Phase 2: Plan Synthesis
 

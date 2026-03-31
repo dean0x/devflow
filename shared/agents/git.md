@@ -112,14 +112,22 @@ Set up task environment: derive branch name, create feature branch, and optional
 
 **Process:**
 1. Record current branch as BASE_BRANCH for later PR targeting
-2. **Derive branch name:**
+2. **Detect branch naming convention** from existing branches:
+   ```bash
+   git branch -r --format='%(refname:short)' | head -50
+   ```
+   - Count prefixes: `feature/` vs `feat/`, `bugfix/` vs `fix/`, `hotfix/` vs `fix/`
+   - If existing branches consistently use a prefix style (>2 instances), adopt it
+   - Detect separator style: hyphens vs underscores
+   - If no clear convention or empty repo, use defaults (`feature/`, `fix/`, `docs/`, `refactor/`, `chore/`)
+3. **Derive branch name** (using detected convention):
    - If `ISSUE_INPUT` provided: fetch issue via GitHub API first, then derive branch name as `{type}/{number}-{slug}` where:
      - `type` is inferred from issue labels: `bug` → `fix`, `documentation` or `docs` → `docs`, `refactor` → `refactor`, `chore` or `maintenance` → `chore`, default → `feature`
      - `slug` is the issue title: lowercased, non-alphanumeric replaced with hyphens, consecutive hyphens collapsed, trimmed, max 40 characters
    - If `TASK_DESCRIPTION` provided (no issue): infer type from description keywords (e.g., "fix login bug" → `fix`, "refactor auth" → `refactor`, "add JWT" → `feature`, "update docs" → `docs`, "chore: cleanup" → `chore`), then slugify description as `{type}/{slug}` (max 40 chars)
    - If neither: fallback to `task-{YYYY-MM-DD_HHMM}`
-3. Create and checkout feature branch: `git checkout -b {derived-branch-name}`
-4. Return setup summary with branch name and BASE_BRANCH recorded
+4. Create and checkout feature branch: `git checkout -b {derived-branch-name}`
+5. Return setup summary with branch name and BASE_BRANCH recorded
 
 **Output:**
 ```markdown

@@ -40,6 +40,8 @@ Get the diff to understand what changed. Identify base branch and extract change
 | **2. Issues in Code You Touched** | Same file/function, but not your line | HIGH | Should fix while here |
 | **3. Pre-existing Issues** | Lines you didn't touch at all | INFORMATIONAL | Fix in separate PR |
 
+**Note:** All categories are reported for resolution — categories affect PR merge-blocking, not whether issues get resolved. The resolve workflow processes all issues (blocking, should-fix, and pre-existing) with pragmatic validation.
+
 ### Step 3: Analyze with Domain Expertise
 
 Apply your specialized lens (security, performance, tests, etc.) to each category:

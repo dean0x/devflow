@@ -68,19 +68,16 @@ Read review reports from `{TARGET_DIR}/*.md` and extract:
 - `review-summary.md` (synthesizer output, not individual findings)
 - `resolution-summary.md` (if it exists from a previous partial run)
 
-**Include only:**
-- Blocking issues (CRITICAL, HIGH)
-- Should-Fix issues (HIGH, MEDIUM)
+**Include:** ALL issues from all categories and severities. Skip only Suggestions.
 
-**Skip:**
-- Pre-existing issues (belong in tech debt, not resolution)
-- LOW severity (informational only)
+Issues are extracted from `{TARGET_DIR}` only — never cross-reference reviews from other worktrees.
 
 **Extract per issue:**
 - `id`: Generated from file:line:type
 - `file`: Full path
 - `line`: Line number
-- `severity`: CRITICAL/HIGH/MEDIUM
+- `severity`: CRITICAL/HIGH/MEDIUM/LOW
+- `category`: blocking/should-fix/pre-existing
 - `type`: Issue type from review
 - `description`: Problem statement
 - `suggested_fix`: From review report
@@ -122,6 +119,7 @@ For dependent batches, spawn sequentially and wait for completion before spawnin
 Aggregate from all Resolvers:
 - **Fixed**: Issues resolved with commits
 - **False positives**: Issues that don't exist or were misunderstood
+- **Won't Fix**: Real issues that are impractical to fix
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
@@ -177,6 +175,7 @@ Note: Deferred issues from resolution are already in resolution-summary.md"
 |---------|-------|
 | Fixed | {n} |
 | False Positive | {n} |
+| Won't Fix | {n} |
 | Tech Debt | {n} |
 | Blocked | {n} |
 
@@ -203,7 +202,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  └─ Step 0c: Target latest review directory per worktree
 │
 ├─ Phase 1: Parse issues from TARGET_DIR
-│  └─ Extract Blocking + Should-Fix (skip Pre-existing, exclude summaries)
+│  └─ Extract ALL issues (skip Suggestions, exclude summaries)
 │
 ├─ Phase 2: Analyze dependencies
 │  └─ Build dependency graph
@@ -238,7 +237,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
-| No actionable issues | Report "No issues to resolve" (all were pre-existing or LOW) |
+| No actionable issues | Report "No issues to resolve" (all were Suggestions) |
 | Incomplete review directory (no review-summary.md) | Skip — resolve only targets complete reviews |
 | Latest review already resolved | Skip worktree, report suggestion to run /code-review first |
 | Legacy flat layout (no subdirectories) | Read flat *.md files directly (backwards compatible) |
@@ -274,6 +273,7 @@ Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
 | Total Issues | {n} |
 | Fixed | {n} |
 | False Positive | {n} |
+| Won't Fix | {n} |
 | Deferred | {n} |
 | Blocked | {n} |
 
@@ -286,6 +286,11 @@ Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
 | Issue | File:Line | Reasoning |
 |-------|-----------|-----------|
 | {description} | {file}:{line} | {why} |
+
+## Won't Fix (Impractical)
+| Issue | File:Line | Reasoning |
+|-------|-----------|-----------|
+| {description} | {file}:{line} | {why impractical} |
 
 ## Deferred to Tech Debt
 | Issue | File:Line | Risk Factor |
