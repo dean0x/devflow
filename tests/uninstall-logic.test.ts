@@ -4,14 +4,14 @@ import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/cli/plugins.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {
-    // devflow-debug has no unique skills (agent-teams + git-safety shared), pick a plugin with unique assets
+    // devflow-debug has no unique skills (agent-teams + git shared), pick a plugin with unique assets
     const debugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-debug')!;
     const { skills } = computeAssetsToRemove([debugPlugin], DEVFLOW_PLUGINS);
 
     // 'agent-teams' is shared with other plugins, should NOT be in removal list
     expect(skills).not.toContain('agent-teams');
-    // 'git-safety' is also in core-skills, should NOT be in removal list
-    expect(skills).not.toContain('git-safety');
+    // 'git' is also in core-skills, should NOT be in removal list
+    expect(skills).not.toContain('git');
   });
 
   it('removes agents unique to selected plugins', () => {
@@ -56,8 +56,8 @@ describe('computeAssetsToRemove', () => {
     const { skills } = computeAssetsToRemove([reviewPlugin], DEVFLOW_PLUGINS);
     // review-methodology is also declared by devflow-ambient, so it must NOT be removed
     expect(skills).not.toContain('review-methodology');
-    // security-patterns is also declared by devflow-ambient
-    expect(skills).not.toContain('security-patterns');
+    // security is also declared by devflow-ambient
+    expect(skills).not.toContain('security');
   });
 
   it('handles custom plugin lists', () => {
@@ -94,11 +94,11 @@ describe('formatDryRunPlan', () => {
 
   it('omits empty sections', () => {
     const plan = formatDryRunPlan({
-      skills: ['core-patterns'],
+      skills: ['software-design'],
       agents: [],
       commands: [],
     });
-    expect(plan).toContain('core-patterns');
+    expect(plan).toContain('software-design');
     expect(plan).not.toContain('Agents');
     expect(plan).not.toContain('Commands');
   });
@@ -115,7 +115,7 @@ describe('formatDryRunPlan', () => {
 
   it('deduplicates skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
-      skills: ['core-patterns', 'core-patterns', 'test-patterns'],
+      skills: ['software-design', 'software-design', 'testing'],
       agents: ['coder', 'coder'],
       commands: ['/implement', '/implement'],
     });

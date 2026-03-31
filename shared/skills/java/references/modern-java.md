@@ -1,37 +1,49 @@
 # Modern Java Features (17-21+)
 
-Deep-dive on modern Java language features. Reference from main SKILL.md.
+Deep-dive on modern Java language features with JEP and literature citations.
+Reference from main SKILL.md.
 
 ---
 
-## Records (Java 16+)
+## Records (Java 16+) [4]
 
-### Basic Record
+Records are transparent carriers of immutable data. The compiler auto-generates
+`equals`, `hashCode`, `toString`, and an accessor method per component. Compact
+constructors validate fields before the record is constructed. — JEP 395 [4]
+
+"Records model the situation where a class's primary purpose is to hold data."
+— Brian Goetz, Data Oriented Programming in Java [9]
+
+### Basic Record [4]
 
 ```java
-// Immutable data carrier with auto-generated equals, hashCode, toString
+// Immutable data carrier with auto-generated equals, hashCode, toString [4]
 public record Point(double x, double y) {}
 
 // Usage
 var p = new Point(3.0, 4.0);
-double x = p.x(); // Accessor method, not getX()
+double x = p.x(); // Accessor method, not getX() [4]
 ```
 
-### Compact Constructor (Validation)
+### Compact Constructor (Validation) [4]
 
 ```java
+// Validation before component fields are sealed [4]
 public record Email(String value) {
     public Email {
         Objects.requireNonNull(value, "email must not be null");
         if (!value.contains("@")) {
             throw new IllegalArgumentException("Invalid email: " + value);
         }
-        value = value.toLowerCase().strip(); // Reassign before final assignment
+        value = value.toLowerCase().strip(); // Normalize before assignment [4]
     }
 }
 ```
 
-### Record with Custom Methods
+### Record with Custom Methods [4][1, Item 17]
+
+Records can have instance methods; they cannot have mutable state. Return new
+records for "updates" — the immutability contract is preserved. [1, Item 17]
 
 ```java
 public record Range(int start, int end) {
@@ -49,11 +61,14 @@ public record Range(int start, int end) {
 }
 ```
 
-### Records as Local Classes
+### Records as Local Classes [4][9]
+
+Local records are useful for intermediate computation shapes inside a method —
+they scope the type to where it is needed. [9]
 
 ```java
 public List<String> processOrders(List<Order> orders) {
-    // Local record for intermediate computation
+    // Local record for intermediate computation [4]
     record OrderTotal(String orderId, Money total) {}
 
     return orders.stream()
@@ -66,11 +81,18 @@ public List<String> processOrders(List<Order> orders) {
 
 ---
 
-## Sealed Classes (Java 17+)
+## Sealed Classes (Java 17+) [5]
 
-### Sealed Interface
+Sealed types close the subtype hierarchy: only `permits`-listed subtypes may
+implement/extend. This enables exhaustive pattern matching — the compiler verifies
+all cases are handled without a `default` branch. — JEP 409 [5]
+
+"Sealed classes expose the constraint that a domain model is closed." — Goetz [9]
+
+### Sealed Interface [5]
 
 ```java
+// Closed hierarchy — compiler knows all subtypes [5]
 public sealed interface Shape permits Circle, Rectangle, Triangle {
     double area();
 }
@@ -88,7 +110,7 @@ public record Triangle(double base, double height) implements Shape {
 }
 ```
 
-### Sealed Class with Abstract Methods
+### Sealed Class with Abstract Methods [5]
 
 ```java
 public sealed abstract class Payment permits CreditCard, BankTransfer, Crypto {
@@ -96,24 +118,22 @@ public sealed abstract class Payment permits CreditCard, BankTransfer, Crypto {
     abstract String reference();
 }
 
-public final class CreditCard extends Payment {
-    private final String cardLast4;
-    private final Money amount;
-    // ...
-}
-
+public final class CreditCard extends Payment { /* ... */ }
 public final class BankTransfer extends Payment { /* ... */ }
 public final class Crypto extends Payment { /* ... */ }
 ```
 
 ---
 
-## Pattern Matching (Java 21+)
+## Pattern Matching (Java 21+) [6]
 
-### Switch with Patterns
+Pattern matching for `switch` combines type testing, binding, and guarded conditions
+in one expression. Sealed types make the switch exhaustive — no `default` needed. — JEP 441 [6]
+
+### Switch with Patterns [6]
 
 ```java
-// Exhaustive pattern matching on sealed types
+// Exhaustive — compiler verifies all Shape subtypes covered [5][6]
 public String describe(Shape shape) {
     return switch (shape) {
         case Circle c    -> "Circle with radius %.2f".formatted(c.radius());
@@ -123,9 +143,10 @@ public String describe(Shape shape) {
 }
 ```
 
-### Guarded Patterns
+### Guarded Patterns [6]
 
 ```java
+// when-guards refine pattern match conditions [6]
 public String classifyTemperature(Object obj) {
     return switch (obj) {
         case Integer i when i < 0    -> "Freezing";
@@ -141,10 +162,13 @@ public String classifyTemperature(Object obj) {
 }
 ```
 
-### Record Patterns (Destructuring)
+### Record Patterns (Destructuring) [6][4]
+
+Record patterns decompose record components inline in the pattern. Nested destructuring
+collapses what would otherwise be multi-step instanceof + field access. [6]
 
 ```java
-// Nested destructuring
+// Nested destructuring — components bound directly in pattern [6][4]
 record Address(String city, String country) {}
 record Person(String name, Address address) {}
 
@@ -159,10 +183,13 @@ public String greet(Object obj) {
 
 ---
 
-## Text Blocks (Java 15+)
+## Text Blocks (Java 15+) [3]
+
+Text blocks preserve indentation relative to the closing delimiter. Use `formatted()`
+for interpolation — avoids escape sequences entirely.
 
 ```java
-// Multi-line strings with proper indentation
+// Multi-line strings with proper indentation [3]
 String json = """
         {
             "name": "%s",
@@ -183,22 +210,31 @@ String sql = """
 
 ---
 
-## Virtual Threads (Java 21+)
+## Virtual Threads (Java 21+) [7]
 
-### Basic Virtual Thread
+Virtual threads are lightweight JVM-managed threads that do not pin a platform thread
+during blocking I/O. Enables thread-per-request style with the efficiency of async. — JEP 444 [7]
+
+"Virtual threads are not faster threads — they are cheaper threads. They allow you
+to write blocking code that scales like async code." — JEP 444 [7]
+
+### Basic Virtual Thread [7]
 
 ```java
-// Lightweight thread - does not pin platform thread during I/O
+// Lightweight thread — does not pin platform thread during I/O [7]
 Thread.startVirtualThread(() -> {
     var result = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     process(result.body());
 });
 ```
 
-### Structured Concurrency (Preview)
+### Structured Concurrency (Preview) [7][28]
+
+Structured concurrency treats a group of concurrent tasks as a single unit of work:
+all succeed, or all are cancelled. Prevents thread leaks and orphaned tasks. [28]
 
 ```java
-// All subtasks complete or cancel together
+// All subtasks complete or cancel together [28]
 try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
     Subtask<User> userTask = scope.fork(() -> fetchUser(userId));
     Subtask<List<Order>> ordersTask = scope.fork(() -> fetchOrders(userId));
@@ -209,10 +245,13 @@ try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
 }
 ```
 
-### ExecutorService with Virtual Threads
+### ExecutorService with Virtual Threads [7][1, Item 80]
+
+Prefer executors over raw threads. `newVirtualThreadPerTaskExecutor` spawns one
+virtual thread per submitted task. — Effective Java, Item 80 [1, Item 80]
 
 ```java
-// Process thousands of concurrent I/O tasks
+// Process thousands of concurrent I/O tasks [7][1, Item 80]
 try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
     List<Future<Response>> futures = urls.stream()
         .map(url -> executor.submit(() -> httpClient.send(
@@ -234,37 +273,63 @@ try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
 
 ## Other Modern Features
 
-### Enhanced instanceof (Java 16+)
+### Enhanced instanceof (Java 16+) [3]
+
+Pattern variable binding eliminates explicit cast — the variable is scoped to the
+branch where the type is guaranteed.
 
 ```java
-// Pattern variable binding eliminates explicit cast
+// Pattern variable binding eliminates explicit cast [3]
 if (obj instanceof String s && s.length() > 5) {
     System.out.println(s.toUpperCase());
 }
 
-// Works with negation
+// Works with negation [3]
 if (!(obj instanceof String s)) {
     throw new IllegalArgumentException("Expected String");
 }
-// s is in scope here
+// s is in scope here — type proven by earlier check
 process(s);
 ```
 
-### Helpful NullPointerExceptions (Java 14+)
+### Helpful NullPointerExceptions (Java 14+) [3]
+
+The JVM now identifies exactly which reference was null in the exception message.
+Enabled by default since Java 17.
 
 ```java
 // JVM now tells you exactly which reference was null:
 // java.lang.NullPointerException: Cannot invoke "String.length()"
 //   because the return value of "User.name()" is null
-// Enable with: -XX:+ShowCodeDetailsInExceptionMessages (default since Java 17)
+// Enable with: -XX:+ShowCodeDetailsInExceptionMessages (default since Java 17) [3]
 ```
 
-### Stream Gatherers (Java 22+ Preview)
+### Stream Gatherers (Java 22+ Preview) [3]
+
+Custom intermediate stream operations via the `Gatherers` API — enables sliding
+windows, batch processing, and other stateful operations.
 
 ```java
-// Custom intermediate stream operations
+// Custom intermediate stream operations [3]
 var windowedAverages = temperatures.stream()
     .gather(Gatherers.windowSliding(5))
     .map(window -> window.stream().mapToDouble(d -> d).average().orElse(0))
     .toList();
 ```
+
+---
+
+## Data Oriented Programming Summary [9]
+
+Brian Goetz's Data Oriented Programming model combines four features into a
+unified paradigm for modeling immutable data: [9]
+
+| Feature | Role | JEP |
+|---------|------|-----|
+| Records | Immutable data carrier | [4] |
+| Sealed classes | Closed type hierarchies | [5] |
+| Pattern matching | Exhaustive dispatch | [6] |
+| Local records | Scoped intermediate types | [4] |
+
+"Data orientation separates the 'what' (data as records) from the 'how'
+(behavior in functions), leading to simpler, more testable code." — Goetz [9]

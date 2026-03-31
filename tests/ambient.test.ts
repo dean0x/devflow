@@ -185,7 +185,7 @@ describe('hasAmbientHook', () => {
 
 describe('classification helpers', () => {
   it('detects classification marker', () => {
-    expect(hasClassification('Ambient: IMPLEMENT/GUIDED. Loading: devflow:core-patterns.')).toBe(true);
+    expect(hasClassification('Ambient: IMPLEMENT/GUIDED. Loading: devflow:software-design.')).toBe(true);
     expect(hasClassification('Ambient: DEBUG/ORCHESTRATED. Loading: devflow:debug-orchestration.')).toBe(true);
   });
 
@@ -200,16 +200,16 @@ describe('classification helpers', () => {
   });
 
   it('extracts intent', () => {
-    expect(extractIntent('Ambient: IMPLEMENT/GUIDED. Loading: devflow:core-patterns.')).toBe('IMPLEMENT');
+    expect(extractIntent('Ambient: IMPLEMENT/GUIDED. Loading: devflow:software-design.')).toBe('IMPLEMENT');
     expect(extractIntent('Ambient: DEBUG/ORCHESTRATED. Loading: devflow:debug-orchestration.')).toBe('DEBUG');
     expect(extractIntent('Ambient: REVIEW/GUIDED. Loading: devflow:self-review.')).toBe('REVIEW');
-    expect(extractIntent('Ambient: PLAN/GUIDED. Loading: devflow:core-patterns.')).toBe('PLAN');
+    expect(extractIntent('Ambient: PLAN/GUIDED. Loading: devflow:software-design.')).toBe('PLAN');
     expect(extractIntent('Ambient: EXPLORE/QUICK')).toBe('EXPLORE');
     expect(extractIntent('Ambient: CHAT/QUICK')).toBe('CHAT');
   });
 
   it('extracts depth', () => {
-    expect(extractDepth('Ambient: IMPLEMENT/GUIDED. Loading: devflow:core-patterns.')).toBe('GUIDED');
+    expect(extractDepth('Ambient: IMPLEMENT/GUIDED. Loading: devflow:software-design.')).toBe('GUIDED');
     expect(extractDepth('Ambient: DEBUG/ORCHESTRATED. Loading: devflow:debug-orchestration.')).toBe('ORCHESTRATED');
   });
 
@@ -222,7 +222,7 @@ describe('classification helpers', () => {
 describe('skill loading helpers', () => {
   it('detects Loading marker', () => {
     expect(hasSkillLoading('Ambient: IMPLEMENT/GUIDED. Loading: devflow:implementation-patterns, devflow:search-first.')).toBe(true);
-    expect(hasSkillLoading('Loading: devflow:core-patterns')).toBe(true);
+    expect(hasSkillLoading('Loading: devflow:software-design')).toBe(true);
   });
 
   it('returns false when no Loading marker', () => {
@@ -231,7 +231,7 @@ describe('skill loading helpers', () => {
   });
 
   it('extracts single skill', () => {
-    expect(extractLoadedSkills('Loading: devflow:core-patterns')).toEqual(['devflow:core-patterns']);
+    expect(extractLoadedSkills('Loading: devflow:software-design')).toEqual(['devflow:software-design']);
   });
 
   it('extracts multiple skills', () => {
@@ -280,7 +280,7 @@ describe('preamble drift detection', () => {
     // Must reference core skills with devflow: namespace prefix
     expect(shellPreamble).toContain('devflow:implementation-patterns');
     expect(shellPreamble).toContain('devflow:test-driven-development');
-    expect(shellPreamble).toContain('devflow:core-patterns');
+    expect(shellPreamble).toContain('devflow:software-design');
     expect(shellPreamble).toContain('devflow:self-review');
     expect(shellPreamble).toContain('devflow:search-first');
 

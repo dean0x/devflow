@@ -43,6 +43,22 @@ describe('skill references', () => {
   });
 });
 
+describe('skill frontmatter integrity', () => {
+  it('every SKILL.md frontmatter name matches its directory name', async () => {
+    const allSkills = getAllSkillNames();
+    for (const skill of allSkills) {
+      const skillMd = path.join(ROOT, 'shared', 'skills', skill, 'SKILL.md');
+      const content = await fs.readFile(skillMd, 'utf-8');
+      const match = content.match(/^name:\s*(.+)$/m);
+      if (!match) expect.unreachable(`shared/skills/${skill}/SKILL.md should have a name: field in frontmatter`);
+      expect(
+        match[1].trim(),
+        `shared/skills/${skill}/SKILL.md frontmatter name '${match[1].trim()}' does not match directory name '${skill}'`,
+      ).toBe(skill);
+    }
+  });
+});
+
 describe('agent references', () => {
   it('every shared agent referenced in plugins exists in shared/agents/', async () => {
     const allAgents = getAllAgentNames();

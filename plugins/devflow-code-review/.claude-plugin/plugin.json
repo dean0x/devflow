@@ -22,18 +22,18 @@
   ],
   "skills": [
     "agent-teams",
-    "architecture-patterns",
-    "complexity-patterns",
-    "consistency-patterns",
-    "database-patterns",
-    "dependencies-patterns",
-    "documentation-patterns",
+    "architecture",
+    "complexity",
+    "consistency",
+    "database",
+    "dependencies",
+    "documentation",
     "knowledge-persistence",
-    "performance-patterns",
-    "regression-patterns",
+    "performance",
+    "regression",
     "review-methodology",
-    "security-patterns",
-    "test-patterns",
+    "security",
+    "testing",
     "worktree-support"
   ]
 }

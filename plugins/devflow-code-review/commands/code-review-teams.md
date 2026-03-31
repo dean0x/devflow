@@ -71,7 +71,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Any .ts or .tsx files | typescript |
 | .tsx or .jsx files (React components) | react |
 | .tsx or .jsx files (React components) | accessibility |
-| .tsx/.jsx/.css/.scss files | frontend-design |
+| .tsx/.jsx/.css/.scss files | ui-design |
 | .go files | go |
 | .java files | java |
 | .py files | python |
@@ -80,7 +80,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
 
-**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before adding a conditional perspective, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that perspective** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, ui-design, go, java, python, rust) require their optional skill plugin to be installed. Before adding a conditional perspective, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that perspective** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Spawn Review Team
 
@@ -92,7 +92,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 - **Security**: vulnerabilities, injection, auth, crypto issues
 - **Architecture**: SOLID violations, coupling, layering, modularity
 - **Performance**: queries, algorithms, caching, I/O bottlenecks
-- **Quality**: complexity, tests, consistency, regression, naming
+- **Quality**: complexity, testing, consistency, regression, naming
 
 **Conditional perspectives (based on changed files):**
 - **TypeScript**: type safety, generics, utility types (if .ts/.tsx changed)
@@ -116,7 +116,7 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/devflow:security-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:security/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
@@ -131,7 +131,7 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/devflow:architecture-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:architecture/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
@@ -146,7 +146,7 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/devflow:performance-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:performance/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
@@ -162,10 +162,10 @@ Spawn review teammates with self-contained prompts:
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
     1. Read your skills:
-       - `Read ~/.claude/skills/devflow:complexity-patterns/SKILL.md`
-       - `Read ~/.claude/skills/devflow:consistency-patterns/SKILL.md`
-       - `Read ~/.claude/skills/devflow:test-patterns/SKILL.md`
-       - `Read ~/.claude/skills/devflow:regression-patterns/SKILL.md`
+       - `Read ~/.claude/skills/devflow:complexity/SKILL.md`
+       - `Read ~/.claude/skills/devflow:consistency/SKILL.md`
+       - `Read ~/.claude/skills/devflow:testing/SKILL.md`
+       - `Read ~/.claude/skills/devflow:regression/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`

@@ -1,8 +1,18 @@
 # Go Concurrency Patterns
 
 Advanced concurrency patterns for Go. Reference from main SKILL.md.
+Sources in `sources.md`.
 
-## errgroup for Structured Concurrency
+Go's concurrency model derives from Hoare's Communicating Sequential Processes (CSP) [9].
+Goroutines are independently-executing functions; channels are typed conduits for communication.
+The guiding principle: "Do not communicate by sharing memory; share memory by communicating." [10]
+
+---
+
+## errgroup for Structured Concurrency [22][13]
+
+`errgroup` (golang.org/x/sync) provides structured concurrency: a group of goroutines
+where the first error cancels the group. [22]
 
 ```go
 import "golang.org/x/sync/errgroup"
@@ -29,7 +39,7 @@ func FetchAll(ctx context.Context, urls []string) ([]Response, error) {
 }
 ```
 
-### errgroup with Concurrency Limit
+### errgroup with Concurrency Limit [22][13]
 
 ```go
 func ProcessItems(ctx context.Context, items []Item) error {
@@ -48,7 +58,10 @@ func ProcessItems(ctx context.Context, items []Item) error {
 
 ---
 
-## Worker Pool
+## Worker Pool [13][10]
+
+Channel-based worker pool following the CSP communication model [9][10].
+Channels pass ownership of data; `context.Done()` cancels work cooperatively. [16]
 
 ```go
 func WorkerPool(ctx context.Context, jobs <-chan Job, workers int) <-chan Result {
@@ -85,7 +98,6 @@ func WorkerPool(ctx context.Context, jobs <-chan Job, workers int) <-chan Result
 jobs := make(chan Job, 100)
 results := WorkerPool(ctx, jobs, 5)
 
-// Send jobs
 go func() {
     defer close(jobs)
     for _, j := range allJobs {
@@ -93,7 +105,6 @@ go func() {
     }
 }()
 
-// Collect results
 for r := range results {
     fmt.Println(r)
 }
@@ -101,7 +112,10 @@ for r := range results {
 
 ---
 
-## Fan-Out / Fan-In
+## Fan-Out / Fan-In [13][9]
+
+Pipeline pattern from CSP theory [9]: fan-out distributes one input stream across
+multiple workers; fan-in merges multiple streams back into one. [13]
 
 ```go
 // Fan-out: one source, multiple workers
@@ -158,7 +172,10 @@ func fanIn(ctx context.Context, channels ...<-chan int) <-chan int {
 
 ---
 
-## Select with Timeout
+## Select with Timeout [16][13]
+
+`select` implements the alternation operator from CSP [9]: choose the first
+ready channel. `context.WithTimeout` integrates deadline propagation. [16]
 
 ```go
 func fetchWithTimeout(ctx context.Context, url string) ([]byte, error) {
@@ -185,7 +202,7 @@ type result struct {
 }
 ```
 
-### Select for Multiple Sources
+### Select for Multiple Sources [8][9]
 
 ```go
 func merge(ctx context.Context, primary, fallback <-chan Event) <-chan Event {
@@ -215,12 +232,15 @@ func merge(ctx context.Context, primary, fallback <-chan Event) <-chan Event {
 
 ---
 
-## Mutex vs Channels
+## Mutex vs Channels [8][10]
 
-### Use Mutex When
+Go proverb: "channels orchestrate; mutexes serialize." [7] The Go Memory Model
+defines the happens-before rules for both synchronization primitives. [8]
+
+### Use Mutex When [8]
 
 ```go
-// Protecting shared state with simple read/write
+// Protecting shared state with simple read/write [8]
 type SafeCounter struct {
     mu sync.RWMutex
     v  map[string]int
@@ -239,10 +259,10 @@ func (c *SafeCounter) Get(key string) int {
 }
 ```
 
-### Use Channels When
+### Use Channels When [10][9]
 
 ```go
-// Communicating between goroutines / coordinating work
+// Communicating between goroutines / coordinating work [10]
 func pipeline(ctx context.Context, input []int) <-chan int {
     out := make(chan int)
     go func() {
@@ -259,20 +279,23 @@ func pipeline(ctx context.Context, input []int) <-chan int {
 }
 ```
 
-### Decision Guide
+### Decision Guide [8][10][13]
 
-| Scenario | Use |
-|----------|-----|
-| Guarding shared state | `sync.Mutex` or `sync.RWMutex` |
-| Passing ownership of data | Channels |
-| Coordinating goroutine lifecycle | `context.Context` + channels |
-| Waiting for N goroutines | `sync.WaitGroup` or `errgroup` |
-| One-time initialization | `sync.Once` |
-| Concurrent map access | `sync.Map` (high read, low write) |
+| Scenario | Use | Source |
+|----------|-----|--------|
+| Guarding shared state | `sync.Mutex` or `sync.RWMutex` | [8] |
+| Passing ownership of data | Channels | [10][9] |
+| Coordinating goroutine lifecycle | `context.Context` + channels | [16] |
+| Waiting for N goroutines | `sync.WaitGroup` or `errgroup` | [22] |
+| One-time initialization | `sync.Once` | [8] |
+| Concurrent map access | `sync.Map` (high read, low write) | [8] |
 
 ---
 
-## sync.Once for Initialization
+## sync.Once for Initialization [8][12]
+
+`sync.Once` guarantees a function runs exactly once, regardless of concurrent callers.
+The Go Memory Model guarantees visibility of the function's effects to all goroutines. [8]
 
 ```go
 type Client struct {
@@ -283,7 +306,6 @@ type Client struct {
 
 func (c *Client) connection() (*grpc.ClientConn, error) {
     c.once.Do(func() {
-        // requires: "google.golang.org/grpc/credentials/insecure"
         c.conn, c.err = grpc.Dial("localhost:50051",
             grpc.WithTransportCredentials(insecure.NewCredentials()))
     })
@@ -293,9 +315,10 @@ func (c *Client) connection() (*grpc.ClientConn, error) {
 
 ---
 
-## Rate Limiting
+## Rate Limiting [13]
 
 ```go
+// golang.org/x/time/rate implements the token bucket algorithm [13]
 func rateLimited(ctx context.Context, items []Item, rps int) error {
     limiter := rate.NewLimiter(rate.Limit(rps), 1)
 

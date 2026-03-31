@@ -1,8 +1,12 @@
 # Go Correct Patterns
 
 Extended correct patterns for Go development. Reference from main SKILL.md.
+Sources in `sources.md`.
 
-## Table-Driven Tests
+## Table-Driven Tests [18]
+
+The idiomatic Go testing approach: define cases in a struct slice, range over them
+with `t.Run`. Fuzzing and benchmarks use the same `testing.T` conventions. [18]
 
 ```go
 func TestAdd(t *testing.T) {
@@ -30,7 +34,10 @@ func TestAdd(t *testing.T) {
 
 ---
 
-## Functional Options
+## Functional Options [1][12]
+
+Enables optional configuration without breaking API changes. Preferred over config
+structs when options have non-trivial defaults. [12]
 
 ```go
 type Server struct {
@@ -55,8 +62,8 @@ func WithLogger(l *slog.Logger) Option {
 
 func NewServer(opts ...Option) *Server {
     s := &Server{
-        addr:    ":8080",           // sensible default
-        timeout: 30 * time.Second,  // sensible default
+        addr:    ":8080",          // sensible default
+        timeout: 30 * time.Second, // sensible default
         logger:  slog.Default(),
     }
     for _, opt := range opts {
@@ -68,13 +75,16 @@ func NewServer(opts ...Option) *Server {
 // Usage
 srv := NewServer(
     WithAddr(":9090"),
-    WithTimeout(60 * time.Second),
+    WithTimeout(60*time.Second),
 )
 ```
 
 ---
 
-## Custom Error Types
+## Custom Error Types [1][6]
+
+Use custom types when callers need to inspect error fields. Use `errors.As` for
+type-based unwrapping, `errors.Is` for sentinel values. [6]
 
 ```go
 type ValidationError struct {
@@ -113,7 +123,10 @@ func handleErr(err error) {
 
 ---
 
-## Middleware Pattern
+## Middleware Pattern [1][3]
+
+HTTP middleware chains following the `func(http.Handler) http.Handler` convention.
+Standard library `net/http` uses this pattern natively. [1]
 
 ```go
 type Middleware func(http.Handler) http.Handler
@@ -154,7 +167,6 @@ func Chain(handler http.Handler, middlewares ...Middleware) http.Handler {
     return handler
 }
 
-// Usage
 mux := http.NewServeMux()
 mux.HandleFunc("/api/users", handleUsers)
 handler := Chain(mux, Recovery(), Logging(logger))
@@ -162,7 +174,10 @@ handler := Chain(mux, Recovery(), Logging(logger))
 
 ---
 
-## Graceful Shutdown
+## Graceful Shutdown [1][16]
+
+Context-aware shutdown propagation. `context.WithTimeout` ensures the shutdown
+completes within a deadline. [16]
 
 ```go
 func main() {
@@ -190,10 +205,13 @@ func main() {
 
 ---
 
-## Constructor Pattern
+## Constructor Pattern [1][2]
+
+Enforce invariants at construction time. Return an error rather than a zero-value
+struct that might be used incorrectly. [1][2]
 
 ```go
-// Validate at construction - enforce invariants
+// Validate at construction — enforce invariants
 func NewUser(name, email string) (*User, error) {
     if name == "" {
         return nil, &ValidationError{Field: "name", Message: "required"}
@@ -212,7 +230,10 @@ func NewUser(name, email string) (*User, error) {
 
 ---
 
-## Structured Logging with slog
+## Structured Logging with slog [19]
+
+`slog` (Go 1.21+) is the standard structured logging package. Use `slog.With` to
+attach request-scoped context once, then log with key-value pairs throughout. [19]
 
 ```go
 func ProcessOrder(ctx context.Context, orderID string) error {
@@ -229,4 +250,29 @@ func ProcessOrder(ctx context.Context, orderID string) error {
     logger.Info("items fetched", "count", len(items))
     return nil
 }
+```
+
+---
+
+## Generics — Type Constraints [11]
+
+Go 1.18+ generics use type constraints to express which types are valid. Prefer
+concrete constraints over `any` when possible. [11]
+
+```go
+type Number interface {
+    ~int | ~int64 | ~float64
+}
+
+func Sum[T Number](values []T) T {
+    var total T
+    for _, v := range values {
+        total += v
+    }
+    return total
+}
+
+// Usage — type inferred from arguments
+total := Sum([]int{1, 2, 3})         // 6
+total64 := Sum([]float64{1.1, 2.2})  // 3.3
 ```

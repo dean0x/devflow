@@ -5,6 +5,8 @@ import {
   getAllAgentNames,
   buildAssetMaps,
   buildFullSkillsMap,
+  SHADOW_RENAMES,
+  LEGACY_SKILL_NAMES,
   type PluginDefinition,
 } from '../src/cli/plugins.js';
 
@@ -202,7 +204,7 @@ describe('optional plugin flag', () => {
     expect(ambient).toBeDefined();
     // Ambient must declare review skills so uninstalling code-review doesn't break ambient review
     expect(ambient!.skills).toContain('review-methodology');
-    expect(ambient!.skills).toContain('security-patterns');
+    expect(ambient!.skills).toContain('security');
     // Ambient must declare orchestration skills
     expect(ambient!.skills).toContain('review-orchestration');
     expect(ambient!.skills).toContain('resolve-orchestration');
@@ -219,9 +221,34 @@ describe('optional plugin flag', () => {
   it('devflow-core-skills does not contain language/ecosystem skills', () => {
     const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
     expect(coreSkills).toBeDefined();
-    const movedSkills = ['typescript', 'react', 'accessibility', 'frontend-design'];
+    const movedSkills = ['typescript', 'react', 'accessibility', 'ui-design'];
     for (const skill of movedSkills) {
       expect(coreSkills!.skills, `core-skills should not contain '${skill}'`).not.toContain(skill);
+    }
+  });
+});
+
+describe('SHADOW_RENAMES consistency', () => {
+  it('every old name in SHADOW_RENAMES appears in LEGACY_SKILL_NAMES (bare, devflow- or devflow: prefixed)', () => {
+    for (const [oldName] of SHADOW_RENAMES) {
+      const inLegacy =
+        LEGACY_SKILL_NAMES.includes(oldName) ||
+        LEGACY_SKILL_NAMES.includes(`devflow-${oldName}`) ||
+        LEGACY_SKILL_NAMES.includes(`devflow:${oldName}`);
+      expect(
+        inLegacy,
+        `SHADOW_RENAMES old name '${oldName}' must appear in LEGACY_SKILL_NAMES (bare, devflow- or devflow: prefixed)`,
+      ).toBe(true);
+    }
+  });
+
+  it('every new name in SHADOW_RENAMES is a known skill in getAllSkillNames()', () => {
+    const allSkills = getAllSkillNames();
+    for (const [, newName] of SHADOW_RENAMES) {
+      expect(
+        allSkills,
+        `SHADOW_RENAMES new name '${newName}' must appear in getAllSkillNames()`,
+      ).toContain(newName);
     }
   });
 });

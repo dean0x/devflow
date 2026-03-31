@@ -1,7 +1,7 @@
 ---
 name: Simplifier
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
-skills: devflow:core-patterns, devflow:worktree-support
+skills: devflow:software-design, devflow:worktree-support
 model: sonnet
 ---
 

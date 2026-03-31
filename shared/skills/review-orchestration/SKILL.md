@@ -52,7 +52,7 @@ Detect conditional reviewers from file types:
 | `*.java` | java |
 | `*.py` | python |
 | `*.rs` | rust |
-| `*.css`, `*.scss` | frontend-design |
+| `*.css`, `*.scss` | ui-design |
 | `*.tsx`, `*.jsx` (with UI) | accessibility |
 | migration/schema files | database |
 | `package.json`, lock files | dependencies |
@@ -63,10 +63,10 @@ Detect conditional reviewers from file types:
 Spawn all reviewers in a single message (parallel execution):
 
 **7 core reviewers** (always):
-- security, architecture, performance, complexity, consistency, tests, regression
+- security, architecture, performance, complexity, consistency, testing, regression
 
 **Conditional reviewers** (from Phase 3 file analysis):
-- typescript, react, database, dependencies, documentation, go, java, python, rust, accessibility, frontend-design
+- typescript, react, database, dependencies, documentation, go, java, python, rust, accessibility, ui-design
 
 Each reviewer receives:
 - **Focus**: Their review type

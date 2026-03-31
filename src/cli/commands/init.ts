@@ -20,7 +20,7 @@ import {
   migrateMemoryFiles,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, SHADOW_RENAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook } from './ambient.js';
@@ -52,6 +52,67 @@ export function classifySafeDeleteState(
   if (installedVersion === currentVersion) return 'current';
   if (installedVersion > 0) return 'outdated';
   return 'missing';
+}
+
+async function shadowExists(p: string): Promise<boolean> {
+  return fs.access(p).then(() => true, () => false);
+}
+
+/**
+ * Migrate shadow skill overrides from old V2 skill names to new names.
+ * Pure function suitable for testing — requires only the devflowDir path.
+ *
+ * Groups SHADOW_RENAMES entries by their target name so that multiple old
+ * names mapping to the same target (e.g. git-safety, git-workflow,
+ * github-patterns → git) are processed sequentially within the group.
+ * Distinct-target groups still run in parallel via Promise.all, preserving
+ * throughput while eliminating the TOCTOU race on shared targets.
+ */
+export async function migrateShadowOverrides(devflowDir: string): Promise<{ migrated: number; warnings: string[] }> {
+  const shadowsRoot = path.join(devflowDir, 'skills');
+
+  // Group entries by target name so many-to-one mappings are serialized.
+  const groups = new Map<string, [string, string][]>();
+  for (const entry of SHADOW_RENAMES) {
+    const [, newName] = entry;
+    const group = groups.get(newName) ?? [];
+    group.push(entry);
+    groups.set(newName, group);
+  }
+
+  // Process distinct-target groups in parallel; entries within each group run
+  // sequentially so check-then-rename is effectively atomic per target.
+  const groupResults = await Promise.all(
+    [...groups.values()].map(async (entries) => {
+      let migrated = 0;
+      const warnings: string[] = [];
+
+      for (const [oldName, newName] of entries) {
+        const oldShadow = path.join(shadowsRoot, oldName);
+        const newShadow = path.join(shadowsRoot, newName);
+
+        if (!(await shadowExists(oldShadow))) continue;
+
+        if (await shadowExists(newShadow)) {
+          // Target already exists (from a previous entry in this group or a
+          // pre-existing user shadow) — warn, don't overwrite
+          warnings.push(`Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`);
+          continue;
+        }
+
+        // Target doesn't exist yet — rename
+        await fs.rename(oldShadow, newShadow);
+        migrated++;
+      }
+
+      return { migrated, warnings };
+    }),
+  );
+
+  return {
+    migrated: groupResults.reduce((sum, r) => sum + r.migrated, 0),
+    warnings: groupResults.flatMap(r => r.warnings),
+  };
 }
 
 /**
@@ -754,6 +815,16 @@ export const initCommand = new Command('init')
     const skillsMap = buildFullSkillsMap();
     // Agents: install only from selected plugins
     const { agentsMap } = buildAssetMaps(pluginsToInstall);
+
+    // Migrate shadow overrides from old V2 skill names BEFORE install,
+    // so the installer's shadow check finds them at the new name
+    const shadowsMigrated = await migrateShadowOverrides(devflowDir);
+    if (shadowsMigrated.migrated > 0) {
+      p.log.info(`Migrated ${shadowsMigrated.migrated} shadow override(s) to V2 names`);
+    }
+    for (const warning of shadowsMigrated.warnings) {
+      p.log.warn(warning);
+    }
 
     // Install: try native CLI first, fall back to file copy
     const cliAvailable = isClaudeCliAvailable();

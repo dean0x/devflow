@@ -71,7 +71,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Any .ts or .tsx files | typescript |
 | .tsx or .jsx files (React components) | react |
 | .tsx or .jsx files (React components) | accessibility |
-| .tsx/.jsx/.css/.scss files | frontend-design |
+| .tsx/.jsx/.css/.scss files | ui-design |
 | .go files | go |
 | .java files | java |
 | .py files | python |
@@ -80,7 +80,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 | Dependency files changed | dependencies |
 | Docs or significant code | documentation |
 
-**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, frontend-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
+**Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, ui-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
 ### Phase 2: Run Reviews (Parallel)
 
@@ -88,29 +88,29 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
-| security | ✓ | devflow:security-patterns |
-| architecture | ✓ | devflow:architecture-patterns |
-| performance | ✓ | devflow:performance-patterns |
-| complexity | ✓ | devflow:complexity-patterns |
-| consistency | ✓ | devflow:consistency-patterns |
-| regression | ✓ | devflow:regression-patterns |
-| tests | ✓ | devflow:test-patterns |
+| security | ✓ | devflow:security |
+| architecture | ✓ | devflow:architecture |
+| performance | ✓ | devflow:performance |
+| complexity | ✓ | devflow:complexity |
+| consistency | ✓ | devflow:consistency |
+| regression | ✓ | devflow:regression |
+| testing | ✓ | devflow:testing |
 | typescript | conditional | devflow:typescript |
 | react | conditional | devflow:react |
 | accessibility | conditional | devflow:accessibility |
-| frontend-design | conditional | devflow:frontend-design |
+| ui-design | conditional | devflow:ui-design |
 | go | conditional | devflow:go |
 | java | conditional | devflow:java |
 | python | conditional | devflow:python |
 | rust | conditional | devflow:rust |
-| database | conditional | devflow:database-patterns |
-| dependencies | conditional | devflow:dependencies-patterns |
-| documentation | conditional | devflow:documentation-patterns |
+| database | conditional | devflow:database |
+| dependencies | conditional | devflow:dependencies |
+| documentation | conditional | devflow:documentation |
 
 Each Reviewer invocation (all in one message, **NOT background**):
 ```
 Task(subagent_type="Reviewer", run_in_background=false):
-"Review focusing on {focus}. Apply devflow:{focus}-patterns.
+"Review focusing on {focus}. Load the pattern skill for your focus from the Focus Areas table.
 Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
@@ -190,7 +190,7 @@ Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
 │  ├─ Phase 2: Reviews (PARALLEL within worktree)
 │  │  ├─ Reviewer: security
 │  │  ├─ Reviewer: architecture, performance, complexity
-│  │  ├─ Reviewer: consistency, regression, tests
+│  │  ├─ Reviewer: consistency, regression, testing
 │  │  └─ Reviewer: [conditional]
 │  │
 │  ├─ Phase 3: Synthesis (PARALLEL within worktree)

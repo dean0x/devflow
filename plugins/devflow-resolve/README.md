@@ -46,12 +46,11 @@ npx devflow-kit init --plugin=resolve
 - `resolver` - Validates and implements fixes
 - `simplifier` - Code refinement after fixes
 
-### Skills (5)
-- `core-patterns` - Result types, DI
-- `git-safety` - Safe git operations
-- `commit` - Atomic commit patterns
+### Skills (4)
+- `software-design` - Result types, DI
+- `git` - Git safety, atomic commits, GitHub API
 - `implementation-patterns` - Implementation guidance
-- `security-patterns` - Security fix patterns
+- `security` - Security fix patterns
 
 ## Output
 

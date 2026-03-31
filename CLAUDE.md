@@ -69,7 +69,7 @@ devflow/
 ```bash
 # 1. Edit source files
 vim plugins/devflow-code-review/commands/code-review.md  # Commands/agents in plugins
-vim shared/skills/security-patterns/SKILL.md   # Skills in shared/
+vim shared/skills/security/SKILL.md   # Skills in shared/
 
 # 2. Build (compiles CLI + distributes skills/agents to plugins)
 npm run build

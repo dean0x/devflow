@@ -1,12 +1,13 @@
 # React Correct Patterns
 
 Extended correct patterns for React development. Reference from main SKILL.md.
+Sources in `references/sources.md`.
 
 ---
 
-## Vercel Performance Patterns
+## Performance Patterns [5][23]
 
-### Async Parallelization
+### Async Parallelization [1]
 
 ```tsx
 // CORRECT: Parallel independent fetches with named destructuring
@@ -47,7 +48,7 @@ async function loadOrderDetails(orderId: string) {
 }
 ```
 
-### Bundle Optimization
+### Bundle Optimization [5]
 
 ```tsx
 // CORRECT: Direct component imports (tree-shakable)
@@ -95,7 +96,7 @@ function Editor({ showPreview }: { showPreview: boolean }) {
 }
 ```
 
-### Re-render Prevention
+### Re-render Prevention [3][4]
 
 ```tsx
 // CORRECT: Extract primitives from objects for deps
@@ -165,7 +166,7 @@ function FilteredList({ items, filter }: Props) {
 }
 ```
 
-### Image Optimization
+### Image Optimization [23]
 
 ```tsx
 // CORRECT: Fully optimized image component
@@ -249,7 +250,7 @@ function ImageWithPlaceholder({ src, alt, width, height }: Props) {
 }
 ```
 
-### Data Structure Performance
+### Data Structure Performance [5]
 
 ```tsx
 // CORRECT: Map for complex key-value operations
@@ -324,9 +325,9 @@ function useFilteredList<T extends { id: string }>(
 
 ---
 
-## Component Patterns
+## Component Patterns [2][12]
 
-### Composition with Compound Components
+### Composition with Compound Components [2][4]
 
 ```tsx
 // CORRECT: Flexible composition through children
@@ -361,7 +362,7 @@ Card.Footer = function CardFooter({ children }: { children: React.ReactNode }) {
 </Card>
 ```
 
-### Render Props Pattern
+### Render Props Pattern [5][18]
 
 ```tsx
 // CORRECT: Share logic, customize rendering
@@ -397,7 +398,7 @@ function DataFetcher<T>({ url, children }: DataFetcherProps<T>) {
 </DataFetcher>
 ```
 
-### Context for Shared State
+### Context for Shared State [1][2]
 
 ```tsx
 // CORRECT: Avoid prop drilling with context
@@ -444,7 +445,7 @@ export function useAuth(): AuthContextValue {
 }
 ```
 
-### Virtualization for Long Lists
+### Virtualization for Long Lists [5]
 
 ```tsx
 // CORRECT: Only render visible items
@@ -468,7 +469,7 @@ function VirtualizedList({ items }: { items: Item[] }) {
 }
 ```
 
-### Lazy Loading Components
+### Lazy Loading Components [5]
 
 ```tsx
 // CORRECT: Load heavy components on demand
@@ -501,9 +502,9 @@ function Dashboard() {
 
 ---
 
-## Hooks Patterns
+## Hooks Patterns [16][24]
 
-### Data Fetching Hook
+### Data Fetching Hook [11]
 
 ```tsx
 // CORRECT: Reusable data fetching logic
@@ -552,7 +553,7 @@ function UserList() {
 }
 ```
 
-### Debounced Value Hook
+### Debounced Value Hook [11]
 
 ```tsx
 // CORRECT: Debounce rapid value changes
@@ -585,7 +586,7 @@ function SearchInput() {
 }
 ```
 
-### Previous Value Hook
+### Previous Value Hook [16]
 
 ```tsx
 // CORRECT: Track previous value for comparisons
@@ -611,7 +612,7 @@ function Counter({ count }: { count: number }) {
 }
 ```
 
-### Toggle Hook
+### Toggle Hook [16]
 
 ```tsx
 // CORRECT: Simple boolean state toggle
@@ -634,7 +635,7 @@ function Modal() {
 }
 ```
 
-### Media Query Hook
+### Media Query Hook [11]
 
 ```tsx
 // CORRECT: Responsive component logic
@@ -662,7 +663,7 @@ function ResponsiveComponent() {
 }
 ```
 
-### Click Outside Hook
+### Click Outside Hook [11]
 
 ```tsx
 // CORRECT: Detect clicks outside element
@@ -699,7 +700,7 @@ function Dropdown() {
 }
 ```
 
-### Reducer for Complex State
+### Reducer for Complex State [14]
 
 ```tsx
 // CORRECT: Manage complex state transitions
@@ -767,7 +768,9 @@ function useForm() {
 
 ## Forms Patterns
 
-### Controlled Form with Validation
+See `references/forms.md` for full form patterns. Key patterns below.
+
+### Controlled Form with Validation [1][21][22]
 
 ```tsx
 // CORRECT: Full validation, accessibility, error display
@@ -832,7 +835,7 @@ function LoginForm({ onSubmit }: { onSubmit: (data: FormData) => void }) {
 }
 ```
 
-### Form with Validation Hook
+### Form with Validation Hook [14]
 
 ```tsx
 // CORRECT: Reusable form handling logic
@@ -944,7 +947,7 @@ function SignupForm() {
 }
 ```
 
-### Multi-Step Form
+### Multi-Step Form [1]
 
 ```tsx
 // CORRECT: Manage state across form steps
@@ -987,7 +990,7 @@ function MultiStepForm() {
 }
 ```
 
-### Uncontrolled Form with FormData
+### Uncontrolled Form with FormData [1]
 
 ```tsx
 // CORRECT: Use native FormData API
@@ -1016,7 +1019,9 @@ function UncontrolledForm({ onSubmit }: { onSubmit: (data: FormData) => void }) 
 
 ## Error Handling Patterns
 
-### Error Boundary Component
+See `references/error-handling.md` for full error handling patterns. Key patterns below.
+
+### Error Boundary Component [1]
 
 ```tsx
 // CORRECT: Catch render errors
@@ -1054,7 +1059,7 @@ class ErrorBoundary extends Component<
 </ErrorBoundary>
 ```
 
-### Error Boundary with Reset
+### Error Boundary with Reset [1]
 
 ```tsx
 // CORRECT: Allow recovery from errors
@@ -1112,7 +1117,7 @@ class ResettableErrorBoundary extends Component<
 </ResettableErrorBoundary>
 ```
 
-### Async Error Handling Hook
+### Async Error Handling Hook [3][13]
 
 ```tsx
 // CORRECT: Handle async operation states
@@ -1164,7 +1169,7 @@ function DataComponent() {
 }
 ```
 
-### Error Fallback Components
+### Error Fallback Components [1]
 
 ```tsx
 // CORRECT: Reusable error display components
@@ -1205,7 +1210,7 @@ function NetworkErrorFallback({ error, onRetry }: ErrorFallbackProps) {
 }
 ```
 
-### Scoped Error Boundaries
+### Scoped Error Boundaries [1]
 
 ```tsx
 // CORRECT: Isolate failures to feature boundaries
@@ -1229,9 +1234,9 @@ function App() {
 
 ---
 
-## Performance Patterns
+## Performance Patterns [4][5][17]
 
-### Memoized Callbacks
+### Memoized Callbacks [3][4]
 
 ```tsx
 // CORRECT: Stable function references for child components
@@ -1244,7 +1249,7 @@ function UserList({ users, onSelect }: Props) {
 }
 ```
 
-### Memoized Computed Values
+### Memoized Computed Values [4]
 
 ```tsx
 // CORRECT: Cache expensive computations
@@ -1261,7 +1266,7 @@ function Dashboard({ data }: { data: DataPoint[] }) {
 }
 ```
 
-### Component Memoization
+### Component Memoization [4][17]
 
 ```tsx
 // CORRECT: Skip re-render when props unchanged
@@ -1275,7 +1280,7 @@ const UserCard = memo(function UserCard({ user }: { user: User }) {
 });
 ```
 
-### Derived State Instead of Effect
+### Derived State Instead of Effect [13]
 
 ```tsx
 // CORRECT: Compute during render, not in effect
@@ -1289,7 +1294,7 @@ function ProductList({ products, filter }: Props) {
 }
 ```
 
-### Effect Cleanup
+### Effect Cleanup [3]
 
 ```tsx
 // CORRECT: Always clean up subscriptions
@@ -1309,7 +1314,7 @@ function WindowSize() {
 }
 ```
 
-### Debounced Search
+### Debounced Search [5]
 
 ```tsx
 // CORRECT: Throttle expensive operations

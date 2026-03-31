@@ -16,30 +16,30 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | devflow:search-first | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
 | devflow:typescript | TypeScript files in scope | GUIDED + ORCHESTRATED | `*.ts`, `*.tsx` |
 | devflow:react | React components in scope | GUIDED + ORCHESTRATED | `*.tsx`, `*.jsx` |
-| devflow:frontend-design | UI/styling work | GUIDED + ORCHESTRATED | `*.css`, `*.scss`, `*.tsx` with styling keywords |
-| devflow:input-validation | Forms, APIs, user input | GUIDED + ORCHESTRATED | Files with form/input/validation keywords |
+| devflow:ui-design | UI/styling work | GUIDED + ORCHESTRATED | `*.css`, `*.scss`, `*.tsx` with styling keywords |
+| devflow:boundary-validation | Forms, APIs, user input | GUIDED + ORCHESTRATED | Files with form/input/validation keywords |
 | devflow:go | Go files in scope | GUIDED + ORCHESTRATED | `*.go` |
 | devflow:java | Java files in scope | GUIDED + ORCHESTRATED | `*.java` |
 | devflow:python | Python files in scope | GUIDED + ORCHESTRATED | `*.py` |
 | devflow:rust | Rust files in scope | GUIDED + ORCHESTRATED | `*.rs` |
-| devflow:security-patterns | Auth, crypto, secrets | GUIDED + ORCHESTRATED | Files with auth/token/crypto/password keywords |
+| devflow:security | Auth, crypto, secrets | GUIDED + ORCHESTRATED | Files with auth/token/crypto/password keywords |
 
 ### DEBUG Intent
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
 | devflow:debug-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates investigation pipeline |
-| devflow:core-patterns | Always for DEBUG | GUIDED + ORCHESTRATED | Any code file |
-| devflow:test-patterns | Always for DEBUG (GUIDED) | GUIDED | Any code file |
-| devflow:git-safety | Git operations involved | GUIDED + ORCHESTRATED | User mentions git, rebase, merge, etc. |
+| devflow:software-design | Always for DEBUG | GUIDED + ORCHESTRATED | Any code file |
+| devflow:testing | Always for DEBUG (GUIDED) | GUIDED | Any code file |
+| devflow:git | Git operations involved | GUIDED + ORCHESTRATED | User mentions git, rebase, merge, etc. |
 
 ### REVIEW Intent
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
 | devflow:self-review | Always for REVIEW | GUIDED | Any code file |
-| devflow:core-patterns | Always for REVIEW | GUIDED | Any code file |
-| devflow:test-patterns | Test files in scope | GUIDED | `*.test.*`, `*.spec.*` |
+| devflow:software-design | Always for REVIEW | GUIDED | Any code file |
+| devflow:testing | Test files in scope | GUIDED | `*.test.*`, `*.spec.*` |
 | devflow:review-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates multi-agent review pipeline |
 
 **REVIEW depth is continuation-aware**: If the prior classification in the same conversation was IMPLEMENT/GUIDED → REVIEW stays GUIDED. If prior was IMPLEMENT/ORCHESTRATED → REVIEW becomes ORCHESTRATED. Standalone REVIEW uses signal words: "full review"/"branch review"/"PR review" → ORCHESTRATED, "check this"/"review this file" → GUIDED. Ambiguous → GUIDED.
@@ -49,7 +49,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
 | devflow:resolve-orchestration | Always for RESOLVE | ORCHESTRATED | Any — orchestrates issue resolution pipeline |
-| devflow:core-patterns | Always for RESOLVE | ORCHESTRATED | Any code file |
+| devflow:software-design | Always for RESOLVE | ORCHESTRATED | Any code file |
 
 RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resolver agents and Simplifier.
 
@@ -68,22 +68,22 @@ PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with
 |-------|-------------|-------|---------------|
 | devflow:plan-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates design pipeline |
 | devflow:implementation-patterns | Always for PLAN | GUIDED + ORCHESTRATED | Any planning context |
-| devflow:core-patterns | Always for PLAN | GUIDED + ORCHESTRATED | System design discussions |
+| devflow:software-design | Always for PLAN | GUIDED + ORCHESTRATED | System design discussions |
 
 ## Skills Excluded from Ambient Router Loading
 
 These skills are always installed (universal skill installation) but loaded by agents internally at runtime, not by the ambient router. Reviewer agents load their pattern skill based on their focus area:
 
 - devflow:review-methodology — Full review process (6-step, 3-category classification)
-- devflow:complexity-patterns — Cyclomatic complexity, deep nesting analysis
-- devflow:consistency-patterns — Naming convention, pattern deviation detection
-- devflow:database-patterns — Index analysis, query optimization, migration safety
-- devflow:dependencies-patterns — CVE detection, license audit, outdated packages
-- devflow:documentation-patterns — Doc drift, stale comments, missing API docs
-- devflow:regression-patterns — Lost functionality, broken exports, behavioral changes
-- devflow:architecture-patterns — SOLID analysis, coupling detection, layering issues
+- devflow:complexity — Cyclomatic complexity, deep nesting analysis
+- devflow:consistency — Naming convention, pattern deviation detection
+- devflow:database — Index analysis, query optimization, migration safety
+- devflow:dependencies — CVE detection, license audit, outdated packages
+- devflow:documentation — Doc drift, stale comments, missing API docs
+- devflow:regression — Lost functionality, broken exports, behavioral changes
+- devflow:architecture — SOLID analysis, coupling detection, layering issues
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
-- devflow:performance-patterns — N+1 queries, memory leaks, caching opportunities
+- devflow:performance — N+1 queries, memory leaks, caching opportunities
 
 ## Multi-Worktree Detection
 

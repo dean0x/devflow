@@ -23,20 +23,20 @@ The orchestrator provides:
 
 | Focus | Pattern Skill File (Read this first) |
 |-------|--------------------------------------|
-| `security` | `~/.claude/skills/devflow:security-patterns/SKILL.md` |
-| `architecture` | `~/.claude/skills/devflow:architecture-patterns/SKILL.md` |
-| `performance` | `~/.claude/skills/devflow:performance-patterns/SKILL.md` |
-| `complexity` | `~/.claude/skills/devflow:complexity-patterns/SKILL.md` |
-| `consistency` | `~/.claude/skills/devflow:consistency-patterns/SKILL.md` |
-| `regression` | `~/.claude/skills/devflow:regression-patterns/SKILL.md` |
-| `tests` | `~/.claude/skills/devflow:test-patterns/SKILL.md` |
+| `security` | `~/.claude/skills/devflow:security/SKILL.md` |
+| `architecture` | `~/.claude/skills/devflow:architecture/SKILL.md` |
+| `performance` | `~/.claude/skills/devflow:performance/SKILL.md` |
+| `complexity` | `~/.claude/skills/devflow:complexity/SKILL.md` |
+| `consistency` | `~/.claude/skills/devflow:consistency/SKILL.md` |
+| `regression` | `~/.claude/skills/devflow:regression/SKILL.md` |
+| `testing` | `~/.claude/skills/devflow:testing/SKILL.md` |
 | `typescript` | `~/.claude/skills/devflow:typescript/SKILL.md` |
-| `database` | `~/.claude/skills/devflow:database-patterns/SKILL.md` |
-| `dependencies` | `~/.claude/skills/devflow:dependencies-patterns/SKILL.md` |
-| `documentation` | `~/.claude/skills/devflow:documentation-patterns/SKILL.md` |
+| `database` | `~/.claude/skills/devflow:database/SKILL.md` |
+| `dependencies` | `~/.claude/skills/devflow:dependencies/SKILL.md` |
+| `documentation` | `~/.claude/skills/devflow:documentation/SKILL.md` |
 | `react` | `~/.claude/skills/devflow:react/SKILL.md` |
 | `accessibility` | `~/.claude/skills/devflow:accessibility/SKILL.md` |
-| `frontend-design` | `~/.claude/skills/devflow:frontend-design/SKILL.md` |
+| `ui-design` | `~/.claude/skills/devflow:ui-design/SKILL.md` |
 | `go` | `~/.claude/skills/devflow:go/SKILL.md` |
 | `java` | `~/.claude/skills/devflow:java/SKILL.md` |
 | `python` | `~/.claude/skills/devflow:python/SKILL.md` |
@@ -154,14 +154,14 @@ Report format for `{output_path}`:
 
 | Focus | Condition |
 |-------|-----------|
-| security, architecture, performance, complexity, consistency, tests, regression | Always |
+| security, architecture, performance, complexity, consistency, testing, regression | Always |
 | typescript | If .ts/.tsx files changed |
 | database | If migration/schema files changed |
 | documentation | If docs changed |
 | dependencies | If package.json/lock files changed |
 | react | If .tsx/.jsx files changed |
 | accessibility | If .tsx/.jsx files changed |
-| frontend-design | If .tsx/.jsx/.css/.scss files changed |
+| ui-design | If .tsx/.jsx/.css/.scss files changed |
 | go | If .go files changed |
 | java | If .java files changed |
 | python | If .py files changed |

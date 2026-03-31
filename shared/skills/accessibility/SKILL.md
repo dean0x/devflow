@@ -1,6 +1,6 @@
 ---
 name: accessibility
-description: This skill should be used when the user asks to "add accessibility", "check ARIA", "handle keyboard navigation", "add focus management", or creates UI components, forms, or interactive elements. Provides WCAG 2.1 AA patterns for keyboard navigation, ARIA roles and states, focus management, color contrast, and screen reader support.
+description: This skill should be used when the user asks to "add accessibility", "check ARIA", "handle keyboard navigation", "add focus management", or creates UI components, forms, or interactive elements. Provides WCAG 2.2 AA patterns for keyboard navigation, ARIA roles and states, focus management, color contrast, and screen reader support.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 activation:
@@ -17,213 +17,129 @@ activation:
 
 # Accessibility Patterns
 
-Reference for web accessibility (WCAG 2.1 AA compliance), keyboard navigation, screen reader support, and inclusive design.
+Reference for web accessibility (WCAG 2.2 AA compliance), keyboard navigation, screen reader support, and inclusive design. Sources in `references/sources.md`.
 
 ## Iron Law
 
-> **EVERY INTERACTION MUST BE POSSIBLE WITHOUT A MOUSE**
+> **EVERY INTERACTION MUST BE POSSIBLE WITHOUT A MOUSE** [1][3]
 >
-> If a user cannot complete an action using only keyboard, the feature is broken.
-> Mouse-only interactions exclude users with motor disabilities, power users,
-> and anyone navigating with assistive technology. Tab order, focus management,
-> and keyboard shortcuts are not optional enhancements.
+> Mouse-only interactions exclude users with motor disabilities, power users, and AT users.
+> Tab order, focus management, and keyboard shortcuts are not optional enhancements.
+> — WCAG 2.1 Principle 2 (Operable) [1]
 
-## When This Skill Activates
-
-- Creating interactive UI components
-- Building forms and inputs
-- Working with React/JSX code
-- Discussing focus, ARIA, or screen readers
-- Reviewing color schemes or contrast
+**Activates for**: interactive UI components · forms · React/JSX or CSS · focus/ARIA/contrast reviews
 
 ---
 
-## Keyboard Navigation
+## Keyboard Navigation [1][3]
 
-### Focus Management
+**Focus management**: On modal open, move focus to the first focusable element; on close, return to the trigger. Trap focus inside. [3]
 
 ```tsx
-// CORRECT: Focus trap in modal
+// CORRECT: Focus trap — APG dialog pattern [3]
 function Modal({ isOpen, onClose, children }) {
-  const firstFocusable = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (isOpen) firstFocusable.current?.focus();
-  }, [isOpen]);
-
+  const first = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (isOpen) first.current?.focus(); }, [isOpen]);
   return (
-    <div role="dialog" aria-modal="true" onKeyDown={(e) => {
-      if (e.key === 'Escape') onClose();
-    }}>
-      <button ref={firstFocusable}>First action</button>
-      {children}
+    <div role="dialog" aria-modal="true"
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+      <button ref={first}>First action</button>{children}
     </div>
   );
 }
-
-// VIOLATION: No focus management, no escape handler
-function BadModal({ children }) {
-  return <div className="modal">{children}</div>;
-}
 ```
 
-### Skip Links
-
-```tsx
-// CORRECT: Skip to main content
-<a href="#main-content" className="sr-only focus:not-sr-only">
-  Skip to main content
-</a>
-<main id="main-content" tabIndex={-1}>...</main>
-```
+**Skip links**: First focusable element — visible on focus, links to `#main-content`. [1][4]
+**Roving tabIndex**: Active item `tabIndex={0}`, others `tabIndex={-1}` — radio groups, toolbars, tabs. [3]
 
 ---
 
-## ARIA and Semantic HTML
+## ARIA and Semantic HTML [2][15][18]
 
-### Prefer Semantic Elements
+**First rule of ARIA**: Use native HTML before adding ARIA roles — no ARIA is better than bad ARIA. [15][18]
 
-```tsx
-// CORRECT: Native semantics
-<button onClick={handleClick}>Submit</button>
-<nav aria-label="Main"><ul>...</ul></nav>
-<article><header>...</header></article>
+| CORRECT [18] | VIOLATION [15] |
+|---|---|
+| `<button>Submit</button>` | `<div role="button">Submit</div>` |
+| `<nav aria-label="Main">` | `<div role="navigation">` |
 
-// VIOLATION: Div with role instead of semantic element
-<div role="button" onClick={handleClick}>Submit</div>
-<div role="navigation">...</div>
-```
+Top WebAIM Million 2024 violations [5]: missing form labels (#1) · low contrast (#2) · missing alt text (#3) · missing button names (#4).
 
-### Live Regions
-
-```tsx
-// CORRECT: Announce dynamic changes
-<div aria-live="polite" aria-atomic="true">
-  {message && <p>{message}</p>}
-</div>
-
-// For errors (assertive)
-<div role="alert">{errorMessage}</div>
-```
+**Live regions**: `aria-live="polite"` for status updates; `role="alert"` for errors. [2]
 
 ---
 
-## Color and Contrast
+## Color and Contrast [1][16][19]
 
-| Element | Minimum Ratio | WCAG Level |
-|---------|--------------|------------|
-| Normal text (<18px) | 4.5:1 | AA |
-| Large text (>=18px bold, >=24px) | 3:1 | AA |
-| UI components | 3:1 | AA |
-| Enhanced | 7:1 | AAA |
+| Element | Ratio | Level | SC |
+|---------|-------|-------|----|
+| Normal text (<18px) | 4.5:1 | AA | [1] §1.4.3 |
+| Large text (≥18px bold, ≥24px) | 3:1 | AA | [1] §1.4.3 |
+| UI components & focus indicators | 3:1 | AA | [1] §1.4.11 |
+| Focus appearance (WCAG 2.2 new) | 3:1 + ≥2px perimeter | AA | [16] §2.4.11 |
 
-### Never Color-Only Meaning
+Never convey meaning through color alone — pair with icon, text, or pattern. [1] §1.4.1
 
-```tsx
-// VIOLATION: Only color indicates error
-<input style={{ borderColor: hasError ? 'red' : 'gray' }} />
-
-// CORRECT: Icon + text + color
-<input aria-invalid={hasError} aria-describedby="error-msg" />
-{hasError && <span id="error-msg" role="alert">Required field</span>}
-```
+**WCAG 2.2 new AA** [16]: `2.4.11` Focus Appearance (≥2px, 3:1 contrast) · `2.5.8` Target Size (≥24×24px) · `3.3.8` Accessible Auth (paste must work)
 
 ---
 
-## Motion and Animation
+## Forms and Errors [1][3][9]
 
 ```tsx
-// CORRECT: Respect user preferences
-const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-<div className={prefersReduced ? 'no-animation' : 'animate-fade'}>
-  Content
-</div>
-
-// CSS approach
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-```
-
----
-
-## Touch and Pointer
-
-### Minimum Target Size
-
-```css
-/* CORRECT: 44x44px minimum touch target */
-.button {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 12px 16px;
-}
-
-/* VIOLATION: Tiny tap targets */
-.icon-button {
-  width: 20px;
-  height: 20px;
-}
-```
-
----
-
-## Forms and Errors
-
-```tsx
-// CORRECT: Associated labels and error linking
-<div>
-  <label htmlFor="email">Email</label>
-  <input
-    id="email"
-    type="email"
-    aria-invalid={!!error}
-    aria-describedby={error ? 'email-error' : undefined}
-  />
-  {error && <span id="email-error" role="alert">{error}</span>}
-</div>
-
-// VIOLATION: Placeholder as label
+// CORRECT: Label + error announcement [1][3]
+<label htmlFor="email">Email</label>
+<input id="email" type="email" aria-invalid={!!error}
+  aria-describedby={error ? 'email-error' : undefined} />
+{error && <span id="email-error" role="alert">{error}</span>}
+// VIOLATION: Placeholder as label — disappears on input [5]
 <input placeholder="Enter email" />
 ```
 
 ---
 
-## Extended References
+## Motion and Cognitive [1][17]
 
-For additional patterns and detection rules:
-- `references/violations.md` - Extended accessibility violations
-- `references/patterns.md` - Extended correct patterns
-- `references/detection.md` - Grep patterns for finding issues
+```css
+@media (prefers-reduced-motion: reduce) { /* WCAG 2.3.3 [1] */
+  *, *::before, *::after { animation-duration: 0.01ms !important; }
+}
+```
+
+Auto-advancing content (carousels, video) must have pause/stop controls. [1] §2.2.2
+Cognitive (COGA [17]): plain language · clear error recovery · no time limits · copy-paste in auth (SC 3.3.8) [16]
 
 ---
 
-## Severity Guidelines
+## Extended References
+
+See `references/`: `sources.md` (20 sources) · `patterns.md` (correct patterns) · `violations.md` (violation examples) · `detection.md` (grep patterns)
+
+---
+
+## Severity [1][5]
 
 | Severity | Criteria |
 |----------|----------|
-| CRITICAL | No keyboard access, missing form labels, zero contrast |
-| HIGH | Missing focus indicators, no skip links, color-only meaning |
-| MEDIUM | Missing ARIA labels, poor focus order, small touch targets |
-| LOW | Missing optional enhancements, could improve announcements |
+| CRITICAL | No keyboard access · missing form labels · zero contrast [1][5] |
+| HIGH | Missing focus indicators · no skip links · color-only meaning [1][16] |
+| MEDIUM | Missing ARIA labels · poor focus order · small touch targets [1][3] |
+| LOW | Missing optional enhancements [2] |
 
 ---
 
 ## Checklist
 
-- [ ] All interactive elements reachable via Tab
-- [ ] Visible focus indicators on all focusable elements
-- [ ] Escape closes modals/dropdowns
-- [ ] Skip link to main content
-- [ ] All form inputs have associated labels
-- [ ] Errors linked via aria-describedby
-- [ ] Color contrast meets 4.5:1 (text) / 3:1 (UI)
-- [ ] No color-only meaning
-- [ ] prefers-reduced-motion respected
-- [ ] Touch targets minimum 44x44px
-- [ ] aria-live for dynamic content
-- [ ] Semantic HTML preferred over ARIA roles
+- [ ] All interactive elements reachable via Tab [1]
+- [ ] Focus indicators visible — ≥2px, 3:1 contrast (SC 2.4.11) [16]
+- [ ] Escape closes modals/dropdowns; focus returns to trigger [3]
+- [ ] Skip link to main content [1]
+- [ ] All form inputs have associated `<label>` [1][5]
+- [ ] Errors linked via `aria-describedby` and announced via `role="alert"` [1]
+- [ ] Color contrast: 4.5:1 (text) / 3:1 (UI) [1]
+- [ ] No color-only meaning [1]
+- [ ] `prefers-reduced-motion` respected [1]
+- [ ] Touch targets ≥24×24px (SC 2.5.8) [16]
+- [ ] `aria-live` for dynamic content [2]
+- [ ] Semantic HTML preferred over ARIA roles [15][18]
+- [ ] Copy-paste works in authentication fields (SC 3.3.8) [16]

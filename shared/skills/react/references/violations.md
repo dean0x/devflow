@@ -1,10 +1,11 @@
 # React Violation Examples
 
 Extended violation patterns for React reviews. Reference from main SKILL.md.
+Sources in `references/sources.md`.
 
-## Vercel Performance Violations
+## Performance Violations [5][23]
 
-### Sequential Fetches
+### Sequential Fetches [1]
 
 ```tsx
 // VIOLATION: Sequential fetches (waterfall)
@@ -28,7 +29,7 @@ useEffect(() => {
 }, [id]);
 ```
 
-### Barrel Import Anti-Patterns
+### Barrel Import Anti-Patterns [5]
 
 ```tsx
 // VIOLATION: Barrel import pulls entire library
@@ -54,7 +55,7 @@ function Dashboard() {
 }
 ```
 
-### Re-render Causing Patterns
+### Re-render Causing Patterns [3][4]
 
 ```tsx
 // VIOLATION: Object literal in deps (new ref every render)
@@ -86,7 +87,7 @@ function FilteredList({ items, filter }: Props) {
 }
 ```
 
-### Unoptimized Images
+### Unoptimized Images [23]
 
 ```tsx
 // VIOLATION: No dimensions (causes layout shift)
@@ -111,7 +112,7 @@ function FilteredList({ items, filter }: Props) {
 />
 ```
 
-### Inefficient Data Structures
+### Inefficient Data Structures [5]
 
 ```tsx
 // VIOLATION: Array.includes for frequent checks (O(n))
@@ -157,9 +158,9 @@ function Tags({ tags, selected }: Props) {
 
 ---
 
-## Component Violations
+## Component Violations [2][12]
 
-### Prop Drilling
+### Prop Drilling [2][4]
 
 ```tsx
 // VIOLATION: Passing data through multiple intermediate components
@@ -178,7 +179,7 @@ function App() {
 }
 ```
 
-### Rigid Component Structure
+### Rigid Component Structure [2][12]
 
 ```tsx
 // VIOLATION: Too many props, no composition
@@ -209,7 +210,7 @@ function Card({
 }
 ```
 
-### Direct State Mutation
+### Direct State Mutation [1]
 
 ```tsx
 // VIOLATION: Mutating state directly
@@ -223,7 +224,7 @@ function UserList() {
 }
 ```
 
-### Missing Keys
+### Missing Keys [1]
 
 ```tsx
 // VIOLATION: Index as key causes reconciliation issues
@@ -239,9 +240,9 @@ function UserList() {
 
 ---
 
-## Hooks Violations
+## Hooks Violations [3][16]
 
-### Missing Dependencies
+### Missing Dependencies [3]
 
 ```tsx
 // VIOLATION: Missing dependency causes stale closure
@@ -256,7 +257,7 @@ function SearchResults({ query }: { query: string }) {
 }
 ```
 
-### Conditional Hooks
+### Conditional Hooks [16][24]
 
 ```tsx
 // VIOLATION: Hook called conditionally
@@ -272,7 +273,7 @@ function UserProfile({ user }: { user: User | null }) {
 }
 ```
 
-### Stale Closure in Callbacks
+### Stale Closure in Callbacks [3]
 
 ```tsx
 // VIOLATION: Callback captures stale state
@@ -291,7 +292,7 @@ function Counter() {
 }
 ```
 
-### Effects Without Cleanup
+### Effects Without Cleanup [3]
 
 ```tsx
 // VIOLATION: Event listener never removed
@@ -311,7 +312,7 @@ function WindowSize() {
 }
 ```
 
-### Derived State in useState
+### Derived State in useState [13]
 
 ```tsx
 // VIOLATION: Storing computed value in state
@@ -330,7 +331,9 @@ function ProductList({ products, filter }: Props) {
 
 ## Forms Violations
 
-### Uncontrolled to Controlled Switch
+See `references/forms.md` for full form violation patterns.
+
+### Uncontrolled to Controlled Switch [1]
 
 ```tsx
 // VIOLATION: Switching from uncontrolled to controlled
@@ -346,7 +349,7 @@ function SearchInput() {
 }
 ```
 
-### Missing Form Validation
+### Missing Form Validation [1]
 
 ```tsx
 // VIOLATION: No validation, direct submission
@@ -369,7 +372,7 @@ function LoginForm({ onSubmit }: Props) {
 }
 ```
 
-### Missing Accessibility Attributes
+### Missing Accessibility Attributes [21][22]
 
 ```tsx
 // VIOLATION: Form inputs without proper accessibility
@@ -385,7 +388,7 @@ function ContactForm() {
 }
 ```
 
-### Form State Not Reset After Submit
+### Form State Not Reset After Submit [1]
 
 ```tsx
 // VIOLATION: Form keeps stale data after successful submit
@@ -411,7 +414,9 @@ function CommentForm({ onSubmit }: Props) {
 
 ## Error Handling Violations
 
-### Missing Error Boundaries
+See `references/error-handling.md` for full error handling violation patterns.
+
+### Missing Error Boundaries [1]
 
 ```tsx
 // VIOLATION: No error boundary around risky component
@@ -429,7 +434,7 @@ function App() {
 }
 ```
 
-### Swallowed Errors
+### Swallowed Errors [3]
 
 ```tsx
 // VIOLATION: Error caught but not handled
@@ -447,7 +452,7 @@ function DataLoader({ url }: { url: string }) {
 }
 ```
 
-### No Loading/Error States
+### No Loading/Error States [13]
 
 ```tsx
 // VIOLATION: Only handles success case
@@ -463,7 +468,7 @@ function UserProfile({ userId }: { userId: string }) {
 }
 ```
 
-### Error State Not Cleared
+### Error State Not Cleared [3]
 
 ```tsx
 // VIOLATION: Error persists after retry
@@ -492,9 +497,9 @@ function DataFetcher({ url }: { url: string }) {
 
 ---
 
-## Performance Violations
+## Performance Violations [4][5]
 
-### Inline Objects in JSX
+### Inline Objects in JSX [3][4]
 
 ```tsx
 // VIOLATION: New reference every render
@@ -504,7 +509,7 @@ function DataFetcher({ url }: { url: string }) {
 />
 ```
 
-### Inline Arrow Functions in JSX
+### Inline Arrow Functions in JSX [3][4]
 
 ```tsx
 // VIOLATION: New function every render
@@ -519,7 +524,7 @@ function DataFetcher({ url }: { url: string }) {
 ))}
 ```
 
-### Missing useMemo for Expensive Computations
+### Missing useMemo for Expensive Computations [4][17]
 
 ```tsx
 // VIOLATION: Recalculates on every render
@@ -536,7 +541,7 @@ function Dashboard({ data }: { data: DataPoint[] }) {
 }
 ```
 
-### State Updates in Render
+### State Updates in Render [13]
 
 ```tsx
 // VIOLATION: Causes infinite loop
@@ -551,7 +556,7 @@ function Sync({ value }: { value: string }) {
 }
 ```
 
-### Unthrottled Event Handlers
+### Unthrottled Event Handlers [5]
 
 ```tsx
 // VIOLATION: Fires on every scroll pixel

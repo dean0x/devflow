@@ -12,13 +12,11 @@ Shared patterns used by multiple agents.
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `core-patterns` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Shepherd |
+| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Shepherd |
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
 | `self-review` | 9-pillar self-review framework | Scrutinizer |
 | `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
-| `git-safety` | Git operations, lock handling, sequential ops | Coder, Git, Resolver |
-| `git-workflow` | Atomic commits, message format, PR descriptions, size assessment | Coder, Git, Resolver |
-| `github-patterns` | GitHub API patterns (rate limiting, PR comments, issues, releases) | Git |
+| `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
 | `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
 | `ambient-router` | Intent classification and proportional skill loading for ambient mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
@@ -30,16 +28,16 @@ Domain expertise for Reviewer agent focus areas. Loaded dynamically based on rev
 
 | Skill | Purpose | Reviewer Focus |
 |-------|---------|----------------|
-| `security-patterns` | Injection, auth, crypto, OWASP vulnerabilities | `security` |
-| `architecture-patterns` | SOLID violations, coupling, layering, modularity | `architecture` |
-| `performance-patterns` | Algorithms, N+1, memory, I/O, caching | `performance` |
-| `complexity-patterns` | Cyclomatic complexity, readability, maintainability | `complexity` |
-| `consistency-patterns` | Pattern violations, simplification, truncation | `consistency` |
-| `test-patterns` | Coverage, quality, brittle tests, mocking, test design | `tests` |
-| `database-patterns` | Schema, queries, migrations, indexes | `database` |
-| `documentation-patterns` | Docs quality, alignment, code-comment drift | `documentation` |
-| `dependencies-patterns` | CVEs, versions, licenses, supply chain | `dependencies` |
-| `regression-patterns` | Lost functionality, broken behavior, migrations | `regression` |
+| `security` | Injection, auth, crypto, OWASP vulnerabilities | `security` |
+| `architecture` | SOLID violations, coupling, layering, modularity | `architecture` |
+| `performance` | Algorithms, N+1, memory, I/O, caching | `performance` |
+| `complexity` | Cyclomatic complexity, readability, maintainability | `complexity` |
+| `consistency` | Pattern violations, simplification, truncation | `consistency` |
+| `testing` | Coverage, quality, brittle tests, mocking, test design | `testing` |
+| `database` | Schema, queries, migrations, indexes | `database` |
+| `documentation` | Docs quality, alignment, code-comment drift | `documentation` |
+| `dependencies` | CVEs, versions, licenses, supply chain | `dependencies` |
+| `regression` | Lost functionality, broken behavior, migrations | `regression` |
 
 ### Tier 2: Specialized Skills
 
@@ -47,7 +45,7 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 
 | Skill | Purpose | Agent Refs |
 |-------|---------|------------|
-| `input-validation` | Boundary validation enforcement | Coder |
+| `boundary-validation` | Boundary validation enforcement | Coder |
 | `search-first` | Research-before-building enforcement for utility code | Coder |
 | `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Coder |
 
@@ -60,7 +58,7 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 | `typescript` | Type safety, generics, utility types, type guards | TypeScript codebases |
 | `react` | Components, hooks, state management, performance | React codebases |
 | `accessibility` | Keyboard, ARIA, focus, color contrast | Frontend codebases |
-| `frontend-design` | Typography, color, spacing, visual design | Frontend codebases |
+| `ui-design` | Typography, color, spacing, visual design | Frontend codebases |
 | `go` | Error handling, interfaces, concurrency, package design | Go codebases |
 | `python` | Type hints, protocols, dataclasses, async patterns | Python codebases |
 | `java` | Records, sealed classes, composition, modern Java | Java codebases |
@@ -71,7 +69,7 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 Skills activate through two guaranteed mechanisms:
 
 1. **Agent frontmatter `skills:` field** — When an agent runs, all skills listed in its frontmatter are loaded into context. This is the primary activation path.
-2. **Reviewer dynamic read** — The Reviewer agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=tests` → `test-patterns/SKILL.md`).
+2. **Reviewer dynamic read** — The Reviewer agent reads the pattern skill file for its assigned focus area from a lookup table (e.g., `focus=testing` → `testing/SKILL.md`).
 
 Skills with `user-invocable: false` also appear in Claude Code's skill catalog with their description. Claude MAY auto-invoke them based on description matching, but this is not guaranteed and should not be relied upon as the sole activation path.
 
@@ -82,7 +80,7 @@ The `activation: file-patterns` frontmatter is metadata for documentation purpos
 ```yaml
 ---
 name: Coder
-skills: core-patterns, git-safety, implementation-patterns, git-workflow, ...
+skills: software-design, git, implementation-patterns, ...
 ---
 ```
 
@@ -209,12 +207,12 @@ activation:
 | `react` | `**/*.tsx`, `**/*.jsx` | `node_modules/**`, `**/*.test.*` |
 | `typescript` | `**/*.ts`, `**/*.tsx` | `node_modules/**`, `**/*.d.ts` |
 | `accessibility` | `**/*.tsx`, `**/*.jsx`, `**/*.css` | `node_modules/**` |
-| `frontend-design` | `**/*.tsx`, `**/*.jsx`, `**/*.css`, `**/*.scss` | `node_modules/**` |
+| `ui-design` | `**/*.tsx`, `**/*.jsx`, `**/*.css`, `**/*.scss` | `node_modules/**` |
 | `go` | `**/*.go` | `vendor/**` |
 | `python` | `**/*.py` | `venv/**`, `.venv/**`, `**/__pycache__/**` |
 | `java` | `**/*.java` | `**/build/**`, `**/target/**` |
 | `rust` | `**/*.rs` | `**/target/**` |
-| `test-patterns` | `**/*.test.*`, `**/*.spec.*`, `**/test/**` | `node_modules/**` |
+| `testing` | `**/*.test.*`, `**/*.spec.*`, `**/test/**` | `node_modules/**` |
 
 **Note:** Glob patterns are metadata hints for documentation. Claude Code does not currently read glob patterns to trigger skills — activation happens through agent frontmatter and Reviewer dynamic read (see "How Skills Activate" above).
 

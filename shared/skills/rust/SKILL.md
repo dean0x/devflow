@@ -16,7 +16,7 @@ Reference for Rust-specific patterns, ownership model, and type-driven design.
 
 ## Iron Law
 
-> **MAKE ILLEGAL STATES UNREPRESENTABLE**
+> **MAKE ILLEGAL STATES UNREPRESENTABLE** [15][2, C-VALIDATE]
 >
 > Encode invariants in the type system. If a function can fail, return `Result`. If a value
 > might be absent, return `Option`. If a state transition is invalid, make it uncompilable.
@@ -32,65 +32,38 @@ Reference for Rust-specific patterns, ownership model, and type-driven design.
 
 ---
 
-## Ownership & Borrowing
+## Ownership & Borrowing [1, Ch.4][11]
 
-### Prefer Borrowing Over Cloning
+Prefer borrowing over cloning — accept `&str` not `String`, `&[T]` not `&Vec<T>` [2, C-BORROW].
+The borrow checker enforces the Stacked Borrows aliasing model at compile time [6][11].
+Lifetime annotations required when elision rules can't resolve ambiguity [1, Ch.10].
 
 ```rust
 // BAD: fn process(data: String) — takes ownership unnecessarily
-// GOOD: fn process(data: &str) — borrows, caller keeps ownership
-
-fn process(data: &str) -> usize {
-    data.len()
-}
+fn process(data: &str) -> usize { data.len() } // GOOD: borrow [2, C-BORROW]
 ```
 
-### Lifetime Annotations When Needed
-
-```rust
-// Return reference tied to input lifetime
-fn first_word(s: &str) -> &str {
-    s.split_whitespace().next().unwrap_or("")
-}
-
-// Explicit when compiler can't infer
-struct Excerpt<'a> {
-    text: &'a str,
-}
-```
+See `references/ownership.md` for elision rules, interior mutability, Cow, and Pin.
 
 ---
 
-## Error Handling
+## Error Handling [8][9][16]
 
-### Use Result and the ? Operator
-
-```rust
-use std::fs;
-use std::io;
-
-fn read_config(path: &str) -> Result<Config, AppError> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| AppError::Io { path: path.into(), source: e })?;
-    let config: Config = toml::from_str(&content)
-        .map_err(|e| AppError::Parse { source: e })?;
-    Ok(config)
-}
-```
-
-### Custom Error Types with thiserror
+Use `thiserror` for libraries (typed, matchable variants); `anyhow` for applications
+(ergonomic propagation). Never use `Box<dyn Error>` in library APIs [8][16].
 
 ```rust
-use thiserror::Error;
-
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum AppError {
     #[error("IO error reading {path}")]
     Io { path: String, #[source] source: io::Error },
-    #[error("parse error")]
-    Parse { #[from] source: toml::de::Error },
     #[error("{entity} with id {id} not found")]
     NotFound { entity: String, id: String },
+}
+// ? operator propagates with source context [1, Ch.9]
+fn read_config(path: &str) -> Result<Config, AppError> {
+    let raw = fs::read_to_string(path).map_err(|e| AppError::Io { path: path.into(), source: e })?;
+    toml::from_str(&raw).map_err(|e| AppError::Parse { source: e })
 }
 ```
 
@@ -98,96 +71,78 @@ pub enum AppError {
 
 ## Type System
 
-### Newtype Pattern
+### Newtype Pattern [2, C-NEWTYPE][15]
 
 ```rust
-// Prevent mixing up IDs
-struct UserId(String);
-struct OrderId(String);
-
-fn get_order(user_id: &UserId, order_id: &OrderId) -> Result<Order, AppError> {
-    // Can't accidentally swap parameters
-    todo!()
-}
+struct UserId(String);   struct OrderId(String);
+// Can't accidentally swap — compiler enforces [15]
+fn get_order(user_id: &UserId, order_id: &OrderId) -> Result<Order, AppError> { todo!() }
 ```
 
-### Enums for State Machines
+### Enums for State Machines [4][15][27]
+
+Each state carries only its relevant data; invalid transitions don't compile [15][27]:
 
 ```rust
-enum Connection {
-    Disconnected,
-    Connecting { attempt: u32 },
-    Connected { session: Session },
-}
-
-// Each state carries only its relevant data
-// Invalid transitions are uncompilable
+enum Connection { Disconnected, Connecting { attempt: u32 }, Connected { session: Session } }
 ```
 
----
-
-## Patterns
-
-### Builder Pattern
+### Builder Pattern [2, C-BUILDER][4]
 
 ```rust
-pub struct ServerBuilder {
-    port: u16,
-    host: String,
-}
-
 impl ServerBuilder {
     pub fn new() -> Self { Self { port: 8080, host: "localhost".into() } }
-    pub fn port(mut self, port: u16) -> Self { self.port = port; self }
-    pub fn host(mut self, host: impl Into<String>) -> Self { self.host = host.into(); self }
+    pub fn port(mut self, p: u16) -> Self { self.port = p; self }
     pub fn build(self) -> Server { Server { port: self.port, host: self.host } }
 }
 ```
 
-### Iterator Chains Over Loops
+---
+
+## Concurrency [1, Ch.16][29]
+
+Prefer channels over shared mutable state. `Send`/`Sync` traits prevent data races at
+compile time — enforced by RustBelt's formal model [6][29]. Use `tokio::fs` or
+`spawn_blocking` in async contexts — never `std::fs` (blocks the runtime) [13].
 
 ```rust
-// BAD: manual loop with push
-// GOOD:
-let active_names: Vec<&str> = users.iter()
-    .filter(|u| u.is_active)
-    .map(|u| u.name.as_str())
-    .collect();
+// mpsc channels over Mutex<Vec> for communication [1, Ch.16]
+let (tx, mut rx) = tokio::sync::mpsc::channel::<Work>(100);
 ```
 
 ---
 
-## Anti-Patterns
+## Anti-Patterns [7][8][2]
 
-| Pattern | Bad | Good |
-|---------|-----|------|
-| Unwrap in library | `.unwrap()` | `?` operator or `.ok_or()` |
-| Clone to satisfy borrow checker | `.clone()` everywhere | Restructure ownership |
-| String for everything | `HashMap<String, String>` | Typed structs and enums |
-| Ignoring Result | `let _ = write(...)` | Handle or propagate error |
-| Mutex<Vec> for message passing | Shared mutable state | Channels (`mpsc`) |
+| Bad | Good | Source |
+|-----|------|--------|
+| `.unwrap()` in library | `?` or `.ok_or()` | [8] |
+| `.clone()` to satisfy borrow checker | Restructure ownership | [2, C-BORROW] |
+| `HashMap<String, String>` | Typed structs and enums | [2, C-NEWTYPE] |
+| `let _ = write(...)` | Handle or propagate | [7] |
+| `std::fs::` in async fn | `tokio::fs::` or `spawn_blocking` | [13] |
 
 ---
 
 ## Extended References
 
-For additional patterns and examples:
-- `references/violations.md` - Common Rust violations
-- `references/patterns.md` - Extended Rust patterns
-- `references/detection.md` - Detection patterns for Rust issues
-- `references/ownership.md` - Advanced ownership and lifetime patterns
+- `references/sources.md` — Full bibliography (~30 sources with access links)
+- `references/violations.md` — Violation patterns with citations
+- `references/patterns.md` — Extended patterns with citations
+- `references/ownership.md` — Lifetimes, interior mutability, Stacked Borrows, Pin
+- `references/detection.md` — Clippy and grep patterns for automated detection
 
 ---
 
 ## Checklist
 
-- [ ] No `.unwrap()` in library/application code (ok in tests)
-- [ ] Custom error types with `thiserror`
-- [ ] `?` operator for error propagation
-- [ ] Borrow instead of clone where possible
-- [ ] Newtype pattern for type-safe IDs
-- [ ] Enums for state machines
-- [ ] Iterator chains over manual loops
-- [ ] `#[must_use]` on Result-returning functions
-- [ ] No `unsafe` without safety comment
-- [ ] Clippy clean (`cargo clippy -- -D warnings`)
+- [ ] No `.unwrap()` in library/application code (ok in tests) [8]
+- [ ] `thiserror` for library errors; `anyhow` for application code [9][16]
+- [ ] `?` operator for error propagation [1, Ch.9]
+- [ ] Borrow instead of clone where possible [2, C-BORROW]
+- [ ] Newtype pattern for type-safe IDs [2, C-NEWTYPE]
+- [ ] Enums for state machines [4][15]
+- [ ] `#[must_use]` on Result-returning functions [7]
+- [ ] No `unsafe` without `// SAFETY:` comment [3][11]
+- [ ] Clippy clean (`cargo clippy -- -D warnings`) [7]
+- [ ] No blocking calls in async context [13]

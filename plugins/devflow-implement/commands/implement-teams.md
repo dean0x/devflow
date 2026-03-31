@@ -186,7 +186,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "testing-planner"
   Prompt: |
     You are planning the test strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:test-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:testing/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 4}
     3. Your deliverable: Test strategy — unit tests, integration tests,
@@ -523,7 +523,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 
 ### Phase 13: Create PR
 
-**For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git-workflow` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+**For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 

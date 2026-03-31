@@ -32,7 +32,7 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 | complexity | Cyclomatic complexity, readability |
 | consistency | Pattern violations, style drift |
 | regression | Lost functionality, broken behavior |
-| tests | Coverage gaps, brittle tests |
+| testing | Coverage gaps, brittle tests |
 | database | Schema issues, slow queries |
 | dependencies | CVEs, outdated packages |
 | documentation | Doc drift, stale comments |
@@ -49,16 +49,16 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 
 ### Skills (11)
 - `review-methodology` - 6-step review process
-- `security-patterns` - Security vulnerabilities
-- `architecture-patterns` - Design patterns
-- `performance-patterns` - Performance issues
-- `complexity-patterns` - Complexity metrics
-- `consistency-patterns` - Pattern violations
-- `regression-patterns` - Regression detection
-- `test-patterns` - Test quality
-- `database-patterns` - Database issues
-- `dependencies-patterns` - Dependency management
-- `documentation-patterns` - Documentation quality
+- `security` - Security vulnerabilities
+- `architecture` - Design patterns
+- `performance` - Performance issues
+- `complexity` - Complexity metrics
+- `consistency` - Pattern violations
+- `regression` - Regression detection
+- `testing` - Test quality
+- `database` - Database issues
+- `dependencies` - Dependency management
+- `documentation` - Documentation quality
 
 ## Output
 

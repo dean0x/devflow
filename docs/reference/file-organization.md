@@ -9,11 +9,11 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (31 skills)
-│   │   ├── git-workflow/
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (37 skills)
+│   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
-│   │   ├── core-patterns/
+│   │   ├── software-design/
 │   │   └── ...
 │   └── agents/                       # SINGLE SOURCE OF TRUTH (10 shared agents)
 │       ├── git.md
