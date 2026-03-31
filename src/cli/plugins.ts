@@ -211,6 +211,7 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'devflow-review-methodology',
   'devflow-docs-framework',
   'devflow-git-safety',
+  'devflow-git-workflow',
   'devflow-github-patterns',
   'devflow-implementation-patterns',
   'devflow-codebase-navigation',
@@ -308,6 +309,10 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'database',
   'dependencies',
   'documentation',
+  // v2.0.0 git consolidation: prefixed old names for cleanup
+  'devflow:git-safety',
+  'devflow:git-workflow',
+  'devflow:github-patterns',
   // v2.0.0 skill renames: prefixed old names for the 6 remaining -patterns suffix removals
   'devflow:complexity-patterns',
   'devflow:consistency-patterns',
