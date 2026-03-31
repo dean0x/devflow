@@ -68,7 +68,7 @@ Read review reports from `{TARGET_DIR}/*.md` and extract:
 - `review-summary.md` (synthesizer output, not individual findings)
 - `resolution-summary.md` (if it exists from a previous partial run)
 
-**Include:** ALL issues from all categories and severities. Skip only Suggestions.
+**Include:** ALL issues from all categories and severities, including Suggestions.
 
 Issues are extracted from `{TARGET_DIR}` only — never cross-reference reviews from other worktrees.
 
@@ -110,49 +110,37 @@ Create a resolution team for cross-validated fixes:
 ```
 Create a team named "resolve-{branch-slug}" to resolve review issues.
 
-Spawn resolver teammates with self-contained prompts (one per independent batch):
+#### Resolver Teammate Prompt Template
+
+Each resolver teammate receives the following instructions (only the issue list varies per batch):
+
+    You are resolving review issues on branch {branch} (PR #{pr_number}).
+    WORKTREE_PATH: {worktree_path}  (omit if cwd)
+    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    2. Your issues to resolve:
+       {BATCH_ISSUES}
+    3. For each issue:
+       a. Read the code context around file:line (use WORKTREE_PATH prefix if provided)
+       b. Validate: is this a real issue or false positive?
+       c. If real: assess risk:
+          - Standard (null checks, validation, docs, logging, isolated security) → FIX directly
+          - Careful (public API, shared state, >3 files, core logic) → systematic refactoring: understand 50+ lines context → plan → test at all call sites → implement → verify → commit
+          - Architectural overhaul (complete redesign, multi-service DB migrations) → TECH_DEBT (LAST RESORT — avoided at almost all costs)
+       d. If FIX: implement the fix, commit with descriptive message
+       e. If TECH_DEBT: document why it's deferred
+    4. Report completion:
+       SendMessage(type: "message", recipient: "team-lead",
+         summary: "Batch {N}: {n} fixed, {n} deferred, {n} false positive")
+
+#### Spawn teammates using the template above (one per independent batch):
 
 - Name: "resolver-batch-1"
-  Prompt: |
-    You are resolving review issues on branch {branch} (PR #{pr_number}).
-    WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
-    2. Your issues to resolve:
-       {batch 1 issues — full structured list with id, file, line, severity, type, description, suggested_fix}
-    3. For each issue:
-       a. Read the code context around file:line (use WORKTREE_PATH prefix if provided)
-       b. Validate: is this a real issue or false positive?
-       c. If real but impractical to fix (trivial perf on non-hot path, impossible error conditions, startup-only micro-optimizations): mark WONT_FIX with reasoning
-       d. If real and worthwhile: assess risk:
-          - Standard (null checks, validation, docs, logging, isolated security) → FIX directly
-          - Careful (public API, shared state, >3 files, core logic) → systematic refactoring: understand 50+ lines context → plan → test at all call sites → implement → verify → commit
-          - Architectural overhaul (complete redesign, multi-service DB migrations) → TECH_DEBT (LAST RESORT)
-       e. If FIX: implement the fix, commit with descriptive message
-       f. If TECH_DEBT: document why it's deferred
-    4. Report completion:
-       SendMessage(type: "message", recipient: "team-lead",
-         summary: "Batch 1: {n} fixed, {n} wont_fix, {n} deferred, {n} false positive")
+  Prompt: Use Resolver Teammate Prompt Template with BATCH_ISSUES =
+    {batch 1 issues — full structured list with id, file, line, severity, category, type, description, suggested_fix}
 
 - Name: "resolver-batch-2"
-  Prompt: |
-    You are resolving review issues on branch {branch} (PR #{pr_number}).
-    WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
-    2. Your issues to resolve:
-       {batch 2 issues — full structured list with id, file, line, severity, category, type, description, suggested_fix}
-    3. For each issue:
-       a. Read the code context around file:line (use WORKTREE_PATH prefix if provided)
-       b. Validate: is this a real issue or false positive?
-       c. If real but impractical to fix (trivial perf on non-hot path, impossible error conditions, startup-only micro-optimizations): mark WONT_FIX with reasoning
-       d. If real and worthwhile: assess risk:
-          - Standard (null checks, validation, docs, logging, isolated security) → FIX directly
-          - Careful (public API, shared state, >3 files, core logic) → systematic refactoring: understand 50+ lines context → plan → test at all call sites → implement → verify → commit
-          - Architectural overhaul (complete redesign, multi-service DB migrations) → TECH_DEBT (LAST RESORT)
-       e. If FIX: implement the fix, commit with descriptive message
-       f. If TECH_DEBT: document why it's deferred
-    4. Report completion:
-       SendMessage(type: "message", recipient: "team-lead",
-         summary: "Batch 2: {n} fixed, {n} wont_fix, {n} deferred, {n} false positive")
+  Prompt: Use Resolver Teammate Prompt Template with BATCH_ISSUES =
+    {batch 2 issues}
 
 (Additional resolvers for additional batches — same pattern)
 
@@ -190,7 +178,6 @@ For dependent batches that cannot run in parallel, spawn sequentially within the
 Aggregate from all Resolvers:
 - **Fixed**: Issues resolved with commits
 - **False positives**: Issues that don't exist or were misunderstood
-- **Won't Fix**: Real issues that are impractical to fix
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
@@ -246,7 +233,6 @@ Note: Deferred issues from resolution are already in resolution-summary.md"
 |---------|-------|
 | Fixed | {n} |
 | False Positive | {n} |
-| Won't Fix | {n} |
 | Tech Debt | {n} |
 | Blocked | {n} |
 
@@ -273,7 +259,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  └─ Step 0c: Target latest review directory per worktree
 │
 ├─ Phase 1: Parse issues from TARGET_DIR
-│  └─ Extract ALL issues (skip Suggestions, exclude summaries)
+│  └─ Extract ALL issues (including Suggestions, exclude summaries)
 │
 ├─ Phase 2: Analyze dependencies
 │  └─ Build dependency graph
@@ -288,7 +274,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  └─ Cross-validation debate → consensus on conflicts
 │
 ├─ Phase 5: Collect results
-│  └─ Aggregate fixed, false positives, deferred, blocked
+│  └─ Aggregate fixed, false positives, deferred
 │
 ├─ Phase 6: Record Pitfalls (SEQUENTIAL across worktrees)
 │
@@ -309,7 +295,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
-| No actionable issues | Report "No issues to resolve" (all were Suggestions) |
+| No actionable issues | Report "No issues to resolve" |
 | Incomplete review directory | Skip — resolve only targets complete reviews |
 | Latest review already resolved | Skip worktree, suggest /code-review first |
 | Legacy flat layout | Read flat *.md files directly (backwards compatible) |
@@ -345,7 +331,6 @@ Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
 | Total Issues | {n} |
 | Fixed | {n} |
 | False Positive | {n} |
-| Won't Fix | {n} |
 | Deferred | {n} |
 | Blocked | {n} |
 
@@ -358,11 +343,6 @@ Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
 | Issue | File:Line | Reasoning |
 |-------|-----------|-----------|
 | {description} | {file}:{line} | {why} |
-
-## Won't Fix (Impractical)
-| Issue | File:Line | Reasoning |
-|-------|-----------|-----------|
-| {description} | {file}:{line} | {why impractical} |
 
 ## Deferred to Tech Debt
 | Issue | File:Line | Risk Factor |

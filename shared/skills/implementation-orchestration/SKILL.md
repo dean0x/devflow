@@ -26,7 +26,7 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 Detect branch type before spawning Coder:
 
 - **Work branches** (`feat/`, `fix/`, `chore/`, `refactor/`, `docs/` prefix): proceed on current branch.
-- **Protected branches** (`main`, `master`, `develop`, `release/*`, `staging`, `production`): record current branch as `BASE_BRANCH`, then spawn Git agent to auto-create a feature branch:
+- **Protected branches** (`main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`): record current branch as `BASE_BRANCH`, then spawn Git agent to auto-create a feature branch:
 
 ```
 Task(subagent_type="Git"):

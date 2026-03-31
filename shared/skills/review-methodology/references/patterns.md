@@ -33,7 +33,7 @@ Correct patterns for effective code reviews.
 ```bash
 # Get the base branch
 BASE_BRANCH=""
-for branch in main master develop; do
+for branch in main master develop integration trunk; do
   if git show-ref --verify --quiet refs/heads/$branch; then
     BASE_BRANCH=$branch
     break
@@ -72,7 +72,7 @@ echo "Current branch: $(git branch --show-current)"
 
 ```bash
 # Detect base branch (in priority order)
-for branch in main master develop; do
+for branch in main master develop integration trunk; do
   if git show-ref --verify --quiet refs/heads/$branch; then
     BASE_BRANCH=$branch
     break

@@ -70,7 +70,7 @@ Only use `--amend` when ALL conditions are met:
 
 ### Branch Safety
 
-Never force push to: `main`, `master`, `develop`, `release/*`, `staging`, `production`
+Never force push to: `main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`
 
 **Branch naming**: `feat/`, `fix/`, `release/`, `hotfix/` prefixes with short descriptions.
 

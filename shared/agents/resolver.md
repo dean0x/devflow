@@ -30,21 +30,13 @@ You receive from orchestrator:
    - Reviewer misunderstood context
    - Code is intentional (e.g., magic number with comment, deliberate complexity for performance, placeholder for planned feature)
 
-3. **Pragmatic validation**: After confirming issue is real, assess if fixing is pragmatically worthwhile. Mark as **WONT_FIX** (not FALSE_POSITIVE) with reasoning if:
-   - Optimizing O(n+m) on a list that never exceeds ~100 items, not in a hot path
-   - Error handling for conditions impossible given the type system or data flow
-   - Null checks where caller contract guarantees non-null
-   - Micro-optimizing code that runs once at startup
-   - Thread safety for single-threaded code paths
-   - Bias: "when in doubt, fix it"
+3. **Assess risk for valid issues**: Apply risk criteria to decide FIX vs TECH_DEBT.
 
-4. **Assess risk for valid issues**: Apply risk criteria to decide FIX vs TECH_DEBT.
+4. **Implement fixes**: Make changes following existing patterns. One logical change per commit.
 
-5. **Implement fixes**: Make changes following existing patterns. One logical change per commit.
+5. **Document all decisions**: Record reasoning for every classification and risk assessment.
 
-6. **Document all decisions**: Record reasoning for every classification and risk assessment.
-
-7. **Commit batch**: Create atomic commit with all fixes in this batch.
+6. **Commit batch**: Create atomic commit with all fixes in this batch.
 
 ## Risk Assessment
 
@@ -89,7 +81,6 @@ For each issue:
 ├─ Still present? NO → FALSE_POSITIVE
 ├─ Reviewer understood correctly? NO → FALSE_POSITIVE
 ├─ Code is intentional? YES → FALSE_POSITIVE (document reasoning)
-├─ Pragmatically worthwhile? NO → WONT_FIX (document: "impractical — {reason}")
 ├─ Understand existing design/behavior/UX before changing anything
 └─ Risk Assessment:
    ├─ Requires complete architectural redesign? → TECH_DEBT (last resort)
@@ -132,11 +123,6 @@ Return structured resolution report:
 | Issue ID | File:Line | Reasoning |
 |----------|-----------|-----------|
 | {id} | {file}:{line} | {why invalid} |
-
-#### Won't Fix (Impractical)
-| Issue ID | File:Line | Reasoning |
-|----------|-----------|-----------|
-| {id} | {file}:{line} | {why impractical} |
 
 #### Deferred to Tech Debt
 | Issue ID | File:Line | Risk Factor |

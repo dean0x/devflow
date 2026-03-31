@@ -14,17 +14,11 @@
 
 Claude Code is powerful. But every session starts from scratch. Context evaporates between conversations. Code reviews are single-pass and shallow. Quality depends entirely on what you remember to ask for.
 
-DevFlow fixes this. Install it once. Forget about it. Your code gets better automatically.
+DevFlow fixes this. Install once, forget about it. Your code gets better automatically.
 
-**18 parallel code reviewers** investigate your changes from every angle — security, architecture, performance, complexity, consistency, regression, testing — each with domain-specific expertise and confidence scoring. Not a linter. Not a single-pass review.
-
-**Working memory that never forgets.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off — zero ceremony.
-
-**It learns how you work.** Repeated workflows and procedural patterns are detected across sessions and turned into reusable slash commands and skills automatically.
+It watches every prompt, classifies intent, and orchestrates the right workflow — plan, implement, review, debug — loading the relevant skills. Simple questions get zero overhead. Complex tasks get an advanced TDD and EDD harness with quality gates at every step.
 
 ## See it work
-
-You're on `main`. You type a task description. DevFlow detects you're on a protected branch, auto-creates a feature branch following your repo's naming conventions, and starts implementing — exploration, planning, coding, validation, refinement, all orchestrated through specialized agents.
 
 ```
 you: add rate limiting to the /api/upload endpoint
@@ -38,8 +32,6 @@ DevFlow: Ambient: IMPLEMENT/ORCHESTRATED
          → Shepherd: implementation matches request ✓
 ```
 
-When you're ready for review:
-
 ```
 /code-review     → 18 reviewers examine your changes in parallel
 /resolve         → all issues validated and fixed automatically
@@ -47,13 +39,31 @@ When you're ready for review:
 
 ## What you get
 
-**Code review that actually works.** Up to 18 specialized reviewers run in parallel — security, architecture, performance, complexity, and more. Each produces findings with severity, confidence, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets a category: must-fix, should-fix, or informational.
+**Ambient intelligence.** DevFlow classifies every prompt into three tiers — QUICK (zero overhead), GUIDED (skill loading + main session), ORCHESTRATED (full agent pipelines). You never invoke it manually. Init and forget.
 
-**Memory that persists.** Three hooks run behind the scenes — on stop, on start, before compaction. Architectural decisions and known pitfalls accumulate in `.memory/knowledge/` and inform every future session. No manual bookkeeping.
+**Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.memory/knowledge/` and inform every future session. No manual bookkeeping.
 
-**Full lifecycle in one command.** `/implement` takes a task from exploration through planning, coding, validation, and refinement to a PR. `/specify` defines features with clarification gates. `/debug` investigates bugs with competing hypotheses in parallel.
+**It learns how you work.** A self-learning mechanism detects repeated workflows and procedural patterns across sessions, then creates reusable slash commands and skills automatically.
 
-**Ambient intelligence.** DevFlow classifies every prompt and loads proportional skill sets automatically. Simple questions get zero overhead. Complex tasks get full agent orchestration. You never invoke it — it just works.
+**18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
+
+**34 skills grounded in expert material.** Every skill is backed by peer-reviewed papers, canonical books, and industry standards — security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey). 200+ sources total.
+
+**Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
+
+**Full lifecycle.** `/implement` takes a task from exploration through planning, coding, validation, and refinement. `/specify` defines features with clarification gates. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
+
+**Everything is composable.** 17 plugins (8 core + 9 language/ecosystem). Install only what you need. Six commands cover the entire development lifecycle.
+
+**HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, session duration, cost, and configuration counts at a glance.
+
+```
+devflow · feat/auth-middleware* · 3↑ · v1.8.3 +5 · 12 files · +234 -56
+Current Session ████░░░░ 42% · Session 5h ██░░░░░░ 18% · 7d █░░░░░░░ 8%
+Opus 4.6 [1m] · 23m · $1.24 · 2 CLAUDE.md · 4 MCPs · 8 hooks · 34 skills
+```
+
+**Security.** Deny lists block dangerous tool patterns out of the box — configurable during init.
 
 ## Quick Start
 
@@ -84,6 +94,12 @@ Optional plugins add language-specific patterns for TypeScript, React, Go, Pytho
 npx devflow-kit init --plugin=typescript,react
 ```
 
+## How it works
+
+DevFlow is a plugin system for Claude Code. Each plugin installs commands, agents, and skills into your Claude Code environment. Skills are tiny markdown files that activate automatically based on context. Agents are specialized workers (reviewer, coder, resolver, etc.) with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Commands orchestrate agent pipelines.
+
+For deep dives: [Working Memory](docs/working-memory.md) | [Self-Learning](docs/self-learning.md) | [CLI Reference](docs/cli-reference.md) | [Commands](docs/commands.md)
+
 ## CLI Reference
 
 ```bash
@@ -96,12 +112,6 @@ npx devflow-kit uninstall               # Remove DevFlow
 ```
 
 See [docs/cli-reference.md](docs/cli-reference.md) for all options.
-
-## How it works
-
-DevFlow is a plugin system for Claude Code. Each plugin installs commands, agents, and skills into your Claude Code environment. Skills are tiny markdown files that activate automatically based on context. Agents are specialized workers (reviewer, coder, resolver, etc.) with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Commands orchestrate agent pipelines.
-
-For deep dives: [Working Memory](docs/working-memory.md) | [Self-Learning](docs/self-learning.md) | [CLI Reference](docs/cli-reference.md) | [Commands](docs/commands.md)
 
 ## Part of the AI Development Stack
 

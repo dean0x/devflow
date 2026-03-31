@@ -35,7 +35,7 @@ Extract branch slug from the directory path.
 
 Read all `{focus}.md` files in the timestamped directory (exclude `review-summary.md` and `resolution-summary.md`).
 
-Extract **ALL** issues from all categories and severities. Skip only Suggestions.
+Extract **ALL** issues from all categories and severities, including Suggestions.
 
 For each issue, extract: id (generated), file, line, severity, category (blocking/should-fix/pre-existing), type (from focus), description, suggested_fix.
 
@@ -59,15 +59,15 @@ Each receives:
 - **BRANCH**: Branch slug
 - **BATCH_ID**: Identifier for this batch
 
-Resolvers apply pragmatic validation (WONT_FIX for impractical fixes) and follow a 3-tier risk approach:
+Resolvers follow a 3-tier risk approach:
 - **Standard fixes**: Applied directly
 - **Careful fixes** (public API, shared state, >3 files): Systematic refactoring — understand context, plan, test, implement, verify
-- **Architectural overhaul**: Defer to tech debt (LAST RESORT — only when complete system redesign required)
+- **Architectural overhaul**: Defer to tech debt (LAST RESORT — avoided at almost all costs, only when complete system redesign required)
 
 ## Phase 5: Collect & Simplify
 
 Aggregate results from all Resolver agents:
-- Count: fixed, false positives, won't fix, deferred
+- Count: fixed, false positives, deferred
 
 Spawn `Task(subagent_type="Simplifier")` on all files modified by Resolvers.
 

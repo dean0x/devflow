@@ -38,7 +38,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 **Input:** `WORKTREE_PATH` (optional)
 
 **Process:**
-1. Verify on feature branch (not main/master/develop/release/*/staging/production) - error if not
+1. Verify on feature branch (not main/master/develop/integration/trunk/release/*/staging/production) - error if not
 2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
 4. Check if PR exists - if not, create PR using `devflow:git` patterns
@@ -73,7 +73,7 @@ Pre-flight validation for `/resolve`. Checks branch state without modifications.
 **Input:** `WORKTREE_PATH` (optional)
 
 **Process:**
-1. Verify on feature branch (not main/master/develop/release/*/staging/production) - error if not
+1. Verify on feature branch (not main/master/develop/integration/trunk/release/*/staging/production) - error if not
 2. Verify working directory is clean - error if uncommitted changes
 3. Get current branch name
 4. Derive branch-slug (replace `/` with `-`)
