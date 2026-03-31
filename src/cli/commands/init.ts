@@ -61,34 +61,61 @@ async function shadowExists(p: string): Promise<boolean> {
 /**
  * Migrate shadow skill overrides from old V2 skill names to new names.
  * Pure function suitable for testing — requires only the devflowDir path.
+ *
+ * Groups SHADOW_RENAMES entries by their target name so that multiple old
+ * names mapping to the same target (e.g. git-safety, git-workflow,
+ * github-patterns → git) are processed sequentially within the group.
+ * Distinct-target groups still run in parallel via Promise.all, preserving
+ * throughput while eliminating the TOCTOU race on shared targets.
  */
 export async function migrateShadowOverrides(devflowDir: string): Promise<{ migrated: number; warnings: string[] }> {
   const shadowsRoot = path.join(devflowDir, 'skills');
 
-  const results = await Promise.all(
-    SHADOW_RENAMES.map(async ([oldName, newName]) => {
-      const oldShadow = path.join(shadowsRoot, oldName);
-      const newShadow = path.join(shadowsRoot, newName);
+  // Group entries by target name so many-to-one mappings are serialized.
+  const groups = new Map<string, [string, string][]>();
+  for (const entry of SHADOW_RENAMES) {
+    const [, newName] = entry;
+    const group = groups.get(newName) ?? [];
+    group.push(entry);
+    groups.set(newName, group);
+  }
 
-      if (!(await shadowExists(oldShadow))) {
-        // Old shadow doesn't exist — nothing to migrate
-        return { migrated: 0, warning: null };
+  // Process distinct-target groups in parallel; entries within each group run
+  // sequentially so check-then-rename is effectively atomic per target.
+  const groupResults = await Promise.all(
+    [...groups.values()].map(async (entries) => {
+      const groupMigrated: Array<{ migrated: number; warning: string | null }> = [];
+
+      for (const [oldName, newName] of entries) {
+        const oldShadow = path.join(shadowsRoot, oldName);
+        const newShadow = path.join(shadowsRoot, newName);
+
+        if (!(await shadowExists(oldShadow))) {
+          // Old shadow doesn't exist — nothing to migrate
+          groupMigrated.push({ migrated: 0, warning: null });
+          continue;
+        }
+
+        if (await shadowExists(newShadow)) {
+          // Target already exists (from a previous entry in this group or a
+          // pre-existing user shadow) — warn, don't overwrite
+          groupMigrated.push({
+            migrated: 0,
+            warning: `Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`,
+          });
+          continue;
+        }
+
+        // Target doesn't exist yet — rename
+        await fs.rename(oldShadow, newShadow);
+        groupMigrated.push({ migrated: 1, warning: null });
       }
 
-      if (await shadowExists(newShadow)) {
-        // Both exist — warn, don't overwrite
-        return {
-          migrated: 0,
-          warning: `Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`,
-        };
-      }
-
-      // New doesn't exist — rename
-      await fs.rename(oldShadow, newShadow);
-      return { migrated: 1, warning: null };
+      return groupMigrated;
     }),
   );
 
+  const results = groupResults.flat();
   return {
     migrated: results.reduce((sum, r) => sum + r.migrated, 0),
     warnings: results.flatMap(r => (r.warning ? [r.warning] : [])),

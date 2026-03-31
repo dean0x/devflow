@@ -709,6 +709,32 @@ describe('migrateShadowOverrides', () => {
     expect(result.migrated).toBe(0);
     expect(result.warnings).toEqual([]);
   });
+
+  it('migrates exactly one shadow when multiple old names map to the same target', async () => {
+    // git-safety, git-workflow, github-patterns all map to 'git'.
+    // Only the first present entry should be migrated; subsequent entries must
+    // warn rather than silently overwrite, regardless of Promise scheduling.
+    const gitSafety = path.join(devflowDir, 'skills', 'git-safety');
+    const gitWorkflow = path.join(devflowDir, 'skills', 'git-workflow');
+    await fs.mkdir(gitSafety, { recursive: true });
+    await fs.mkdir(gitWorkflow, { recursive: true });
+    await fs.writeFile(path.join(gitSafety, 'SKILL.md'), '# git-safety override');
+    await fs.writeFile(path.join(gitWorkflow, 'SKILL.md'), '# git-workflow override');
+
+    const result = await migrateShadowOverrides(devflowDir);
+
+    // Exactly one migration to 'git', one warning for the second entry
+    expect(result.migrated).toBe(1);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('git');
+
+    // 'git' target must exist
+    await expect(fs.access(path.join(devflowDir, 'skills', 'git'))).resolves.toBeUndefined();
+
+    // The migrated content must belong to whichever entry ran first (git-safety)
+    const content = await fs.readFile(path.join(devflowDir, 'skills', 'git', 'SKILL.md'), 'utf-8');
+    expect(content).toBe('# git-safety override');
+  });
 });
 
 describe('shadow migration → install ordering', () => {
