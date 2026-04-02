@@ -7,6 +7,7 @@ import {
   buildFullSkillsMap,
   SHADOW_RENAMES,
   LEGACY_SKILL_NAMES,
+  LEGACY_AGENT_NAMES,
   type PluginDefinition,
 } from '../src/cli/plugins.js';
 
@@ -218,6 +219,24 @@ describe('optional plugin flag', () => {
     expect(ambient!.agents).toContain('resolver');
   });
 
+  it('devflow-implement declares evaluator and tester agents and qa skill', () => {
+    const implement = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-implement');
+    expect(implement).toBeDefined();
+    // evaluator and tester are declared so uninstalling ambient doesn't break implement
+    expect(implement!.agents).toContain('evaluator');
+    expect(implement!.agents).toContain('tester');
+    // qa skill is required for the tester agent
+    expect(implement!.skills).toContain('qa');
+  });
+
+  it('devflow-ambient declares evaluator and tester agents', () => {
+    const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
+    expect(ambient).toBeDefined();
+    // Ambient orchestrates the full implement pipeline, so evaluator and tester must be declared
+    expect(ambient!.agents).toContain('evaluator');
+    expect(ambient!.agents).toContain('tester');
+  });
+
   it('devflow-core-skills does not contain language/ecosystem skills', () => {
     const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
     expect(coreSkills).toBeDefined();
@@ -249,6 +268,18 @@ describe('SHADOW_RENAMES consistency', () => {
         allSkills,
         `SHADOW_RENAMES new name '${newName}' must appear in getAllSkillNames()`,
       ).toContain(newName);
+    }
+  });
+});
+
+describe('LEGACY_AGENT_NAMES consistency', () => {
+  it('no legacy agent name appears in any current plugin agents array', () => {
+    const currentAgents = getAllAgentNames();
+    for (const legacyName of LEGACY_AGENT_NAMES) {
+      expect(
+        currentAgents,
+        `LEGACY_AGENT_NAMES entry '${legacyName}' must not appear in getAllAgentNames() — remove it from LEGACY_AGENT_NAMES or update the plugin registry`,
+      ).not.toContain(legacyName);
     }
   });
 });
