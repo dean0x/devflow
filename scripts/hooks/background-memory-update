@@ -98,12 +98,14 @@ extract_last_turn() {
   local last_user last_assistant
 
   last_user=$(grep '"type":"user"' "$transcript" 2>/dev/null \
-    | while IFS= read -r line; do printf '%s\n' "$line" | json_extract_messages; done \
+    | tail -3 \
+    | while IFS= read -r line; do printf '%s\n' "$line" | head -c 100000 | json_extract_messages; done \
     | awk 'NF' \
     | tail -1)
 
   last_assistant=$(grep '"type":"assistant"' "$transcript" 2>/dev/null \
-    | while IFS= read -r line; do printf '%s\n' "$line" | json_extract_messages; done \
+    | tail -3 \
+    | while IFS= read -r line; do printf '%s\n' "$line" | head -c 100000 | json_extract_messages; done \
     | awk 'NF' \
     | tail -1)
 
