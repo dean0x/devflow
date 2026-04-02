@@ -117,6 +117,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'documentation',
       'implementation-patterns',
       'knowledge-persistence',
+      'qa',
       'worktree-support',
     ],
   },

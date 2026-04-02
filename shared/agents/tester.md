@@ -68,8 +68,6 @@ For each scenario:
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
-For web-facing changes, follow the Dev Server Lifecycle and Browser Execution procedures in `devflow:qa/references/browser-testing.md`.
-
 ## Output
 
 Return structured QA report:

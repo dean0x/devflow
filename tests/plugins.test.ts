@@ -229,12 +229,14 @@ describe('optional plugin flag', () => {
     expect(implement!.skills).toContain('qa');
   });
 
-  it('devflow-ambient declares evaluator and tester agents', () => {
+  it('devflow-ambient declares evaluator, tester agents and qa skill', () => {
     const ambient = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-ambient');
     expect(ambient).toBeDefined();
     // Ambient orchestrates the full implement pipeline, so evaluator and tester must be declared
     expect(ambient!.agents).toContain('evaluator');
     expect(ambient!.agents).toContain('tester');
+    // qa skill is required for the tester agent
+    expect(ambient!.skills).toContain('qa');
   });
 
   it('devflow-core-skills does not contain language/ecosystem skills', () => {
