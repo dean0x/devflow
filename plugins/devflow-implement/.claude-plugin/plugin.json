@@ -23,13 +23,15 @@
     "coder",
     "simplifier",
     "scrutinizer",
-    "shepherd",
+    "evaluator",
+    "tester",
     "validator"
   ],
   "skills": [
     "agent-teams",
     "implementation-patterns",
     "knowledge-persistence",
+    "qa",
     "self-review",
     "worktree-support"
   ]

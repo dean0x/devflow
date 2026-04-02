@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import type { PluginDefinition } from '../plugins.js';
-import { DEVFLOW_PLUGINS, prefixSkillName } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_AGENT_NAMES, prefixSkillName } from '../plugins.js';
 
 /**
  * Minimal spinner interface matching @clack/prompts spinner().
@@ -209,6 +209,14 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
         }
       }
     } catch { /* no agents directory */ }
+  }
+
+  // Clean up legacy agent files (renamed or removed agents from prior versions)
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
+  for (const legacyAgent of LEGACY_AGENT_NAMES) {
+    try {
+      await fs.rm(path.join(agentsTarget, `${legacyAgent}.md`), { force: true });
+    } catch { /* ignore */ }
   }
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).

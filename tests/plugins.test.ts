@@ -157,7 +157,7 @@ describe('optional plugin flag', () => {
     'devflow-typescript',
     'devflow-react',
     'devflow-accessibility',
-    'devflow-frontend-design',
+    'devflow-ui-design',
     'devflow-go',
     'devflow-java',
     'devflow-python',

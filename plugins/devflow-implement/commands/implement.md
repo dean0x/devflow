@@ -297,10 +297,10 @@ Verify Scrutinizer's fixes didn't break anything."
 
 ### Phase 12: Alignment Check
 
-After Scrutinizer passes (and re-validation if needed), spawn Shepherd to validate alignment:
+After Scrutinizer passes (and re-validation if needed), spawn Evaluator to validate alignment:
 
 ```
-Task(subagent_type="Shepherd"):
+Task(subagent_type="Evaluator"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {synthesized plan from Phase 6}
 FILES_CHANGED: {list of files from Coder output}
@@ -311,7 +311,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
 **If ALIGNED:** Continue to Phase 13
 
 **If MISALIGNED:**
-1. Extract misalignment details from Shepherd output
+1. Extract misalignment details from Evaluator output
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
    - Spawn Coder to fix misalignments:
@@ -320,7 +320,7 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
-   MISALIGNMENTS: {structured misalignments from Shepherd}
+   MISALIGNMENTS: {structured misalignments from Evaluator}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false"
    ```
@@ -334,17 +334,56 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    - If Validator PASS: Loop back to Phase 12 (re-check alignment)
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
-### Phase 13: Create PR
+### Phase 13: QA Testing
+
+After Evaluator passes, spawn Tester for scenario-based acceptance testing:
+
+```
+Task(subagent_type="Tester"):
+"ORIGINAL_REQUEST: {task description or issue content}
+EXECUTION_PLAN: {synthesized plan from Phase 6}
+FILES_CHANGED: {list of files from Coder output}
+ACCEPTANCE_CRITERIA: {extracted criteria if available}
+Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
+```
+
+**If PASS:** Continue to Phase 14
+
+**If FAIL:**
+1. Extract failure details from Tester output
+2. Increment `qa_retry_count`
+3. If `qa_retry_count <= 2`:
+   - Spawn Coder to fix QA failures:
+   ```
+   Task(subagent_type="Coder"):
+   "TASK_ID: {task-id}
+   TASK_DESCRIPTION: Fix QA test failures
+   OPERATION: qa-fix
+   QA_FAILURES: {structured failures from Tester}
+   SCOPE: Fix only the listed failures, no other changes
+   CREATE_PR: false"
+   ```
+   - Spawn Validator to verify fix didn't break tests:
+   ```
+   Task(subagent_type="Validator", model="haiku"):
+   "FILES_CHANGED: {files modified by fix Coder}
+   VALIDATION_SCOPE: changed-only"
+   ```
+   - If Validator FAIL: Report to user
+   - If Validator PASS: Loop back to Phase 13 (re-run Tester)
+4. If `qa_retry_count > 2`: Report QA failures to user for decision
+
+### Phase 14: Create PR
 
 **For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
-### Phase 14: Report
+### Phase 15: Report
 
 Display completion summary with phase status, PR info, and next steps.
 
-### Phase 15: Record Decisions (if any)
+### Phase 16: Record Decisions (if any)
 
 If the Coder's report includes Key Decisions with architectural significance:
 1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
@@ -398,17 +437,21 @@ If the Coder's report includes Key Decisions with architectural significance:
 │  └─ Validator agent (verify Scrutinizer fixes)
 │
 ├─ Phase 12: Alignment Check
-│  └─ Shepherd agent (validates alignment - reports only, no fixes)
+│  └─ Evaluator agent (validates alignment - reports only, no fixes)
 │  └─ If MISALIGNED: Coder fix loop (max 2 iterations) → Validator → re-check
 │
-├─ Phase 13: Create PR (if needed)
+├─ Phase 13: QA Testing
+│  └─ Tester agent (scenario-based acceptance tests)
+│  └─ If FAIL: Coder fix loop (max 2 retries) → Validator → re-test
+│
+├─ Phase 14: Create PR (if needed)
 │  └─ SINGLE_CODER: handled by Coder
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-├─ Phase 14: Display agent outputs
+├─ Phase 15: Display agent outputs
 │
-└─ Phase 15: Record Decisions (inline, if any)
+└─ Phase 16: Record Decisions (inline, if any)
 ```
 
 ## Principles

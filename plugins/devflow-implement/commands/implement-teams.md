@@ -430,7 +430,7 @@ Verify Scrutinizer's fixes didn't break anything."
 
 **If PASS:** Continue to Phase 12
 
-### Phase 12: Shepherd↔Coder Dialogue
+### Phase 12: Evaluator↔Coder Dialogue
 
 After Scrutinizer passes (and re-validation if needed), check alignment using direct dialogue:
 
@@ -441,7 +441,7 @@ Create a team named "align-{task-id}" for alignment check.
 
 Spawn teammates with self-contained prompts:
 
-- Name: "shepherd"
+- Name: "evaluator"
   Prompt: |
     You are validating that the implementation aligns with the original request.
     ORIGINAL_REQUEST: {task description or issue content}
@@ -463,18 +463,18 @@ Spawn teammates with self-contained prompts:
 
 - Name: "alignment-coder"
   Prompt: |
-    You are fixing alignment issues identified by the Shepherd.
+    You are fixing alignment issues identified by the Evaluator.
     TASK_ID: {task-id}
     ORIGINAL_REQUEST: {task description or issue content}
     FILES_CHANGED: {list of files from Coder output}
 
     Steps:
-    1. Wait for Shepherd's findings via message
+    1. Wait for Evaluator's findings via message
     2. For each misalignment: fix the code or explain why it's correct
-    3. Reply to Shepherd:
-       SendMessage(type: "message", recipient: "shepherd",
+    3. Reply to Evaluator:
+       SendMessage(type: "message", recipient: "evaluator",
          summary: "Fixes applied: {n} issues")
-    4. SCOPE: Fix only misalignments identified by Shepherd — no other changes
+    4. SCOPE: Fix only misalignments identified by Evaluator — no other changes
     5. Max 2 exchanges. Then report to lead:
        SendMessage(type: "message", recipient: "team-lead",
          summary: "Alignment fixes complete")
@@ -484,7 +484,7 @@ Spawn teammates with self-contained prompts:
 
 ```
 Step 1: Shutdown each teammate
-  SendMessage(type: "shutdown_request", recipient: "shepherd", content: "Alignment complete")
+  SendMessage(type: "shutdown_request", recipient: "evaluator", content: "Alignment complete")
   SendMessage(type: "shutdown_request", recipient: "alignment-coder", content: "Alignment complete")
   Wait for each shutdown_response (approve: true)
 
@@ -498,7 +498,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 **If ALIGNED:** Continue to Phase 13
 
 **If MISALIGNED:**
-1. Extract misalignment details from Shepherd output
+1. Extract misalignment details from Evaluator output
 2. Increment `alignment_fix_count`
 3. If `alignment_fix_count <= 2`:
    - Spawn Coder to fix misalignments:
@@ -507,7 +507,7 @@ Step 3: GATE — Verify TeamDelete succeeded
    "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
-   MISALIGNMENTS: {structured misalignments from Shepherd}
+   MISALIGNMENTS: {structured misalignments from Evaluator}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false"
    ```
@@ -521,17 +521,56 @@ Step 3: GATE — Verify TeamDelete succeeded
    - If Validator PASS: Loop back to Phase 12 (re-check alignment)
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
-### Phase 13: Create PR
+### Phase 13: QA Testing
+
+After Evaluator passes, spawn Tester for scenario-based acceptance testing (standalone agent, not a teammate — testing is sequential, not debate):
+
+```
+Task(subagent_type="Tester"):
+"ORIGINAL_REQUEST: {task description or issue content}
+EXECUTION_PLAN: {synthesized plan from Phase 6}
+FILES_CHANGED: {list of files from Coder output}
+ACCEPTANCE_CRITERIA: {extracted criteria if available}
+Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
+```
+
+**If PASS:** Continue to Phase 14
+
+**If FAIL:**
+1. Extract failure details from Tester output
+2. Increment `qa_retry_count`
+3. If `qa_retry_count <= 2`:
+   - Spawn Coder to fix QA failures:
+   ```
+   Task(subagent_type="Coder"):
+   "TASK_ID: {task-id}
+   TASK_DESCRIPTION: Fix QA test failures
+   OPERATION: qa-fix
+   QA_FAILURES: {structured failures from Tester}
+   SCOPE: Fix only the listed failures, no other changes
+   CREATE_PR: false"
+   ```
+   - Spawn Validator to verify fix didn't break tests:
+   ```
+   Task(subagent_type="Validator", model="haiku"):
+   "FILES_CHANGED: {files modified by fix Coder}
+   VALIDATION_SCOPE: changed-only"
+   ```
+   - If Validator FAIL: Report to user
+   - If Validator PASS: Loop back to Phase 13 (re-run Tester)
+4. If `qa_retry_count > 2`: Report QA failures to user for decision
+
+### Phase 14: Create PR
 
 **For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
-### Phase 14: Report
+### Phase 15: Report
 
 Display completion summary with phase status, PR info, and next steps.
 
-### Phase 15: Record Decisions (if any)
+### Phase 16: Record Decisions (if any)
 
 If the Coder's report includes Key Decisions with architectural significance:
 1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
@@ -586,17 +625,21 @@ If the Coder's report includes Key Decisions with architectural significance:
 ├─ Phase 11: Re-Validate (if Scrutinizer made changes)
 │  └─ Validator agent (verify Scrutinizer fixes)
 │
-├─ Phase 12: Shepherd↔Coder Dialogue (Agent Teams)
-│  └─ Direct Shepherd↔Coder messaging (max 2 exchanges)
+├─ Phase 12: Evaluator↔Coder Dialogue (Agent Teams)
+│  └─ Direct Evaluator↔Coder messaging (max 2 exchanges)
 │
-├─ Phase 13: Create PR (if needed)
+├─ Phase 13: QA Testing
+│  └─ Tester agent (scenario-based acceptance tests)
+│  └─ If FAIL: Coder fix loop (max 2 retries) → Validator → re-test
+│
+├─ Phase 14: Create PR (if needed)
 │  └─ SINGLE_CODER: handled by Coder
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-├─ Phase 14: Display agent outputs
+├─ Phase 15: Display agent outputs
 │
-└─ Phase 15: Record Decisions (inline, if any)
+└─ Phase 16: Record Decisions (inline, if any)
 ```
 
 ## Principles

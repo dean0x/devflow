@@ -20,7 +20,8 @@ plugins/*/agents/simplifier.md
 plugins/*/agents/coder.md
 plugins/*/agents/reviewer.md
 plugins/*/agents/resolver.md
-plugins/*/agents/shepherd.md
+plugins/*/agents/evaluator.md
+plugins/*/agents/tester.md
 plugins/*/agents/scrutinizer.md
 plugins/*/agents/validator.md
 npm-debug.log*

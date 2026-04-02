@@ -27,8 +27,9 @@ npx devflow-kit init --plugin=implement
 3. **Implementation** - Coder agent implements on feature branch
 4. **Validation** - Validator runs build/test/lint checks
 5. **Self-Review** - Scrutinizer evaluates against 9-pillar framework
-6. **Alignment Check** - Shepherd validates against original request
-7. **Simplification** - Simplifier refines code clarity
+6. **Alignment Check** - Evaluator validates against original request
+7. **QA Testing** - Tester executes scenario-based acceptance tests
+8. **Simplification** - Simplifier refines code clarity
 8. **PR Creation** - Git agent creates pull request
 
 ## Components
@@ -43,7 +44,8 @@ npx devflow-kit init --plugin=implement
 - `coder` - Autonomous implementation
 - `simplifier` - Code refinement
 - `scrutinizer` - Self-review (9-pillar framework)
-- `shepherd` - Alignment validation
+- `evaluator` - Alignment validation
+- `tester` - Scenario-based QA testing
 - `validator` - Build/test validation
 
 ### Skills (9)

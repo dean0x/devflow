@@ -399,9 +399,9 @@ run_sonnet_analysis() {
   # Read response, strip markdown fences, validate, write back for Node operations
   local RESPONSE
   RESPONSE=$(cat "$RESPONSE_FILE")
-  RESPONSE=$(echo "$RESPONSE" | sed '1s/^```json$//' | sed '1s/^```$//' | sed '$s/^```$//')
+  RESPONSE=$(printf '%s\n' "$RESPONSE" | sed '1s/^```json$//' | sed '1s/^```$//' | sed '$s/^```$//')
 
-  if ! echo "$RESPONSE" | json_valid; then
+  if ! printf '%s\n' "$RESPONSE" | json_valid; then
     log "Invalid JSON response from model — skipping"
     log "--- Raw response ---"
     log "$RESPONSE"
@@ -410,7 +410,7 @@ run_sonnet_analysis() {
     return 1
   fi
 
-  echo "$RESPONSE" > "$RESPONSE_FILE"
+  printf '%s\n' "$RESPONSE" > "$RESPONSE_FILE"
   return 0
 }
 

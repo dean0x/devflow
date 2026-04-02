@@ -159,7 +159,7 @@ json_array_item() {
 
 # --- Transcript extraction ---
 
-# Extract text messages from Claude message JSON. Usage: echo '{"message":...}' | json_extract_messages
+# Extract text messages from Claude message JSON. Usage: printf '%s\n' '{"message":...}' | json_extract_messages
 json_extract_messages() {
   if [ "$_HAS_JQ" = "true" ]; then
     jq -r 'if .message.content then

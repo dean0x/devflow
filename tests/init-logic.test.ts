@@ -58,6 +58,18 @@ describe('parsePluginSelection', () => {
     expect(selected).toEqual(['devflow-implement']);
     expect(invalid).toEqual([]);
   });
+
+  it('remaps legacy plugin names', () => {
+    const { selected, invalid } = parsePluginSelection('frontend-design', DEVFLOW_PLUGINS);
+    expect(selected).toEqual(['devflow-ui-design']);
+    expect(invalid).toEqual([]);
+  });
+
+  it('remaps legacy plugin names with prefix', () => {
+    const { selected, invalid } = parsePluginSelection('devflow-frontend-design', DEVFLOW_PLUGINS);
+    expect(selected).toEqual(['devflow-ui-design']);
+    expect(invalid).toEqual([]);
+  });
 });
 
 describe('substituteSettingsTemplate', () => {

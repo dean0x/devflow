@@ -146,9 +146,9 @@
       ]
     },
     {
-      "name": "devflow-frontend-design",
-      "source": "./plugins/devflow-frontend-design",
-      "description": "Frontend design patterns - typography, color systems, spacing, motion, responsive design",
+      "name": "devflow-ui-design",
+      "source": "./plugins/devflow-ui-design",
+      "description": "UI design patterns - typography, color systems, spacing, motion, responsive design",
       "version": "1.8.3",
       "keywords": [
         "design",
