@@ -49,6 +49,7 @@
     "documentation",
     "implementation-patterns",
     "knowledge-persistence",
+    "qa",
     "worktree-support"
   ]
 }

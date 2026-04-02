@@ -166,6 +166,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
 
   // Install commands and agents from selected plugins (with deduplication)
   spinner.message('Installing commands and agents...');
+  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
   for (const plugin of plugins) {
     const pluginSourceDir = path.join(pluginsDir, plugin.name);
 
@@ -193,7 +194,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
 
     // Install agents (deduplicated)
     const agentsSource = path.join(pluginSourceDir, 'agents');
-    const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
     try {
       const files = await fs.readdir(agentsSource);
       if (files.length > 0) {
@@ -212,7 +212,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   }
 
   // Clean up legacy agent files (renamed or removed agents from prior versions)
-  const agentsTarget = path.join(claudeDir, 'agents', 'devflow');
   for (const legacyAgent of LEGACY_AGENT_NAMES) {
     try {
       await fs.rm(path.join(agentsTarget, `${legacyAgent}.md`), { force: true });

@@ -48,7 +48,7 @@ DevFlow: Ambient: IMPLEMENT/ORCHESTRATED
 
 **18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
 
-**35 skills grounded in expert material.** Every skill is backed by peer-reviewed papers, canonical books, and industry standards — security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey). 200+ sources total.
+**38 skills grounded in expert material.** Every skill is backed by peer-reviewed papers, canonical books, and industry standards — security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey). 200+ sources total.
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
@@ -61,7 +61,7 @@ DevFlow: Ambient: IMPLEMENT/ORCHESTRATED
 ```
 devflow · feat/auth-middleware* · 3↑ · v1.8.3 +5 · 12 files · +234 -56
 Current Session ████░░░░ 42% · Session 5h ██░░░░░░ 18% · 7d █░░░░░░░ 8%
-Opus 4.6 [1m] · 23m · $1.24 · 2 CLAUDE.md · 4 MCPs · 8 hooks · 35 skills
+Opus 4.6 [1m] · 23m · $1.24 · 2 CLAUDE.md · 4 MCPs · 8 hooks · 38 skills
 ```
 
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init.
