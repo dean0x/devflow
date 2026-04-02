@@ -26,11 +26,11 @@ npx devflow-kit init --plugin=implement
 2. **Planning** - Plan agents design implementation approach
 3. **Implementation** - Coder agent implements on feature branch
 4. **Validation** - Validator runs build/test/lint checks
-5. **Self-Review** - Scrutinizer evaluates against 9-pillar framework
-6. **Alignment Check** - Evaluator validates against original request
-7. **QA Testing** - Tester executes scenario-based acceptance tests
-8. **Simplification** - Simplifier refines code clarity
-8. **PR Creation** - Git agent creates pull request
+5. **Simplification** - Simplifier refines code clarity
+6. **Self-Review** - Scrutinizer evaluates against 9-pillar framework
+7. **Alignment Check** - Evaluator validates against original request
+8. **QA Testing** - Tester executes scenario-based acceptance tests
+9. **PR Creation** - Git agent creates pull request
 
 ## Components
 
@@ -48,16 +48,13 @@ npx devflow-kit init --plugin=implement
 - `tester` - Scenario-based QA testing
 - `validator` - Build/test validation
 
-### Skills (9)
-- `software-design` - Result types, DI, immutability, workaround labeling
-- `git` - Git safety, atomic commits, PR descriptions
+### Skills (6)
+- `agent-teams` - Agent Teams orchestration patterns
 - `implementation-patterns` - CRUD, API, events
-- `testing` - Test quality, coverage
-- `boundary-validation` - Boundary validation
+- `knowledge-persistence` - Architectural decision recording
+- `qa` - Scenario-based acceptance testing
 - `self-review` - 9-pillar framework
-- `typescript` - TypeScript patterns
-- `react` - React patterns
-- `accessibility` - Keyboard, ARIA, focus management
+- `worktree-support` - Worktree-aware path resolution
 
 ## Output
 
