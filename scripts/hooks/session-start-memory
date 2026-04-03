@@ -1,10 +1,8 @@
 #!/bin/bash
 
 # SessionStart Hook
-# Injects working memory AND ambient skill content as additionalContext.
+# Injects working memory as additionalContext.
 # Memory: restores .memory/WORKING-MEMORY.md + git state + compact recovery.
-# Ambient: injects ambient-router SKILL.md so Claude has it in context (no Read call needed).
-# Either section can fire independently — ambient works even without memory files.
 
 set -e
 
@@ -198,27 +196,6 @@ ${LEARNED_SECTION}"
     else
       CONTEXT="$LEARNED_SECTION"
     fi
-  fi
-fi
-
-# --- Section 2: Ambient Skill Injection ---
-
-# Inject ambient-router SKILL.md directly into context so Claude doesn't need a Read call.
-# Only injects when ambient mode is enabled (UserPromptSubmit hook present in settings).
-AMBIENT_SKILL_PATH="$HOME/.claude/skills/devflow:ambient-router/SKILL.md"
-[ ! -f "$AMBIENT_SKILL_PATH" ] && AMBIENT_SKILL_PATH="$CWD/.claude/skills/devflow:ambient-router/SKILL.md"
-
-SETTINGS_FILE="$HOME/.claude/settings.json"
-if [ -f "$AMBIENT_SKILL_PATH" ] && [ -f "$SETTINGS_FILE" ] && grep -q "ambient-prompt" "$SETTINGS_FILE" 2>/dev/null; then
-  AMBIENT_SKILL_CONTENT=$(cat "$AMBIENT_SKILL_PATH")
-  AMBIENT_SECTION="--- AMBIENT ROUTER (auto-loaded) ---
-${AMBIENT_SKILL_CONTENT}"
-  if [ -n "$CONTEXT" ]; then
-    CONTEXT="${CONTEXT}
-
-${AMBIENT_SECTION}"
-  else
-    CONTEXT="$AMBIENT_SECTION"
   fi
 fi
 

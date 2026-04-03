@@ -111,9 +111,9 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
       'add input validation to the CLI parser in src/cli/cli.ts',
       (r) => {
         const skills = getSkillInvocations(r);
-        return skills.includes('implementation-patterns')
+        return skills.includes('patterns')
           && skills.includes('test-driven-development')
-          && skills.includes('search-first');
+          && skills.includes('research');
       },
       { maxAttempts: 3, timeout: 60000 },
     );
@@ -121,7 +121,7 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
     // Soft assertion: report which skills were loaded even on failure
     const skills = getSkillInvocations(result);
     if (!passed) {
-      console.warn(`Skill selection incomplete. Loaded: [${skills.join(', ')}]. Expected all of: implementation-patterns, test-driven-development, search-first`);
+      console.warn(`Skill selection incomplete. Loaded: [${skills.join(', ')}]. Expected all of: patterns, test-driven-development, research`);
     }
     expect(passed).toBe(true);
   });

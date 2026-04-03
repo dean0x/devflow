@@ -98,9 +98,9 @@ describe('buildFullSkillsMap', () => {
     expect(fullMap.has('typescript')).toBe(true);
     expect(fullMap.has('go')).toBe(true);
     // Must include all orchestration skills
-    expect(fullMap.has('review-orchestration')).toBe(true);
-    expect(fullMap.has('resolve-orchestration')).toBe(true);
-    expect(fullMap.has('pipeline-orchestration')).toBe(true);
+    expect(fullMap.has('review')).toBe(true);
+    expect(fullMap.has('resolve')).toBe(true);
+    expect(fullMap.has('pipeline')).toBe(true);
   });
 
   it('covers more skills than buildAssetMaps with only non-optional plugins', () => {
@@ -207,11 +207,11 @@ describe('optional plugin flag', () => {
     expect(ambient!.skills).toContain('review-methodology');
     expect(ambient!.skills).toContain('security');
     // Ambient must declare orchestration skills
-    expect(ambient!.skills).toContain('review-orchestration');
-    expect(ambient!.skills).toContain('resolve-orchestration');
-    expect(ambient!.skills).toContain('pipeline-orchestration');
+    expect(ambient!.skills).toContain('review');
+    expect(ambient!.skills).toContain('resolve');
+    expect(ambient!.skills).toContain('pipeline');
     // Ambient must declare resolve dependencies
-    expect(ambient!.skills).toContain('implementation-patterns');
+    expect(ambient!.skills).toContain('patterns');
     expect(ambient!.skills).toContain('knowledge-persistence');
     // Ambient must declare all needed agents
     expect(ambient!.agents).toContain('git');

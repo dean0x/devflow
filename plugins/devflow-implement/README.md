@@ -50,7 +50,7 @@ npx devflow-kit init --plugin=implement
 
 ### Skills (6)
 - `agent-teams` - Agent Teams orchestration patterns
-- `implementation-patterns` - CRUD, API, events
+- `patterns` - CRUD, API, events
 - `knowledge-persistence` - Architectural decision recording
 - `qa` - Scenario-based acceptance testing
 - `self-review` - 9-pillar framework

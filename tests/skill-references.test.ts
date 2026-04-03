@@ -134,6 +134,9 @@ const COMMAND_REFS = new Set([
   'specify',
   'self-review',  // NOTE: self-review IS a skill too, but it also appears as a command ref in skill-catalog.md tables
   'audit-claude',
+  'plan',   // plan is now both a skill name and a command reference
+  'review', // review is now both a skill name and a command reference
+  'pipeline', // pipeline is now both a skill name and a command reference
 ]);
 
 /**
@@ -684,23 +687,25 @@ describe('Test infrastructure skill references', () => {
     }
   });
 
-  it('AMBIENT_PREAMBLE skill refs in tests/integration/helpers.ts exist in actual hook preamble', () => {
+  it('DEVFLOW_PREAMBLE skill refs in tests/integration/helpers.ts exist in actual hook preamble', () => {
     const helpersPath = path.join(ROOT, 'tests', 'integration', 'helpers.ts');
     const helpersContent = readFileSync(helpersPath, 'utf-8');
-    const hookPath = path.join(ROOT, 'scripts', 'hooks', 'ambient-prompt');
+    const hookPath = path.join(ROOT, 'scripts', 'hooks', 'preamble');
     const hookContent = readFileSync(hookPath, 'utf-8');
 
     const helpersRefs = extractPrefixedRefs(helpersContent);
     const hookRefs = extractPrefixedRefs(hookContent);
     const hookSkillSet = new Set(hookRefs);
 
-    expect(helpersRefs.length, 'helpers.ts AMBIENT_PREAMBLE should have skill refs').toBeGreaterThan(5);
+    // The new preamble is detection-only — helpers.ts DEVFLOW_PREAMBLE also has only router ref.
+    // Just verify helpers.ts has at least one skill ref (devflow:router).
+    expect(helpersRefs.length, 'helpers.ts DEVFLOW_PREAMBLE should have skill refs').toBeGreaterThan(0);
 
     const skillRefs = filterNonSkillRefs(helpersRefs);
     for (const ref of skillRefs) {
       expect(
         hookSkillSet.has(ref),
-        `tests/integration/helpers.ts AMBIENT_PREAMBLE has 'devflow:${ref}' but scripts/hooks/ambient-prompt does not — preamble drift`,
+        `tests/integration/helpers.ts DEVFLOW_PREAMBLE has 'devflow:${ref}' but scripts/hooks/preamble does not — preamble drift`,
       ).toBe(true);
     }
   });
@@ -884,16 +889,16 @@ describe('Cross-component runtime alignment', () => {
     }
   });
 
-  it('review-orchestration core reviewers exist in reviewer Focus Areas', () => {
+  it('review (review-orchestration) core reviewers exist in reviewer Focus Areas', () => {
     const orchContent = readFileSync(
-      path.join(ROOT, 'shared', 'skills', 'review-orchestration', 'SKILL.md'),
+      path.join(ROOT, 'shared', 'skills', 'review', 'SKILL.md'),
       'utf-8',
     );
 
     // Extract core reviewer list: "- security, architecture, performance, ..."
     const coreMatch = orchContent.match(/^\*\*7 core reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
     if (!coreMatch) {
-      expect.unreachable('review-orchestration should list 7 core reviewers');
+      expect.unreachable('review skill should list 7 core reviewers');
     }
 
     const coreReviewers = coreMatch[1].split(',').map(s => s.trim());
@@ -902,21 +907,21 @@ describe('Cross-component runtime alignment', () => {
     for (const focus of coreReviewers) {
       expect(
         reviewerFocusAreas.has(focus),
-        `review-orchestration lists core reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
+        `review skill lists core reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
       ).toBe(true);
     }
   });
 
-  it('review-orchestration conditional reviewers exist in reviewer Focus Areas', () => {
+  it('review (review-orchestration) conditional reviewers exist in reviewer Focus Areas', () => {
     const orchContent = readFileSync(
-      path.join(ROOT, 'shared', 'skills', 'review-orchestration', 'SKILL.md'),
+      path.join(ROOT, 'shared', 'skills', 'review', 'SKILL.md'),
       'utf-8',
     );
 
     // Extract conditional reviewer list: "- typescript, react, database, ..."
     const condMatch = orchContent.match(/^\*\*Conditional reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
     if (!condMatch) {
-      expect.unreachable('review-orchestration should list conditional reviewers');
+      expect.unreachable('review skill should list conditional reviewers');
     }
 
     const condReviewers = condMatch[1].split(',').map(s => s.trim());
@@ -924,7 +929,7 @@ describe('Cross-component runtime alignment', () => {
     for (const focus of condReviewers) {
       expect(
         reviewerFocusAreas.has(focus),
-        `review-orchestration lists conditional reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
+        `review skill lists conditional reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
       ).toBe(true);
     }
   });

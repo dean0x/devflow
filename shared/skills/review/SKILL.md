@@ -1,5 +1,5 @@
 ---
-name: review-orchestration
+name: review
 description: Agent orchestration for REVIEW intent in ambient ORCHESTRATED mode — multi-agent code review with parallel reviewers
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion

@@ -1,5 +1,5 @@
 ---
-name: implementation-orchestration
+name: implement
 description: Agent orchestration for IMPLEMENT intent — pre-flight, Coder, quality gates
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash, Task
@@ -67,6 +67,8 @@ Spawn `Task(subagent_type="Coder")` with input variables:
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
+
+**TDD Enforcement**: Coder MUST follow TDD (RED-GREEN-REFACTOR). Test commits must precede production code. This is defense-in-depth — even if Coder frontmatter changes, the orchestrator enforces TDD.
 
 If Coder returns **BLOCKED**, halt the pipeline and report to user.
 

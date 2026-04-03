@@ -1,5 +1,5 @@
 ---
-name: implementation-patterns
+name: patterns
 description: This skill should be used when the user asks to "create an API endpoint", "add CRUD operations", "implement event handlers", "set up logging", "add configuration", or builds features involving database operations, REST/GraphQL APIs, pub/sub patterns, or service configuration. Provides implementation patterns that follow existing codebase conventions.
 user-invocable: false
 allowed-tools: Read, Grep, Glob

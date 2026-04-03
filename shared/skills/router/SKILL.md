@@ -1,15 +1,15 @@
 ---
-name: ambient-router
-description: This skill should be used when classifying user intent for ambient mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
+name: router
+description: This skill should be used when classifying user intent for DevFlow mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
 user-invocable: false
 # No allowed-tools: orchestrator requires unrestricted access (Skill, Agent, Edit, Write, Bash)
 ---
 
-# Ambient Router
+# Router
 
 Classify user intent and auto-load relevant skills. Zero overhead for simple requests, skill loading + optional agent orchestration for substantive work.
 
-**Note:** The UserPromptSubmit hook injects a self-contained classification preamble on every prompt with compact rules and skill mappings. After context compaction, this SKILL.md may be dropped — the preamble is the reliable fallback that ensures classification and skill loading continue to work.
+**Note:** The UserPromptSubmit hook injects a detection-only preamble (classification rules only). This SKILL.md contains the full skill mappings — load it via Skill tool for complete routing logic.
 
 ## Iron Law
 
@@ -27,17 +27,17 @@ Classify user intent and auto-load relevant skills. Zero overhead for simple req
 
 Determine what the user is trying to do from their prompt.
 
-| Intent | Signal Words / Patterns | Examples |
-|--------|------------------------|---------|
-| **IMPLEMENT** | "add", "create", "implement", "build", "write", "make" | "add a login form", "create an API endpoint" |
-| **DEBUG** | "fix", "bug", "broken", "failing", "error", "why does" | "fix the auth error", "why is this test failing" |
-| **REVIEW** | "check", "look at", "review", "is this ok", "any issues" | "check this function", "any issues with this?" |
-| **RESOLVE** | "resolve", "fix review issues", "address feedback", "fix findings" | "resolve the review issues", "fix the findings" |
-| **PIPELINE** | "end to end", "implement and review", "build and review", "full pipeline" | "implement this end to end", "build and review this" |
-| **MULTI_WORKTREE** | "all worktrees/branches", "each worktree/branch", "review everything", "resolve all" | "review all my worktrees", "resolve all branches", "review everything that needs review" |
-| **PLAN** | "how should", "design", "architecture", "approach", "strategy" | "how should I structure auth?", "what's the approach for caching?" |
-| **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" | "where is the config?", "explain this function" |
-| **CHAT** | greetings, meta-questions, confirmations, short responses | "thanks", "yes", "what can you do?" |
+| Intent | Signal Words / Patterns |
+|--------|------------------------|
+| **IMPLEMENT** | "add", "create", "implement", "build", "write", "make" |
+| **DEBUG** | "fix", "bug", "broken", "failing", "error", "why does" |
+| **REVIEW** | "check", "look at", "review", "is this ok", "any issues" |
+| **RESOLVE** | "resolve", "fix review issues", "address feedback", "fix findings" |
+| **PIPELINE** | "end to end", "implement and review", "build and review", "full pipeline" |
+| **MULTI_WORKTREE** | "all worktrees/branches", "each worktree/branch", "review everything", "resolve all" |
+| **PLAN** | "how should", "design", "architecture", "approach", "strategy" |
+| **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" |
+| **CHAT** | greetings, meta-questions, confirmations, short responses |
 
 **Ambiguous prompts:** "Update the README" → QUICK. Git operations like "commit this" → QUICK. Code-change prompts without clear scope → GUIDED (not QUICK).
 
@@ -49,7 +49,7 @@ Determine how much enforcement the prompt warrants.
 |-------|----------|--------|
 | **QUICK** | CHAT intent. EXPLORE intent. Git/devops operations (commit, push, merge, branch, pr, deploy, reinstall). Single-word continuations. Small edits, config changes, trivial single-file tweaks. | Respond normally. Zero overhead. Do not state classification. |
 | **GUIDED** | IMPLEMENT with small scope (≤2 files, single module). DEBUG with clear error location (stack trace, specific file, known function). PLAN for focused design questions (specific area/pattern). REVIEW (small scope — see below). | Load skills via Skill tool. Main session implements directly. Spawn Simplifier after code changes. State classification. |
-| **ORCHESTRATED** | IMPLEMENT with larger scope (>2 files, multi-module, complex). DEBUG with vague/cross-cutting bug (no clear location, multiple possible causes). PLAN for system-level architecture (caching layer, auth system, multi-module design). REVIEW (large scope — see below). RESOLVE (always). PIPELINE (always). | Load skills via Skill tool, then orchestrate agents per Step 5. State classification. |
+| **ORCHESTRATED** | IMPLEMENT with larger scope (>2 files, multi-module, complex). DEBUG with vague/cross-cutting bug (no clear location, multiple possible causes). PLAN for system-level architecture (caching layer, auth system, multi-module design). REVIEW (large scope — see below). RESOLVE (always). PIPELINE (always). | Load skills via Skill tool, then orchestrate agents. State classification. |
 
 **Scope-based decision criteria:**
 
@@ -73,21 +73,21 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
+| **IMPLEMENT** | devflow:test-driven-development, devflow:patterns, devflow:research | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
 | **DEBUG** | devflow:software-design, devflow:testing | devflow:git (if git operations involved) |
-| **PLAN** | devflow:implementation-patterns, devflow:software-design | — |
+| **PLAN** | devflow:patterns, devflow:software-design | — |
 | **REVIEW** | devflow:self-review, devflow:software-design | devflow:testing |
 
 ### ORCHESTRATED-depth skills
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | devflow:implementation-orchestration, devflow:implementation-patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
-| **DEBUG** | devflow:debug-orchestration, devflow:software-design | devflow:git (if git operations involved) |
-| **PLAN** | devflow:plan-orchestration, devflow:implementation-patterns, devflow:software-design | — |
-| **REVIEW** | devflow:review-orchestration | — (reviewers load their own pattern skills) |
-| **RESOLVE** | devflow:resolve-orchestration, devflow:software-design | — |
-| **PIPELINE** | devflow:pipeline-orchestration, devflow:implementation-patterns | — |
+| **IMPLEMENT** | devflow:implement, devflow:patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
+| **DEBUG** | devflow:debug, devflow:software-design | devflow:git (if git operations involved) |
+| **PLAN** | devflow:plan, devflow:patterns, devflow:software-design | — |
+| **REVIEW** | devflow:review | — (reviewers load their own pattern skills) |
+| **RESOLVE** | devflow:resolve, devflow:software-design | — |
+| **PIPELINE** | devflow:pipeline, devflow:patterns | — |
 
 **Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity, devflow:consistency, devflow:database, devflow:dependencies, devflow:documentation, devflow:regression, devflow:architecture, devflow:accessibility, devflow:performance, devflow:qa. These skills are always installed (universal skill installation) but loaded by Reviewer/Tester agents at runtime, not by the router.
 
@@ -102,14 +102,14 @@ BLOCKING REQUIREMENT: Your FIRST tool calls MUST be Skill tool invocations — b
 writing ANY text about the task. Invoke all selected skills, THEN state classification,
 THEN proceed with work. Do NOT write implementation text before all Skill tools return.
 For IMPLEMENT intent, enforce TDD: write the failing test before ANY production code.
-NOTE: Skills loaded in the main session via ambient mode are reference patterns only —
+NOTE: Skills loaded in the main session via DevFlow mode are reference patterns only —
 their allowed-tools metadata does NOT restrict your tool access. You retain full access
 to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 </IMPORTANT>
 
 - **QUICK:** Respond directly. No preamble, no classification statement.
-- **GUIDED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/GUIDED. Loading: devflow:implementation-patterns, devflow:search-first.` Then work directly in main session. After code changes, spawn Simplifier on changed files.
-- **ORCHESTRATED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Ambient: IMPLEMENT/ORCHESTRATED. Loading: devflow:implementation-orchestration, devflow:implementation-patterns.` Then follow Step 5 for agent orchestration.
+- **GUIDED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `DevFlow: IMPLEMENT/GUIDED. Loading: devflow:patterns, devflow:research.` Then work directly in main session. After code changes, spawn Simplifier on changed files.
+- **ORCHESTRATED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `DevFlow: IMPLEMENT/ORCHESTRATED. Loading: devflow:implement, devflow:patterns.` Then orchestrate agents per the loaded orchestration skill's pipeline.
 
 ### GUIDED Behavior by Intent
 
@@ -120,33 +120,7 @@ to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 | **PLAN** | Explore relevant code and design directly. The area is focused enough for main session. | No Simplifier (no code changes). |
 | **REVIEW** | Review directly with loaded skills (self-review in main session). | No Simplifier. |
 
-## Step 5: Orchestrate Agents (ORCHESTRATED depth only)
-
-After loading skills via Step 3-4, execute the agent pipeline for the classified intent:
-
-| Intent | Pipeline |
-|--------|----------|
-| **IMPLEMENT** | Follow devflow:implementation-orchestration skill pipeline: pre-flight → plan synthesis → Coder → quality gates |
-| **DEBUG** | Follow devflow:debug-orchestration skill pipeline: hypotheses → parallel Explores → convergence → report → offer fix |
-| **PLAN** | Follow devflow:plan-orchestration skill pipeline: Skimmer → Explores → Plan agent → gap validation |
-| **REVIEW** | Follow devflow:review-orchestration skill pipeline: pre-flight → incremental detection → parallel reviewers → synthesis |
-| **RESOLVE** | Follow devflow:resolve-orchestration skill pipeline: find review → parse issues → batch → parallel resolvers → simplify |
-| **PIPELINE** | Follow devflow:pipeline-orchestration skill pipeline: implement → gate → review → gate → resolve |
-| **MULTI_WORKTREE + REVIEW** | Follow `devflow:code-review` command flow (auto-discovers worktrees natively) |
-| **MULTI_WORKTREE + RESOLVE** | Follow `devflow:resolve` command flow (auto-discovers worktrees natively) |
-| **EXPLORE** | No agents — respond in main session |
-| **CHAT** | No agents — respond in main session |
-
----
-
-## Transparency Rules
-
-1. **QUICK → silent.** No classification output.
-2. **GUIDED → brief statement + full skill enforcement.** One line: intent, depth, skills loaded. Then implement in main session with skill patterns applied.
-3. **ORCHESTRATED → brief statement + full skill enforcement + agent orchestration.** One line: intent, depth, skills loaded. Then follow every skill requirement and orchestrate agents per Step 5.
-4. **Never lie about classification.** If uncertain, say so.
-5. **Never over-classify.** When in doubt, go one tier lower.
-6. **Never under-apply.** Rationalization is the enemy of quality. If a skill requires a step, do the step.
+State classification as: `DevFlow: INTENT/DEPTH. Loading: [skills].` QUICK is silent.
 
 ## Edge Cases
 

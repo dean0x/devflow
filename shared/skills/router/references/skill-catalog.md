@@ -1,6 +1,6 @@
-# Ambient Router — Skill Catalog
+# Router — Skill Catalog
 
-Full mapping of DevFlow skills to ambient intents and file-type triggers. The ambient-router SKILL.md references this for detailed selection logic.
+Full mapping of DevFlow skills to intents and file-type triggers. The router SKILL.md references this for detailed selection logic.
 
 ## Skills Available for Ambient Loading
 
@@ -10,10 +10,10 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
-| devflow:implementation-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates agent pipeline |
+| devflow:implement | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates agent pipeline |
 | devflow:test-driven-development | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file — enforces RED-GREEN-REFACTOR |
-| devflow:implementation-patterns | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file |
-| devflow:search-first | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
+| devflow:patterns | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file |
+| devflow:research | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
 | devflow:typescript | TypeScript files in scope | GUIDED + ORCHESTRATED | `*.ts`, `*.tsx` |
 | devflow:react | React components in scope | GUIDED + ORCHESTRATED | `*.tsx`, `*.jsx` |
 | devflow:ui-design | UI/styling work | GUIDED + ORCHESTRATED | `*.css`, `*.scss`, `*.tsx` with styling keywords |
@@ -28,7 +28,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
-| devflow:debug-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates investigation pipeline |
+| devflow:debug | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates investigation pipeline |
 | devflow:software-design | Always for DEBUG | GUIDED + ORCHESTRATED | Any code file |
 | devflow:testing | Always for DEBUG (GUIDED) | GUIDED | Any code file |
 | devflow:git | Git operations involved | GUIDED + ORCHESTRATED | User mentions git, rebase, merge, etc. |
@@ -40,7 +40,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | devflow:self-review | Always for REVIEW | GUIDED | Any code file |
 | devflow:software-design | Always for REVIEW | GUIDED | Any code file |
 | devflow:testing | Test files in scope | GUIDED | `*.test.*`, `*.spec.*` |
-| devflow:review-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates multi-agent review pipeline |
+| devflow:review | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates multi-agent review pipeline |
 
 **REVIEW depth is continuation-aware**: If the prior classification in the same conversation was IMPLEMENT/GUIDED → REVIEW stays GUIDED. If prior was IMPLEMENT/ORCHESTRATED → REVIEW becomes ORCHESTRATED. Standalone REVIEW uses signal words: "full review"/"branch review"/"PR review" → ORCHESTRATED, "check this"/"review this file" → GUIDED. Ambiguous → GUIDED.
 
@@ -48,7 +48,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
-| devflow:resolve-orchestration | Always for RESOLVE | ORCHESTRATED | Any — orchestrates issue resolution pipeline |
+| devflow:resolve | Always for RESOLVE | ORCHESTRATED | Any — orchestrates issue resolution pipeline |
 | devflow:software-design | Always for RESOLVE | ORCHESTRATED | Any code file |
 
 RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resolver agents and Simplifier.
@@ -57,8 +57,8 @@ RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resol
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
-| devflow:pipeline-orchestration | Always for PIPELINE | ORCHESTRATED | Any — meta-orchestrator for implement → review → resolve |
-| devflow:implementation-patterns | Always for PIPELINE | ORCHESTRATED | Any code file |
+| devflow:pipeline | Always for PIPELINE | ORCHESTRATED | Any — meta-orchestrator for implement → review → resolve |
+| devflow:patterns | Always for PIPELINE | ORCHESTRATED | Any code file |
 
 PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with user gates.
 
@@ -66,8 +66,8 @@ PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
-| devflow:plan-orchestration | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates design pipeline |
-| devflow:implementation-patterns | Always for PLAN | GUIDED + ORCHESTRATED | Any planning context |
+| devflow:plan | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates design pipeline |
+| devflow:patterns | Always for PLAN | GUIDED + ORCHESTRATED | Any planning context |
 | devflow:software-design | Always for PLAN | GUIDED + ORCHESTRATED | System design discussions |
 
 ## Skills Excluded from Ambient Router Loading
@@ -102,7 +102,7 @@ No additional skills needed — the code-review and resolve commands handle all 
 ## Selection Limits
 
 - **Maximum 3 knowledge skills** per ambient response (primary + up to 2 secondary)
-- **Orchestration skills** (devflow:implementation-orchestration, devflow:debug-orchestration, devflow:plan-orchestration, devflow:review-orchestration, devflow:resolve-orchestration, devflow:pipeline-orchestration) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
+- **Orchestration skills** (devflow:implement, devflow:debug, devflow:plan, devflow:review, devflow:resolve, devflow:pipeline) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
 - **Primary skills** are always loaded for the classified intent at both GUIDED and ORCHESTRATED depth
 - **Secondary skills** are loaded only when file patterns match conversation context
 - **GUIDED depth** loads knowledge skills only (no orchestration skills) — main session works directly

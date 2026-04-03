@@ -1,5 +1,5 @@
 ---
-name: pipeline-orchestration
+name: pipeline
 description: End-to-end meta-orchestrator chaining implement → review → resolve with user gates between stages
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
@@ -21,11 +21,11 @@ Meta-orchestrator chaining implement → review → resolve with user gates betw
 ## Cost Communication
 
 Classification statement must warn about scope:
-`Ambient: PIPELINE/ORCHESTRATED. This runs implement → review → resolve (15+ agents across stages).`
+`DevFlow: PIPELINE/ORCHESTRATED. This runs implement → review → resolve (15+ agents across stages).`
 
 ## Phase 1: Implement
 
-Follow devflow:implementation-orchestration pipeline (Phases 1-6).
+Follow devflow:implement pipeline (Phases 1-6).
 
 If implementation returns **BLOCKED**: halt entire pipeline, report blocker.
 
@@ -41,7 +41,7 @@ Use AskUserQuestion:
 
 ## Phase 3: Review
 
-Follow devflow:review-orchestration pipeline (Phases 1-6).
+Follow devflow:review pipeline (Phases 1-6).
 
 Report review results (merge recommendation, issue counts).
 
@@ -58,7 +58,7 @@ If **no blocking issues**:
 
 ## Phase 5: Resolve
 
-Follow devflow:resolve-orchestration pipeline (Phases 1-6).
+Follow devflow:resolve pipeline (Phases 1-6).
 
 ## Phase 6: Summary
 

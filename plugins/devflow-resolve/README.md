@@ -49,7 +49,7 @@ npx devflow-kit init --plugin=resolve
 ### Skills (4)
 - `software-design` - Result types, DI
 - `git` - Git safety, atomic commits, GitHub API
-- `implementation-patterns` - Implementation guidance
+- `patterns` - Implementation guidance
 - `security` - Security fix patterns
 
 ## Output

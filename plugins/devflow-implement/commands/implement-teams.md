@@ -68,7 +68,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "architecture-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -82,7 +82,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "integration-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -96,7 +96,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "reusable-code-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -110,7 +110,7 @@ Spawn exploration teammates with self-contained prompts:
 - Name: "edge-case-explorer"
   Prompt: |
     You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
        Consider prior decisions and known pitfalls relevant to this task.
     3. Skimmer context (files/patterns already identified):
@@ -175,7 +175,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "implementation-planner"
   Prompt: |
     You are planning implementation for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 4}
     3. Your deliverable: Step-by-step coding approach with specific files
@@ -197,7 +197,7 @@ Spawn planning teammates with self-contained prompts:
 - Name: "risk-planner"
   Prompt: |
     You are assessing risk and execution strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Exploration synthesis (what we know about the codebase):
        {synthesis output from Phase 4}
     3. Your deliverable: Risk assessment, rollback strategy, and execution

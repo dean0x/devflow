@@ -6,7 +6,7 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 
-const AMBIENT_HOOK_MARKER = 'ambient-prompt';
+const PREAMBLE_HOOK_MARKER = 'preamble';
 
 /**
  * Add the ambient UserPromptSubmit hook to settings JSON.
@@ -23,7 +23,7 @@ export function addAmbientHook(settingsJson: string, devflowDir: string): string
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' ambient-prompt';
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble';
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -58,7 +58,7 @@ export function removeAmbientHook(settingsJson: string): string {
 
   const before = settings.hooks.UserPromptSubmit.length;
   settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
-    (matcher) => !matcher.hooks.some((h) => h.command.includes(AMBIENT_HOOK_MARKER)),
+    (matcher) => !matcher.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
   );
 
   if (settings.hooks.UserPromptSubmit.length === before) {
@@ -87,7 +87,7 @@ export function hasAmbientHook(settingsJson: string): boolean {
   }
 
   return settings.hooks.UserPromptSubmit.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(AMBIENT_HOOK_MARKER)),
+    matcher.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
   );
 }
 

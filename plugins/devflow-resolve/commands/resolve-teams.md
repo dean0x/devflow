@@ -116,7 +116,7 @@ Each resolver teammate receives the following instructions (only the issue list 
 
     You are resolving review issues on branch {branch} (PR #{pr_number}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    1. Read your skill: `Read ~/.claude/skills/devflow:implementation-patterns/SKILL.md`
+    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Your issues to resolve:
        {BATCH_ISSUES}
     3. For each issue:

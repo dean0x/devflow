@@ -1,6 +1,6 @@
 import { execSync, execFileSync } from 'child_process';
 
-const CLASSIFICATION_PATTERN = /ambient:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
+const CLASSIFICATION_PATTERN = /devflow:\s*(IMPLEMENT|DEBUG|REVIEW|PLAN|EXPLORE|CHAT|RESOLVE|PIPELINE)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
 const LOADING_PATTERN = /loading:\s*[\w:-]+(?:,\s*[\w:-]+)*/i;
 
 /**
@@ -15,17 +15,13 @@ export function isClaudeAvailable(): boolean {
   }
 }
 
-// SYNC: must match scripts/hooks/ambient-prompt PREAMBLE structure
-const AMBIENT_PREAMBLE =
-  `AMBIENT MODE: Classify depth then act. QUICK=chat/explore/git/config/trivial: respond normally. GUIDED=implement(1-2 files)/debug(clear error)/plan(focused)/review: load skills. ORCHESTRATED=implement(3+ files)/debug(vague)/architecture: load skills+agents. Prefer GUIDED for code changes.
-GUIDED/ORCHESTRATED: Call Skill tool for ALL skills listed for intent — one Skill call per skill, before ANY text.
-IMPLEMENT → devflow:test-driven-development, devflow:implementation-patterns, devflow:search-first
-DEBUG → devflow:software-design, devflow:testing
-REVIEW → devflow:self-review, devflow:software-design
-PLAN → devflow:implementation-patterns, devflow:software-design
-Also add if file type matches: devflow:typescript, devflow:react, devflow:go, devflow:java, devflow:python, devflow:rust, devflow:boundary-validation, devflow:security, devflow:ui-design
-ORCHESTRATED also add: devflow:implementation-orchestration / devflow:debug-orchestration / devflow:plan-orchestration
-State: Ambient: INTENT/DEPTH. Loading: skills. Then proceed.`;
+// SYNC: must match scripts/hooks/preamble PREAMBLE structure
+const DEVFLOW_PREAMBLE =
+  `DEVFLOW MODE: Classify user intent and depth.
+Intents: IMPLEMENT (add/create/build), DEBUG (fix/bug/error), REVIEW (check/review), RESOLVE (resolve review issues), PIPELINE (end-to-end), PLAN (design/architecture), EXPLORE (find/explain), CHAT (greetings/confirmations), MULTI_WORKTREE (all worktrees/branches).
+Depth: QUICK (chat, explore, git ops, config, trivial) | GUIDED (code changes ≤2 files, clear bugs, focused reviews) | ORCHESTRATED (>2 files, multi-module, vague bugs, full/branch/PR reviews, RESOLVE and PIPELINE always).
+QUICK: respond normally. No classification, no skills.
+GUIDED/ORCHESTRATED: Load devflow:router skill FIRST via Skill tool for skill mappings. Then load all skills it specifies. State: DevFlow: INTENT/DEPTH. Loading: [skills].`;
 
 /** Structured result from a claude -p invocation */
 export interface ClaudeResult {
@@ -47,7 +43,7 @@ export function runClaude(prompt: string, options?: { timeout?: number; ambient?
 
   const args = ['-p', '--output-format', 'json', '--model', 'haiku'];
   if (ambient) {
-    args.push('--append-system-prompt', AMBIENT_PREAMBLE);
+    args.push('--append-system-prompt', DEVFLOW_PREAMBLE);
   }
   args.push(prompt);
 

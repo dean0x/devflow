@@ -1,5 +1,5 @@
 ---
-name: search-first
+name: research
 description: >-
   This skill should be used when the user asks to "add a utility", "create a helper",
   "implement parsing", "build a wrapper", or writes infrastructure/utility code that
@@ -8,7 +8,7 @@ user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
-# Search-First
+# Research
 
 Research before building. Check if a battle-tested solution exists before writing custom utility code.
 
@@ -103,8 +103,8 @@ Choose one of four outcomes:
 **Document the decision** in a code comment at the usage site:
 
 ```typescript
-// search-first: Adopted date-fns for date formatting (2M weekly downloads, 30KB)
-// search-first: Built custom — no package handles our specific wire format
+// research: Adopted date-fns for date formatting (2M weekly downloads, 30KB)
+// research: Built custom — no package handles our specific wire format
 ```
 
 ---

@@ -23,7 +23,7 @@ It watches every prompt, classifies intent, and orchestrates the right workflow 
 ```
 you: add rate limiting to the /api/upload endpoint
 
-DevFlow: Ambient: IMPLEMENT/ORCHESTRATED
+DevFlow: IMPLEMENT/ORCHESTRATED
          → Created branch feat/42-rate-limit-upload
          → Exploring codebase... Planning... Coding...
          → Validator: build ✓ typecheck ✓ lint ✓ tests ✓

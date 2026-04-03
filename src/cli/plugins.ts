@@ -47,7 +47,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins',
     commands: [],
     agents: [],
-    skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'search-first', 'test-driven-development', 'testing'],
+    skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
     name: 'devflow-specify',
@@ -61,7 +61,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow with exploration, planning, and coding',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
-    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'qa', 'self-review', 'worktree-support'],
+    skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'qa', 'self-review', 'worktree-support'],
   },
   {
     name: 'devflow-code-review',
@@ -75,7 +75,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Process and fix code review issues with risk assessment',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'security', 'worktree-support'],
+    skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'security', 'worktree-support'],
   },
   {
     name: 'devflow-debug',
@@ -97,13 +97,13 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/ambient'],
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
     skills: [
-      'ambient-router',
-      'implementation-orchestration',
-      'debug-orchestration',
-      'plan-orchestration',
-      'review-orchestration',
-      'resolve-orchestration',
-      'pipeline-orchestration',
+      'router',
+      'implement',
+      'debug',
+      'plan',
+      'review',
+      'resolve',
+      'pipeline',
       'review-methodology',
       'security',
       'architecture',
@@ -115,7 +115,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'database',
       'dependencies',
       'documentation',
-      'implementation-patterns',
+      'patterns',
       'knowledge-persistence',
       'qa',
       'worktree-support',
@@ -339,6 +339,26 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'devflow:database-patterns',
   'devflow:dependencies-patterns',
   'devflow:documentation-patterns',
+  // v2.0.0 ambient refinements: old names → short names
+  'devflow:ambient-router',
+  'devflow:implementation-orchestration',
+  'devflow:debug-orchestration',
+  'devflow:plan-orchestration',
+  'devflow:review-orchestration',
+  'devflow:resolve-orchestration',
+  'devflow:pipeline-orchestration',
+  'devflow:implementation-patterns',
+  'devflow:search-first',
+  // v2.0.0 ambient refinements: new bare names for pre-namespace installs
+  'router',
+  'implement',
+  'debug',
+  'plan',
+  'review',
+  'resolve',
+  'pipeline',
+  'patterns',
+  'research',
 ];
 
 /**
@@ -364,6 +384,15 @@ export const SHADOW_RENAMES: [string, string][] = [
   ['database-patterns', 'database'],
   ['dependencies-patterns', 'dependencies'],
   ['documentation-patterns', 'documentation'],
+  ['ambient-router', 'router'],
+  ['implementation-orchestration', 'implement'],
+  ['debug-orchestration', 'debug'],
+  ['plan-orchestration', 'plan'],
+  ['review-orchestration', 'review'],
+  ['resolve-orchestration', 'resolve'],
+  ['pipeline-orchestration', 'pipeline'],
+  ['implementation-patterns', 'patterns'],
+  ['search-first', 'research'],
 ];
 
 /**
@@ -420,7 +449,7 @@ export function buildAssetMaps(plugins: PluginDefinition[]): {
 /**
  * Build a skills map from ALL plugins (regardless of selection).
  * Skills are tiny markdown files — always install all of them so orchestration
- * skills (review-orchestration, resolve-orchestration) can spawn agents that
+ * skills (review, resolve) can spawn agents that
  * depend on skills from other plugins.
  */
 export function buildFullSkillsMap(): Map<string, string> {
