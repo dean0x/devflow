@@ -69,7 +69,7 @@ describe('addLearningHook', () => {
     const input = JSON.stringify({
       hooks: {
         SessionEnd: [{ hooks: [{ type: 'command', command: 'other-session-end.sh' }] }],
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
       },
     });
     const result = addLearningHook(input, '/home/user/.devflow');
@@ -105,7 +105,7 @@ describe('addLearningHook', () => {
         Stop: [
           { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
         ],
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
       },
     });
     const result = addLearningHook(input, '/home/user/.devflow');
@@ -162,7 +162,7 @@ describe('removeLearningHook', () => {
   it('preserves other hook event types', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
         SessionEnd: [
           { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
         ],

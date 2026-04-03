@@ -16,7 +16,7 @@ const HOOK_SCRIPTS = [
   'stop-update-memory',
   'session-start-memory',
   'pre-compact-memory',
-  'ambient-prompt',
+  'preamble',
   'json-parse',
 ];
 

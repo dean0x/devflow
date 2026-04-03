@@ -889,7 +889,7 @@ describe('Cross-component runtime alignment', () => {
     }
   });
 
-  it('review (review-orchestration) core reviewers exist in reviewer Focus Areas', () => {
+  it('review orchestration core reviewers exist in reviewer Focus Areas', () => {
     const orchContent = readFileSync(
       path.join(ROOT, 'shared', 'skills', 'review', 'SKILL.md'),
       'utf-8',
@@ -912,7 +912,7 @@ describe('Cross-component runtime alignment', () => {
     }
   });
 
-  it('review (review-orchestration) conditional reviewers exist in reviewer Focus Areas', () => {
+  it('review orchestration conditional reviewers exist in reviewer Focus Areas', () => {
     const orchContent = readFileSync(
       path.join(ROOT, 'shared', 'skills', 'review', 'SKILL.md'),
       'utf-8',

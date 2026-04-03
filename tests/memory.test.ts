@@ -22,14 +22,14 @@ describe('addMemoryHooks', () => {
   it('preserves existing hooks (UserPromptSubmit/ambient untouched)', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
       },
     });
     const result = addMemoryHooks(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('ambient-prompt');
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('preamble');
     expect(settings.hooks.Stop).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.PreCompact).toHaveLength(1);
@@ -116,7 +116,7 @@ describe('removeMemoryHooks', () => {
   it('preserves other hooks (UserPromptSubmit)', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
         Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
         PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
@@ -211,7 +211,7 @@ describe('hasMemoryHooks', () => {
   it('returns false for non-memory hooks only', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'ambient-prompt' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
       },
     });
     expect(hasMemoryHooks(input)).toBe(false);

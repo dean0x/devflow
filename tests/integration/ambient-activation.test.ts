@@ -91,7 +91,7 @@ describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
 
   it('REVIEW prompt triggers skill loading', () => {
     const { result, passed, attempts } = runClaudeWithRetry(
-      'review the ambient-prompt hook script for any issues',
+      'review the preamble hook script for any issues',
       (r) => hasSkillInvocations(r),
       { maxAttempts: 5 },
     );
