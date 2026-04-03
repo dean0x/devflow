@@ -60,8 +60,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-implement',
     description: 'Complete task implementation workflow with exploration, planning, and coding',
     commands: ['/implement'],
-    agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'shepherd', 'validator'],
-    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'self-review', 'worktree-support'],
+    agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
+    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'qa', 'self-review', 'worktree-support'],
   },
   {
     name: 'devflow-code-review',
@@ -95,7 +95,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Ambient mode — intent classification with proportional agent orchestration',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'shepherd', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
     skills: [
       'ambient-router',
       'implementation-orchestration',
@@ -117,6 +117,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'documentation',
       'implementation-patterns',
       'knowledge-persistence',
+      'qa',
       'worktree-support',
     ],
   },
@@ -153,8 +154,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     optional: true,
   },
   {
-    name: 'devflow-frontend-design',
-    description: 'Frontend design patterns - typography, color systems, spacing, motion, responsive design',
+    name: 'devflow-ui-design',
+    description: 'UI design patterns - typography, color systems, spacing, motion, responsive design',
     commands: [],
     agents: [],
     skills: ['ui-design'],
@@ -195,11 +196,27 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
 ];
 
 /**
+ * Deprecated plugin names from old installations.
+ * Maps old name → new name for migration during init.
+ */
+export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
+  'devflow-frontend-design': 'devflow-ui-design',
+};
+
+/**
  * Deprecated command names from old installations.
  * Used during init to clean up stale command files on upgrade.
  */
 export const LEGACY_COMMAND_NAMES: string[] = [
   'review',
+];
+
+/**
+ * Deprecated agent names from old installations.
+ * Used during init to clean up stale agent files on upgrade.
+ */
+export const LEGACY_AGENT_NAMES: string[] = [
+  'shepherd',
 ];
 
 /**
@@ -309,6 +326,8 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'database',
   'dependencies',
   'documentation',
+  // v2.0.0 new skills: bare names for pre-namespace installs
+  'qa',
   // v2.0.0 git consolidation: prefixed old names for cleanup
   'devflow:git-safety',
   'devflow:git-workflow',

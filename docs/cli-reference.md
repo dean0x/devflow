@@ -54,7 +54,7 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-typescript` | Language | TypeScript patterns |
 | `devflow-react` | Language | React patterns |
 | `devflow-accessibility` | Language | Web accessibility patterns |
-| `devflow-frontend-design` | Language | Frontend design patterns |
+| `devflow-ui-design` | Language | UI design patterns |
 | `devflow-go` | Language | Go patterns |
 | `devflow-python` | Language | Python patterns |
 | `devflow-java` | Language | Java patterns |

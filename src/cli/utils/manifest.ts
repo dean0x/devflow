@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { LEGACY_PLUGIN_NAMES } from '../plugins.js';
 
 /**
  * Manifest data tracked for each DevFlow installation.
@@ -133,7 +134,8 @@ export function resolvePluginList(
   isPartialInstall: boolean,
 ): string[] {
   if (existingManifest && isPartialInstall) {
-    return mergeManifestPlugins(existingManifest.plugins, installedPluginNames);
+    const cleaned = existingManifest.plugins.map(p => LEGACY_PLUGIN_NAMES[p] ?? p);
+    return mergeManifestPlugins(cleaned, installedPluginNames);
   }
   return installedPluginNames;
 }

@@ -53,7 +53,7 @@ Skills are loaded via the Skill tool and work happens in the main session:
 
 | Intent | Pipeline |
 |--------|----------|
-| IMPLEMENT | Pre-flight → Coder → Validator → Simplifier → Scrutinizer → Shepherd |
+| IMPLEMENT | Pre-flight → Coder → Validator → Simplifier → Scrutinizer → Evaluator → Tester |
 | DEBUG | Hypotheses → parallel Explores → convergence → report → offer fix |
 | PLAN | Skimmer → Explores → Plan agent → gap validation |
 

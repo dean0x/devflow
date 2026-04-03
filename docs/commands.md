@@ -26,7 +26,8 @@ Executes a single task through the complete development lifecycle:
 4. **Implementation** — Write code on the feature branch
 5. **Validation** — Build, typecheck, lint, and test
 6. **Refinement** — Simplifier (code clarity) + Scrutinizer (9-pillar quality)
-7. **Alignment** — Shepherd verifies implementation matches the original request
+7. **Alignment** — Evaluator verifies implementation matches the original request
+8. **QA Testing** — Tester executes scenario-based acceptance tests
 
 Creates a PR when complete.
 

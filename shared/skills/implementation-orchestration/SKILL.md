@@ -15,7 +15,7 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 
 > **QUALITY GATES ARE NON-NEGOTIABLE**
 >
-> Every Coder output passes through Validator → Simplifier → Scrutinizer → re-Validate → Shepherd.
+> Every Coder output passes through Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
 > Skipping a gate because "it looks fine" is never acceptable. The pipeline runs to completion
 > or halts on failure — there is no shortcut.
 
@@ -90,7 +90,8 @@ Run sequentially — each gate must pass before the next:
 2. `Task(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
 3. `Task(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED
 4. `Task(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
-5. `Task(subagent_type="Shepherd")` — verify implementation matches original request — retry up to 2× if misalignment found
+5. `Task(subagent_type="Evaluator")` — verify implementation matches original request — retry up to 2× if misalignment found
+6. `Task(subagent_type="Tester")` — scenario-based acceptance testing from user's perspective — retry up to 2× if QA fails
 
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
 
@@ -108,4 +109,5 @@ Report results:
 
 - **Coder BLOCKED**: Halt immediately, report blocker to user
 - **Validator fails after retries**: Report specific failures, halt pipeline
-- **Shepherd misalignment after retries**: Report misalignment details, let user decide next steps
+- **Evaluator misalignment after retries**: Report misalignment details, let user decide next steps
+- **Tester QA failures after retries**: Report QA failure details, let user decide next steps

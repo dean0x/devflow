@@ -346,4 +346,17 @@ describe('resolvePluginList', () => {
     );
     expect(result).toEqual(['devflow-code-review']);
   });
+
+  it('remaps legacy plugin names in existing manifest on partial install', () => {
+    const legacyManifest: ManifestData = {
+      ...existingManifest,
+      plugins: ['devflow-core-skills', 'devflow-frontend-design'],
+    };
+    const result = resolvePluginList(
+      ['devflow-code-review'],
+      legacyManifest,
+      true,
+    );
+    expect(result).toEqual(['devflow-core-skills', 'devflow-ui-design', 'devflow-code-review']);
+  });
 });

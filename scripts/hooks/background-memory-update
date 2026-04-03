@@ -99,12 +99,14 @@ extract_last_turn() {
 
   last_user=$(grep '"type":"user"' "$transcript" 2>/dev/null \
     | tail -3 \
-    | while IFS= read -r line; do echo "$line" | json_extract_messages; done \
+    | while IFS= read -r line; do printf '%s\n' "$line" | head -c 100000 | json_extract_messages; done \
+    | awk 'NF' \
     | tail -1)
 
   last_assistant=$(grep '"type":"assistant"' "$transcript" 2>/dev/null \
     | tail -3 \
-    | while IFS= read -r line; do echo "$line" | json_extract_messages; done \
+    | while IFS= read -r line; do printf '%s\n' "$line" | head -c 100000 | json_extract_messages; done \
+    | awk 'NF' \
     | tail -1)
 
   # Truncate to ~4000 chars total to keep token cost low

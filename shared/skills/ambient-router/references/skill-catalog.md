@@ -84,6 +84,7 @@ These skills are always installed (universal skill installation) but loaded by a
 - devflow:architecture — SOLID analysis, coupling detection, layering issues
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - devflow:performance — N+1 queries, memory leaks, caching opportunities
+- devflow:qa — Scenario-based acceptance testing, evidence collection
 
 ## Multi-Worktree Detection
 

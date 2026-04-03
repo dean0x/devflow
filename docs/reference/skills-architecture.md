@@ -12,7 +12,7 @@ Shared patterns used by multiple agents.
 
 | Skill | Purpose | Used By |
 |-------|---------|---------|
-| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Shepherd |
+| `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Evaluator |
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
 | `self-review` | 9-pillar self-review framework | Scrutinizer |
 | `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
@@ -21,6 +21,7 @@ Shared patterns used by multiple agents.
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
 | `ambient-router` | Intent classification and proportional skill loading for ambient mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
 | `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /specify, /self-review |
+| `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
 ### Tier 1b: Pattern Skills
 

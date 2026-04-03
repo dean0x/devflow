@@ -20,7 +20,7 @@ import {
   migrateMemoryFiles,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, SHADOW_RENAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, SHADOW_RENAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook } from './ambient.js';
@@ -125,7 +125,8 @@ export function parsePluginSelection(
 ): { selected: string[]; invalid: string[] } {
   const selected = input.split(',').map(p => {
     const trimmed = p.trim();
-    return trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
+    const normalized = trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
+    return LEGACY_PLUGIN_NAMES[normalized] ?? normalized;
   });
 
   const validNames = validPlugins.map(p => p.name);
@@ -309,7 +310,7 @@ export const initCommand = new Command('init')
         'devflow-typescript': 'TypeScript patterns',
         'devflow-react': 'React patterns',
         'devflow-accessibility': 'WCAG compliance',
-        'devflow-frontend-design': 'typography, color, spacing',
+        'devflow-ui-design': 'typography, color, spacing',
         'devflow-go': 'Go patterns',
         'devflow-java': 'Java patterns',
         'devflow-python': 'Python patterns',

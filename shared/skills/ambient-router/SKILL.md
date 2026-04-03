@@ -89,7 +89,7 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 | **RESOLVE** | devflow:resolve-orchestration, devflow:software-design | — |
 | **PIPELINE** | devflow:pipeline-orchestration, devflow:implementation-patterns | — |
 
-**Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity, devflow:consistency, devflow:database, devflow:dependencies, devflow:documentation, devflow:regression, devflow:architecture, devflow:accessibility, devflow:performance. These skills are always installed (universal skill installation) but loaded by Reviewer agents at runtime, not by the router.
+**Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity, devflow:consistency, devflow:database, devflow:dependencies, devflow:documentation, devflow:regression, devflow:architecture, devflow:accessibility, devflow:performance, devflow:qa. These skills are always installed (universal skill installation) but loaded by Reviewer/Tester agents at runtime, not by the router.
 
 See `references/skill-catalog.md` for the full skill-to-intent mapping with file pattern triggers.
 

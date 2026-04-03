@@ -1,6 +1,6 @@
 {
-  "name": "devflow-frontend-design",
-  "description": "Frontend design patterns - typography, color systems, spacing, motion, responsive design",
+  "name": "devflow-ui-design",
+  "description": "UI design patterns - typography, color systems, spacing, motion, responsive design",
   "author": {
     "name": "Dean0x"
   },

@@ -20,7 +20,8 @@
     "validator",
     "simplifier",
     "scrutinizer",
-    "shepherd",
+    "evaluator",
+    "tester",
     "skimmer",
     "reviewer",
     "git",
@@ -48,6 +49,7 @@
     "documentation",
     "implementation-patterns",
     "knowledge-persistence",
+    "qa",
     "worktree-support"
   ]
 }
