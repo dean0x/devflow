@@ -1,6 +1,6 @@
 # Working Memory
 
-DevFlow automatically preserves session context across restarts, `/clear`, and context compaction — zero ceremony required.
+Devflow automatically preserves session context across restarts, `/clear`, and context compaction — zero ceremony required.
 
 ## How it works
 
@@ -58,7 +58,7 @@ The Stop hook maintains these sections in `WORKING-MEMORY.md`:
 
 ## Long-term Knowledge
 
-Beyond session memory, DevFlow persists architectural decisions and known pitfalls:
+Beyond session memory, Devflow persists architectural decisions and known pitfalls:
 
 - **`decisions.md`** — ADR-numbered entries (append-only). Reviewers check if changes violate prior decisions.
 - **`pitfalls.md`** — PF-numbered entries scoped by area. Reviewers check if changes reintroduce known pitfalls.
@@ -67,7 +67,7 @@ These files are read by reviewers automatically during `/code-review`.
 
 ## Documentation Structure
 
-DevFlow creates project documentation in `.docs/`:
+Devflow creates project documentation in `.docs/`:
 
 ```
 .docs/

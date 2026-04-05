@@ -47,7 +47,7 @@ Skills are loaded via the Skill tool and work happens in the main session:
 | IMPLEMENT | test-driven-development, patterns, research | Implement with TDD | `Task(subagent_type="Simplifier")` |
 | DEBUG | software-design, testing | Investigate, diagnose, fix | `Task(subagent_type="Simplifier")` |
 | PLAN | patterns, software-design | Explore and design | — |
-| REVIEW | self-review, software-design | Review directly | — |
+| REVIEW | quality-gates, software-design | Review directly | — |
 
 ## ORCHESTRATED Pipelines
 
@@ -63,6 +63,6 @@ These are lightweight variants of `/implement`, `/debug`, and the Plan phase of 
 
 - `router` — Intent + depth classification, skill selection matrix
 - `test-driven-development` — TDD enforcement for IMPLEMENT (GUIDED + ORCHESTRATED)
-- `implement` — Agent pipeline for IMPLEMENT/ORCHESTRATED
-- `debug` — Agent pipeline for DEBUG/ORCHESTRATED
-- `plan` — Agent pipeline for PLAN/ORCHESTRATED
+- `implement:orch` — Agent pipeline for IMPLEMENT/ORCHESTRATED
+- `debug:orch` — Agent pipeline for DEBUG/ORCHESTRATED
+- `plan:orch` — Agent pipeline for PLAN/ORCHESTRATED

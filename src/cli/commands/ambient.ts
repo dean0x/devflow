@@ -9,34 +9,44 @@ import type { HookMatcher, Settings } from '../utils/hooks.js';
 const PREAMBLE_HOOK_MARKER = 'preamble';
 const LEGACY_HOOK_MARKER = 'ambient-prompt';
 
+/** Filter hook entries from a parsed Settings object. Returns true if any were removed. */
+function filterHookEntries(
+  settings: Settings,
+  shouldRemove: (matcher: HookMatcher) => boolean,
+): boolean {
+  if (!settings.hooks?.UserPromptSubmit) return false;
+
+  const before = settings.hooks.UserPromptSubmit.length;
+  settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
+    (matcher) => !shouldRemove(matcher),
+  );
+
+  if (settings.hooks.UserPromptSubmit.length === before) return false;
+
+  if (settings.hooks.UserPromptSubmit.length === 0) {
+    delete settings.hooks.UserPromptSubmit;
+  }
+  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
+    delete settings.hooks;
+  }
+  return true;
+}
+
+const isLegacy = (matcher: HookMatcher) =>
+  matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER));
+
+const isAmbient = (matcher: HookMatcher) =>
+  matcher.hooks.some((h) =>
+    h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
+  );
+
 /**
  * Remove only the legacy `ambient-prompt` hook entries.
  * Used by `addAmbientHook` to clean before adding the new preamble hook.
  */
 export function removeLegacyAmbientHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks?.UserPromptSubmit) {
-    return settingsJson;
-  }
-
-  const before = settings.hooks.UserPromptSubmit.length;
-  settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
-    (matcher) => !matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER)),
-  );
-
-  if (settings.hooks.UserPromptSubmit.length === before) {
-    return settingsJson;
-  }
-
-  if (settings.hooks.UserPromptSubmit.length === 0) {
-    delete settings.hooks.UserPromptSubmit;
-  }
-
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-
+  if (!filterHookEntries(settings, isLegacy)) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -46,15 +56,14 @@ export function removeLegacyAmbientHook(settingsJson: string): string {
  * Idempotent — returns unchanged JSON if the new hook already exists.
  */
 export function addAmbientHook(settingsJson: string, devflowDir: string): string {
-  // First, remove any legacy ambient-prompt hook
-  const cleaned = removeLegacyAmbientHook(settingsJson);
-  const settings: Settings = JSON.parse(cleaned);
+  const settings: Settings = JSON.parse(settingsJson);
+  const legacyRemoved = filterHookEntries(settings, isLegacy);
 
   // Check if the NEW preamble hook already exists
   if (settings.hooks?.UserPromptSubmit?.some((m) =>
     m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
   )) {
-    return cleaned;
+    return legacyRemoved ? JSON.stringify(settings, null, 2) + '\n' : settingsJson;
   }
 
   if (!settings.hooks) {
@@ -90,30 +99,7 @@ export function addAmbientHook(settingsJson: string, devflowDir: string): string
  */
 export function removeAmbientHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks?.UserPromptSubmit) {
-    return settingsJson;
-  }
-
-  const before = settings.hooks.UserPromptSubmit.length;
-  settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
-    (matcher) => !matcher.hooks.some((h) =>
-      h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
-    ),
-  );
-
-  if (settings.hooks.UserPromptSubmit.length === before) {
-    return settingsJson;
-  }
-
-  if (settings.hooks.UserPromptSubmit.length === 0) {
-    delete settings.hooks.UserPromptSubmit;
-  }
-
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-
+  if (!filterHookEntries(settings, isAmbient)) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 

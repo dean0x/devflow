@@ -5,7 +5,7 @@ Interactive feature specification plugin for Claude Code. Creates well-defined G
 ## Installation
 
 ```bash
-# Via DevFlow CLI
+# Via Devflow CLI
 npx devflow-kit init --plugin=specify
 
 # Via Claude Code (when available)

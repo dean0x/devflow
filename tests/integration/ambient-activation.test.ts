@@ -9,7 +9,7 @@ import {
 } from './helpers.js';
 
 /**
- * Integration tests for DevFlow ambient mode classification and skill loading.
+ * Integration tests for Devflow ambient mode classification and skill loading.
  *
  * GUIDED tests use two-tier assertions:
  *   Hard: router skill loaded (proves non-QUICK classification — system works)
@@ -22,7 +22,7 @@ import {
  *
  * Requirements:
  * - `claude` CLI installed and authenticated
- * - DevFlow skills installed (`devflow init`)
+ * - Devflow skills installed (`devflow init`)
  *
  * Run: npm run test:integration (not part of `npm test` — each test is an API call)
  */
@@ -45,7 +45,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   // --- GUIDED tier: router must load (hard), specific skills logged (soft) ---
 
   it('EXPLORE/GUIDED — loads router and explore skills', async () => {
-    const expected = ['explore'];
+    const expected = ['explore:orch'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'explain how the plugin loading system works from registration through initialization',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
@@ -97,7 +97,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('REVIEW/GUIDED — loads router and review skills', async () => {
-    const expected = ['self-review', 'software-design'];
+    const expected = ['quality-gates', 'software-design'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'check this error handling in the authentication module',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
@@ -112,7 +112,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   // --- ORCHESTRATED tier: strict skill assertions ---
 
   it('IMPLEMENT/ORCHESTRATED — loads implement, patterns', async () => {
-    const required = ['implement', 'patterns'];
+    const required = ['implement:orch', 'patterns'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'build a multi-module authentication system with OAuth, session management, and role-based access control',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
@@ -125,7 +125,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('REVIEW/ORCHESTRATED — loads review', async () => {
-    const required = ['review'];
+    const required = ['review:orch'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'do a full branch review of all changes',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
@@ -138,7 +138,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('RESOLVE/ORCHESTRATED — loads resolve, software-design', async () => {
-    const required = ['resolve', 'software-design'];
+    const required = ['resolve:orch', 'software-design'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'resolve the review findings from the last code review',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
@@ -151,7 +151,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('EXPLORE/ORCHESTRATED — loads explore', async () => {
-    const required = ['explore'];
+    const required = ['explore:orch'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'map out the complete data flow across all hook scripts — how they interact, what triggers each, and how data passes between them',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
@@ -164,7 +164,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('PIPELINE/ORCHESTRATED — loads pipeline, patterns', async () => {
-    const required = ['pipeline', 'patterns'];
+    const required = ['pipeline:orch', 'patterns'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'implement and review end to end the new user preferences API',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),

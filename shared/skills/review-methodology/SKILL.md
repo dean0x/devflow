@@ -7,7 +7,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Review Methodology
 
-The canonical review process for all DevFlow review agents. Ensures consistent, fair, and actionable code reviews.
+The canonical review process for all Devflow review agents. Ensures consistent, fair, and actionable code reviews.
 
 ## Iron Law
 

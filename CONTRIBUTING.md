@@ -1,6 +1,6 @@
-# Contributing to DevFlow
+# Contributing to Devflow
 
-Thanks for your interest in contributing to DevFlow! This guide covers everything you need to get started.
+Thanks for your interest in contributing to Devflow! This guide covers everything you need to get started.
 
 ## Prerequisites
 
@@ -18,14 +18,14 @@ npm run build
 node dist/cli.js init
 ```
 
-After setup, DevFlow commands (`/code-review`, `/implement`, etc.) are available in Claude Code.
+After setup, Devflow commands (`/code-review`, `/implement`, etc.) are available in Claude Code.
 
 ## Project Structure
 
 ```
 devflow/
-├── shared/skills/       # 37 skills (single source of truth)
-├── shared/agents/       # 10 shared agents (single source of truth)
+├── shared/skills/       # 39 skills (single source of truth)
+├── shared/agents/       # 11 shared agents (single source of truth)
 ├── plugins/devflow-*/   # 17 plugins (8 core + 9 optional)
 ├── scripts/hooks/       # Working Memory hooks
 ├── src/cli/             # TypeScript CLI (init, list, uninstall)

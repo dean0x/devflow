@@ -1,6 +1,6 @@
 ---
 name: router
-description: This skill should be used when classifying user intent for DevFlow mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
+description: This skill should be used when classifying user intent for Devflow mode, auto-loading relevant skills without explicit command invocation. Used by the always-on UserPromptSubmit hook.
 user-invocable: false
 # No allowed-tools: orchestrator requires unrestricted access (Skill, Agent, Edit, Write, Bash)
 ---
@@ -73,22 +73,22 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
 | **IMPLEMENT** | devflow:test-driven-development, devflow:patterns, devflow:research | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
-| **EXPLORE** | devflow:explore | — |
+| **EXPLORE** | devflow:explore:orch | — |
 | **DEBUG** | devflow:test-driven-development, devflow:software-design, devflow:testing | devflow:git (if git operations involved) |
-| **PLAN** | devflow:test-driven-development, devflow:plan, devflow:patterns, devflow:software-design | — |
-| **REVIEW** | devflow:self-review, devflow:software-design | devflow:testing |
+| **PLAN** | devflow:test-driven-development, devflow:plan:orch, devflow:patterns, devflow:software-design | — |
+| **REVIEW** | devflow:quality-gates, devflow:software-design | devflow:testing |
 
 ### ORCHESTRATED-depth skills
 
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
-| **IMPLEMENT** | devflow:implement, devflow:patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
-| **EXPLORE** | devflow:explore | — |
-| **DEBUG** | devflow:debug, devflow:test-driven-development, devflow:software-design | devflow:git (if git operations involved) |
-| **PLAN** | devflow:plan, devflow:test-driven-development, devflow:patterns, devflow:software-design | — |
-| **REVIEW** | devflow:review | — (reviewers load their own pattern skills) |
-| **RESOLVE** | devflow:resolve, devflow:test-driven-development, devflow:software-design | — |
-| **PIPELINE** | devflow:pipeline, devflow:patterns | — |
+| **IMPLEMENT** | devflow:implement:orch, devflow:patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
+| **EXPLORE** | devflow:explore:orch | — |
+| **DEBUG** | devflow:debug:orch, devflow:test-driven-development, devflow:software-design | devflow:git (if git operations involved) |
+| **PLAN** | devflow:plan:orch, devflow:test-driven-development, devflow:patterns, devflow:software-design | — |
+| **REVIEW** | devflow:review:orch | — (reviewers load their own pattern skills) |
+| **RESOLVE** | devflow:resolve:orch, devflow:test-driven-development, devflow:software-design | — |
+| **PIPELINE** | devflow:pipeline:orch, devflow:patterns | — |
 
 **Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity, devflow:consistency, devflow:database, devflow:dependencies, devflow:documentation, devflow:regression, devflow:architecture, devflow:accessibility, devflow:performance, devflow:qa. These skills are always installed (universal skill installation) but loaded by Reviewer/Tester agents at runtime, not by the router.
 
@@ -103,14 +103,14 @@ BLOCKING REQUIREMENT: Your FIRST tool calls MUST be Skill tool invocations — b
 writing ANY text about the task. Invoke all selected skills, THEN state classification,
 THEN proceed with work. Do NOT write implementation text before all Skill tools return.
 For IMPLEMENT intent, enforce TDD: write the failing test before ANY production code.
-NOTE: Skills loaded in the main session via DevFlow mode are reference patterns only —
+NOTE: Skills loaded in the main session via Devflow mode are reference patterns only —
 their allowed-tools metadata does NOT restrict your tool access. You retain full access
 to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 </IMPORTANT>
 
 - **QUICK:** Respond directly. No preamble, no classification statement.
-- **GUIDED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `DevFlow: IMPLEMENT/GUIDED. Loading: devflow:patterns, devflow:research.` Then work directly in main session. After code changes, spawn Simplifier on changed files.
-- **ORCHESTRATED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `DevFlow: IMPLEMENT/ORCHESTRATED. Loading: devflow:implement, devflow:patterns.` Then orchestrate agents per the loaded orchestration skill's pipeline.
+- **GUIDED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Devflow: IMPLEMENT/GUIDED. Loading: devflow:patterns, devflow:research.` Then work directly in main session. After code changes, spawn Simplifier on changed files.
+- **ORCHESTRATED:** First, invoke each selected skill using the Skill tool. After all Skill tools return, state classification briefly: `Devflow: IMPLEMENT/ORCHESTRATED. Loading: devflow:implement:orch, devflow:patterns.` Then orchestrate agents per the loaded orchestration skill's pipeline.
 
 ### GUIDED Behavior by Intent
 
@@ -122,7 +122,7 @@ to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 | **PLAN** | Spawn Skimmer for orientation, then design directly with loaded pattern/design skills. | No Simplifier (no code changes). |
 | **REVIEW** | Review directly with loaded skills (self-review in main session). | No Simplifier. |
 
-State classification as: `DevFlow: INTENT/DEPTH. Loading: [skills].` QUICK is silent.
+State classification as: `Devflow: INTENT/DEPTH. Loading: [skills].` QUICK is silent.
 
 ## Edge Cases
 
@@ -131,7 +131,7 @@ State classification as: `DevFlow: INTENT/DEPTH. Loading: [skills].` QUICK is si
 | Mixed intent ("fix this bug and add a test") | Use the higher-overhead intent (IMPLEMENT > DEBUG) |
 | Continuation of previous conversation | Inherit previous classification unless prompt clearly shifts |
 | User explicitly requests no enforcement | Respect immediately — classify as QUICK |
-| Prompt references specific DevFlow command | Skip ambient — the command has its own orchestration |
+| Prompt references specific Devflow command | Skip ambient — the command has its own orchestration |
 | Scope ambiguous between GUIDED and ORCHESTRATED | Default to GUIDED; escalate if complexity emerges during work |
 | REVIEW after IMPLEMENT/GUIDED | GUIDED (continuation — match prior depth) |
 | REVIEW after IMPLEMENT/ORCHESTRATED | ORCHESTRATED (continuation — match prior depth) |

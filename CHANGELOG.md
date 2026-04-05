@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to DevFlow will be documented in this file.
+All notable changes to Devflow will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -26,6 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Learning**: Race condition in batch file handoff (atomic `mv` replaces `cp`+`rm`)
 - **Learning**: `--enable` now auto-upgrades legacy Stop hook to SessionEnd
 - **Learning**: `--status` detects legacy hook and shows upgrade instructions
+
+---
+
+## [2.0.0] - 2026-04-05
+
+### Added
+- **EXPLORE depth classification** (GUIDED/ORCHESTRATED) with skimmer-based codebase analysis
+- **`devflow:explore`** orchestration skill for ambient EXPLORE intent
+- **TDD enforcement**: `test-driven-development` skill auto-loads for IMPLEMENT, PLAN, and CODER intents
+- **Stale skill name detector** in tests covers all renamed/deleted skills
+
+### Changed
+- **Orchestration skills**: 7 skills renamed with `:orch` suffix — `implement:orch`, `explore:orch`, `debug:orch`, `plan:orch`, `review:orch`, `resolve:orch`, `pipeline:orch`
+- **`self-review` skill** renamed to `quality-gates`
+- **`ambient-router` skill** renamed to `router`
+- **Preamble**: simplified to detection-only; skill mappings moved to router skill
+- **Output branding**: standardized to `DevFlow: INTENT/DEPTH` across all ambient outputs
+- **Integration test `hasRequiredSkills()`**: uses bounded matching instead of substring
+
+### Removed
+- **`implementation-patterns` skill** (merged into `patterns`)
+- **`search-first` skill** (merged into `research`)
+- **Dead `isFirstToolASkill()` function** from integration test helpers
 
 ---
 
@@ -612,11 +635,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Interactive prompt with clear descriptions when `--scope` flag not provided
   - CLI flag: `devflow init --scope <user|local>`
   - Automatic .gitignore updates for local scope (excludes `.claude/` and `.devflow/`)
-  - Perfect for team projects where DevFlow should be project-specific
+  - Perfect for team projects where Devflow should be project-specific
 
 #### Smart Uninstall with Scope Detection
-- **Auto-detection of installed scopes** - Intelligently finds and removes DevFlow installations
-  - Automatically detects which scopes have DevFlow installed (user and/or local)
+- **Auto-detection of installed scopes** - Intelligently finds and removes Devflow installations
+  - Automatically detects which scopes have Devflow installed (user and/or local)
   - Default behavior: Remove from all detected scopes
   - Manual override: `--scope <user|local>` to target specific scope
   - Clear feedback showing which scopes are being uninstalled
@@ -685,7 +708,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Commands: `/research`, `/debug` for explicit user requests
   - Skills: Auto-activated versions when conversation context matches
   - Clear separation of concerns and activation modes
-  - Documented pattern for extending DevFlow functionality
+  - Documented pattern for extending Devflow functionality
 
 #### Enhanced /devlog Command
 - **Orchestrator pattern** - Refactored to use project-state agent
@@ -961,7 +984,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Initial Release
 
-DevFlow is an Agentic Development Toolkit designed to enhance Claude Code with intelligent commands and workflows for AI-assisted development.
+Devflow is an Agentic Development Toolkit designed to enhance Claude Code with intelligent commands and workflows for AI-assisted development.
 
 ### Added
 

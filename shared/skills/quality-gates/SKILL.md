@@ -1,5 +1,5 @@
 ---
-name: self-review
+name: quality-gates
 description: This skill should be used when evaluating implementation quality before submission, checking correctness, security, and simplicity.
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash

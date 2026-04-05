@@ -1,6 +1,6 @@
 {
   "name": "devflow-core-skills",
-  "description": "Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins",
+  "description": "Auto-activating quality enforcement skills - foundation layer for all Devflow plugins",
   "author": {
     "name": "Dean0x"
   },

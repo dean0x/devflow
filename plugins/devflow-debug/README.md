@@ -5,7 +5,7 @@ Debugging workflow plugin for Claude Code. Investigates bugs using competing hyp
 ## Installation
 
 ```bash
-# Via DevFlow CLI
+# Via Devflow CLI
 npx devflow-kit init --plugin=debug
 
 # Via Claude Code (when available)
@@ -15,8 +15,8 @@ npx devflow-kit init --plugin=debug
 ## Prerequisites
 
 Requires Agent Teams feature:
-- Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings (included in DevFlow settings)
-- Or install DevFlow with `--override-settings` to enable automatically
+- Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings (included in Devflow settings)
+- Or install Devflow with `--override-settings` to enable automatically
 
 ## Usage
 

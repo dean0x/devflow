@@ -318,8 +318,8 @@ describe('hasAmbientHook', () => {
 
 describe('classification helpers', () => {
   it('detects classification marker', () => {
-    expect(hasClassification(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe(true);
-    expect(hasClassification(textResult('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.'))).toBe(true);
+    expect(hasClassification(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe(true);
+    expect(hasClassification(textResult('Devflow: DEBUG/ORCHESTRATED. Loading: devflow:debug:orch.'))).toBe(true);
   });
 
   it('returns false when no classification', () => {
@@ -328,17 +328,17 @@ describe('classification helpers', () => {
   });
 
   it('extracts intent', () => {
-    expect(extractIntent(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('IMPLEMENT');
-    expect(extractIntent(textResult('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.'))).toBe('DEBUG');
-    expect(extractIntent(textResult('DevFlow: REVIEW/GUIDED. Loading: devflow:self-review.'))).toBe('REVIEW');
-    expect(extractIntent(textResult('DevFlow: PLAN/GUIDED. Loading: devflow:software-design.'))).toBe('PLAN');
-    expect(extractIntent(textResult('DevFlow: EXPLORE/QUICK'))).toBe('EXPLORE');
-    expect(extractIntent(textResult('DevFlow: CHAT/QUICK'))).toBe('CHAT');
+    expect(extractIntent(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('IMPLEMENT');
+    expect(extractIntent(textResult('Devflow: DEBUG/ORCHESTRATED. Loading: devflow:debug:orch.'))).toBe('DEBUG');
+    expect(extractIntent(textResult('Devflow: REVIEW/GUIDED. Loading: devflow:quality-gates.'))).toBe('REVIEW');
+    expect(extractIntent(textResult('Devflow: PLAN/GUIDED. Loading: devflow:software-design.'))).toBe('PLAN');
+    expect(extractIntent(textResult('Devflow: EXPLORE/QUICK'))).toBe('EXPLORE');
+    expect(extractIntent(textResult('Devflow: CHAT/QUICK'))).toBe('CHAT');
   });
 
   it('extracts depth', () => {
-    expect(extractDepth(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('GUIDED');
-    expect(extractDepth(textResult('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.'))).toBe('ORCHESTRATED');
+    expect(extractDepth(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('GUIDED');
+    expect(extractDepth(textResult('Devflow: DEBUG/ORCHESTRATED. Loading: devflow:debug:orch.'))).toBe('ORCHESTRATED');
   });
 
   it('returns null for missing classification', () => {
@@ -346,11 +346,11 @@ describe('classification helpers', () => {
     expect(extractDepth(textResult('no classification here'))).toBeNull();
   });
 
-  it('detects DevFlow branding', () => {
-    expect(hasDevFlowBranding(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:patterns.'))).toBe(true);
+  it('detects Devflow branding', () => {
+    expect(hasDevFlowBranding(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:patterns.'))).toBe(true);
   });
 
-  it('returns false for non-DevFlow branding', () => {
+  it('returns false for non-Devflow branding', () => {
     expect(hasDevFlowBranding(textResult('Some random text without branding.'))).toBe(false);
   });
 });
@@ -401,7 +401,7 @@ describe('preamble drift detection', () => {
     expect(shellPreamble).toContain('Skill tool');
 
     // Must include classification output format
-    expect(shellPreamble).toContain('DevFlow:');
+    expect(shellPreamble).toContain('Devflow:');
     expect(shellPreamble).toContain('Loading:');
   });
 });

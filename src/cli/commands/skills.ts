@@ -110,7 +110,7 @@ export const skillsCommand = new Command('skills')
       await fs.rm(shadowDir, { recursive: true, force: true });
 
       p.log.success(`Unshadowed ${color.cyan(bareName)}`);
-      p.log.info('Run devflow init to restore DevFlow\'s version.');
+      p.log.info('Run devflow init to restore Devflow\'s version.');
     } else if (action === 'list-shadowed') {
       const shadowed = await listShadowed(devflowDir);
 

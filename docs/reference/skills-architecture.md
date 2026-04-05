@@ -14,12 +14,12 @@ Shared patterns used by multiple agents.
 |-------|---------|---------|
 | `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Evaluator |
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
-| `self-review` | 9-pillar self-review framework | Scrutinizer |
+| `quality-gates` | 9-pillar self-review framework | Scrutinizer |
 | `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
 | `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
-| `router` | Intent classification and proportional skill loading for DevFlow mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
+| `router` | Intent classification and proportional skill loading for Devflow mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
 | `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /specify, /self-review |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 

@@ -1,5 +1,5 @@
 /**
- * Bump version across all DevFlow files and extract release notes.
+ * Bump version across all Devflow files and extract release notes.
  *
  * Usage: npx tsx scripts/bump-version.ts <version>
  *

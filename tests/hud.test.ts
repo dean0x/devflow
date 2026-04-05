@@ -48,7 +48,7 @@ describe('addHudStatusLine', () => {
     expect(settings.statusLine.command).toContain('hud.sh');
   });
 
-  it('replaces existing DevFlow statusline.sh with HUD', () => {
+  it('replaces existing Devflow statusline.sh with HUD', () => {
     const input = JSON.stringify({
       statusLine: { type: 'command', command: '/old/path/statusline.sh' },
     });
@@ -79,7 +79,7 @@ describe('removeHudStatusLine', () => {
     expect(settings.statusLine).toBeUndefined();
   });
 
-  it('does not remove non-DevFlow statusLine', () => {
+  it('does not remove non-Devflow statusLine', () => {
     const input = JSON.stringify({
       statusLine: {
         type: 'command',
@@ -130,7 +130,7 @@ describe('hasHudStatusLine', () => {
     expect(hasHudStatusLine('{}')).toBe(false);
   });
 
-  it('returns false for non-DevFlow statusLine', () => {
+  it('returns false for non-Devflow statusLine', () => {
     const input = JSON.stringify({
       statusLine: {
         type: 'command',
@@ -152,7 +152,7 @@ describe('hasNonDevFlowStatusLine', () => {
     expect(hasNonDevFlowStatusLine(input)).toBe(true);
   });
 
-  it('returns false for DevFlow HUD', () => {
+  it('returns false for Devflow HUD', () => {
     const withHud = addHudStatusLine('{}', '/home/user/.devflow');
     expect(hasNonDevFlowStatusLine(withHud)).toBe(false);
   });

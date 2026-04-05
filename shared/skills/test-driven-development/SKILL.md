@@ -138,4 +138,4 @@ When skipping TDD, never rationalize. State clearly: "Skipping TDD because: [spe
 - **PLAN/GUIDED** → TDD shapes the plan: test strategy section, test-first file ordering, RED-GREEN-REFACTOR cycle awareness.
 - **PLAN/ORCHESTRATED** → Same as GUIDED but via Plan agent pipeline. Plans must include test strategy grounded in TDD.
 - **RESOLVE/ORCHESTRATED** → TDD enforced via Resolver agent (skill in Resolver frontmatter). Every fix needs a regression test first.
-- **PIPELINE/ORCHESTRATED** → TDD inherited transitively through devflow:implement → Coder.
+- **PIPELINE/ORCHESTRATED** → TDD inherited transitively through devflow:implement:orch → Coder.

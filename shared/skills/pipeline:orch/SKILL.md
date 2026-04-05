@@ -1,5 +1,5 @@
 ---
-name: pipeline
+name: pipeline:orch
 description: End-to-end meta-orchestrator chaining implement → review → resolve with user gates between stages
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
@@ -21,11 +21,11 @@ Meta-orchestrator chaining implement → review → resolve with user gates betw
 ## Cost Communication
 
 Classification statement must warn about scope:
-`DevFlow: PIPELINE/ORCHESTRATED. This runs implement → review → resolve (15+ agents across stages).`
+`Devflow: PIPELINE/ORCHESTRATED. This runs implement → review → resolve (15+ agents across stages).`
 
 ## Phase 1: Implement
 
-Load `devflow:implement` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → plan synthesis → Coder → FILES_CHANGED detection → quality gates → completion). The quality gates are non-negotiable: Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
+Load `devflow:implement:orch` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → plan synthesis → Coder → FILES_CHANGED detection → quality gates → completion). The quality gates are non-negotiable: Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
 
 If implementation returns **BLOCKED**: halt entire pipeline, report blocker.
 
@@ -41,7 +41,7 @@ Use AskUserQuestion:
 
 ## Phase 3: Review
 
-Load `devflow:review` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → incremental detection → file analysis → parallel reviewers (7 core + conditional) → synthesis → finalize). All 7 core reviewers (security, architecture, performance, complexity, consistency, testing, regression) are mandatory.
+Load `devflow:review:orch` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → incremental detection → file analysis → parallel reviewers (7 core + conditional) → synthesis → finalize). All 7 core reviewers (security, architecture, performance, complexity, consistency, testing, regression) are mandatory.
 
 Report review results (merge recommendation, issue counts).
 
@@ -58,7 +58,7 @@ If **no blocking issues**:
 
 ## Phase 5: Resolve
 
-Load `devflow:resolve` via the Skill tool, then execute its full pipeline (Phases 1-6: target review directory → parse issues → analyze & batch → parallel resolvers → collect & simplify → report).
+Load `devflow:resolve:orch` via the Skill tool, then execute its full pipeline (Phases 1-6: target review directory → parse issues → analyze & batch → parallel resolvers → collect & simplify → report).
 
 ## Phase 6: Summary
 

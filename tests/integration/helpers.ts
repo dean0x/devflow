@@ -20,7 +20,7 @@ const DEVFLOW_PREAMBLE =
 Intents: CHAT (greetings/confirmations), EXPLORE (find/explain/analyze/trace/map), PLAN (plan/design/architecture), IMPLEMENT (add/create/build/implement), REVIEW (check/review), RESOLVE (resolve review issues), DEBUG (fix/bug/error), PIPELINE (end-to-end).
 Depth: QUICK (chat, simple lookups, git ops, config, rename/comment tweaks, 1-2 line edits) | GUIDED (code changes ≤2 files, clear bugs, focused reviews, focused exploration, focused design/plan) | ORCHESTRATED (>2 files, multi-module, vague bugs, full/branch/PR reviews, deep exploration, system-level design, RESOLVE and PIPELINE always).
 QUICK: respond normally. No classification, no skills.
-GUIDED/ORCHESTRATED: Load devflow:router skill FIRST via Skill tool for skill mappings. Then load all skills it specifies. State: DevFlow: INTENT/DEPTH. Loading: [skills].`;
+GUIDED/ORCHESTRATED: Load devflow:router skill FIRST via Skill tool for skill mappings. Then load all skills it specifies. State: Devflow: INTENT/DEPTH. Loading: [skills].`;
 
 /** Result from a streaming claude invocation */
 export interface StreamResult {
@@ -55,6 +55,7 @@ export function runClaudeStreaming(
     const skills: string[] = [];
     const textFragments: string[] = [];
     let settled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
 
     const args = [
       '-p', '--output-format', 'stream-json', '--verbose',
@@ -73,6 +74,8 @@ export function runClaudeStreaming(
     const finish = (killedEarly: boolean) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
       try { proc.kill('SIGTERM'); } catch { /* already dead */ }
       resolve({
         skills: [...new Set(skills)],
@@ -109,9 +112,8 @@ export function runClaudeStreaming(
             }
 
             // Once we have skills, give a brief window for more, then finish
-            if (skills.length > 0) {
-              setTimeout(() => {
-                clearTimeout(timer);
+            if (skills.length > 0 && !graceTimer) {
+              graceTimer = setTimeout(() => {
                 finish(true);
               }, 8000); // 8s grace for additional skill loads after first detection
             }
@@ -181,16 +183,6 @@ export function getSkillInvocations(result: StreamResult): string[] {
   return result.skills;
 }
 
-/**
- * Check if the first tool_use event in the stream is a Skill invocation.
- * This is the primary assertion for GUIDED/ORCHESTRATED classification.
- */
-export function isFirstToolASkill(result: StreamResult): boolean {
-  // If skills were detected, the Skill tool was invoked.
-  // The streaming parser captures skill tool_use events in order.
-  return result.skills.length > 0;
-}
-
 export function hasClassification(result: StreamResult): boolean {
   const text = result.textFragments.join(' ');
   return CLASSIFICATION_PATTERN.test(text);
@@ -215,10 +207,10 @@ export function hasDevFlowBranding(result: StreamResult): boolean {
 
 /**
  * Check if required skills are present in the result.
- * Matches flexibly: 'patterns' matches both the prefixed and unprefixed form.
+ * Uses bounded matching: exact match, namespace-suffixed, or devflow-prefixed.
  */
 export function hasRequiredSkills(result: StreamResult, required: string[]): boolean {
   return required.every((name) =>
-    result.skills.some((s) => s.includes(name)),
+    result.skills.some((s) => s === name || s.endsWith(`:${name}`) || s === `devflow:${name}`),
   );
 }

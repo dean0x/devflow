@@ -3,7 +3,7 @@
  */
 
 /**
- * Namespace prefix for DevFlow skills installed to ~/.claude/skills/.
+ * Namespace prefix for Devflow skills installed to ~/.claude/skills/.
  * Skills are installed as `devflow:{skill-name}` to avoid collisions with
  * other plugin ecosystems. Source dirs in shared/skills/ stay unprefixed.
  */
@@ -39,12 +39,12 @@ export interface PluginDefinition {
 }
 
 /**
- * Available DevFlow plugins
+ * Available Devflow plugins
  */
 export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   {
     name: 'devflow-core-skills',
-    description: 'Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins',
+    description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
     agents: [],
     skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
@@ -61,7 +61,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow with exploration, planning, and coding',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
-    skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'qa', 'self-review', 'worktree-support'],
+    skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'qa', 'quality-gates', 'worktree-support'],
   },
   {
     name: 'devflow-code-review',
@@ -89,7 +89,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
-    skills: ['self-review', 'software-design', 'worktree-support'],
+    skills: ['quality-gates', 'software-design', 'worktree-support'],
   },
   {
     name: 'devflow-ambient',
@@ -98,13 +98,13 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
     skills: [
       'router',
-      'implement',
-      'debug',
-      'explore',
-      'plan',
-      'review',
-      'resolve',
-      'pipeline',
+      'implement:orch',
+      'debug:orch',
+      'explore:orch',
+      'plan:orch',
+      'review:orch',
+      'resolve:orch',
+      'pipeline:orch',
       'review-methodology',
       'security',
       'architecture',
@@ -361,6 +361,26 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'pipeline',
   'patterns',
   'research',
+  // v2.0.0 orch rename: prefixed short names for cleanup
+  'devflow:implement',
+  'devflow:debug',
+  'devflow:explore',
+  'devflow:plan',
+  'devflow:review',
+  'devflow:resolve',
+  'devflow:pipeline',
+  // v2.0.0 self-review → quality-gates rename
+  'devflow:self-review',
+  // v2.0.0 orch rename: bare :orch names for pre-namespace installs
+  'implement:orch',
+  'debug:orch',
+  'explore:orch',
+  'plan:orch',
+  'review:orch',
+  'resolve:orch',
+  'pipeline:orch',
+  // v2.0.0 quality-gates: bare name for pre-namespace installs
+  'quality-gates',
 ];
 
 /**
@@ -387,12 +407,20 @@ export const SHADOW_RENAMES: [string, string][] = [
   ['dependencies-patterns', 'dependencies'],
   ['documentation-patterns', 'documentation'],
   ['ambient-router', 'router'],
-  ['implementation-orchestration', 'implement'],
-  ['debug-orchestration', 'debug'],
-  ['plan-orchestration', 'plan'],
-  ['review-orchestration', 'review'],
-  ['resolve-orchestration', 'resolve'],
-  ['pipeline-orchestration', 'pipeline'],
+  ['implementation-orchestration', 'implement:orch'],
+  ['debug-orchestration', 'debug:orch'],
+  ['plan-orchestration', 'plan:orch'],
+  ['review-orchestration', 'review:orch'],
+  ['resolve-orchestration', 'resolve:orch'],
+  ['pipeline-orchestration', 'pipeline:orch'],
+  ['implement', 'implement:orch'],
+  ['debug', 'debug:orch'],
+  ['explore', 'explore:orch'],
+  ['plan', 'plan:orch'],
+  ['review', 'review:orch'],
+  ['resolve', 'resolve:orch'],
+  ['pipeline', 'pipeline:orch'],
+  ['self-review', 'quality-gates'],
   ['implementation-patterns', 'patterns'],
   ['search-first', 'research'],
 ];

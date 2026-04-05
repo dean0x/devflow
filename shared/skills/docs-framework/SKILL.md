@@ -1,13 +1,13 @@
 ---
 name: docs-framework
-description: This skill should be used when the user asks to "create a review report", "write a status log", "add documentation", "name this artifact", or creates files in the .docs/ directory. Provides naming conventions, templates, and directory structure for reviews, debug sessions, design docs, and all persistent DevFlow documentation artifacts.
+description: This skill should be used when the user asks to "create a review report", "write a status log", "add documentation", "name this artifact", or creates files in the .docs/ directory. Provides naming conventions, templates, and directory structure for reviews, debug sessions, design docs, and all persistent Devflow documentation artifacts.
 user-invocable: false
 allowed-tools: Read, Bash, Glob
 ---
 
 # Documentation Framework
 
-The canonical source for documentation conventions in DevFlow. All agents that persist artifacts must follow these standards.
+The canonical source for documentation conventions in Devflow. All agents that persist artifacts must follow these standards.
 
 ## Iron Law
 

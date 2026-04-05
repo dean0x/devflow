@@ -1,5 +1,5 @@
 ---
-name: plan
+name: plan:orch
 description: Agent orchestration for PLAN intent — codebase orientation, design exploration, gap validation
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion

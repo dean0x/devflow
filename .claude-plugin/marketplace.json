@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "devflow",
-  "description": "DevFlow - Agentic Development Toolkit for Claude Code",
+  "description": "Devflow - Agentic Development Toolkit for Claude Code",
   "owner": {
     "name": "Dean0x"
   },
@@ -80,7 +80,7 @@
     {
       "name": "devflow-core-skills",
       "source": "./plugins/devflow-core-skills",
-      "description": "Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins",
+      "description": "Auto-activating quality enforcement skills - foundation layer for all Devflow plugins",
       "version": "1.8.3",
       "keywords": [
         "skills",

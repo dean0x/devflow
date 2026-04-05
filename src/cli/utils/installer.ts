@@ -48,7 +48,7 @@ export async function chmodRecursive(dir: string, mode: number): Promise<void> {
 }
 
 /**
- * Add DevFlow marketplace to Claude CLI.
+ * Add Devflow marketplace to Claude CLI.
  * Idempotent — safe to call multiple times.
  */
 function addMarketplaceViaCli(): boolean {
@@ -84,7 +84,7 @@ export function installViaCli(
   scope: 'user' | 'local',
   spinner: Spinner,
 ): boolean {
-  spinner.message('Adding DevFlow marketplace...');
+  spinner.message('Adding Devflow marketplace...');
   const marketplaceAdded = addMarketplaceViaCli();
 
   if (!marketplaceAdded) return false;
@@ -130,7 +130,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     spinner,
   } = options;
 
-  // Clean old DevFlow files before installing
+  // Clean old Devflow files before installing
   spinner.message('Cleaning old files...');
   if (!isPartialInstall) {
     // Commands and agents are plugin-scoped — only wipe on full install
@@ -230,7 +230,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     } catch { continue; /* skill dir doesn't exist in built plugin */ }
 
     // Shadow check: ~/.devflow/skills/{unprefixed-name}/
-    // If shadowed with actual content, copy user's version instead of DevFlow source
+    // If shadowed with actual content, copy user's version instead of Devflow source
     const shadowDir = path.join(devflowDir, 'skills', skillName);
     const prefixedName = prefixSkillName(skillName);
     const skillTarget = path.join(claudeDir, 'skills', prefixedName);

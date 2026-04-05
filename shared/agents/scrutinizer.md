@@ -2,7 +2,7 @@
 name: Scrutinizer
 description: Self-review agent that evaluates and fixes implementation issues using 9-pillar framework. Runs in fresh context after Coder completes.
 model: opus
-skills: devflow:self-review, devflow:software-design, devflow:worktree-support
+skills: devflow:quality-gates, devflow:software-design, devflow:worktree-support
 ---
 
 # Scrutinizer Agent

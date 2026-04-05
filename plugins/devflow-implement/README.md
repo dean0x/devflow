@@ -5,7 +5,7 @@ Complete task implementation workflow for Claude Code. Orchestrates exploration,
 ## Installation
 
 ```bash
-# Via DevFlow CLI
+# Via Devflow CLI
 npx devflow-kit init --plugin=implement
 
 # Via Claude Code (when available)
@@ -53,7 +53,7 @@ npx devflow-kit init --plugin=implement
 - `patterns` - CRUD, API, events
 - `knowledge-persistence` - Architectural decision recording
 - `qa` - Scenario-based acceptance testing
-- `self-review` - 9-pillar framework
+- `quality-gates` - 9-pillar framework
 - `worktree-support` - Worktree-aware path resolution
 
 ## Output

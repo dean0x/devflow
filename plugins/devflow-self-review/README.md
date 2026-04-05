@@ -1,4 +1,4 @@
-# DevFlow Self-Review Plugin
+# Devflow Self-Review Plugin
 
 Self-review workflow that runs Simplifier and Scrutinizer sequentially on your code changes.
 

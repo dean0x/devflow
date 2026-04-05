@@ -32,7 +32,7 @@
     "patterns",
     "knowledge-persistence",
     "qa",
-    "self-review",
+    "quality-gates",
     "worktree-support"
   ]
 }

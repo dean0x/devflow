@@ -22,19 +22,19 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 
 /** Extract devflow:name prefixed references from file content. */
 function extractPrefixedRefs(content: string): string[] {
-  const matches = content.matchAll(/devflow:([\w-]+)/g);
+  const matches = content.matchAll(/devflow:([\w:-]+)/g);
   return [...matches].map(m => m[1]);
 }
 
 /** Extract install path references (~/.claude/skills/devflow:NAME/SKILL.md). */
 function extractInstallPaths(content: string): string[] {
-  const matches = content.matchAll(/~\/\.claude\/skills\/devflow:([\w-]+)\/SKILL\.md/g);
+  const matches = content.matchAll(/~\/\.claude\/skills\/devflow:([\w:-]+)\/SKILL\.md/g);
   return [...matches].map(m => m[1]);
 }
 
 /** Extract source directory path references (shared/skills/NAME/). */
 function extractSourceDirRefs(content: string): string[] {
-  const matches = content.matchAll(/shared\/skills\/([\w-]+)\//g);
+  const matches = content.matchAll(/shared\/skills\/([\w:-]+)\//g);
   return [...matches].map(m => m[1]);
 }
 
@@ -57,7 +57,7 @@ function extractSkillSectionNames(content: string): string[] {
   const nextHeader = rest.match(/^#{2,3}\s+\S/m);
   const section = nextHeader?.index !== undefined ? rest.slice(0, nextHeader.index) : rest;
   const names: string[] = [];
-  for (const m of section.matchAll(/^[-|]\s*`([\w-]+)`/gm)) {
+  for (const m of section.matchAll(/^[-|]\s*`([\w:-]+)`/gm)) {
     names.push(m[1]);
   }
   return names;
@@ -66,7 +66,7 @@ function extractSkillSectionNames(content: string): string[] {
 /** Extract first-column backtick-quoted names from markdown tables. */
 function extractTableFirstColumnNames(content: string): string[] {
   const names: string[] = [];
-  for (const m of content.matchAll(/^\|\s*`([\w-]+)`\s*\|/gm)) {
+  for (const m of content.matchAll(/^\|\s*`([\w:-]+)`\s*\|/gm)) {
     names.push(m[1]);
   }
   return names;
@@ -77,7 +77,7 @@ function extractTableFirstColumnNames(content: string): string[] {
  * Pattern: `skill-name/references/file.md` — the first path component is a skill name.
  */
 function extractRelativeSkillRefs(content: string): string[] {
-  const matches = content.matchAll(/(?:^|[`\s])([\w-]+)\/references\/[\w-]+\.md/gm);
+  const matches = content.matchAll(/(?:^|[`\s])([\w:-]+)\/references\/[\w-]+\.md/gm);
   return [...matches].map(m => m[1]);
 }
 
@@ -132,11 +132,11 @@ const COMMAND_REFS = new Set([
   'debug',
   'implement',
   'specify',
-  'self-review',  // NOTE: self-review IS a skill too, but it also appears as a command ref in skill-catalog.md tables
+  'self-review',
   'audit-claude',
-  'plan',   // plan is now both a skill name and a command reference
-  'review', // review is now both a skill name and a command reference
-  'pipeline', // pipeline is now both a skill name and a command reference
+  'plan',
+  'review',
+  'pipeline',
 ]);
 
 /**
@@ -297,7 +297,7 @@ describe('Format 3: Install path references', () => {
 
 /** Extract skill names from shadow path references: ~/.devflow/skills/NAME/ */
 function extractShadowPaths(content: string): string[] {
-  const matches = content.matchAll(/~\/\.devflow\/skills\/([\w-]+)\//g);
+  const matches = content.matchAll(/~\/\.devflow\/skills\/([\w:-]+)\//g);
   return [...matches].map(m => m[1]);
 }
 
@@ -734,6 +734,16 @@ describe('Test infrastructure skill references', () => {
       ['git-safety', /(?<!devflow-)(?<![\w])git-safety(?![\w])/g],
       ['git-workflow', /(?<!devflow-)(?<![\w])git-workflow(?![\w])/g],
       ['github-patterns', /(?<!devflow-)(?<![\w])github-patterns(?![\w])/g],
+      // track3 ambient refinements: old long names
+      ['implementation-orchestration', /(?<![\w])implementation-orchestration(?![\w])/g],
+      ['debug-orchestration', /(?<![\w])debug-orchestration(?![\w])/g],
+      ['plan-orchestration', /(?<![\w])plan-orchestration(?![\w])/g],
+      ['review-orchestration', /(?<![\w])review-orchestration(?![\w])/g],
+      ['resolve-orchestration', /(?<![\w])resolve-orchestration(?![\w])/g],
+      ['pipeline-orchestration', /(?<![\w])pipeline-orchestration(?![\w])/g],
+      ['ambient-router', /(?<![\w])ambient-router(?![\w])/g],
+      ['implementation-patterns', /(?<!devflow-)(?<![\w])implementation-patterns(?![\w])/g],
+      ['search-first', /(?<![\w])search-first(?![\w])/g],
     ];
 
     // Known allowlist: lines containing migration test data, legacy references, or comments about old names.
@@ -891,7 +901,7 @@ describe('Cross-component runtime alignment', () => {
 
   it('review orchestration core reviewers exist in reviewer Focus Areas', () => {
     const orchContent = readFileSync(
-      path.join(ROOT, 'shared', 'skills', 'review', 'SKILL.md'),
+      path.join(ROOT, 'shared', 'skills', 'review:orch', 'SKILL.md'),
       'utf-8',
     );
 
@@ -914,7 +924,7 @@ describe('Cross-component runtime alignment', () => {
 
   it('review orchestration conditional reviewers exist in reviewer Focus Areas', () => {
     const orchContent = readFileSync(
-      path.join(ROOT, 'shared', 'skills', 'review', 'SKILL.md'),
+      path.join(ROOT, 'shared', 'skills', 'review:orch', 'SKILL.md'),
       'utf-8',
     );
 

@@ -1,5 +1,5 @@
 ---
-name: implement
+name: implement:orch
 description: Agent orchestration for IMPLEMENT intent — pre-flight, Coder, quality gates
 user-invocable: false
 allowed-tools: Read, Grep, Glob, Bash, Task

@@ -1,4 +1,4 @@
-# DevFlow .gitignore
+# Devflow .gitignore
 
 # Node.js
 node_modules/
@@ -60,7 +60,7 @@ commands/local-*
 
 # Installation logs
 install.log
-# DevFlow local scope installation (use --scope local)
+# Devflow local scope installation (use --scope local)
 .claude/
 .devflow/
 

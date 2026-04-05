@@ -1,6 +1,6 @@
 {
   "name": "devflow-kit",
-  "version": "1.8.3",
+  "version": "2.0.0",
   "description": "The most advanced agentic development toolkit for generating production-grade code with Claude Code",
   "type": "module",
   "bin": {
@@ -42,7 +42,7 @@
     "cli",
     "developer-tools"
   ],
-  "author": "DevFlow Contributors",
+  "author": "Devflow Contributors",
   "license": "MIT",
   "repository": {
     "type": "git",

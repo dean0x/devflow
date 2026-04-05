@@ -62,7 +62,7 @@ export function getClaudeDirectory(): string {
 }
 
 /**
- * Get DevFlow directory with environment variable override support
+ * Get Devflow directory with environment variable override support
  * Priority: DEVFLOW_DIR env var > ~/.devflow
  *
  * @throws {Error} If DEVFLOW_DIR is invalid (not absolute, outside home)

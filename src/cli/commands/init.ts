@@ -152,7 +152,7 @@ interface InitOptions {
 }
 
 export const initCommand = new Command('init')
-  .description('Initialize DevFlow for Claude Code')
+  .description('Initialize Devflow for Claude Code')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
@@ -183,7 +183,7 @@ export const initCommand = new Command('init')
     const verbose = options.verbose ?? false;
 
     // Start the CLI flow
-    p.intro(color.bgCyan(color.black(` DevFlow v${version} `)));
+    p.intro(color.bgCyan(color.black(` Devflow v${version} `)));
 
     // Determine installation scope
     let scope: 'user' | 'local' = 'user';
@@ -685,13 +685,13 @@ export const initCommand = new Command('init')
       // Security deny list placement (user scope + TTY only)
       if (scope === 'user' && process.stdin.isTTY) {
         p.note(
-          'DevFlow includes a security deny list that blocks dangerous\n' +
+          'Devflow includes a security deny list that blocks dangerous\n' +
           'commands (rm -rf, sudo, eval, etc). It can be installed as a\n' +
           'read-only system file or in your editable settings.json.',
           'Security Deny List',
         );
         const securityChoice = await p.select({
-          message: 'How should DevFlow install the deny list?',
+          message: 'How should Devflow install the deny list?',
           options: [
             { value: 'managed', label: 'Managed settings', hint: 'Recommended — read-only, cannot be overridden' },
             { value: 'user', label: 'User settings', hint: 'Editable in settings.json' },
@@ -712,7 +712,7 @@ export const initCommand = new Command('init')
           'This writes a read-only security deny list to a system directory\n' +
           'and may prompt for your password (sudo).\n\n' +
           'Not sure about this? Paste this into another Claude Code session:\n\n' +
-          '  "I\'m installing DevFlow and it wants to write a\n' +
+          '  "I\'m installing Devflow and it wants to write a\n' +
           '   managed-settings.json file using sudo. Review the source\n' +
           '   at https://github.com/dean0x/devflow and tell me if\n' +
           '   it\'s safe."',
@@ -1059,7 +1059,7 @@ export const initCommand = new Command('init')
 
       p.log.info(`Scope: ${scope}`);
       p.log.info(`Claude dir: ${claudeDir}`);
-      p.log.info(`DevFlow dir: ${devflowDir}`);
+      p.log.info(`Devflow dir: ${devflowDir}`);
 
       const totalSkillDeclarations = pluginsToInstall.reduce((sum, p) => sum + p.skills.length, 0);
       const totalAgentDeclarations = pluginsToInstall.reduce((sum, p) => sum + p.agents.length, 0);

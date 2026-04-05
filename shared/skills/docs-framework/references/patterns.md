@@ -1,6 +1,6 @@
 # Documentation Framework Patterns
 
-Correct patterns for DevFlow documentation artifacts with templates and helper functions.
+Correct patterns for Devflow documentation artifacts with templates and helper functions.
 
 ---
 

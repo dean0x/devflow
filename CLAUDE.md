@@ -1,10 +1,10 @@
-# DevFlow Development Guide
+# Devflow Development Guide
 
-Instructions for developers and AI agents working on DevFlow. For user docs, see README.md.
+Instructions for developers and AI agents working on Devflow. For user docs, see README.md.
 
 ## Purpose
 
-DevFlow enhances Claude Code with intelligent development workflows. Modifications must:
+Devflow enhances Claude Code with intelligent development workflows. Modifications must:
 - Maintain brutal honesty in review outputs (no sycophancy)
 - Preserve context across sessions
 - Enhance developer empowerment without replacing judgment
@@ -50,7 +50,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 38 skills (single source of truth)
+├── shared/skills/          # 39 skills (single source of truth)
 ├── shared/agents/          # 11 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
@@ -126,7 +126,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Incremental Reviews**: `/code-review` writes reports into timestamped subdirectories (`YYYY-MM-DD_HHMM`) and tracks HEAD SHA in `.last-review-head` for incremental diffs. Second review only diffs from last reviewed commit. `/resolve` defaults to latest timestamped directory. Both commands auto-discover git worktrees and process all reviewable branches in parallel.
 
-**Coder Handoff Artifact**: Sequential Coder phases write `.docs/handoff.md` after each phase. Survives context compaction (unlike PRIOR_PHASE_SUMMARY). Every Coder reads it on startup. Deleted by implement orchestration skill after pipeline completes.
+**Coder Handoff Artifact**: Sequential Coder phases write `.docs/handoff.md` after each phase. Survives context compaction (unlike PRIOR_PHASE_SUMMARY). Every Coder reads it on startup. Deleted by implement:orch orchestration skill after pipeline completes.
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `shared/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
@@ -147,7 +147,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Plugin-specific agents** (1): claude-md-auditor
 
-**Orchestration skills** (7): implement, explore, debug, plan, review, resolve, pipeline. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
+**Orchestration skills** (7): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
 **Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
@@ -158,7 +158,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - 3-tier system: Foundation (shared patterns), Specialized (auto-activate), Domain (language/framework)
 - Each skill has one non-negotiable **Iron Law** in its `SKILL.md`
 - Target: ~120-150 lines per SKILL.md with progressive disclosure to `references/`
-- Skills default to read-only (`allowed-tools: Read, Grep, Glob`); exceptions: git/review skills add `Bash`, interactive skills add `AskUserQuestion`, `knowledge-persistence`/`self-review` add `Write` for state persistence, and `router` omits `allowed-tools` entirely (unrestricted, as the main-session orchestrator)
+- Skills default to read-only (`allowed-tools: Read, Grep, Glob`); exceptions: git/review skills add `Bash`, interactive skills add `AskUserQuestion`, `knowledge-persistence`/`quality-gates` add `Write` for state persistence, and `router` omits `allowed-tools` entirely (unrestricted, as the main-session orchestrator)
 - All skills live in `shared/skills/` — add to plugin `plugin.json` `skills` array, then `npm run build`
 
 ### Agents
