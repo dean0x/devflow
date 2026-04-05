@@ -3,7 +3,7 @@
  */
 
 /**
- * Namespace prefix for DevFlow skills installed to ~/.claude/skills/.
+ * Namespace prefix for Devflow skills installed to ~/.claude/skills/.
  * Skills are installed as `devflow:{skill-name}` to avoid collisions with
  * other plugin ecosystems. Source dirs in shared/skills/ stay unprefixed.
  */
@@ -39,15 +39,15 @@ export interface PluginDefinition {
 }
 
 /**
- * Available DevFlow plugins
+ * Available Devflow plugins
  */
 export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   {
     name: 'devflow-core-skills',
-    description: 'Auto-activating quality enforcement skills - foundation layer for all DevFlow plugins',
+    description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
     agents: [],
-    skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'search-first', 'test-driven-development', 'testing'],
+    skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
     name: 'devflow-specify',
@@ -61,7 +61,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow with exploration, planning, and coding',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
-    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'qa', 'self-review', 'worktree-support'],
+    skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'qa', 'quality-gates', 'worktree-support'],
   },
   {
     name: 'devflow-code-review',
@@ -75,7 +75,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Process and fix code review issues with risk assessment',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['agent-teams', 'implementation-patterns', 'knowledge-persistence', 'security', 'worktree-support'],
+    skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'security', 'worktree-support'],
   },
   {
     name: 'devflow-debug',
@@ -89,7 +89,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
-    skills: ['self-review', 'software-design', 'worktree-support'],
+    skills: ['quality-gates', 'software-design', 'worktree-support'],
   },
   {
     name: 'devflow-ambient',
@@ -97,13 +97,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/ambient'],
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
     skills: [
-      'ambient-router',
-      'implementation-orchestration',
-      'debug-orchestration',
-      'plan-orchestration',
-      'review-orchestration',
-      'resolve-orchestration',
-      'pipeline-orchestration',
+      'router',
+      'implement:orch',
+      'debug:orch',
+      'explore:orch',
+      'plan:orch',
+      'review:orch',
+      'resolve:orch',
+      'pipeline:orch',
       'review-methodology',
       'security',
       'architecture',
@@ -115,7 +116,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'database',
       'dependencies',
       'documentation',
-      'implementation-patterns',
+      'patterns',
       'knowledge-persistence',
       'qa',
       'worktree-support',
@@ -339,6 +340,47 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'devflow:database-patterns',
   'devflow:dependencies-patterns',
   'devflow:documentation-patterns',
+  // v2.0.0 ambient refinements: old names → short names
+  'devflow:ambient-router',
+  'devflow:implementation-orchestration',
+  'devflow:debug-orchestration',
+  'devflow:plan-orchestration',
+  'devflow:review-orchestration',
+  'devflow:resolve-orchestration',
+  'devflow:pipeline-orchestration',
+  'devflow:implementation-patterns',
+  'devflow:search-first',
+  // v2.0.0 ambient refinements: new bare names for pre-namespace installs
+  'explore',
+  'router',
+  'implement',
+  'debug',
+  'plan',
+  'review',
+  'resolve',
+  'pipeline',
+  'patterns',
+  'research',
+  // v2.0.0 orch rename: prefixed short names for cleanup
+  'devflow:implement',
+  'devflow:debug',
+  'devflow:explore',
+  'devflow:plan',
+  'devflow:review',
+  'devflow:resolve',
+  'devflow:pipeline',
+  // v2.0.0 self-review → quality-gates rename
+  'devflow:self-review',
+  // v2.0.0 orch rename: bare :orch names for pre-namespace installs
+  'implement:orch',
+  'debug:orch',
+  'explore:orch',
+  'plan:orch',
+  'review:orch',
+  'resolve:orch',
+  'pipeline:orch',
+  // v2.0.0 quality-gates: bare name for pre-namespace installs
+  'quality-gates',
 ];
 
 /**
@@ -364,6 +406,23 @@ export const SHADOW_RENAMES: [string, string][] = [
   ['database-patterns', 'database'],
   ['dependencies-patterns', 'dependencies'],
   ['documentation-patterns', 'documentation'],
+  ['ambient-router', 'router'],
+  ['implementation-orchestration', 'implement:orch'],
+  ['debug-orchestration', 'debug:orch'],
+  ['plan-orchestration', 'plan:orch'],
+  ['review-orchestration', 'review:orch'],
+  ['resolve-orchestration', 'resolve:orch'],
+  ['pipeline-orchestration', 'pipeline:orch'],
+  ['implement', 'implement:orch'],
+  ['debug', 'debug:orch'],
+  ['explore', 'explore:orch'],
+  ['plan', 'plan:orch'],
+  ['review', 'review:orch'],
+  ['resolve', 'resolve:orch'],
+  ['pipeline', 'pipeline:orch'],
+  ['self-review', 'quality-gates'],
+  ['implementation-patterns', 'patterns'],
+  ['search-first', 'research'],
 ];
 
 /**
@@ -420,7 +479,7 @@ export function buildAssetMaps(plugins: PluginDefinition[]): {
 /**
  * Build a skills map from ALL plugins (regardless of selection).
  * Skills are tiny markdown files — always install all of them so orchestration
- * skills (review-orchestration, resolve-orchestration) can spawn agents that
+ * skills (review, resolve) can spawn agents that
  * depend on skills from other plugins.
  */
 export function buildFullSkillsMap(): Map<string, string> {

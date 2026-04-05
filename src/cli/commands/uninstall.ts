@@ -95,7 +95,7 @@ function uninstallPluginViaCli(scope: 'user' | 'local'): boolean {
 }
 
 /**
- * Check if DevFlow is installed at the given paths
+ * Check if Devflow is installed at the given paths
  */
 async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
   try {
@@ -107,7 +107,7 @@ async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
 }
 
 export const uninstallCommand = new Command('uninstall')
-  .description('Uninstall DevFlow from Claude Code')
+  .description('Uninstall Devflow from Claude Code')
   .option('--keep-docs', 'Keep .docs/ directory and documentation')
   .option('--scope <type>', 'Uninstall from specific scope only (default: auto-detect all)', /^(user|local)$/i)
   .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,review)')
@@ -116,7 +116,7 @@ export const uninstallCommand = new Command('uninstall')
   .action(async (options) => {
     const dryRun = options.dryRun ?? false;
 
-    p.intro(color.bgRed(color.white(dryRun ? ' DevFlow Uninstall (dry run) ' : ' Uninstalling DevFlow ')));
+    p.intro(color.bgRed(color.white(dryRun ? ' Devflow Uninstall (dry run) ' : ' Uninstalling Devflow ')));
 
     const verbose = options.verbose ?? false;
 
@@ -163,7 +163,7 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       if (scopesToUninstall.length === 0) {
-        p.log.error('No DevFlow installation found');
+        p.log.error('No Devflow installation found');
         p.log.info('Checked user scope (~/.claude/) and local scope (git-root/.claude/)');
         process.exit(1);
       }
@@ -171,7 +171,7 @@ export const uninstallCommand = new Command('uninstall')
       if (scopesToUninstall.length > 1 && !dryRun) {
         if (process.stdin.isTTY) {
           const scopeChoice = await p.select({
-            message: 'Found DevFlow in multiple scopes. Uninstall from:',
+            message: 'Found Devflow in multiple scopes. Uninstall from:',
             options: [
               { value: 'both', label: 'Both', hint: 'user + local' },
               { value: 'user', label: 'User scope', hint: '~/.claude/' },
@@ -388,14 +388,14 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // 5. settings.json (DevFlow hooks)
+      // 5. settings.json (Devflow hooks)
       for (const scope of scopesToUninstall) {
         try {
           const paths = await getInstallationPaths(scope);
           const settingsPath = path.join(paths.claudeDir, 'settings.json');
           const originalContent = await fs.readFile(settingsPath, 'utf-8');
 
-          // Remove all DevFlow hooks and flags in one pass (idempotent)
+          // Remove all Devflow hooks and flags in one pass (idempotent)
           let settingsContent = removeAmbientHook(originalContent);
           settingsContent = removeMemoryHooks(settingsContent);
           settingsContent = removeLearningHook(settingsContent);
@@ -405,7 +405,7 @@ export const uninstallCommand = new Command('uninstall')
           if (settingsContent !== originalContent) {
             await fs.writeFile(settingsPath, settingsContent, 'utf-8');
             if (verbose) {
-              p.log.success(`DevFlow hooks removed from settings.json (${scope})`);
+              p.log.success(`Devflow hooks removed from settings.json (${scope})`);
             }
           }
 
@@ -414,14 +414,14 @@ export const uninstallCommand = new Command('uninstall')
           if (settings.hooks) {
             if (process.stdin.isTTY) {
               const removeHooks = await p.confirm({
-                message: `Remove DevFlow hooks from settings.json (${scope} scope)? Other settings preserved.`,
+                message: `Remove Devflow hooks from settings.json (${scope} scope)? Other settings preserved.`,
                 initialValue: false,
               });
 
               if (!p.isCancel(removeHooks) && removeHooks) {
                 delete settings.hooks;
                 await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-                p.log.success(`DevFlow hooks removed from settings.json (${scope})`);
+                p.log.success(`Devflow hooks removed from settings.json (${scope})`);
               } else {
                 p.log.info(`settings.json hooks preserved (${scope})`);
               }
@@ -447,7 +447,7 @@ export const uninstallCommand = new Command('uninstall')
       if (managedSettingsExist) {
         if (process.stdin.isTTY) {
           const removeManagedConfirm = await p.confirm({
-            message: 'Remove DevFlow security deny list from managed settings?',
+            message: 'Remove Devflow security deny list from managed settings?',
             initialValue: false,
           });
 
@@ -499,13 +499,13 @@ export const uninstallCommand = new Command('uninstall')
       }
     }
 
-    const status = color.green('DevFlow uninstalled successfully');
+    const status = color.green('Devflow uninstalled successfully');
 
     p.outro(`${status}${color.dim('  Reinstall: npx devflow-kit init')}`);
   });
 
 /**
- * Remove all DevFlow assets (full uninstall).
+ * Remove all Devflow assets (full uninstall).
  */
 async function removeAllDevFlow(
   claudeDir: string,
@@ -522,14 +522,14 @@ async function removeAllDevFlow(
     try {
       await fs.rm(dir.path, { recursive: true, force: true });
       if (verbose) {
-        p.log.success(`Removed DevFlow ${dir.name}`);
+        p.log.success(`Removed Devflow ${dir.name}`);
       }
     } catch (error) {
       p.log.warn(`Could not remove ${dir.name}: ${error}`);
     }
   }
 
-  // Remove all DevFlow skills: prefixed (devflow:name), unprefixed (name), and legacy (devflow-name)
+  // Remove all Devflow skills: prefixed (devflow:name), unprefixed (name), and legacy (devflow-name)
   const allSkillNames = new Set([...getAllSkillNames(), ...LEGACY_SKILL_NAMES]);
   const skillsDir = path.join(claudeDir, 'skills');
 
@@ -552,7 +552,7 @@ async function removeAllDevFlow(
   }
 
   if (skillsRemoved > 0 && verbose) {
-    p.log.success(`Removed ${skillsRemoved} DevFlow skill directories`);
+    p.log.success(`Removed ${skillsRemoved} Devflow skill directories`);
   }
 
   // Also remove old nested skills structure if it exists

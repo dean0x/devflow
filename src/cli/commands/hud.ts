@@ -37,7 +37,7 @@ export function addHudStatusLine(
     return settingsJson;
   }
 
-  // If there's a non-DevFlow statusLine, don't overwrite (caller should check first)
+  // If there's a non-Devflow statusLine, don't overwrite (caller should check first)
   if (settings.statusLine && !isDevFlowStatusLine(settings.statusLine)) {
     return settingsJson;
   }
@@ -52,7 +52,7 @@ export function addHudStatusLine(
 
 /**
  * Remove the HUD statusLine from settings JSON.
- * Idempotent — returns unchanged JSON if statusLine not present or not DevFlow.
+ * Idempotent — returns unchanged JSON if statusLine not present or not Devflow.
  */
 export function removeHudStatusLine(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
@@ -61,7 +61,7 @@ export function removeHudStatusLine(settingsJson: string): string {
     return settingsJson;
   }
 
-  // Only remove if it's a DevFlow HUD/statusline
+  // Only remove if it's a Devflow HUD/statusline
   if (!isDevFlowStatusLine(settings.statusLine)) {
     return settingsJson;
   }
@@ -72,7 +72,7 @@ export function removeHudStatusLine(settingsJson: string): string {
 }
 
 /**
- * Check if the statusLine in settings JSON points to the DevFlow HUD.
+ * Check if the statusLine in settings JSON points to the Devflow HUD.
  */
 export function hasHudStatusLine(settingsJson: string): boolean {
   const settings: Settings = JSON.parse(settingsJson);
@@ -81,7 +81,7 @@ export function hasHudStatusLine(settingsJson: string): boolean {
 }
 
 /**
- * Check if an existing statusLine belongs to DevFlow (HUD or legacy statusline).
+ * Check if an existing statusLine belongs to Devflow (HUD or legacy statusline).
  * Matches paths containing 'hud.sh', 'statusline.sh', or a '/devflow/' directory segment.
  */
 function isDevFlowStatusLine(statusLine: StatusLine): boolean {
@@ -95,7 +95,7 @@ function isDevFlowStatusLine(statusLine: StatusLine): boolean {
 }
 
 /**
- * Check if an existing statusLine belongs to a non-DevFlow tool.
+ * Check if an existing statusLine belongs to a non-Devflow tool.
  */
 export function hasNonDevFlowStatusLine(settingsJson: string): boolean {
   const settings: Settings = JSON.parse(settingsJson);
@@ -179,7 +179,7 @@ export const hudCommand = new Command('hud')
 
       // Ensure statusLine is registered
       if (!hasHudStatusLine(settingsContent)) {
-        // Check for non-DevFlow statusLine
+        // Check for non-Devflow statusLine
         if (hasNonDevFlowStatusLine(settingsContent)) {
           const settings = JSON.parse(settingsContent) as Settings;
           p.log.warn(
@@ -188,7 +188,7 @@ export const hudCommand = new Command('hud')
           if (process.stdin.isTTY) {
             const overwrite = await p.confirm({
               message:
-                'Replace existing statusLine with DevFlow HUD?',
+                'Replace existing statusLine with Devflow HUD?',
               initialValue: false,
             });
             if (p.isCancel(overwrite) || !overwrite) {

@@ -14,12 +14,12 @@ Shared patterns used by multiple agents.
 |-------|---------|---------|
 | `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Evaluator |
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
-| `self-review` | 9-pillar self-review framework | Scrutinizer |
+| `quality-gates` | 9-pillar self-review framework | Scrutinizer |
 | `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
-| `implementation-patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
+| `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
-| `ambient-router` | Intent classification and proportional skill loading for ambient mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
+| `router` | Intent classification and proportional skill loading for Devflow mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
 | `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /specify, /self-review |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
@@ -47,7 +47,7 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 | Skill | Purpose | Agent Refs |
 |-------|---------|------------|
 | `boundary-validation` | Boundary validation enforcement | Coder |
-| `search-first` | Research-before-building enforcement for utility code | Coder |
+| `research` | Research-before-building enforcement for utility code | Coder |
 | `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Coder |
 
 ### Tier 3: Domain-Specific Skills
@@ -81,7 +81,7 @@ The `activation: file-patterns` frontmatter is metadata for documentation purpos
 ```yaml
 ---
 name: Coder
-skills: software-design, git, implementation-patterns, ...
+skills: software-design, git, patterns, ...
 ---
 ```
 

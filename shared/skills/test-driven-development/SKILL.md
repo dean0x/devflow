@@ -133,5 +133,9 @@ When skipping TDD, never rationalize. State clearly: "Skipping TDD because: [spe
 - **IMPLEMENT/GUIDED** → TDD enforced in main session. Write the failing test before production code. Skill loaded directly.
 - **IMPLEMENT/ORCHESTRATED** → TDD enforced via Coder agent (skill in Coder frontmatter). Every implementation gets test-first treatment.
 - **IMPLEMENT/QUICK** → TDD skipped (trivial single-file edit).
-- **DEBUG/GUIDED** → TDD applies to the fix in main session: write a test that reproduces the bug first, then fix.
-- **DEBUG/ORCHESTRATED** → TDD applies to the fix: write a test that reproduces the bug first, then fix.
+- **DEBUG/GUIDED** → TDD applies to the fix in main session: write a test that reproduces the bug first, then fix. Skill loaded by router.
+- **DEBUG/ORCHESTRATED** → TDD applies in Phase 5 (fix): write a test that reproduces the bug first, then fix. Skill loaded by router + debug skill.
+- **PLAN/GUIDED** → TDD shapes the plan: test strategy section, test-first file ordering, RED-GREEN-REFACTOR cycle awareness.
+- **PLAN/ORCHESTRATED** → Same as GUIDED but via Plan agent pipeline. Plans must include test strategy grounded in TDD.
+- **RESOLVE/ORCHESTRATED** → TDD enforced via Resolver agent (skill in Resolver frontmatter). Every fix needs a regression test first.
+- **PIPELINE/ORCHESTRATED** → TDD inherited transitively through devflow:implement:orch → Coder.

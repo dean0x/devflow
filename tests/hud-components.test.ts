@@ -506,7 +506,7 @@ describe('worktreeCount component', () => {
 describe('configCounts component', () => {
   it('includes skills count from transcript', async () => {
     const transcript = makeTranscript({
-      skills: ['software-design', 'testing', 'implementation-patterns'],
+      skills: ['software-design', 'testing', 'patterns'],
     });
     const ctx = makeCtx({
       transcript,

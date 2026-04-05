@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared log path computation for DevFlow hooks.
+# Shared log path computation for Devflow hooks.
 # Source this file to get devflow_log_dir function.
 
 devflow_log_dir() {

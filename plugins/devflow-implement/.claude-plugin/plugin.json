@@ -29,10 +29,10 @@
   ],
   "skills": [
     "agent-teams",
-    "implementation-patterns",
+    "patterns",
     "knowledge-persistence",
     "qa",
-    "self-review",
+    "quality-gates",
     "worktree-support"
   ]
 }

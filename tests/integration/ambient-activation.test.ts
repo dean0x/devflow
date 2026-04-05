@@ -1,128 +1,178 @@
 import { describe, it, expect } from 'vitest';
 import {
   isClaudeAvailable,
-  runClaude,
-  runClaudeWithRetry,
-  isQuietResponse,
-  extractDepth,
+  runClaudeStreaming,
+  runClaudeStreamingWithRetry,
   hasSkillInvocations,
   getSkillInvocations,
+  hasRequiredSkills,
 } from './helpers.js';
 
 /**
- * Integration tests for ambient mode classification and skill loading.
+ * Integration tests for Devflow ambient mode classification and skill loading.
  *
- * Uses `claude -p` with `--output-format json` to capture permission_denials,
- * which reveal Skill tool invocation attempts even when the tool isn't auto-approved.
- * This lets us verify that the model:
- *   1. Correctly classifies intent/depth
- *   2. Attempts to load the right skills via the Skill tool
+ * GUIDED tests use two-tier assertions:
+ *   Hard: router skill loaded (proves non-QUICK classification — system works)
+ *   Soft: specific skills match expectations (quality metric, logged but not gating)
  *
- * QUICK tests are deterministic (absence of classification = pass).
- * GUIDED/ORCHESTRATED tests use retry logic for non-determinism.
+ * ORCHESTRATED tests use strict assertions (deterministic at that scope).
+ *
+ * Model strategy: Haiku first, Sonnet fallback.
+ * Process killed ~8s after first skill detection — no waiting for completion.
  *
  * Requirements:
  * - `claude` CLI installed and authenticated
- * - DevFlow skills installed (`devflow init`)
+ * - Devflow skills installed (`devflow init`)
  *
  * Run: npm run test:integration (not part of `npm test` — each test is an API call)
  */
-describe.skipIf(!isClaudeAvailable())('ambient classification', () => {
+describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
 
-  // --- QUICK tier: no skills loaded, no classification output ---
+  // --- QUICK tier: no skills loaded ---
 
-  it('classifies "thanks" as QUICK (silent)', () => {
-    const result = runClaude('thanks');
-    expect(isQuietResponse(result.text)).toBe(true);
+  it('QUICK — chat: "thanks" loads no skills', async () => {
+    const result = await runClaudeStreaming('thanks', { timeout: 20000 });
     expect(hasSkillInvocations(result)).toBe(false);
+    console.log(`QUICK chat: no skills (${result.durationMs}ms)`);
   });
 
-  it('classifies "commit this" as QUICK (git op)', () => {
-    const result = runClaude('commit the current changes');
-    expect(isQuietResponse(result.text) || extractDepth(result.text) === 'QUICK').toBe(true);
+  it('QUICK — explore: "where is the config?" loads no skills', async () => {
+    const result = await runClaudeStreaming('where is the config file?', { timeout: 20000 });
+    expect(hasSkillInvocations(result)).toBe(false);
+    console.log(`QUICK explore: no skills (${result.durationMs}ms)`);
   });
 
-  it('classifies "where is the config?" as QUICK (explore)', () => {
-    const result = runClaude('where is the config file?');
-    expect(isQuietResponse(result.text)).toBe(true);
-  });
+  // --- GUIDED tier: router must load (hard), specific skills logged (soft) ---
 
-  // --- GUIDED tier: skills loaded, classification stated ---
-
-  // Note: In `-p` mode, haiku sometimes skips classification and responds directly.
-  // 5 retries gives ~85% pass rate per test. In interactive mode (real usage),
-  // the UserPromptSubmit hook + full session context make classification more reliable.
-
-  it('IMPLEMENT prompt triggers skill loading', () => {
-    const { result, passed, attempts } = runClaudeWithRetry(
-      'create a new validation module in src/cli/utils/validation.ts with Zod schemas for CLI arguments',
-      (r) => hasSkillInvocations(r),
-      { maxAttempts: 5 },
+  it('EXPLORE/GUIDED — loads router and explore skills', async () => {
+    const expected = ['explore:orch'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'explain how the plugin loading system works from registration through initialization',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
     );
 
     const skills = getSkillInvocations(result);
-    console.log(`IMPLEMENT: ${passed ? 'PASS' : 'FAIL'} after ${attempts} attempts. Skills: [${skills.join(', ')}]`);
+    const hasExpected = hasRequiredSkills(result, expected);
+    console.log(`EXPLORE/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('DEBUG prompt triggers skill loading', () => {
-    const { result, passed, attempts } = runClaudeWithRetry(
-      'fix the failing test in tests/ambient.test.ts — the preamble drift detection assertion is wrong',
-      (r) => hasSkillInvocations(r),
-      { maxAttempts: 5 },
+  it('IMPLEMENT/GUIDED — loads router and implementation skills', async () => {
+    const expected = ['patterns', 'test-driven-development', 'research'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'add a retry mechanism with exponential backoff to the HTTP client module',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
     );
 
     const skills = getSkillInvocations(result);
-    console.log(`DEBUG: ${passed ? 'PASS' : 'FAIL'} after ${attempts} attempts. Skills: [${skills.join(', ')}]`);
+    const hasExpected = hasRequiredSkills(result, expected);
+    console.log(`IMPLEMENT/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('PLAN prompt triggers skill loading', () => {
-    const { result, passed, attempts } = runClaudeWithRetry(
-      'how should we structure a plugin dependency system so plugins can declare requirements on other plugins?',
-      (r) => hasSkillInvocations(r),
-      { maxAttempts: 5 },
+  it('DEBUG/GUIDED — loads router and debug skills', async () => {
+    const expected = ['software-design', 'testing'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'fix the bug where the date formatter returns wrong timezone offset for DST transitions',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
     );
 
     const skills = getSkillInvocations(result);
-    console.log(`PLAN: ${passed ? 'PASS' : 'FAIL'} after ${attempts} attempts. Skills: [${skills.join(', ')}]`);
+    const hasExpected = hasRequiredSkills(result, expected);
+    console.log(`DEBUG/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('REVIEW prompt triggers skill loading', () => {
-    const { result, passed, attempts } = runClaudeWithRetry(
-      'review the ambient-prompt hook script for any issues',
-      (r) => hasSkillInvocations(r),
-      { maxAttempts: 5 },
+  it('PLAN/GUIDED — loads router and planning skills', async () => {
+    const expected = ['patterns', 'software-design'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'how should we design a caching layer for API responses?',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
     );
 
     const skills = getSkillInvocations(result);
-    console.log(`REVIEW: ${passed ? 'PASS' : 'FAIL'} after ${attempts} attempts. Skills: [${skills.join(', ')}]`);
+    const hasExpected = hasRequiredSkills(result, expected);
+    console.log(`PLAN/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  // --- Skill selection accuracy ---
-  // These test that ALL primary skills listed in the preamble are loaded.
-  // Non-deterministic: haiku sometimes loads a subset instead of all listed skills.
-  // Tracked as soft failures — if these fail consistently, the preamble wording needs work.
-
-  it('loads all primary IMPLEMENT skills', () => {
-    const { result, passed } = runClaudeWithRetry(
-      'add input validation to the CLI parser in src/cli/cli.ts',
-      (r) => {
-        const skills = getSkillInvocations(r);
-        return skills.includes('implementation-patterns')
-          && skills.includes('test-driven-development')
-          && skills.includes('search-first');
-      },
-      { maxAttempts: 3, timeout: 60000 },
+  it('REVIEW/GUIDED — loads router and review skills', async () => {
+    const expected = ['quality-gates', 'software-design'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'check this error handling in the authentication module',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
     );
 
-    // Soft assertion: report which skills were loaded even on failure
     const skills = getSkillInvocations(result);
-    if (!passed) {
-      console.warn(`Skill selection incomplete. Loaded: [${skills.join(', ')}]. Expected all of: implementation-patterns, test-driven-development, search-first`);
-    }
+    const hasExpected = hasRequiredSkills(result, expected);
+    console.log(`REVIEW/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    expect(passed).toBe(true);
+  });
+
+  // --- ORCHESTRATED tier: strict skill assertions ---
+
+  it('IMPLEMENT/ORCHESTRATED — loads implement, patterns', async () => {
+    const required = ['implement:orch', 'patterns'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'build a multi-module authentication system with OAuth, session management, and role-based access control',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
+    );
+
+    const skills = getSkillInvocations(result);
+    console.log(`IMPLEMENT/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
+    if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
+    expect(passed).toBe(true);
+  });
+
+  it('REVIEW/ORCHESTRATED — loads review', async () => {
+    const required = ['review:orch'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'do a full branch review of all changes',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
+    );
+
+    const skills = getSkillInvocations(result);
+    console.log(`REVIEW/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
+    if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
+    expect(passed).toBe(true);
+  });
+
+  it('RESOLVE/ORCHESTRATED — loads resolve, software-design', async () => {
+    const required = ['resolve:orch', 'software-design'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'resolve the review findings from the last code review',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
+    );
+
+    const skills = getSkillInvocations(result);
+    console.log(`RESOLVE/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
+    if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
+    expect(passed).toBe(true);
+  });
+
+  it('EXPLORE/ORCHESTRATED — loads explore', async () => {
+    const required = ['explore:orch'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'map out the complete data flow across all hook scripts — how they interact, what triggers each, and how data passes between them',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
+    );
+
+    const skills = getSkillInvocations(result);
+    console.log(`EXPLORE/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
+    if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
+    expect(passed).toBe(true);
+  });
+
+  it('PIPELINE/ORCHESTRATED — loads pipeline, patterns', async () => {
+    const required = ['pipeline:orch', 'patterns'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'implement and review end to end the new user preferences API',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
+    );
+
+    const skills = getSkillInvocations(result);
+    console.log(`PIPELINE/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
+    if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
     expect(passed).toBe(true);
   });
 });

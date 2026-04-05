@@ -23,7 +23,7 @@ import {
 import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, SHADOW_RENAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
-import { addAmbientHook } from './ambient.js';
+import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addLearningHook, removeLearningHook } from './learn.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
@@ -33,7 +33,7 @@ import { getDefaultFlags, applyFlags, stripFlags, FLAG_REGISTRY } from '../utils
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
-export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
+export { addAmbientHook, removeAmbientHook, removeLegacyAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addLearningHook, removeLearningHook, hasLearningHook } from './learn.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
@@ -152,7 +152,7 @@ interface InitOptions {
 }
 
 export const initCommand = new Command('init')
-  .description('Initialize DevFlow for Claude Code')
+  .description('Initialize Devflow for Claude Code')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
@@ -183,7 +183,7 @@ export const initCommand = new Command('init')
     const verbose = options.verbose ?? false;
 
     // Start the CLI flow
-    p.intro(color.bgCyan(color.black(` DevFlow v${version} `)));
+    p.intro(color.bgCyan(color.black(` Devflow v${version} `)));
 
     // Determine installation scope
     let scope: 'user' | 'local' = 'user';
@@ -685,13 +685,13 @@ export const initCommand = new Command('init')
       // Security deny list placement (user scope + TTY only)
       if (scope === 'user' && process.stdin.isTTY) {
         p.note(
-          'DevFlow includes a security deny list that blocks dangerous\n' +
+          'Devflow includes a security deny list that blocks dangerous\n' +
           'commands (rm -rf, sudo, eval, etc). It can be installed as a\n' +
           'read-only system file or in your editable settings.json.',
           'Security Deny List',
         );
         const securityChoice = await p.select({
-          message: 'How should DevFlow install the deny list?',
+          message: 'How should Devflow install the deny list?',
           options: [
             { value: 'managed', label: 'Managed settings', hint: 'Recommended — read-only, cannot be overridden' },
             { value: 'user', label: 'User settings', hint: 'Editable in settings.json' },
@@ -712,7 +712,7 @@ export const initCommand = new Command('init')
           'This writes a read-only security deny list to a system directory\n' +
           'and may prompt for your password (sudo).\n\n' +
           'Not sure about this? Paste this into another Claude Code session:\n\n' +
-          '  "I\'m installing DevFlow and it wants to write a\n' +
+          '  "I\'m installing Devflow and it wants to write a\n' +
           '   managed-settings.json file using sudo. Review the source\n' +
           '   at https://github.com/dean0x/devflow and tell me if\n' +
           '   it\'s safe."',
@@ -891,6 +891,14 @@ export const initCommand = new Command('init')
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
     }
 
+    // Clean up legacy hook scripts (e.g., ambient-prompt → preamble)
+    const LEGACY_HOOK_SCRIPTS = ['ambient-prompt'];
+    const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
+    for (const legacy of LEGACY_HOOK_SCRIPTS) {
+      const legacyPath = path.join(hooksDir, legacy);
+      try { await fs.rm(legacyPath); } catch { /* doesn't exist */ }
+    }
+
     // === Settings & hooks (all automatic based on collected choices) ===
     s.message('Configuring settings');
 
@@ -908,10 +916,9 @@ export const initCommand = new Command('init')
       let content = await fs.readFile(settingsPath, 'utf-8');
       const original = content;
 
-      // Ambient hook
-      if (ambientEnabled) {
-        content = addAmbientHook(content, devflowDir);
-      }
+      // Ambient hook — always remove-then-add to upgrade from legacy ambient-prompt → preamble
+      const cleanedForAmbient = removeAmbientHook(content);
+      content = ambientEnabled ? addAmbientHook(cleanedForAmbient, devflowDir) : cleanedForAmbient;
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
       const cleaned = removeMemoryHooks(content);
@@ -1052,7 +1059,7 @@ export const initCommand = new Command('init')
 
       p.log.info(`Scope: ${scope}`);
       p.log.info(`Claude dir: ${claudeDir}`);
-      p.log.info(`DevFlow dir: ${devflowDir}`);
+      p.log.info(`Devflow dir: ${devflowDir}`);
 
       const totalSkillDeclarations = pluginsToInstall.reduce((sum, p) => sum + p.skills.length, 0);
       const totalAgentDeclarations = pluginsToInstall.reduce((sum, p) => sum + p.agents.length, 0);

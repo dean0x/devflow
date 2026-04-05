@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (38 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (39 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -46,7 +46,7 @@ devflow/
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
-│       ├── ambient-prompt           # UserPromptSubmit hook: ambient skill injection
+│       ├── preamble                # UserPromptSubmit hook: ambient skill injection
 │       ├── session-end-learning      # SessionEnd hook: batched learning trigger
 │       ├── stop-update-learning     # Stop hook: deprecated stub (upgrade via devflow learn)
 │       ├── background-learning      # Background: pattern detection via Sonnet
@@ -92,7 +92,7 @@ devflow-{name}/
   "description": "Complete task implementation workflow",
   "version": "1.1.0",
   "agents": ["git", "coder", "synthesizer"],
-  "skills": ["implementation-patterns", "self-review"]
+  "skills": ["patterns", "quality-gates"]
 }
 ```
 
@@ -107,7 +107,7 @@ The `skills` and `agents` arrays declare which shared assets this plugin needs. 
 | Skills | `~/.claude/skills/devflow:*/` | Namespaced (`devflow:` prefix) |
 | Scripts | `~/.devflow/scripts/` | Helper scripts |
 | Hooks | `~/.devflow/scripts/hooks/` | Working Memory hooks |
-| Settings | `~/.claude/settings.json` | DevFlow configuration |
+| Settings | `~/.claude/settings.json` | Devflow configuration |
 
 ## Build-Time Asset Distribution
 
@@ -148,7 +148,7 @@ Included settings:
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
-- `extraKnownMarketplaces` - DevFlow plugin marketplace (`dean0x/devflow`)
+- `extraKnownMarketplaces` - Devflow plugin marketplace (`dean0x/devflow`)
 - `permissions.deny` - Security deny list (140 blocked operations) + sensitive file patterns
 
 ## Working Memory Hooks

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { LEGACY_PLUGIN_NAMES } from '../plugins.js';
 
 /**
- * Manifest data tracked for each DevFlow installation.
+ * Manifest data tracked for each Devflow installation.
  */
 export interface ManifestData {
   version: string;

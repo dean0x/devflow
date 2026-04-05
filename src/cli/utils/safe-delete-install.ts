@@ -2,8 +2,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import type { Shell } from './safe-delete.js';
 
-const START_MARKER = '# >>> DevFlow safe-delete >>>';
-const END_MARKER = '# <<< DevFlow safe-delete <<<';
+const START_MARKER = '# >>> Devflow safe-delete >>>';
+const END_MARKER = '# <<< Devflow safe-delete <<<';
 
 /** Bump this when the safe-delete block changes. */
 export const SAFE_DELETE_BLOCK_VERSION = 2;

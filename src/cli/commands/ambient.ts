@@ -6,24 +6,71 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 
-const AMBIENT_HOOK_MARKER = 'ambient-prompt';
+const PREAMBLE_HOOK_MARKER = 'preamble';
+const LEGACY_HOOK_MARKER = 'ambient-prompt';
+
+/** Filter hook entries from a parsed Settings object. Returns true if any were removed. */
+function filterHookEntries(
+  settings: Settings,
+  shouldRemove: (matcher: HookMatcher) => boolean,
+): boolean {
+  if (!settings.hooks?.UserPromptSubmit) return false;
+
+  const before = settings.hooks.UserPromptSubmit.length;
+  settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
+    (matcher) => !shouldRemove(matcher),
+  );
+
+  if (settings.hooks.UserPromptSubmit.length === before) return false;
+
+  if (settings.hooks.UserPromptSubmit.length === 0) {
+    delete settings.hooks.UserPromptSubmit;
+  }
+  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
+    delete settings.hooks;
+  }
+  return true;
+}
+
+const isLegacy = (matcher: HookMatcher) =>
+  matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER));
+
+const isAmbient = (matcher: HookMatcher) =>
+  matcher.hooks.some((h) =>
+    h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
+  );
+
+/**
+ * Remove only the legacy `ambient-prompt` hook entries.
+ * Used by `addAmbientHook` to clean before adding the new preamble hook.
+ */
+export function removeLegacyAmbientHook(settingsJson: string): string {
+  const settings: Settings = JSON.parse(settingsJson);
+  if (!filterHookEntries(settings, isLegacy)) return settingsJson;
+  return JSON.stringify(settings, null, 2) + '\n';
+}
 
 /**
  * Add the ambient UserPromptSubmit hook to settings JSON.
- * Idempotent — returns unchanged JSON if hook already exists.
+ * Removes any legacy `ambient-prompt` hook first, then adds the new `preamble` hook.
+ * Idempotent — returns unchanged JSON if the new hook already exists.
  */
 export function addAmbientHook(settingsJson: string, devflowDir: string): string {
   const settings: Settings = JSON.parse(settingsJson);
+  const legacyRemoved = filterHookEntries(settings, isLegacy);
 
-  if (hasAmbientHook(settingsJson)) {
-    return settingsJson;
+  // Check if the NEW preamble hook already exists
+  if (settings.hooks?.UserPromptSubmit?.some((m) =>
+    m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
+  )) {
+    return legacyRemoved ? JSON.stringify(settings, null, 2) + '\n' : settingsJson;
   }
 
   if (!settings.hooks) {
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' ambient-prompt';
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble';
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -46,38 +93,18 @@ export function addAmbientHook(settingsJson: string, devflowDir: string): string
 
 /**
  * Remove the ambient UserPromptSubmit hook from settings JSON.
+ * Removes BOTH legacy `ambient-prompt` and current `preamble` hooks.
  * Idempotent — returns unchanged JSON if hook not present.
  * Preserves other UserPromptSubmit hooks. Cleans empty arrays/objects.
  */
 export function removeAmbientHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks?.UserPromptSubmit) {
-    return settingsJson;
-  }
-
-  const before = settings.hooks.UserPromptSubmit.length;
-  settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
-    (matcher) => !matcher.hooks.some((h) => h.command.includes(AMBIENT_HOOK_MARKER)),
-  );
-
-  if (settings.hooks.UserPromptSubmit.length === before) {
-    return settingsJson;
-  }
-
-  if (settings.hooks.UserPromptSubmit.length === 0) {
-    delete settings.hooks.UserPromptSubmit;
-  }
-
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-
+  if (!filterHookEntries(settings, isAmbient)) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * Check if the ambient hook is registered in settings JSON.
+ * Check if the ambient hook (legacy or current) is registered in settings JSON.
  */
 export function hasAmbientHook(settingsJson: string): boolean {
   const settings: Settings = JSON.parse(settingsJson);
@@ -87,7 +114,9 @@ export function hasAmbientHook(settingsJson: string): boolean {
   }
 
   return settings.hooks.UserPromptSubmit.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(AMBIENT_HOOK_MARKER)),
+    matcher.hooks.some((h) =>
+      h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
+    ),
   );
 }
 

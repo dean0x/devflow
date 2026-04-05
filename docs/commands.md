@@ -1,6 +1,6 @@
 # Commands
 
-DevFlow provides six commands that orchestrate specialized agents. Commands spawn agents — they never do the work themselves.
+Devflow provides six commands that orchestrate specialized agents. Commands spawn agents — they never do the work themselves.
 
 ## /specify
 

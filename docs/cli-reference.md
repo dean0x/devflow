@@ -92,7 +92,7 @@ npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
 
 ## Skill Shadowing
 
-Override any DevFlow skill with your own version. Shadowed skills survive `devflow init` — your version is installed instead of DevFlow's.
+Override any Devflow skill with your own version. Shadowed skills survive `devflow init` — your version is installed instead of Devflow's.
 
 ```bash
 npx devflow-kit skills shadow software-design    # Create override (copies current as reference)

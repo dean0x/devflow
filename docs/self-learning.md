@@ -1,6 +1,6 @@
 # Self-Learning
 
-DevFlow detects repeated workflows and procedural knowledge across sessions and automatically creates slash commands and skills.
+Devflow detects repeated workflows and procedural knowledge across sessions and automatically creates slash commands and skills.
 
 ## How it works
 

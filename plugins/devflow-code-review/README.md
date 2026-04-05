@@ -5,7 +5,7 @@ Comprehensive code review plugin for Claude Code. Runs parallel specialized revi
 ## Installation
 
 ```bash
-# Via DevFlow CLI
+# Via Devflow CLI
 npx devflow-kit init --plugin=code-review
 
 # Via Claude Code (when available)

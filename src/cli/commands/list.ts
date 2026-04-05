@@ -52,9 +52,9 @@ export function formatPluginCommands(commands: string[]): string {
 }
 
 export const listCommand = new Command('list')
-  .description('List available DevFlow plugins')
+  .description('List available Devflow plugins')
   .action(async () => {
-    p.intro(color.bgCyan(color.black(' DevFlow Plugins ')));
+    p.intro(color.bgCyan(color.black(' Devflow Plugins ')));
 
     // Resolve user manifest and git root in parallel (independent I/O)
     const userDevflowDir = getDevFlowDirectory();

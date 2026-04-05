@@ -68,7 +68,7 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
 }
 
 /**
- * Merge DevFlow deny entries into an existing managed settings object.
+ * Merge Devflow deny entries into an existing managed settings object.
  * Preserves existing entries, deduplicates, and returns the merged JSON string.
  */
 export function mergeDenyList(existingJson: string, newDenyEntries: string[]): string {
@@ -165,8 +165,8 @@ export async function installManagedSettings(
 }
 
 /**
- * Remove DevFlow deny entries from managed settings.
- * If only DevFlow entries remain, deletes the file entirely.
+ * Remove Devflow deny entries from managed settings.
+ * If only Devflow entries remain, deletes the file entirely.
  *
  * Mirrors installManagedSettings strategy:
  * 1. Try direct write/delete
@@ -237,7 +237,7 @@ export async function removeManagedSettings(
       writeFileSync(managedPath, updatedContent!, 'utf-8');
     }
     if (verbose) {
-      p.log.success(shouldDelete ? 'Managed settings file removed' : 'DevFlow deny entries removed from managed settings');
+      p.log.success(shouldDelete ? 'Managed settings file removed' : 'Devflow deny entries removed from managed settings');
     }
     return true;
   } catch (error: unknown) {
@@ -274,7 +274,7 @@ export async function removeManagedSettings(
       await fs.rm(tmpFile, { force: true });
     }
     if (verbose) {
-      p.log.success(shouldDelete ? 'Managed settings file removed' : 'DevFlow deny entries removed from managed settings');
+      p.log.success(shouldDelete ? 'Managed settings file removed' : 'Devflow deny entries removed from managed settings');
     }
     return true;
   } catch (error) {
@@ -288,7 +288,7 @@ export async function removeManagedSettings(
 export type SecurityMode = 'managed' | 'user';
 
 /**
- * Install or update settings.json with DevFlow configuration.
+ * Install or update settings.json with Devflow configuration.
  * Prompts interactively in TTY mode when settings already exist.
  * In non-TTY mode, skips override (safe default).
  *
@@ -465,7 +465,7 @@ export async function discoverProjectGitRoots(homeDir?: string): Promise<string[
 }
 
 /**
- * Update .gitignore with DevFlow entries (for local scope installs).
+ * Update .gitignore with Devflow entries (for local scope installs).
  */
 export async function updateGitignore(
   gitRoot: string,
@@ -484,8 +484,8 @@ export async function updateGitignore(
 
     if (linesToAdd.length > 0) {
       const newContent = gitignoreContent
-        ? `${gitignoreContent.trimEnd()}\n\n# DevFlow local installation\n${linesToAdd.join('\n')}\n`
-        : `# DevFlow local installation\n${linesToAdd.join('\n')}\n`;
+        ? `${gitignoreContent.trimEnd()}\n\n# Devflow local installation\n${linesToAdd.join('\n')}\n`
+        : `# Devflow local installation\n${linesToAdd.join('\n')}\n`;
 
       await fs.writeFile(gitignorePath, newContent, 'utf-8');
       if (verbose) {
@@ -500,7 +500,7 @@ export async function updateGitignore(
 }
 
 /**
- * Create .docs/ directory structure for DevFlow artifacts.
+ * Create .docs/ directory structure for Devflow artifacts.
  */
 export async function createDocsStructure(verbose: boolean): Promise<void> {
   const docsDir = path.join(process.cwd(), '.docs');

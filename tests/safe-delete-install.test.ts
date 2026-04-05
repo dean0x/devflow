@@ -15,8 +15,8 @@ describe('generateSafeDeleteBlock', () => {
   it('generates bash/zsh block with markers, existence check, and both functions', () => {
     const block = generateSafeDeleteBlock('zsh', 'darwin', 'trash');
     expect(block).not.toBeNull();
-    expect(block).toContain('# >>> DevFlow safe-delete >>>');
-    expect(block).toContain('# <<< DevFlow safe-delete <<<');
+    expect(block).toContain('# >>> Devflow safe-delete >>>');
+    expect(block).toContain('# <<< Devflow safe-delete <<<');
     expect(block).toContain('rm() {');
     expect(block).toContain('command() {');
     expect(block).toContain('[ -e "$f" ] || [ -L "$f" ]');
@@ -32,7 +32,7 @@ describe('generateSafeDeleteBlock', () => {
   it('generates fish block with fish syntax and existence check', () => {
     const block = generateSafeDeleteBlock('fish', 'darwin', 'trash');
     expect(block).not.toBeNull();
-    expect(block).toContain('# >>> DevFlow safe-delete >>>');
+    expect(block).toContain('# >>> Devflow safe-delete >>>');
     expect(block).toContain('function rm --description "Safe delete via trash"');
     expect(block).toContain('test -e $f; or test -L $f');
     expect(block).toContain('set existing $existing $f');
@@ -107,9 +107,9 @@ describe('getInstalledVersion', () => {
   it('returns 1 for legacy block without version line', async () => {
     const filePath = path.join(tmpDir, '.zshrc');
     await fs.writeFile(filePath, [
-      '# >>> DevFlow safe-delete >>>',
+      '# >>> Devflow safe-delete >>>',
       'rm() { trash "$@"; }',
-      '# <<< DevFlow safe-delete <<<',
+      '# <<< Devflow safe-delete <<<',
     ].join('\n'));
     expect(await getInstalledVersion(filePath)).toBe(1);
   });
@@ -117,10 +117,10 @@ describe('getInstalledVersion', () => {
   it('returns version number for versioned block', async () => {
     const filePath = path.join(tmpDir, '.zshrc');
     await fs.writeFile(filePath, [
-      '# >>> DevFlow safe-delete >>>',
+      '# >>> Devflow safe-delete >>>',
       '# v2',
       'rm() { trash "$@"; }',
-      '# <<< DevFlow safe-delete <<<',
+      '# <<< Devflow safe-delete <<<',
     ].join('\n'));
     expect(await getInstalledVersion(filePath)).toBe(2);
   });
@@ -141,9 +141,9 @@ describe('isAlreadyInstalled', () => {
     const filePath = path.join(tmpDir, '.zshrc');
     await fs.writeFile(filePath, [
       'existing content',
-      '# >>> DevFlow safe-delete >>>',
+      '# >>> Devflow safe-delete >>>',
       'rm() { trash "$@"; }',
-      '# <<< DevFlow safe-delete <<<',
+      '# <<< Devflow safe-delete <<<',
     ].join('\n'));
     expect(await isAlreadyInstalled(filePath)).toBe(true);
   });
@@ -154,7 +154,7 @@ describe('isAlreadyInstalled', () => {
 
   it('returns false for partial markers', async () => {
     const filePath = path.join(tmpDir, '.zshrc');
-    await fs.writeFile(filePath, '# >>> DevFlow safe-delete >>>\nsome content\n');
+    await fs.writeFile(filePath, '# >>> Devflow safe-delete >>>\nsome content\n');
     expect(await isAlreadyInstalled(filePath)).toBe(false);
   });
 
@@ -216,9 +216,9 @@ describe('removeFromProfile', () => {
     await fs.writeFile(filePath, [
       'before content',
       '',
-      '# >>> DevFlow safe-delete >>>',
+      '# >>> Devflow safe-delete >>>',
       'rm() { trash "$@"; }',
-      '# <<< DevFlow safe-delete <<<',
+      '# <<< Devflow safe-delete <<<',
       '',
       'after content',
     ].join('\n'));
@@ -229,7 +229,7 @@ describe('removeFromProfile', () => {
     const content = await fs.readFile(filePath, 'utf-8');
     expect(content).toContain('before content');
     expect(content).toContain('after content');
-    expect(content).not.toContain('DevFlow safe-delete');
+    expect(content).not.toContain('Devflow safe-delete');
   });
 
   it('returns false for missing file', async () => {
@@ -239,9 +239,9 @@ describe('removeFromProfile', () => {
   it('deletes file when block is the only content', async () => {
     const filePath = path.join(tmpDir, 'rm.fish');
     await fs.writeFile(filePath, [
-      '# >>> DevFlow safe-delete >>>',
+      '# >>> Devflow safe-delete >>>',
       'function rm; trash $argv; end',
-      '# <<< DevFlow safe-delete <<<',
+      '# <<< Devflow safe-delete <<<',
     ].join('\n'));
 
     const removed = await removeFromProfile(filePath);
@@ -257,9 +257,9 @@ describe('removeFromProfile', () => {
       'content above',
       '',
       '',
-      '# >>> DevFlow safe-delete >>>',
+      '# >>> Devflow safe-delete >>>',
       'block',
-      '# <<< DevFlow safe-delete <<<',
+      '# <<< Devflow safe-delete <<<',
       '',
       '',
     ].join('\n'));
