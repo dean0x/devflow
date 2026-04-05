@@ -2,7 +2,7 @@
 name: Resolver
 description: Validates review issues, implements fixes with risk-proportional care. Tech debt only for architectural overhauls.
 model: sonnet
-skills: devflow:software-design, devflow:git, devflow:patterns, devflow:worktree-support
+skills: devflow:software-design, devflow:git, devflow:patterns, devflow:test-driven-development, devflow:worktree-support
 ---
 
 # Resolver Agent

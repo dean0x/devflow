@@ -25,7 +25,7 @@ Classification statement must warn about scope:
 
 ## Phase 1: Implement
 
-Follow devflow:implement pipeline (Phases 1-6).
+Load `devflow:implement` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → plan synthesis → Coder → FILES_CHANGED detection → quality gates → completion). The quality gates are non-negotiable: Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
 
 If implementation returns **BLOCKED**: halt entire pipeline, report blocker.
 
@@ -41,7 +41,7 @@ Use AskUserQuestion:
 
 ## Phase 3: Review
 
-Follow devflow:review pipeline (Phases 1-6).
+Load `devflow:review` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → incremental detection → file analysis → parallel reviewers (7 core + conditional) → synthesis → finalize). All 7 core reviewers (security, architecture, performance, complexity, consistency, testing, regression) are mandatory.
 
 Report review results (merge recommendation, issue counts).
 
@@ -58,7 +58,7 @@ If **no blocking issues**:
 
 ## Phase 5: Resolve
 
-Follow devflow:resolve pipeline (Phases 1-6).
+Load `devflow:resolve` via the Skill tool, then execute its full pipeline (Phases 1-6: target review directory → parse issues → analyze & batch → parallel resolvers → collect & simplify → report).
 
 ## Phase 6: Summary
 

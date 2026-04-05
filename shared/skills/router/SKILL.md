@@ -74,8 +74,8 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 |--------|---------------|----------------------------------|
 | **IMPLEMENT** | devflow:test-driven-development, devflow:patterns, devflow:research | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
 | **EXPLORE** | devflow:explore | — |
-| **DEBUG** | devflow:software-design, devflow:testing | devflow:git (if git operations involved) |
-| **PLAN** | devflow:plan, devflow:patterns, devflow:software-design | — |
+| **DEBUG** | devflow:test-driven-development, devflow:software-design, devflow:testing | devflow:git (if git operations involved) |
+| **PLAN** | devflow:test-driven-development, devflow:plan, devflow:patterns, devflow:software-design | — |
 | **REVIEW** | devflow:self-review, devflow:software-design | devflow:testing |
 
 ### ORCHESTRATED-depth skills
@@ -84,10 +84,10 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 |--------|---------------|----------------------------------|
 | **IMPLEMENT** | devflow:implement, devflow:patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
 | **EXPLORE** | devflow:explore | — |
-| **DEBUG** | devflow:debug, devflow:software-design | devflow:git (if git operations involved) |
-| **PLAN** | devflow:plan, devflow:patterns, devflow:software-design | — |
+| **DEBUG** | devflow:debug, devflow:test-driven-development, devflow:software-design | devflow:git (if git operations involved) |
+| **PLAN** | devflow:plan, devflow:test-driven-development, devflow:patterns, devflow:software-design | — |
 | **REVIEW** | devflow:review | — (reviewers load their own pattern skills) |
-| **RESOLVE** | devflow:resolve, devflow:software-design | — |
+| **RESOLVE** | devflow:resolve, devflow:test-driven-development, devflow:software-design | — |
 | **PIPELINE** | devflow:pipeline, devflow:patterns | — |
 
 **Excluded from ambient loading** (loaded by agents internally): devflow:review-methodology, devflow:complexity, devflow:consistency, devflow:database, devflow:dependencies, devflow:documentation, devflow:regression, devflow:architecture, devflow:accessibility, devflow:performance, devflow:qa. These skills are always installed (universal skill installation) but loaded by Reviewer/Tester agents at runtime, not by the router.
