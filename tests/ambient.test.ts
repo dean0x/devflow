@@ -1,8 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { addAmbientHook, removeAmbientHook, hasAmbientHook } from '../src/cli/commands/ambient.js';
-import { hasClassification, isQuietResponse, extractIntent, extractDepth, hasSkillLoading, extractLoadedSkills } from './integration/helpers.js';
+import { addAmbientHook, removeAmbientHook, removeLegacyAmbientHook, hasAmbientHook } from '../src/cli/commands/ambient.js';
+import type { StreamResult } from './integration/helpers.js';
+import {
+  hasClassification,
+  extractIntent,
+  extractDepth,
+  hasDevFlowBranding,
+  hasSkillInvocations,
+} from './integration/helpers.js';
+
+/** Helper to create a StreamResult from text for unit-testing classification helpers. */
+function textResult(text: string, skills: string[] = []): StreamResult {
+  return { skills, textFragments: [text], killedEarly: false, durationMs: 0 };
+}
 
 describe('addAmbientHook', () => {
   it('adds hook to empty settings', () => {
@@ -68,6 +80,40 @@ describe('addAmbientHook', () => {
 
     expect(command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
     expect(command).toContain('preamble');
+  });
+
+  it('replaces legacy ambient-prompt hook with new preamble hook', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+        ],
+      },
+    });
+    const result = addAmbientHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Legacy removed, new preamble added
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).not.toContain('ambient-prompt');
+  });
+
+  it('replaces legacy hook while preserving other UserPromptSubmit hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
+          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+        ],
+      },
+    });
+    const result = addAmbientHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
+    expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('preamble');
   });
 });
 
@@ -147,10 +193,86 @@ describe('removeAmbientHook', () => {
 
     expect(settings.statusLine).toEqual({ type: 'command' });
   });
+
+  it('removes legacy ambient-prompt hook', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+        ],
+      },
+    });
+    const result = removeAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('removes both legacy and new hooks at once', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] },
+          { hooks: [{ type: 'command', command: 'other-hook.sh' }] },
+        ],
+      },
+    });
+    const result = removeAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
+  });
+});
+
+describe('removeLegacyAmbientHook', () => {
+  it('removes only legacy ambient-prompt hook', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+          { hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] },
+        ],
+      },
+    });
+    const result = removeLegacyAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    // Preamble hook preserved, legacy removed
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
+  });
+
+  it('is idempotent when no legacy hook present', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook preamble' }] },
+        ],
+      },
+    });
+    const result = removeLegacyAmbientHook(input);
+    expect(result).toBe(input);
+  });
+
+  it('cleans empty structures after removing legacy hook', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+        ],
+      },
+    });
+    const result = removeLegacyAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
 });
 
 describe('hasAmbientHook', () => {
-  it('returns true when present', () => {
+  it('returns true when current preamble hook present', () => {
     const withHook = addAmbientHook('{}', '/home/user/.devflow');
     expect(hasAmbientHook(withHook)).toBe(true);
   });
@@ -181,69 +303,65 @@ describe('hasAmbientHook', () => {
     });
     expect(hasAmbientHook(input)).toBe(true);
   });
+
+  it('detects legacy ambient-prompt hook', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook ambient-prompt' }] },
+        ],
+      },
+    });
+    expect(hasAmbientHook(input)).toBe(true);
+  });
 });
 
 describe('classification helpers', () => {
   it('detects classification marker', () => {
-    expect(hasClassification('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.')).toBe(true);
-    expect(hasClassification('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.')).toBe(true);
+    expect(hasClassification(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe(true);
+    expect(hasClassification(textResult('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.'))).toBe(true);
   });
 
   it('returns false when no classification', () => {
-    expect(hasClassification('Here is the code you asked for.')).toBe(false);
-    expect(hasClassification('')).toBe(false);
-  });
-
-  it('isQuietResponse is inverse of hasClassification', () => {
-    expect(isQuietResponse('Just a normal response')).toBe(true);
-    expect(isQuietResponse('DevFlow: IMPLEMENT/GUIDED. Loading: x.')).toBe(false);
+    expect(hasClassification(textResult('Here is the code you asked for.'))).toBe(false);
+    expect(hasClassification(textResult(''))).toBe(false);
   });
 
   it('extracts intent', () => {
-    expect(extractIntent('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.')).toBe('IMPLEMENT');
-    expect(extractIntent('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.')).toBe('DEBUG');
-    expect(extractIntent('DevFlow: REVIEW/GUIDED. Loading: devflow:self-review.')).toBe('REVIEW');
-    expect(extractIntent('DevFlow: PLAN/GUIDED. Loading: devflow:software-design.')).toBe('PLAN');
-    expect(extractIntent('DevFlow: EXPLORE/QUICK')).toBe('EXPLORE');
-    expect(extractIntent('DevFlow: CHAT/QUICK')).toBe('CHAT');
+    expect(extractIntent(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('IMPLEMENT');
+    expect(extractIntent(textResult('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.'))).toBe('DEBUG');
+    expect(extractIntent(textResult('DevFlow: REVIEW/GUIDED. Loading: devflow:self-review.'))).toBe('REVIEW');
+    expect(extractIntent(textResult('DevFlow: PLAN/GUIDED. Loading: devflow:software-design.'))).toBe('PLAN');
+    expect(extractIntent(textResult('DevFlow: EXPLORE/QUICK'))).toBe('EXPLORE');
+    expect(extractIntent(textResult('DevFlow: CHAT/QUICK'))).toBe('CHAT');
   });
 
   it('extracts depth', () => {
-    expect(extractDepth('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.')).toBe('GUIDED');
-    expect(extractDepth('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.')).toBe('ORCHESTRATED');
+    expect(extractDepth(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('GUIDED');
+    expect(extractDepth(textResult('DevFlow: DEBUG/ORCHESTRATED. Loading: devflow:debug.'))).toBe('ORCHESTRATED');
   });
 
   it('returns null for missing classification', () => {
-    expect(extractIntent('no classification here')).toBeNull();
-    expect(extractDepth('no classification here')).toBeNull();
+    expect(extractIntent(textResult('no classification here'))).toBeNull();
+    expect(extractDepth(textResult('no classification here'))).toBeNull();
+  });
+
+  it('detects DevFlow branding', () => {
+    expect(hasDevFlowBranding(textResult('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:patterns.'))).toBe(true);
+  });
+
+  it('returns false for non-DevFlow branding', () => {
+    expect(hasDevFlowBranding(textResult('Some random text without branding.'))).toBe(false);
   });
 });
 
-describe('skill loading helpers', () => {
-  it('detects Loading marker', () => {
-    expect(hasSkillLoading('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:patterns, devflow:research.')).toBe(true);
-    expect(hasSkillLoading('Loading: devflow:software-design')).toBe(true);
+describe('skill invocation helpers', () => {
+  it('detects skill invocations', () => {
+    expect(hasSkillInvocations(textResult('', ['devflow:patterns', 'devflow:research']))).toBe(true);
   });
 
-  it('returns false when no Loading marker', () => {
-    expect(hasSkillLoading('DevFlow: IMPLEMENT/GUIDED.')).toBe(false);
-    expect(hasSkillLoading('Just some text')).toBe(false);
-  });
-
-  it('extracts single skill', () => {
-    expect(extractLoadedSkills('Loading: devflow:software-design')).toEqual(['devflow:software-design']);
-  });
-
-  it('extracts multiple skills', () => {
-    expect(extractLoadedSkills('DevFlow: IMPLEMENT/GUIDED. Loading: devflow:patterns, devflow:research, devflow:typescript.')).toEqual([
-      'devflow:patterns',
-      'devflow:research',
-      'devflow:typescript',
-    ]);
-  });
-
-  it('returns empty array when no Loading marker', () => {
-    expect(extractLoadedSkills('no skills here')).toEqual([]);
+  it('returns false when no skills', () => {
+    expect(hasSkillInvocations(textResult('some text'))).toBe(false);
   });
 });
 
@@ -259,7 +377,7 @@ describe('preamble drift detection', () => {
 
     // The preamble is detection-only: classification rules + router skill reference.
     // Verify structural elements rather than exact string match to allow wording refinement.
-    expect(shellPreamble).toContain('DEVFLOW MODE');
+    expect(shellPreamble).toContain('AMBIENT MODE');
 
     // Must contain depth definitions
     expect(shellPreamble).toContain('QUICK');
@@ -267,15 +385,14 @@ describe('preamble drift detection', () => {
     expect(shellPreamble).toContain('ORCHESTRATED');
 
     // Must contain intent names for each category
+    expect(shellPreamble).toContain('CHAT');
+    expect(shellPreamble).toContain('EXPLORE');
+    expect(shellPreamble).toContain('PLAN');
     expect(shellPreamble).toContain('IMPLEMENT');
-    expect(shellPreamble).toContain('DEBUG');
     expect(shellPreamble).toContain('REVIEW');
     expect(shellPreamble).toContain('RESOLVE');
+    expect(shellPreamble).toContain('DEBUG');
     expect(shellPreamble).toContain('PIPELINE');
-    expect(shellPreamble).toContain('PLAN');
-
-    // Must contain multi-worktree awareness
-    expect(shellPreamble).toContain('MULTI_WORKTREE');
 
     // Must reference the router skill (detection-only: no direct skill mappings)
     expect(shellPreamble).toContain('devflow:router');

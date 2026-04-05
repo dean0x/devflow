@@ -100,6 +100,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'router',
       'implement',
       'debug',
+      'explore',
       'plan',
       'review',
       'resolve',
@@ -350,6 +351,7 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'devflow:implementation-patterns',
   'devflow:search-first',
   // v2.0.0 ambient refinements: new bare names for pre-namespace installs
+  'explore',
   'router',
   'implement',
   'debug',

@@ -21,6 +21,14 @@ This is a lightweight variant of the Plan phase in `/implement` for ambient ORCH
 
 ---
 
+## GUIDED Behavior
+
+For GUIDED depth, the main session performs planning directly:
+
+1. **Spawn Skimmer** — `Task(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
+2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session.
+3. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
+
 ## Worktree Support
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.

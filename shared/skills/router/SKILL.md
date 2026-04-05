@@ -29,15 +29,14 @@ Determine what the user is trying to do from their prompt.
 
 | Intent | Signal Words / Patterns |
 |--------|------------------------|
+| **CHAT** | greetings, meta-questions, confirmations, short responses |
+| **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" |
+| **PLAN** | "how should", "design", "architecture", "approach", "strategy" |
 | **IMPLEMENT** | "add", "create", "implement", "build", "write", "make" |
-| **DEBUG** | "fix", "bug", "broken", "failing", "error", "why does" |
 | **REVIEW** | "check", "look at", "review", "is this ok", "any issues" |
 | **RESOLVE** | "resolve", "fix review issues", "address feedback", "fix findings" |
+| **DEBUG** | "fix", "bug", "broken", "failing", "error", "why does" |
 | **PIPELINE** | "end to end", "implement and review", "build and review", "full pipeline" |
-| **MULTI_WORKTREE** | "all worktrees/branches", "each worktree/branch", "review everything", "resolve all" |
-| **PLAN** | "how should", "design", "architecture", "approach", "strategy" |
-| **EXPLORE** | "what is", "where is", "find", "show me", "explain", "how does" |
-| **CHAT** | greetings, meta-questions, confirmations, short responses |
 
 **Ambiguous prompts:** "Update the README" → QUICK. Git operations like "commit this" → QUICK. Code-change prompts without clear scope → GUIDED (not QUICK).
 
@@ -47,7 +46,7 @@ Determine how much enforcement the prompt warrants.
 
 | Depth | Criteria | Action |
 |-------|----------|--------|
-| **QUICK** | CHAT intent. EXPLORE intent. Git/devops operations (commit, push, merge, branch, pr, deploy, reinstall). Single-word continuations. Small edits, config changes, trivial single-file tweaks. | Respond normally. Zero overhead. Do not state classification. |
+| **QUICK** | CHAT intent. EXPLORE simple lookups ("where is X?"). Git/devops operations (commit, push, merge, branch, pr, deploy, reinstall). Single-word continuations. Rename/comment tweaks, config changes. 1-2 line edits. | Respond normally. Zero overhead. Do not state classification. |
 | **GUIDED** | IMPLEMENT with small scope (≤2 files, single module). DEBUG with clear error location (stack trace, specific file, known function). PLAN for focused design questions (specific area/pattern). REVIEW (small scope — see below). | Load skills via Skill tool. Main session implements directly. Spawn Simplifier after code changes. State classification. |
 | **ORCHESTRATED** | IMPLEMENT with larger scope (>2 files, multi-module, complex). DEBUG with vague/cross-cutting bug (no clear location, multiple possible causes). PLAN for system-level architecture (caching layer, auth system, multi-module design). REVIEW (large scope — see below). RESOLVE (always). PIPELINE (always). | Load skills via Skill tool, then orchestrate agents. State classification. |
 
@@ -58,12 +57,12 @@ Determine how much enforcement the prompt warrants.
 | **IMPLEMENT** | ≤2 files, single module, clear task | >2 files, multi-module, complex |
 | **DEBUG** | Clear error with known location (stack trace, specific file) | Vague/cross-cutting bug, multiple possible causes |
 | **PLAN** | Focused question about specific area/pattern | System-level architecture, multi-module design |
+| **EXPLORE** | Focused flow/module analysis, single subsystem | Multi-system architecture mapping, cross-cutting analysis |
 | **REVIEW** | Continuation: match prior IMPLEMENT depth. Standalone: "check this"/"review this file" → GUIDED | Continuation: match prior IMPLEMENT depth. Standalone: "full review"/"branch review"/"PR review" → ORCHESTRATED |
 | **RESOLVE** | — | Always ORCHESTRATED |
 | **PIPELINE** | — | Always ORCHESTRATED |
-| **MULTI_WORKTREE** | Always ORCHESTRATED — triggers code-review/resolve command flow | — |
 
-**Classification conservatism:** When choosing between GUIDED and ORCHESTRATED, prefer GUIDED — escalate only when scope clearly exceeds main-session capacity. When choosing between QUICK and GUIDED, prefer GUIDED if the prompt involves code changes (implement, debug, fix, add, create code). Reserve QUICK for truly zero-overhead prompts: chat, exploration, git ops, config changes, trivial edits.
+**Classification conservatism:** When choosing between GUIDED and ORCHESTRATED, prefer GUIDED — escalate only when scope clearly exceeds main-session capacity. When choosing between QUICK and GUIDED, prefer GUIDED if the prompt involves code changes (implement, debug, fix, add, create code) or asks for analysis/explanation of a subsystem. Reserve QUICK for truly zero-overhead prompts: chat, simple lookups, git ops, config changes, trivial edits.
 
 ## Step 3: Select Skills
 
@@ -74,8 +73,9 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
 | **IMPLEMENT** | devflow:test-driven-development, devflow:patterns, devflow:research | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
+| **EXPLORE** | devflow:explore | — |
 | **DEBUG** | devflow:software-design, devflow:testing | devflow:git (if git operations involved) |
-| **PLAN** | devflow:patterns, devflow:software-design | — |
+| **PLAN** | devflow:plan, devflow:patterns, devflow:software-design | — |
 | **REVIEW** | devflow:self-review, devflow:software-design | devflow:testing |
 
 ### ORCHESTRATED-depth skills
@@ -83,6 +83,7 @@ Based on classified intent and depth, invoke each selected skill using the Skill
 | Intent | Primary Skills | Secondary (if file type matches) |
 |--------|---------------|----------------------------------|
 | **IMPLEMENT** | devflow:implement, devflow:patterns | devflow:typescript (.ts), devflow:react (.tsx/.jsx), devflow:go (.go), devflow:java (.java), devflow:python (.py), devflow:rust (.rs), devflow:ui-design (CSS/UI), devflow:boundary-validation (forms/API), devflow:security (auth/crypto) |
+| **EXPLORE** | devflow:explore | — |
 | **DEBUG** | devflow:debug, devflow:software-design | devflow:git (if git operations involved) |
 | **PLAN** | devflow:plan, devflow:patterns, devflow:software-design | — |
 | **REVIEW** | devflow:review | — (reviewers load their own pattern skills) |
@@ -116,8 +117,9 @@ to all tools (Edit, Write, Bash, Agent, etc.) for implementation work.
 | Intent | Main Session Work | Post-Work |
 |--------|------------------|-----------|
 | **IMPLEMENT** | Implement directly with loaded skills. Follow TDD cycle. | Spawn Simplifier on changed files. |
+| **EXPLORE** | Spawn Skimmer for orientation, then trace flow/analyze directly in main session. | No Simplifier (no code changes). |
 | **DEBUG** | Investigate directly — reproduce bug, diagnose from stack trace/error, fix. | Spawn Simplifier on changed files. |
-| **PLAN** | Explore relevant code and design directly. The area is focused enough for main session. | No Simplifier (no code changes). |
+| **PLAN** | Spawn Skimmer for orientation, then design directly with loaded pattern/design skills. | No Simplifier (no code changes). |
 | **REVIEW** | Review directly with loaded skills (self-review in main session). | No Simplifier. |
 
 State classification as: `DevFlow: INTENT/DEPTH. Loading: [skills].` QUICK is silent.
@@ -138,5 +140,7 @@ State classification as: `DevFlow: INTENT/DEPTH. Loading: [skills].` QUICK is si
 | REVIEW standalone, ambiguous | GUIDED (conservative) |
 | RESOLVE intent | Always ORCHESTRATED |
 | PIPELINE intent | Always ORCHESTRATED |
-| MULTI_WORKTREE intent | Always ORCHESTRATED — follow code-review/resolve command flow which auto-discovers worktrees |
+| EXPLORE simple lookup ("where is X?") | QUICK — no skills needed |
+| EXPLORE focused subsystem ("explain the auth flow") | GUIDED — Skimmer + main session trace |
+| EXPLORE multi-system ("map the full architecture") | ORCHESTRATED — Skimmer + parallel Explore agents + Synthesizer |
 | Multiple triggers per session | Each runs independently; context compaction handles accumulation |

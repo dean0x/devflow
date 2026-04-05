@@ -75,7 +75,7 @@ Write custom code when:
 **Required**: Document why Build was chosen:
 
 ```typescript
-// search-first: Built custom — our wire format uses non-standard
+// research: Built custom — our wire format uses non-standard
 // ISO-8601 extensions that no date library handles correctly.
 // Evaluated: date-fns (no custom format support), luxon (500KB overhead),
 // dayjs (close but missing timezone edge case).

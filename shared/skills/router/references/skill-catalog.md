@@ -62,6 +62,14 @@ RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resol
 
 PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with user gates.
 
+### EXPLORE Intent
+
+| Skill | When to Load | Depth | File Patterns |
+|-------|-------------|-------|---------------|
+| devflow:explore | Always for EXPLORE | GUIDED + ORCHESTRATED | Any — orchestrates codebase exploration |
+
+EXPLORE depth: simple lookups ("where is X?") → QUICK. Focused subsystem/flow analysis → GUIDED. Multi-system architecture mapping → ORCHESTRATED.
+
 ### PLAN Intent
 
 | Skill | When to Load | Depth | File Patterns |
@@ -86,23 +94,10 @@ These skills are always installed (universal skill installation) but loaded by a
 - devflow:performance — N+1 queries, memory leaks, caching opportunities
 - devflow:qa — Scenario-based acceptance testing, evidence collection
 
-## Multi-Worktree Detection
-
-When the user's prompt contains multi-worktree signals ("all worktrees", "all branches", "each worktree", "review everything", "resolve all"), classify as MULTI_WORKTREE intent combined with REVIEW or RESOLVE. This always routes to ORCHESTRATED depth.
-
-| Signal | Combined Intent | Action |
-|--------|----------------|--------|
-| "review all worktrees/branches" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow (auto-discovers worktrees) |
-| "resolve all worktrees/branches" | MULTI_WORKTREE + RESOLVE | Follow `devflow:resolve` command flow (auto-discovers worktrees) |
-| "review everything that needs review" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow |
-| "run code review on each branch" | MULTI_WORKTREE + REVIEW | Follow `devflow:code-review` command flow |
-
-No additional skills needed — the code-review and resolve commands handle all orchestration internally, including worktree discovery, incremental detection, and parallel agent spawning.
-
 ## Selection Limits
 
 - **Maximum 3 knowledge skills** per ambient response (primary + up to 2 secondary)
-- **Orchestration skills** (devflow:implement, devflow:debug, devflow:plan, devflow:review, devflow:resolve, devflow:pipeline) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
+- **Orchestration skills** (devflow:implement, devflow:explore, devflow:debug, devflow:plan, devflow:review, devflow:resolve, devflow:pipeline) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
 - **Primary skills** are always loaded for the classified intent at both GUIDED and ORCHESTRATED depth
 - **Secondary skills** are loaded only when file patterns match conversation context
 - **GUIDED depth** loads knowledge skills only (no orchestration skills) — main session works directly

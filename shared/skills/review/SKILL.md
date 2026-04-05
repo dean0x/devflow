@@ -9,7 +9,7 @@ allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 
 Agent pipeline for REVIEW intent in ambient ORCHESTRATED mode. Full multi-agent review with parallel specialized reviewers, incremental detection, and disk-persisted reports.
 
-This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. Excluded: pitfall recording, tech debt management, Agent Teams debate, multi-worktree flow (routes to full command via MULTI_WORKTREE intent), CLI flag parsing.
+This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. Excluded: pitfall recording, tech debt management, Agent Teams debate, CLI flag parsing.
 
 ## Iron Law
 

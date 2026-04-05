@@ -46,7 +46,7 @@ devflow/
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
-│       ├── ambient-prompt           # UserPromptSubmit hook: ambient skill injection
+│       ├── preamble                # UserPromptSubmit hook: ambient skill injection
 │       ├── session-end-learning      # SessionEnd hook: batched learning trigger
 │       ├── stop-update-learning     # Stop hook: deprecated stub (upgrade via devflow learn)
 │       ├── background-learning      # Background: pattern detection via Sonnet
@@ -92,7 +92,7 @@ devflow-{name}/
   "description": "Complete task implementation workflow",
   "version": "1.1.0",
   "agents": ["git", "coder", "synthesizer"],
-  "skills": ["implementation-patterns", "self-review"]
+  "skills": ["patterns", "self-review"]
 }
 ```
 

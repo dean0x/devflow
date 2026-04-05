@@ -55,7 +55,7 @@ devflow/
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start, pre-compact, ambient-prompt, session-end-learning, stop-update-learning [deprecated], background-learning)
+│   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start, pre-compact, preamble, session-end-learning, stop-update-learning [deprecated], background-learning)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, flags)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
@@ -147,7 +147,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Plugin-specific agents** (1): claude-md-auditor
 
-**Orchestration skills** (6): implement, debug, plan, review, resolve, pipeline. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
+**Orchestration skills** (7): implement, explore, debug, plan, review, resolve, pipeline. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
 **Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
