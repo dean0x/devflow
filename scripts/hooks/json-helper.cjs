@@ -81,12 +81,25 @@ function parseJsonl(file) {
 const DECAY_FACTORS = [1.0, 0.90, 0.81, 0.73, 0.66, 0.59, 0.53];
 const CONFIDENCE_FLOOR = 0.10;
 const DECAY_PERIOD_DAYS = 30;
-const REQUIRED_OBSERVATIONS = 3;
-const TEMPORAL_SPREAD_SECS = 86400;
+const REQUIRED_OBSERVATIONS = 5;
+const TEMPORAL_SPREAD_SECS = 604800; // 7 days
+const INITIAL_CONFIDENCE = 0.33; // seed value for first observation (higher than calculateConfidence(1) to reduce noise)
 
 function learningLog(msg) {
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   process.stderr.write(`[${ts}] ${msg}\n`);
+}
+
+/**
+ * Strip leading YAML frontmatter from content that the model may have included
+ * despite being told not to. Belt-and-suspenders defense against duplicate frontmatter.
+ */
+function stripLeadingFrontmatter(text) {
+  if (!text) return '';
+  const trimmed = text.replace(/^\s*\n/, '');
+  if (!trimmed.startsWith('---')) return text;
+  const match = trimmed.match(/^---\s*\n[\s\S]*?\n---\s*\n?/);
+  return match ? trimmed.slice(match[0].length) : text;
 }
 
 function writeJsonlAtomic(file, entries) {
@@ -262,17 +275,17 @@ try {
 
     case 'array-length': {
       const input = JSON.parse(readStdin());
-      const path = args[0];
-      const arr = getNestedField(input, path);
+      const dotPath = args[0];
+      const arr = getNestedField(input, dotPath);
       console.log(Array.isArray(arr) ? arr.length : 0);
       break;
     }
 
     case 'array-item': {
       const input = JSON.parse(readStdin());
-      const path = args[0];
+      const dotPath = args[0];
       const index = parseInt(args[1]);
-      const arr = getNestedField(input, path);
+      const arr = getNestedField(input, dotPath);
       if (Array.isArray(arr) && index >= 0 && index < arr.length) {
         console.log(JSON.stringify(arr[index]));
       } else {
@@ -456,7 +469,7 @@ try {
             id: obs.id,
             type: obs.type,
             pattern: obs.pattern,
-            confidence: 0.33,
+            confidence: INITIAL_CONFIDENCE,
             observations: 1,
             first_seen: nowIso,
             last_seen: nowIso,
@@ -465,7 +478,7 @@ try {
             details: obs.details || '',
           };
           logMap.set(obs.id, newEntry);
-          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=0.33`);
+          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${INITIAL_CONFIDENCE}`);
           created++;
         }
       }
@@ -544,7 +557,7 @@ try {
             `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
             '---',
             '',
-            art.content || '',
+            stripLeadingFrontmatter(art.content || ''),
             '',
           ].join('\n');
         } else {
@@ -557,7 +570,7 @@ try {
             `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
             '---',
             '',
-            art.content || '',
+            stripLeadingFrontmatter(art.content || ''),
             '',
           ].join('\n');
         }
