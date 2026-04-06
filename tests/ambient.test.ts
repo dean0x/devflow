@@ -455,7 +455,7 @@ describe('skill invocation helpers', () => {
 });
 
 describe('preamble drift detection', () => {
-  it('preamble contains classify instruction', async () => {
+  it('preamble contains classify and devflow:router instructions', async () => {
     const hookPath = path.resolve(__dirname, '../scripts/hooks/preamble');
     const hookContent = await fs.readFile(hookPath, 'utf-8');
 
@@ -464,36 +464,61 @@ describe('preamble drift detection', () => {
     expect(match).not.toBeNull();
     const shellPreamble = match![1];
 
-    // The preamble is now a one-sentence classification prompt
+    // SYNC: preamble must instruct classification + router loading
     expect(shellPreamble.toLowerCase()).toContain('classify');
+    expect(shellPreamble).toContain('devflow:router');
   });
 
-  it('classification-context injection reads router SKILL.md', async () => {
+  it('classification-rules.md contains required classification elements', async () => {
+    const rulesPath = path.resolve(__dirname, '../shared/skills/router/references/classification-rules.md');
+    const rulesContent = await fs.readFile(rulesPath, 'utf-8');
+
+    // Must contain Intent Signals heading
+    expect(rulesContent).toContain('Intent Signals');
+
+    // Must contain all 8 intents
+    expect(rulesContent).toContain('CHAT');
+    expect(rulesContent).toContain('EXPLORE');
+    expect(rulesContent).toContain('PLAN');
+    expect(rulesContent).toContain('IMPLEMENT');
+    expect(rulesContent).toContain('REVIEW');
+    expect(rulesContent).toContain('RESOLVE');
+    expect(rulesContent).toContain('DEBUG');
+    expect(rulesContent).toContain('PIPELINE');
+
+    // Must contain all 3 depths
+    expect(rulesContent).toContain('QUICK');
+    expect(rulesContent).toContain('GUIDED');
+    expect(rulesContent).toContain('ORCHESTRATED');
+
+    // Must reference devflow:router for GUIDED/ORCHESTRATED
+    expect(rulesContent).toContain('devflow:router');
+  });
+
+  it('router SKILL.md contains skill lookup tables', async () => {
     const routerPath = path.resolve(__dirname, '../shared/skills/router/SKILL.md');
     const routerContent = await fs.readFile(routerPath, 'utf-8');
 
-    // Router SKILL.md must exist and contain required structural elements
-    expect(routerContent).toContain('Classify Intent');
-    expect(routerContent).toContain('Classify Depth');
-    expect(routerContent).toContain('Select Skills');
-
-    // Must contain all intent types
-    expect(routerContent).toContain('CHAT');
-    expect(routerContent).toContain('EXPLORE');
-    expect(routerContent).toContain('PLAN');
-    expect(routerContent).toContain('IMPLEMENT');
-    expect(routerContent).toContain('REVIEW');
-    expect(routerContent).toContain('RESOLVE');
-    expect(routerContent).toContain('DEBUG');
-    expect(routerContent).toContain('PIPELINE');
-
-    // Must contain depth definitions
-    expect(routerContent).toContain('QUICK');
-    expect(routerContent).toContain('GUIDED');
-    expect(routerContent).toContain('ORCHESTRATED');
+    // Must contain GUIDED/ORCHESTRATED headings
+    expect(routerContent).toContain('## GUIDED');
+    expect(routerContent).toContain('## ORCHESTRATED');
 
     // Must contain classification output format
     expect(routerContent).toContain('Devflow:');
     expect(routerContent).toContain('Loading:');
+
+    // Must contain intent names in tables
+    expect(routerContent).toContain('IMPLEMENT');
+    expect(routerContent).toContain('EXPLORE');
+    expect(routerContent).toContain('DEBUG');
+    expect(routerContent).toContain('PLAN');
+    expect(routerContent).toContain('REVIEW');
+  });
+
+  it('session-start-classification hook reads classification-rules.md', async () => {
+    const hookPath = path.resolve(__dirname, '../scripts/hooks/session-start-classification');
+    const hookContent = await fs.readFile(hookPath, 'utf-8');
+
+    expect(hookContent).toContain('classification-rules.md');
   });
 });

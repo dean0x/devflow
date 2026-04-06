@@ -33,6 +33,6 @@ fi
 
 # Minimal preamble — classification rules injected at SessionStart, not here.
 # SYNC: must match tests/ambient.test.ts preamble drift detection
-PREAMBLE="Classify user intent and depth."
+PREAMBLE="Classify this request's intent and depth, then load devflow:router via Skill tool."
 
 json_prompt_output "$PREAMBLE"

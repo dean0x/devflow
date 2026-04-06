@@ -17,30 +17,17 @@ export function isClaudeAvailable(): boolean {
 }
 
 /**
- * Read router SKILL.md from disk and strip YAML frontmatter.
+ * Read classification-rules.md from disk.
  * Simulates SessionStart injection for integration tests.
  */
 function loadRouterContext(): string {
-  const routerPath = resolve(__dirname, '../../shared/skills/router/SKILL.md');
-  const raw = readFileSync(routerPath, 'utf-8');
-  // Strip YAML frontmatter (everything between first two --- lines)
-  const lines = raw.split('\n');
-  let dashCount = 0;
-  let startIndex = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === '---') {
-      dashCount++;
-      if (dashCount === 2) {
-        startIndex = i + 1;
-        break;
-      }
-    }
-  }
-  return lines.slice(startIndex).join('\n').trim();
+  const rulesPath = resolve(__dirname, '../../shared/skills/router/references/classification-rules.md');
+  return readFileSync(rulesPath, 'utf-8').trim();
 }
 
-// Simulates SessionStart injection (router SKILL.md content) + per-message preamble
-const DEVFLOW_PREAMBLE = loadRouterContext() + '\nClassify user intent and depth.';
+// Simulates SessionStart injection (classification rules) + per-message preamble
+const DEVFLOW_PREAMBLE = loadRouterContext() +
+  '\nClassify this request\'s intent and depth, then load devflow:router via Skill tool.';
 
 /** Result from a streaming claude invocation */
 export interface StreamResult {

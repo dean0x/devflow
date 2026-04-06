@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # SessionStart Classification Hook
-# Reads the installed router SKILL.md and injects its content as additionalContext.
-# The router SKILL.md is the single source of truth for ambient classification rules.
-# Zero duplication — content lives in one place, injected once per session.
+# Reads classification-rules.md and injects as additionalContext.
+# Single source of truth for ambient classification rules.
 
 set -e
 
@@ -16,10 +15,14 @@ INPUT=$(cat)
 CWD=$(echo "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then exit 0; fi
 
-ROUTER_SKILL="$HOME/.claude/skills/devflow:router/SKILL.md"
-if [ ! -f "$ROUTER_SKILL" ]; then exit 0; fi
-
-# Strip YAML frontmatter (everything between first two --- lines)
-CONTEXT=$(awk '/^---$/{n++; next} n>=2' "$ROUTER_SKILL")
+CLASSIFICATION_RULES="$HOME/.claude/skills/devflow:router/references/classification-rules.md"
+if [ -f "$CLASSIFICATION_RULES" ]; then
+  CONTEXT=$(cat "$CLASSIFICATION_RULES")
+elif [ -f "$HOME/.claude/skills/devflow:router/SKILL.md" ]; then
+  # Fallback for upgrade window: old install without classification-rules.md
+  CONTEXT=$(awk '/^---$/{n++; next} n>=2' "$HOME/.claude/skills/devflow:router/SKILL.md")
+else
+  exit 0
+fi
 
 json_session_output "$CONTEXT"
