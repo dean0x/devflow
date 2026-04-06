@@ -501,7 +501,7 @@ describe('json-helper.cjs process-observations', () => {
 
       const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
       expect(entry.observations).toBe(2);
-      expect(entry.confidence).toBe(0.66);
+      expect(entry.confidence).toBe(0.40);
       expect(entry.evidence).toContain('old evidence');
       expect(entry.evidence).toContain('new evidence');
     } finally {
@@ -582,7 +582,7 @@ describe('json-helper.cjs process-observations', () => {
     try {
       fs.writeFileSync(logFile, JSON.stringify({
         id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.66, observations: 2,
+        confidence: 0.80, observations: 4,
         first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
         status: 'observing', evidence: [], details: '',
       }) + '\n');
@@ -608,11 +608,11 @@ describe('json-helper.cjs process-observations', () => {
     const responseFile = path.join(tmpDir, 'response.json');
     const logFile = path.join(tmpDir, 'learning.jsonl');
     try {
-      const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
+      const eightDaysAgo = new Date(Date.now() - 8 * 86400000).toISOString();
       fs.writeFileSync(logFile, JSON.stringify({
         id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.66, observations: 2,
-        first_seen: twoDaysAgo, last_seen: twoDaysAgo,
+        confidence: 0.80, observations: 4,
+        first_seen: eightDaysAgo, last_seen: eightDaysAgo,
         status: 'observing', evidence: [], details: '',
       }) + '\n');
 
@@ -1090,6 +1090,82 @@ describe('session-end-learning structure', () => {
     const lines = content.split('\n');
     expect(lines[0]).toBe('#!/bin/bash');
     expect(content).toContain('source "$SCRIPT_DIR/json-parse"');
+  });
+});
+
+describe('json-helper.cjs create-artifacts frontmatter stripping', () => {
+  it('strips model-generated YAML frontmatter from artifact content', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3, status: 'ready',
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
+        evidence: [], details: '',
+      }) + '\n');
+
+      // Model incorrectly includes frontmatter in content
+      const contentWithFrontmatter = '---\ndescription: "model added this"\n---\n\n# Real Content\nActual body.';
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'strip-test', description: 'Test stripping',
+          content: contentWithFrontmatter,
+        }],
+      }));
+
+      execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+
+      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'strip-test.md');
+      const content = fs.readFileSync(artPath, 'utf8');
+      // Should have system-generated frontmatter, NOT the model's frontmatter
+      expect(content).toContain('description: "Test stripping"');
+      expect(content).toContain('devflow-learning: auto-generated');
+      // Model's frontmatter should be stripped, leaving only the body
+      expect(content).toContain('# Real Content');
+      expect(content).not.toContain('model added this');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves content without frontmatter unchanged', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const responseFile = path.join(tmpDir, 'response.json');
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, JSON.stringify({
+        id: 'obs_abc123', type: 'workflow', pattern: 'test',
+        confidence: 0.95, observations: 3, status: 'ready',
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
+        evidence: [], details: '',
+      }) + '\n');
+
+      fs.writeFileSync(responseFile, JSON.stringify({
+        artifacts: [{
+          observation_id: 'obs_abc123', type: 'command',
+          name: 'no-strip-test', description: 'No stripping needed',
+          content: '# Clean Content\nNo frontmatter here.',
+        }],
+      }));
+
+      execSync(
+        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+
+      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'no-strip-test.md');
+      const content = fs.readFileSync(artPath, 'utf8');
+      expect(content).toContain('# Clean Content');
+      expect(content).toContain('No frontmatter here.');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 

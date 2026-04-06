@@ -5,6 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
+import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 
 /**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
@@ -235,7 +236,8 @@ export function formatLearningStatus(observations: LearningObservation[], hookSt
  * Skips fields with wrong types; swallows parse errors.
  */
 // SYNC: Config loading duplicated in scripts/hooks/background-learning load_config()
-// Synced fields: max_daily_runs, throttle_minutes, model, debug, batch_size
+// Synced fields: max_daily_runs, throttle_minutes, model, debug
+// Note: batch_size is loaded here and in session-end-learning, but not in background-learning
 export function applyConfigLayer(config: LearningConfig, json: string): LearningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
@@ -299,6 +301,7 @@ interface LearnOptions {
   list?: boolean;
   configure?: boolean;
   clear?: boolean;
+  reset?: boolean;
   purge?: boolean;
 }
 
@@ -310,9 +313,10 @@ export const learnCommand = new Command('learn')
   .option('--list', 'Show all observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard')
   .option('--clear', 'Reset learning log (removes all observations)')
+  .option('--reset', 'Remove all self-learning artifacts, log, and transient state')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.purge;
+    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -322,6 +326,7 @@ export const learnCommand = new Command('learn')
         `${color.cyan('devflow learn --list')}        Show all observations\n` +
         `${color.cyan('devflow learn --configure')}   Configuration wizard\n` +
         `${color.cyan('devflow learn --clear')}       Reset learning log\n` +
+        `${color.cyan('devflow learn --reset')}       Remove artifacts + log + state\n` +
         `${color.cyan('devflow learn --purge')}       Remove invalid entries`,
         'Usage',
       );
@@ -523,6 +528,135 @@ export const learnCommand = new Command('learn')
       const validLines = observations.map(o => JSON.stringify(o));
       await fs.writeFile(logPath, validLines.join('\n') + (validLines.length ? '\n' : ''), 'utf-8');
       p.log.success(`Purged ${invalidCount} invalid entry(ies). ${observations.length} valid observation(s) remain.`);
+      return;
+    }
+
+    // --- --reset ---
+    if (options.reset) {
+      const memoryDir = path.join(process.cwd(), '.memory');
+      const lockDir = path.join(memoryDir, '.learning.lock');
+
+      // Acquire lock to prevent conflict with running background-learning
+      try {
+        await fs.mkdir(lockDir);
+      } catch {
+        p.log.error('Learning system is currently running. Try again in a moment.');
+        return;
+      }
+
+      try {
+        // Inventory what will be removed (dry-run) before asking for confirmation
+        const { observations } = await readObservations(logPath);
+
+        // Count artifacts without removing them
+        const skillsDir = path.join(claudeDir, 'skills');
+        const commandsDir = path.join(claudeDir, 'commands', 'self-learning');
+        let skillCount = 0;
+        let cmdCount = 0;
+        try {
+          const skillEntries = await fs.readdir(skillsDir, { withFileTypes: true });
+          for (const entry of skillEntries) {
+            if (!entry.isDirectory() || entry.name.startsWith('devflow:')) continue;
+            const skillFile = path.join(skillsDir, entry.name, 'SKILL.md');
+            try {
+              const content = await fs.readFile(skillFile, 'utf-8');
+              if (content.split('\n').slice(0, 10).join('\n').includes(AUTO_GENERATED_MARKER)) {
+                skillCount++;
+              }
+            } catch { /* file doesn't exist */ }
+          }
+        } catch { /* skills dir doesn't exist */ }
+        try {
+          const cmdEntries = await fs.readdir(commandsDir, { withFileTypes: true });
+          for (const entry of cmdEntries) {
+            if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+            try {
+              const content = await fs.readFile(path.join(commandsDir, entry.name), 'utf-8');
+              if (content.split('\n').slice(0, 10).join('\n').includes(AUTO_GENERATED_MARKER)) {
+                cmdCount++;
+              }
+            } catch { /* file doesn't exist */ }
+          }
+        } catch { /* commands dir doesn't exist */ }
+
+        const transientFiles = [
+          '.learning-session-count',
+          '.learning-batch-ids',
+          '.learning-runs-today',
+          '.learning-notified-at',
+        ];
+        let transientCount = 0;
+        for (const f of transientFiles) {
+          try {
+            await fs.access(path.join(memoryDir, f));
+            transientCount++;
+          } catch { /* doesn't exist */ }
+        }
+
+        if (skillCount === 0 && cmdCount === 0 && observations.length === 0 && transientCount === 0) {
+          p.log.info('Nothing to clean — no self-learning artifacts or state found.');
+          return;
+        }
+
+        // Build and show confirmation prompt
+        const lines: string[] = ['This will remove:'];
+        if (skillCount > 0) lines.push(`  - ${skillCount} self-learning skill(s)`);
+        if (cmdCount > 0) lines.push(`  - ${cmdCount} self-learning command(s)`);
+        if (observations.length > 0) lines.push(`  - Learning log (${observations.length} observations)`);
+        if (transientCount > 0) lines.push(`  - ${transientCount} transient state file(s)`);
+
+        if (process.stdin.isTTY) {
+          p.log.info(lines.join('\n'));
+          const confirm = await p.confirm({
+            message: 'Continue? This cannot be undone.',
+            initialValue: false,
+          });
+          if (p.isCancel(confirm) || !confirm) {
+            p.log.info('Reset cancelled.');
+            return;
+          }
+        }
+
+        // User confirmed — now actually remove everything
+        const artifactResult = await cleanSelfLearningArtifacts(claudeDir);
+
+        // Truncate learning log
+        try {
+          await fs.writeFile(logPath, '', 'utf-8');
+        } catch { /* file may not exist */ }
+
+        // Remove transient state files
+        for (const f of transientFiles) {
+          try {
+            await fs.unlink(path.join(memoryDir, f));
+          } catch { /* file may not exist */ }
+        }
+
+        // Remove stale `enabled` field from learning.json (migration)
+        const configPath = path.join(memoryDir, 'learning.json');
+        try {
+          const configContent = await fs.readFile(configPath, 'utf-8');
+          const config = JSON.parse(configContent) as Record<string, unknown>;
+          if ('enabled' in config) {
+            delete config.enabled;
+            if (Object.keys(config).length === 0) {
+              await fs.unlink(configPath);
+            } else {
+              await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+            }
+          }
+        } catch { /* config may not exist */ }
+
+        const parts: string[] = [];
+        if (artifactResult.removed > 0) parts.push(`${artifactResult.removed} artifact(s)`);
+        if (observations.length > 0) parts.push('learning log');
+        if (transientCount > 0) parts.push('transient state');
+
+        p.log.success(`Reset complete — removed ${parts.join(', ')}.`);
+      } finally {
+        // Release lock
+        try { await fs.rmdir(lockDir); } catch { /* already cleaned */ }
+      }
       return;
     }
 

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
   addLearningHook,
   removeLearningHook,
@@ -11,6 +14,7 @@ import {
   applyConfigLayer,
   type LearningObservation,
 } from '../src/cli/commands/learn.js';
+import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../src/cli/utils/learning-cleanup.js';
 
 describe('addLearningHook', () => {
   it('adds hook to empty settings', () => {
@@ -621,5 +625,130 @@ describe('applyConfigLayer — immutability', () => {
     const original = { max_daily_runs: 10, throttle_minutes: 5, model: 'sonnet', debug: false, batch_size: 3 };
     const result = applyConfigLayer(original, JSON.stringify({ batch_size: 'large' }));
     expect(result.batch_size).toBe(3);
+  });
+});
+
+describe('cleanSelfLearningArtifacts', () => {
+  function makeTmpClaudeDir(): string {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-clean-test-'));
+    fs.mkdirSync(path.join(tmpDir, 'skills'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'commands', 'self-learning'), { recursive: true });
+    return tmpDir;
+  }
+
+  it('removes skills with auto-generated marker', async () => {
+    const claudeDir = makeTmpClaudeDir();
+    try {
+      const skillDir = path.join(claudeDir, 'skills', 'test-skill');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
+        '---',
+        'name: self-learning:test-skill',
+        `# ${AUTO_GENERATED_MARKER} (2026-04-01, confidence: 0.95, obs: 5)`,
+        '---',
+        '',
+        '# Test Skill',
+      ].join('\n'));
+
+      const result = await cleanSelfLearningArtifacts(claudeDir);
+      expect(result.removed).toBe(1);
+      expect(fs.existsSync(skillDir)).toBe(false);
+    } finally {
+      fs.rmSync(claudeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes commands with auto-generated marker', async () => {
+    const claudeDir = makeTmpClaudeDir();
+    try {
+      const cmdFile = path.join(claudeDir, 'commands', 'self-learning', 'deploy.md');
+      fs.writeFileSync(cmdFile, [
+        '---',
+        'description: "Deploy workflow"',
+        `# ${AUTO_GENERATED_MARKER} (2026-04-01, confidence: 0.95, obs: 5)`,
+        '---',
+        '',
+        '# Deploy',
+      ].join('\n'));
+
+      const result = await cleanSelfLearningArtifacts(claudeDir);
+      expect(result.removed).toBe(1);
+      expect(fs.existsSync(cmdFile)).toBe(false);
+    } finally {
+      fs.rmSync(claudeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves devflow-namespaced skills', async () => {
+    const claudeDir = makeTmpClaudeDir();
+    try {
+      const skillDir = path.join(claudeDir, 'skills', 'devflow:quality-gates');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# Quality Gates');
+
+      const result = await cleanSelfLearningArtifacts(claudeDir);
+      expect(result.removed).toBe(0);
+      expect(fs.existsSync(skillDir)).toBe(true);
+    } finally {
+      fs.rmSync(claudeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves skills without auto-generated marker', async () => {
+    const claudeDir = makeTmpClaudeDir();
+    try {
+      const skillDir = path.join(claudeDir, 'skills', 'user-skill');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: user-skill\n---\n# User Skill');
+
+      const result = await cleanSelfLearningArtifacts(claudeDir);
+      expect(result.removed).toBe(0);
+      expect(fs.existsSync(skillDir)).toBe(true);
+    } finally {
+      fs.rmSync(claudeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes empty self-learning commands dir', async () => {
+    const claudeDir = makeTmpClaudeDir();
+    try {
+      const cmdFile = path.join(claudeDir, 'commands', 'self-learning', 'test.md');
+      fs.writeFileSync(cmdFile, `---\n# ${AUTO_GENERATED_MARKER}\n---\nTest`);
+
+      await cleanSelfLearningArtifacts(claudeDir);
+      const selfLearningDir = path.join(claudeDir, 'commands', 'self-learning');
+      expect(fs.existsSync(selfLearningDir)).toBe(false);
+    } finally {
+      fs.rmSync(claudeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('handles missing directories gracefully', async () => {
+    const claudeDir = path.join(os.tmpdir(), `devflow-nonexistent-${Date.now()}`);
+    const result = await cleanSelfLearningArtifacts(claudeDir);
+    expect(result.removed).toBe(0);
+    expect(result.paths).toEqual([]);
+  });
+
+  it('returns paths of all removed artifacts', async () => {
+    const claudeDir = makeTmpClaudeDir();
+    try {
+      // Create a skill
+      const skillDir = path.join(claudeDir, 'skills', 'learned-skill');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\n# ${AUTO_GENERATED_MARKER}\n---\nSkill`);
+
+      // Create a command
+      const cmdFile = path.join(claudeDir, 'commands', 'self-learning', 'learned-cmd.md');
+      fs.writeFileSync(cmdFile, `---\n# ${AUTO_GENERATED_MARKER}\n---\nCmd`);
+
+      const result = await cleanSelfLearningArtifacts(claudeDir);
+      expect(result.removed).toBe(2);
+      expect(result.paths).toHaveLength(2);
+      expect(result.paths.some(p => p.includes('learned-skill'))).toBe(true);
+      expect(result.paths.some(p => p.includes('learned-cmd'))).toBe(true);
+    } finally {
+      fs.rmSync(claudeDir, { recursive: true, force: true });
+    }
   });
 });

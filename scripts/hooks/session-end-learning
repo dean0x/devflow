@@ -30,21 +30,21 @@ CWD=$(echo "$INPUT" | json_field "cwd" "")
 MEMORY_DIR="$CWD/.memory"
 [ ! -d "$MEMORY_DIR" ] && exit 0
 
-# Learning config
+# Learning config — hook presence in settings.json IS the enabled state, no dual check
 LEARNING_CONFIG="$MEMORY_DIR/learning.json"
-[ ! -f "$LEARNING_CONFIG" ] && exit 0
+if [ -f "$LEARNING_CONFIG" ]; then
+  DEBUG=$(json_field "debug" "false" < "$LEARNING_CONFIG")
+  MAX_DAILY=$(json_field "max_daily_runs" "5" < "$LEARNING_CONFIG")
+  BATCH_SIZE=$(json_field "batch_size" "3" < "$LEARNING_CONFIG")
+else
+  DEBUG="false"
+  MAX_DAILY=5
+  BATCH_SIZE=3
+fi
 
 # Resolve claude binary
 CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
 [ -z "$CLAUDE_BIN" ] && exit 0
-
-# --- Config ---
-ENABLED=$(json_field "enabled" "false" < "$LEARNING_CONFIG")
-[ "$ENABLED" != "true" ] && exit 0
-
-DEBUG=$(json_field "debug" "false" < "$LEARNING_CONFIG")
-MAX_DAILY=$(json_field "max_daily_runs" "5" < "$LEARNING_CONFIG")
-BATCH_SIZE=$(json_field "batch_size" "3" < "$LEARNING_CONFIG")
 
 # Log path (shared helper — consistent slug with background-learning)
 source "$SCRIPT_DIR/log-paths"
