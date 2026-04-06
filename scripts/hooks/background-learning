@@ -261,12 +261,12 @@ $USER_MESSAGES
 Detect two types of patterns:
 
 1. WORKFLOW patterns: Multi-step sequences the user instructs repeatedly (e.g., \"squash merge PR, pull main, delete branch\"). These become slash commands.
-   - Required observations for artifact creation: 3 (seen across multiple sessions)
-   - Temporal spread requirement: first_seen and last_seen must be 24h+ apart
+   - Required observations for artifact creation: 5 (seen across multiple sessions)
+   - Temporal spread requirement: first_seen and last_seen must be 7 days apart
 
 2. PROCEDURAL patterns: Knowledge about how to accomplish specific tasks (e.g., debugging hook failures, configuring specific tools). These become skills.
-   - Required observations for artifact creation: 3 (same as workflows)
-   - Temporal spread requirement: first_seen and last_seen must be 24h+ apart (same as workflows)
+   - Required observations for artifact creation: 5 (same as workflows)
+   - Temporal spread requirement: first_seen and last_seen must be 7 days apart (same as workflows)
 
 Rules:
 - If an existing observation matches a pattern from this session, report it with the SAME id so the count can be incremented
@@ -279,14 +279,10 @@ Rules:
 
 # === SKILL TEMPLATE ===
 
-SKILL TEMPLATE (required structure when creating skill artifacts):
+IMPORTANT: Do NOT include YAML frontmatter (--- blocks) in artifact content.
+The system adds frontmatter automatically. Only provide the markdown body.
 
----
-name: self-learning:{slug}
-description: \"This skill should be used when {specific trigger context}\"
-user-invocable: false
-allowed-tools: Read, Grep, Glob
----
+SKILL TEMPLATE (required body structure when creating skill artifacts):
 
 # {Title}
 
@@ -312,7 +308,7 @@ allowed-tools: Read, Grep, Glob
 # === COMMAND TEMPLATE ===
 
 COMMAND TEMPLATE (when creating command artifacts):
-Standard markdown with description frontmatter.
+Standard markdown body only. Do NOT include YAML frontmatter (--- blocks).
 
 # === NAMING RULES ===
 
@@ -321,6 +317,14 @@ NAMING RULES:
 - Skill descriptions MUST start with \"This skill should be used when...\"
 - Do NOT include project-specific prefixes in the slug
 - Keep slugs short and descriptive (2-3 words kebab-case)
+
+# === QUALITY RULES ===
+
+- Content must be actionable and specific. Avoid generic advice.
+- Skills should be 30-80 lines of practical, concrete patterns.
+- Do NOT include YAML frontmatter (--- blocks) in artifact content.
+- Commands should have clear step-by-step instructions.
+- Focus on project-specific patterns, not general best practices.
 
 # === OUTPUT FORMAT ===
 
