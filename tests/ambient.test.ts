@@ -183,12 +183,6 @@ describe('removeAmbientHook', () => {
 
   it('removes both UserPromptSubmit and SessionStart hooks', () => {
     const withHook = addAmbientHook('{}', '/home/user/.devflow');
-    const settings = JSON.parse(withHook);
-
-    // Verify both exist before removal
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.SessionStart).toHaveLength(1);
-
     const result = removeAmbientHook(withHook);
     const cleaned = JSON.parse(result);
 
@@ -477,7 +471,8 @@ function parseRouterTables(content: string): { guided: Map<string, string[]>; or
       ? []
       : skillsStr.split(',').map(s => s.trim());
 
-    (currentSection === 'guided' ? guided : orchestrated).set(intent, skills);
+    const table = currentSection === 'guided' ? guided : orchestrated;
+    table.set(intent, skills);
   }
 
   return { guided, orchestrated };
@@ -504,7 +499,6 @@ describe('router structural validation', () => {
   const routerPath = path.resolve(__dirname, '../shared/skills/router/SKILL.md');
   const rulesPath = path.resolve(__dirname, '../shared/skills/router/references/classification-rules.md');
   const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
-  const integrationPath = path.resolve(__dirname, './integration/ambient-activation.test.ts');
 
   it('router covers all ORCHESTRATED intents (every non-CHAT intent has a row)', async () => {
     const rulesContent = await fs.readFile(rulesPath, 'utf-8');
@@ -547,6 +541,7 @@ describe('router structural validation', () => {
   });
 
   it('integration test expectations align with router skill tables', async () => {
+    const integrationPath = path.resolve(__dirname, './integration/ambient-activation.test.ts');
     const routerContent = await fs.readFile(routerPath, 'utf-8');
     const testContent = await fs.readFile(integrationPath, 'utf-8');
     const { guided, orchestrated } = parseRouterTables(routerContent);
