@@ -62,7 +62,7 @@ RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resol
 | devflow:pipeline:orch | Always for PIPELINE | ORCHESTRATED | Any — meta-orchestrator for implement → review → resolve |
 | devflow:patterns | Always for PIPELINE | ORCHESTRATED | Any code file |
 
-PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with user gates.
+PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with status reporting between phases.
 
 ### EXPLORE Intent
 

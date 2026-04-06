@@ -687,25 +687,21 @@ describe('Test infrastructure skill references', () => {
     }
   });
 
-  it('DEVFLOW_PREAMBLE skill refs in tests/integration/helpers.ts exist in actual hook preamble', () => {
-    const helpersPath = path.join(ROOT, 'tests', 'integration', 'helpers.ts');
-    const helpersContent = readFileSync(helpersPath, 'utf-8');
-    const hookPath = path.join(ROOT, 'scripts', 'hooks', 'preamble');
-    const hookContent = readFileSync(hookPath, 'utf-8');
+  it('DEVFLOW_PREAMBLE reads router SKILL.md which has skill refs matching canonical set', () => {
+    // helpers.ts now loads DEVFLOW_PREAMBLE dynamically from shared/skills/router/SKILL.md at runtime.
+    // Verify the router SKILL.md has devflow: refs that exist in the canonical skill set.
+    const canonicalSkills = new Set(getAllSkillNames());
+    const routerPath = path.join(ROOT, 'shared', 'skills', 'router', 'SKILL.md');
+    const routerContent = readFileSync(routerPath, 'utf-8');
 
-    const helpersRefs = extractPrefixedRefs(helpersContent);
-    const hookRefs = extractPrefixedRefs(hookContent);
-    const hookSkillSet = new Set(hookRefs);
+    const routerRefs = extractPrefixedRefs(routerContent);
+    expect(routerRefs.length, 'router SKILL.md should have devflow: skill refs').toBeGreaterThan(0);
 
-    // The new preamble is detection-only — helpers.ts DEVFLOW_PREAMBLE also has only router ref.
-    // Just verify helpers.ts has at least one skill ref (devflow:router).
-    expect(helpersRefs.length, 'helpers.ts DEVFLOW_PREAMBLE should have skill refs').toBeGreaterThan(0);
-
-    const skillRefs = filterNonSkillRefs(helpersRefs);
+    const skillRefs = filterNonSkillRefs(routerRefs);
     for (const ref of skillRefs) {
       expect(
-        hookSkillSet.has(ref),
-        `tests/integration/helpers.ts DEVFLOW_PREAMBLE has 'devflow:${ref}' but scripts/hooks/preamble does not — preamble drift`,
+        canonicalSkills.has(ref),
+        `router SKILL.md has 'devflow:${ref}' but it is not in canonical skill set`,
       ).toBe(true);
     }
   });

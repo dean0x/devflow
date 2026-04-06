@@ -8,23 +8,25 @@ import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 const PREAMBLE_HOOK_MARKER = 'preamble';
 const LEGACY_HOOK_MARKER = 'ambient-prompt';
+const CLASSIFICATION_HOOK_MARKER = 'session-start-classification';
 
-/** Filter hook entries from a parsed Settings object. Returns true if any were removed. */
+/** Filter hook entries from a parsed Settings object for a given event. Returns true if any were removed. */
 function filterHookEntries(
   settings: Settings,
+  eventName: string,
   shouldRemove: (matcher: HookMatcher) => boolean,
 ): boolean {
-  if (!settings.hooks?.UserPromptSubmit) return false;
+  if (!settings.hooks?.[eventName]) return false;
 
-  const before = settings.hooks.UserPromptSubmit.length;
-  settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
+  const before = settings.hooks[eventName].length;
+  settings.hooks[eventName] = settings.hooks[eventName].filter(
     (matcher) => !shouldRemove(matcher),
   );
 
-  if (settings.hooks.UserPromptSubmit.length === before) return false;
+  if (settings.hooks[eventName].length === before) return false;
 
-  if (settings.hooks.UserPromptSubmit.length === 0) {
-    delete settings.hooks.UserPromptSubmit;
+  if (settings.hooks[eventName].length === 0) {
+    delete settings.hooks[eventName];
   }
   if (settings.hooks && Object.keys(settings.hooks).length === 0) {
     delete settings.hooks;
@@ -40,66 +42,93 @@ const isAmbient = (matcher: HookMatcher) =>
     h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
   );
 
+const isClassification = (matcher: HookMatcher) =>
+  matcher.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER));
+
 /**
  * Remove only the legacy `ambient-prompt` hook entries.
  * Used by `addAmbientHook` to clean before adding the new preamble hook.
  */
 export function removeLegacyAmbientHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-  if (!filterHookEntries(settings, isLegacy)) return settingsJson;
+  if (!filterHookEntries(settings, 'UserPromptSubmit', isLegacy)) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * Add the ambient UserPromptSubmit hook to settings JSON.
+ * Add the ambient UserPromptSubmit hook and SessionStart classification hook to settings JSON.
  * Removes any legacy `ambient-prompt` hook first, then adds the new `preamble` hook.
- * Idempotent — returns unchanged JSON if the new hook already exists.
+ * Also adds the SessionStart classification hook (reads router SKILL.md).
+ * Idempotent — each hook checked independently.
  */
 export function addAmbientHook(settingsJson: string, devflowDir: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-  const legacyRemoved = filterHookEntries(settings, isLegacy);
-
-  // Check if the NEW preamble hook already exists
-  if (settings.hooks?.UserPromptSubmit?.some((m) =>
-    m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
-  )) {
-    return legacyRemoved ? JSON.stringify(settings, null, 2) + '\n' : settingsJson;
-  }
+  let changed = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
 
   if (!settings.hooks) {
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble';
+  // --- UserPromptSubmit: preamble hook ---
+  const hasPreamble = settings.hooks.UserPromptSubmit?.some((m) =>
+    m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
+  );
 
-  const newEntry: HookMatcher = {
-    hooks: [
-      {
-        type: 'command',
-        command: hookCommand,
-        timeout: 5,
-      },
-    ],
-  };
+  if (!hasPreamble) {
+    if (!settings.hooks.UserPromptSubmit) {
+      settings.hooks.UserPromptSubmit = [];
+    }
 
-  if (!settings.hooks.UserPromptSubmit) {
-    settings.hooks.UserPromptSubmit = [];
+    settings.hooks.UserPromptSubmit.push({
+      hooks: [
+        {
+          type: 'command',
+          command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' preamble',
+          timeout: 5,
+        },
+      ],
+    });
+    changed = true;
   }
 
-  settings.hooks.UserPromptSubmit.push(newEntry);
+  // --- SessionStart: classification hook ---
+  const hasClassificationHook = settings.hooks.SessionStart?.some((m) =>
+    m.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER)),
+  );
 
+  if (!hasClassificationHook) {
+    if (!settings.hooks.SessionStart) {
+      settings.hooks.SessionStart = [];
+    }
+
+    settings.hooks.SessionStart.push({
+      hooks: [
+        {
+          type: 'command',
+          command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-start-classification',
+          timeout: 5,
+        },
+      ],
+    });
+    changed = true;
+  }
+
+  if (!changed) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * Remove the ambient UserPromptSubmit hook from settings JSON.
- * Removes BOTH legacy `ambient-prompt` and current `preamble` hooks.
- * Idempotent — returns unchanged JSON if hook not present.
- * Preserves other UserPromptSubmit hooks. Cleans empty arrays/objects.
+ * Remove the ambient hooks from settings JSON.
+ * Removes preamble + legacy from UserPromptSubmit, and classification from SessionStart.
+ * Idempotent — returns unchanged JSON if hooks not present.
+ * Preserves other hooks. Cleans empty arrays/objects.
  */
 export function removeAmbientHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
-  if (!filterHookEntries(settings, isAmbient)) return settingsJson;
+  const removedPrompt = filterHookEntries(settings, 'UserPromptSubmit', isAmbient);
+  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+
+  if (!removedPrompt && !removedClassification) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 

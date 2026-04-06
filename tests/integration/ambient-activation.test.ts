@@ -12,8 +12,9 @@ import {
  * Integration tests for Devflow ambient mode classification and skill loading.
  *
  * GUIDED tests use two-tier assertions:
- *   Hard: router skill loaded (proves non-QUICK classification — system works)
+ *   Hard: at least one skill loaded (proves non-QUICK classification — system works)
  *   Soft: specific skills match expectations (quality metric, logged but not gating)
+ *   Note: router content is injected at SessionStart, not loaded via Skill tool.
  *
  * ORCHESTRATED tests use strict assertions (deterministic at that scope).
  *
@@ -48,7 +49,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const expected = ['explore:orch'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'explain how the plugin loading system works from registration through initialization',
-      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
+      (r) => hasSkillInvocations(r),
     );
 
     const skills = getSkillInvocations(result);
@@ -61,7 +62,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const expected = ['patterns', 'test-driven-development', 'research'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'add a retry mechanism with exponential backoff to the HTTP client module',
-      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
+      (r) => hasSkillInvocations(r),
     );
 
     const skills = getSkillInvocations(result);
@@ -74,7 +75,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const expected = ['software-design', 'testing'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'fix the bug where the date formatter returns wrong timezone offset for DST transitions',
-      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
+      (r) => hasSkillInvocations(r),
     );
 
     const skills = getSkillInvocations(result);
@@ -87,7 +88,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const expected = ['patterns', 'software-design'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'how should we design a caching layer for API responses?',
-      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
+      (r) => hasSkillInvocations(r),
     );
 
     const skills = getSkillInvocations(result);
@@ -100,7 +101,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const expected = ['quality-gates', 'software-design'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'check this error handling in the authentication module',
-      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, ['router']),
+      (r) => hasSkillInvocations(r),
     );
 
     const skills = getSkillInvocations(result);

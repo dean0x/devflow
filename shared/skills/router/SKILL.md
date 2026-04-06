@@ -9,7 +9,7 @@ user-invocable: false
 
 Classify user intent and auto-load relevant skills. Zero overhead for simple requests, skill loading + optional agent orchestration for substantive work.
 
-**Note:** The UserPromptSubmit hook injects a detection-only preamble (classification rules only). This SKILL.md contains the full skill mappings — load it via Skill tool for complete routing logic.
+**Note:** Classification rules injected at session start via SessionStart hook (reads this file). Content is the source of truth for ambient mode classification.
 
 ## Iron Law
 

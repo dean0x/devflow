@@ -1,4 +1,6 @@
 import { execSync, spawn, ChildProcess } from 'child_process';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 const CLASSIFICATION_PATTERN = /devflow:\s*(CHAT|EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
 
@@ -14,13 +16,31 @@ export function isClaudeAvailable(): boolean {
   }
 }
 
-// SYNC: must match scripts/hooks/preamble PREAMBLE structure
-const DEVFLOW_PREAMBLE =
-  `AMBIENT MODE ENABLED: Classify user intent and depth.
-Intents: CHAT (greetings/confirmations), EXPLORE (find/explain/analyze/trace/map), PLAN (plan/design/architecture), IMPLEMENT (add/create/build/implement), REVIEW (check/review), RESOLVE (resolve review issues), DEBUG (fix/bug/error), PIPELINE (end-to-end).
-Depth: QUICK (chat, simple lookups, git ops, config, rename/comment tweaks, 1-2 line edits) | GUIDED (code changes ≤2 files, clear bugs, focused reviews, focused exploration, focused design/plan) | ORCHESTRATED (>2 files, multi-module, vague bugs, full/branch/PR reviews, deep exploration, system-level design, RESOLVE and PIPELINE always).
-QUICK: respond normally. No classification, no skills.
-GUIDED/ORCHESTRATED: Load devflow:router skill FIRST via Skill tool for skill mappings. Then load all skills it specifies. State: Devflow: INTENT/DEPTH. Loading: [skills].`;
+/**
+ * Read router SKILL.md from disk and strip YAML frontmatter.
+ * Simulates SessionStart injection for integration tests.
+ */
+function loadRouterContext(): string {
+  const routerPath = resolve(__dirname, '../../shared/skills/router/SKILL.md');
+  const raw = readFileSync(routerPath, 'utf-8');
+  // Strip YAML frontmatter (everything between first two --- lines)
+  const lines = raw.split('\n');
+  let dashCount = 0;
+  let startIndex = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === '---') {
+      dashCount++;
+      if (dashCount === 2) {
+        startIndex = i + 1;
+        break;
+      }
+    }
+  }
+  return lines.slice(startIndex).join('\n').trim();
+}
+
+// Simulates SessionStart injection (router SKILL.md content) + per-message preamble
+const DEVFLOW_PREAMBLE = loadRouterContext() + '\nClassify user intent and depth.';
 
 /** Result from a streaming claude invocation */
 export interface StreamResult {
