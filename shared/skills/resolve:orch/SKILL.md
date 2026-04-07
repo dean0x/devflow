@@ -2,7 +2,6 @@
 name: resolve:orch
 description: Agent orchestration for RESOLVE intent in ambient mode — issue resolution from review reports
 user-invocable: false
-allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 ---
 
 # Resolve Orchestration
@@ -52,7 +51,7 @@ Determine execution: batches with no shared files can run in parallel.
 
 ## Phase 4: Resolve (Parallel)
 
-Spawn `Task(subagent_type="Resolver")` agents — one per batch, parallel where possible.
+Spawn `Agent(subagent_type="Resolver")` agents — one per batch, parallel where possible.
 
 Each receives:
 - **ISSUES**: Array of issues in the batch
@@ -69,7 +68,7 @@ Resolvers follow a 3-tier risk approach:
 Aggregate results from all Resolver agents:
 - Count: fixed, false positives, deferred
 
-Spawn `Task(subagent_type="Simplifier")` on all files modified by Resolvers.
+Spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
 ## Phase 6: Report
 

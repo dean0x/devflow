@@ -34,7 +34,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 For each reviewable worktree, spawn Git agent:
 
 ```
-Task(subagent_type="Git", run_in_background=false):
+Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Validate branch, commit if needed, push, create PR if needed.
@@ -109,7 +109,7 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 
 Each Reviewer invocation (all in one message, **NOT background**):
 ```
-Task(subagent_type="Reviewer", run_in_background=false):
+Agent(subagent_type="Reviewer", run_in_background=false):
 "Review focusing on {focus}. Load the pattern skill for your focus from the Focus Areas table.
 Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
@@ -126,7 +126,7 @@ In multi-worktree mode, process worktrees **sequentially** (one worktree at a ti
 
 **Git Agent (PR Comments)** per worktree:
 ```
-Task(subagent_type="Git", run_in_background=false):
+Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Read reviews from {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/
@@ -139,7 +139,7 @@ Check for existing inline comments at same file:line before creating new ones to
 
 **Synthesizer Agent** per worktree:
 ```
-Task(subagent_type="Synthesizer", run_in_background=false):
+Agent(subagent_type="Synthesizer", run_in_background=false):
 "Mode: review
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 REVIEW_BASE_DIR: {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}

@@ -1,4 +1,6 @@
 import { execSync, spawn, ChildProcess } from 'child_process';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 const CLASSIFICATION_PATTERN = /devflow:\s*(CHAT|EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
 
@@ -14,13 +16,18 @@ export function isClaudeAvailable(): boolean {
   }
 }
 
-// SYNC: must match scripts/hooks/preamble PREAMBLE structure
-const DEVFLOW_PREAMBLE =
-  `AMBIENT MODE ENABLED: Classify user intent and depth.
-Intents: CHAT (greetings/confirmations), EXPLORE (find/explain/analyze/trace/map), PLAN (plan/design/architecture), IMPLEMENT (add/create/build/implement), REVIEW (check/review), RESOLVE (resolve review issues), DEBUG (fix/bug/error), PIPELINE (end-to-end).
-Depth: QUICK (chat, simple lookups, git ops, config, rename/comment tweaks, 1-2 line edits) | GUIDED (code changes ≤2 files, clear bugs, focused reviews, focused exploration, focused design/plan) | ORCHESTRATED (>2 files, multi-module, vague bugs, full/branch/PR reviews, deep exploration, system-level design, RESOLVE and PIPELINE always).
-QUICK: respond normally. No classification, no skills.
-GUIDED/ORCHESTRATED: Load devflow:router skill FIRST via Skill tool for skill mappings. Then load all skills it specifies. State: Devflow: INTENT/DEPTH. Loading: [skills].`;
+/**
+ * Read classification-rules.md from disk.
+ * Simulates SessionStart injection for integration tests.
+ */
+function loadRouterContext(): string {
+  const rulesPath = resolve(__dirname, '../../shared/skills/router/references/classification-rules.md');
+  return readFileSync(rulesPath, 'utf-8').trim();
+}
+
+// Simulates SessionStart injection (classification rules) + per-message preamble
+const DEVFLOW_PREAMBLE = loadRouterContext() +
+  '\nClassify this request\'s intent and depth, then load devflow:router via Skill tool.';
 
 /** Result from a streaming claude invocation */
 export interface StreamResult {

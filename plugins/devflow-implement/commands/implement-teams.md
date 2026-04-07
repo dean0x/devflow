@@ -30,7 +30,7 @@ Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:
 
 ```
-Task(subagent_type="Git"):
+Agent(subagent_type="Git"):
 "OPERATION: setup-task
 BASE_BRANCH: {current branch name}
 ISSUE_INPUT: {issue number if $ARGUMENTS starts with #, otherwise omit}
@@ -51,7 +51,7 @@ Return the branch setup summary."
 Spawn Skimmer agent for codebase overview:
 
 ```
-Task(subagent_type="Skimmer"):
+Agent(subagent_type="Skimmer"):
 "Orient in codebase for: {task description}
 Run rskim on source directories (NOT repo root) to identify relevant files, functions, integration points"
 ```
@@ -156,7 +156,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 You MUST spawn the Synthesizer agent.
 
 ```
-Task(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesizer"):
 "Synthesize EXPLORATION outputs for: {task}
 Mode: exploration
 Explorer consensus: {team exploration consensus output}
@@ -252,7 +252,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 You MUST spawn the Synthesizer agent.
 
 ```
-Task(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesizer"):
 "Synthesize PLANNING outputs for: {task}
 Mode: planning
 Planner consensus: {team planning consensus output}
@@ -282,7 +282,7 @@ Based on Phase 6 synthesis, use the three-strategy framework:
 **SINGLE_CODER** (default):
 
 ```
-Task(subagent_type="Coder"):
+Agent(subagent_type="Coder"):
 "TASK_ID: {task-id}
 TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
@@ -300,7 +300,7 @@ Spawn Coders one at a time, passing handoff summaries between phases:
 
 **Phase 1 Coder:**
 ```
-Task(subagent_type="Coder"):
+Agent(subagent_type="Coder"):
 "TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
@@ -313,7 +313,7 @@ HANDOFF_REQUIRED: true"
 
 **Phase 2+ Coders** (after prior phase completes):
 ```
-Task(subagent_type="Coder"):
+Agent(subagent_type="Coder"):
 "TASK_ID: {task-id}
 TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
@@ -335,7 +335,7 @@ HANDOFF_REQUIRED: {true if not last phase}"
 Spawn multiple Coders **in a single message**, each with independent subtask:
 
 ```
-Task(subagent_type="Coder"):  # Coder 1
+Agent(subagent_type="Coder"):  # Coder 1
 "TASK_ID: {task-id}-part1
 TASK_DESCRIPTION: {independent subtask 1}
 BASE_BRANCH: {base branch}
@@ -344,7 +344,7 @@ PATTERNS: {patterns}
 CREATE_PR: false
 DOMAIN: {subtask 1 domain}"
 
-Task(subagent_type="Coder"):  # Coder 2 (same message)
+Agent(subagent_type="Coder"):  # Coder 2 (same message)
 "TASK_ID: {task-id}-part2
 TASK_DESCRIPTION: {independent subtask 2}
 BASE_BRANCH: {base branch}
@@ -365,7 +365,7 @@ DOMAIN: {subtask 2 domain}"
 After Coder completes, spawn Validator to verify correctness:
 
 ```
-Task(subagent_type="Validator", model="haiku"):
+Agent(subagent_type="Validator", model="haiku"):
 "FILES_CHANGED: {list of files from Coder output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
@@ -377,7 +377,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 3. If `validation_retry_count <= 2`:
    - Spawn Coder with fix context:
    ```
-   Task(subagent_type="Coder"):
+   Agent(subagent_type="Coder"):
    "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix validation failures
    OPERATION: validation-fix
@@ -395,7 +395,7 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 After validation passes, spawn Simplifier to polish the code:
 
 ```
-Task(subagent_type="Simplifier"):
+Agent(subagent_type="Simplifier"):
 "Simplify recently implemented code
 Task: {task description}
 FILES_CHANGED: {list of files from Coder output}
@@ -407,7 +407,7 @@ Focus on code modified by Coder, apply project standards, enhance clarity"
 After Simplifier completes, spawn Scrutinizer as final quality gate:
 
 ```
-Task(subagent_type="Scrutinizer"):
+Agent(subagent_type="Scrutinizer"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {list of files from Coder output}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
@@ -420,7 +420,7 @@ If Scrutinizer returns BLOCKED, report to user and halt.
 If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
 
 ```
-Task(subagent_type="Validator", model="haiku"):
+Agent(subagent_type="Validator", model="haiku"):
 "FILES_CHANGED: {files modified by Scrutinizer}
 VALIDATION_SCOPE: changed-only
 Verify Scrutinizer's fixes didn't break anything."
@@ -503,7 +503,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 3. If `alignment_fix_count <= 2`:
    - Spawn Coder to fix misalignments:
    ```
-   Task(subagent_type="Coder"):
+   Agent(subagent_type="Coder"):
    "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
@@ -513,7 +513,7 @@ Step 3: GATE — Verify TeamDelete succeeded
    ```
    - Spawn Validator to verify fix didn't break tests:
    ```
-   Task(subagent_type="Validator", model="haiku"):
+   Agent(subagent_type="Validator", model="haiku"):
    "FILES_CHANGED: {files modified by fix Coder}
    VALIDATION_SCOPE: changed-only"
    ```
@@ -526,7 +526,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 After Evaluator passes, spawn Tester for scenario-based acceptance testing (standalone agent, not a teammate — testing is sequential, not debate):
 
 ```
-Task(subagent_type="Tester"):
+Agent(subagent_type="Tester"):
 "ORIGINAL_REQUEST: {task description or issue content}
 EXECUTION_PLAN: {synthesized plan from Phase 6}
 FILES_CHANGED: {list of files from Coder output}
@@ -542,7 +542,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 3. If `qa_retry_count <= 2`:
    - Spawn Coder to fix QA failures:
    ```
-   Task(subagent_type="Coder"):
+   Agent(subagent_type="Coder"):
    "TASK_ID: {task-id}
    TASK_DESCRIPTION: Fix QA test failures
    OPERATION: qa-fix
@@ -552,7 +552,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    ```
    - Spawn Validator to verify fix didn't break tests:
    ```
-   Task(subagent_type="Validator", model="haiku"):
+   Agent(subagent_type="Validator", model="haiku"):
    "FILES_CHANGED: {files modified by fix Coder}
    VALIDATION_SCOPE: changed-only"
    ```
@@ -652,7 +652,7 @@ If the Coder's report includes Key Decisions with architectural significance:
 6. **Clean handoffs** - Each phase passes structured data to next; sequential Coders pass implementation summaries
 7. **Honest reporting** - Display agent outputs directly
 8. **Simplification pass** - Code refined for clarity before PR
-9. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Task tool with X, not do X's work yourself
+9. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
 10. **Validator owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validator agent
 11. **Coder owns fixes** - Never implement fixes in main session; spawn Coder for validation failures and alignment fixes
 12. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user

@@ -59,7 +59,7 @@ Delegate research to an Explore subagent to keep main session context clean.
 **Spawn an Explore agent** with this prompt template:
 
 ```
-Task(subagent_type="Explore"):
+Agent(subagent_type="Explore"):
 "Research existing solutions for: {need description}
 
 Search for:

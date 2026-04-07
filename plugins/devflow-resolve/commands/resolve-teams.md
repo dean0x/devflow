@@ -35,7 +35,7 @@ Process issues from code review reports: validate them (false positive check), a
 For each resolvable worktree, spawn Git agent:
 
 ```
-Task(subagent_type="Git", run_in_background=false):
+Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: validate-branch
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Check feature branch, clean working directory, reviews exist.
@@ -195,7 +195,7 @@ For each issue deferred as TECH_DEBT:
 If any fixes were made, spawn Simplifier agent to refine the changed code:
 
 ```
-Task(subagent_type="Simplifier", run_in_background=false):
+Agent(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 FILES_CHANGED: {list of files modified by Resolvers}
@@ -209,7 +209,7 @@ Simplify and refine the fixes for clarity and consistency"
 If any issues were deferred, spawn Git agent:
 
 ```
-Task(subagent_type="Git"):
+Agent(subagent_type="Git"):
 "OPERATION: manage-debt
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 REVIEW_DIR: {TARGET_DIR}

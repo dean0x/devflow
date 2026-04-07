@@ -34,7 +34,7 @@ Run a comprehensive code review of the current branch by spawning a review team 
 For each reviewable worktree, spawn Git agent:
 
 ```
-Task(subagent_type="Git", run_in_background=false):
+Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Validate branch, commit if needed, push, create PR if needed.
@@ -218,7 +218,7 @@ Spawn 2 agents **in a single message**:
 
 **Git Agent (PR Comments)**:
 ```
-Task(subagent_type="Git", run_in_background=false):
+Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Read reviews from {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/

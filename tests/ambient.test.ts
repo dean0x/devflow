@@ -26,6 +26,15 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(5);
   });
 
+  it('adds SessionStart classification hook to empty settings', () => {
+    const result = addAmbientHook('{}', '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-classification');
+    expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(5);
+  });
+
   it('adds alongside existing hooks', () => {
     const input = JSON.stringify({
       hooks: {
@@ -37,6 +46,7 @@ describe('addAmbientHook', () => {
 
     expect(settings.hooks.Stop).toHaveLength(1);
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
   });
 
   it('adds alongside existing UserPromptSubmit hooks', () => {
@@ -53,11 +63,33 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('preamble');
   });
 
+  it('preserves existing SessionStart hooks (session-start-memory)', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/to/run-hook session-start-memory' }] }],
+      },
+    });
+    const result = addAmbientHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.SessionStart).toHaveLength(2);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
+    expect(settings.hooks.SessionStart[1].hooks[0].command).toContain('session-start-classification');
+  });
+
   it('is idempotent — does not add duplicate hooks', () => {
     const first = addAmbientHook('{}', '/home/user/.devflow');
     const second = addAmbientHook(first, '/home/user/.devflow');
 
     expect(second).toBe(first);
+  });
+
+  it('idempotent for SessionStart classification hook', () => {
+    const first = addAmbientHook('{}', '/home/user/.devflow');
+    const second = addAmbientHook(first, '/home/user/.devflow');
+    const settings = JSON.parse(second);
+
+    expect(settings.hooks.SessionStart).toHaveLength(1);
   });
 
   it('preserves other settings', () => {
@@ -71,15 +103,19 @@ describe('addAmbientHook', () => {
     expect(settings.statusLine.command).toBe('statusline.sh');
     expect(settings.env.SOME_VAR).toBe('1');
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
   });
 
   it('uses correct devflowDir path in command via run-hook wrapper', () => {
     const result = addAmbientHook('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
-    const command = settings.hooks.UserPromptSubmit[0].hooks[0].command;
+    const preambleCmd = settings.hooks.UserPromptSubmit[0].hooks[0].command;
+    const classificationCmd = settings.hooks.SessionStart[0].hooks[0].command;
 
-    expect(command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
-    expect(command).toContain('preamble');
+    expect(preambleCmd).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
+    expect(preambleCmd).toContain('preamble');
+    expect(classificationCmd).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
+    expect(classificationCmd).toContain('session-start-classification');
   });
 
   it('replaces legacy ambient-prompt hook with new preamble hook', () => {
@@ -115,10 +151,29 @@ describe('addAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
     expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('preamble');
   });
+
+  it('adds SessionStart hook even when preamble already exists (upgrade path)', () => {
+    // Simulates existing user who has preamble but not classification hook
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/home/user/.devflow/scripts/hooks/run-hook preamble', timeout: 5 }] },
+        ],
+      },
+    });
+    const result = addAmbientHook(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // Preamble preserved (not duplicated)
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    // SessionStart classification hook added
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-classification');
+  });
 });
 
 describe('removeAmbientHook', () => {
-  it('removes ambient hook', () => {
+  it('removes ambient hook — clears both UserPromptSubmit and SessionStart', () => {
     const withHook = addAmbientHook('{}', '/home/user/.devflow');
     const result = removeAmbientHook(withHook);
     const settings = JSON.parse(result);
@@ -140,6 +195,26 @@ describe('removeAmbientHook', () => {
 
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
+  });
+
+  it('preserves other SessionStart hooks when removing classification', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-memory' }] },
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+        ],
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/to/preamble' }] },
+        ],
+      },
+    });
+    const result = removeAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
+    expect(settings.hooks.UserPromptSubmit).toBeUndefined();
   });
 
   it('cleans empty hooks object when last hook removed', () => {
@@ -365,43 +440,209 @@ describe('skill invocation helpers', () => {
   });
 });
 
+/** Parse router SKILL.md markdown tables into intent→skills maps */
+function parseRouterTables(content: string): { guided: Map<string, string[]>; orchestrated: Map<string, string[]> } {
+  const guided = new Map<string, string[]>();
+  const orchestrated = new Map<string, string[]>();
+
+  let currentSection: 'guided' | 'orchestrated' | null = null;
+
+  for (const line of content.split('\n')) {
+    if (line.startsWith('## GUIDED')) { currentSection = 'guided'; continue; }
+    if (line.startsWith('## ORCHESTRATED')) { currentSection = 'orchestrated'; continue; }
+    if (line.startsWith('## ') && currentSection) { currentSection = null; continue; }
+
+    if (!currentSection) continue;
+
+    const match = line.match(/^\|\s*(\w+)\s*\|\s*(.+?)\s*\|$/);
+    if (!match || match[1] === 'Intent') continue;
+
+    const intent = match[1];
+    const skillsStr = match[2].trim();
+    const skills = skillsStr === '—' || skillsStr === '-'
+      ? []
+      : skillsStr.split(',').map(s => s.trim());
+
+    const table = currentSection === 'guided' ? guided : orchestrated;
+    table.set(intent, skills);
+  }
+
+  return { guided, orchestrated };
+}
+
+/** Extract intent names from classification-rules.md Intent Signals section only */
+function parseClassificationIntents(content: string): string[] {
+  const intents: string[] = [];
+  let inIntentSection = false;
+
+  for (const line of content.split('\n')) {
+    if (line.includes('Intent Signals')) { inIntentSection = true; continue; }
+    if (line.startsWith('## ') && inIntentSection) break; // left the section
+
+    if (!inIntentSection) continue;
+
+    const match = line.match(/^\-\s*\*\*(\w+)\*\*/);
+    if (match) intents.push(match[1]);
+  }
+  return intents;
+}
+
+describe('router structural validation', () => {
+  const routerPath = path.resolve(__dirname, '../shared/skills/router/SKILL.md');
+  const rulesPath = path.resolve(__dirname, '../shared/skills/router/references/classification-rules.md');
+  const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
+
+  it('router covers all ORCHESTRATED intents (every non-CHAT intent has a row)', async () => {
+    const rulesContent = await fs.readFile(rulesPath, 'utf-8');
+    const routerContent = await fs.readFile(routerPath, 'utf-8');
+
+    const nonChatIntents = parseClassificationIntents(rulesContent).filter(i => i !== 'CHAT');
+    const { orchestrated } = parseRouterTables(routerContent);
+
+    for (const intent of nonChatIntents) {
+      expect(orchestrated.has(intent), `ORCHESTRATED table missing intent: ${intent}`).toBe(true);
+    }
+  });
+
+  it('RESOLVE and PIPELINE have no GUIDED rows (always ORCHESTRATED)', async () => {
+    const routerContent = await fs.readFile(routerPath, 'utf-8');
+    const { guided } = parseRouterTables(routerContent);
+
+    expect(guided.has('RESOLVE'), 'RESOLVE must not have a GUIDED row — classification says always ORCHESTRATED').toBe(false);
+    expect(guided.has('PIPELINE'), 'PIPELINE must not have a GUIDED row — classification says always ORCHESTRATED').toBe(false);
+  });
+
+  it('router table skills are canonical — every prefixed ref exists in shared/skills/', async () => {
+    const routerContent = await fs.readFile(routerPath, 'utf-8');
+    const { guided, orchestrated } = parseRouterTables(routerContent);
+
+    const allSkills = new Set<string>();
+    for (const skills of [...guided.values(), ...orchestrated.values()]) {
+      for (const skill of skills) {
+        if (skill.startsWith('devflow:')) {
+          allSkills.add(skill.replace('devflow:', ''));
+        }
+      }
+    }
+
+    const entries = await fs.readdir(sharedSkillsDir);
+
+    for (const skill of allSkills) {
+      expect(entries, `shared/skills/${skill}/ not found — router references nonexistent skill`).toContain(skill);
+    }
+  });
+
+  it('integration test expectations align with router skill tables', async () => {
+    const integrationPath = path.resolve(__dirname, './integration/ambient-activation.test.ts');
+    const routerContent = await fs.readFile(routerPath, 'utf-8');
+    const testContent = await fs.readFile(integrationPath, 'utf-8');
+    const { guided, orchestrated } = parseRouterTables(routerContent);
+
+    // Split integration tests into blocks and extract intent/depth + expected/required arrays
+    const blocks = testContent.split(/\bit\(/);
+
+    for (const block of blocks) {
+      const nameMatch = block.match(/^'([^']+)'/);
+      if (!nameMatch) continue;
+      const name = nameMatch[1];
+
+      const classMatch = name.match(/(IMPLEMENT|EXPLORE|DEBUG|PLAN|REVIEW|RESOLVE|PIPELINE)\/(GUIDED|ORCHESTRATED)/);
+      if (!classMatch) continue;
+
+      const [, intent, depth] = classMatch;
+      const table = depth === 'GUIDED' ? guided : orchestrated;
+      const routerSkills = table.get(intent);
+
+      // Extract expected or required array from block
+      const arrayMatch = block.match(/const (?:expected|required) = \[([^\]]*)\]/);
+      if (!arrayMatch) continue; // Some tests (like EXPLORE/GUIDED) have no expected array — skip
+
+      const testSkills = arrayMatch[1]
+        .split(',')
+        .map(s => s.trim().replace(/['"]/g, ''))
+        .filter(Boolean)
+        .map(s => `devflow:${s}`);
+
+      expect(routerSkills, `${name}: router has no ${depth} row for ${intent}`).toBeDefined();
+      if (!routerSkills) return;
+
+      // Every skill the test asserts must appear in the router table row
+      for (const skill of testSkills) {
+        expect(
+          routerSkills.includes(skill),
+          `${name}: test asserts '${skill}' but router ${depth} ${intent} row is [${routerSkills.join(', ')}]`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
 describe('preamble drift detection', () => {
-  it('preamble PREAMBLE contains required classification elements', async () => {
+  it('preamble contains classify and devflow:router instructions', async () => {
     const hookPath = path.resolve(__dirname, '../scripts/hooks/preamble');
     const hookContent = await fs.readFile(hookPath, 'utf-8');
 
-    // Extract the PREAMBLE string from the shell script (may be multiline)
+    // Extract the PREAMBLE string from the shell script
     const match = hookContent.match(/PREAMBLE="([^"]+)"/);
     expect(match).not.toBeNull();
-    const shellPreamble = match![1];
+    if (!match) return;
+    const shellPreamble = match[1];
 
-    // The preamble is detection-only: classification rules + router skill reference.
-    // Verify structural elements rather than exact string match to allow wording refinement.
-    expect(shellPreamble).toContain('AMBIENT MODE');
-
-    // Must contain depth definitions
-    expect(shellPreamble).toContain('QUICK');
-    expect(shellPreamble).toContain('GUIDED');
-    expect(shellPreamble).toContain('ORCHESTRATED');
-
-    // Must contain intent names for each category
-    expect(shellPreamble).toContain('CHAT');
-    expect(shellPreamble).toContain('EXPLORE');
-    expect(shellPreamble).toContain('PLAN');
-    expect(shellPreamble).toContain('IMPLEMENT');
-    expect(shellPreamble).toContain('REVIEW');
-    expect(shellPreamble).toContain('RESOLVE');
-    expect(shellPreamble).toContain('DEBUG');
-    expect(shellPreamble).toContain('PIPELINE');
-
-    // Must reference the router skill (detection-only: no direct skill mappings)
+    // SYNC: preamble must instruct classification + router loading
+    expect(shellPreamble.toLowerCase()).toContain('classify');
     expect(shellPreamble).toContain('devflow:router');
+  });
 
-    // Must instruct Skill tool invocation
-    expect(shellPreamble).toContain('Skill tool');
+  it('classification-rules.md contains required classification elements', async () => {
+    const rulesPath = path.resolve(__dirname, '../shared/skills/router/references/classification-rules.md');
+    const rulesContent = await fs.readFile(rulesPath, 'utf-8');
 
-    // Must include classification output format
-    expect(shellPreamble).toContain('Devflow:');
-    expect(shellPreamble).toContain('Loading:');
+    // Must contain Intent Signals heading
+    expect(rulesContent).toContain('Intent Signals');
+
+    // Must contain all 8 intents
+    expect(rulesContent).toContain('CHAT');
+    expect(rulesContent).toContain('EXPLORE');
+    expect(rulesContent).toContain('PLAN');
+    expect(rulesContent).toContain('IMPLEMENT');
+    expect(rulesContent).toContain('REVIEW');
+    expect(rulesContent).toContain('RESOLVE');
+    expect(rulesContent).toContain('DEBUG');
+    expect(rulesContent).toContain('PIPELINE');
+
+    // Must contain all 3 depths
+    expect(rulesContent).toContain('QUICK');
+    expect(rulesContent).toContain('GUIDED');
+    expect(rulesContent).toContain('ORCHESTRATED');
+
+    // Must reference devflow:router for GUIDED/ORCHESTRATED
+    expect(rulesContent).toContain('devflow:router');
+  });
+
+  it('router SKILL.md contains skill lookup tables', async () => {
+    const routerPath = path.resolve(__dirname, '../shared/skills/router/SKILL.md');
+    const routerContent = await fs.readFile(routerPath, 'utf-8');
+
+    // Must contain GUIDED/ORCHESTRATED headings
+    expect(routerContent).toContain('## GUIDED');
+    expect(routerContent).toContain('## ORCHESTRATED');
+
+    // Must contain classification output format
+    expect(routerContent).toContain('Devflow:');
+    expect(routerContent).toContain('Loading:');
+
+    // Must contain intent names in tables
+    expect(routerContent).toContain('IMPLEMENT');
+    expect(routerContent).toContain('EXPLORE');
+    expect(routerContent).toContain('DEBUG');
+    expect(routerContent).toContain('PLAN');
+    expect(routerContent).toContain('REVIEW');
+  });
+
+  it('session-start-classification hook reads classification-rules.md', async () => {
+    const hookPath = path.resolve(__dirname, '../scripts/hooks/session-start-classification');
+    const hookContent = await fs.readFile(hookPath, 'utf-8');
+
+    expect(hookContent).toContain('classification-rules.md');
   });
 });

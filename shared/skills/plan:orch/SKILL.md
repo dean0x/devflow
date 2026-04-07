@@ -2,7 +2,6 @@
 name: plan:orch
 description: Agent orchestration for PLAN intent — codebase orientation, design exploration, gap validation
 user-invocable: false
-allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 ---
 
 # Plan Orchestration
@@ -25,7 +24,7 @@ This is a lightweight variant of the Plan phase in `/implement` for ambient ORCH
 
 For GUIDED depth, the main session performs planning directly:
 
-1. **Spawn Skimmer** — `Task(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
+1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
 2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session.
 3. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
 
@@ -35,7 +34,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 ## Phase 1: Orient
 
-Spawn `Task(subagent_type="Skimmer")` to get codebase overview relevant to the planning question:
+Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the planning question:
 
 - Existing patterns and conventions in the affected area
 - File structure and module boundaries
@@ -44,7 +43,7 @@ Spawn `Task(subagent_type="Skimmer")` to get codebase overview relevant to the p
 
 ## Phase 2: Explore
 
-Based on Skimmer findings, spawn 2-3 `Task(subagent_type="Explore")` agents **in a single message** (parallel execution):
+Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **in a single message** (parallel execution):
 
 - **Integration explorer**: Examine integration points — APIs, shared types, module boundaries the plan must respect
 - **Pattern explorer**: Find existing implementations of similar features to follow as templates
@@ -54,7 +53,7 @@ Adjust explorer focus based on the specific planning question.
 
 ## Phase 3: Design
 
-Spawn `Task(subagent_type="Plan")` with combined Skimmer + Explore findings:
+Spawn `Agent(subagent_type="Plan")` with combined Skimmer + Explore findings:
 
 - Design implementation approach with file-level specificity
 - Reference existing patterns discovered in Phase 1-2
