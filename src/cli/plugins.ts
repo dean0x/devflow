@@ -50,24 +50,17 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
-    name: 'devflow-specify',
-    description: 'Interactive feature specification - creates well-defined GitHub issues',
-    commands: ['/specify'],
-    agents: ['skimmer', 'synthesizer'],
-    skills: ['agent-teams'],
-  },
-  {
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
     agents: ['git', 'skimmer', 'synthesizer', 'designer'],
-    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'knowledge-persistence'],
+    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'knowledge-persistence', 'worktree-support'],
   },
   {
     name: 'devflow-implement',
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
-    agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
+    agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
     skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'qa', 'quality-gates', 'worktree-support'],
   },
   {
@@ -219,6 +212,8 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
  */
 export const LEGACY_COMMAND_NAMES: string[] = [
   'review',
+  'specify',
+  'specify-teams',
 ];
 
 /**
@@ -233,6 +228,8 @@ export const LEGACY_AGENT_NAMES: string[] = [
  * Deprecated skill names from old installations (prefixed with devflow-).
  * Used during uninstall to clean up legacy installs.
  */
+// Pruning: entries can be removed after 2 major versions.
+// Users who skip major versions should run uninstall + reinstall.
 export const LEGACY_SKILL_NAMES: string[] = [
   'devflow-core-patterns',
   'devflow-review-methodology',

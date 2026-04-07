@@ -11,17 +11,19 @@ Orchestrate a single task through implementation by spawning specialized agents.
 ```
 /implement <task description>
 /implement #42                                     (GitHub issue number)
-/implement .docs/design/42-jwt.2026-04.md          (plan document from /plan)
+/implement .docs/design/42-jwt-auth.2026-04-07_1430.md  (plan document from /plan)
 /implement                                         (use conversation context)
 ```
 
 ## Input
 
 `$ARGUMENTS` contains whatever follows `/implement`:
-- Plan document path: `.docs/design/42-jwt.2026-04.md` (path to an existing `.md` file)
+- Plan document path: `.docs/design/42-jwt-auth.2026-04-07_1430.md` (path to an existing `.md` file)
 - GitHub issue: `#42`
 - Task description: "implement JWT auth"
 - Empty: use conversation context
+
+> **Tip**: For best results, run `/plan` first to produce a design artifact, then pass it to `/implement`.
 
 ## Phases
 

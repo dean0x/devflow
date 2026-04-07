@@ -1,20 +1,6 @@
 # Commands
 
-Devflow provides six commands that orchestrate specialized agents. Commands spawn agents — they never do the work themselves.
-
-## /specify
-
-Interactive feature specification with three mandatory gates:
-
-1. **Understanding Gate** — Confirm the feature idea is understood
-2. **Scope Gate** — Validate priorities and boundaries
-3. **Acceptance Gate** — Confirm success criteria
-
-Creates a well-defined GitHub issue ready for `/implement`.
-
-```
-/specify              # Start interactive specification
-```
+Devflow provides five commands that orchestrate specialized agents. Commands spawn agents — they never do the work themselves.
 
 ## /implement
 

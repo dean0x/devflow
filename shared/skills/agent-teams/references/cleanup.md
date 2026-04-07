@@ -74,7 +74,7 @@ After cleanup, verify:
 
 ## Sequential Team Transition Protocol
 
-Commands that create multiple teams (e.g., `/implement`, `/specify`) MUST follow this 4-step protocol between teams. Skipping steps causes silent failures due to the one-team-per-session constraint.
+Commands that create multiple teams (e.g., `/implement`, `/plan`) MUST follow this 4-step protocol between teams. Skipping steps causes silent failures due to the one-team-per-session constraint.
 
 ```
 Step 1: SHUTDOWN — Send shutdown_request to each teammate by name

@@ -1,6 +1,6 @@
 {
   "name": "devflow-implement",
-  "description": "Complete task implementation workflow - orchestrates exploration, planning, coding, validation, and PR creation",
+  "description": "Complete task implementation workflow - accepts plan documents, issues, or task descriptions",
   "author": {
     "name": "Dean0x"
   },
@@ -18,8 +18,6 @@
   ],
   "agents": [
     "git",
-    "skimmer",
-    "synthesizer",
     "coder",
     "simplifier",
     "scrutinizer",

@@ -54,7 +54,7 @@ Devflow: IMPLEMENT/ORCHESTRATED
 
 **Full lifecycle.** `/plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/implement`. `/implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
 
-**Everything is composable.** 18 plugins (9 core + 9 language/ecosystem). Install only what you need. Seven commands cover the entire development lifecycle.
+**Everything is composable.** 17 plugins (8 core + 9 language/ecosystem). Install only what you need. Six commands cover the entire development lifecycle.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, session duration, cost, and configuration counts at a glance.
 
@@ -84,7 +84,6 @@ That's it. The interactive wizard handles plugin selection, feature configuratio
 | `/resolve` | Validate and fix all review issues |
 | `/debug` | Competing hypothesis investigation |
 | `/self-review` | Simplifier + Scrutinizer quality pass |
-| `/specify` | _(deprecated: use `/plan`)_ Define a feature with clarification gates → GitHub issue |
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
 

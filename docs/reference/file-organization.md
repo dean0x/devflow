@@ -21,7 +21,7 @@ devflow/
 │       ├── coder.md
 │       └── ...
 ├── plugins/                          # Plugin collection (17 plugins)
-│   ├── devflow-specify/
+│   ├── devflow-plan/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
 │   │   ├── commands/

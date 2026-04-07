@@ -7,18 +7,6 @@
   },
   "plugins": [
     {
-      "name": "devflow-specify",
-      "source": "./plugins/devflow-specify",
-      "description": "Interactive feature specification - creates well-defined GitHub issues",
-      "version": "1.8.3",
-      "keywords": [
-        "specification",
-        "requirements",
-        "planning",
-        "issues"
-      ]
-    },
-    {
       "name": "devflow-plan",
       "source": "./plugins/devflow-plan",
       "description": "Unified design planning with gap analysis and design review",
@@ -33,7 +21,7 @@
     {
       "name": "devflow-implement",
       "source": "./plugins/devflow-implement",
-      "description": "Complete task implementation workflow with exploration, planning, and coding",
+      "description": "Complete task implementation workflow - accepts plan documents, issues, or task descriptions",
       "version": "1.8.3",
       "keywords": [
         "implementation",

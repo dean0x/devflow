@@ -1,6 +1,6 @@
 # devflow-implement
 
-Complete task implementation workflow for Claude Code. Orchestrates exploration, planning, coding, validation, and PR creation through specialized agents.
+Complete task implementation workflow for Claude Code. Accepts plan documents, issues, or task descriptions and drives them through coding, validation, and PR creation.
 
 ## Installation
 
@@ -22,15 +22,14 @@ npx devflow-kit init --plugin=implement
 
 ## Workflow
 
-1. **Exploration** - Skimmer + Explore agents understand the codebase
-2. **Planning** - Plan agents design implementation approach
-3. **Implementation** - Coder agent implements on feature branch
-4. **Validation** - Validator runs build/test/lint checks
-5. **Simplification** - Simplifier refines code clarity
-6. **Self-Review** - Scrutinizer evaluates against 9-pillar framework
-7. **Alignment Check** - Evaluator validates against original request
-8. **QA Testing** - Tester executes scenario-based acceptance tests
-9. **PR Creation** - Git agent creates pull request
+1. **Setup** - Git agent creates feature branch, parses plan document or fetches issue
+2. **Implementation** - Coder agent implements on feature branch
+3. **Validation** - Validator runs build/test/lint checks
+4. **Simplification** - Simplifier refines code clarity
+5. **Self-Review** - Scrutinizer evaluates against 9-pillar framework
+6. **Alignment Check** - Evaluator validates against original request
+7. **QA Testing** - Tester executes scenario-based acceptance tests
+8. **PR Creation** - Git agent creates pull request
 
 ## Components
 
@@ -39,8 +38,6 @@ npx devflow-kit init --plugin=implement
 
 ### Agents
 - `git` - GitHub operations (setup, PR creation)
-- `skimmer` - Codebase orientation
-- `synthesizer` - Output synthesis
 - `coder` - Autonomous implementation
 - `simplifier` - Code refinement
 - `scrutinizer` - Self-review (9-pillar framework)
@@ -64,6 +61,6 @@ npx devflow-kit init --plugin=implement
 
 ## Related Plugins
 
-- [devflow-specify](../devflow-specify) - Specify the task first
+- [devflow-plan](../devflow-plan) - Plan the task first
 - [devflow-code-review](../devflow-code-review) - Review the implementation
 - [devflow-resolve](../devflow-resolve) - Fix review issues

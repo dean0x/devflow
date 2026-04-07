@@ -12,11 +12,10 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 18 plugins (9 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 17 plugins (8 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
-| `devflow-specify` | Feature specification workflow | Optional |
 | `devflow-implement` | Complete task implementation lifecycle | Optional |
 | `devflow-plan` | Unified design planning with gap analysis | Optional |
 | `devflow-code-review` | Comprehensive code review | Optional |
@@ -55,7 +54,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 devflow/
 ├── shared/skills/          # 41 skills (single source of truth)
 ├── shared/agents/          # 12 shared agents (single source of truth)
-├── plugins/devflow-*/      # 18 plugins (9 core + 9 optional language/ecosystem)
+├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start-memory, session-start-classification, pre-compact, preamble, session-end-learning, stop-update-learning [deprecated], background-learning)
@@ -99,7 +98,7 @@ All generated docs live under `.docs/` in the project root:
 │       ├── {focus}.md                 # Reviewer reports (security.md, etc.)
 │       ├── review-summary.md          # Synthesizer output
 │       └── resolution-summary.md      # Written by /resolve
-└── design/                            # Implementation plans
+└── design/                            # Design artifacts from /plan
 ```
 
 Working memory files live in a dedicated `.memory/` directory:
@@ -138,9 +137,8 @@ Working memory files live in a dedicated `.memory/` directory:
 ## Agent & Command Roster
 
 **Orchestration commands** (spawn agents, never do agent work in main session):
-- `/specify` — Skimmer + Explore + Synthesizer + Plan + Synthesizer → GitHub issue
 - `/plan` — Skimmer + Explore + Designer + Synthesizer + Plan + Designer → design artifact
-- `/implement` — Git + Coder + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
+- `/implement` — Git + Coder + Validator + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
 - `/code-review` — 7-11 Reviewer agents + Git + Synthesizer
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
@@ -153,7 +151,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Orchestration skills** (7): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
-**Agent Teams**: 6 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
+**Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/debug`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
 ## Key Conventions
 

@@ -20,7 +20,7 @@ Shared patterns used by multiple agents.
 | `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug |
 | `router` | Intent classification and proportional skill loading for Devflow mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
-| `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /specify, /self-review |
+| `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /plan, /self-review |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
 ### Tier 1b: Pattern Skills
@@ -263,12 +263,3 @@ For language/framework patterns:
 4. Add to relevant plugin manifests
 5. Run `npm run build` to distribute
 
-## Clarification Gates
-
-The `/specify` command uses **mandatory clarification gates**:
-
-1. **Gate 0 (Before Exploration)**: Confirm understanding of feature idea
-2. **Gate 1 (After Exploration)**: Validate scope and priorities
-3. **Gate 2 (Before Issue Creation)**: Confirm acceptance criteria
-
-No gate may be skipped. If user says "whatever you think", state recommendation and get explicit approval.

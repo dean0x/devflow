@@ -99,7 +99,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('PLAN/GUIDED — loads router and planning skills', async () => {
-    const expected = ['test-driven-development', 'patterns', 'software-design', 'security'];
+    const expected = ['test-driven-development', 'patterns', 'software-design', 'security', 'design-review'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'how should we design a caching layer for API responses?',
       (r) => hasRequiredSkills(r, ['router']),
@@ -192,7 +192,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('PLAN/ORCHESTRATED — loads plan:orch, patterns', async () => {
-    const required = ['plan:orch', 'patterns'];
+    const required = ['plan:orch', 'patterns', 'design-review'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'design the architecture for a multi-service notification system with email, SMS, and push channels that supports user preferences and delivery guarantees',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
