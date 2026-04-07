@@ -204,6 +204,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
  */
 export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
   'devflow-frontend-design': 'devflow-ui-design',
+  'devflow-specify': 'devflow-plan',
 };
 
 /**

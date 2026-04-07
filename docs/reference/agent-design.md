@@ -49,7 +49,7 @@ When an agent only needs a subset of tools, prefer platform-enforced restriction
 | Agent Type | Target Lines | Examples |
 |------------|-------------|----------|
 | Utility | 50-80 | Skimmer, Simplifier, Validator |
-| Worker | 80-120 | Coder, Reviewer, Git |
+| Worker | 80-120 | Coder, Reviewer, Git, Designer |
 | Orchestration | 100-150 | (Commands handle orchestration, not agents) |
 
 ## What Belongs Where
@@ -106,4 +106,4 @@ Before committing a new or modified agent:
 3. Test with explicit invocation
 4. Document in plugin README.md
 
-**Note:** Shared agents live in `shared/agents/` and are distributed at build time. Only create plugin-specific agents when tightly coupled to a single workflow (e.g., `claude-md-auditor.md`).
+**Note:** Shared agents live in `shared/agents/` and are distributed at build time (e.g., `git.md`, `coder.md`, `designer.md`). Only create plugin-specific agents when tightly coupled to a single workflow (e.g., `claude-md-auditor.md`).
