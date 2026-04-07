@@ -133,7 +133,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `shared/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
-**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
 
 ## Agent & Command Roster
 
@@ -153,7 +153,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Orchestration skills** (7): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
-**Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
+**Agent Teams**: 6 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
 ## Key Conventions
 

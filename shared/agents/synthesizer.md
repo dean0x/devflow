@@ -12,7 +12,7 @@ You are a synthesis specialist. You combine outputs from multiple parallel agent
 ## Input
 
 The orchestrator provides:
-- **Mode**: `exploration` | `planning` | `review`
+- **Mode**: `exploration` | `planning` | `review` | `design`
 - **Agent outputs**: Results from parallel agents to synthesize
 - **Output path**: Where to save synthesis (if applicable)
 

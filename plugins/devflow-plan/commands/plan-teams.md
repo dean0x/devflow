@@ -330,7 +330,7 @@ Combine into: execution plan with strategy decision, gap mitigations integrated"
 
 ### Block 5: Design Review
 
-#### Phase 13: Design Review (Parallel Subagent)
+#### Phase 13: Design Review (Single Subagent)
 
 Design review uses a single independent agent — not a team.
 
@@ -366,7 +366,12 @@ User can: accept, revise (re-run phases 11-13), or cancel.
 
 #### Phase 15: Store Design Artifact
 
-Write design artifact to `.docs/design/{issue-number}-{topic-slug}.{YYYY-MM-DD_HHMM}.md` (or `{topic-slug}.{YYYY-MM-DD_HHMM}.md` if no issue).
+Write design artifact to disk:
+- If issue number: `.docs/design/{issue-number}-{topic-slug}.{YYYY-MM-DD_HHMM}.md`
+- If multi-issue: `.docs/design/{first-issue-number}-multi.{YYYY-MM-DD_HHMM}.md`
+- If no issue: `.docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
+
+Create parent directory if needed.
 
 **Artifact YAML frontmatter:**
 ```yaml
