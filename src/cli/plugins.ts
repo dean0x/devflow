@@ -65,7 +65,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-implement',
-    description: 'Complete task implementation workflow with exploration, planning, and coding',
+    description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
     agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
     skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'qa', 'quality-gates', 'worktree-support'],
@@ -390,7 +390,7 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'pipeline:orch',
   // v2.0.0 quality-gates: bare name for pre-namespace installs
   'quality-gates',
-  // feat/108: new plan skills bare names for pre-namespace installs
+  // v2.x plan plugin: new skills bare names for pre-namespace installs
   'gap-analysis',
   'design-review',
 ];
