@@ -301,7 +301,8 @@ export const initCommand = new Command('init')
     } else if (process.stdin.isTTY) {
       // Short hints to prevent overflow in multiselect — full descriptions live in plugins.ts
       const pluginHints: Record<string, string> = {
-        'devflow-implement': 'explore, plan, code, review',
+        'devflow-plan': 'gap analysis, design review',
+        'devflow-implement': 'code, validate, self-review, PR',
         'devflow-code-review': 'parallel specialized reviewers',
         'devflow-resolve': 'fix review issues by risk',
         'devflow-debug': 'competing hypotheses',

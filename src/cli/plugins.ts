@@ -227,9 +227,10 @@ export const LEGACY_AGENT_NAMES: string[] = [
 /**
  * Deprecated skill names from old installations (prefixed with devflow-).
  * Used during uninstall to clean up legacy installs.
+ *
+ * Pruning: entries can be removed after 2 major versions.
+ * Users who skip major versions should run uninstall + reinstall.
  */
-// Pruning: entries can be removed after 2 major versions.
-// Users who skip major versions should run uninstall + reinstall.
 export const LEGACY_SKILL_NAMES: string[] = [
   'devflow-core-patterns',
   'devflow-review-methodology',
