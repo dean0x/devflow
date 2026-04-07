@@ -138,15 +138,17 @@ export function removeAmbientHook(settingsJson: string): string {
 export function hasAmbientHook(settingsJson: string): boolean {
   const settings: Settings = JSON.parse(settingsJson);
 
-  if (!settings.hooks?.UserPromptSubmit) {
-    return false;
-  }
-
-  return settings.hooks.UserPromptSubmit.some((matcher) =>
+  const hasPreamble = settings.hooks?.UserPromptSubmit?.some((matcher) =>
     matcher.hooks.some((h) =>
       h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
     ),
-  );
+  ) ?? false;
+
+  const hasClassificationHook = settings.hooks?.SessionStart?.some((matcher) =>
+    isClassification(matcher),
+  ) ?? false;
+
+  return hasPreamble || hasClassificationHook;
 }
 
 interface AmbientOptions {
@@ -157,8 +159,8 @@ interface AmbientOptions {
 
 export const ambientCommand = new Command('ambient')
   .description('Enable or disable ambient mode (always-on quality enforcement)')
-  .option('--enable', 'Register UserPromptSubmit hook for ambient mode')
-  .option('--disable', 'Remove ambient mode hook')
+  .option('--enable', 'Register ambient mode hooks')
+  .option('--disable', 'Remove ambient mode hooks')
   .option('--status', 'Check if ambient mode is enabled')
   .action(async (options: AmbientOptions) => {
     const hasFlag = options.enable || options.disable || options.status;
@@ -218,7 +220,7 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('Ambient mode enabled — UserPromptSubmit hook registered');
+      p.log.success('Ambient mode enabled — hooks registered');
       p.log.info(color.dim('Skills auto-load and agents orchestrate based on each prompt'));
     }
 
