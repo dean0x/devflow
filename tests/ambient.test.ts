@@ -564,12 +564,13 @@ describe('router structural validation', () => {
         .map(s => `devflow:${s}`);
 
       expect(routerSkills, `${name}: router has no ${depth} row for ${intent}`).toBeDefined();
+      if (!routerSkills) return;
 
       // Every skill the test asserts must appear in the router table row
       for (const skill of testSkills) {
         expect(
-          routerSkills!.includes(skill),
-          `${name}: test asserts '${skill}' but router ${depth} ${intent} row is [${routerSkills!.join(', ')}]`,
+          routerSkills.includes(skill),
+          `${name}: test asserts '${skill}' but router ${depth} ${intent} row is [${routerSkills.join(', ')}]`,
         ).toBe(true);
       }
     }
@@ -584,7 +585,8 @@ describe('preamble drift detection', () => {
     // Extract the PREAMBLE string from the shell script
     const match = hookContent.match(/PREAMBLE="([^"]+)"/);
     expect(match).not.toBeNull();
-    const shellPreamble = match![1];
+    if (!match) return;
+    const shellPreamble = match[1];
 
     // SYNC: preamble must instruct classification + router loading
     expect(shellPreamble.toLowerCase()).toContain('classify');
