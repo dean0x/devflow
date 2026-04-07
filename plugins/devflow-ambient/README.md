@@ -1,11 +1,11 @@
 # devflow-ambient
 
-Ambient mode — classifies intent and applies proportional effort via a `UserPromptSubmit` hook. No slash command — ambient mode activates automatically on every prompt when enabled.
+Ambient mode — classifies intent and applies proportional effort via a `SessionStart` hook and a `UserPromptSubmit` hook. No slash command — ambient mode activates automatically on every prompt when enabled.
 
 ## Activation
 
 ```bash
-devflow ambient --enable    # Register UserPromptSubmit hook
+devflow ambient --enable    # Register ambient mode hooks
 devflow ambient --disable   # Remove hook
 devflow ambient --status    # Check if enabled
 ```
@@ -45,8 +45,8 @@ Skills are loaded via the Skill tool and work happens in the main session:
 | Intent | Skills | Main Session Work | Post-Work |
 |--------|--------|-------------------|-----------|
 | IMPLEMENT | test-driven-development, patterns, research | Implement with TDD | `Agent(subagent_type="Simplifier")` |
-| DEBUG | software-design, testing | Investigate, diagnose, fix | `Agent(subagent_type="Simplifier")` |
-| PLAN | patterns, software-design | Explore and design | — |
+| DEBUG | test-driven-development, software-design, testing | Investigate, diagnose, fix | `Agent(subagent_type="Simplifier")` |
+| PLAN | test-driven-development, patterns, software-design, security | Explore and design | — |
 | REVIEW | quality-gates, software-design | Review directly | — |
 
 ## ORCHESTRATED Pipelines

@@ -29,8 +29,8 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
 | devflow:debug:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates investigation pipeline |
-| devflow:test-driven-development | Always for DEBUG | GUIDED + ORCHESTRATED | Any code file — bug fix needs regression test first |
-| devflow:software-design | Always for DEBUG | GUIDED + ORCHESTRATED | Any code file |
+| devflow:test-driven-development | Always for DEBUG | GUIDED | Any code file — bug fix needs regression test first |
+| devflow:software-design | Always for DEBUG | GUIDED | Any code file |
 | devflow:testing | Always for DEBUG (GUIDED) | GUIDED | Any code file |
 | devflow:git | Git operations involved | GUIDED + ORCHESTRATED | User mentions git, rebase, merge, etc. |
 
@@ -50,8 +50,6 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
 | devflow:resolve:orch | Always for RESOLVE | ORCHESTRATED | Any — orchestrates issue resolution pipeline |
-| devflow:test-driven-development | Always for RESOLVE | ORCHESTRATED | Any code file — fixes need regression tests |
-| devflow:software-design | Always for RESOLVE | ORCHESTRATED | Any code file |
 
 RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resolver agents and Simplifier.
 
@@ -77,7 +75,7 @@ EXPLORE depth: simple lookups ("where is X?") → QUICK. Focused subsystem/flow 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
 | devflow:plan:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates design pipeline |
-| devflow:test-driven-development | Always for PLAN | GUIDED + ORCHESTRATED | Any planning context — plans must account for test-first workflow |
+| devflow:test-driven-development | Always for PLAN | GUIDED | Any planning context — plans must account for test-first workflow |
 | devflow:patterns | Always for PLAN | GUIDED + ORCHESTRATED | Any planning context |
 | devflow:software-design | Always for PLAN | GUIDED + ORCHESTRATED | System design discussions |
 
