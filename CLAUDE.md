@@ -12,12 +12,13 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 17 plugins (8 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 18 plugins (9 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
 | `devflow-specify` | Feature specification workflow | Optional |
 | `devflow-implement` | Complete task implementation lifecycle | Optional |
+| `devflow-plan` | Unified design planning with gap analysis | Optional |
 | `devflow-code-review` | Comprehensive code review | Optional |
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
@@ -52,9 +53,9 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 39 skills (single source of truth)
-├── shared/agents/          # 11 shared agents (single source of truth)
-├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
+├── shared/skills/          # 41 skills (single source of truth)
+├── shared/agents/          # 12 shared agents (single source of truth)
+├── plugins/devflow-*/      # 18 plugins (9 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start-memory, session-start-classification, pre-compact, preamble, session-end-learning, stop-update-learning [deprecated], background-learning)
@@ -138,14 +139,15 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Orchestration commands** (spawn agents, never do agent work in main session):
 - `/specify` — Skimmer + Explore + Synthesizer + Plan + Synthesizer → GitHub issue
-- `/implement` — Git + Skimmer + Explore + Synthesizer + Plan + Synthesizer + Coder + Simplifier + Scrutinizer + Evaluator + Tester → PR
+- `/plan` — Skimmer + Explore + Designer + Synthesizer + Plan + Designer → design artifact
+- `/implement` — Git + Coder + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
 - `/code-review` — 7-11 Reviewer agents + Git + Synthesizer
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential)
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
-**Shared agents** (11): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator
+**Shared agents** (12): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer
 
 **Plugin-specific agents** (1): claude-md-auditor
 

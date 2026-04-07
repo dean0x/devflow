@@ -24,6 +24,7 @@ plugins/*/agents/evaluator.md
 plugins/*/agents/tester.md
 plugins/*/agents/scrutinizer.md
 plugins/*/agents/validator.md
+plugins/*/agents/designer.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

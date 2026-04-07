@@ -34,6 +34,8 @@ All generated documentation lives under `.docs/` in the project root:
 │   └── {timestamp}/                   # Second review (incremental)
 │       ├── {focus}.md
 │       └── review-summary.md
+├── design/                             # Design artifacts from /plan
+│   └── {issue}-{topic-slug}.{timestamp}.md  # Design document
 ├── status/                             # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md
@@ -82,6 +84,7 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 | Resolution summary | `resolution-summary.md` in timestamped dir | `2025-12-26_1430/resolution-summary.md` |
 | Review head marker | `.last-review-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
+| Design documents | `{issue}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
 
 ---
 
@@ -113,6 +116,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Working Memory | `.memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
 | Knowledge (decisions) | `.memory/knowledge/decisions.md` | Append-only (ADR-NNN sequential IDs) |
 | Knowledge (pitfalls) | `.memory/knowledge/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
+| Designer (via /plan) | `.docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 
 ### Agents That Don't Persist
 

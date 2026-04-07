@@ -4,6 +4,10 @@ description: Specify a single feature through agent-team exploration with debate
 
 # Specify Command
 
+> **DEPRECATED**: This command is superseded by `/plan`, which combines requirements discovery,
+> gap analysis, implementation planning, and design review into a single workflow.
+> `/specify` will be removed in a future version. Use `/plan` instead.
+
 Transform a rough feature idea into a well-defined, implementation-ready GitHub issue through multi-perspective requirements exploration and user clarification.
 
 **Focus**: Requirements only (what/why/for whom), not implementation (that's `/implement`'s job).
