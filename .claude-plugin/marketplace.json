@@ -19,6 +19,18 @@
       ]
     },
     {
+      "name": "devflow-plan",
+      "source": "./plugins/devflow-plan",
+      "description": "Unified design planning with gap analysis and design review",
+      "version": "1.8.3",
+      "keywords": [
+        "planning",
+        "design",
+        "gap-analysis",
+        "architecture"
+      ]
+    },
+    {
       "name": "devflow-implement",
       "source": "./plugins/devflow-implement",
       "description": "Complete task implementation workflow with exploration, planning, and coding",

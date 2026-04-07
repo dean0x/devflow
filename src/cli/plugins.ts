@@ -57,6 +57,13 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['agent-teams'],
   },
   {
+    name: 'devflow-plan',
+    description: 'Unified design planning with gap analysis and design review',
+    commands: ['/plan'],
+    agents: ['git', 'skimmer', 'synthesizer', 'designer'],
+    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'knowledge-persistence'],
+  },
+  {
     name: 'devflow-implement',
     description: 'Complete task implementation workflow with exploration, planning, and coding',
     commands: ['/implement'],
@@ -95,7 +102,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Ambient mode — intent classification with proportional agent orchestration',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer'],
     skills: [
       'router',
       'implement:orch',
@@ -120,6 +127,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'knowledge-persistence',
       'qa',
       'worktree-support',
+      'gap-analysis',
+      'design-review',
     ],
   },
   {
@@ -381,6 +390,9 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'pipeline:orch',
   // v2.0.0 quality-gates: bare name for pre-namespace installs
   'quality-gates',
+  // feat/108: new plan skills bare names for pre-namespace installs
+  'gap-analysis',
+  'design-review',
 ];
 
 /**

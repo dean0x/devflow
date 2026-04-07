@@ -26,7 +26,8 @@
     "reviewer",
     "git",
     "synthesizer",
-    "resolver"
+    "resolver",
+    "designer"
   ],
   "skills": [
     "router",
@@ -51,6 +52,8 @@
     "patterns",
     "knowledge-persistence",
     "qa",
-    "worktree-support"
+    "worktree-support",
+    "gap-analysis",
+    "design-review"
   ]
 }

@@ -20,7 +20,7 @@ ORCHESTRATED: follow the loaded orchestration skill's pipeline.
 | IMPLEMENT | devflow:test-driven-development, devflow:patterns, devflow:research |
 | EXPLORE | — |
 | DEBUG | devflow:test-driven-development, devflow:software-design, devflow:testing |
-| PLAN | devflow:test-driven-development, devflow:patterns, devflow:software-design, devflow:security |
+| PLAN | devflow:test-driven-development, devflow:patterns, devflow:software-design, devflow:security, devflow:design-review |
 | REVIEW | devflow:quality-gates, devflow:software-design |
 
 ## ORCHESTRATED
@@ -30,7 +30,7 @@ ORCHESTRATED: follow the loaded orchestration skill's pipeline.
 | IMPLEMENT | devflow:implement:orch, devflow:patterns |
 | EXPLORE | devflow:explore:orch |
 | DEBUG | devflow:debug:orch |
-| PLAN | devflow:plan:orch, devflow:patterns, devflow:software-design, devflow:security |
+| PLAN | devflow:plan:orch, devflow:patterns, devflow:software-design, devflow:security, devflow:design-review |
 | REVIEW | devflow:review:orch |
 | RESOLVE | devflow:resolve:orch |
 | PIPELINE | devflow:pipeline:orch, devflow:patterns |

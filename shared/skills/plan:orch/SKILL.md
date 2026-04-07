@@ -1,14 +1,14 @@
 ---
 name: plan:orch
-description: Agent orchestration for PLAN intent — codebase orientation, design exploration, gap validation
+description: Agent orchestration for PLAN intent — codebase orientation, gap analysis, design exploration, implementation planning, design review
 user-invocable: false
 ---
 
 # Plan Orchestration
 
-Agent pipeline for PLAN intent in ambient ORCHESTRATED mode. Codebase orientation, targeted exploration, architecture design, and gap validation.
+Agent pipeline for PLAN intent in ambient ORCHESTRATED mode. Codebase orientation, gap analysis, targeted exploration, implementation planning, and design review.
 
-This is a lightweight variant of the Plan phase in `/implement` for ambient ORCHESTRATED mode.
+This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRATED mode — no user gates, lighter weight, stays in conversation context.
 
 ## Iron Law
 
@@ -25,12 +25,14 @@ This is a lightweight variant of the Plan phase in `/implement` for ambient ORCH
 For GUIDED depth, the main session performs planning directly:
 
 1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
-2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session.
+2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 3. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
 
 ## Worktree Support
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
+---
 
 ## Phase 1: Orient
 
@@ -51,32 +53,94 @@ Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **i
 
 Adjust explorer focus based on the specific planning question.
 
-## Phase 3: Design
+## Phase 3: Gap Analysis Lite
 
-Spawn `Agent(subagent_type="Plan")` with combined Skimmer + Explore findings:
+Spawn 2 `Agent(subagent_type="Designer")` agents **in a single message** (parallel execution):
+
+```
+Agent(subagent_type="Designer"):
+"Mode: gap-analysis
+Focus: completeness
+Artifacts:
+  Planning question: {user's intent}
+  Exploration findings: {Phase 2 outputs}
+  Codebase context: {Phase 1 output}
+Identify missing requirements, undefined error states, vague acceptance criteria."
+
+Agent(subagent_type="Designer"):
+"Mode: gap-analysis
+Focus: architecture
+Artifacts:
+  Planning question: {user's intent}
+  Exploration findings: {Phase 2 outputs}
+  Codebase context: {Phase 1 output}
+Identify pattern violations, missing integration points, layering issues."
+```
+
+## Phase 4: Synthesize
+
+Spawn `Agent(subagent_type="Synthesizer")` combining gap analysis and explore outputs:
+
+```
+Agent(subagent_type="Synthesizer"):
+"Mode: design
+Designer outputs: {Phase 3 designer outputs}
+Combine gap findings with exploration context into blocking vs. should-address categorization."
+```
+
+## Phase 5: Plan
+
+Spawn `Agent(subagent_type="Plan")` with all findings:
 
 - Design implementation approach with file-level specificity
-- Reference existing patterns discovered in Phase 1-2
+- Reference existing patterns discovered in Phases 1-2
 - Include: architecture decisions, file changes, new files needed, test strategy
-- Flag any areas where existing patterns conflict with the proposed approach
+- Integrate gap mitigations from Phase 4 into the relevant steps
+- Flag areas where existing patterns conflict with the proposed approach
 
-## Phase 4: Validate
+## Phase 6: Design Review Lite
 
-Main session reviews the plan for:
+Main session reviews the plan inline using the loaded `devflow:design-review` skill:
 
-- **Gaps**: Missing files, unhandled edge cases, integration points not addressed
-- **Risks**: Areas where the plan deviates from existing patterns, potential regressions
-- **Ambiguities**: Design choices that need user input
+- Check for N+1 query implications
+- Check for god functions
+- Check for missing parallelism
+- Check for error handling gaps
+- Check for missing caching
+- Check for poor decomposition
 
-Present plan to user with identified risks. Use AskUserQuestion for any ambiguous design choices.
+Note findings directly in the plan presentation. This is inline review — no agent spawn needed.
+
+## Phase 7: Present
+
+Present plan to user with:
+- Implementation approach (file-level)
+- Gap analysis findings (from Phase 4 synthesis)
+- Design review notes (from Phase 6 inline check)
+- Risk areas
+
+Use AskUserQuestion for any ambiguous design choices that need user input before proceeding to IMPLEMENT.
+
+## Phase 8: Persist
+
+If the plan is substantial (>10 implementation steps or HIGH/CRITICAL context risk):
+- Write to `.docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md` with YAML frontmatter
+- Note the artifact path in the output
+
+Otherwise: plan stays in conversation context, ready for IMPLEMENT to consume directly.
+
+---
 
 ## Output
 
 Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
 
 - Goal and scope
+- Gap analysis findings (blocking vs. should-address)
 - Architecture decisions with rationale
 - File-level change list (create/modify/delete)
 - Test strategy
+- Design review notes (anti-patterns checked, any concerns)
 - Risks and mitigations
 - Open questions (if any)
+- Design artifact path (if written to disk)
