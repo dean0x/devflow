@@ -51,7 +51,7 @@ Use AskUserQuestion to confirm understanding before spawning any agents.
 Spawn Skimmer agent for codebase context:
 
 ```
-Task(subagent_type="Skimmer"):
+Agent(subagent_type="Skimmer"):
 "Orient in codebase for requirements exploration: {feature}
 Run rskim on source directories (NOT repo root) to find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
@@ -77,7 +77,7 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context and pr
 **WAIT** for Phase 4, then spawn Synthesizer:
 
 ```
-Task(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesizer"):
 "Synthesize EXPLORATION outputs for: {feature}
 Mode: exploration
 Combine into: user needs, similar features, constraints, failure modes"
@@ -98,7 +98,7 @@ Spawn 3 Plan agents **in a single message**, each with exploration synthesis:
 **WAIT** for Phase 6, then spawn Synthesizer:
 
 ```
-Task(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesizer"):
 "Synthesize PLANNING outputs for: {feature}
 Mode: planning
 Combine into: user stories, scope breakdown, acceptance criteria, open questions"

@@ -29,7 +29,7 @@ Detect branch type before spawning Coder:
 - **Protected branches** (`main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`): record current branch as `BASE_BRANCH`, then spawn Git agent to auto-create a feature branch:
 
 ```
-Task(subagent_type="Git"):
+Agent(subagent_type="Git"):
 "OPERATION: setup-task
 BASE_BRANCH: {current branch name}
 ISSUE_INPUT: {issue number if ticket mentioned in conversation, otherwise omit}
@@ -57,7 +57,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 Record git SHA before first Coder: `git rev-parse HEAD`
 
-Spawn `Task(subagent_type="Coder")` with input variables:
+Spawn `Agent(subagent_type="Coder")` with input variables:
 - **TASK_ID**: Generated from timestamp (e.g., `task-2026-03-19_1430`)
 - **TASK_DESCRIPTION**: From conversation context
 - **BASE_BRANCH**: Current branch (or newly created branch from Phase 1)
@@ -88,12 +88,12 @@ Pass FILES_CHANGED to all quality gate agents.
 
 Run sequentially — each gate must pass before the next:
 
-1. `Task(subagent_type="Validator")` (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
-2. `Task(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
-3. `Task(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED
-4. `Task(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
-5. `Task(subagent_type="Evaluator")` — verify implementation matches original request — retry up to 2× if misalignment found
-6. `Task(subagent_type="Tester")` — scenario-based acceptance testing from user's perspective — retry up to 2× if QA fails
+1. `Agent(subagent_type="Validator")` (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
+2. `Agent(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
+3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED
+4. `Agent(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
+5. `Agent(subagent_type="Evaluator")` — verify implementation matches original request — retry up to 2× if misalignment found
+6. `Agent(subagent_type="Tester")` — scenario-based acceptance testing from user's perspective — retry up to 2× if QA fails
 
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
 

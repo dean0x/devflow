@@ -29,7 +29,7 @@ Detect changed files and build context:
 
 Spawn Simplifier agent to refine code for clarity and consistency:
 
-Task(subagent_type="Simplifier", run_in_background=false):
+Agent(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
 KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
@@ -42,7 +42,7 @@ If knowledge context is provided, verify no known pitfall patterns are being rei
 
 Spawn Scrutinizer agent for quality evaluation and fixing:
 
-Task(subagent_type="Scrutinizer", run_in_background=false):
+Agent(subagent_type="Scrutinizer", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
 KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
@@ -55,7 +55,7 @@ If knowledge context is provided, check whether any known pitfall patterns are b
 
 If Scrutinizer made changes (STATUS == FIXED):
 
-Task(subagent_type="Validator", run_in_background=false):
+Agent(subagent_type="Validator", run_in_background=false):
 "FILES_CHANGED: {scrutinizer_modified_files}
 VALIDATION_SCOPE: changed-only
 Run build, typecheck, lint, test on modified files"

@@ -32,7 +32,7 @@ Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Known
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
 ```
-Task(subagent_type="Git"):
+Agent(subagent_type="Git"):
 "OPERATION: fetch-issue
 ISSUE: {issue number}
 Return issue title, body, labels, and any linked error logs."
@@ -48,7 +48,7 @@ Analyze the bug description (from arguments or issue) and identify 3-5 plausible
 Spawn one Explore agent per hypothesis in a **single message** (parallel execution):
 
 ```
-Task(subagent_type="Explore"):
+Agent(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
 
 Hypothesis: {hypothesis A description}
@@ -67,7 +67,7 @@ Return a structured report:
 - Evidence AGAINST: [list with file:line refs]
 - Key finding: {one-sentence summary}"
 
-Task(subagent_type="Explore"):
+Agent(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
 
 Hypothesis: {hypothesis B description}
@@ -75,7 +75,7 @@ Focus area: {specific code area, mechanism, or condition}
 
 [same steps and return format]"
 
-Task(subagent_type="Explore"):
+Agent(subagent_type="Explore"):
 "Investigate this bug: {bug_description}
 
 Hypothesis: {hypothesis C description}
@@ -91,7 +91,7 @@ Focus area: {specific code area, mechanism, or condition}
 Once all investigators return, spawn a Synthesizer agent to aggregate findings:
 
 ```
-Task(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesizer"):
 "You are a root cause analyst. Synthesize these investigation reports:
 
 {paste all investigator reports}

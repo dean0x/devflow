@@ -23,7 +23,7 @@ Agent pipeline for EXPLORE intent in ambient GUIDED and ORCHESTRATED modes. Code
 
 For GUIDED depth, the main session performs exploration directly:
 
-1. **Spawn Skimmer** — `Task(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
+1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
 2. **Trace** — Using Skimmer findings, trace the flow or analyze the subsystem directly in main session. Follow call chains, read key files, map integration points.
 3. **Present** — Deliver structured findings using the Output format below. Use AskUserQuestion to offer drill-down into specific areas.
 
@@ -31,7 +31,7 @@ For GUIDED depth, the main session performs exploration directly:
 
 ### Phase 1: Orient
 
-Spawn `Task(subagent_type="Skimmer")` to get codebase overview relevant to the exploration question:
+Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the exploration question:
 
 - File structure and module boundaries in the target area
 - Entry points and key abstractions
@@ -39,7 +39,7 @@ Spawn `Task(subagent_type="Skimmer")` to get codebase overview relevant to the e
 
 ### Phase 2: Explore
 
-Based on Skimmer findings, spawn 2-3 `Task(subagent_type="Explore")` agents **in a single message** (parallel execution):
+Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **in a single message** (parallel execution):
 
 - **Flow explorer**: Trace the primary call chain end-to-end — entry point through to side effects
 - **Dependency explorer**: Map imports, shared types, module boundaries, and integration points
@@ -49,7 +49,7 @@ Adjust explorer focus based on the specific exploration question.
 
 ### Phase 3: Synthesize
 
-Spawn `Task(subagent_type="Synthesizer")` in `exploration` mode with combined findings:
+Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined findings:
 
 - Merge overlapping discoveries from parallel explorers
 - Resolve any contradictions between explorer findings

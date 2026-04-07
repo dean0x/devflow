@@ -32,7 +32,7 @@ Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Known
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
 ```
-Task(subagent_type="Git"):
+Agent(subagent_type="Git"):
 "OPERATION: fetch-issue
 ISSUE: {issue number}
 Return issue title, body, labels, and any linked error logs."

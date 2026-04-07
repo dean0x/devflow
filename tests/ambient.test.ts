@@ -173,20 +173,12 @@ describe('addAmbientHook', () => {
 });
 
 describe('removeAmbientHook', () => {
-  it('removes ambient hook', () => {
+  it('removes ambient hook — clears both UserPromptSubmit and SessionStart', () => {
     const withHook = addAmbientHook('{}', '/home/user/.devflow');
     const result = removeAmbientHook(withHook);
     const settings = JSON.parse(result);
 
     expect(settings.hooks).toBeUndefined();
-  });
-
-  it('removes both UserPromptSubmit and SessionStart hooks', () => {
-    const withHook = addAmbientHook('{}', '/home/user/.devflow');
-    const result = removeAmbientHook(withHook);
-    const cleaned = JSON.parse(result);
-
-    expect(cleaned.hooks).toBeUndefined();
   });
 
   it('preserves other UserPromptSubmit hooks', () => {

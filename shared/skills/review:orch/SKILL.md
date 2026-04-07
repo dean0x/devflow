@@ -22,7 +22,7 @@ This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. E
 
 ## Phase 1: Pre-flight
 
-Spawn `Task(subagent_type="Git")` with action `ensure-pr-ready`:
+Spawn `Agent(subagent_type="Git")` with action `ensure-pr-ready`:
 - Extract: branch, base_branch, branch_slug, pr_number
 - If BLOCKED (detached HEAD, no commits ahead of base): halt with message
 
@@ -78,8 +78,8 @@ Each reviewer receives:
 
 After all reviewers complete, spawn in parallel:
 
-1. `Task(subagent_type="Git")` with action `comment-pr` — post review summary as PR comment (deduplicate: check existing comments first)
-2. `Task(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`
+1. `Agent(subagent_type="Git")` with action `comment-pr` — post review summary as PR comment (deduplicate: check existing comments first)
+2. `Agent(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`
 
 ## Phase 6: Finalize
 

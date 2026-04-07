@@ -51,7 +51,7 @@ Use AskUserQuestion to confirm understanding before spawning any agents.
 Spawn Skimmer agent for codebase context:
 
 ```
-Task(subagent_type="Skimmer"):
+Agent(subagent_type="Skimmer"):
 "Orient in codebase for requirements exploration: {feature}
 Run rskim on source directories (NOT repo root) to find: project structure, similar features, patterns, integration points
 Return: codebase context for requirements (not implementation details)"
@@ -148,7 +148,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 **WAIT** for Phase 4, then spawn Synthesizer:
 
 ```
-Task(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesizer"):
 "Synthesize EXPLORATION outputs for: {feature}
 Mode: exploration
 Explorer consensus: {team exploration consensus output}
@@ -230,7 +230,7 @@ Step 3: GATE — Verify TeamDelete succeeded
 **WAIT** for Phase 6, then spawn Synthesizer:
 
 ```
-Task(subagent_type="Synthesizer"):
+Agent(subagent_type="Synthesizer"):
 "Synthesize PLANNING outputs for: {feature}
 Mode: planning
 Planner consensus: {team planning consensus output}

@@ -37,7 +37,7 @@ If fewer than 3 hypotheses are possible, proceed with 2.
 
 ## Phase 2: Investigate (Parallel)
 
-Spawn one `Task(subagent_type="Explore")` per hypothesis **in a single message** (parallel execution):
+Spawn one `Agent(subagent_type="Explore")` per hypothesis **in a single message** (parallel execution):
 
 - Each investigator searches for evidence FOR and AGAINST its hypothesis
 - Must provide file:line references for all evidence
@@ -47,7 +47,7 @@ Spawn one `Task(subagent_type="Explore")` per hypothesis **in a single message**
 
 Evaluate investigation results:
 
-- **One CONFIRMED**: Spawn 1-2 additional `Task(subagent_type="Explore")` agents to validate from different angles (prevent confirmation bias)
+- **One CONFIRMED**: Spawn 1-2 additional `Agent(subagent_type="Explore")` agents to validate from different angles (prevent confirmation bias)
 - **Multiple PARTIAL**: Look for a unifying root cause that explains all partial evidence
 - **All DISPROVED**: Report honestly — "No root cause identified from initial hypotheses." Generate 2-3 second-round hypotheses if conversation context suggests avenues not yet explored.
 
@@ -64,7 +64,7 @@ Present root cause analysis:
 
 Ask user via AskUserQuestion: "Want me to implement this fix?"
 
-- **YES** → Implement the fix directly in main session using GUIDED approach: load devflow:patterns, devflow:research, and devflow:test-driven-development skills, then code the fix. Spawn `Task(subagent_type="Simplifier")` on changed files after.
+- **YES** → Implement the fix directly in main session using GUIDED approach: load devflow:patterns, devflow:research, and devflow:test-driven-development skills, then code the fix. Spawn `Agent(subagent_type="Simplifier")` on changed files after.
 - **NO** → Done. Report stands as documentation.
 
 ## Error Handling

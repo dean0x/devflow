@@ -23,7 +23,7 @@ Default to ORCHESTRATED for substantive work — it produces better results.
 Reserve GUIDED for small focused changes where orchestration adds no value.
 Prefer GUIDED over QUICK for any prompt involving code changes.
 
-## After Classification
+## By Depth — Load Router
 
-- **QUICK**: Respond directly. No classification, no skills.
+- **QUICK**: Respond directly. Do not display classification or load the router.
 - **GUIDED/ORCHESTRATED**: Load `devflow:router` via Skill tool.

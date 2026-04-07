@@ -44,8 +44,8 @@ Skills are loaded via the Skill tool and work happens in the main session:
 
 | Intent | Skills | Main Session Work | Post-Work |
 |--------|--------|-------------------|-----------|
-| IMPLEMENT | test-driven-development, patterns, research | Implement with TDD | `Task(subagent_type="Simplifier")` |
-| DEBUG | software-design, testing | Investigate, diagnose, fix | `Task(subagent_type="Simplifier")` |
+| IMPLEMENT | test-driven-development, patterns, research | Implement with TDD | `Agent(subagent_type="Simplifier")` |
+| DEBUG | software-design, testing | Investigate, diagnose, fix | `Agent(subagent_type="Simplifier")` |
 | PLAN | patterns, software-design | Explore and design | — |
 | REVIEW | quality-gates, software-design | Review directly | — |
 
