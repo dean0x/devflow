@@ -2,7 +2,6 @@
 name: resolve:orch
 description: Agent orchestration for RESOLVE intent in ambient mode — issue resolution from review reports
 user-invocable: false
-allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 ---
 
 # Resolve Orchestration

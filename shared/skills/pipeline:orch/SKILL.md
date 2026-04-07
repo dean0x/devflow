@@ -2,7 +2,6 @@
 name: pipeline:orch
 description: End-to-end meta-orchestrator chaining implement → review → resolve with status reporting between stages
 user-invocable: false
-allowed-tools: Read, Grep, Glob, Bash, Task
 ---
 
 # Pipeline Orchestration

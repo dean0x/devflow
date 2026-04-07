@@ -2,7 +2,6 @@
 name: debug:orch
 description: Agent orchestration for DEBUG intent — hypothesis investigation, root cause analysis, optional fix
 user-invocable: false
-allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 ---
 
 # Debug Orchestration

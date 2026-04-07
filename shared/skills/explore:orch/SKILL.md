@@ -2,7 +2,6 @@
 name: explore:orch
 description: Agent orchestration for EXPLORE intent — codebase analysis, flow tracing, architecture mapping
 user-invocable: false
-allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion
 ---
 
 # Explore Orchestration
