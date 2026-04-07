@@ -34,8 +34,8 @@ For **multi-issue** mode: collect all `#N` tokens from `$ARGUMENTS` as `ISSUE_NU
 | Gate | Phase | Purpose |
 |------|-------|---------|
 | Gate 0 | Phase 1 | Confirm understanding before exploration |
-| Gate 1 | Phase 8 | Validate scope + gap analysis results |
-| Gate 2 | Phase 14 | Confirm final plan + design review |
+| Gate 1 | Phase 7 | Validate scope + gap analysis results |
+| Gate 2 | Phase 13 | Confirm final plan + design review |
 
 No gate may be skipped. If user says "proceed" or "whatever you think", state recommendation and get explicit confirmation.
 
@@ -57,7 +57,7 @@ For multi-issue: present unified scope across all issues.
 
 **MANDATORY**: Do not spawn any agents until Gate 0 is confirmed.
 
-#### Phase 2: Orient
+#### Phase 2: Orient + Load Knowledge
 
 Spawn Skimmer agent for codebase context:
 
@@ -72,11 +72,9 @@ Run rskim on source directories (NOT repo root) to identify:
 Return codebase context for requirements analysis."
 ```
 
-#### Phase 3: Load Project Knowledge
+While Skimmer runs, read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Pass Skimmer context and project knowledge to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis.
 
-Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Pass their content to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis.
-
-#### Phase 4: Explore Requirements (Parallel)
+#### Phase 3: Explore Requirements (Parallel)
 
 Spawn 4 Explore agents **in a single message**, each with Skimmer context and project knowledge:
 
@@ -87,9 +85,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context and pr
 | Constraints | quick | Dependencies, business rules, prior architectural decisions |
 | Failure modes | quick | Error states, edge cases, known pitfalls |
 
-#### Phase 5: Synthesize Exploration
+#### Phase 4: Synthesize Exploration
 
-**WAIT** for Phase 4 to complete.
+**WAIT** for Phase 3 to complete.
 
 ```
 Agent(subagent_type="Synthesizer"):
@@ -103,7 +101,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 
 ### Block 2: Gap Analysis
 
-#### Phase 6: Gap Analysis (Parallel)
+#### Phase 5: Gap Analysis (Parallel)
 
 **Single-issue**: Spawn 4 Designer agents **in a single message**:
 
@@ -124,9 +122,9 @@ Combine into: user needs, similar features, constraints, failure modes"
 Each designer receives:
 - Mode: `gap-analysis`
 - Focus: (their assigned focus from table)
-- Exploration synthesis from Phase 5
+- Exploration synthesis from Phase 4
 - Skimmer context from Phase 2
-- Project knowledge from Phase 3
+- Project knowledge from Phase 2
 - Multi-issue: all issue bodies
 
 ```
@@ -135,15 +133,15 @@ Agent(subagent_type="Designer"):
 Focus: {completeness|architecture|security|performance|consistency|dependencies}
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
-  Exploration synthesis: {Phase 5 output}
+  Exploration synthesis: {Phase 4 output}
   Codebase context: {Phase 2 output}
   Project knowledge: {decisions + pitfalls}
 Analyze only your assigned focus area. Cite evidence from provided artifacts."
 ```
 
-#### Phase 7: Synthesize Gap Analysis
+#### Phase 6: Synthesize Gap Analysis
 
-**WAIT** for Phase 6 to complete.
+**WAIT** for Phase 5 to complete.
 
 ```
 Agent(subagent_type="Synthesizer"):
@@ -157,7 +155,7 @@ Deduplicate, boost confidence for multi-agent flags, categorize by severity."
 
 ### Block 3: Scope Approval
 
-#### Phase 8: Gate 1 — Validate Scope + Gaps
+#### Phase 7: Gate 1 — Validate Scope + Gaps
 
 Use AskUserQuestion to present and validate:
 
@@ -167,7 +165,7 @@ Use AskUserQuestion to present and validate:
    - v1 scope (what's included)
    - Explicit exclusions
 
-2. **Gap Analysis Results** (from Phase 7)
+2. **Gap Analysis Results** (from Phase 6)
    - Blocking gaps (CRITICAL/HIGH) with proposed resolutions
    - Should-address recommendations (MEDIUM)
    - Informational items (LOW)
@@ -183,7 +181,7 @@ User can:
 
 ### Block 4: Implementation Design
 
-#### Phase 9: Explore Implementation (Parallel)
+#### Phase 8: Explore Implementation (Parallel)
 
 Spawn 4 Explore agents **in a single message**, each with Skimmer context + accepted scope:
 
@@ -194,9 +192,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context + acce
 | Reusable code | medium | Utilities, helpers, validation patterns, error handling |
 | Edge cases | quick | Error scenarios, race conditions, permission failures |
 
-#### Phase 10: Synthesize Implementation Exploration
+#### Phase 9: Synthesize Implementation Exploration
 
-**WAIT** for Phase 9 to complete.
+**WAIT** for Phase 8 to complete.
 
 ```
 Agent(subagent_type="Synthesizer"):
@@ -206,7 +204,7 @@ Explorer outputs: {all 4 outputs}
 Combine into: patterns to follow, integration points, reusable code, edge cases"
 ```
 
-#### Phase 11: Plan Implementation (Parallel)
+#### Phase 10: Plan Implementation (Parallel)
 
 Spawn 3 Plan agents **in a single message**, each with implementation exploration synthesis:
 
@@ -216,11 +214,11 @@ Spawn 3 Plan agents **in a single message**, each with implementation exploratio
 | Testing strategy | Unit tests, integration tests, edge case tests |
 | Execution strategy | SINGLE_CODER vs SEQUENTIAL_CODERS vs PARALLEL_CODERS |
 
-Implementation steps planner: include explicit gap mitigations (from Phase 7) in the relevant steps.
+Implementation steps planner: include explicit gap mitigations (from Phase 6) in the relevant steps.
 
-#### Phase 12: Synthesize Planning
+#### Phase 11: Synthesize Planning
 
-**WAIT** for Phase 11 to complete.
+**WAIT** for Phase 10 to complete.
 
 ```
 Agent(subagent_type="Synthesizer"):
@@ -232,9 +230,9 @@ Combine into: execution plan with strategy decision, gap mitigations integrated"
 
 ---
 
-### Block 5: Design Review
+### Block 5: Design Review + Approval
 
-#### Phase 13: Design Review
+#### Phase 12: Design Review
 
 Spawn 1 Designer agent with mode `design-review`:
 
@@ -242,17 +240,13 @@ Spawn 1 Designer agent with mode `design-review`:
 Agent(subagent_type="Designer"):
 "Mode: design-review
 Artifacts:
-  Implementation plan: {Phase 12 planning synthesis}
-  Implementation exploration: {Phase 10 exploration synthesis}
+  Implementation plan: {Phase 11 planning synthesis}
+  Implementation exploration: {Phase 9 exploration synthesis}
   Codebase context: {Phase 2 output}
 Review the full plan for all 6 anti-patterns. Report all findings with evidence."
 ```
 
----
-
-### Block 6: Plan Approval
-
-#### Phase 14: Gate 2 — Confirm Plan + Design Review
+#### Phase 13: Gate 2 — Confirm Plan + Design Review
 
 Use AskUserQuestion to present:
 
@@ -261,7 +255,7 @@ Use AskUserQuestion to present:
    - Key implementation steps with files
    - Test strategy
 
-2. **Design Review Findings** (from Phase 13)
+2. **Design Review Findings** (from Phase 12)
    - Each anti-pattern finding with severity and proposed mitigation
    - Which findings are already addressed in the plan
 
@@ -273,16 +267,18 @@ Use AskUserQuestion to present:
 
 User can:
 - **Accept** — proceed to output phases
-- **Revise** — re-run phases 11-13 with new constraints (loop back, no limit on revisions)
+- **Revise** — re-run phases 10-12 with new constraints (loop back, no limit on revisions)
 - **Cancel** — stop gracefully, no artifact written
 
 **MANDATORY**: Do not write design artifact until Gate 2 is confirmed.
 
 ---
 
-### Block 7: Output
+### Block 6: Output
 
-#### Phase 15: Store Design Artifact
+#### Phase 14: Output
+
+**Store design artifact:**
 
 Write design artifact to disk:
 - If issue number: `.docs/design/{issue-number}-{topic-slug}.{YYYY-MM-DD_HHMM}.md`
@@ -320,7 +316,7 @@ Required sections:
 10. **Design Review Results** — anti-pattern findings with mitigations
 11. **Risk Assessment** — context risk level, unresolved risks
 
-#### Phase 16: Create GitHub Issue (Optional)
+**Create GitHub issue (optional):**
 
 If the feature does not already have a GitHub issue:
 - Create via `gh issue create`
@@ -330,7 +326,7 @@ If the feature does not already have a GitHub issue:
 
 Skip if issue number was provided as input.
 
-#### Phase 17: Report
+**Report:**
 
 Display completion summary:
 - Design artifact path
@@ -349,63 +345,58 @@ Display completion summary:
 ├─ Block 1: Requirements Discovery
 │  ├─ Phase 1: GATE 0 - Confirm Understanding ⛔ MANDATORY
 │  │  └─ AskUserQuestion: Validate interpretation
-│  ├─ Phase 2: Orient
-│  │  └─ Skimmer agent (codebase context)
-│  ├─ Phase 3: Load Project Knowledge
+│  ├─ Phase 2: Orient + Load Knowledge
+│  │  ├─ Skimmer agent (codebase context)
 │  │  └─ Read decisions.md + pitfalls.md
-│  ├─ Phase 4: Explore Requirements (PARALLEL)
+│  ├─ Phase 3: Explore Requirements (PARALLEL)
 │  │  ├─ Explore: User perspective
 │  │  ├─ Explore: Similar features
 │  │  ├─ Explore: Constraints
 │  │  └─ Explore: Failure modes
-│  └─ Phase 5: Synthesize Exploration
+│  └─ Phase 4: Synthesize Exploration
 │     └─ Synthesizer agent (mode: exploration)
 │
 ├─ Block 2: Gap Analysis
-│  ├─ Phase 6: Gap Analysis (PARALLEL)
+│  ├─ Phase 5: Gap Analysis (PARALLEL)
 │  │  ├─ Designer: completeness
 │  │  ├─ Designer: architecture
 │  │  ├─ Designer: security
 │  │  ├─ Designer: performance
 │  │  ├─ Designer: consistency (multi-issue only)
 │  │  └─ Designer: dependencies (multi-issue only)
-│  └─ Phase 7: Synthesize Gap Analysis
+│  └─ Phase 6: Synthesize Gap Analysis
 │     └─ Synthesizer agent (mode: design)
 │
 ├─ Block 3: Scope Approval
-│  └─ Phase 8: GATE 1 - Validate Scope + Gaps ⛔ MANDATORY
+│  └─ Phase 7: GATE 1 - Validate Scope + Gaps ⛔ MANDATORY
 │     └─ AskUserQuestion: Confirm scope and gap resolutions
 │
 ├─ Block 4: Implementation Design
-│  ├─ Phase 9: Explore Implementation (PARALLEL)
+│  ├─ Phase 8: Explore Implementation (PARALLEL)
 │  │  ├─ Explore: Architecture
 │  │  ├─ Explore: Integration
 │  │  ├─ Explore: Reusable code
 │  │  └─ Explore: Edge cases
-│  ├─ Phase 10: Synthesize Implementation Exploration
+│  ├─ Phase 9: Synthesize Implementation Exploration
 │  │  └─ Synthesizer agent (mode: exploration)
-│  ├─ Phase 11: Plan Implementation (PARALLEL)
+│  ├─ Phase 10: Plan Implementation (PARALLEL)
 │  │  ├─ Plan: Implementation steps
 │  │  ├─ Plan: Testing strategy
 │  │  └─ Plan: Execution strategy
-│  └─ Phase 12: Synthesize Planning
+│  └─ Phase 11: Synthesize Planning
 │     └─ Synthesizer agent (mode: planning)
 │
-├─ Block 5: Design Review
-│  └─ Phase 13: Design Review
-│     └─ Designer agent (mode: design-review)
-│
-├─ Block 6: Plan Approval
-│  └─ Phase 14: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
+├─ Block 5: Design Review + Approval
+│  ├─ Phase 12: Design Review
+│  │  └─ Designer agent (mode: design-review)
+│  └─ Phase 13: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
 │     └─ AskUserQuestion: Final plan approval
 │
-└─ Block 7: Output
-   ├─ Phase 15: Store Design Artifact
-   │  └─ Write .docs/design/{slug}.{timestamp}.md
-   ├─ Phase 16: Create GitHub Issue (optional)
-   │  └─ gh issue create (if no existing issue)
-   └─ Phase 17: Report
-      └─ Artifact path, issue URL, gap + design review summary
+└─ Block 6: Output
+   └─ Phase 14: Output
+      ├─ Store design artifact (.docs/design/)
+      ├─ Create GitHub issue (optional)
+      └─ Report summary + next step
 ```
 
 ## Principles
@@ -421,6 +412,6 @@ Display completion summary:
 ## Error Handling
 
 - If any agent fails, report the phase, agent type, and error
-- If user selects "Revise" at Gate 2, loop back to Phase 11 with user's constraints
+- If user selects "Revise" at Gate 2, loop back to Phase 10 with user's constraints
 - If user selects "Cancel" at any gate, stop gracefully without writing artifact
-- If `.docs/design/` does not exist, create it in Phase 15
+- If `.docs/design/` does not exist, create it in Phase 14

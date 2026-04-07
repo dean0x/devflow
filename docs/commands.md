@@ -11,8 +11,7 @@ Unified design planning from requirements discovery through implementation desig
 3. **Gap Analysis** — Identify missing pieces, risks, and dependencies
 4. **Gate 1** — Validate scope and gaps with user
 5. **Implementation Design** — Parallel planning agents design the approach
-6. **Design Review** — Dedicated review of the design artifact
-7. **Gate 2** — User approves the final plan
+6. **Design Review + Gate 2** — Review the design artifact, user approves the final plan
 
 Produces a machine-readable design artifact in `.docs/design/` consumed by `/implement`.
 

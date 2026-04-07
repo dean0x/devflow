@@ -22,15 +22,14 @@ Unified design planning plugin. Combines requirements discovery, gap analysis, i
 
 ## Workflow
 
-17-phase pipeline organized in 7 blocks:
+14-phase pipeline organized in 6 blocks:
 
 1. **Requirements Discovery** — Orient, explore requirements, synthesize
 2. **Gap Analysis** — Parallel analysis across completeness, architecture, security, performance
 3. **Scope Approval** — Mandatory gate to validate scope and gap resolutions
 4. **Implementation Design** — Explore implementation, plan steps and tests
-5. **Design Review** — Anti-pattern detection in the implementation plan
-6. **Plan Approval** — Mandatory gate to confirm plan and accept design review findings
-7. **Output** — Write design artifact, optionally create GitHub issue
+5. **Design Review + Approval** — Anti-pattern detection + mandatory gate to confirm plan
+6. **Output** — Write design artifact, optionally create GitHub issue
 
 ## Output
 
