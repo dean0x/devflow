@@ -103,6 +103,12 @@ if [ -f "$PROCESSING_FILE" ]; then
     rm "$QUEUE_FILE"
     log "Merged new queue entries into recovery batch"
   fi
+  # Cap processing file to prevent unbounded growth from persistent Write failures
+  PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+  if [ "$PROC_LINES" -gt 200 ]; then
+    tail -100 "$PROCESSING_FILE" > "$PROCESSING_FILE.tmp" && mv "$PROCESSING_FILE.tmp" "$PROCESSING_FILE"
+    log "Processing file overflow: truncated from $PROC_LINES to 100 lines"
+  fi
 else
   # Normal path: atomic handoff
   if [ ! -f "$QUEUE_FILE" ]; then
@@ -142,13 +148,8 @@ CURRENT_USER=""
 while IFS= read -r line; do
   [ -z "$line" ] && continue
 
-  if [ "$_HAS_JQ" = "true" ]; then
-    ROLE=$(echo "$line" | jq -r '.role // ""' 2>/dev/null)
-    CONTENT=$(echo "$line" | jq -r '.content // ""' 2>/dev/null)
-  else
-    ROLE=$(echo "$line" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(d).role||'')}catch(e){}})" 2>/dev/null || true)
-    CONTENT=$(echo "$line" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(d).content||'')}catch(e){}})" 2>/dev/null || true)
-  fi
+  ROLE=$(echo "$line" | json_field "role" "")
+  CONTENT=$(echo "$line" | json_field "content" "")
 
   if [ "$ROLE" = "user" ]; then
     # If we had an orphan user (no assistant followed), emit it solo
@@ -263,13 +264,15 @@ if wait "$CLAUDE_PID" 2>/dev/null; then
     NEW_MTIME=$(get_mtime "$MEMORY_FILE")
     if [ "$NEW_MTIME" -gt "$PRE_UPDATE_MTIME" ]; then
       log "Update completed successfully"
-      rm -f "$PROCESSING_FILE"
     else
       log "Update finished but file was not modified (possible Write tool failure)"
     fi
   else
     log "Update finished but file does not exist"
   fi
+  # Clean up on success (exit 0) even if Write was not invoked —
+  # retrying same turns won't help; new turns are captured in the queue
+  rm -f "$PROCESSING_FILE"
 else
   EXIT_CODE=$?
   if [ "$EXIT_CODE" -gt 128 ]; then

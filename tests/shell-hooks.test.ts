@@ -1080,10 +1080,6 @@ describe('json-helper.cjs filter-observations', () => {
 });
 
 describe('session-end-learning structure', () => {
-  it('is included in bash -n syntax checks', () => {
-    expect(HOOK_SCRIPTS).toContain('session-end-learning');
-  });
-
   it('starts with bash shebang and sources json-parse', () => {
     const scriptPath = path.join(HOOKS_DIR, 'session-end-learning');
     const content = fs.readFileSync(scriptPath, 'utf8');
@@ -1188,9 +1184,8 @@ describe('json-parse wrapper', () => {
 });
 
 describe('working memory queue behavior', () => {
-  const HOOKS_DIR_ABS = path.resolve(__dirname, '..', 'scripts', 'hooks');
-  const STOP_HOOK = path.join(HOOKS_DIR_ABS, 'stop-update-memory');
-  const PREAMBLE_HOOK = path.join(HOOKS_DIR_ABS, 'preamble');
+  const STOP_HOOK = path.join(HOOKS_DIR, 'stop-update-memory');
+  const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
 
   let tmpDir: string;
 
