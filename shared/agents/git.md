@@ -25,6 +25,7 @@ The orchestrator provides:
 | `validate-branch` | Pre-flight for /resolve: check branch state | `WORKTREE_PATH` (optional) |
 | `setup-task` | Create feature branch and fetch issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
+| `fetch-issues-batch` | Fetch multiple GitHub issues for multi-issue planning | `ISSUE_NUMBERS` |
 | `comment-pr` | Create PR inline comments for review findings | `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT` |
@@ -173,6 +174,39 @@ Fetch comprehensive issue details for implementation planning.
 
 ### Suggested Branch
 {type}/{number}-{slug}
+```
+
+---
+
+## Operation: fetch-issues-batch
+
+Fetch multiple GitHub issues for multi-issue planning flows.
+
+**Input:** `ISSUE_NUMBERS` - Array of issue numbers (e.g., "12 15 18")
+
+**Process:**
+1. Parse space-separated issue numbers
+2. Fetch each issue via `gh issue view {number} --json number,title,body,labels,assignees,milestone,comments`
+3. Extract acceptance criteria and dependencies from each
+4. Identify cross-issue relationships (shared labels, mutual references, dependency chains)
+
+**Output:**
+```markdown
+## Issues Batch ({n} issues)
+
+### Issue #{number1}: {title}
+**Labels**: {labels} | **Priority**: {priority}
+{body summary}
+**Acceptance Criteria**: {extracted}
+**Dependencies**: {extracted}
+
+### Issue #{number2}: {title}
+...
+
+### Cross-Issue Analysis
+- **Shared labels**: {common labels}
+- **Dependencies**: {dependency chain if any}
+- **Conflicts**: {conflicting requirements if any}
 ```
 
 ---

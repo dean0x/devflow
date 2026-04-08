@@ -9,19 +9,19 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (39 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (41 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
 │   │   ├── software-design/
 │   │   └── ...
-│   └── agents/                       # SINGLE SOURCE OF TRUTH (11 shared agents)
+│   └── agents/                       # SINGLE SOURCE OF TRUTH (12 shared agents)
 │       ├── git.md
 │       ├── synthesizer.md
 │       ├── coder.md
 │       └── ...
 ├── plugins/                          # Plugin collection (17 plugins)
-│   ├── devflow-specify/
+│   ├── devflow-plan/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
 │   │   ├── commands/
@@ -135,7 +135,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 ### Shared vs Plugin-Specific Agents
 
-- **Shared** (11): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`
+- **Shared** (12): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`
 - **Plugin-specific** (1): `claude-md-auditor` — committed directly in its plugin
 
 ## Settings Override

@@ -43,7 +43,7 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 
 | Plugin | Type | Description |
 |--------|------|-------------|
-| `devflow-specify` | Core | Feature specification workflow |
+| `devflow-plan` | Core | Unified design planning with gap analysis |
 | `devflow-implement` | Core | Complete task implementation lifecycle |
 | `devflow-code-review` | Core | Comprehensive code review |
 | `devflow-resolve` | Core | Review issue resolution |

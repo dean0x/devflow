@@ -16,8 +16,8 @@ Plugin marketplace with 17 plugins (8 core + 9 optional language/ecosystem), eac
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
-| `devflow-specify` | Feature specification workflow | Optional |
 | `devflow-implement` | Complete task implementation lifecycle | Optional |
+| `devflow-plan` | Unified design planning with gap analysis | Optional |
 | `devflow-code-review` | Comprehensive code review | Optional |
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
@@ -52,8 +52,8 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 39 skills (single source of truth)
-├── shared/agents/          # 11 shared agents (single source of truth)
+├── shared/skills/          # 41 skills (single source of truth)
+├── shared/agents/          # 12 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
@@ -98,7 +98,7 @@ All generated docs live under `.docs/` in the project root:
 │       ├── {focus}.md                 # Reviewer reports (security.md, etc.)
 │       ├── review-summary.md          # Synthesizer output
 │       └── resolution-summary.md      # Written by /resolve
-└── design/                            # Implementation plans
+└── design/                            # Design artifacts from /plan
 ```
 
 Working memory files live in a dedicated `.memory/` directory:
@@ -132,26 +132,26 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `shared/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
-**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
 
 ## Agent & Command Roster
 
 **Orchestration commands** (spawn agents, never do agent work in main session):
-- `/specify` — Skimmer + Explore + Synthesizer + Plan + Synthesizer → GitHub issue
-- `/implement` — Git + Skimmer + Explore + Synthesizer + Plan + Synthesizer + Coder + Simplifier + Scrutinizer + Evaluator + Tester → PR
+- `/plan` — Skimmer + Explore + Designer + Synthesizer + Plan + Designer → design artifact
+- `/implement` — Git + Coder + Validator + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
 - `/code-review` — 7-11 Reviewer agents + Git + Synthesizer
 - `/resolve` — N Resolver agents + Git
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential)
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
-**Shared agents** (11): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator
+**Shared agents** (12): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer
 
 **Plugin-specific agents** (1): claude-md-auditor
 
 **Orchestration skills** (7): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
-**Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/debug`, `/specify`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
+**Agent Teams**: 5 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/debug`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 
 ## Key Conventions
 

@@ -131,7 +131,6 @@ const COMMAND_REFS = new Set([
   'resolve',
   'debug',
   'implement',
-  'specify',
   'self-review',
   'audit-claude',
   'plan',

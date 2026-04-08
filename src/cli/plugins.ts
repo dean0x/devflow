@@ -50,17 +50,17 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
-    name: 'devflow-specify',
-    description: 'Interactive feature specification - creates well-defined GitHub issues',
-    commands: ['/specify'],
-    agents: ['skimmer', 'synthesizer'],
-    skills: ['agent-teams'],
+    name: 'devflow-plan',
+    description: 'Unified design planning with gap analysis and design review',
+    commands: ['/plan'],
+    agents: ['git', 'skimmer', 'synthesizer', 'designer'],
+    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'knowledge-persistence', 'worktree-support'],
   },
   {
     name: 'devflow-implement',
-    description: 'Complete task implementation workflow with exploration, planning, and coding',
+    description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
-    agents: ['git', 'skimmer', 'synthesizer', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
+    agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
     skills: ['agent-teams', 'patterns', 'knowledge-persistence', 'qa', 'quality-gates', 'worktree-support'],
   },
   {
@@ -95,7 +95,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Ambient mode — intent classification with proportional agent orchestration',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer'],
     skills: [
       'router',
       'implement:orch',
@@ -120,6 +120,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'knowledge-persistence',
       'qa',
       'worktree-support',
+      'gap-analysis',
+      'design-review',
     ],
   },
   {
@@ -202,6 +204,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
  */
 export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
   'devflow-frontend-design': 'devflow-ui-design',
+  'devflow-specify': 'devflow-plan',
 };
 
 /**
@@ -210,6 +213,8 @@ export const LEGACY_PLUGIN_NAMES: Record<string, string> = {
  */
 export const LEGACY_COMMAND_NAMES: string[] = [
   'review',
+  'specify',
+  'specify-teams',
 ];
 
 /**
@@ -223,6 +228,9 @@ export const LEGACY_AGENT_NAMES: string[] = [
 /**
  * Deprecated skill names from old installations (prefixed with devflow-).
  * Used during uninstall to clean up legacy installs.
+ *
+ * Pruning: entries can be removed after 2 major versions.
+ * Users who skip major versions should run uninstall + reinstall.
  */
 export const LEGACY_SKILL_NAMES: string[] = [
   'devflow-core-patterns',
@@ -381,6 +389,9 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'pipeline:orch',
   // v2.0.0 quality-gates: bare name for pre-namespace installs
   'quality-gates',
+  // v2.x plan plugin: new skills bare names for pre-namespace installs
+  'gap-analysis',
+  'design-review',
 ];
 
 /**

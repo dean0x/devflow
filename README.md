@@ -48,11 +48,11 @@ Devflow: IMPLEMENT/ORCHESTRATED
 
 **18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
 
-**39 skills grounded in expert material.** Every skill is backed by peer-reviewed papers, canonical books, and industry standards — security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey). 200+ sources total.
+**41 skills grounded in expert material.** Every skill is backed by peer-reviewed papers, canonical books, and industry standards — security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey). 200+ sources total.
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
-**Full lifecycle.** `/implement` takes a task from exploration through planning, coding, validation, and refinement. `/specify` defines features with clarification gates. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
+**Full lifecycle.** `/plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/implement`. `/implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
 
 **Everything is composable.** 17 plugins (8 core + 9 language/ecosystem). Install only what you need. Six commands cover the entire development lifecycle.
 
@@ -61,7 +61,7 @@ Devflow: IMPLEMENT/ORCHESTRATED
 ```
 devflow · feat/auth-middleware* · 3↑ · v1.8.3 +5 · 12 files · +234 -56
 Current Session ████░░░░ 42% · Session 5h ██░░░░░░ 18% · 7d █░░░░░░░ 8%
-Opus 4.6 [1m] · 23m · $1.24 · 2 CLAUDE.md · 4 MCPs · 8 hooks · 39 skills
+Opus 4.6 [1m] · 23m · $1.24 · 2 CLAUDE.md · 4 MCPs · 8 hooks · 41 skills
 ```
 
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init.
@@ -78,8 +78,8 @@ That's it. The interactive wizard handles plugin selection, feature configuratio
 
 | Command | What it does |
 |---------|-------------|
-| `/specify` | Define a feature with clarification gates → GitHub issue |
-| `/implement` | Full lifecycle: explore → plan → code → validate → refine → PR |
+| `/plan` | Full design pipeline: explore → gap analysis → design → PR-ready plan document |
+| `/implement` | Execute plan: accepts plan documents from `/plan`, issues, or task descriptions → PR |
 | `/code-review` | Multi-perspective parallel code review |
 | `/resolve` | Validate and fix all review issues |
 | `/debug` | Competing hypothesis investigation |

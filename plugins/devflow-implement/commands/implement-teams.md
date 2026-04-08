@@ -1,25 +1,29 @@
 ---
-description: Execute a single task through the complete lifecycle - orchestrates team-based exploration, planning, implementation, and quality gates
+description: Execute a single task through team-based implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
 ---
 
 # Implement Command
 
-Orchestrate a single task from exploration through implementation by spawning specialized agent teams for collaborative exploration and planning, then implementation agents for coding and quality gates.
+Orchestrate a single task through implementation by spawning specialized agent teams for collaborative alignment checking, then implementation agents for coding and quality gates.
 
 ## Usage
 
 ```
 /implement <task description>
-/implement #42  (GitHub issue number)
-/implement      (use conversation context)
+/implement #42                                     (GitHub issue number)
+/implement .docs/design/42-jwt-auth.2026-04-07_1430.md  (plan document from /plan)
+/implement                                         (use conversation context)
 ```
 
 ## Input
 
 `$ARGUMENTS` contains whatever follows `/implement`:
+- Plan document path: `.docs/design/42-jwt-auth.2026-04-07_1430.md` (path to an existing `.md` file)
+- GitHub issue: `#42`
 - Task description: "implement JWT auth"
-- GitHub issue: "#42"
 - Empty: use conversation context
+
+> **Tip**: For best results, run `/plan` first to produce a design artifact, then pass it to `/implement`.
 
 ## Phases
 
@@ -34,7 +38,7 @@ Agent(subagent_type="Git"):
 "OPERATION: setup-task
 BASE_BRANCH: {current branch name}
 ISSUE_INPUT: {issue number if $ARGUMENTS starts with #, otherwise omit}
-TASK_DESCRIPTION: {task description from $ARGUMENTS if not an issue number, otherwise omit}
+TASK_DESCRIPTION: {task description from $ARGUMENTS if not an issue number or .md path, otherwise omit}
 Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
@@ -46,230 +50,21 @@ Return the branch setup summary."
 - `ISSUE_CONTENT`: Full issue body including description (if provided)
 - `ACCEPTANCE_CRITERIA`: Extracted acceptance criteria from issue (if provided)
 
-### Phase 2: Orient
+**Plan Document Handling** (when $ARGUMENTS is a path ending in `.md`):
+1. Read the plan document from the path provided
+2. Extract from YAML frontmatter: `execution-strategy`, `context-risk`, `issue` number
+3. Extract from body: Subtask Breakdown, Implementation Plan, Patterns to Follow, Acceptance Criteria
+4. If `issue` field present in frontmatter: pass to Git agent as ISSUE_INPUT
+5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
+6. Captured values override defaults from Git agent where present
 
-Spawn Skimmer agent for codebase overview:
+### Phase 2: Implement
 
-```
-Agent(subagent_type="Skimmer"):
-"Orient in codebase for: {task description}
-Run rskim on source directories (NOT repo root) to identify relevant files, functions, integration points"
-```
+Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
 
-### Phase 3: Exploration Team
-
-Create an agent team for collaborative codebase exploration:
-
-```
-Create a team named "explore-{task-id}" to explore the codebase for: {task description}
-
-Spawn exploration teammates with self-contained prompts:
-
-- Name: "architecture-explorer"
-  Prompt: |
-    You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
-    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
-       Consider prior decisions and known pitfalls relevant to this task.
-    3. Skimmer context (files/patterns already identified):
-       {skimmer output}
-    4. Your deliverable: Find similar implementations, established patterns,
-       module structure, and architectural conventions relevant to this task.
-    5. Document findings with file:path references.
-    6. Report completion: SendMessage(type: "message", recipient: "team-lead",
-       summary: "Architecture exploration done")
-
-- Name: "integration-explorer"
-  Prompt: |
-    You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
-    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
-       Consider prior decisions and known pitfalls relevant to this task.
-    3. Skimmer context (files/patterns already identified):
-       {skimmer output}
-    4. Your deliverable: Find entry points, services, database models,
-       configuration, and integration points relevant to this task.
-    5. Document findings with file:path references.
-    6. Report completion: SendMessage(type: "message", recipient: "team-lead",
-       summary: "Integration exploration done")
-
-- Name: "reusable-code-explorer"
-  Prompt: |
-    You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
-    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
-       Consider prior decisions and known pitfalls relevant to this task.
-    3. Skimmer context (files/patterns already identified):
-       {skimmer output}
-    4. Your deliverable: Find utilities, helpers, validation patterns,
-       and error handling that can be reused for this task.
-    5. Document findings with file:path references.
-    6. Report completion: SendMessage(type: "message", recipient: "team-lead",
-       summary: "Reusable code exploration done")
-
-- Name: "edge-case-explorer"
-  Prompt: |
-    You are exploring a codebase for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
-    2. Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` if they exist.
-       Consider prior decisions and known pitfalls relevant to this task.
-    3. Skimmer context (files/patterns already identified):
-       {skimmer output}
-    4. Your deliverable: Find error scenarios, race conditions, permission
-       failures, and boundary cases relevant to this task.
-    5. Document findings with file:path references.
-    6. Report completion: SendMessage(type: "message", recipient: "team-lead",
-       summary: "Edge case exploration done")
-
-After initial exploration, lead initiates debate:
-SendMessage(type: "broadcast", summary: "Debate: challenge exploration findings"):
-- Architecture challenges edge cases: "This boundary isn't handled by existing patterns"
-- Integration challenges reusable code: "That helper doesn't cover our integration point"
-- Edge cases challenges architecture: "This pattern fails under concurrent access"
-Teammates use SendMessage(type: "message", recipient: "{name}") for direct challenges.
-
-Max 2 debate rounds, then submit consensus exploration findings.
-```
-
-**Exploration team output**: Consensus findings on patterns, integration points, reusable code, edge cases.
-
-**Team Shutdown Protocol** (must complete before Phase 5):
-
-```
-Step 1: Shutdown each teammate
-  SendMessage(type: "shutdown_request", recipient: "architecture-explorer", content: "Exploration complete")
-  SendMessage(type: "shutdown_request", recipient: "integration-explorer", content: "Exploration complete")
-  SendMessage(type: "shutdown_request", recipient: "reusable-code-explorer", content: "Exploration complete")
-  SendMessage(type: "shutdown_request", recipient: "edge-case-explorer", content: "Exploration complete")
-  Wait for each shutdown_response (approve: true)
-
-Step 2: TeamDelete
-
-Step 3: GATE — Verify TeamDelete succeeded
-  If failed → retry once after 5s
-  If retry failed → HALT and report: "Exploration team cleanup failed. Cannot create planning team."
-```
-
-### Phase 4: Synthesize Exploration
-
-**CRITICAL**: Do NOT synthesize outputs yourself in the main session.
-You MUST spawn the Synthesizer agent.
-
-```
-Agent(subagent_type="Synthesizer"):
-"Synthesize EXPLORATION outputs for: {task}
-Mode: exploration
-Explorer consensus: {team exploration consensus output}
-Combine into: patterns, integration points, reusable code, edge cases"
-```
-
-### Phase 5: Planning Team
-
-Create an agent team for collaborative implementation planning:
-
-```
-Create a team named "plan-{task-id}" to plan implementation of: {task description}
-
-Spawn planning teammates with self-contained prompts:
-
-- Name: "implementation-planner"
-  Prompt: |
-    You are planning implementation for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
-    2. Exploration synthesis (what we know about the codebase):
-       {synthesis output from Phase 4}
-    3. Your deliverable: Step-by-step coding approach with specific files
-       to create/modify, dependencies between steps, and execution order.
-    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
-       summary: "Implementation plan ready")
-
-- Name: "testing-planner"
-  Prompt: |
-    You are planning the test strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:testing/SKILL.md`
-    2. Exploration synthesis (what we know about the codebase):
-       {synthesis output from Phase 4}
-    3. Your deliverable: Test strategy — unit tests, integration tests,
-       edge case coverage, testing patterns to follow from the codebase.
-    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
-       summary: "Test plan ready")
-
-- Name: "risk-planner"
-  Prompt: |
-    You are assessing risk and execution strategy for task: {task description}
-    1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
-    2. Exploration synthesis (what we know about the codebase):
-       {synthesis output from Phase 4}
-    3. Your deliverable: Risk assessment, rollback strategy, and execution
-       strategy decision (SINGLE_CODER vs SEQUENTIAL_CODERS vs PARALLEL_CODERS)
-       based on artifact independence, context capacity, and domain specialization.
-    4. Report completion: SendMessage(type: "message", recipient: "team-lead",
-       summary: "Risk assessment ready")
-
-After initial planning, lead initiates debate:
-SendMessage(type: "broadcast", summary: "Debate: challenge implementation plans"):
-- Testing challenges implementation: "This approach is untestable without major refactoring"
-- Risk challenges both: "Rollback is impossible with this migration strategy"
-- Implementation challenges testing: "Full coverage here adds 3x complexity for minimal value"
-Teammates use SendMessage(type: "message", recipient: "{name}") for direct challenges.
-
-Max 2 debate rounds, then submit consensus plan.
-```
-
-**Execution Strategy** (from Risk & Execution planner, validated by team):
-
-| Axis | Signals | Decision Impact |
-|------|---------|-----------------|
-| **Artifact Independence** | Shared contracts? Integration points? | If coupled → SINGLE_CODER |
-| **Context Capacity** | File count, module breadth, pattern complexity | HIGH/CRITICAL → SEQUENTIAL_CODERS |
-| **Domain Specialization** | Tech stack detected (backend, frontend, tests) | Determines DOMAIN hints for Coders |
-
-**Context Risk Levels:**
-- **LOW**: <10 files, single module → SINGLE_CODER
-- **MEDIUM**: 10-20 files, 2-3 modules → Consider SEQUENTIAL_CODERS
-- **HIGH**: 20-30 files, multiple modules → SEQUENTIAL_CODERS (2-3 phases)
-- **CRITICAL**: >30 files, cross-cutting concerns → SEQUENTIAL_CODERS (more phases)
-
-**Team Shutdown Protocol** (must complete before Phase 7):
-
-```
-Step 1: Shutdown each teammate
-  SendMessage(type: "shutdown_request", recipient: "implementation-planner", content: "Planning complete")
-  SendMessage(type: "shutdown_request", recipient: "testing-planner", content: "Planning complete")
-  SendMessage(type: "shutdown_request", recipient: "risk-planner", content: "Planning complete")
-  Wait for each shutdown_response (approve: true)
-
-Step 2: TeamDelete
-
-Step 3: GATE — Verify TeamDelete succeeded
-  If failed → retry once after 5s
-  If retry failed → HALT and report: "Planning team cleanup failed. Cannot proceed to implementation."
-```
-
-### Phase 6: Synthesize Planning
-
-**CRITICAL**: Do NOT synthesize outputs yourself in the main session.
-You MUST spawn the Synthesizer agent.
-
-```
-Agent(subagent_type="Synthesizer"):
-"Synthesize PLANNING outputs for: {task}
-Mode: planning
-Planner consensus: {team planning consensus output}
-Combine into: execution plan with strategy decision (SINGLE_CODER | SEQUENTIAL_CODERS | PARALLEL_CODERS)"
-```
-
-**Synthesizer returns:**
-- Execution strategy type and reasoning
-- Context risk level
-- Subtask breakdown with DOMAIN hints (if not SINGLE_CODER)
-- Implementation plan with dependencies
-
-### Phase 7: Implement
-
-Based on Phase 6 synthesis, use the three-strategy framework:
-
-**Strategy Selection** (from planning team consensus):
+**Strategy Selection**:
+- If plan document provided: use `execution-strategy` from frontmatter (default: SINGLE_CODER if absent)
+- Otherwise: default to SINGLE_CODER unless task description signals high complexity
 
 | Strategy | When | Frequency |
 |----------|------|-----------|
@@ -286,8 +81,8 @@ Agent(subagent_type="Coder"):
 "TASK_ID: {task-id}
 TASK_DESCRIPTION: {description}
 BASE_BRANCH: {base branch}
-EXECUTION_PLAN: {full plan from synthesis}
-PATTERNS: {patterns from exploration}
+EXECUTION_PLAN: {full plan from setup context}
+PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
 DOMAIN: {detected domain or 'fullstack'}"
 ```
@@ -305,7 +100,7 @@ Agent(subagent_type="Coder"):
 TASK_DESCRIPTION: {phase 1 description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase 1 steps}
-PATTERNS: {patterns from exploration}
+PATTERNS: {patterns from plan document or empty}
 CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
 HANDOFF_REQUIRED: true"
@@ -318,7 +113,7 @@ Agent(subagent_type="Coder"):
 TASK_DESCRIPTION: {phase N description}
 BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {phase N steps}
-PATTERNS: {patterns from exploration}
+PATTERNS: {patterns from plan document or empty}
 CREATE_PR: {true if last phase, false otherwise}
 DOMAIN: {phase N domain, e.g., 'frontend'}
 PRIOR_PHASE_SUMMARY: {summary from previous Coder}
@@ -360,7 +155,7 @@ DOMAIN: {subtask 2 domain}"
 - Different files/modules with no imports between them
 - Each subtask is self-contained
 
-### Phase 8: Validate
+### Phase 3: Validate
 
 After Coder completes, spawn Validator to verify correctness:
 
@@ -385,12 +180,12 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false"
    ```
-   - Loop back to Phase 8 (re-validate)
+   - Loop back to Phase 3 (re-validate)
 4. If `validation_retry_count > 2`: Report failures to user and halt
 
-**If PASS:** Continue to Phase 9
+**If PASS:** Continue to Phase 4
 
-### Phase 9: Simplify
+### Phase 4: Simplify
 
 After validation passes, spawn Simplifier to polish the code:
 
@@ -402,7 +197,7 @@ FILES_CHANGED: {list of files from Coder output}
 Focus on code modified by Coder, apply project standards, enhance clarity"
 ```
 
-### Phase 10: Self-Review
+### Phase 5: Self-Review
 
 After Simplifier completes, spawn Scrutinizer as final quality gate:
 
@@ -415,7 +210,7 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 
 If Scrutinizer returns BLOCKED, report to user and halt.
 
-### Phase 11: Re-Validate (if Scrutinizer made changes)
+### Phase 6: Re-Validate (if Scrutinizer made changes)
 
 If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
 
@@ -428,9 +223,9 @@ Verify Scrutinizer's fixes didn't break anything."
 
 **If FAIL:** Report to user - Scrutinizer broke tests, needs manual intervention.
 
-**If PASS:** Continue to Phase 12
+**If PASS:** Continue to Phase 7
 
-### Phase 12: Evaluator↔Coder Dialogue
+### Phase 7: Evaluator↔Coder Dialogue
 
 After Scrutinizer passes (and re-validation if needed), check alignment using direct dialogue:
 
@@ -445,7 +240,7 @@ Spawn teammates with self-contained prompts:
   Prompt: |
     You are validating that the implementation aligns with the original request.
     ORIGINAL_REQUEST: {task description or issue content}
-    EXECUTION_PLAN: {synthesized plan from Phase 6}
+    EXECUTION_PLAN: {execution plan from Phase 1}
     FILES_CHANGED: {list of files from Coder output}
     ACCEPTANCE_CRITERIA: {extracted criteria if available}
 
@@ -480,7 +275,7 @@ Spawn teammates with self-contained prompts:
          summary: "Alignment fixes complete")
 ```
 
-**Team Shutdown Protocol** (must complete before Phase 13):
+**Team Shutdown Protocol** (must complete before Phase 8):
 
 ```
 Step 1: Shutdown each teammate
@@ -495,7 +290,7 @@ Step 3: GATE — Verify TeamDelete succeeded
   If retry failed → HALT and report: "Alignment team cleanup failed."
 ```
 
-**If ALIGNED:** Continue to Phase 13
+**If ALIGNED:** Continue to Phase 8
 
 **If MISALIGNED:**
 1. Extract misalignment details from Evaluator output
@@ -518,23 +313,23 @@ Step 3: GATE — Verify TeamDelete succeeded
    VALIDATION_SCOPE: changed-only"
    ```
    - If Validator FAIL: Report to user
-   - If Validator PASS: Loop back to Phase 12 (re-check alignment)
+   - If Validator PASS: Loop back to Phase 7 (re-check alignment)
 4. If `alignment_fix_count > 2`: Report misalignments to user for decision
 
-### Phase 13: QA Testing
+### Phase 8: QA Testing
 
 After Evaluator passes, spawn Tester for scenario-based acceptance testing (standalone agent, not a teammate — testing is sequential, not debate):
 
 ```
 Agent(subagent_type="Tester"):
 "ORIGINAL_REQUEST: {task description or issue content}
-EXECUTION_PLAN: {synthesized plan from Phase 6}
+EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {list of files from Coder output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
 ```
 
-**If PASS:** Continue to Phase 14
+**If PASS:** Continue to Phase 9
 
 **If FAIL:**
 1. Extract failure details from Tester output
@@ -557,20 +352,18 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    VALIDATION_SCOPE: changed-only"
    ```
    - If Validator FAIL: Report to user
-   - If Validator PASS: Loop back to Phase 13 (re-run Tester)
+   - If Validator PASS: Loop back to Phase 8 (re-run Tester)
 4. If `qa_retry_count > 2`: Report QA failures to user for decision
 
-### Phase 14: Create PR
+### Phase 9: Create PR
 
 **For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
-### Phase 15: Report
+### Phase 10: Report + Record Decisions
 
 Display completion summary with phase status, PR info, and next steps.
-
-### Phase 16: Record Decisions (if any)
 
 If the Coder's report includes Key Decisions with architectural significance:
 1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
@@ -584,79 +377,57 @@ If the Coder's report includes Key Decisions with architectural significance:
 │
 ├─ Phase 1: Setup
 │  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
+│  └─ Plan document parsing (if .md path provided) - extracts execution plan, strategy
 │
-├─ Phase 2: Orient
-│  └─ Skimmer agent (codebase overview via skim)
-│
-├─ Phase 3: Exploration Team (Agent Teams)
-│  ├─ Architecture Explorer (teammate)
-│  ├─ Integration Explorer (teammate)
-│  ├─ Reusable Code Explorer (teammate)
-│  ├─ Edge Case Explorer (teammate)
-│  └─ Debate → consensus exploration findings
-│
-├─ Phase 4: Synthesize Exploration
-│  └─ Synthesizer agent (mode: exploration)
-│
-├─ Phase 5: Planning Team (Agent Teams)
-│  ├─ Implementation Planner (teammate)
-│  ├─ Testing Planner (teammate)
-│  ├─ Risk & Execution Planner (teammate)
-│  └─ Debate → consensus plan with strategy decision
-│
-├─ Phase 6: Synthesize Planning
-│  └─ Synthesizer agent (mode: planning) → returns strategy + DOMAIN hints
-│
-├─ Phase 7: Implement (3-strategy framework)
+├─ Phase 2: Implement (3-strategy framework)
 │  ├─ SINGLE_CODER (80%): One Coder, full plan, CREATE_PR: true
 │  ├─ SEQUENTIAL_CODERS (15%): N Coders with handoff summaries
 │  └─ PARALLEL_CODERS (5%): N Coders in single message (rare)
 │
-├─ Phase 8: Validate
+├─ Phase 3: Validate
 │  └─ Validator agent (build, typecheck, lint, test)
 │  └─ If FAIL: Coder fix loop (max 2 retries) → re-validate
 │
-├─ Phase 9: Simplify
+├─ Phase 4: Simplify
 │  └─ Simplifier agent (refines code clarity and consistency)
 │
-├─ Phase 10: Self-Review
+├─ Phase 5: Self-Review
 │  └─ Scrutinizer agent (final quality gate, fixes P0/P1)
 │
-├─ Phase 11: Re-Validate (if Scrutinizer made changes)
+├─ Phase 6: Re-Validate (if Scrutinizer made changes)
 │  └─ Validator agent (verify Scrutinizer fixes)
 │
-├─ Phase 12: Evaluator↔Coder Dialogue (Agent Teams)
+├─ Phase 7: Evaluator↔Coder Dialogue (Agent Teams)
 │  └─ Direct Evaluator↔Coder messaging (max 2 exchanges)
 │
-├─ Phase 13: QA Testing
+├─ Phase 8: QA Testing
 │  └─ Tester agent (scenario-based acceptance tests)
 │  └─ If FAIL: Coder fix loop (max 2 retries) → Validator → re-test
 │
-├─ Phase 14: Create PR (if needed)
+├─ Phase 9: Create PR (if needed)
 │  └─ SINGLE_CODER: handled by Coder
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-├─ Phase 15: Display agent outputs
-│
-└─ Phase 16: Record Decisions (inline, if any)
+└─ Phase 10: Report + Record Decisions (inline, if any)
 ```
 
 ## Principles
 
 1. **Orchestration only** - Command spawns teams/agents, never does work itself
-2. **Team-based exploration** - Exploration and planning use Agent Teams for debate
-3. **Coherence-first** - Single Coder produces more consistent code (default ~80% of tasks)
-4. **Bounded debate** - Max 2 exchange rounds in any team, then converge
-5. **Agent ownership** - Each agent owns its output completely
-6. **Clean handoffs** - Each phase passes structured data to next; sequential Coders pass implementation summaries
-7. **Honest reporting** - Display agent outputs directly
-8. **Simplification pass** - Code refined for clarity before PR
-9. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
-10. **Validator owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validator agent
-11. **Coder owns fixes** - Never implement fixes in main session; spawn Coder for validation failures and alignment fixes
-12. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
-13. **Cleanup always** - Team resources released after exploration and planning phases
+2. **Plan-first** - Plan documents from `/plan` skip exploration/planning overhead entirely
+3. **Team-based alignment** - Alignment check uses Agent Teams for Evaluator↔Coder dialogue
+4. **Coherence-first** - Single Coder produces more consistent code (default ~80% of tasks)
+5. **Bounded debate** - Max 2 exchange rounds in any team, then converge
+6. **Agent ownership** - Each agent owns its output completely
+7. **Clean handoffs** - Each phase passes structured data to next; sequential Coders pass implementation summaries
+8. **Honest reporting** - Display agent outputs directly
+9. **Simplification pass** - Code refined for clarity before PR
+10. **Strict delegation** - Never perform agent work in main session. "Spawn X" means call Agent tool with X, not do X's work yourself
+11. **Validator owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validator agent
+12. **Coder owns fixes** - Never implement fixes in main session; spawn Coder for validation failures and alignment fixes
+13. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
+14. **Cleanup always** - Team resources released after alignment phase
 
 ## Error Handling
 

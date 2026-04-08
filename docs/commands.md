@@ -2,38 +2,43 @@
 
 Devflow provides six commands that orchestrate specialized agents. Commands spawn agents — they never do the work themselves.
 
-## /specify
+## /plan
 
-Interactive feature specification with three mandatory gates:
+Unified design planning from requirements discovery through implementation design:
 
-1. **Understanding Gate** — Confirm the feature idea is understood
-2. **Scope Gate** — Validate priorities and boundaries
-3. **Acceptance Gate** — Confirm success criteria
+1. **Gate 0** — Confirm understanding of the requirement
+2. **Requirements Discovery** — Parallel exploration agents analyze codebase
+3. **Gap Analysis** — Identify missing pieces, risks, and dependencies
+4. **Gate 1** — Validate scope and gaps with user
+5. **Implementation Design** — Parallel planning agents design the approach
+6. **Design Review + Gate 2** — Review the design artifact, user approves the final plan
 
-Creates a well-defined GitHub issue ready for `/implement`.
+Produces a machine-readable design artifact in `.docs/design/` consumed by `/implement`.
 
 ```
-/specify              # Start interactive specification
+/plan add JWT auth           # From description
+/plan #42                    # From GitHub issue
+/plan #12 #15 #18           # Multi-issue
+/plan                        # From conversation context
 ```
 
 ## /implement
 
-Executes a single task through the complete development lifecycle:
+Executes a single task through the complete development lifecycle. Accepts plan documents, GitHub issues, or task descriptions.
 
-1. **Setup** — Auto-create feature branch (detects repo naming conventions)
-2. **Exploration** — Analyze codebase for relevant patterns and dependencies
-3. **Planning** — Design the implementation approach
-4. **Implementation** — Write code on the feature branch
-5. **Validation** — Build, typecheck, lint, and test
-6. **Refinement** — Simplifier (code clarity) + Scrutinizer (9-pillar quality)
-7. **Alignment** — Evaluator verifies implementation matches the original request
-8. **QA Testing** — Tester executes scenario-based acceptance tests
+1. **Setup** — Auto-create feature branch, parse plan document or fetch issue
+2. **Implementation** — Write code on the feature branch
+3. **Validation** — Build, typecheck, lint, and test
+4. **Refinement** — Simplifier (code clarity) + Scrutinizer (9-pillar quality)
+5. **Alignment** — Evaluator verifies implementation matches the original request
+6. **QA Testing** — Tester executes scenario-based acceptance tests
 
 Creates a PR when complete.
 
 ```
-/implement add JWT auth      # From description
+/implement .docs/design/42-jwt-auth.2026-04-07_1430.md  # From plan document
 /implement #42               # From GitHub issue
+/implement add JWT auth      # From description
 /implement                   # From conversation context
 ```
 

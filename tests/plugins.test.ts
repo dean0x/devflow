@@ -49,11 +49,11 @@ describe('buildAssetMaps', () => {
     // 'accessibility' first appears in devflow-accessibility (optional plugin)
     expect(skillsMap.get('accessibility')).toBe('devflow-accessibility');
 
-    // 'git' first appears in devflow-implement
-    expect(agentsMap.get('git')).toBe('devflow-implement');
+    // 'git' first appears in devflow-plan (inserted before devflow-implement)
+    expect(agentsMap.get('git')).toBe('devflow-plan');
 
-    // 'synthesizer' first appears in devflow-specify
-    expect(agentsMap.get('synthesizer')).toBe('devflow-specify');
+    // 'synthesizer' first appears in devflow-plan
+    expect(agentsMap.get('synthesizer')).toBe('devflow-plan');
   });
 
   it('returns empty maps for empty input', () => {

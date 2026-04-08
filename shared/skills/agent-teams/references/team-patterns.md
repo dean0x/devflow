@@ -95,9 +95,9 @@ Lead spawns:
 
 ---
 
-## Specification Team
+## Planning Team
 
-### Requirements Exploration Team (4 perspectives)
+### Requirements Discovery Team (4 perspectives)
 
 ```
 Lead spawns:
@@ -117,7 +117,7 @@ Lead spawns:
 5. Lead collects consensus after max 2 exchange rounds
 ```
 
-### Scope Planning Team (3 perspectives)
+### Design Planning Team (3 perspectives)
 
 ```
 Lead spawns:
@@ -136,7 +136,7 @@ Lead spawns:
 5. Lead collects consensus after max 2 exchange rounds
 ```
 
-**Note**: Specification teams complement (not replace) the 3 mandatory clarification gates. User still drives all decisions via Gate 0, Gate 1, and Gate 2.
+**Note**: Planning teams support gap analysis and design review. User approves the final design artifact before implementation.
 
 ---
 
@@ -210,8 +210,8 @@ Lead spawns (one per hypothesis):
 | Full review | 4 | 5 | Core perspectives |
 | Exploration | 3 | 4 | Diminishing returns beyond 4 |
 | Planning | 2 | 3 | Too many cooks |
-| Specification (explore) | 3 | 4 | Requirements need diverse perspectives |
-| Specification (scope) | 2 | 3 | Scope planning benefits from focus |
+| Planning (discover) | 3 | 4 | Requirements need diverse perspectives |
+| Planning (design) | 2 | 3 | Design planning benefits from focus |
 | Resolution | 2 | 4 | One per independent batch |
 | Debugging | 3 | 5 | One per viable hypothesis |
 | Parallel coding | 2 | 3 | Merge complexity grows fast |

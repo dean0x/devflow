@@ -37,7 +37,6 @@ Size team to task complexity. Assign distinct, non-overlapping perspectives.
 | Full review | 4-5 | Core perspectives covered |
 | Debug investigation | 3-5 | One per hypothesis |
 | Implementation | 2-4 | Domain-separated work units |
-| Specification | 3-4 | Debate requirements before user gates |
 | Resolution | 2-4 | Cross-validate fixes across batches |
 
 **Model guidance**: Explorers/Reviewers inherit parent model. Validators use `model: haiku`.
@@ -119,6 +118,6 @@ Lead MUST always handle cleanup:
 
 ## Extended References
 
-- `references/team-patterns.md` - Team structures for review, implement, debug, specify, resolve workflows
+- `references/team-patterns.md` - Team structures for review, implement, plan, debug, resolve workflows
 - `references/communication.md` - Message protocols, broadcast patterns, debate formats
 - `references/cleanup.md` - Session management, orphan detection, resource cleanup
