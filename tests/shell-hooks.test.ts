@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -1184,5 +1184,131 @@ describe('json-parse wrapper', () => {
       { stdio: 'pipe' },
     ).toString().trim();
     expect(result).toBe('val');
+  });
+});
+
+describe('working memory queue behavior', () => {
+  const HOOKS_DIR_ABS = path.resolve(__dirname, '..', 'scripts', 'hooks');
+  const STOP_HOOK = path.join(HOOKS_DIR_ABS, 'stop-update-memory');
+  const PREAMBLE_HOOK = path.join(HOOKS_DIR_ABS, 'preamble');
+
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-queue-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('stop_reason tool_use — no queue append', () => {
+    // Create .memory/ so the hook proceeds to the stop_reason check
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-001',
+      stop_reason: 'tool_use',
+      assistant_message: 'test response',
+    });
+
+    execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${STOP_HOOK}"`, { stdio: 'pipe' });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('stop_reason end_turn — appends assistant turn to queue', () => {
+    // Create .memory/ directory
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-002',
+      stop_reason: 'end_turn',
+      assistant_message: 'test response',
+    });
+
+    execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${STOP_HOOK}"`, { stdio: 'pipe' });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('assistant');
+    expect(entry.content).toBe('test response');
+    expect(typeof entry.ts).toBe('number');
+  });
+
+  it('preamble captures user prompt to queue', () => {
+    // Create .memory/ directory so capture is triggered
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-003',
+      prompt: 'implement the cache',
+    });
+
+    // Capture stdout (preamble outputs classification JSON) — we don't assert on it here
+    execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${PREAMBLE_HOOK}"`, { stdio: 'pipe' });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('user');
+    expect(entry.content).toBe('implement the cache');
+    expect(typeof entry.ts).toBe('number');
+  });
+
+  it('preamble with missing .memory/ — no capture, exit 0', () => {
+    // tmpDir exists but has no .memory/ subdirectory
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-004',
+      prompt: 'implement the cache',
+    });
+
+    // Should not throw (exit 0)
+    expect(() => {
+      execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${PREAMBLE_HOOK}"`, { stdio: 'pipe' });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('queue JSONL format — each line is valid JSON with role, content, ts', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+
+    const now = Math.floor(Date.now() / 1000);
+    const entries = [
+      { role: 'user', content: 'hello world', ts: now },
+      { role: 'assistant', content: 'I will help you', ts: now + 1 },
+      { role: 'user', content: 'thanks', ts: now + 2 },
+    ];
+
+    fs.writeFileSync(queueFile, entries.map(e => JSON.stringify(e)).join('\n') + '\n');
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(3);
+
+    for (const line of lines) {
+      const parsed = JSON.parse(line);
+      expect(['user', 'assistant']).toContain(parsed.role);
+      expect(typeof parsed.content).toBe('string');
+      expect(typeof parsed.ts).toBe('number');
+    }
   });
 });

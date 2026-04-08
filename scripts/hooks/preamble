@@ -20,6 +20,24 @@ fi
 
 PROMPT=$(echo "$INPUT" | json_field "prompt" "")
 
+# --- Queue user prompt for working memory (before skip checks — capture everything) ---
+(
+  if [ "${DEVFLOW_BG_UPDATER:-}" != "1" ] && [ -d "$CWD/.memory" ] && [ -n "$PROMPT" ]; then
+    _TRUNCATED_PROMPT="$PROMPT"
+    if [ ${#_TRUNCATED_PROMPT} -gt 2000 ]; then
+      _TRUNCATED_PROMPT="${_TRUNCATED_PROMPT:0:2000}... [truncated]"
+    fi
+    _TS=$(date +%s)
+    if [ "$_HAS_JQ" = "true" ]; then
+      jq -n -c --arg role "user" --arg content "$_TRUNCATED_PROMPT" --argjson ts "$_TS" \
+        '{role: $role, content: $content, ts: $ts}' >> "$CWD/.memory/.pending-turns.jsonl"
+    else
+      node -e "process.stdout.write(JSON.stringify({role:'user',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
+        "$_TRUNCATED_PROMPT" "$_TS" >> "$CWD/.memory/.pending-turns.jsonl"
+    fi
+  fi
+) 2>/dev/null || true
+
 # Skip slash commands — they have their own orchestration
 if [[ "$PROMPT" == /* ]]; then
   exit 0
