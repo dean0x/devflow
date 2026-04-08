@@ -1208,7 +1208,7 @@ describe('working memory queue behavior', () => {
       assistant_message: 'test response',
     });
 
-    execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${STOP_HOOK}"`, { stdio: 'pipe' });
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
@@ -1227,7 +1227,7 @@ describe('working memory queue behavior', () => {
       assistant_message: 'test response',
     });
 
-    execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${STOP_HOOK}"`, { stdio: 'pipe' });
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
@@ -1252,7 +1252,7 @@ describe('working memory queue behavior', () => {
     });
 
     // Capture stdout (preamble outputs classification JSON) — we don't assert on it here
-    execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${PREAMBLE_HOOK}"`, { stdio: 'pipe' });
+    execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
@@ -1276,7 +1276,7 @@ describe('working memory queue behavior', () => {
 
     // Should not throw (exit 0)
     expect(() => {
-      execSync(`echo '${input.replace(/'/g, "'\\''")}' | bash "${PREAMBLE_HOOK}"`, { stdio: 'pipe' });
+      execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
@@ -1305,5 +1305,70 @@ describe('working memory queue behavior', () => {
       expect(typeof parsed.content).toBe('string');
       expect(typeof parsed.ts).toBe('number');
     }
+  });
+
+  it('stop_reason end_turn — content array: joins text blocks, excludes tool_use', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-005',
+      stop_reason: 'end_turn',
+      assistant_message: [
+        { type: 'text', text: 'First part of response' },
+        { type: 'tool_use', id: 'toolu_01', name: 'Read', input: { file_path: '/tmp/foo' } },
+        { type: 'text', text: 'Second part of response' },
+      ],
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('assistant');
+    // Both text blocks joined with newline; tool_use block excluded
+    expect(entry.content).toBe('First part of response\nSecond part of response');
+    expect(typeof entry.ts).toBe('number');
+  });
+
+  it('queue overflow — >200 lines truncated to last 100', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const now = Math.floor(Date.now() / 1000);
+
+    // Pre-populate queue with 201 entries
+    const existingLines = Array.from({ length: 201 }, (_, i) =>
+      JSON.stringify({ role: 'user', content: `entry ${i}`, ts: now + i }),
+    );
+    fs.writeFileSync(queueFile, existingLines.join('\n') + '\n');
+
+    // Trigger stop hook — appends 1 more entry, then overflow check fires
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-006',
+      stop_reason: 'end_turn',
+      assistant_message: 'overflow trigger response',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    // After overflow: 201 pre-existing + 1 new = 202 lines → truncated to last 100
+    const resultLines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(resultLines.length).toBeLessThanOrEqual(101);
+
+    // The new entry (the assistant turn) must be present as the last line
+    const lastEntry = JSON.parse(resultLines[resultLines.length - 1]);
+    expect(lastEntry.role).toBe('assistant');
+    expect(lastEntry.content).toBe('overflow trigger response');
   });
 });
