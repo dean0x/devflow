@@ -10,6 +10,12 @@ set -e
 
 CWD="$1"
 CLAUDE_BIN="$2"
+
+if [ ! -d "$CWD" ]; then
+  echo "background-memory-update: CWD does not exist: $CWD" >&2
+  exit 1
+fi
+
 MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 
 # Source JSON parsing helpers (jq with node fallback)
@@ -144,12 +150,28 @@ else
   ENTRIES=$(cat "$PROCESSING_FILE")
 fi
 
-CURRENT_USER=""
-while IFS= read -r line; do
-  [ -z "$line" ] && continue
+# Single-pass extraction: extract role+content as TSV in one jq/node invocation.
+# Newlines within content are collapsed to a space to preserve TSV line integrity.
+if [ "$_HAS_JQ" = "true" ]; then
+  EXTRACTED=$(jq -r '(.role // "") + "\t" + ((.content // "") | gsub("\n"; " "))' <<< "$ENTRIES" 2>/dev/null)
+else
+  EXTRACTED=$(node -e '
+    const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const role = obj.role || "";
+        const content = (obj.content || "").replace(/\n/g, " ");
+        process.stdout.write(role + "\t" + content + "\n");
+      } catch {}
+    }
+  ' <<< "$ENTRIES" 2>/dev/null)
+fi
 
-  ROLE=$(echo "$line" | json_field "role" "")
-  CONTENT=$(echo "$line" | json_field "content" "")
+CURRENT_USER=""
+while IFS=$'\t' read -r ROLE CONTENT; do
+  [ -z "$ROLE" ] && continue
 
   if [ "$ROLE" = "user" ]; then
     # If we had an orphan user (no assistant followed), emit it solo
@@ -178,7 +200,7 @@ Assistant: ${CONTENT}
 "
     fi
   fi
-done <<< "$ENTRIES"
+done <<< "$EXTRACTED"
 
 # Flush any trailing orphan user
 if [ -n "$CURRENT_USER" ]; then
