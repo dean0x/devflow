@@ -21,10 +21,19 @@ INPUT=$(cat)
 
 # Resolve project directory
 CWD=$(echo "$INPUT" | json_field "cwd" "")
-if [ -z "$CWD" ]; then exit 0; fi
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
 # Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
+
+# Portable mtime helper (same logic as get_mtime in background-memory-update)
+get_mtime() {
+  if stat --version &>/dev/null 2>&1; then
+    stat -c %Y "$1"
+  else
+    stat -f %m "$1"
+  fi
+}
 
 # Logging
 source "$SCRIPT_DIR/log-paths"
@@ -76,7 +85,7 @@ if [ "$_HAS_JQ" = "true" ]; then
     '{role: $role, content: $content, ts: $ts}' >> "$QUEUE_FILE"
 else
   node -e "process.stdout.write(JSON.stringify({role:'assistant',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
-    "$ASSISTANT_MSG" "$TS" >> "$QUEUE_FILE"
+    -- "$ASSISTANT_MSG" "$TS" >> "$QUEUE_FILE"
 fi
 
 # Queue overflow safety: if >200 lines, keep last 100
@@ -93,11 +102,7 @@ log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
 # --- Throttle: only spawn background updater every 2 minutes ---
 TRIGGER_MARKER="$CWD/.memory/.working-memory-last-trigger"
 if [ -f "$TRIGGER_MARKER" ]; then
-  if stat --version &>/dev/null 2>&1; then
-    MARKER_MTIME=$(stat -c %Y "$TRIGGER_MARKER")
-  else
-    MARKER_MTIME=$(stat -f %m "$TRIGGER_MARKER")
-  fi
+  MARKER_MTIME=$(get_mtime "$TRIGGER_MARKER")
   NOW=$(date +%s)
   AGE=$(( NOW - MARKER_MTIME ))
   if [ "$AGE" -lt 120 ]; then
