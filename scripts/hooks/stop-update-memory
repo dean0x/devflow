@@ -26,7 +26,7 @@ if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 # Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
-# Portable mtime helper (same logic as get_mtime in background-memory-update)
+# Portable mtime (GNU stat uses -c, BSD stat uses -f)
 get_mtime() {
   if stat --version &>/dev/null 2>&1; then
     stat -c %Y "$1"
@@ -89,6 +89,7 @@ else
 fi
 
 # Queue overflow safety: if >200 lines, keep last 100
+# NOTE: same 200/100 threshold in background-memory-update
 if [ -f "$QUEUE_FILE" ]; then
   LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
   if [ "$LINE_COUNT" -gt 200 ]; then

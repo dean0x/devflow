@@ -46,7 +46,8 @@ devflow/
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
-│       ├── preamble                # UserPromptSubmit hook: ambient skill injection
+│       ├── prompt-capture-memory   # UserPromptSubmit hook: captures prompts to queue
+│       ├── preamble                # UserPromptSubmit hook: ambient skill injection (zero file I/O)
 │       ├── session-end-learning      # SessionEnd hook: batched learning trigger
 │       ├── stop-update-learning     # Stop hook: deprecated stub (upgrade via devflow learn)
 │       ├── background-learning      # Background: pattern detection via Sonnet
@@ -144,7 +145,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
-- `hooks` - Working Memory hooks (Stop, SessionStart, PreCompact) + Learning Stop hook
+- `hooks` - Working Memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) + Learning Stop hook
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
@@ -153,17 +154,20 @@ Included settings:
 
 ## Working Memory Hooks
 
-Three hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
+Four hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
 
-A fourth hook (`session-end-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
+A fifth hook (`session-end-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
 
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|
-| `stop-update-memory` | Stop | `.memory/WORKING-MEMORY.md` | Throttled (skips if <2min fresh). Slim instruction after first write. |
+| `prompt-capture-memory` | UserPromptSubmit | `.memory/.pending-turns.jsonl` | Captures user prompts to queue. Zero classification overhead. |
+| `stop-update-memory` | Stop | `.memory/WORKING-MEMORY.md` | Captures assistant turns to queue. Throttled (skips if <2min fresh). Spawns background updater. |
 | `session-start-memory` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. Injects pre-compact snapshot when compaction occurred mid-session. |
 | `pre-compact-memory` | PreCompact | `.memory/backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
 
-**Flow**: Session ends → Stop hook checks throttle (skips if <2min fresh) → spawns background updater → background updater reads session transcript + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
+**Flow**: User sends prompt → UserPromptSubmit hook (prompt-capture-memory) appends user turn to `.memory/.pending-turns.jsonl`. Session ends → Stop hook appends assistant turn to queue, checks throttle (skips if <2min fresh), spawns background updater → background updater reads queued turns + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
+
+`devflow memory --disable` removes all four hooks and cleans up any pending queue files (`.pending-turns.jsonl`, `.pending-turns.processing`).
 
 Hooks auto-create `.memory/` on first run — no manual setup needed per project.
 

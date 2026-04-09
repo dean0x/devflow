@@ -44,6 +44,7 @@ rotate_log() {
 
 # --- Stale Lock Recovery ---
 
+# Portable mtime (GNU stat uses -c, BSD stat uses -f)
 get_mtime() {
   if stat --version &>/dev/null 2>&1; then
     stat -c %Y "$1"
@@ -110,6 +111,7 @@ if [ -f "$PROCESSING_FILE" ]; then
     log "Merged new queue entries into recovery batch"
   fi
   # Cap processing file to prevent unbounded growth from persistent Write failures
+  # NOTE: same 200/100 threshold in stop-update-memory
   PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
   if [ "$PROC_LINES" -gt 200 ]; then
     tail -100 "$PROCESSING_FILE" > "$PROCESSING_FILE.tmp" && mv "$PROCESSING_FILE.tmp" "$PROCESSING_FILE"
