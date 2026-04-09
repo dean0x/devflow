@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -16,8 +16,10 @@ const HOOK_SCRIPTS = [
   'stop-update-memory',
   'session-start-memory',
   'pre-compact-memory',
+  'prompt-capture-memory',
   'preamble',
   'json-parse',
+  'get-mtime',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1080,10 +1082,6 @@ describe('json-helper.cjs filter-observations', () => {
 });
 
 describe('session-end-learning structure', () => {
-  it('is included in bash -n syntax checks', () => {
-    expect(HOOK_SCRIPTS).toContain('session-end-learning');
-  });
-
   it('starts with bash shebang and sources json-parse', () => {
     const scriptPath = path.join(HOOKS_DIR, 'session-end-learning');
     const content = fs.readFileSync(scriptPath, 'utf8');
@@ -1184,5 +1182,340 @@ describe('json-parse wrapper', () => {
       { stdio: 'pipe' },
     ).toString().trim();
     expect(result).toBe('val');
+  });
+});
+
+describe('working memory queue behavior', () => {
+  const STOP_HOOK = path.join(HOOKS_DIR, 'stop-update-memory');
+  const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
+  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'prompt-capture-memory');
+
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-queue-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('stop_reason tool_use — no queue append', () => {
+    // Create .memory/ so the hook proceeds to the stop_reason check
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-001',
+      stop_reason: 'tool_use',
+      assistant_message: 'test response',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('stop_reason end_turn — appends assistant turn to queue', () => {
+    // Create .memory/ directory
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-002',
+      stop_reason: 'end_turn',
+      assistant_message: 'test response',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('assistant');
+    expect(entry.content).toBe('test response');
+    expect(typeof entry.ts).toBe('number');
+  });
+
+  it('prompt-capture-memory captures user prompt to queue', () => {
+    // Create .memory/ directory so capture is triggered
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-003',
+      prompt: 'implement the cache',
+    });
+
+    execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('user');
+    expect(entry.content).toBe('implement the cache');
+    expect(typeof entry.ts).toBe('number');
+  });
+
+  it('prompt-capture-memory with missing .memory/ — creates it via ensure-memory-gitignore, exit 0', () => {
+    // tmpDir exists but has no .memory/ subdirectory — ensure-memory-gitignore creates it
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-004a',
+      prompt: 'implement the cache',
+    });
+
+    expect(() => {
+      execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    // Hook creates .memory/ and writes to queue
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+
+  it('preamble does NOT write to queue — zero file I/O', () => {
+    // Create .memory/ to confirm preamble doesn't touch the queue even when .memory/ exists
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-004',
+      prompt: 'implement the cache',
+    });
+
+    // Should not throw (exit 0)
+    expect(() => {
+      execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('preamble with slash command — exits 0, no queue write', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-004b',
+      prompt: '/code-review',
+    });
+
+    expect(() => {
+      execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('queue JSONL format — each line is valid JSON with role, content, ts', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+
+    const now = Math.floor(Date.now() / 1000);
+    const entries = [
+      { role: 'user', content: 'hello world', ts: now },
+      { role: 'assistant', content: 'I will help you', ts: now + 1 },
+      { role: 'user', content: 'thanks', ts: now + 2 },
+    ];
+
+    fs.writeFileSync(queueFile, entries.map(e => JSON.stringify(e)).join('\n') + '\n');
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(3);
+
+    for (const line of lines) {
+      const parsed = JSON.parse(line);
+      expect(['user', 'assistant']).toContain(parsed.role);
+      expect(typeof parsed.content).toBe('string');
+      expect(typeof parsed.ts).toBe('number');
+    }
+  });
+
+  it('stop_reason end_turn — content array: joins text blocks, excludes tool_use', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-005',
+      stop_reason: 'end_turn',
+      assistant_message: [
+        { type: 'text', text: 'First part of response' },
+        { type: 'tool_use', id: 'toolu_01', name: 'Read', input: { file_path: '/tmp/foo' } },
+        { type: 'text', text: 'Second part of response' },
+      ],
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('assistant');
+    // Both text blocks joined with newline; tool_use block excluded
+    expect(entry.content).toBe('First part of response\nSecond part of response');
+    expect(typeof entry.ts).toBe('number');
+  });
+
+  it('queue overflow — >200 lines truncated to last 100', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const now = Math.floor(Date.now() / 1000);
+
+    // Pre-populate queue with 201 entries
+    const existingLines = Array.from({ length: 201 }, (_, i) =>
+      JSON.stringify({ role: 'user', content: `entry ${i}`, ts: now + i }),
+    );
+    fs.writeFileSync(queueFile, existingLines.join('\n') + '\n');
+
+    // Trigger stop hook — appends 1 more entry, then overflow check fires
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-006',
+      stop_reason: 'end_turn',
+      assistant_message: 'overflow trigger response',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    // After overflow: 201 pre-existing + 1 new = 202 lines → truncated to last 100
+    const resultLines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(resultLines).toHaveLength(100);
+
+    // The new entry (the assistant turn) must be present as the last line
+    const lastEntry = JSON.parse(resultLines[resultLines.length - 1]);
+    expect(lastEntry.role).toBe('assistant');
+    expect(lastEntry.content).toBe('overflow trigger response');
+  });
+
+  it('prompt-capture-memory truncates prompts longer than 2000 chars', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const longPrompt = 'a'.repeat(3000);
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-trunc-001',
+      prompt: longPrompt,
+    });
+
+    execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    // Truncated at 2000 chars + '... [truncated]' suffix (15 chars) = 2015
+    expect(entry.content.length).toBe(2015);
+    expect(entry.content).toContain('[truncated]');
+  });
+
+  it('stop-update-memory truncates assistant content longer than 2000 chars', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const longMessage = 'b'.repeat(5000);
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-trunc-002',
+      stop_reason: 'end_turn',
+      assistant_message: longMessage,
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    // Truncated at 2000 chars + '... [truncated]' suffix (15 chars) = 2015
+    expect(entry.content.length).toBe(2015);
+    expect(entry.content).toContain('[truncated]');
+  });
+
+  it('stop-update-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-bg-guard-001',
+      stop_reason: 'end_turn',
+      assistant_message: 'should not be captured',
+    });
+
+    // Should not throw; no queue write expected
+    expect(() => {
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('prompt-capture-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-bg-guard-002',
+      prompt: 'should not be captured',
+    });
+
+    // Should not throw; no queue write expected
+    expect(() => {
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+});
+
+describe('get-mtime behavioral', () => {
+  it('returns a valid positive epoch timestamp for a real file', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const tmpFile = path.join(tmpDir, 'probe.txt');
+    const getMtimeScript = path.join(HOOKS_DIR, 'get-mtime');
+
+    try {
+      fs.writeFileSync(tmpFile, 'probe');
+      const result = execSync(
+        `bash -c 'source "${getMtimeScript}" && get_mtime "${tmpFile}"'`,
+        { stdio: 'pipe' }
+      ).toString().trim();
+
+      const epoch = parseInt(result, 10);
+      expect(Number.isInteger(epoch)).toBe(true);
+      expect(epoch).toBeGreaterThan(0);
+      // Sanity: must be after 2020-01-01 (epoch 1577836800) and before year 2100 (4102444800)
+      expect(epoch).toBeGreaterThan(1577836800);
+      expect(epoch).toBeLessThan(4102444800);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

@@ -134,11 +134,11 @@ export function removeLearningHook(settingsJson: string): string {
 }
 
 /**
- * Check if the learning hook is registered in settings JSON.
+ * Check if the learning hook is registered in settings JSON or parsed Settings object.
  * Returns 'current' for SessionEnd hook, 'legacy' for old Stop hook, or false if absent.
  */
-export function hasLearningHook(settingsJson: string): 'current' | 'legacy' | false {
-  const settings: Settings = JSON.parse(settingsJson);
+export function hasLearningHook(input: string | Settings): 'current' | 'legacy' | false {
+  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
 
   const hasSessionEnd = settings.hooks?.SessionEnd?.some((matcher) =>
     matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
@@ -364,15 +364,19 @@ export const learnCommand = new Command('learn')
 
     // --- --list ---
     if (options.list) {
-      let observations: LearningObservation[];
-      let invalidCount: number;
+      let logExists = true;
       try {
-        const logContent = await fs.readFile(logPath, 'utf-8');
-        ({ observations, invalidCount } = loadAndCountObservations(logContent));
+        await fs.access(logPath);
       } catch {
+        logExists = false;
+      }
+
+      if (!logExists) {
         p.log.info('No observations yet. Learning log not found.');
         return;
       }
+
+      const { observations, invalidCount } = await readObservations(logPath);
 
       if (observations.length === 0) {
         p.log.info('No observations recorded yet.');

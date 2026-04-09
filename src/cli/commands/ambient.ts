@@ -133,10 +133,10 @@ export function removeAmbientHook(settingsJson: string): string {
 }
 
 /**
- * Check if the ambient hook (legacy or current) is registered in settings JSON.
+ * Check if the ambient hook (legacy or current) is registered in settings JSON or parsed Settings object.
  */
-export function hasAmbientHook(settingsJson: string): boolean {
-  const settings: Settings = JSON.parse(settingsJson);
+export function hasAmbientHook(input: string | Settings): boolean {
+  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
 
   const hasPreamble = settings.hooks?.UserPromptSubmit?.some((matcher) =>
     matcher.hooks.some((h) =>

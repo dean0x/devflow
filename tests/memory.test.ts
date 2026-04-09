@@ -3,23 +3,25 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { exec } from 'child_process';
-import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks } from '../src/cli/commands/memory.js';
+import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory } from '../src/cli/commands/memory.js';
 import { createMemoryDir, migrateMemoryFiles } from '../src/cli/utils/post-install.js';
 
 describe('addMemoryHooks', () => {
-  it('adds all 3 hook types to empty settings', () => {
+  it('adds all 4 hook types to empty settings', () => {
     const result = addMemoryHooks('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
 
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(settings.hooks.Stop).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.PreCompact).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('prompt-capture-memory');
     expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-memory');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
     expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory');
   });
 
-  it('preserves existing hooks (UserPromptSubmit/ambient untouched)', () => {
+  it('preserves existing ambient preamble hook when adding memory hooks', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
@@ -28,8 +30,10 @@ describe('addMemoryHooks', () => {
     const result = addMemoryHooks(input, '/home/user/.devflow');
     const settings = JSON.parse(result);
 
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    // Ambient preamble preserved alongside prompt-capture-memory
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('preamble');
+    expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toContain('prompt-capture-memory');
     expect(settings.hooks.Stop).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     expect(settings.hooks.PreCompact).toHaveLength(1);
@@ -45,6 +49,7 @@ describe('addMemoryHooks', () => {
   it('adds only missing hooks when partial state (1 hook missing)', () => {
     const input = JSON.stringify({
       hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/prompt-capture-memory', timeout: 10 }] }],
         Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory', timeout: 10 }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory', timeout: 10 }] }],
       },
@@ -53,11 +58,36 @@ describe('addMemoryHooks', () => {
     const settings = JSON.parse(result);
 
     // Existing hooks preserved
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(settings.hooks.Stop).toHaveLength(1);
     expect(settings.hooks.SessionStart).toHaveLength(1);
     // Missing hook added
     expect(settings.hooks.PreCompact).toHaveLength(1);
     expect(settings.hooks.PreCompact[0].hooks[0].command).toContain('pre-compact-memory');
+  });
+
+  it('adds UserPromptSubmit prompt-capture-memory alongside existing preamble (upgrade path)', () => {
+    // Simulate a 3-hook install (pre-upgrade) that already has ambient preamble
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/preamble' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory', timeout: 10 }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory', timeout: 10 }] }],
+      },
+    });
+    const result = addMemoryHooks(input, '/home/user/.devflow');
+    const settings = JSON.parse(result);
+
+    // prompt-capture-memory added; preamble kept
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
+    const commands = settings.hooks.UserPromptSubmit.map((m: { hooks: { command: string }[] }) => m.hooks[0].command);
+    expect(commands.some((c: string) => c.includes('preamble'))).toBe(true);
+    expect(commands.some((c: string) => c.includes('prompt-capture-memory'))).toBe(true);
+    // Other hooks unchanged
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.PreCompact).toHaveLength(1);
   });
 
   it('creates hooks object if missing', () => {
@@ -73,6 +103,8 @@ describe('addMemoryHooks', () => {
     const result = addMemoryHooks('{}', '/custom/path/.devflow');
     const settings = JSON.parse(result);
 
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('prompt-capture-memory');
     expect(settings.hooks.Stop[0].hooks[0].command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
     expect(settings.hooks.Stop[0].hooks[0].command).toContain('stop-update-memory');
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('run-hook');
@@ -98,6 +130,7 @@ describe('addMemoryHooks', () => {
     const result = addMemoryHooks('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
 
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(10);
     expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(10);
     expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(10);
     expect(settings.hooks.PreCompact[0].hooks[0].timeout).toBe(10);
@@ -105,7 +138,7 @@ describe('addMemoryHooks', () => {
 });
 
 describe('removeMemoryHooks', () => {
-  it('removes all 3 hook types', () => {
+  it('removes all 4 hook types', () => {
     const withHooks = addMemoryHooks('{}', '/home/user/.devflow');
     const result = removeMemoryHooks(withHooks);
     const settings = JSON.parse(result);
@@ -113,10 +146,13 @@ describe('removeMemoryHooks', () => {
     expect(settings.hooks).toBeUndefined();
   });
 
-  it('preserves other hooks (UserPromptSubmit)', () => {
+  it('preserves ambient preamble when removing memory hooks (preamble != prompt-capture-memory)', () => {
     const input = JSON.stringify({
       hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: 'preamble' }] },
+          { hooks: [{ type: 'command', command: '/path/prompt-capture-memory' }] },
+        ],
         Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
         PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
@@ -125,7 +161,9 @@ describe('removeMemoryHooks', () => {
     const result = removeMemoryHooks(input);
     const settings = JSON.parse(result);
 
+    // Ambient preamble preserved; prompt-capture-memory removed
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('preamble');
     expect(settings.hooks.Stop).toBeUndefined();
     expect(settings.hooks.SessionStart).toBeUndefined();
     expect(settings.hooks.PreCompact).toBeUndefined();
@@ -164,7 +202,7 @@ describe('removeMemoryHooks', () => {
     const input = JSON.stringify({
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
-        // SessionStart and PreCompact already missing
+        // UserPromptSubmit, SessionStart, PreCompact already missing
       },
     });
     const result = removeMemoryHooks(input);
@@ -177,6 +215,7 @@ describe('removeMemoryHooks', () => {
     const input = JSON.stringify({
       statusLine: { type: 'command' },
       hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/prompt-capture-memory' }] }],
         Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
         SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
         PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
@@ -187,10 +226,22 @@ describe('removeMemoryHooks', () => {
 
     expect(settings.statusLine).toEqual({ type: 'command' });
   });
+
+  it('toggle cycle: enable → disable → enable produces clean state', () => {
+    const enabled = addMemoryHooks('{}', '/home/user/.devflow');
+    const disabled = removeMemoryHooks(enabled);
+    const reEnabled = addMemoryHooks(disabled, '/home/user/.devflow');
+    const settings = JSON.parse(reEnabled);
+
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.Stop).toHaveLength(1);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.PreCompact).toHaveLength(1);
+  });
 });
 
 describe('hasMemoryHooks', () => {
-  it('returns true when all 3 present', () => {
+  it('returns true when all 4 present', () => {
     const withHooks = addMemoryHooks('{}', '/home/user/.devflow');
     expect(hasMemoryHooks(withHooks)).toBe(true);
   });
@@ -199,7 +250,7 @@ describe('hasMemoryHooks', () => {
     expect(hasMemoryHooks('{}')).toBe(false);
   });
 
-  it('returns false when partial (1 or 2 of 3)', () => {
+  it('returns false when partial (1 of 4)', () => {
     const input = JSON.stringify({
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
@@ -208,7 +259,18 @@ describe('hasMemoryHooks', () => {
     expect(hasMemoryHooks(input)).toBe(false);
   });
 
-  it('returns false for non-memory hooks only', () => {
+  it('returns false when partial (3 of 4 — old install missing UserPromptSubmit)', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
+      },
+    });
+    expect(hasMemoryHooks(input)).toBe(false);
+  });
+
+  it('returns false for ambient preamble only (not a memory hook)', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
@@ -219,16 +281,16 @@ describe('hasMemoryHooks', () => {
 });
 
 describe('countMemoryHooks', () => {
-  it('returns 3 when all present', () => {
+  it('returns 4 when all present', () => {
     const withHooks = addMemoryHooks('{}', '/home/user/.devflow');
-    expect(countMemoryHooks(withHooks)).toBe(3);
+    expect(countMemoryHooks(withHooks)).toBe(4);
   });
 
   it('returns 0 when none present', () => {
     expect(countMemoryHooks('{}')).toBe(0);
   });
 
-  it('returns correct partial count', () => {
+  it('returns correct partial count (2 of 4)', () => {
     const input = JSON.stringify({
       hooks: {
         Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
@@ -236,6 +298,19 @@ describe('countMemoryHooks', () => {
       },
     });
     expect(countMemoryHooks(input)).toBe(2);
+  });
+
+  it('does not count ambient preamble as prompt-capture-memory', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/preamble' }] }],
+        Stop: [{ hooks: [{ type: 'command', command: '/path/stop-update-memory' }] }],
+        SessionStart: [{ hooks: [{ type: 'command', command: '/path/session-start-memory' }] }],
+        PreCompact: [{ hooks: [{ type: 'command', command: '/path/pre-compact-memory' }] }],
+      },
+    });
+    // preamble does not match 'prompt-capture-memory' marker
+    expect(countMemoryHooks(input)).toBe(3);
   });
 });
 
@@ -408,145 +483,225 @@ describe('migrateMemoryFiles', () => {
   });
 });
 
-describe('knowledge file format', () => {
+describe('countMemoryHooks accepts parsed Settings', () => {
+  it('accepts a parsed Settings object (not just JSON string)', () => {
+    const settings = {
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/prompt-capture-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
+        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
+      },
+    };
+    expect(countMemoryHooks(settings)).toBe(4);
+    expect(hasMemoryHooks(settings)).toBe(true);
+  });
+
+  it('accepts parsed Settings with no hooks', () => {
+    const settings = {};
+    expect(countMemoryHooks(settings)).toBe(0);
+    expect(hasMemoryHooks(settings)).toBe(false);
+  });
+
+  it('accepts parsed Settings with partial hooks', () => {
+    const settings = {
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
+      },
+    };
+    expect(countMemoryHooks(settings)).toBe(2);
+    expect(hasMemoryHooks(settings)).toBe(false);
+  });
+});
+
+describe('hasMemoryDir', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-test-'));
-    await fs.mkdir(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hasMemoryDir-'));
   });
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('parses TL;DR from decisions.md comment header', async () => {
-    const content = '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions';
-    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), content);
-
-    const firstLine = (await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), 'utf-8')).split('\n')[0];
-    const tldr = firstLine.replace('<!-- TL;DR: ', '').replace(' -->', '');
-
-    expect(tldr).toBe('2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder');
+  it('returns true when .memory/ directory exists', async () => {
+    await fs.mkdir(path.join(tmpDir, '.memory'), { recursive: true });
+    expect(await hasMemoryDir(tmpDir)).toBe(true);
   });
 
-  it('parses TL;DR from pitfalls.md comment header', async () => {
-    const content = '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->\n# Known Pitfalls';
-    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), content);
-
-    const firstLine = (await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8')).split('\n')[0];
-    const tldr = firstLine.replace('<!-- TL;DR: ', '').replace(' -->', '');
-
-    expect(tldr).toBe('1 pitfall. Key: PF-001 Synthesizer glob');
+  it('returns false when .memory/ directory does not exist', async () => {
+    expect(await hasMemoryDir(tmpDir)).toBe(false);
   });
 
-  it('extracts highest ADR number via regex', async () => {
-    const content = [
-      '<!-- TL;DR: 3 decisions. Key: ADR-001 A, ADR-002 B, ADR-003 C -->',
-      '# Architectural Decisions',
-      '',
-      '## ADR-001: First decision',
-      '- **Status**: Accepted',
-      '',
-      '## ADR-002: Second decision',
-      '- **Status**: Accepted',
-      '',
-      '## ADR-003: Third decision',
-      '- **Status**: Accepted',
-    ].join('\n');
-    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), content);
+  it('returns false when root itself does not exist', async () => {
+    expect(await hasMemoryDir(path.join(tmpDir, 'nonexistent'))).toBe(false);
+  });
+});
 
-    const fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), 'utf-8');
-    const matches = [...fileContent.matchAll(/^## ADR-(\d+)/gm)];
-    const highest = matches.length > 0 ? Math.max(...matches.map(m => parseInt(m[1], 10))) : 0;
+describe('filterProjectsWithMemory', () => {
+  let tmpDir: string;
 
-    expect(highest).toBe(3);
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-filterProjects-'));
   });
 
-  it('returns 0 for empty file with no ADR entries', async () => {
-    const content = '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only.';
-    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), content);
-
-    const fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'), 'utf-8');
-    const matches = [...fileContent.matchAll(/^## ADR-(\d+)/gm)];
-    const highest = matches.length > 0 ? Math.max(...matches.map(m => parseInt(m[1], 10))) : 0;
-
-    expect(highest).toBe(0);
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('detects duplicate pitfall by Area + Issue match', async () => {
-    const content = [
-      '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->',
-      '# Known Pitfalls',
-      '',
-      '## PF-001: Synthesizer review glob matched zero files',
-      '- **Area**: shared/agents/synthesizer.md',
-      '- **Issue**: Glob didn\'t match reviewer output filenames',
-    ].join('\n');
-    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), content);
-
-    const fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8');
-
-    // Check if an entry with matching Area and Issue already exists
-    const newArea = 'shared/agents/synthesizer.md';
-    const newIssue = 'Glob didn\'t match reviewer output filenames';
-    const isDuplicate = fileContent.includes(`**Area**: ${newArea}`) && fileContent.includes(`**Issue**: ${newIssue}`);
-
-    expect(isDuplicate).toBe(true);
+  it('returns empty array when no git roots provided', async () => {
+    expect(await filterProjectsWithMemory([])).toEqual([]);
   });
 
-  it('gracefully handles missing knowledge files', async () => {
-    // Verify no error when reading non-existent knowledge files
-    const knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+  it('returns only projects that have .memory/', async () => {
+    const projA = path.join(tmpDir, 'projA');
+    const projB = path.join(tmpDir, 'projB');
+    const projC = path.join(tmpDir, 'projC');
+    await fs.mkdir(path.join(projA, '.memory'), { recursive: true });
+    await fs.mkdir(projB, { recursive: true }); // no .memory/
+    await fs.mkdir(path.join(projC, '.memory'), { recursive: true });
 
-    // Simulate the graceful degradation pattern from session-start hook
-    let tldrLines: string[] = [];
-    for (const kf of [decisionsPath, pitfallsPath]) {
-      try {
-        await fs.access(kf);
-        const firstLine = (await fs.readFile(kf, 'utf-8')).split('\n')[0];
-        if (firstLine.startsWith('<!-- TL;DR:')) {
-          tldrLines.push(firstLine.replace('<!-- TL;DR: ', '').replace(' -->', ''));
-        }
-      } catch {
-        // File doesn't exist — skip silently
-      }
+    const result = await filterProjectsWithMemory([projA, projB, projC]);
+    expect(result).toEqual([projA, projC]);
+  });
+
+  it('returns empty array when no projects have .memory/', async () => {
+    const projA = path.join(tmpDir, 'projA');
+    await fs.mkdir(projA, { recursive: true });
+    expect(await filterProjectsWithMemory([projA])).toEqual([]);
+  });
+});
+
+describe('cleanQueueFiles', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-cleanQueue-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns cleaned=0 when no projects provided', async () => {
+    const result = await cleanQueueFiles([]);
+    expect(result).toEqual({ cleaned: 0, projects: [] });
+  });
+
+  it('cleans both queue files when both exist', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
+    await fs.writeFile(path.join(memDir, '.pending-turns.processing'), '{"role":"user"}');
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result.cleaned).toBe(1);
+    expect(result.projects).toEqual([tmpDir]);
+    await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).rejects.toThrow();
+    await expect(fs.access(path.join(memDir, '.pending-turns.processing'))).rejects.toThrow();
+  });
+
+  it('cleans only .pending-turns.jsonl when only that file exists', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result.cleaned).toBe(1);
+    await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).rejects.toThrow();
+  });
+
+  it('returns cleaned=0 when neither queue file exists', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result).toEqual({ cleaned: 0, projects: [] });
+  });
+
+  it('skips projects where lock directory is present', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
+    // Create the lock directory to simulate active background updater
+    await fs.mkdir(path.join(memDir, '.working-memory.lock'), { recursive: true });
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result).toEqual({ cleaned: 0, projects: [] });
+    // File should remain untouched
+    await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).resolves.toBeUndefined();
+  });
+
+  it('cleans multiple projects in parallel', async () => {
+    const projA = path.join(tmpDir, 'projA');
+    const projB = path.join(tmpDir, 'projB');
+    const projC = path.join(tmpDir, 'projC');
+
+    for (const proj of [projA, projB, projC]) {
+      await fs.mkdir(path.join(proj, '.memory'), { recursive: true });
+      await fs.writeFile(path.join(proj, '.memory', '.pending-turns.jsonl'), '{"role":"user"}');
     }
 
-    expect(tldrLines).toHaveLength(0);
+    const result = await cleanQueueFiles([projA, projB, projC]);
+    expect(result.cleaned).toBe(3);
+    expect(result.projects).toContain(projA);
+    expect(result.projects).toContain(projB);
+    expect(result.projects).toContain(projC);
   });
 
-  it('updates TL;DR to reflect new entry count after append', async () => {
-    const content = [
-      '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->',
-      '# Known Pitfalls',
-      '',
-      '## PF-001: Synthesizer review glob matched zero files',
-      '- **Area**: shared/agents/synthesizer.md',
-      '- **Issue**: Glob pattern mismatch',
-    ].join('\n');
-    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), content);
+  it('cleans unlocked projects and skips locked ones in same batch', async () => {
+    const locked = path.join(tmpDir, 'locked');
+    const unlocked = path.join(tmpDir, 'unlocked');
 
-    // Simulate appending a new entry and updating TL;DR
-    let fileContent = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8');
-    const newEntry = '\n\n## PF-002: Race condition in background hook\n- **Area**: scripts/hooks/stop-update-memory\n- **Issue**: Concurrent writes to memory file';
-    fileContent += newEntry;
+    await fs.mkdir(path.join(locked, '.memory', '.working-memory.lock'), { recursive: true });
+    await fs.writeFile(path.join(locked, '.memory', '.pending-turns.jsonl'), 'data');
 
-    // Update TL;DR
-    const matches = [...fileContent.matchAll(/^## PF-(\d+)/gm)];
-    const count = matches.length;
-    const keys = matches.map(m => `PF-${m[1].padStart(3, '0')}`).join(', ');
-    fileContent = fileContent.replace(/^<!-- TL;DR:.*-->/, `<!-- TL;DR: ${count} pitfalls. Key: ${keys} -->`);
+    await fs.mkdir(path.join(unlocked, '.memory'), { recursive: true });
+    await fs.writeFile(path.join(unlocked, '.memory', '.pending-turns.jsonl'), 'data');
 
-    await fs.writeFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), fileContent);
+    const result = await cleanQueueFiles([locked, unlocked]);
+    expect(result.cleaned).toBe(1);
+    expect(result.projects).toEqual([unlocked]);
+  });
+});
 
-    const updated = await fs.readFile(path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'), 'utf-8');
-    const updatedTldr = updated.split('\n')[0];
+describe('removeMemoryHooks accepts parsed Settings', () => {
+  it('accepts a parsed Settings object and returns JSON string', () => {
+    const settings = {
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/prompt-capture-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
+        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
+      },
+    };
+    const result = removeMemoryHooks(settings);
+    const parsed = JSON.parse(result);
+    expect(parsed.hooks).toBeUndefined();
+  });
 
-    expect(updatedTldr).toBe('<!-- TL;DR: 2 pitfalls. Key: PF-001, PF-002 -->');
-    expect(updated).toContain('## PF-002');
+  it('does not mutate the original Settings object when passed by reference', () => {
+    const settings = {
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+      },
+    };
+    removeMemoryHooks(settings);
+    // Original must be unchanged
+    expect(settings.hooks.Stop).toHaveLength(1);
+  });
+
+  it('consistent API: string and Settings produce same result', () => {
+    const settingsObj = {
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+      },
+    };
+    const resultFromObj = removeMemoryHooks(settingsObj);
+    const resultFromStr = removeMemoryHooks(JSON.stringify(settingsObj));
+    expect(JSON.parse(resultFromObj)).toEqual(JSON.parse(resultFromStr));
   });
 });
 

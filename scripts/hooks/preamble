@@ -13,12 +13,13 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | json_field "cwd" "")
-if [ -z "$CWD" ]; then
+FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
+CWD="${FIELDS%%$'\001'*}"
+PROMPT="${FIELDS#*$'\001'}"
+
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
   exit 0
 fi
-
-PROMPT=$(echo "$INPUT" | json_field "prompt" "")
 
 # Skip slash commands — they have their own orchestration
 if [[ "$PROMPT" == /* ]]; then

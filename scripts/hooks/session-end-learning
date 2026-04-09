@@ -24,7 +24,7 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 # Read hook input from stdin (Claude passes JSON with cwd, session_id, etc.)
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | json_field "cwd" "")
+CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 [ -z "$CWD" ] && exit 0
 
 MEMORY_DIR="$CWD/.memory"
@@ -67,7 +67,7 @@ if [ ! -d "$PROJECTS_DIR" ]; then
 fi
 
 # Extract session ID from hook JSON (preferred), fall back to most recent transcript
-SESSION_ID=$(echo "$INPUT" | json_field "session_id" "")
+SESSION_ID=$(printf '%s' "$INPUT" | json_field "session_id" "")
 if [ -n "$SESSION_ID" ] && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
   TRANSCRIPT="$PROJECTS_DIR/${SESSION_ID}.jsonl"
 else

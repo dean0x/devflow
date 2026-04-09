@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Working Memory: Prompt Capture Hook (UserPromptSubmit)
+# Captures user prompts to .memory/.pending-turns.jsonl queue.
+# Registered/removed with memory hooks — does not run when memory disabled.
+
+set -e
+
+# Break feedback loop: background updater's haiku session triggers hooks
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
+CWD="${FIELDS%%$'\001'*}"
+PROMPT="${FIELDS#*$'\001'}"
+
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
+
+source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
+
+if [ -z "$PROMPT" ]; then exit 0; fi
+
+# Truncate to 2000 chars
+if [ ${#PROMPT} -gt 2000 ]; then
+  PROMPT="${PROMPT:0:2000}... [truncated]"
+fi
+
+TS=$(date +%s)
+if [ "$_HAS_JQ" = "true" ]; then
+  jq -n -c --arg role "user" --arg content "$PROMPT" --argjson ts "$TS" \
+    '{role: $role, content: $content, ts: $ts}' >> "$CWD/.memory/.pending-turns.jsonl"
+else
+  node -e "process.stdout.write(JSON.stringify({role:'user',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
+    -- "$PROMPT" "$TS" >> "$CWD/.memory/.pending-turns.jsonl"
+fi
+
+exit 0

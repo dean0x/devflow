@@ -1,88 +1,142 @@
 #!/bin/bash
 
 # Working Memory: Stop Hook
-# Spawns a background process to update .memory/WORKING-MEMORY.md asynchronously.
-# The session ends immediately — no visible edit in the TUI.
+# Captures assistant responses to .memory/.pending-turns.jsonl queue,
+# then spawns background updater (throttled) to process accumulated turns.
 # On failure: does nothing (stale memory is better than fake data).
 
 set -e
 
 # Break feedback loop: background updater's headless session triggers stop hook on exit.
-# DEVFLOW_BG_UPDATER is set by background-memory-update before invoking claude.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
 
-# Resolve script directory once (used for json-parse, ensure-memory-gitignore, and updater)
+# Resolve script directory once
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# JSON parsing (jq with node fallback) — silently no-op if neither available
+# JSON parsing (jq with node fallback)
 source "$SCRIPT_DIR/json-parse"
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-# Resolve project directory — bail if missing
-CWD=$(echo "$INPUT" | json_field "cwd" "")
-if [ -z "$CWD" ]; then
-  exit 0
+# Resolve project directory and stop reason in one subprocess (consistent with
+# batched extraction pattern used in UserPromptSubmit hooks).
+# Uses ASCII SOH (0x01) as delimiter for bash 3.2 compatibility with cut.
+if [ "$_HAS_JQ" = "true" ]; then
+  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "\u0001" + (.stop_reason // "")')
+else
+  _FIELDS=$(printf '%s' "$INPUT" | node -e "
+    const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    process.stdout.write((j.cwd||'')+'\x01'+(j.stop_reason||''))")
 fi
+CWD="${_FIELDS%%$'\001'*}"
+STOP_REASON="${_FIELDS#*$'\001'}"
 
-# Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
+
+# Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
-# Logging (shared log file with background updater; [stop-hook] prefix distinguishes)
-MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
+source "$SCRIPT_DIR/get-mtime"
+
+# Logging
 source "$SCRIPT_DIR/log-paths"
 LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
 
-# Throttle: skip if stop hook was triggered within the last 2 minutes
-# Uses a marker file touched BEFORE spawning the updater — prevents race condition
-# where multiple hooks see stale WORKING-MEMORY.md mtime and all bypass throttle.
+# --- Filter: only capture end_turn stops ---
+if [ "$STOP_REASON" != "end_turn" ]; then
+  exit 0
+fi
+
+# --- Extract assistant_message (handles both string and content array) ---
+ASSISTANT_MSG=""
+if [ "$_HAS_JQ" = "true" ]; then
+  ASSISTANT_MSG=$(printf '%s' "$INPUT" | jq -r '
+    if (.assistant_message | type) == "string" then .assistant_message
+    elif (.assistant_message | type) == "array" then
+      [.assistant_message[] | select(.type == "text") | .text] | join("\n")
+    else "" end
+  ' 2>/dev/null || true)
+else
+  # Node fallback: extract assistant_message, try as string first
+  ASSISTANT_MSG=$(printf '%s' "$INPUT" | node -e "
+    let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+      try{const o=JSON.parse(d);const m=o.assistant_message;
+      if(typeof m==='string'){process.stdout.write(m)}
+      else if(Array.isArray(m)){process.stdout.write(m.filter(b=>b.type==='text').map(b=>b.text).join('\n'))}
+      }catch(e){}
+    })" 2>/dev/null || true)
+fi
+
+# Skip if empty
+if [ -z "$ASSISTANT_MSG" ]; then
+  log "Skipped: empty assistant_message"
+  exit 0
+fi
+
+# Truncate to 2000 chars
+if [ ${#ASSISTANT_MSG} -gt 2000 ]; then
+  ASSISTANT_MSG="${ASSISTANT_MSG:0:2000}... [truncated]"
+fi
+
+# --- Append to queue ---
+QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"
+TS=$(date +%s)
+if [ "$_HAS_JQ" = "true" ]; then
+  jq -n -c --arg role "assistant" --arg content "$ASSISTANT_MSG" --argjson ts "$TS" \
+    '{role: $role, content: $content, ts: $ts}' >> "$QUEUE_FILE"
+else
+  node -e "process.stdout.write(JSON.stringify({role:'assistant',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
+    -- "$ASSISTANT_MSG" "$TS" >> "$QUEUE_FILE"
+fi
+
+# Queue overflow safety: if >200 lines, keep last 100
+# NOTE: same 200/100 threshold in background-memory-update
+if [ -f "$QUEUE_FILE" ]; then
+  LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
+  if [ "$LINE_COUNT" -gt 200 ]; then
+    tail -100 "$QUEUE_FILE" > "$QUEUE_FILE.tmp" && mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+    log "Queue overflow: truncated from $LINE_COUNT to 100 lines"
+  fi
+fi
+
+log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
+
+# --- Throttle: only spawn background updater every 2 minutes ---
 TRIGGER_MARKER="$CWD/.memory/.working-memory-last-trigger"
 if [ -f "$TRIGGER_MARKER" ]; then
-  if stat --version &>/dev/null 2>&1; then
-    MARKER_MTIME=$(stat -c %Y "$TRIGGER_MARKER")
-  else
-    MARKER_MTIME=$(stat -f %m "$TRIGGER_MARKER")
-  fi
+  MARKER_MTIME=$(get_mtime "$TRIGGER_MARKER")
   NOW=$(date +%s)
   AGE=$(( NOW - MARKER_MTIME ))
   if [ "$AGE" -lt 120 ]; then
-    log "Skipped: triggered ${AGE}s ago (throttled)"
+    log "Throttled: triggered ${AGE}s ago (capture saved, processing deferred)"
     exit 0
   fi
 fi
 
-# Resolve claude binary — if not found, skip (graceful degradation)
+# Resolve claude binary
 CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
 if [ -z "$CLAUDE_BIN" ]; then
-  log "Skipped: claude binary not found"
+  log "Skipped spawn: claude binary not found"
   exit 0
 fi
 
-# Extract session ID from hook input
-SESSION_ID=$(echo "$INPUT" | json_field "session_id" "")
-if [ -z "$SESSION_ID" ]; then
-  log "Skipped: no session_id in hook input"
-  exit 0
-fi
-
-# Resolve the background updater script (same directory as this hook)
+# Resolve updater script
 UPDATER="$SCRIPT_DIR/background-memory-update"
 if [ ! -x "$UPDATER" ]; then
-  log "Skipped: updater not found/not executable at $UPDATER"
+  log "Skipped spawn: updater not found/not executable at $UPDATER"
   exit 0
 fi
 
-# Touch marker BEFORE spawning updater — prevents race with concurrent hooks
+# Touch marker BEFORE spawning (prevents race with concurrent hooks)
 touch "$TRIGGER_MARKER"
 
-# Spawn background updater — detached, no effect on session exit
-nohup "$UPDATER" "$CWD" "$SESSION_ID" "$MEMORY_FILE" "$CLAUDE_BIN" \
+# Spawn background updater — 2 args (down from 4)
+nohup "$UPDATER" "$CWD" "$CLAUDE_BIN" \
   </dev/null >/dev/null 2>&1 &
 disown
 
-log "Spawned background updater: session=$SESSION_ID cwd=$CWD memory=$MEMORY_FILE claude=$CLAUDE_BIN updater=$UPDATER"
+log "Spawned background updater: cwd=$CWD claude=$CLAUDE_BIN"
 
-# Allow stop immediately (no JSON output = proceed)
 exit 0

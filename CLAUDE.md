@@ -38,7 +38,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Build-time asset distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/`, then copied to each plugin at build time based on `plugin.json` manifests. This eliminates duplication in git.
 
-**Working Memory**: Three shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Stop hook → reads last turn from session transcript (`~/.claude/projects/{encoded-cwd}/{session_id}.jsonl`), spawns background `claude -p --model haiku` to update `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`; throttled: skips if triggered <2min ago; concurrent sessions serialize via mkdir-based lock). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Zero-ceremony context preservation.
+**Working Memory**: Four shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. UserPromptSubmit (`prompt-capture-memory`) captures user prompt to `.memory/.pending-turns.jsonl` queue. Stop hook captures `assistant_message` (on `end_turn` only) to same queue, then spawns throttled background `claude -p --model haiku` updater (skips if triggered <2min ago; concurrent sessions serialize via mkdir-based lock). Background updater uses `mv`-based atomic handoff to process all pending turns in batch (capped at 10 most recent), with crash recovery via `.pending-turns.processing` file. Updates `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Disabling memory removes all four hooks. Use `devflow memory --clear` to clean up pending queue files across projects. Zero-ceremony context preservation.
 
 **Ambient Mode**: Three-layer architecture for always-on intent classification. SessionStart hook (`session-start-classification`) reads lean classification rules (`~/.claude/skills/devflow:router/references/classification-rules.md`, ~30 lines) and injects as `additionalContext` — once per session, deterministic, zero model overhead. UserPromptSubmit hook (`preamble`) injects a one-sentence prompt per message triggering classification + router loading via Skill tool. Router SKILL.md is a pure skill lookup table (~50 lines) loaded on-demand only for GUIDED/ORCHESTRATED depth — maps intent×depth to domain and orchestration skills. Toggleable via `devflow ambient --enable/--disable/--status` or `devflow init`.
 
@@ -57,7 +57,7 @@ devflow/
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Working Memory + ambient + learning hooks (stop, session-start-memory, session-start-classification, pre-compact, preamble, session-end-learning, stop-update-learning [deprecated], background-learning)
+│   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, stop-update-learning [deprecated], background-learning, get-mtime)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, flags)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
@@ -105,7 +105,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 ```
 .memory/
-├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each session)
+├── WORKING-MEMORY.md         # Auto-maintained by background updater (queue-based, updated in batch)
 ├── backup.json               # Pre-compact git state snapshot
 ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
 ├── learning.json             # Project-level learning config (max runs, throttle, model, debug — no enabled field)
@@ -113,6 +113,8 @@ Working memory files live in a dedicated `.memory/` directory:
 ├── .learning-session-count   # Session IDs pending batch (one per line)
 ├── .learning-batch-ids       # Session IDs for current batch run
 ├── .learning-notified-at     # New artifact notification marker (epoch timestamp)
+├── .pending-turns.jsonl      # Queue of captured user/assistant turns (JSONL, ephemeral)
+├── .pending-turns.processing  # Atomic handoff during background processing (transient)
 └── knowledge/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
     └── pitfalls.md            # Known pitfalls (PF-NNN, area-specific gotchas)

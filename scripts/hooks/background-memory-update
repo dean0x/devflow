@@ -2,16 +2,21 @@
 
 # Background Working Memory Updater
 # Called by stop-update-memory as a detached background process.
-# Reads the last turn from the session transcript, then uses a fresh `claude -p`
-# invocation to update .memory/WORKING-MEMORY.md.
+# Reads queued turns from .memory/.pending-turns.jsonl, then uses a fresh
+# `claude -p` invocation to update .memory/WORKING-MEMORY.md.
 # On failure: logs error, does nothing (stale memory is better than fake data).
 
 set -e
 
 CWD="$1"
-SESSION_ID="$2"
-MEMORY_FILE="$3"
-CLAUDE_BIN="$4"
+CLAUDE_BIN="$2"
+
+if [ ! -d "$CWD" ]; then
+  echo "background-memory-update: CWD does not exist: $CWD" >&2
+  exit 1
+fi
+
+MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 
 # Source JSON parsing helpers (jq with node fallback)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -20,6 +25,9 @@ source "$SCRIPT_DIR/json-parse"
 source "$SCRIPT_DIR/log-paths"
 LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
 LOCK_DIR="$CWD/.memory/.working-memory.lock"
+
+QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"
+PROCESSING_FILE="$CWD/.memory/.pending-turns.processing"
 
 # --- Logging ---
 
@@ -36,16 +44,9 @@ rotate_log() {
 
 # --- Stale Lock Recovery ---
 
-# Portable mtime in epoch seconds
-get_mtime() {
-  if stat --version &>/dev/null 2>&1; then
-    stat -c %Y "$1"
-  else
-    stat -f %m "$1"
-  fi
-}
+source "$SCRIPT_DIR/get-mtime"
 
-STALE_THRESHOLD=300  # 5 min — generous vs 30-60s normal runtime
+STALE_THRESHOLD=300  # 5 min
 
 break_stale_lock() {
   if [ ! -d "$LOCK_DIR" ]; then return; fi
@@ -59,7 +60,7 @@ break_stale_lock() {
   fi
 }
 
-# --- Locking (mkdir-based, POSIX-atomic) ---
+# --- Locking ---
 
 acquire_lock() {
   local timeout=90
@@ -79,74 +80,141 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- Transcript Extraction ---
-
-extract_last_turn() {
-  # Compute transcript path: Claude Code stores transcripts at
-  # ~/.claude/projects/{cwd-with-slashes-replaced-by-hyphens}/{session_id}.jsonl
-  local encoded_cwd
-  encoded_cwd=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
-  local transcript="$HOME/.claude/projects/-${encoded_cwd}/${SESSION_ID}.jsonl"
-
-  if [ ! -f "$transcript" ]; then
-    log "Transcript not found at $transcript"
-    return 1
-  fi
-
-  # Extract last user and assistant text from JSONL
-  # Each line is a JSON object with "type" field
-  local last_user last_assistant
-
-  last_user=$(grep '"type":"user"' "$transcript" 2>/dev/null \
-    | tail -3 \
-    | while IFS= read -r line; do printf '%s\n' "$line" | head -c 100000 | json_extract_messages; done \
-    | awk 'NF' \
-    | tail -1)
-
-  last_assistant=$(grep '"type":"assistant"' "$transcript" 2>/dev/null \
-    | tail -3 \
-    | while IFS= read -r line; do printf '%s\n' "$line" | head -c 100000 | json_extract_messages; done \
-    | awk 'NF' \
-    | tail -1)
-
-  # Truncate to ~4000 chars total to keep token cost low
-  if [ ${#last_user} -gt 2000 ]; then
-    last_user="${last_user:0:2000}... [truncated]"
-  fi
-  if [ ${#last_assistant} -gt 2000 ]; then
-    last_assistant="${last_assistant:0:2000}... [truncated]"
-  fi
-
-  if [ -z "$last_user" ] && [ -z "$last_assistant" ]; then
-    log "No text content found in transcript"
-    return 1
-  fi
-
-  LAST_USER_TEXT="$last_user"
-  LAST_ASSISTANT_TEXT="$last_assistant"
-  return 0
-}
-
 # --- Main ---
 
-# Wait for parent session to flush transcript
-sleep 3
+log "Starting queue-based update"
 
-log "Starting update for session $SESSION_ID"
-
-# Break stale locks from previous zombie processes
 break_stale_lock
 
-# Acquire lock (other sessions may be updating concurrently)
 if ! acquire_lock; then
-  log "Lock timeout after 90s — skipping update for session $SESSION_ID"
+  log "Lock timeout after 90s — skipping update"
   trap - EXIT
   exit 0
 fi
 
 rotate_log
 
-# Read existing memory for merge context
+# --- Crash recovery: if .processing exists from a failed previous run ---
+if [ -f "$PROCESSING_FILE" ]; then
+  log "Found leftover .processing file from previous crash — recovering"
+  if [ -f "$QUEUE_FILE" ]; then
+    # Append new queue entries to the leftover processing file
+    cat "$QUEUE_FILE" >> "$PROCESSING_FILE"
+    rm "$QUEUE_FILE"
+    log "Merged new queue entries into recovery batch"
+  fi
+  # Cap processing file to prevent unbounded growth from persistent Write failures
+  # NOTE: same 200/100 threshold in stop-update-memory
+  PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+  if [ "$PROC_LINES" -gt 200 ]; then
+    tail -100 "$PROCESSING_FILE" > "$PROCESSING_FILE.tmp" && mv "$PROCESSING_FILE.tmp" "$PROCESSING_FILE"
+    log "Processing file overflow: truncated from $PROC_LINES to 100 lines"
+  fi
+else
+  # Normal path: atomic handoff
+  if [ ! -f "$QUEUE_FILE" ]; then
+    log "No pending turns in queue — skipping"
+    exit 0
+  fi
+  mv "$QUEUE_FILE" "$PROCESSING_FILE"
+fi
+
+# Count entries
+TOTAL_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+log "Processing $TOTAL_LINES queued entries"
+
+if [ "$TOTAL_LINES" -eq 0 ]; then
+  rm -f "$PROCESSING_FILE"
+  log "Processing file empty — skipping"
+  exit 0
+fi
+
+# --- Build turns from queue (cap at 10 most recent turns) ---
+# A "turn" is a user+assistant pair. Read entries in order, pair adjacent user→assistant.
+
+TURNS_TEXT=""
+TURN_COUNT=0
+MAX_TURNS=10
+
+# Take last entries if too many (each turn = 2 lines, so keep last MAX_TURNS*2 lines)
+MAX_LINES=$((MAX_TURNS * 2))
+if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
+  ENTRIES=$(tail -"$MAX_LINES" "$PROCESSING_FILE")
+  log "Capped to last $MAX_LINES entries (from $TOTAL_LINES)"
+else
+  ENTRIES=$(cat "$PROCESSING_FILE")
+fi
+
+# Single-pass extraction: extract role+content as TSV in one jq/node invocation.
+# Newlines within content are collapsed to a space to preserve TSV line integrity.
+if [ "$_HAS_JQ" = "true" ]; then
+  EXTRACTED=$(jq -r '(.role // "") + "\t" + ((.content // "") | gsub("\n"; " "))' <<< "$ENTRIES" 2>/dev/null)
+else
+  EXTRACTED=$(node -e '
+    const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const role = obj.role || "";
+        const content = (obj.content || "").replace(/\n/g, " ");
+        process.stdout.write(role + "\t" + content + "\n");
+      } catch {}
+    }
+  ' <<< "$ENTRIES" 2>/dev/null)
+fi
+
+CURRENT_USER=""
+while IFS=$'\t' read -r ROLE CONTENT; do
+  [ -z "$ROLE" ] && continue
+
+  if [ "$ROLE" = "user" ]; then
+    # If we had an orphan user (no assistant followed), emit it solo
+    if [ -n "$CURRENT_USER" ]; then
+      TURN_COUNT=$((TURN_COUNT + 1))
+      TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+User: ${CURRENT_USER}
+"
+    fi
+    CURRENT_USER="$CONTENT"
+  elif [ "$ROLE" = "assistant" ]; then
+    TURN_COUNT=$((TURN_COUNT + 1))
+    if [ -n "$CURRENT_USER" ]; then
+      TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+User: ${CURRENT_USER}
+Assistant: ${CONTENT}
+"
+      CURRENT_USER=""
+    else
+      # Orphan assistant (no preceding user)
+      TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+Assistant: ${CONTENT}
+"
+    fi
+  fi
+done <<< "$EXTRACTED"
+
+# Flush any trailing orphan user
+if [ -n "$CURRENT_USER" ]; then
+  TURN_COUNT=$((TURN_COUNT + 1))
+  TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+User: ${CURRENT_USER}
+"
+fi
+
+if [ "$TURN_COUNT" -eq 0 ]; then
+  rm -f "$PROCESSING_FILE"
+  log "No parseable turns in queue — skipping"
+  exit 0
+fi
+
+log "Built $TURN_COUNT turns from queue"
+
+# --- Read existing memory ---
 EXISTING_MEMORY=""
 PRE_UPDATE_MTIME=0
 if [ -f "$MEMORY_FILE" ]; then
@@ -154,7 +222,7 @@ if [ -f "$MEMORY_FILE" ]; then
   PRE_UPDATE_MTIME=$(get_mtime "$MEMORY_FILE")
 fi
 
-# Gather git state (always available, used as fallback too)
+# --- Gather git state ---
 GIT_STATE=""
 if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   GIT_STATUS=$(git status --short 2>/dev/null | head -20)
@@ -169,32 +237,14 @@ Diff summary:
 ${GIT_DIFF}"
 fi
 
-# Extract last turn from transcript (or fall back to git-only)
-LAST_USER_TEXT=""
-LAST_ASSISTANT_TEXT=""
-EXCHANGE_SECTION=""
-
-if extract_last_turn; then
-  log "--- Extracted user text (${#LAST_USER_TEXT} chars) ---"
-  log "$LAST_USER_TEXT"
-  log "--- Extracted assistant text (${#LAST_ASSISTANT_TEXT} chars) ---"
-  log "$LAST_ASSISTANT_TEXT"
-  log "--- End transcript extraction ---"
-  EXCHANGE_SECTION="Last exchange:
-User: ${LAST_USER_TEXT}
-Assistant: ${LAST_ASSISTANT_TEXT}"
-else
-  log "Falling back to git-state-only context"
-  EXCHANGE_SECTION="(Session transcript not available — using git state only)"
-fi
-
-# Build prompt for fresh claude -p invocation
+# --- Build prompt ---
 PROMPT="You are a working memory updater. Your ONLY job is to update the file at ${MEMORY_FILE} using the Write tool. Do it immediately — do not ask questions or explain.
 
 Current working memory:
 ${EXISTING_MEMORY:-"(no existing content)"}
 
-${EXCHANGE_SECTION}
+Recent session turns:
+${TURNS_TEXT}
 
 Git state:
 ${GIT_STATE:-"(not a git repo)"}
@@ -212,7 +262,7 @@ log "--- Full prompt being passed to claude -p ---"
 log "$PROMPT"
 log "--- End prompt ---"
 
-# Run fresh claude -p (no --resume, no conversation confusion)
+# --- Run claude -p ---
 TIMEOUT=120
 
 DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
@@ -223,32 +273,33 @@ DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
   >> "$LOG_FILE" 2>&1 &
 CLAUDE_PID=$!
 
-# Watchdog: kill claude if it exceeds timeout
 ( sleep "$TIMEOUT" && kill "$CLAUDE_PID" 2>/dev/null ) &
 WATCHDOG_PID=$!
 
 if wait "$CLAUDE_PID" 2>/dev/null; then
-  # Validate the file was actually modified (detect silent Write failures)
   if [ -f "$MEMORY_FILE" ]; then
     NEW_MTIME=$(get_mtime "$MEMORY_FILE")
     if [ "$NEW_MTIME" -gt "$PRE_UPDATE_MTIME" ]; then
-      log "Update completed for session $SESSION_ID"
+      log "Update completed successfully"
     else
-      log "Update finished but file was not modified for session $SESSION_ID (possible Write tool failure)"
+      log "Update finished but file was not modified (possible Write tool failure)"
     fi
   else
-    log "Update finished but file does not exist for session $SESSION_ID"
+    log "Update finished but file does not exist"
   fi
+  # Clean up on success (exit 0) even if Write was not invoked —
+  # retrying same turns won't help; new turns are captured in the queue
+  rm -f "$PROCESSING_FILE"
 else
   EXIT_CODE=$?
   if [ "$EXIT_CODE" -gt 128 ]; then
-    log "Update timed out (killed after ${TIMEOUT}s) for session $SESSION_ID"
+    log "Update timed out (killed after ${TIMEOUT}s)"
   else
-    log "Update failed for session $SESSION_ID (exit code $EXIT_CODE)"
+    log "Update failed (exit code $EXIT_CODE)"
   fi
+  # Leave .processing file for crash recovery on next run
 fi
 
-# Clean up watchdog
 kill "$WATCHDOG_PID" 2>/dev/null || true
 wait "$WATCHDOG_PID" 2>/dev/null || true
 
