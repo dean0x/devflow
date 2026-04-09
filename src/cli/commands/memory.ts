@@ -32,8 +32,6 @@ export function addMemoryHooks(settingsJson: string, devflowDir: string): string
     settings.hooks = {};
   }
 
-  let changed = false;
-
   for (const [hookType, marker] of Object.entries(MEMORY_HOOK_CONFIG)) {
     const existing = settings.hooks[hookType] ?? [];
     const alreadyPresent = existing.some((matcher) =>
@@ -57,12 +55,7 @@ export function addMemoryHooks(settingsJson: string, devflowDir: string): string
       }
 
       settings.hooks[hookType].push(newEntry);
-      changed = true;
     }
-  }
-
-  if (!changed) {
-    return settingsJson;
   }
 
   return JSON.stringify(settings, null, 2) + '\n';
