@@ -153,6 +153,32 @@ async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
   return checks.filter((c) => c.has).map((c) => c.root);
 }
 
+/**
+ * Clean up memory queue files from the given project paths.
+ * Skips projects where the background updater lock is held to avoid data loss.
+ * Returns the count of projects from which at least one file was removed.
+ */
+export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned: number; projects: string[] }> {
+  const cleanedProjects: string[] = [];
+  for (const project of projectPaths) {
+    const memDir = path.join(project, '.memory');
+    const lockDir = path.join(memDir, '.working-memory.lock');
+    try {
+      await fs.access(lockDir);
+      // Lock directory exists — background updater is active; skip to avoid data loss
+      continue;
+    } catch {
+      // No lock — safe to proceed
+    }
+    const q = await fs.unlink(path.join(memDir, '.pending-turns.jsonl')).then(() => true).catch(() => false);
+    const pr = await fs.unlink(path.join(memDir, '.pending-turns.processing')).then(() => true).catch(() => false);
+    if (q || pr) {
+      cleanedProjects.push(project);
+    }
+  }
+  return { cleaned: cleanedProjects.length, projects: cleanedProjects };
+}
+
 export const memoryCommand = new Command('memory')
   .description('Enable or disable working memory (session context preservation)')
   .option('--enable', 'Add UserPromptSubmit/Stop/SessionStart/PreCompact hooks')
@@ -177,11 +203,14 @@ export const memoryCommand = new Command('memory')
     if (options.clear) {
       p.intro(color.bgCyan(color.white(' Memory Cleanup ')));
 
-      const gitRoots = await discoverProjectGitRoots();
-      const projectsWithMemory = await filterProjectsWithMemory(gitRoots);
+      // Discover current project and all known projects in parallel
+      const [gitRoots, gitRoot] = await Promise.all([discoverProjectGitRoots(), getGitRoot()]);
+      const [projectsWithMemory, currentProjectHasMem] = await Promise.all([
+        filterProjectsWithMemory(gitRoots),
+        gitRoot ? hasMemoryDir(gitRoot) : Promise.resolve(false),
+      ]);
 
-      const gitRoot = await getGitRoot();
-      const currentProject = gitRoot && await hasMemoryDir(gitRoot) ? gitRoot : null;
+      const currentProject = gitRoot && currentProjectHasMem ? gitRoot : null;
 
       // Add current project if not already in list
       const allProjects = currentProject && !projectsWithMemory.includes(currentProject)
@@ -193,33 +222,35 @@ export const memoryCommand = new Command('memory')
         return;
       }
 
-      const scope = await p.select({
-        message: 'Clean up queue files from:',
-        options: [
-          ...(currentProject ? [{ value: 'local' as const, label: `Current project (${currentProject})` }] : []),
-          ...(allProjects.length > 0 ? [{
-            value: 'all' as const,
-            label: `All projects (${allProjects.length} found)`,
-            hint: allProjects.map(proj => path.basename(proj)).join(', '),
-          }] : []),
-        ],
-      });
+      let targets: string[];
+      if (!process.stdin.isTTY) {
+        // Non-interactive: clean all projects without prompting
+        p.log.info('Non-interactive mode detected, cleaning all projects');
+        targets = allProjects;
+      } else {
+        const scope = await p.select({
+          message: 'Clean up queue files from:',
+          options: [
+            ...(currentProject ? [{ value: 'local' as const, label: `Current project (${currentProject})` }] : []),
+            {
+              value: 'all' as const,
+              label: `All projects (${allProjects.length} found)`,
+              hint: allProjects.map(proj => path.basename(proj)).join(', '),
+            },
+          ],
+        });
 
-      if (p.isCancel(scope)) {
-        p.cancel('Cancelled');
-        return;
+        if (p.isCancel(scope)) {
+          p.cancel('Cancelled');
+          return;
+        }
+
+        targets = scope === 'local' && currentProject ? [currentProject] : allProjects;
       }
 
-      const targets = scope === 'local' ? [currentProject!] : allProjects;
-      let cleaned = 0;
-      for (const project of targets) {
-        const memDir = path.join(project, '.memory');
-        const q = await fs.unlink(path.join(memDir, '.pending-turns.jsonl')).then(() => true).catch(() => false);
-        const pr = await fs.unlink(path.join(memDir, '.pending-turns.processing')).then(() => true).catch(() => false);
-        if (q || pr) {
-          cleaned++;
-          p.log.info(color.dim(`Cleaned: ${project}`));
-        }
+      const { cleaned, projects: cleanedProjects } = await cleanQueueFiles(targets);
+      for (const project of cleanedProjects) {
+        p.log.info(color.dim(`Cleaned: ${project}`));
       }
       p.log.success(cleaned > 0
         ? `Cleaned queue files from ${cleaned} project${cleaned > 1 ? 's' : ''}`
