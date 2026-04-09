@@ -15,15 +15,9 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-if [ "$_HAS_JQ" = "true" ]; then
-  FIELDS=$(printf '%s' "$INPUT" | jq -r '[(.cwd // ""), (.prompt // "")] | @tsv')
-  CWD=$(printf '%s' "$FIELDS" | cut -f1)
-  PROMPT=$(printf '%s' "$FIELDS" | cut -f2-)
-else
-  FIELDS=$(printf '%s' "$INPUT" | node -e "const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.stdout.write((j.cwd||'')+'\t'+(j.prompt||''))")
-  CWD=$(printf '%s' "$FIELDS" | cut -f1)
-  PROMPT=$(printf '%s' "$FIELDS" | cut -f2-)
-fi
+FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
+CWD="${FIELDS%%$'\001'*}"
+PROMPT="${FIELDS#*$'\001'}"
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 

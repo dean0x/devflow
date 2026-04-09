@@ -14,6 +14,7 @@
 //   construct <json-template> [--arg k v] Build JSON object with args
 //   update-field <field> <value> [--json] Set field on stdin JSON (--json parses value)
 //   update-fields <json-patches>          Apply multiple field updates from stdin JSON
+//   extract-cwd-prompt                    Extract cwd + prompt fields, NUL-byte delimited
 //   extract-text-messages                 Extract text content from Claude message format
 //   merge-evidence                        Flatten, dedupe, limit to 10 from stdin JSON
 //   slurp-sort <file> <field> [limit]     Read JSONL, sort by field desc, limit results
@@ -220,6 +221,18 @@ try {
         }
       }
       console.log(JSON.stringify(input));
+      break;
+    }
+
+    case 'extract-cwd-prompt': {
+      // Extract cwd and prompt from hook JSON in one pass.
+      // Outputs: cwd + ASCII SOH (0x01) + prompt (no trailing newline).
+      // Caller splits with: cut -d$'\001' -f1 and cut -d$'\001' -f2-
+      // SOH is used (not NUL) for bash 3.2 compatibility with cut.
+      const input = JSON.parse(readStdin());
+      const cwd = input.cwd || '';
+      const prompt = input.prompt || '';
+      process.stdout.write(cwd + '\x01' + prompt);
       break;
     }
 

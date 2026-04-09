@@ -157,6 +157,24 @@ json_array_item() {
   fi
 }
 
+# --- Multi-field batched extraction ---
+
+# Extract cwd and prompt from stdin JSON in a single subprocess.
+# Uses ASCII SOH (U+0001) as delimiter — safe for prompts containing tabs or backslashes,
+# and compatible with bash 3.2 parameter expansion (unlike NUL byte).
+# Caller pattern (zero extra subprocesses for the split):
+#   FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
+#   CWD="${FIELDS%%$'\001'*}"
+#   PROMPT="${FIELDS#*$'\001'}"
+# This replaces the @tsv/@cut pattern, which corrupts tab chars in prompts to "\t".
+json_extract_cwd_prompt() {
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -r '(.cwd // "") + "\u0001" + (.prompt // "")' 2>/dev/null
+  else
+    node "$_JSON_HELPER" extract-cwd-prompt
+  fi
+}
+
 # --- Transcript extraction ---
 
 # Extract text messages from Claude message JSON. Usage: printf '%s\n' '{"message":...}' | json_extract_messages

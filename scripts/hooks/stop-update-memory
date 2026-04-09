@@ -19,8 +19,19 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-# Resolve project directory
-CWD=$(echo "$INPUT" | json_field "cwd" "")
+# Resolve project directory and stop reason in one subprocess (consistent with
+# batched extraction pattern used in UserPromptSubmit hooks).
+# Uses ASCII SOH (0x01) as delimiter for bash 3.2 compatibility with cut.
+if [ "$_HAS_JQ" = "true" ]; then
+  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "\u0001" + (.stop_reason // "")')
+else
+  _FIELDS=$(printf '%s' "$INPUT" | node -e "
+    const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    process.stdout.write((j.cwd||'')+'\x01'+(j.stop_reason||''))")
+fi
+CWD="${_FIELDS%%$'\001'*}"
+STOP_REASON="${_FIELDS#*$'\001'}"
+
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
 # Auto-create .memory/ and ensure .gitignore entries
@@ -34,7 +45,6 @@ LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
 
 # --- Filter: only capture end_turn stops ---
-STOP_REASON=$(echo "$INPUT" | json_field "stop_reason" "")
 if [ "$STOP_REASON" != "end_turn" ]; then
   exit 0
 fi
@@ -42,7 +52,7 @@ fi
 # --- Extract assistant_message (handles both string and content array) ---
 ASSISTANT_MSG=""
 if [ "$_HAS_JQ" = "true" ]; then
-  ASSISTANT_MSG=$(echo "$INPUT" | jq -r '
+  ASSISTANT_MSG=$(printf '%s' "$INPUT" | jq -r '
     if (.assistant_message | type) == "string" then .assistant_message
     elif (.assistant_message | type) == "array" then
       [.assistant_message[] | select(.type == "text") | .text] | join("\n")
@@ -50,7 +60,7 @@ if [ "$_HAS_JQ" = "true" ]; then
   ' 2>/dev/null || true)
 else
   # Node fallback: extract assistant_message, try as string first
-  ASSISTANT_MSG=$(echo "$INPUT" | node -e "
+  ASSISTANT_MSG=$(printf '%s' "$INPUT" | node -e "
     let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
       try{const o=JSON.parse(d);const m=o.assistant_message;
       if(typeof m==='string'){process.stdout.write(m)}

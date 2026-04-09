@@ -13,7 +13,7 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | json_field "cwd" "")
+CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
   exit 0
 fi
