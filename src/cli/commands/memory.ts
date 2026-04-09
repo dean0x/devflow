@@ -64,11 +64,13 @@ export function addMemoryHooks(settingsJson: string, devflowDir: string): string
 
 /**
  * Remove all memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) from settings JSON.
+ * Accepts either a JSON string or a parsed Settings object (consistent with hasMemoryHooks/countMemoryHooks).
  * Idempotent — returns unchanged JSON if no memory hooks present.
  * Preserves non-memory hooks. Cleans empty arrays/objects.
  */
-export function removeMemoryHooks(settingsJson: string): string {
-  const settings: Settings = JSON.parse(settingsJson);
+export function removeMemoryHooks(input: string | Settings): string {
+  const settingsJson = typeof input === 'string' ? input : JSON.stringify(input);
+  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : structuredClone(input);
 
   if (!settings.hooks) {
     return settingsJson;
@@ -143,12 +145,22 @@ interface MemoryOptions {
   clear?: boolean;
 }
 
-async function hasMemoryDir(root: string): Promise<boolean> {
-  try { await fs.access(path.join(root, '.memory')); return true; }
-  catch { return false; }
+export async function hasMemoryDir(root: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(root, '.memory'));
+    return true;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return false;
+    }
+    // Unexpected error (e.g. EACCES) — log and treat as absent to avoid false positives
+    console.warn(`[memory] Unexpected error checking .memory/ in ${root}: ${(err as Error).message}`);
+    return false;
+  }
 }
 
-async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
+export async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
   const checks = await Promise.all(gitRoots.map(async (root) => ({ root, has: await hasMemoryDir(root) })));
   return checks.filter((c) => c.has).map((c) => c.root);
 }
@@ -159,23 +171,25 @@ async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
  * Returns the count of projects from which at least one file was removed.
  */
 export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned: number; projects: string[] }> {
-  const cleanedProjects: string[] = [];
-  for (const project of projectPaths) {
-    const memDir = path.join(project, '.memory');
-    const lockDir = path.join(memDir, '.working-memory.lock');
-    try {
-      await fs.access(lockDir);
-      // Lock directory exists — background updater is active; skip to avoid data loss
-      continue;
-    } catch {
-      // No lock — safe to proceed
-    }
-    const q = await fs.unlink(path.join(memDir, '.pending-turns.jsonl')).then(() => true).catch(() => false);
-    const pr = await fs.unlink(path.join(memDir, '.pending-turns.processing')).then(() => true).catch(() => false);
-    if (q || pr) {
-      cleanedProjects.push(project);
-    }
-  }
+  const results = await Promise.all(
+    projectPaths.map(async (project) => {
+      const memDir = path.join(project, '.memory');
+      const lockDir = path.join(memDir, '.working-memory.lock');
+      try {
+        await fs.access(lockDir);
+        // Lock directory exists — background updater is active; skip to avoid data loss
+        return null;
+      } catch {
+        // No lock — safe to proceed
+      }
+      const [q, pr] = await Promise.all([
+        fs.unlink(path.join(memDir, '.pending-turns.jsonl')).then(() => true).catch(() => false),
+        fs.unlink(path.join(memDir, '.pending-turns.processing')).then(() => true).catch(() => false),
+      ]);
+      return (q || pr) ? project : null;
+    }),
+  );
+  const cleanedProjects = results.filter((p): p is string => p !== null);
   return { cleaned: cleanedProjects.length, projects: cleanedProjects };
 }
 
@@ -309,5 +323,6 @@ export const memoryCommand = new Command('memory')
       const updated = removeMemoryHooks(settingsContent);
       await fs.writeFile(settingsPath, updated, 'utf-8');
       p.log.success('Working memory disabled — hooks removed');
+      p.log.info(color.dim('Run devflow memory --clear to clean up queue files'));
     }
   });

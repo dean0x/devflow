@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { exec } from 'child_process';
-import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks } from '../src/cli/commands/memory.js';
+import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, cleanQueueFiles, hasMemoryDir, filterProjectsWithMemory } from '../src/cli/commands/memory.js';
 import { createMemoryDir, migrateMemoryFiles } from '../src/cli/utils/post-install.js';
 
 describe('addMemoryHooks', () => {
@@ -512,6 +512,196 @@ describe('countMemoryHooks accepts parsed Settings', () => {
     };
     expect(countMemoryHooks(settings)).toBe(2);
     expect(hasMemoryHooks(settings)).toBe(false);
+  });
+});
+
+describe('hasMemoryDir', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hasMemoryDir-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns true when .memory/ directory exists', async () => {
+    await fs.mkdir(path.join(tmpDir, '.memory'), { recursive: true });
+    expect(await hasMemoryDir(tmpDir)).toBe(true);
+  });
+
+  it('returns false when .memory/ directory does not exist', async () => {
+    expect(await hasMemoryDir(tmpDir)).toBe(false);
+  });
+
+  it('returns false when root itself does not exist', async () => {
+    expect(await hasMemoryDir(path.join(tmpDir, 'nonexistent'))).toBe(false);
+  });
+});
+
+describe('filterProjectsWithMemory', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-filterProjects-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty array when no git roots provided', async () => {
+    expect(await filterProjectsWithMemory([])).toEqual([]);
+  });
+
+  it('returns only projects that have .memory/', async () => {
+    const projA = path.join(tmpDir, 'projA');
+    const projB = path.join(tmpDir, 'projB');
+    const projC = path.join(tmpDir, 'projC');
+    await fs.mkdir(path.join(projA, '.memory'), { recursive: true });
+    await fs.mkdir(projB, { recursive: true }); // no .memory/
+    await fs.mkdir(path.join(projC, '.memory'), { recursive: true });
+
+    const result = await filterProjectsWithMemory([projA, projB, projC]);
+    expect(result).toEqual([projA, projC]);
+  });
+
+  it('returns empty array when no projects have .memory/', async () => {
+    const projA = path.join(tmpDir, 'projA');
+    await fs.mkdir(projA, { recursive: true });
+    expect(await filterProjectsWithMemory([projA])).toEqual([]);
+  });
+});
+
+describe('cleanQueueFiles', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-cleanQueue-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns cleaned=0 when no projects provided', async () => {
+    const result = await cleanQueueFiles([]);
+    expect(result).toEqual({ cleaned: 0, projects: [] });
+  });
+
+  it('cleans both queue files when both exist', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
+    await fs.writeFile(path.join(memDir, '.pending-turns.processing'), '{"role":"user"}');
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result.cleaned).toBe(1);
+    expect(result.projects).toEqual([tmpDir]);
+    await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).rejects.toThrow();
+    await expect(fs.access(path.join(memDir, '.pending-turns.processing'))).rejects.toThrow();
+  });
+
+  it('cleans only .pending-turns.jsonl when only that file exists', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result.cleaned).toBe(1);
+    await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).rejects.toThrow();
+  });
+
+  it('returns cleaned=0 when neither queue file exists', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result).toEqual({ cleaned: 0, projects: [] });
+  });
+
+  it('skips projects where lock directory is present', async () => {
+    const memDir = path.join(tmpDir, '.memory');
+    await fs.mkdir(memDir, { recursive: true });
+    await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
+    // Create the lock directory to simulate active background updater
+    await fs.mkdir(path.join(memDir, '.working-memory.lock'), { recursive: true });
+
+    const result = await cleanQueueFiles([tmpDir]);
+    expect(result).toEqual({ cleaned: 0, projects: [] });
+    // File should remain untouched
+    await expect(fs.access(path.join(memDir, '.pending-turns.jsonl'))).resolves.toBeUndefined();
+  });
+
+  it('cleans multiple projects in parallel', async () => {
+    const projA = path.join(tmpDir, 'projA');
+    const projB = path.join(tmpDir, 'projB');
+    const projC = path.join(tmpDir, 'projC');
+
+    for (const proj of [projA, projB, projC]) {
+      await fs.mkdir(path.join(proj, '.memory'), { recursive: true });
+      await fs.writeFile(path.join(proj, '.memory', '.pending-turns.jsonl'), '{"role":"user"}');
+    }
+
+    const result = await cleanQueueFiles([projA, projB, projC]);
+    expect(result.cleaned).toBe(3);
+    expect(result.projects).toContain(projA);
+    expect(result.projects).toContain(projB);
+    expect(result.projects).toContain(projC);
+  });
+
+  it('cleans unlocked projects and skips locked ones in same batch', async () => {
+    const locked = path.join(tmpDir, 'locked');
+    const unlocked = path.join(tmpDir, 'unlocked');
+
+    await fs.mkdir(path.join(locked, '.memory', '.working-memory.lock'), { recursive: true });
+    await fs.writeFile(path.join(locked, '.memory', '.pending-turns.jsonl'), 'data');
+
+    await fs.mkdir(path.join(unlocked, '.memory'), { recursive: true });
+    await fs.writeFile(path.join(unlocked, '.memory', '.pending-turns.jsonl'), 'data');
+
+    const result = await cleanQueueFiles([locked, unlocked]);
+    expect(result.cleaned).toBe(1);
+    expect(result.projects).toEqual([unlocked]);
+  });
+});
+
+describe('removeMemoryHooks accepts parsed Settings', () => {
+  it('accepts a parsed Settings object and returns JSON string', () => {
+    const settings = {
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/prompt-capture-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
+        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
+      },
+    };
+    const result = removeMemoryHooks(settings);
+    const parsed = JSON.parse(result);
+    expect(parsed.hooks).toBeUndefined();
+  });
+
+  it('does not mutate the original Settings object when passed by reference', () => {
+    const settings = {
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+      },
+    };
+    removeMemoryHooks(settings);
+    // Original must be unchanged
+    expect(settings.hooks.Stop).toHaveLength(1);
+  });
+
+  it('consistent API: string and Settings produce same result', () => {
+    const settingsObj = {
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+      },
+    };
+    const resultFromObj = removeMemoryHooks(settingsObj);
+    const resultFromStr = removeMemoryHooks(JSON.stringify(settingsObj));
+    expect(JSON.parse(resultFromObj)).toEqual(JSON.parse(resultFromStr));
   });
 });
 
