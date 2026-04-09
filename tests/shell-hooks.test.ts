@@ -16,6 +16,7 @@ const HOOK_SCRIPTS = [
   'stop-update-memory',
   'session-start-memory',
   'pre-compact-memory',
+  'prompt-capture-memory',
   'preamble',
   'json-parse',
 ];
@@ -1186,6 +1187,7 @@ describe('json-parse wrapper', () => {
 describe('working memory queue behavior', () => {
   const STOP_HOOK = path.join(HOOKS_DIR, 'stop-update-memory');
   const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
+  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'prompt-capture-memory');
 
   let tmpDir: string;
 
@@ -1241,7 +1243,7 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('preamble captures user prompt to queue', () => {
+  it('prompt-capture-memory captures user prompt to queue', () => {
     // Create .memory/ directory so capture is triggered
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
@@ -1251,8 +1253,7 @@ describe('working memory queue behavior', () => {
       prompt: 'implement the cache',
     });
 
-    // Capture stdout (preamble outputs classification JSON) — we don't assert on it here
-    execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
@@ -1266,8 +1267,27 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('preamble with missing .memory/ — no capture, exit 0', () => {
-    // tmpDir exists but has no .memory/ subdirectory
+  it('prompt-capture-memory with missing .memory/ — creates it via ensure-memory-gitignore, exit 0', () => {
+    // tmpDir exists but has no .memory/ subdirectory — ensure-memory-gitignore creates it
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-004a',
+      prompt: 'implement the cache',
+    });
+
+    expect(() => {
+      execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    // Hook creates .memory/ and writes to queue
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+
+  it('preamble does NOT write to queue — zero file I/O', () => {
+    // Create .memory/ to confirm preamble doesn't touch the queue even when .memory/ exists
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-004',
@@ -1275,6 +1295,23 @@ describe('working memory queue behavior', () => {
     });
 
     // Should not throw (exit 0)
+    expect(() => {
+      execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('preamble with slash command — exits 0, no queue write', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-004b',
+      prompt: '/code-review',
+    });
+
     expect(() => {
       execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
@@ -1364,7 +1401,7 @@ describe('working memory queue behavior', () => {
 
     // After overflow: 201 pre-existing + 1 new = 202 lines → truncated to last 100
     const resultLines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
-    expect(resultLines.length).toBeLessThanOrEqual(101);
+    expect(resultLines).toHaveLength(100);
 
     // The new entry (the assistant turn) must be present as the last line
     const lastEntry = JSON.parse(resultLines[resultLines.length - 1]);
