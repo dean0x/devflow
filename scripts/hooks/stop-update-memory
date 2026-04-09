@@ -26,14 +26,7 @@ if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 # Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
-# Portable mtime (GNU stat uses -c, BSD stat uses -f)
-get_mtime() {
-  if stat --version &>/dev/null 2>&1; then
-    stat -c %Y "$1"
-  else
-    stat -f %m "$1"
-  fi
-}
+source "$SCRIPT_DIR/get-mtime"
 
 # Logging
 source "$SCRIPT_DIR/log-paths"

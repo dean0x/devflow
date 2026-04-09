@@ -483,7 +483,39 @@ describe('migrateMemoryFiles', () => {
   });
 });
 
-describe('queue file cleanup', () => {
+describe('countMemoryHooks accepts parsed Settings', () => {
+  it('accepts a parsed Settings object (not just JSON string)', () => {
+    const settings = {
+      hooks: {
+        UserPromptSubmit: [{ hooks: [{ type: 'command' as const, command: '/path/prompt-capture-memory', timeout: 10 }] }],
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
+        PreCompact: [{ hooks: [{ type: 'command' as const, command: '/path/pre-compact-memory', timeout: 10 }] }],
+      },
+    };
+    expect(countMemoryHooks(settings)).toBe(4);
+    expect(hasMemoryHooks(settings)).toBe(true);
+  });
+
+  it('accepts parsed Settings with no hooks', () => {
+    const settings = {};
+    expect(countMemoryHooks(settings)).toBe(0);
+    expect(hasMemoryHooks(settings)).toBe(false);
+  });
+
+  it('accepts parsed Settings with partial hooks', () => {
+    const settings = {
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command' as const, command: '/path/stop-update-memory', timeout: 10 }] }],
+        SessionStart: [{ hooks: [{ type: 'command' as const, command: '/path/session-start-memory', timeout: 10 }] }],
+      },
+    };
+    expect(countMemoryHooks(settings)).toBe(2);
+    expect(hasMemoryHooks(settings)).toBe(false);
+  });
+});
+
+describe('memory --clear queue cleanup', () => {
   let tmpDir: string;
 
   beforeEach(async () => {
@@ -495,46 +527,42 @@ describe('queue file cleanup', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('removeMemoryHooks + queue cleanup deletes .pending-turns.jsonl when present', async () => {
+  it('cleans .pending-turns.jsonl when present', async () => {
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     await fs.writeFile(queueFile, '{"role":"user","content":"test","ts":1}\n');
 
-    // removeMemoryHooks is pure (settings only); queue cleanup is done by the command handler
-    // Simulate the disable handler's cleanup logic:
-    const queueDeleted = await fs.unlink(queueFile).then(() => true).catch(() => false);
-    const procDeleted = await fs.unlink(path.join(tmpDir, '.memory', '.pending-turns.processing')).then(() => true).catch(() => false);
+    const q = await fs.unlink(queueFile).then(() => true).catch(() => false);
+    const pr = await fs.unlink(path.join(tmpDir, '.memory', '.pending-turns.processing')).then(() => true).catch(() => false);
 
-    expect(queueDeleted).toBe(true);
-    expect(procDeleted).toBe(false); // did not exist
+    expect(q).toBe(true);
+    expect(pr).toBe(false); // did not exist
     await expect(fs.access(queueFile)).rejects.toThrow();
   });
 
-  it('queue cleanup is safe when .pending-turns.jsonl does not exist', async () => {
-    // Should not throw
-    const queueDeleted = await fs.unlink(path.join(tmpDir, '.memory', '.pending-turns.jsonl')).then(() => true).catch(() => false);
-    const procDeleted = await fs.unlink(path.join(tmpDir, '.memory', '.pending-turns.processing')).then(() => true).catch(() => false);
+  it('is safe when queue files do not exist', async () => {
+    const q = await fs.unlink(path.join(tmpDir, '.memory', '.pending-turns.jsonl')).then(() => true).catch(() => false);
+    const pr = await fs.unlink(path.join(tmpDir, '.memory', '.pending-turns.processing')).then(() => true).catch(() => false);
 
-    expect(queueDeleted).toBe(false);
-    expect(procDeleted).toBe(false);
+    expect(q).toBe(false);
+    expect(pr).toBe(false);
   });
 
-  it('queue cleanup deletes both .pending-turns.jsonl and .pending-turns.processing', async () => {
+  it('cleans both .pending-turns.jsonl and .pending-turns.processing', async () => {
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const procFile = path.join(tmpDir, '.memory', '.pending-turns.processing');
     await fs.writeFile(queueFile, '{"role":"user","content":"a","ts":1}\n');
     await fs.writeFile(procFile, '{"role":"assistant","content":"b","ts":2}\n');
 
-    const queueDeleted = await fs.unlink(queueFile).then(() => true).catch(() => false);
-    const procDeleted = await fs.unlink(procFile).then(() => true).catch(() => false);
+    const q = await fs.unlink(queueFile).then(() => true).catch(() => false);
+    const pr = await fs.unlink(procFile).then(() => true).catch(() => false);
 
-    expect(queueDeleted).toBe(true);
-    expect(procDeleted).toBe(true);
+    expect(q).toBe(true);
+    expect(pr).toBe(true);
     await expect(fs.access(queueFile)).rejects.toThrow();
     await expect(fs.access(procFile)).rejects.toThrow();
   });
 
-  it('queue cleanup is safe when .memory/ directory does not exist', async () => {
-    // Use a non-existent dir
+  it('is safe when .memory/ directory does not exist', async () => {
     const nonExistentMemory = path.join(tmpDir, 'no-such-dir', '.pending-turns.jsonl');
     const deleted = await fs.unlink(nonExistentMemory).then(() => true).catch(() => false);
     expect(deleted).toBe(false);

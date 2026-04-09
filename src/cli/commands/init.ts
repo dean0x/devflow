@@ -951,11 +951,6 @@ export const initCommand = new Command('init')
     if (memoryEnabled) {
       await createMemoryDir(verbose);
       await migrateMemoryFiles(verbose);
-    } else {
-      // Clean up ephemeral queue files from previous enable
-      const memoryDir = path.join(process.cwd(), '.memory');
-      await fs.unlink(path.join(memoryDir, '.pending-turns.jsonl')).catch(() => {});
-      await fs.unlink(path.join(memoryDir, '.pending-turns.processing')).catch(() => {});
     }
 
     // Configure HUD

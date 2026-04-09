@@ -47,10 +47,12 @@ devflow/
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
 │       ├── prompt-capture-memory   # UserPromptSubmit hook: captures prompts to queue
+│       ├── background-memory-update # Background: queue-based WORKING-MEMORY.md updater
 │       ├── preamble                # UserPromptSubmit hook: ambient skill injection (zero file I/O)
 │       ├── session-end-learning      # SessionEnd hook: batched learning trigger
 │       ├── stop-update-learning     # Stop hook: deprecated stub (upgrade via devflow learn)
 │       ├── background-learning      # Background: pattern detection via Sonnet
+│       ├── get-mtime                # Shared helper: portable mtime (BSD/GNU stat)
 │       ├── json-helper.cjs           # Node.js jq-equivalent operations
 │       └── json-parse               # Shell wrapper: jq with node fallback
 └── src/
@@ -161,13 +163,14 @@ A fifth hook (`session-end-learning`) provides self-learning. Toggleable via `de
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|
 | `prompt-capture-memory` | UserPromptSubmit | `.memory/.pending-turns.jsonl` | Captures user prompts to queue. Zero classification overhead. |
-| `stop-update-memory` | Stop | `.memory/WORKING-MEMORY.md` | Captures assistant turns to queue. Throttled (skips if <2min fresh). Spawns background updater. |
+| `stop-update-memory` | Stop | `.memory/.pending-turns.jsonl` | Captures assistant turns to queue. Throttled (skips if <2min fresh). Spawns background updater. |
+| `background-memory-update` | (background) | `.memory/WORKING-MEMORY.md` | Queue-based updater spawned by stop-update-memory. Reads queued turns + git state, writes WORKING-MEMORY.md via `claude -p --model haiku`. |
 | `session-start-memory` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. Injects pre-compact snapshot when compaction occurred mid-session. |
 | `pre-compact-memory` | PreCompact | `.memory/backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
 
 **Flow**: User sends prompt → UserPromptSubmit hook (prompt-capture-memory) appends user turn to `.memory/.pending-turns.jsonl`. Session ends → Stop hook appends assistant turn to queue, checks throttle (skips if <2min fresh), spawns background updater → background updater reads queued turns + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
 
-`devflow memory --disable` removes all four hooks and cleans up any pending queue files (`.pending-turns.jsonl`, `.pending-turns.processing`).
+`devflow memory --disable` removes all four hooks. Use `devflow memory --clear` to clean up pending queue files (`.pending-turns.jsonl`, `.pending-turns.processing`) across all projects.
 
 Hooks auto-create `.memory/` on first run — no manual setup needed per project.
 

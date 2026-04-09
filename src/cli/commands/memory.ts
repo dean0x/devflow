@@ -4,7 +4,8 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { createMemoryDir, migrateMemoryFiles } from '../utils/post-install.js';
+import { createMemoryDir, migrateMemoryFiles, discoverProjectGitRoots } from '../utils/post-install.js';
+import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 /**
@@ -24,7 +25,7 @@ const MEMORY_HOOK_CONFIG: Record<string, string> = {
 export function addMemoryHooks(settingsJson: string, devflowDir: string): string {
   const settings: Settings = JSON.parse(settingsJson);
 
-  if (hasMemoryHooks(settingsJson)) {
+  if (hasMemoryHooks(settings)) {
     return settingsJson;
   }
 
@@ -106,17 +107,18 @@ export function removeMemoryHooks(settingsJson: string): string {
 }
 
 /**
- * Check if ALL 4 memory hooks are registered in settings JSON.
+ * Check if ALL 4 memory hooks are registered in settings JSON or parsed Settings object.
  */
-export function hasMemoryHooks(settingsJson: string): boolean {
-  return countMemoryHooks(settingsJson) === Object.keys(MEMORY_HOOK_CONFIG).length;
+export function hasMemoryHooks(input: string | Settings): boolean {
+  return countMemoryHooks(input) === Object.keys(MEMORY_HOOK_CONFIG).length;
 }
 
 /**
  * Count how many of the 4 memory hooks are present (0-4).
+ * Accepts either a JSON string or a parsed Settings object.
  */
-export function countMemoryHooks(settingsJson: string): number {
-  const settings: Settings = JSON.parse(settingsJson);
+export function countMemoryHooks(input: string | Settings): number {
+  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
 
   if (!settings.hooks) {
     return 0;
@@ -138,6 +140,24 @@ interface MemoryOptions {
   enable?: boolean;
   disable?: boolean;
   status?: boolean;
+  clear?: boolean;
+}
+
+async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
+  const results = await Promise.allSettled(
+    gitRoots.map(async (root) => {
+      await fs.access(path.join(root, '.memory'));
+      return root;
+    }),
+  );
+  return results
+    .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+    .map((r) => r.value);
+}
+
+async function hasMemoryDir(root: string): Promise<boolean> {
+  try { await fs.access(path.join(root, '.memory')); return true; }
+  catch { return false; }
 }
 
 export const memoryCommand = new Command('memory')
@@ -145,17 +165,72 @@ export const memoryCommand = new Command('memory')
   .option('--enable', 'Add UserPromptSubmit/Stop/SessionStart/PreCompact hooks')
   .option('--disable', 'Remove memory hooks')
   .option('--status', 'Show current state')
+  .option('--clear', 'Clean up queue files from projects')
   .action(async (options: MemoryOptions) => {
-    const hasFlag = options.enable || options.disable || options.status;
+    const hasFlag = options.enable || options.disable || options.status || options.clear;
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' Working Memory ')));
       p.note(
         `${color.cyan('devflow memory --enable')}   Add memory hooks\n` +
         `${color.cyan('devflow memory --disable')}  Remove memory hooks\n` +
-        `${color.cyan('devflow memory --status')}   Check current state`,
+        `${color.cyan('devflow memory --status')}   Check current state\n` +
+        `${color.cyan('devflow memory --clear')}    Clean up queue files`,
         'Usage',
       );
       p.outro(color.dim('Memory hooks provide automatic session context preservation'));
+      return;
+    }
+
+    if (options.clear) {
+      p.intro(color.bgCyan(color.white(' Memory Cleanup ')));
+
+      const gitRoots = await discoverProjectGitRoots();
+      const projectsWithMemory = await filterProjectsWithMemory(gitRoots);
+
+      const gitRoot = await getGitRoot();
+      const currentProject = gitRoot && await hasMemoryDir(gitRoot) ? gitRoot : null;
+
+      // Add current project if not already in list
+      const allProjects = currentProject && !projectsWithMemory.includes(currentProject)
+        ? [currentProject, ...projectsWithMemory]
+        : projectsWithMemory;
+
+      if (allProjects.length === 0) {
+        p.log.info('No projects with .memory/ found');
+        return;
+      }
+
+      const scope = await p.select({
+        message: 'Clean up queue files from:',
+        options: [
+          ...(currentProject ? [{ value: 'local' as const, label: `Current project (${currentProject})` }] : []),
+          ...(allProjects.length > 0 ? [{
+            value: 'all' as const,
+            label: `All projects (${allProjects.length} found)`,
+            hint: allProjects.map(proj => path.basename(proj)).join(', '),
+          }] : []),
+        ],
+      });
+
+      if (p.isCancel(scope)) {
+        p.cancel('Cancelled');
+        return;
+      }
+
+      const targets = scope === 'local' ? [currentProject!] : allProjects;
+      let cleaned = 0;
+      for (const project of targets) {
+        const memDir = path.join(project, '.memory');
+        const q = await fs.unlink(path.join(memDir, '.pending-turns.jsonl')).then(() => true).catch(() => false);
+        const pr = await fs.unlink(path.join(memDir, '.pending-turns.processing')).then(() => true).catch(() => false);
+        if (q || pr) {
+          cleaned++;
+          p.log.info(color.dim(`Cleaned: ${project}`));
+        }
+      }
+      p.log.success(cleaned > 0
+        ? `Cleaned queue files from ${cleaned} project${cleaned > 1 ? 's' : ''}`
+        : 'No queue files found to clean');
       return;
     }
 
@@ -190,11 +265,11 @@ export const memoryCommand = new Command('memory')
     const devflowDir = getDevFlowDirectory();
 
     if (options.enable) {
-      const updated = addMemoryHooks(settingsContent, devflowDir);
-      if (updated === settingsContent) {
+      if (hasMemoryHooks(settingsContent)) {
         p.log.info('Working memory already enabled');
         return;
       }
+      const updated = addMemoryHooks(settingsContent, devflowDir);
       await fs.writeFile(settingsPath, updated, 'utf-8');
       await createMemoryDir(false);
       await migrateMemoryFiles(true);
@@ -203,19 +278,12 @@ export const memoryCommand = new Command('memory')
     }
 
     if (options.disable) {
-      const updated = removeMemoryHooks(settingsContent);
-      if (updated === settingsContent) {
+      if (countMemoryHooks(settingsContent) === 0) {
         p.log.info('Working memory already disabled');
         return;
       }
+      const updated = removeMemoryHooks(settingsContent);
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      // Clean up ephemeral queue files
-      const memoryDir = path.join(process.cwd(), '.memory');
-      const queueDeleted = await fs.unlink(path.join(memoryDir, '.pending-turns.jsonl')).then(() => true).catch(() => false);
-      const procDeleted = await fs.unlink(path.join(memoryDir, '.pending-turns.processing')).then(() => true).catch(() => false);
-      if (queueDeleted || procDeleted) {
-        p.log.info(color.dim('Cleaned up pending queue files'));
-      }
       p.log.success('Working memory disabled — hooks removed');
     }
   });

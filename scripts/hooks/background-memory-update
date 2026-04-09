@@ -44,14 +44,7 @@ rotate_log() {
 
 # --- Stale Lock Recovery ---
 
-# Portable mtime (GNU stat uses -c, BSD stat uses -f)
-get_mtime() {
-  if stat --version &>/dev/null 2>&1; then
-    stat -c %Y "$1"
-  else
-    stat -f %m "$1"
-  fi
-}
+source "$SCRIPT_DIR/get-mtime"
 
 STALE_THRESHOLD=300  # 5 min
 

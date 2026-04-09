@@ -15,12 +15,20 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-CWD=$(echo "$INPUT" | json_field "cwd" "")
+if [ "$_HAS_JQ" = "true" ]; then
+  FIELDS=$(printf '%s' "$INPUT" | jq -r '[(.cwd // ""), (.prompt // "")] | @tsv')
+  CWD=$(printf '%s' "$FIELDS" | cut -f1)
+  PROMPT=$(printf '%s' "$FIELDS" | cut -f2-)
+else
+  FIELDS=$(printf '%s' "$INPUT" | node -e "const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.stdout.write((j.cwd||'')+'\t'+(j.prompt||''))")
+  CWD=$(printf '%s' "$FIELDS" | cut -f1)
+  PROMPT=$(printf '%s' "$FIELDS" | cut -f2-)
+fi
+
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
-PROMPT=$(echo "$INPUT" | json_field "prompt" "")
 if [ -z "$PROMPT" ]; then exit 0; fi
 
 # Truncate to 2000 chars

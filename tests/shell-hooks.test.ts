@@ -19,6 +19,7 @@ const HOOK_SCRIPTS = [
   'prompt-capture-memory',
   'preamble',
   'json-parse',
+  'get-mtime',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1407,5 +1408,87 @@ describe('working memory queue behavior', () => {
     const lastEntry = JSON.parse(resultLines[resultLines.length - 1]);
     expect(lastEntry.role).toBe('assistant');
     expect(lastEntry.content).toBe('overflow trigger response');
+  });
+
+  it('prompt-capture-memory truncates prompts longer than 2000 chars', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const longPrompt = 'a'.repeat(3000);
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-trunc-001',
+      prompt: longPrompt,
+    });
+
+    execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.content.length).toBeLessThan(3000);
+    expect(entry.content).toContain('[truncated]');
+  });
+
+  it('stop-update-memory truncates assistant content longer than 2000 chars', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    // Touch throttle marker to prevent background spawn attempt
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const longMessage = 'b'.repeat(5000);
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-trunc-002',
+      stop_reason: 'end_turn',
+      assistant_message: longMessage,
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.content.length).toBeLessThan(5000);
+    expect(entry.content).toContain('[truncated]');
+  });
+
+  it('stop-update-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-bg-guard-001',
+      stop_reason: 'end_turn',
+      assistant_message: 'should not be captured',
+    });
+
+    // Should not throw; no queue write expected
+    expect(() => {
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('prompt-capture-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-bg-guard-002',
+      prompt: 'should not be captured',
+    });
+
+    // Should not throw; no queue write expected
+    expect(() => {
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
   });
 });
