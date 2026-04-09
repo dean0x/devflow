@@ -143,21 +143,14 @@ interface MemoryOptions {
   clear?: boolean;
 }
 
-async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
-  const results = await Promise.allSettled(
-    gitRoots.map(async (root) => {
-      await fs.access(path.join(root, '.memory'));
-      return root;
-    }),
-  );
-  return results
-    .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
-    .map((r) => r.value);
-}
-
 async function hasMemoryDir(root: string): Promise<boolean> {
   try { await fs.access(path.join(root, '.memory')); return true; }
   catch { return false; }
+}
+
+async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
+  const checks = await Promise.all(gitRoots.map(async (root) => ({ root, has: await hasMemoryDir(root) })));
+  return checks.filter((c) => c.has).map((c) => c.root);
 }
 
 export const memoryCommand = new Command('memory')
