@@ -1492,3 +1492,28 @@ describe('working memory queue behavior', () => {
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 });
+
+describe('get-mtime behavioral', () => {
+  it('returns a valid positive epoch timestamp for a real file', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const tmpFile = path.join(tmpDir, 'probe.txt');
+    const getMtimeScript = path.join(HOOKS_DIR, 'get-mtime');
+
+    try {
+      fs.writeFileSync(tmpFile, 'probe');
+      const result = execSync(
+        `bash -c 'source "${getMtimeScript}" && get_mtime "${tmpFile}"'`,
+        { stdio: 'pipe' }
+      ).toString().trim();
+
+      const epoch = parseInt(result, 10);
+      expect(Number.isInteger(epoch)).toBe(true);
+      expect(epoch).toBeGreaterThan(0);
+      // Sanity: must be after 2020-01-01 (epoch 1577836800) and before year 2100 (4102444800)
+      expect(epoch).toBeGreaterThan(1577836800);
+      expect(epoch).toBeLessThan(4102444800);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

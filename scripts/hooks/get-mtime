@@ -1,11 +1,23 @@
 #!/bin/bash
 # Portable file mtime extraction (BSD/GNU stat compatible)
 # Usage: source "$SCRIPT_DIR/get-mtime"  then  mtime=$(get_mtime "/path/to/file")
+# Returns: Unix epoch seconds of file's last modification time
+
+# Cache platform detection on first call to avoid repeated capability probes
+_GET_MTIME_STAT_TYPE=""
 
 get_mtime() {
   local file="$1"
-  if stat -f %m "$file" 2>/dev/null; then
-    return  # BSD (macOS)
+  if [ -z "$_GET_MTIME_STAT_TYPE" ]; then
+    if stat --version &>/dev/null 2>&1; then
+      _GET_MTIME_STAT_TYPE="gnu"
+    else
+      _GET_MTIME_STAT_TYPE="bsd"
+    fi
   fi
-  stat -c %Y "$file" 2>/dev/null  # GNU (Linux)
+  if [ "$_GET_MTIME_STAT_TYPE" = "gnu" ]; then
+    stat -c %Y "$file" 2>/dev/null  # GNU (Linux)
+  else
+    stat -f %m "$file" 2>/dev/null  # BSD (macOS)
+  fi
 }
