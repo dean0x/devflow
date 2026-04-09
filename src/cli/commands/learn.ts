@@ -134,11 +134,11 @@ export function removeLearningHook(settingsJson: string): string {
 }
 
 /**
- * Check if the learning hook is registered in settings JSON.
+ * Check if the learning hook is registered in settings JSON or parsed Settings object.
  * Returns 'current' for SessionEnd hook, 'legacy' for old Stop hook, or false if absent.
  */
-export function hasLearningHook(settingsJson: string): 'current' | 'legacy' | false {
-  const settings: Settings = JSON.parse(settingsJson);
+export function hasLearningHook(input: string | Settings): 'current' | 'legacy' | false {
+  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
 
   const hasSessionEnd = settings.hooks?.SessionEnd?.some((matcher) =>
     matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),

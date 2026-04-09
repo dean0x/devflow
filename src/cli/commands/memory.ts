@@ -194,7 +194,7 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
 }
 
 export const memoryCommand = new Command('memory')
-  .description('Enable or disable working memory (session context preservation)')
+  .description('Enable, disable, or clean up working memory (session context preservation)')
   .option('--enable', 'Add UserPromptSubmit/Stop/SessionStart/PreCompact hooks')
   .option('--disable', 'Remove memory hooks')
   .option('--status', 'Show current state')
