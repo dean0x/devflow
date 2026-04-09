@@ -145,6 +145,10 @@ interface MemoryOptions {
   clear?: boolean;
 }
 
+/**
+ * Returns true if the given project root contains a `.memory/` directory.
+ * Treats unexpected errors (e.g. EACCES) as absent to avoid false positives.
+ */
 export async function hasMemoryDir(root: string): Promise<boolean> {
   try {
     await fs.access(path.join(root, '.memory'));
@@ -160,6 +164,9 @@ export async function hasMemoryDir(root: string): Promise<boolean> {
   }
 }
 
+/**
+ * Filters the provided git root paths to those that contain a `.memory/` directory.
+ */
 export async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
   const checks = await Promise.all(gitRoots.map(async (root) => ({ root, has: await hasMemoryDir(root) })));
   return checks.filter((c) => c.has).map((c) => c.root);

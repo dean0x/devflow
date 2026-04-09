@@ -1427,7 +1427,8 @@ describe('working memory queue behavior', () => {
     expect(lines).toHaveLength(1);
 
     const entry = JSON.parse(lines[0]);
-    expect(entry.content.length).toBeLessThan(3000);
+    // Truncated at 2000 chars + '... [truncated]' suffix (15 chars) = 2015
+    expect(entry.content.length).toBe(2015);
     expect(entry.content).toContain('[truncated]');
   });
 
@@ -1451,7 +1452,8 @@ describe('working memory queue behavior', () => {
     expect(lines).toHaveLength(1);
 
     const entry = JSON.parse(lines[0]);
-    expect(entry.content.length).toBeLessThan(5000);
+    // Truncated at 2000 chars + '... [truncated]' suffix (15 chars) = 2015
+    expect(entry.content.length).toBe(2015);
     expect(entry.content).toContain('[truncated]');
   });
 
