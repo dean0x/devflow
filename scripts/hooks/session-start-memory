@@ -28,11 +28,8 @@ if [ -f "$MEMORY_FILE" ]; then
   MEMORY_CONTENT=$(cat "$MEMORY_FILE")
 
   # Compute staleness warning
-  if stat --version &>/dev/null 2>&1; then
-    FILE_MTIME=$(stat -c %Y "$MEMORY_FILE")
-  else
-    FILE_MTIME=$(stat -f %m "$MEMORY_FILE")
-  fi
+  source "$SCRIPT_DIR/get-mtime"
+  FILE_MTIME=$(get_mtime "$MEMORY_FILE")
   NOW=$(date +%s)
   AGE=$(( NOW - FILE_MTIME ))
 

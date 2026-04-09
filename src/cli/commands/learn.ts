@@ -364,15 +364,19 @@ export const learnCommand = new Command('learn')
 
     // --- --list ---
     if (options.list) {
-      let observations: LearningObservation[];
-      let invalidCount: number;
+      let logExists = true;
       try {
-        const logContent = await fs.readFile(logPath, 'utf-8');
-        ({ observations, invalidCount } = loadAndCountObservations(logContent));
+        await fs.access(logPath);
       } catch {
+        logExists = false;
+      }
+
+      if (!logExists) {
         p.log.info('No observations yet. Learning log not found.');
         return;
       }
+
+      const { observations, invalidCount } = await readObservations(logPath);
 
       if (observations.length === 0) {
         p.log.info('No observations recorded yet.');
