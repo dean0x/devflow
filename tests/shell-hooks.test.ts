@@ -503,7 +503,7 @@ describe('json-helper.cjs process-observations', () => {
 
       const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
       expect(entry.observations).toBe(2);
-      expect(entry.confidence).toBe(0.40);
+      expect(entry.confidence).toBe(0.66);
       expect(entry.evidence).toContain('old evidence');
       expect(entry.evidence).toContain('new evidence');
     } finally {
@@ -615,11 +615,11 @@ describe('json-helper.cjs process-observations', () => {
         id: 'obs_abc123', type: 'workflow', pattern: 'test',
         confidence: 0.80, observations: 4,
         first_seen: eightDaysAgo, last_seen: eightDaysAgo,
-        status: 'observing', evidence: [], details: '',
+        status: 'observing', evidence: [], details: '', quality_ok: true,
       }) + '\n');
 
       fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [] }],
+        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [], quality_ok: true }],
       }));
 
       execSync(
