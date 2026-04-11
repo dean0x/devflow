@@ -132,19 +132,28 @@ check_daily_cap() {
 }
 
 # --- Batch Transcript Extraction ---
+# DESIGN: D1 — two-channel filter produces USER_SIGNALS and DIALOG_PAIRS.
+# D10 — single LLM call per batch processes all channels together.
 
 extract_batch_messages() {
   local encoded_cwd
   encoded_cwd=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
   local projects_dir="$HOME/.claude/projects/-${encoded_cwd}"
   local batch_file="$CWD/.memory/.learning-batch-ids"
+  local filter_module="$SCRIPT_DIR/lib/transcript-filter.cjs"
 
   if [ ! -f "$batch_file" ]; then
     log "No batch IDs file found"
     return 1
   fi
 
-  USER_MESSAGES=""
+  if [ ! -f "$filter_module" ]; then
+    log "transcript-filter.cjs not found at $filter_module"
+    return 1
+  fi
+
+  USER_SIGNALS=""
+  DIALOG_PAIRS="[]"
   local session_count=0
 
   while IFS= read -r sid; do
@@ -155,48 +164,43 @@ extract_batch_messages() {
       continue
     fi
 
-    # Single-pass extraction: pipe all user-type lines through one jq/node process
-    local session_msgs
-    if [ "$_HAS_JQ" = "true" ]; then
-      session_msgs=$(grep '"type":"user"' "$transcript" 2>/dev/null \
-        | jq -r 'if .message.content then
-            if (.message.content | type) == "string" then .message.content
-            else [.message.content[] | select(.type == "text") | .text] | join("\n")
-            end
-          else "" end' 2>/dev/null \
-        | grep -v '^$' || true)
-    else
-      session_msgs=$(grep '"type":"user"' "$transcript" 2>/dev/null \
-        | node -e "
-          const lines = require('fs').readFileSync('/dev/stdin','utf8').trim().split('\n');
-          for (const line of lines) {
-            try {
-              const d = JSON.parse(line);
-              const c = d && d.message && d.message.content;
-              if (typeof c === 'string') { if (c) console.log(c); }
-              else if (Array.isArray(c)) {
-                const t = c.filter(x=>x.type==='text').map(x=>x.text).join('\n');
-                if (t) console.log(t);
-              }
-            } catch {}
-          }
-        " 2>/dev/null \
-        | grep -v '^$' || true)
-    fi
+    # Use transcript-filter.cjs to extract both channels in one pass
+    local filter_result
+    filter_result=$(node -e "
+      const fs = require('fs');
+      const { extractChannels } = require('$filter_module');
+      const content = fs.readFileSync('$transcript', 'utf8');
+      const result = extractChannels(content);
+      // Output USER_SIGNALS and DIALOG_PAIRS as tab-separated JSON values
+      process.stdout.write(JSON.stringify(result.userSignals) + '\t' + JSON.stringify(result.dialogPairs));
+    " 2>>"$LOG_FILE" || echo "[]	[]")
 
-    if [ -n "$session_msgs" ]; then
-      # Per-session cap: 8,000 chars ensures each session contributes proportionally
-      if [ ${#session_msgs} -gt 8000 ]; then
-        session_msgs="${session_msgs:0:8000}... [truncated]"
-      fi
-      if [ -n "$USER_MESSAGES" ]; then
-        USER_MESSAGES="${USER_MESSAGES}
---- Session ${sid} ---
-${session_msgs}"
+    local session_signals
+    local session_pairs
+    session_signals=$(printf '%s' "$filter_result" | cut -f1)
+    session_pairs=$(printf '%s' "$filter_result" | cut -f2)
+
+    # Merge signals (join with newline between sessions)
+    local decoded_signals
+    decoded_signals=$(node -e "const s=JSON.parse(process.argv[1]);console.log(s.join('\n'));" "$session_signals" 2>/dev/null || true)
+
+    if [ -n "$decoded_signals" ]; then
+      if [ -n "$USER_SIGNALS" ]; then
+        USER_SIGNALS="${USER_SIGNALS}
+${decoded_signals}"
       else
-        USER_MESSAGES="--- Session ${sid} ---
-${session_msgs}"
+        USER_SIGNALS="$decoded_signals"
       fi
+
+      # Merge DIALOG_PAIRS (JSON array concatenation)
+      if [ "$session_pairs" != "[]" ] && [ -n "$session_pairs" ]; then
+        DIALOG_PAIRS=$(node -e "
+          const a = JSON.parse(process.argv[1]);
+          const b = JSON.parse(process.argv[2]);
+          console.log(JSON.stringify([...a, ...b]));
+        " "$DIALOG_PAIRS" "$session_pairs" 2>/dev/null || echo "$DIALOG_PAIRS")
+      fi
+
       session_count=$((session_count + 1))
     fi
   done < "$batch_file"
@@ -204,17 +208,17 @@ ${session_msgs}"
   # Clean up batch file after reading
   rm -f "$batch_file"
 
-  if [ -z "$USER_MESSAGES" ]; then
+  if [ -z "$USER_SIGNALS" ]; then
     log "No user text content found in batch transcripts"
     return 1
   fi
 
-  if [ ${#USER_MESSAGES} -lt 200 ]; then
-    log "Insufficient content for pattern detection (${#USER_MESSAGES} chars, min 200)"
+  if [ ${#USER_SIGNALS} -lt 200 ]; then
+    log "Insufficient content for pattern detection (${#USER_SIGNALS} chars, min 200)"
     return 1
   fi
 
-  log "Extracted messages from $session_count session(s)"
+  log "Extracted channels from $session_count session(s): ${#USER_SIGNALS} signal chars, $(echo "$DIALOG_PAIRS" | node -e "try{console.log(JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).length);}catch{console.log(0);}" 2>/dev/null || echo 0) dialog pairs"
   return 0
 }
 
@@ -241,90 +245,80 @@ cap_entries() {
 }
 
 # --- Prompt Construction ---
+# DESIGN: D10 — single LLM call per batch, 4-type detection with quality_ok gate.
+# Rendering is now deterministic (D5) — this prompt ONLY produces observation metadata.
 
 build_sonnet_prompt() {
   EXISTING_OBS=$(node "$_JSON_HELPER" filter-observations "$LEARNING_LOG" confidence 30 2>> "$LOG_FILE" || echo "[]")
   [ -z "$EXISTING_OBS" ] && EXISTING_OBS="[]"
 
-  PROMPT="You are a pattern detection agent. Analyze the user's session messages to identify repeated workflows and procedural knowledge.
+  PROMPT="You are a pattern detection agent. Analyze the user's session messages to identify four distinct types of learnable patterns. Your output will be merged into a persistent learning log and used to materialize slash commands, skills, and project knowledge entries.
 
 # === CONTEXT ===
 
 EXISTING OBSERVATIONS (for deduplication — reuse IDs for matching patterns):
 $EXISTING_OBS
 
-USER MESSAGES FROM RECENT SESSIONS:
-$USER_MESSAGES
+USER_SIGNALS (clean user text, one per line, used for workflow/procedural detection):
+$USER_SIGNALS
 
-# === OBSERVATION RULES ===
+DIALOG_PAIRS (user turn with its immediately-preceding assistant turn, used for decision/pitfall detection):
+$DIALOG_PAIRS
 
-Detect two types of patterns:
+# === OBSERVATION TYPES ===
 
-1. WORKFLOW patterns: Multi-step sequences the user instructs repeatedly (e.g., \"squash merge PR, pull main, delete branch\"). These become slash commands.
-   - Required observations for artifact creation: 5 (seen across multiple sessions)
-   - Temporal spread requirement: first_seen and last_seen must be 7 days apart
+Detect four types of patterns. Each has its own evidence requirement. Do not lower the bar when evidence is scarce — emit fewer observations instead.
 
-2. PROCEDURAL patterns: Knowledge about how to accomplish specific tasks (e.g., debugging hook failures, configuring specific tools). These become skills.
-   - Required observations for artifact creation: 5 (same as workflows)
-   - Temporal spread requirement: first_seen and last_seen must be 7 days apart (same as workflows)
+## 1. WORKFLOW — multi-step sequences the user instructs repeatedly
+Source: USER_SIGNALS only.
+Examples: \"squash merge the PR, pull main, delete the feature branch\"; \"implement the plan, then run /self-review, then commit and push\"; \"first run the tests, then the typecheck, then format\"
+Strong signals: imperative verbs chained with \"then\"/\"next\"/\"after that\", numbered lists the user typed, \"Implement the following plan:\" followed by steps, explicit ordering words.
+Weak signals (reject): a single imperative, a question, restatement of the assistant's suggestion.
+Evidence requirement: 2+ distinct user statements that describe the same sequence.
 
-Rules:
-- If an existing observation matches a pattern from this session, report it with the SAME id so the count can be incremented
-- For new patterns, generate a new id starting with obs_ followed by 6 random alphanumeric chars (e.g. obs_a1b2c3)
-- Every observation MUST have: id (obs_ + 6 alphanumeric), type (exactly \"workflow\" or \"procedural\"), pattern (non-empty description)
-- Every artifact MUST have: observation_id (matching an observation), type (exactly \"command\" or \"skill\"), name (non-empty kebab-case)
-- Quote specific evidence from user messages that supports each observation
-- Only report patterns that are clearly distinct — do not create near-duplicate observations
-- If no patterns detected, return {\"observations\": [], \"artifacts\": []}
+## 2. PROCEDURAL — durable \"how to do X in this project\" knowledge
+Source: USER_SIGNALS only.
+Examples: \"when debugging hook failures, check the lock dir first, then tail the log\"; \"to regenerate the grammar, always run \`make lex\` first\"; \"the way to update classification rules is to edit classification-rules.md, then update the router, then align tests\"
+Strong signals: \"when <situation>, <action>\" phrasing, \"to <goal>, <action>\" phrasing, references to specific project tools/files/commands by name.
+Weak signals (reject): single imperative with no explanation, generic advice applicable to any project.
+Evidence requirement: 2+ user statements describing the same how-to, OR 1 statement with strong instructional tone referencing project-specific entities.
 
-# === SKILL TEMPLATE ===
+## 3. DECISION — architectural or scope commitment with explicit rationale
+Source: DIALOG_PAIRS. The prior assistant turn is used only to disambiguate what the user is committing to.
+The key signal is INTENT + RATIONALE in a single user statement or adjacent sentences. The user must say BOTH what they want AND why.
+Template patterns: \"I want X because Y\"; \"let's go with X — Y\"; \"X is better than Y because Z\"; \"not X, but Y, because Z\"
+Strong rationale anchors (must be present in user text for a valid observation): \"because\", \"since\", \"so that\", \"to avoid\", \"the reason\", \"the point is\".
+Weak signals (reject): one-word approvals (\"yes\", \"ok\"), preferences without reasoning, restatement of the assistant's recommendation.
+Quality gate: before emitting, ask — \"if I delete the 'because ___' clause from the user's words, does the statement still capture a decision worth recording?\" If yes, the rationale is not load-bearing and the observation should be skipped.
+Evidence requirement: 1 user statement with the rationale anchor present AND quotable.
 
-IMPORTANT: Do NOT include YAML frontmatter (--- blocks) in artifact content.
-The system adds frontmatter automatically. Only provide the markdown body.
+## 4. PITFALL — user correction of something the assistant did or proposed
+Source: DIALOG_PAIRS. Both the prior assistant content AND the user correction MUST be cited in the evidence array.
+Examples:
+- prior: \"I'll add a try/catch around the Result parsing\"; user: \"no — we use Result types precisely to avoid try/catch. Do not wrap.\"
+- prior: \"Let me amend the previous commit\"; user: \"don't amend pushed commits. Create a new one.\"
+- prior: \"I'll delete the \`.pending-turns.jsonl\` file\"; user: \"stop, that's transient state — the queue may still be processing.\"
+Strong signals: explicit negation after an assistant action (\"no\", \"don't\", \"stop\"), question-form redirects, re-emphasis (\"please plan carefully, make sure X\"), counter-instructions.
+Weak signals (reject): stylistic preferences, typo corrections, clarifying questions, generic warnings, \"thanks\" responses.
+PRIOR CONTEXT REQUIREMENT: You CANNOT emit a pitfall observation without quoting the prior assistant text. If DIALOG_PAIRS does not contain an assistant turn immediately before the user's correction, skip the observation.
+Quality gate: the pitfall must be tied to a concrete file, tool, command, or subsystem named in the dialog. Generic warnings are rejected.
+Evidence requirement: at least one DIALOG_PAIR where (a) the prior assistant text proposed or performed an action, and (b) the user's next message rejects/undoes/warns against it.
 
-SKILL TEMPLATE (required body structure when creating skill artifacts):
+# === QUALITY GATE ===
 
-# {Title}
+For EVERY observation you emit, include a \"quality_ok\" field (boolean). Set to true ONLY if:
+- The evidence array contains quoted text that supports the pattern.
+- For decision: the rationale anchor phrase is present in at least one evidence item.
+- For pitfall: both the assistant's action phrase AND the user's rejection phrase are present in evidence.
+- For workflow/procedural: at least 2 distinct evidence items are quoted.
 
-{One-line summary.}
+If quality_ok is false, still emit the observation so its count increments — but the downstream system will NOT materialize it.
 
-## Iron Law
+# === DEDUPLICATION ===
 
-> **{SINGLE RULE IN ALL CAPS}**
->
-> {2-3 sentence core principle.}
-
----
-
-## When This Skill Activates
-
-- {Trigger condition 1}
-- {Trigger condition 2}
-
-## {Pattern Section}
-
-{Practical patterns, rules, or procedures.}
-
-# === COMMAND TEMPLATE ===
-
-COMMAND TEMPLATE (when creating command artifacts):
-Standard markdown body only. Do NOT include YAML frontmatter (--- blocks).
-
-# === NAMING RULES ===
-
-NAMING RULES:
-- Skill names: self-learning:{slug} (e.g., self-learning:debug-hooks)
-- Skill descriptions MUST start with \"This skill should be used when...\"
-- Do NOT include project-specific prefixes in the slug
-- Keep slugs short and descriptive (2-3 words kebab-case)
-
-# === QUALITY RULES ===
-
-- Content must be actionable and specific. Avoid generic advice.
-- Skills should be 30-80 lines of practical, concrete patterns.
-- Do NOT include YAML frontmatter (--- blocks) in artifact content.
-- Commands should have clear step-by-step instructions.
-- Focus on project-specific patterns, not general best practices.
+- If an existing observation matches a pattern from this session, report it with the SAME id so the count can increment.
+- For new patterns, generate a new id: obs_ followed by 6 random alphanumeric chars.
+- Do not create near-duplicate observations — prefer fewer, higher-signal entries.
 
 # === OUTPUT FORMAT ===
 
@@ -335,21 +329,17 @@ Output ONLY the JSON object. No markdown fences, no explanation.
     {
       \"id\": \"obs_a1b2c3\",
       \"type\": \"workflow\",
-      \"pattern\": \"Short description of the pattern\",
-      \"evidence\": [\"quoted user message excerpt 1\", \"quoted user message excerpt 2\"],
-      \"details\": \"Step-by-step description of the workflow or knowledge\"
-    }
-  ],
-  \"artifacts\": [
-    {
-      \"observation_id\": \"obs_a1b2c3\",
-      \"type\": \"command\",
-      \"name\": \"kebab-case-name\",
-      \"description\": \"One-line description for frontmatter\",
-      \"content\": \"Full markdown content for the command/skill file\"
+      \"pattern\": \"Short name for the pattern\",
+      \"evidence\": [\"quoted user message 1\", \"quoted user message 2\"],
+      \"details\": \"Type-specific structured body. workflow: numbered step list. procedural: method explanation. decision: 'context: ...; decision: ...; rationale: ...'. pitfall: 'area: ...; issue: ...; impact: ...; resolution: ...'\",
+      \"quality_ok\": true
     }
   ]
-}"
+}
+
+If no patterns detected, return {\"observations\": []}.
+
+Do NOT emit artifact content, rendered markdown, YAML frontmatter, or templates. Rendering is a separate step handled by the render layer. Your only job is to produce structured observation metadata."
 }
 
 # --- Sonnet Invocation ---
@@ -428,10 +418,73 @@ process_observations() {
 
 # --- Create Artifacts ---
 
-create_artifacts() {
+# --- Render Ready Observations ---
+# DESIGN: D5 — deterministic rendering replaces LLM-generated content.
+# Called after process_observations so status='ready' entries are now available.
+
+render_ready_observations() {
   local result
-  result=$(node "$_JSON_HELPER" create-artifacts "$RESPONSE_FILE" "$LEARNING_LOG" "$CWD" 2>> "$LOG_FILE") || return
-  [ "$DEBUG" = "true" ] && log "Artifacts: $result"
+  result=$(node "$_JSON_HELPER" render-ready "$LEARNING_LOG" "$CWD" 2>> "$LOG_FILE") || return
+  [ "$DEBUG" = "true" ] && log "Render: $result"
+}
+
+# --- Staleness Pass ---
+# DESIGN: D16 — grep-based staleness check on active log entries.
+# Checks whether files/functions/commands referenced in details/evidence still exist.
+# Sets mayBeStale=true and staleReason on the entry if references are missing.
+
+check_staleness() {
+  [ ! -f "$LEARNING_LOG" ] && return
+
+  local updated=0
+  local temp_log="${LEARNING_LOG}.stale.tmp"
+  > "$temp_log"
+
+  while IFS= read -r entry_line; do
+    [ -z "$entry_line" ] && continue
+
+    # Extract details and evidence text for reference scanning
+    local details evidence
+    details=$(printf '%s' "$entry_line" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d.details||'');}catch{}" 2>/dev/null || true)
+    evidence=$(printf '%s' "$entry_line" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log((d.evidence||[]).join(' '));}catch{}" 2>/dev/null || true)
+
+    local combined="${details} ${evidence}"
+
+    # Extract file path references matching *.ts, *.js, *.cjs, *.md, *.sh, *.py, *.go, *.java, *.rs
+    local stale_ref=""
+    local ref
+    while IFS= read -r ref; do
+      [ -z "$ref" ] && continue
+      # Skip if absolute path doesn't look like a project file
+      if [[ "$ref" == /* ]]; then
+        [ ! -f "$ref" ] && stale_ref="$ref" && break
+      else
+        # Check relative to CWD
+        [ ! -f "$CWD/$ref" ] && stale_ref="$ref" && break
+      fi
+    done < <(printf '%s\n' "$combined" | grep -oE '[A-Za-z0-9_/.-]+\.(ts|tsx|js|cjs|md|sh|py|go|java|rs)' | sort -u 2>/dev/null || true)
+
+    if [ -n "$stale_ref" ]; then
+      # Mark entry as potentially stale
+      entry_line=$(printf '%s' "$entry_line" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        d.mayBeStale=true;
+        d.staleReason='code-ref-missing:${stale_ref}';
+        console.log(JSON.stringify(d));
+      " 2>/dev/null || printf '%s' "$entry_line")
+      updated=$((updated + 1))
+      [ "$DEBUG" = "true" ] && log "Staleness: ${stale_ref} missing, flagged entry"
+    fi
+
+    printf '%s\n' "$entry_line" >> "$temp_log"
+  done < "$LEARNING_LOG"
+
+  if [ "$updated" -gt 0 ]; then
+    mv "$temp_log" "$LEARNING_LOG"
+    log "Staleness pass: $updated entries flagged"
+  else
+    rm -f "$temp_log"
+  fi
 }
 
 # --- Main ---
@@ -459,8 +512,10 @@ if ! check_daily_cap; then
   exit 0
 fi
 
-# Extract user messages (batch mode reads from .learning-batch-ids)
-USER_MESSAGES=""
+# Extract channels (batch mode reads from .learning-batch-ids)
+# Produces USER_SIGNALS and DIALOG_PAIRS via transcript-filter.cjs (D1, D2)
+USER_SIGNALS=""
+DIALOG_PAIRS="[]"
 if ! extract_batch_messages; then
   log "No messages to analyze — skipping"
   exit 0
@@ -475,21 +530,28 @@ build_sonnet_prompt
 
 # Debug: log prompt inputs
 if [ "$DEBUG" = "true" ]; then
-  log "--- DEBUG: USER_MESSAGES (first 500 chars) ---"
-  log "${USER_MESSAGES:0:500}"
+  log "--- DEBUG: USER_SIGNALS (first 500 chars) ---"
+  log "${USER_SIGNALS:0:500}"
+  log "--- DEBUG: DIALOG_PAIRS (first 300 chars) ---"
+  log "${DIALOG_PAIRS:0:300}"
   log "--- DEBUG: EXISTING_OBS ---"
   log "$EXISTING_OBS"
   log "--- DEBUG: End prompt inputs ---"
 fi
 
-# Run Sonnet analysis
+# Run Sonnet analysis (D10 — single LLM call per batch)
 if ! run_sonnet_analysis; then
   exit 0
 fi
 
-# Process observations and create artifacts
+# Process observations into learning log (D3 — per-type promotion)
 process_observations
-create_artifacts
+
+# Render ready observations to artifacts (D5 — deterministic rendering)
+render_ready_observations
+
+# Check for stale code references (D16 — grep-based staleness)
+check_staleness
 
 # Clean up response file
 rm -f "$RESPONSE_FILE"

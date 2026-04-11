@@ -100,6 +100,14 @@ ${COMPACT_NOTE}"
   fi
 fi
 
+# --- Section 1.4: Learning Manifest Reconciliation ---
+# DESIGN: D6 — reconciler runs at session-start to amortize filesystem checks
+# across session boundaries rather than on every tool call.
+# Silently ignores errors — a failed reconcile is non-fatal.
+if [ -f "$CWD/.memory/.learning-manifest.json" ] && [ -f "$CWD/.memory/learning-log.jsonl" ]; then
+  node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
+fi
+
 # --- Section 1.5: Project Knowledge TL;DR ---
 KNOWLEDGE_DIR="$CWD/.memory/knowledge"
 if [ -d "$KNOWLEDGE_DIR" ]; then
