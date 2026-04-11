@@ -9,19 +9,28 @@ import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/lear
 
 /**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
+ * v2 extends type to include 'decision' and 'pitfall', and adds attention flags.
  */
 export interface LearningObservation {
   id: string;
-  type: 'workflow' | 'procedural';
+  type: 'workflow' | 'procedural' | 'decision' | 'pitfall';
   pattern: string;
   confidence: number;
   observations: number;
   first_seen: string;
   last_seen: string;
-  status: 'observing' | 'ready' | 'created';
+  status: 'observing' | 'ready' | 'created' | 'deprecated';
   evidence: string[];
   details: string;
   artifact_path?: string;
+  /** Set by staleness checker (D16) when code refs in artifact file are missing */
+  mayBeStale?: boolean;
+  staleReason?: string;
+  /** Set by reconcile-manifest when artifact file is deleted */
+  needsReview?: boolean;
+  /** Set when knowledge file is at capacity (50 entries) */
+  softCapExceeded?: boolean;
+  quality_ok?: boolean;
 }
 
 /**
@@ -38,18 +47,19 @@ export interface LearningConfig {
 
 /**
  * Type guard for validating raw JSON as a LearningObservation.
+ * Accepts all 4 types (v2: decision + pitfall added) and all statuses including deprecated.
  */
 export function isLearningObservation(obj: unknown): obj is LearningObservation {
   if (typeof obj !== 'object' || obj === null) return false;
   const o = obj as Record<string, unknown>;
   return typeof o.id === 'string' && o.id.length > 0
-    && (o.type === 'workflow' || o.type === 'procedural')
+    && (o.type === 'workflow' || o.type === 'procedural' || o.type === 'decision' || o.type === 'pitfall')
     && typeof o.pattern === 'string' && o.pattern.length > 0
     && typeof o.confidence === 'number'
     && typeof o.observations === 'number'
     && typeof o.first_seen === 'string'
     && typeof o.last_seen === 'string'
-    && (o.status === 'observing' || o.status === 'ready' || o.status === 'created')
+    && (o.status === 'observing' || o.status === 'ready' || o.status === 'created' || o.status === 'deprecated')
     && Array.isArray(o.evidence)
     && typeof o.details === 'string';
 }
@@ -220,13 +230,20 @@ export function formatLearningStatus(observations: LearningObservation[], hookSt
 
   const workflows = observations.filter((o) => o.type === 'workflow');
   const procedurals = observations.filter((o) => o.type === 'procedural');
+  const decisions = observations.filter((o) => o.type === 'decision');
+  const pitfalls = observations.filter((o) => o.type === 'pitfall');
   const created = observations.filter((o) => o.status === 'created');
   const ready = observations.filter((o) => o.status === 'ready');
   const observing = observations.filter((o) => o.status === 'observing');
+  const deprecated = observations.filter((o) => o.status === 'deprecated');
+  const needReview = observations.filter((o) => o.mayBeStale || o.needsReview || o.softCapExceeded);
 
   lines.push(`Observations: ${observations.length} total`);
-  lines.push(`  Workflows: ${workflows.length}, Procedural: ${procedurals.length}`);
-  lines.push(`  Status: ${observing.length} observing, ${ready.length} ready, ${created.length} promoted`);
+  lines.push(`  Workflows: ${workflows.length}, Procedural: ${procedurals.length}, Decisions: ${decisions.length}, Pitfalls: ${pitfalls.length}`);
+  lines.push(`  Status: ${observing.length} observing, ${ready.length} ready, ${created.length} promoted, ${deprecated.length} deprecated`);
+  if (needReview.length > 0) {
+    lines.push(`  ${color.yellow('⚠')} ${needReview.length} need review — run 'devflow learn --review'`);
+  }
 
   return lines.join('\n');
 }
@@ -294,6 +311,110 @@ function warnIfInvalid(invalidCount: number): void {
   }
 }
 
+/**
+ * Write observations back to the log file atomically.
+ * Each observation is serialized as a JSON line.
+ */
+async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
+  const lines = observations.map(o => JSON.stringify(o));
+  await fs.writeFile(logPath, lines.join('\n') + (lines.length ? '\n' : ''), 'utf-8');
+}
+
+/**
+ * Update the Status: field for a decision or pitfall entry in a knowledge file.
+ * Locates the entry by anchor ID (from artifact_path fragment), sets Status to the given value.
+ * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
+ */
+export async function updateKnowledgeStatus(
+  filePath: string,
+  anchorId: string,
+  newStatus: string,
+): Promise<boolean> {
+  const lockPath = path.join(path.dirname(filePath), '.knowledge.lock');
+  const lockTimeout = 30_000;
+  const staleMs = 60_000;
+  const start = Date.now();
+
+  // Acquire lock
+  while (true) {
+    try {
+      await fs.mkdir(lockPath);
+      break; // Lock acquired
+    } catch {
+      // Check for stale lock
+      try {
+        const stat = await fs.stat(lockPath);
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          try { await fs.rmdir(lockPath); } catch { /* race condition OK */ }
+          continue;
+        }
+      } catch { /* lock dir doesn't exist anymore */ }
+
+      if (Date.now() - start > lockTimeout) {
+        return false; // Timed out
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  try {
+    let content: string;
+    try {
+      content = await fs.readFile(filePath, 'utf-8');
+    } catch {
+      return false; // File doesn't exist
+    }
+
+    // Find the anchor heading and update Status: field
+    const anchorPattern = new RegExp(`(##[^#][^\n]*${escapeRegExp(anchorId)}[^\n]*\n(?:(?!^##)[^\n]*\n)*?)(- \\*\\*Status\\*\\*: )[^\n]+`, 'm');
+    const updated = content.replace(anchorPattern, `$1$2${newStatus}`);
+
+    if (updated === content) {
+      // Try a simpler replacement: find the Status line after the anchor heading
+      const lines = content.split('\n');
+      let inSection = false;
+      let changed = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(anchorId)) {
+          inSection = true;
+        } else if (inSection && lines[i].startsWith('## ')) {
+          break; // Past the section
+        } else if (inSection && lines[i].match(/^- \*\*Status\*\*: /)) {
+          lines[i] = `- **Status**: ${newStatus}`;
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return false;
+      await fs.writeFile(filePath, lines.join('\n'), 'utf-8');
+    } else {
+      await fs.writeFile(filePath, updated, 'utf-8');
+    }
+    return true;
+  } finally {
+    try { await fs.rmdir(lockPath); } catch { /* already cleaned */ }
+  }
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Format a stale reason string for display.
+ */
+function formatStaleReason(obs: LearningObservation): string {
+  const reasons: string[] = [];
+  if (obs.mayBeStale && obs.staleReason) {
+    reasons.push(`stale: ${obs.staleReason}`);
+  } else if (obs.mayBeStale) {
+    reasons.push('may be stale');
+  }
+  if (obs.needsReview) reasons.push('artifact missing (deleted?)');
+  if (obs.softCapExceeded) reasons.push('knowledge file at capacity');
+  return reasons.join(', ') || 'flagged for review';
+}
+
 interface LearnOptions {
   enable?: boolean;
   disable?: boolean;
@@ -303,6 +424,8 @@ interface LearnOptions {
   clear?: boolean;
   reset?: boolean;
   purge?: boolean;
+  review?: boolean;
+  purgeLegacyKnowledge?: boolean;
 }
 
 export const learnCommand = new Command('learn')
@@ -315,8 +438,10 @@ export const learnCommand = new Command('learn')
   .option('--clear', 'Reset learning log (removes all observations)')
   .option('--reset', 'Remove all self-learning artifacts, log, and transient state')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
+  .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
+  .option('--purge-legacy-knowledge', 'One-time removal of legacy low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge;
+    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.purgeLegacyKnowledge;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -327,7 +452,8 @@ export const learnCommand = new Command('learn')
         `${color.cyan('devflow learn --configure')}   Configuration wizard\n` +
         `${color.cyan('devflow learn --clear')}       Reset learning log\n` +
         `${color.cyan('devflow learn --reset')}       Remove artifacts + log + state\n` +
-        `${color.cyan('devflow learn --purge')}       Remove invalid entries`,
+        `${color.cyan('devflow learn --purge')}       Remove invalid entries\n` +
+        `${color.cyan('devflow learn --review')}      Review flagged observations interactively`,
         'Usage',
       );
       p.outro(color.dim('Detects repeated workflows and creates slash commands automatically'));
@@ -388,9 +514,13 @@ export const learnCommand = new Command('learn')
 
       p.intro(color.bgYellow(color.black(' Learning Observations ')));
       for (const obs of observations) {
-        const typeIcon = obs.type === 'workflow' ? 'W' : 'P';
+        const typeIcon = obs.type === 'workflow' ? 'W'
+          : obs.type === 'procedural' ? 'P'
+          : obs.type === 'decision' ? 'D'
+          : 'F';
         const statusIcon = obs.status === 'created' ? color.green('created')
           : obs.status === 'ready' ? color.yellow('ready')
+          : obs.status === 'deprecated' ? color.dim('deprecated')
           : color.dim('observing');
         const conf = (obs.confidence * 100).toFixed(0);
         p.log.info(
@@ -686,6 +816,170 @@ export const learnCommand = new Command('learn')
 
       await fs.writeFile(logPath, '', 'utf-8');
       p.log.success('Learning log cleared.');
+      return;
+    }
+
+    // --- --review ---
+    if (options.review) {
+      const { observations, invalidCount } = await readObservations(logPath);
+      warnIfInvalid(invalidCount);
+
+      const flagged = observations.filter(
+        (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
+      );
+
+      if (flagged.length === 0) {
+        p.log.info('No observations flagged for review. All clear.');
+        return;
+      }
+
+      p.intro(color.bgYellow(color.black(' Learning Review ')));
+      p.log.info(`${flagged.length} observation(s) flagged for review.`);
+
+      const updatedObservations = [...observations];
+
+      for (const obs of flagged) {
+        const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
+        const reason = formatStaleReason(obs);
+
+        p.log.info(
+          `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
+          `  Reason: ${color.yellow(reason)}\n` +
+          (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
+          `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
+        );
+
+        const action = await p.select({
+          message: 'Action:',
+          options: [
+            { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
+            { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
+            { value: 'skip', label: 'Skip', hint: 'No change' },
+          ],
+        });
+
+        if (p.isCancel(action)) {
+          p.cancel('Review cancelled.');
+          return;
+        }
+
+        const idx = updatedObservations.findIndex(o => o.id === obs.id);
+        if (idx === -1) continue;
+
+        if (action === 'deprecate') {
+          updatedObservations[idx] = {
+            ...updatedObservations[idx],
+            status: 'deprecated',
+            mayBeStale: undefined,
+            needsReview: undefined,
+            softCapExceeded: undefined,
+          };
+
+          // Update Status: field in knowledge file for decisions/pitfalls
+          if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
+            const hashIdx = obs.artifact_path.indexOf('#');
+            if (hashIdx !== -1) {
+              const knowledgePath = obs.artifact_path.slice(0, hashIdx);
+              const anchorId = obs.artifact_path.slice(hashIdx + 1);
+              const absPath = path.isAbsolute(knowledgePath)
+                ? knowledgePath
+                : path.join(process.cwd(), knowledgePath);
+              const updated = await updateKnowledgeStatus(absPath, anchorId, 'Deprecated');
+              if (updated) {
+                p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+              } else {
+                p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
+              }
+            }
+          }
+
+          p.log.success(`Marked '${obs.pattern}' as deprecated.`);
+        } else if (action === 'keep') {
+          updatedObservations[idx] = {
+            ...updatedObservations[idx],
+            mayBeStale: undefined,
+            needsReview: undefined,
+            softCapExceeded: undefined,
+          };
+          p.log.success(`Cleared review flags for '${obs.pattern}'.`);
+        }
+        // 'skip' — no change
+      }
+
+      // Write updated log
+      await writeObservations(logPath, updatedObservations);
+      p.outro(color.green('Review complete.'));
+      return;
+    }
+
+    // --- --purge-legacy-knowledge ---
+    if (options.purgeLegacyKnowledge) {
+      const LEGACY_IDS = ['ADR-002', 'PF-001', 'PF-003', 'PF-005'];
+      const knowledgeDir = path.join(process.cwd(), '.memory', 'knowledge');
+      const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+      const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+
+      p.intro(color.bgYellow(color.black(' Purge Legacy Knowledge ')));
+      p.log.info(
+        `This will remove the following low-signal legacy entries:\n` +
+        LEGACY_IDS.map(id => `  - ${id}`).join('\n') +
+        '\n\nThese were created by agent-summary extraction (v1) and replaced by transcript-based extraction (v2).',
+      );
+
+      if (process.stdin.isTTY) {
+        const confirm = await p.confirm({
+          message: 'Proceed with removal? This cannot be undone.',
+          initialValue: false,
+        });
+        if (p.isCancel(confirm) || !confirm) {
+          p.cancel('Purge cancelled.');
+          return;
+        }
+      }
+
+      let removed = 0;
+      for (const filePath of [decisionsPath, pitfallsPath]) {
+        let content: string;
+        try {
+          content = await fs.readFile(filePath, 'utf-8');
+        } catch {
+          continue; // File doesn't exist
+        }
+
+        const prefix = filePath.includes('decisions') ? 'ADR' : 'PF';
+        const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
+
+        let updatedContent = content;
+        for (const legacyId of legacyInFile) {
+          // Remove the section from `## LEGACYID:` to the next `## ` or end-of-file
+          const sectionRegex = new RegExp(
+            `\\n## ${escapeRegExp(legacyId)}:[^\\n]*(?:\\n(?!## )[^\\n]*)*`,
+            'g',
+          );
+          const before = updatedContent;
+          updatedContent = updatedContent.replace(sectionRegex, '');
+          if (updatedContent !== before) removed++;
+        }
+
+        if (updatedContent !== content) {
+          // Update TL;DR count
+          const headingMatches = updatedContent.match(/^## (ADR|PF)-/gm) || [];
+          const count = headingMatches.length;
+          const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
+          updatedContent = updatedContent.replace(
+            /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
+            `<!-- TL;DR: ${count} ${label}. Key: -->`,
+          );
+          await fs.writeFile(filePath, updatedContent, 'utf-8');
+        }
+      }
+
+      if (removed === 0) {
+        p.log.info('No legacy entries found — already clean.');
+      } else {
+        p.log.success(`Removed ${removed} legacy entry(ies).`);
+      }
+      p.outro(color.green('Legacy purge complete.'));
       return;
     }
 
