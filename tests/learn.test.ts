@@ -415,6 +415,33 @@ describe('formatLearningStatus', () => {
     expect(result).toContain('Procedural: 1');
   });
 
+  it('shows decision and pitfall counts', () => {
+    const observations: LearningObservation[] = [
+      { id: 'obs_1', type: 'decision', pattern: 'use Result types for error handling', confidence: 0.80, observations: 2, first_seen: 't', last_seen: 't', status: 'observing', evidence: ['User chose Result over throw'], details: 'ADR-001' },
+      { id: 'obs_2', type: 'pitfall', pattern: 'avoid circular deps in services', confidence: 0.70, observations: 2, first_seen: 't', last_seen: 't', status: 'observing', evidence: ['Circular dep caused build fail'], details: 'PF-001' },
+      { id: 'obs_3', type: 'decision', pattern: 'inject all deps via constructor', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'ready', evidence: ['Consistent DI across services'], details: 'ADR-002' },
+    ];
+    const result = formatLearningStatus(observations, 'current');
+    expect(result).toContain('3 total');
+    expect(result).toContain('Decisions: 2');
+    expect(result).toContain('Pitfalls: 1');
+  });
+
+  it('shows all 4 type counts together', () => {
+    const observations: LearningObservation[] = [
+      { id: 'obs_1', type: 'workflow', pattern: 'w1', confidence: 0.5, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+      { id: 'obs_2', type: 'procedural', pattern: 'p1', confidence: 0.5, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+      { id: 'obs_3', type: 'decision', pattern: 'd1', confidence: 0.5, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+      { id: 'obs_4', type: 'pitfall', pattern: 'f1', confidence: 0.5, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+    ];
+    const result = formatLearningStatus(observations, 'current');
+    expect(result).toContain('4 total');
+    expect(result).toContain('Workflows: 1');
+    expect(result).toContain('Procedural: 1');
+    expect(result).toContain('Decisions: 1');
+    expect(result).toContain('Pitfalls: 1');
+  });
+
   it('shows promoted artifacts count', () => {
     const observations: LearningObservation[] = [
       { id: 'obs_1', type: 'workflow', pattern: 'p1', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '/path' },
@@ -423,6 +450,18 @@ describe('formatLearningStatus', () => {
     const result = formatLearningStatus(observations, 'current');
     expect(result).toContain('1 promoted');
     expect(result).toContain('1 observing');
+  });
+
+  it('counts decision and pitfall promoted entries', () => {
+    const observations: LearningObservation[] = [
+      { id: 'obs_1', type: 'decision', pattern: 'use Result types', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/knowledge/decisions.md#adr-001' },
+      { id: 'obs_2', type: 'pitfall', pattern: 'avoid mutating state', confidence: 0.90, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/knowledge/pitfalls.md#pf-001' },
+      { id: 'obs_3', type: 'workflow', pattern: 'w1', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
+    ];
+    const result = formatLearningStatus(observations, 'current');
+    expect(result).toContain('2 promoted');
+    expect(result).toContain('Decisions: 1');
+    expect(result).toContain('Pitfalls: 1');
   });
 
   it('handles empty observations', () => {
@@ -513,6 +552,23 @@ describe('isLearningObservation', () => {
 
   it('rejects invalid type', () => {
     expect(isLearningObservation({ ...validObs, type: 'unknown' })).toBe(false);
+  });
+
+  it('accepts decision type', () => {
+    expect(isLearningObservation({ ...validObs, type: 'decision' })).toBe(true);
+  });
+
+  it('accepts pitfall type', () => {
+    expect(isLearningObservation({ ...validObs, type: 'pitfall' })).toBe(true);
+  });
+
+  it('accepts deprecated status', () => {
+    expect(isLearningObservation({ ...validObs, status: 'deprecated' })).toBe(true);
+  });
+
+  it('accepts quality_ok field when present', () => {
+    expect(isLearningObservation({ ...validObs, quality_ok: true })).toBe(true);
+    expect(isLearningObservation({ ...validObs, quality_ok: false })).toBe(true);
   });
 
   it('rejects confidence as string', () => {
