@@ -5,16 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
-
-const JSON_HELPER = path.resolve(__dirname, '../../scripts/hooks/json-helper.cjs');
-
-function runHelper(args: string): string {
-  return execSync(`node "${JSON_HELPER}" ${args}`, {
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-}
+import { runHelper } from './helpers.js';
 
 function makeReadyProcedural(id: string, pattern: string, details?: string): object {
   const now = new Date().toISOString();

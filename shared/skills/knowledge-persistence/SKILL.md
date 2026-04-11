@@ -88,6 +88,7 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Issue**: {What goes wrong}
 - **Impact**: {Consequences if hit}
 - **Resolution**: {How to fix or avoid}
+- **Status**: Active
 - **Source**: {session ID or command identifier}
 ```
 
@@ -101,11 +102,15 @@ extractor checks capacity before writing. At capacity: new entries are skipped a
 
 ## Status Field Semantics
 
-The `Status:` field in ADR entries accepts:
+ADR (`decisions.md`) entries accept:
 - `Accepted` — active decision, enforced
 - `Superseded` — replaced by a newer ADR (reference successor)
 - `Deprecated` — no longer applicable (set by `devflow learn --review`)
 - `Proposed` — under consideration (rare, set manually)
+
+PF (`pitfalls.md`) entries accept:
+- `Active` — pitfall still applies, watch for it
+- `Deprecated` — no longer relevant (fixed, refactored away, set by `devflow learn --review`)
 
 ## Lock Protocol
 

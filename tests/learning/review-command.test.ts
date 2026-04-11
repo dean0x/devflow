@@ -95,9 +95,15 @@ describe('isLearningObservation v2', () => {
 
 describe('updateKnowledgeStatus', () => {
   let tmpDir: string;
+  let knowledgeDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-cmd-test-'));
+    // Mirror the production layout (`.memory/knowledge/{file}.md`) so the lock
+    // directory computed by updateKnowledgeStatus lands inside tmpDir rather
+    // than the system temp root shared across tests.
+    knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
+    fs.mkdirSync(knowledgeDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -105,7 +111,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('updates Status field in decisions.md for a known anchor', async () => {
-    const decisionsPath = path.join(tmpDir, 'decisions.md');
+    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
     fs.writeFileSync(decisionsPath, [
       '<!-- TL;DR: 1 decisions. Key: -->',
       '# Architectural Decisions',
@@ -130,7 +136,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('updates Status field in pitfalls.md for a known anchor', async () => {
-    const pitfallsPath = path.join(tmpDir, 'pitfalls.md');
+    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
     fs.writeFileSync(pitfallsPath, [
       '<!-- TL;DR: 1 pitfalls. Key: -->',
       '# Known Pitfalls',
@@ -156,7 +162,7 @@ describe('updateKnowledgeStatus', () => {
 
   it('returns false when file does not exist', async () => {
     const result = await updateKnowledgeStatus(
-      path.join(tmpDir, 'nonexistent.md'),
+      path.join(knowledgeDir, 'nonexistent.md'),
       'ADR-001',
       'Deprecated',
     );
@@ -164,7 +170,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('does not corrupt file when anchor not found', async () => {
-    const decisionsPath = path.join(tmpDir, 'decisions.md');
+    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
     const originalContent = [
       '<!-- TL;DR: 1 decisions. Key: -->',
       '# Architectural Decisions',
@@ -186,7 +192,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('does not corrupt file when Status field is absent in section', async () => {
-    const decisionsPath = path.join(tmpDir, 'decisions.md');
+    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
     const originalContent = [
       '# Architectural Decisions',
       '',

@@ -7,32 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
-
-const JSON_HELPER = path.resolve(__dirname, '../../scripts/hooks/json-helper.cjs');
-
-function runHelper(args: string): string {
-  return execSync(`node "${JSON_HELPER}" ${args}`, {
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-}
-
-interface LogEntry {
-  id: string;
-  type: string;
-  pattern: string;
-  confidence: number;
-  observations: number;
-  first_seen: string;
-  last_seen: string;
-  status: string;
-  evidence: string[];
-  details: string;
-  quality_ok?: boolean;
-  artifact_path?: string;
-  pendingCapacity?: boolean;
-}
+import { runHelper, type LogEntry } from './helpers.js';
 
 function makeReadyDecision(id: string, pattern: string, details?: string): LogEntry {
   const now = new Date().toISOString();
@@ -158,7 +133,7 @@ describe('render-ready — decision type', () => {
     expect(result.rendered).toHaveLength(0);
   });
 
-  it('sets pendingCapacity when knowledge file is at capacity (50 entries)', () => {
+  it('sets softCapExceeded when knowledge file is at capacity (50 entries)', () => {
     // Create a decisions.md with 50 ADR entries
     const header = '<!-- TL;DR: 50 decisions. Key: ADR-050 -->\n# Architectural Decisions\n\nAppend-only.\n';
     let entries = '';
@@ -175,6 +150,6 @@ describe('render-ready — decision type', () => {
     expect(result.skipped).toBe(1);
 
     const updated: LogEntry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-    expect(updated.pendingCapacity).toBe(true);
+    expect(updated.softCapExceeded).toBe(true);
   });
 });

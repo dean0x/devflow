@@ -8,8 +8,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
+import { JSON_HELPER } from './helpers.js';
 
-const JSON_HELPER = path.resolve(__dirname, '../../scripts/hooks/json-helper.cjs');
 const BACKGROUND_LEARNING = path.resolve(__dirname, '../../scripts/hooks/background-learning');
 
 // Helper: minimal staleness check via node script that mirrors background-learning logic

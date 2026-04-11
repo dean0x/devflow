@@ -130,6 +130,40 @@ function writeJsonlAtomic(file, entries) {
   fs.renameSync(tmp, file);
 }
 
+/** Atomically write a text file via a .tmp sibling and rename. */
+function writeFileAtomic(file, content) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, content, 'utf8');
+  fs.renameSync(tmp, file);
+}
+
+/**
+ * Return the initial header content for a new knowledge file.
+ * @param {'decision'|'pitfall'} type
+ * @returns {string}
+ */
+function initKnowledgeContent(type) {
+  return type === 'decision'
+    ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
+    : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
+}
+
+/**
+ * Find the highest numeric suffix (NNN) among heading matches and return next padded ID.
+ * @param {RegExpMatchArray[]} matches
+ * @param {string} prefix - 'ADR' or 'PF'
+ * @returns {{ nextN: string, anchorId: string }}
+ */
+function nextKnowledgeId(matches, prefix) {
+  let maxN = 0;
+  for (const m of matches) {
+    const n = parseInt(m[1], 10);
+    if (n > maxN) maxN = n;
+  }
+  const nextN = (maxN + 1).toString().padStart(3, '0');
+  return { nextN, anchorId: `${prefix}-${nextN}` };
+}
+
 /**
  * Calculate confidence for a given observation count and type.
  * DESIGN: D3 — uses per-type required count from THRESHOLDS so workflow (req=3) reaches
@@ -600,10 +634,15 @@ try {
           existing.last_seen = nowIso;
           if (obs.pattern) existing.pattern = obs.pattern;
           if (obs.details) existing.details = obs.details;
-          // Preserve quality_ok: once true it stays true (quality improves, never regresses)
+          // DESIGN: D4 — quality_ok is sticky once true. A single low-confidence
+          // model call cannot regress the rationale quality of an already-promoted
+          // observation; the model can only confirm or upgrade it.
           if (qualityOk) existing.quality_ok = true;
 
-          // Per-type promotion (D3): uses threshold from THRESHOLDS, requires quality_ok
+          // DESIGN: D3 + D4 — per-type promotion requires BOTH the confidence
+          // threshold AND quality_ok. quality_ok gates materialization; without it
+          // we keep accumulating observations (so the count still grows) but the
+          // downstream render-ready will skip the entry. See render-ready (line ~838).
           if (existing.status !== 'created') {
             const th = THRESHOLDS[existing.type] || THRESHOLDS.procedural;
             if (existing.confidence >= th.promote && existing.quality_ok === true) {
@@ -835,19 +874,16 @@ try {
               '',
             ].join('\n');
 
-            const tmp = artPath + '.tmp';
-            fs.writeFileSync(tmp, content, 'utf8');
-            fs.renameSync(tmp, artPath);
+            writeFileAtomic(artPath, content);
 
             obs.status = 'created';
             obs.artifact_path = artPath;
 
-            const hash = contentHash(content);
             manifestMap.set(obs.id, {
               observationId: obs.id,
               type: obs.type,
               path: artPath,
-              contentHash: hash,
+              contentHash: contentHash(content),
               renderedAt: new Date().toISOString(),
             });
             rendered.push(artPath);
@@ -889,19 +925,16 @@ try {
               '',
             ].join('\n');
 
-            const tmp = artPath + '.tmp';
-            fs.writeFileSync(tmp, content, 'utf8');
-            fs.renameSync(tmp, artPath);
+            writeFileAtomic(artPath, content);
 
             obs.status = 'created';
             obs.artifact_path = artPath;
 
-            const hash = contentHash(content);
             manifestMap.set(obs.id, {
               observationId: obs.id,
               type: obs.type,
               path: artPath,
-              contentHash: hash,
+              contentHash: contentHash(content),
               renderedAt: new Date().toISOString(),
             });
             rendered.push(artPath);
@@ -926,22 +959,18 @@ try {
             try {
               fs.mkdirSync(knowledgeDir, { recursive: true });
 
-              let existingContent = '';
-              if (fs.existsSync(knowledgeFile)) {
-                existingContent = fs.readFileSync(knowledgeFile, 'utf8');
-              } else {
-                // Create with template header
-                existingContent = isDecision
-                  ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
-                  : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
-              }
+              const existingContent = fs.existsSync(knowledgeFile)
+                ? fs.readFileSync(knowledgeFile, 'utf8')
+                : initKnowledgeContent(obs.type);
 
               // Count existing entries
               const existingMatches = [...existingContent.matchAll(headingRe)];
               const count = existingMatches.length;
 
               if (count >= CAPACITY) {
-                obs.pendingCapacity = true;
+                // D15: set softCapExceeded — surfaces to HUD and `devflow learn --review`
+                // so the user can decide which entry to deprecate before a new one lands.
+                obs.softCapExceeded = true;
                 learningLog(`Knowledge file at capacity (${count}/${CAPACITY}), skipping ${obs.id}`);
                 skipped++;
                 continue; // lock still held; released in finally
@@ -972,14 +1001,7 @@ try {
                 }
               }
 
-              // Find highest NNN
-              let maxN = 0;
-              for (const m of existingMatches) {
-                const n = parseInt(m[1], 10);
-                if (n > maxN) maxN = n;
-              }
-              const nextN = (maxN + 1).toString().padStart(3, '0');
-              const anchorId = `${entryPrefix}-${nextN}`;
+              const { anchorId } = nextKnowledgeId(existingMatches, entryPrefix);
 
               let entry;
               const detailsStr = obs.details || '';
@@ -1004,6 +1026,8 @@ try {
                 const issueMatch2 = detailsStr.match(/issue:\s*([^;]+)/i);
                 const impactMatch = detailsStr.match(/impact:\s*([^;]+)/i);
                 const resMatch = detailsStr.match(/resolution:\s*([^;]+)/i);
+                // Status: Active — added so `devflow learn --review` deprecate
+                // can flip it to Deprecated consistently with ADR entries.
                 entry = [
                   `\n## ${anchorId}: ${obs.pattern}`,
                   '',
@@ -1011,6 +1035,7 @@ try {
                   `- **Issue**: ${(issueMatch2 || [])[1] || detailsStr}`,
                   `- **Impact**: ${(impactMatch || [])[1] || ''}`,
                   `- **Resolution**: ${(resMatch || [])[1] || ''}`,
+                  `- **Status**: Active`,
                   `- **Source**: self-learning:${obs.id}`,
                   '',
                 ].join('\n');
@@ -1028,20 +1053,16 @@ try {
                 `<!-- TL;DR: ${newCount} ${tldrLabel}. Key: ${allIds.join(', ')} -->`
               );
 
-              // Atomic write
-              const tmp = knowledgeFile + '.tmp';
-              fs.writeFileSync(tmp, updatedContent, 'utf8');
-              fs.renameSync(tmp, knowledgeFile);
+              writeFileAtomic(knowledgeFile, updatedContent);
 
               obs.status = 'created';
               obs.artifact_path = `${knowledgeFile}#${anchorId}`;
 
-              const hash = contentHash(entry);
               manifestMap.set(obs.id, {
                 observationId: obs.id,
                 type: obs.type,
                 path: knowledgeFile,
-                contentHash: hash,
+                contentHash: contentHash(entry),
                 renderedAt: new Date().toISOString(),
                 anchorId,
               });
@@ -1059,12 +1080,9 @@ try {
 
       // Write updated log and manifest atomically
       writeJsonlAtomic(logFile, Array.from(logMap.values()));
-      const manifestDir = path.dirname(manifestPath);
-      fs.mkdirSync(manifestDir, { recursive: true });
-      const manifestTmp = manifestPath + '.tmp';
+      fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
       manifest.entries = Array.from(manifestMap.values());
-      fs.writeFileSync(manifestTmp, JSON.stringify(manifest, null, 2), 'utf8');
-      fs.renameSync(manifestTmp, manifestPath);
+      writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2));
 
       console.log(JSON.stringify({ rendered, skipped }));
       break;
@@ -1174,9 +1192,7 @@ try {
         // Atomic writes
         writeJsonlAtomic(logFile, Array.from(logMap.values()));
         manifest.entries = keptEntries;
-        const manifestTmp = manifestPath + '.tmp';
-        fs.writeFileSync(manifestTmp, JSON.stringify(manifest, null, 2), 'utf8');
-        fs.renameSync(manifestTmp, manifestPath);
+        writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2));
 
         console.log(JSON.stringify({ deletions, edits, unchanged }));
       } finally {
@@ -1257,19 +1273,15 @@ try {
           existing.details = newObs.details;
         }
 
-        // Levenshtein ratio check on details/rationale: if <0.6, flag for review
+        // If details diverge significantly, flag for review and append new version
+        // as an additional bullet rather than silently overwriting.
         const existDetails = normalizeForDedup(existing.details || '');
         const newDetails = normalizeForDedup(newObs.details || '');
         if (existDetails.length > 0 && newDetails.length > 0) {
-          // Simple approximation: overlap ratio via common chars
-          const lcs = longestCommonSubsequenceRatio(existDetails, newDetails);
-          if (lcs < 0.6) {
+          const similarity = longestCommonSubsequenceRatio(existDetails, newDetails);
+          if (similarity < 0.6) {
             existing.needsReview = true;
-            // Append as additional bullet rather than replace
             existing.details = (existing.details || '') + '\n\n**Additional observation**: ' + newObs.details;
-            existing.details = (newObs.details || '').length > (existing.details || '').length
-              ? newObs.details
-              : existing.details;
           }
         }
 
@@ -1310,7 +1322,9 @@ try {
     // -------------------------------------------------------------------------
     // knowledge-append <file> <type> <obsJson>
     // Standalone op for appending to knowledge files (decisions.md or pitfalls.md).
-    // Used directly by command handlers that want to record without render-ready.
+    // Acquires the shared `.memory/.knowledge.lock` to serialize against render-ready
+    // and any CLI updateKnowledgeStatus callers. Lock path derivation matches the
+    // render-ready handler: sibling of the `knowledge/` directory.
     // -------------------------------------------------------------------------
     case 'knowledge-append': {
       const knowledgeFile = safePath(args[0]);
@@ -1327,55 +1341,56 @@ try {
       const artDate = new Date().toISOString().slice(0, 10);
 
       const knowledgeDir = path.dirname(knowledgeFile);
+      const memoryDir = path.dirname(knowledgeDir);
+      const knowledgeLockDir = path.join(memoryDir, '.knowledge.lock');
+
       fs.mkdirSync(knowledgeDir, { recursive: true });
 
-      let existingContent = '';
-      if (fs.existsSync(knowledgeFile)) {
-        existingContent = fs.readFileSync(knowledgeFile, 'utf8');
-      } else {
-        existingContent = isDecision
-          ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
-          : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
+      if (!acquireLock(knowledgeLockDir, 30000, 60000)) {
+        process.stderr.write(`knowledge-append: timeout acquiring lock at ${knowledgeLockDir}\n`);
+        process.exit(1);
       }
 
-      const existingMatches = [...existingContent.matchAll(headingRe)];
-      let maxN = 0;
-      for (const m of existingMatches) {
-        const n = parseInt(m[1], 10);
-        if (n > maxN) maxN = n;
+      try {
+        const existingContent = fs.existsSync(knowledgeFile)
+          ? fs.readFileSync(knowledgeFile, 'utf8')
+          : initKnowledgeContent(entryType);
+
+        const existingMatches = [...existingContent.matchAll(headingRe)];
+        const { anchorId } = nextKnowledgeId(existingMatches, entryPrefix);
+
+        const detailsStr = obs.details || '';
+        let entry;
+        if (isDecision) {
+          const contextM = detailsStr.match(/context:\s*([^;]+)/i);
+          const decisionM = detailsStr.match(/decision:\s*([^;]+)/i);
+          const rationaleM = detailsStr.match(/rationale:\s*([^;]+)/i);
+          entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Date**: ${artDate}\n- **Status**: Accepted\n- **Context**: ${(contextM||[])[1]||detailsStr}\n- **Decision**: ${(decisionM||[])[1]||obs.pattern}\n- **Consequences**: ${(rationaleM||[])[1]||''}\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
+        } else {
+          const areaM = detailsStr.match(/area:\s*([^;]+)/i);
+          const issueM = detailsStr.match(/issue:\s*([^;]+)/i);
+          const impactM = detailsStr.match(/impact:\s*([^;]+)/i);
+          const resM = detailsStr.match(/resolution:\s*([^;]+)/i);
+          // Status: Active — kept in sync with render-ready pitfall template so
+          // `devflow learn --review` can deprecate entries appended via this op too.
+          entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Area**: ${(areaM||[])[1]||detailsStr}\n- **Issue**: ${(issueM||[])[1]||detailsStr}\n- **Impact**: ${(impactM||[])[1]||''}\n- **Resolution**: ${(resM||[])[1]||''}\n- **Status**: Active\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
+        }
+
+        const newContent = existingContent + entry;
+        const newCount = existingMatches.length + 1;
+        const allIds = [...existingMatches.map(m => `${entryPrefix}-${m[1].padStart(3,'0')}`), anchorId].slice(-5);
+        const tldrLabel = isDecision ? 'decisions' : 'pitfalls';
+        const updatedContent = newContent.replace(
+          /^<!-- TL;DR:.*-->/m,
+          `<!-- TL;DR: ${newCount} ${tldrLabel}. Key: ${allIds.join(', ')} -->`
+        );
+
+        writeFileAtomic(knowledgeFile, updatedContent);
+
+        console.log(JSON.stringify({ anchorId, file: knowledgeFile }));
+      } finally {
+        releaseLock(knowledgeLockDir);
       }
-      const nextN = (maxN + 1).toString().padStart(3, '0');
-      const anchorId = `${entryPrefix}-${nextN}`;
-
-      const detailsStr = obs.details || '';
-      let entry;
-      if (isDecision) {
-        const contextM = detailsStr.match(/context:\s*([^;]+)/i);
-        const decisionM = detailsStr.match(/decision:\s*([^;]+)/i);
-        const rationaleM = detailsStr.match(/rationale:\s*([^;]+)/i);
-        entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Date**: ${artDate}\n- **Status**: Accepted\n- **Context**: ${(contextM||[])[1]||detailsStr}\n- **Decision**: ${(decisionM||[])[1]||obs.pattern}\n- **Consequences**: ${(rationaleM||[])[1]||''}\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
-      } else {
-        const areaM = detailsStr.match(/area:\s*([^;]+)/i);
-        const issueM = detailsStr.match(/issue:\s*([^;]+)/i);
-        const impactM = detailsStr.match(/impact:\s*([^;]+)/i);
-        const resM = detailsStr.match(/resolution:\s*([^;]+)/i);
-        entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Area**: ${(areaM||[])[1]||detailsStr}\n- **Issue**: ${(issueM||[])[1]||detailsStr}\n- **Impact**: ${(impactM||[])[1]||''}\n- **Resolution**: ${(resM||[])[1]||''}\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
-      }
-
-      const newContent = existingContent + entry;
-      const newCount = existingMatches.length + 1;
-      const allIds = [...existingMatches.map(m => `${entryPrefix}-${m[1].padStart(3,'0')}`), anchorId].slice(-5);
-      const tldrLabel = isDecision ? 'decisions' : 'pitfalls';
-      const updatedContent = newContent.replace(
-        /^<!-- TL;DR:.*-->/m,
-        `<!-- TL;DR: ${newCount} ${tldrLabel}. Key: ${allIds.join(', ')} -->`
-      );
-
-      const tmp = knowledgeFile + '.tmp';
-      fs.writeFileSync(tmp, updatedContent, 'utf8');
-      fs.renameSync(tmp, knowledgeFile);
-
-      console.log(JSON.stringify({ anchorId, file: knowledgeFile }));
       break;
     }
 

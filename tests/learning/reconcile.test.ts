@@ -6,16 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
-
-const JSON_HELPER = path.resolve(__dirname, '../../scripts/hooks/json-helper.cjs');
-
-function runHelper(args: string): string {
-  return execSync(`node "${JSON_HELPER}" ${args}`, {
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-}
+import { runHelper, type LogEntry } from './helpers.js';
 
 interface ManifestEntry {
   observationId: string;
@@ -29,23 +20,6 @@ interface ManifestEntry {
 interface Manifest {
   schemaVersion: number;
   entries: ManifestEntry[];
-}
-
-interface LogEntry {
-  id: string;
-  type: string;
-  pattern: string;
-  confidence: number;
-  observations: number;
-  first_seen: string;
-  last_seen: string;
-  status: string;
-  evidence: string[];
-  details: string;
-  quality_ok?: boolean;
-  artifact_path?: string;
-  status_deprecated?: string;
-  deprecated_at?: string;
 }
 
 function setup(tmpDir: string) {

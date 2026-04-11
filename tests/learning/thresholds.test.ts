@@ -7,18 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
-
-const JSON_HELPER = path.resolve(__dirname, '../../scripts/hooks/json-helper.cjs');
-
-function runHelper(args: string, input?: string): string {
-  const cmd = `node "${JSON_HELPER}" ${args}`;
-  const result = execSync(cmd, {
-    input: input,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  return result.trim();
-}
+import { runHelper } from './helpers.js';
 
 function nodeEval(code: string): unknown {
   const result = execSync(`node -e "${code.replace(/"/g, '\\"')}"`, { encoding: 'utf8' });

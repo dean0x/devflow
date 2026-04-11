@@ -41,6 +41,15 @@ function isNoisyText(text) {
 }
 
 /**
+ * Cap text to the per-turn character limit.
+ * @param {string} text
+ * @returns {string}
+ */
+function capText(text) {
+  return text.length > CAP_TEXT_CHARS ? text.slice(0, CAP_TEXT_CHARS) : text;
+}
+
+/**
  * Cleans text content from a user turn.
  * For string content: reject if noisy.
  * For array content: filter out tool_result items and noisy text items, join remainder.
@@ -138,15 +147,13 @@ function extractChannels(jsonlContent) {
     if (role === 'user') {
       const { ok, text } = cleanContent(content);
       if (!ok) continue;
-      const capped = text.length > CAP_TEXT_CHARS ? text.slice(0, CAP_TEXT_CHARS) : text;
-      turns.push({ role: 'user', text: capped, turnId: ++turnId });
+      turns.push({ role: 'user', text: capText(text), turnId: ++turnId });
     } else if (role === 'assistant') {
       // For assistant turns: accept string content or text-array content
       const { ok, text } = cleanContent(content);
       if (!ok) continue;
-      const capped = text.length > CAP_TEXT_CHARS ? text.slice(0, CAP_TEXT_CHARS) : text;
       // Assistant turn inherits current turnId (not incremented)
-      turns.push({ role: 'assistant', text: capped, turnId });
+      turns.push({ role: 'assistant', text: capText(text), turnId });
     }
   }
 

@@ -303,6 +303,40 @@ async function readObservations(logPath: string): Promise<{ observations: Learni
 }
 
 /**
+ * Acquire a mkdir-based lock directory.
+ *
+ * Used by CLI writers (`--review`, `--purge-legacy-knowledge`) to serialize
+ * against the background learning pipeline. `.learning.lock` guards log mutations;
+ * `.knowledge.lock` guards decisions.md / pitfalls.md — the caller picks the path.
+ *
+ * Stale detection: if the lock directory is older than `staleMs` we assume the
+ * previous holder crashed and remove it. Matches the contract documented in
+ * `shared/skills/knowledge-persistence/SKILL.md` and mirrored in json-helper.cjs
+ * so all lock holders interpret staleness consistently.
+ *
+ * @returns true when the lock was acquired, false on timeout.
+ */
+async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, staleMs = 60_000): Promise<boolean> {
+  const start = Date.now();
+  while (true) {
+    try {
+      await fs.mkdir(lockDir);
+      return true;
+    } catch {
+      try {
+        const stat = await fs.stat(lockDir);
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          try { await fs.rmdir(lockDir); } catch { /* race condition OK */ }
+          continue;
+        }
+      } catch { /* lock vanished between EEXIST and stat */ }
+      if (Date.now() - start >= timeoutMs) return false;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+}
+
+/**
  * Warn the user if invalid entries were found in the learning log.
  */
 function warnIfInvalid(invalidCount: number): void {
@@ -312,25 +346,47 @@ function warnIfInvalid(invalidCount: number): void {
 }
 
 /**
+ * Atomically write a text file by writing to a sibling `.tmp` file and renaming.
+ * Mirrors scripts/hooks/json-helper.cjs writeFileAtomic — single POSIX rename
+ * ensures readers either see the old content or the new content, never a partial write.
+ */
+async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+  const tmp = `${filePath}.tmp`;
+  await fs.writeFile(tmp, content, 'utf-8');
+  await fs.rename(tmp, filePath);
+}
+
+/**
  * Write observations back to the log file atomically.
- * Each observation is serialized as a JSON line.
+ * Each observation is serialized as a JSON line. Uses a `.tmp` sibling + rename so
+ * concurrent readers (e.g. background-learning during a race) never observe a
+ * half-written file.
  */
 async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
   const lines = observations.map(o => JSON.stringify(o));
-  await fs.writeFile(logPath, lines.join('\n') + (lines.length ? '\n' : ''), 'utf-8');
+  const content = lines.join('\n') + (lines.length ? '\n' : '');
+  await writeFileAtomic(logPath, content);
 }
 
 /**
  * Update the Status: field for a decision or pitfall entry in a knowledge file.
  * Locates the entry by anchor ID (from artifact_path fragment), sets Status to the given value.
  * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
+ *
+ * The lock path MUST match the render-ready writer in json-helper.cjs so CLI updates
+ * serialize against the background learning pipeline.
  */
 export async function updateKnowledgeStatus(
   filePath: string,
   anchorId: string,
   newStatus: string,
 ): Promise<boolean> {
-  const lockPath = path.join(path.dirname(filePath), '.knowledge.lock');
+  // Lock path MUST be `.memory/.knowledge.lock` (sibling of `knowledge/`) to match
+  // scripts/hooks/json-helper.cjs render-ready + knowledge-append writers.
+  // Knowledge files live at `.memory/knowledge/{decisions,pitfalls}.md` so we go up
+  // one level from the file's parent directory.
+  const memoryDir = path.dirname(path.dirname(filePath));
+  const lockPath = path.join(memoryDir, '.knowledge.lock');
   const lockTimeout = 30_000;
   const staleMs = 60_000;
   const start = Date.now();
@@ -386,9 +442,9 @@ export async function updateKnowledgeStatus(
         }
       }
       if (!changed) return false;
-      await fs.writeFile(filePath, lines.join('\n'), 'utf-8');
+      await writeFileAtomic(filePath, lines.join('\n'));
     } else {
-      await fs.writeFile(filePath, updated, 'utf-8');
+      await writeFileAtomic(filePath, updated);
     }
     return true;
   } finally {
@@ -514,10 +570,8 @@ export const learnCommand = new Command('learn')
 
       p.intro(color.bgYellow(color.black(' Learning Observations ')));
       for (const obs of observations) {
-        const typeIcon = obs.type === 'workflow' ? 'W'
-          : obs.type === 'procedural' ? 'P'
-          : obs.type === 'decision' ? 'D'
-          : 'F';
+        const typeIconMap = { workflow: 'W', procedural: 'P', decision: 'D', pitfall: 'F' } as const;
+        const typeIcon = typeIconMap[obs.type] ?? 'F';
         const statusIcon = obs.status === 'created' ? color.green('created')
           : obs.status === 'ready' ? color.yellow('ready')
           : obs.status === 'deprecated' ? color.dim('deprecated')
@@ -833,89 +887,119 @@ export const learnCommand = new Command('learn')
         return;
       }
 
+      // Acquire .learning.lock so we don't race with background-learning during the
+      // interactive loop. The internal updateKnowledgeStatus call still takes its own
+      // .knowledge.lock — different lock directories, no deadlock.
+      const memoryDirForReview = path.join(process.cwd(), '.memory');
+      const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
+      const lockAcquired = await acquireMkdirLock(learningLockDir);
+      if (!lockAcquired) {
+        p.log.error('Learning system is currently running. Try again in a moment.');
+        return;
+      }
+
       p.intro(color.bgYellow(color.black(' Learning Review ')));
       p.log.info(`${flagged.length} observation(s) flagged for review.`);
 
       const updatedObservations = [...observations];
 
-      for (const obs of flagged) {
-        const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
-        const reason = formatStaleReason(obs);
+      try {
+        for (const obs of flagged) {
+          const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
+          const reason = formatStaleReason(obs);
 
-        p.log.info(
-          `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
-          `  Reason: ${color.yellow(reason)}\n` +
-          (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
-          `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
-        );
+          p.log.info(
+            `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
+            `  Reason: ${color.yellow(reason)}\n` +
+            (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
+            `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
+          );
 
-        const action = await p.select({
-          message: 'Action:',
-          options: [
-            { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
-            { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
-            { value: 'skip', label: 'Skip', hint: 'No change' },
-          ],
-        });
+          const action = await p.select({
+            message: 'Action:',
+            options: [
+              { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
+              { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
+              { value: 'skip', label: 'Skip', hint: 'No change' },
+            ],
+          });
 
-        if (p.isCancel(action)) {
-          p.cancel('Review cancelled.');
-          return;
-        }
-
-        const idx = updatedObservations.findIndex(o => o.id === obs.id);
-        if (idx === -1) continue;
-
-        if (action === 'deprecate') {
-          updatedObservations[idx] = {
-            ...updatedObservations[idx],
-            status: 'deprecated',
-            mayBeStale: undefined,
-            needsReview: undefined,
-            softCapExceeded: undefined,
-          };
-
-          // Update Status: field in knowledge file for decisions/pitfalls
-          if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
-            const hashIdx = obs.artifact_path.indexOf('#');
-            if (hashIdx !== -1) {
-              const knowledgePath = obs.artifact_path.slice(0, hashIdx);
-              const anchorId = obs.artifact_path.slice(hashIdx + 1);
-              const absPath = path.isAbsolute(knowledgePath)
-                ? knowledgePath
-                : path.join(process.cwd(), knowledgePath);
-              const updated = await updateKnowledgeStatus(absPath, anchorId, 'Deprecated');
-              if (updated) {
-                p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
-              } else {
-                p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
-              }
-            }
+          if (p.isCancel(action)) {
+            // Persist any changes made so far before exiting so the user keeps
+            // partial progress (and log/knowledge stay consistent).
+            await writeObservations(logPath, updatedObservations);
+            p.cancel('Review cancelled — partial progress saved.');
+            return;
           }
 
-          p.log.success(`Marked '${obs.pattern}' as deprecated.`);
-        } else if (action === 'keep') {
-          updatedObservations[idx] = {
-            ...updatedObservations[idx],
-            mayBeStale: undefined,
-            needsReview: undefined,
-            softCapExceeded: undefined,
-          };
-          p.log.success(`Cleared review flags for '${obs.pattern}'.`);
+          const idx = updatedObservations.findIndex(o => o.id === obs.id);
+          if (idx === -1) continue;
+
+          if (action === 'deprecate') {
+            updatedObservations[idx] = {
+              ...updatedObservations[idx],
+              status: 'deprecated',
+              mayBeStale: undefined,
+              needsReview: undefined,
+              softCapExceeded: undefined,
+            };
+
+            // Update Status: field in knowledge file for decisions/pitfalls
+            if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
+              const hashIdx = obs.artifact_path.indexOf('#');
+              if (hashIdx !== -1) {
+                const knowledgePath = obs.artifact_path.slice(0, hashIdx);
+                const anchorId = obs.artifact_path.slice(hashIdx + 1);
+                const absPath = path.isAbsolute(knowledgePath)
+                  ? knowledgePath
+                  : path.join(process.cwd(), knowledgePath);
+                const updated = await updateKnowledgeStatus(absPath, anchorId, 'Deprecated');
+                if (updated) {
+                  p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+                } else {
+                  p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
+                }
+              }
+            }
+
+            // Persist log after each deprecation so Ctrl-C never leaves the log
+            // out of sync with the knowledge file updates.
+            await writeObservations(logPath, updatedObservations);
+            p.log.success(`Marked '${obs.pattern}' as deprecated.`);
+          } else if (action === 'keep') {
+            updatedObservations[idx] = {
+              ...updatedObservations[idx],
+              mayBeStale: undefined,
+              needsReview: undefined,
+              softCapExceeded: undefined,
+            };
+            // Keep writes are flag-clears only; still persist immediately for
+            // consistent on-disk state if the loop is interrupted.
+            await writeObservations(logPath, updatedObservations);
+            p.log.success(`Cleared review flags for '${obs.pattern}'.`);
+          }
+          // 'skip' — no change
         }
-        // 'skip' — no change
+
+        // Final write is a no-op if every branch already persisted, but cheap
+        // and keeps the success path explicit.
+        await writeObservations(logPath, updatedObservations);
+      } finally {
+        try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
       }
 
-      // Write updated log
-      await writeObservations(logPath, updatedObservations);
       p.outro(color.green('Review complete.'));
       return;
     }
 
     // --- --purge-legacy-knowledge ---
     if (options.purgeLegacyKnowledge) {
+      // Hard-coded targets from the v2 signal-quality audit — these were the only
+      // agent-summary entries that survived review; widen this list only with
+      // another audit.
       const LEGACY_IDS = ['ADR-002', 'PF-001', 'PF-003', 'PF-005'];
-      const knowledgeDir = path.join(process.cwd(), '.memory', 'knowledge');
+      const memoryDirForPurge = path.join(process.cwd(), '.memory');
+      const knowledgeDir = path.join(memoryDirForPurge, 'knowledge');
       const decisionsPath = path.join(knowledgeDir, 'decisions.md');
       const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
 
@@ -937,41 +1021,55 @@ export const learnCommand = new Command('learn')
         }
       }
 
+      // Acquire the same `.knowledge.lock` used by json-helper.cjs render-ready /
+      // knowledge-append and by updateKnowledgeStatus — concurrent writers must
+      // all serialize on this single lock directory.
+      const knowledgeLockDir = path.join(memoryDirForPurge, '.knowledge.lock');
+      const purgeLockAcquired = await acquireMkdirLock(knowledgeLockDir);
+      if (!purgeLockAcquired) {
+        p.log.error('Knowledge files are currently being written. Try again in a moment.');
+        return;
+      }
+
       let removed = 0;
-      for (const filePath of [decisionsPath, pitfallsPath]) {
-        let content: string;
-        try {
-          content = await fs.readFile(filePath, 'utf-8');
-        } catch {
-          continue; // File doesn't exist
-        }
+      try {
+        for (const filePath of [decisionsPath, pitfallsPath]) {
+          let content: string;
+          try {
+            content = await fs.readFile(filePath, 'utf-8');
+          } catch {
+            continue; // File doesn't exist
+          }
 
-        const prefix = filePath.includes('decisions') ? 'ADR' : 'PF';
-        const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
+          const prefix = filePath.includes('decisions') ? 'ADR' : 'PF';
+          const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
 
-        let updatedContent = content;
-        for (const legacyId of legacyInFile) {
-          // Remove the section from `## LEGACYID:` to the next `## ` or end-of-file
-          const sectionRegex = new RegExp(
-            `\\n## ${escapeRegExp(legacyId)}:[^\\n]*(?:\\n(?!## )[^\\n]*)*`,
-            'g',
-          );
-          const before = updatedContent;
-          updatedContent = updatedContent.replace(sectionRegex, '');
-          if (updatedContent !== before) removed++;
-        }
+          let updatedContent = content;
+          for (const legacyId of legacyInFile) {
+            // Remove the section from `## LEGACYID:` to the next `## ` or end-of-file
+            const sectionRegex = new RegExp(
+              `\\n## ${escapeRegExp(legacyId)}:[^\\n]*(?:\\n(?!## )[^\\n]*)*`,
+              'g',
+            );
+            const before = updatedContent;
+            updatedContent = updatedContent.replace(sectionRegex, '');
+            if (updatedContent !== before) removed++;
+          }
 
-        if (updatedContent !== content) {
-          // Update TL;DR count
-          const headingMatches = updatedContent.match(/^## (ADR|PF)-/gm) || [];
-          const count = headingMatches.length;
-          const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
-          updatedContent = updatedContent.replace(
-            /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
-            `<!-- TL;DR: ${count} ${label}. Key: -->`,
-          );
-          await fs.writeFile(filePath, updatedContent, 'utf-8');
+          if (updatedContent !== content) {
+            // Update TL;DR count
+            const headingMatches = updatedContent.match(/^## (ADR|PF)-/gm) || [];
+            const count = headingMatches.length;
+            const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
+            updatedContent = updatedContent.replace(
+              /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
+              `<!-- TL;DR: ${count} ${label}. Key: -->`,
+            );
+            await writeFileAtomic(filePath, updatedContent);
+          }
         }
+      } finally {
+        try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
       }
 
       if (removed === 0) {
