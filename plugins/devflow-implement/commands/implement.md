@@ -2,6 +2,13 @@
 description: Execute a single task through implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
 ---
 
+<!--
+@devflow-design-decision D8
+Phase 10 previously recorded decisions retrospectively after reading knowledge-persistence SKILL.
+Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
+from user transcripts by scripts/hooks/background-learning.
+-->
+
 # Implement Command
 
 Orchestrate a single task through implementation by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.
@@ -309,14 +316,9 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
-### Phase 10: Report + Record Decisions
+### Phase 10: Report
 
 Display completion summary with phase status, PR info, and next steps.
-
-If the Coder's report includes Key Decisions with architectural significance:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
-2. Source field: `/implement {TASK_ID}`
-3. Skip entirely if no architectural decisions were made
 
 ## Architecture
 
@@ -358,7 +360,7 @@ If the Coder's report includes Key Decisions with architectural significance:
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-└─ Phase 10: Report + Record Decisions (inline, if any)
+└─ Phase 10: Report
 ```
 
 ## Principles
