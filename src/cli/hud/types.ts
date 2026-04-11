@@ -15,7 +15,7 @@ export interface StdinData {
 }
 
 /**
- * Component IDs — the 14 HUD components.
+ * Component IDs — the 15 HUD components.
  */
 export type ComponentId =
   | 'directory'
@@ -31,7 +31,8 @@ export type ComponentId =
   | 'configCounts'
   | 'sessionCost'
   | 'releaseInfo'
-  | 'worktreeCount';
+  | 'worktreeCount'
+  | 'learningCounts';
 
 /**
  * HUD config persisted to ~/.devflow/hud.json.
@@ -100,6 +101,20 @@ export interface ConfigCountsData {
 }
 
 /**
+ * Learning counts data for the learningCounts HUD component.
+ * @devflow-design-decision D15: Soft cap + HUD attention counter, not auto-pruning.
+ * We cannot reliably detect 'irrelevance' without human judgment. The soft cap shifts
+ * the decision to the user at the point where it matters.
+ */
+export interface LearningCountsData {
+  workflows: number;
+  procedural: number;
+  decisions: number;
+  pitfalls: number;
+  needReview: number;
+}
+
+/**
  * Gather context passed to all component render functions.
  */
 export interface GatherContext {
@@ -108,6 +123,7 @@ export interface GatherContext {
   transcript: TranscriptData | null;
   usage: UsageData | null;
   configCounts: ConfigCountsData | null;
+  learningCounts: LearningCountsData | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;
   sessionStartTime: number | null;

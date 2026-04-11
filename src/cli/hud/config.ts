@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import type { HudConfig, ComponentId } from './types.js';
 
 /**
- * All 14 HUD components in display order.
+ * All 15 HUD components in display order.
  */
 export const HUD_COMPONENTS: readonly ComponentId[] = [
   'directory',
@@ -21,6 +21,7 @@ export const HUD_COMPONENTS: readonly ComponentId[] = [
   'usageQuota',
   'todoProgress',
   'configCounts',
+  'learningCounts',
 ];
 
 export function getConfigPath(): string {

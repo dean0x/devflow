@@ -37,6 +37,7 @@ function makeCtx(
     transcript: null,
     usage: null,
     configCounts: null,
+    learningCounts: null,
     config: {
       enabled: true,
       detail: false,
@@ -204,7 +205,7 @@ describe('config', () => {
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
-  it('HUD_COMPONENTS has 14 components', () => {
-    expect(HUD_COMPONENTS).toHaveLength(14);
+  it('HUD_COMPONENTS has 15 components', () => {
+    expect(HUD_COMPONENTS).toHaveLength(15);
   });
 });

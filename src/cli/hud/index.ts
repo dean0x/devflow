@@ -7,6 +7,7 @@ import { gatherGitStatus } from './git.js';
 import { parseTranscript } from './transcript.js';
 import { fetchUsageData } from './usage-api.js';
 import { gatherConfigCounts } from './components/config-counts.js';
+import { getLearningCounts } from './learning-counts.js';
 import { render } from './render.js';
 import type { GatherContext } from './types.js';
 
@@ -53,6 +54,7 @@ async function run(): Promise<string> {
     components.has('configCounts');
   const needsUsage = components.has('usageQuota');
   const needsConfigCounts = components.has('configCounts');
+  const needsLearningCounts = components.has('learningCounts');
 
   // Parallel data gathering — only fetch what's needed
   const [git, transcript, usage] = await Promise.all([
@@ -77,6 +79,11 @@ async function run(): Promise<string> {
     ? gatherConfigCounts(cwd)
     : null;
 
+  // Learning counts (fast, synchronous filesystem reads; graceful if log missing)
+  const learningCountsData = needsLearningCounts
+    ? getLearningCounts(cwd)
+    : null;
+
   // Terminal width via stderr (stdout is piped to Claude Code)
   const terminalWidth = process.stderr.columns || 120;
 
@@ -86,6 +93,7 @@ async function run(): Promise<string> {
     transcript,
     usage,
     configCounts: configCountsData,
+    learningCounts: learningCountsData,
     config: { ...config, components: resolved } as GatherContext['config'],
     devflowDir,
     sessionStartTime,
