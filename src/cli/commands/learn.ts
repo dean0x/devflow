@@ -26,7 +26,8 @@ export interface LearningObservation {
   /** Set by staleness checker (D16) when code refs in artifact file are missing */
   mayBeStale?: boolean;
   staleReason?: string;
-  /** Set by reconcile-manifest when artifact file is deleted */
+  /** Set by merge-observation when an incoming observation's details diverge
+   *  significantly from the existing entry (Levenshtein ratio < 0.6). See D14. */
   needsReview?: boolean;
   /** Set when knowledge file is at capacity (50 entries) */
   softCapExceeded?: boolean;

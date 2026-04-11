@@ -244,6 +244,37 @@ cap_entries() {
   fi
 }
 
+# === DESIGN: D7 — Greenfield migration (no dual-writer) ===
+#
+# On first v2 run in a project where a v1 learning-log exists (detected by
+# absence of quality_ok field on all entries), we move it to
+# .learning-log.v1.jsonl.bak and start fresh. No dual-writer period.
+#
+# Rationale: post-reset state means no data loss risk, and the schema change
+# makes reconciling v1 and v2 entries complex for no benefit. Single-step
+# cutover is simpler to reason about and test. Existing knowledge files
+# (decisions.md, pitfalls.md) stay — they're compatible with the new format.
+#
+# See: V2 plan "Migration — greenfield" section, acceptance criterion D7.
+
+migrate_v1_log() {
+  [ ! -f "$LEARNING_LOG" ] && return
+
+  # Check if ANY entry has a quality_ok field — if so, this is already a v2 log
+  local has_quality_ok
+  has_quality_ok=$(grep -c '"quality_ok"' "$LEARNING_LOG" 2>/dev/null || true)
+
+  if [ "${has_quality_ok:-0}" -gt 0 ]; then
+    # Already v2 schema — no migration needed
+    return
+  fi
+
+  # No quality_ok fields found: this is a v1 log. Rename and start fresh.
+  local bak="${LEARNING_LOG%.jsonl}.v1.jsonl.bak"
+  mv "$LEARNING_LOG" "$bak"
+  log "D7 migration: moved v1 learning-log to $(basename "$bak"), starting fresh"
+}
+
 # --- Prompt Construction ---
 # DESIGN: D10 — single LLM call per batch, 4-type detection with quality_ok gate.
 # Rendering is now deterministic (D5) — this prompt ONLY produces observation metadata.
@@ -506,6 +537,9 @@ fi
 
 load_config
 rotate_log
+
+# D7: Migrate v1 learning-log (if present and lacking quality_ok fields)
+migrate_v1_log
 
 # Check daily cap
 if ! check_daily_cap; then

@@ -37,12 +37,12 @@ Observations accumulate in `.memory/learning-log.jsonl` (JSONL, one entry per li
 
 Per-type thresholds (in `json-helper.cjs THRESHOLDS`):
 
-| Type | Required count | Spread |
-|------|---------------|--------|
-| workflow | 3 | 7 days |
-| procedural | 3 | 7 days |
-| decision | 2 | 3 days |
-| pitfall | 2 | 3 days |
+| Type | Required count | Spread | Promote threshold |
+|------|---------------|--------|-------------------|
+| workflow | 3 | 3 days | 0.60 |
+| procedural | 4 | 5 days | 0.70 |
+| decision | 2 | 0 days (no spread) | 0.65 |
+| pitfall | 2 | 0 days (no spread) | 0.65 |
 
 An observation promotes to `ready` when: `quality_ok === true` AND `observations >= required` AND `daySpread >= spread`.
 
