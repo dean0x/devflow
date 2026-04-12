@@ -322,7 +322,7 @@ async function readObservations(logPath: string): Promise<{ observations: Learni
 /**
  * Acquire a mkdir-based lock directory.
  *
- * Used by CLI writers (`--review`, `--purge-legacy-knowledge`) to serialize
+ * Used by CLI writers (`--review`, `--dismiss-capacity`) to serialize
  * against the background learning pipeline. `.learning.lock` guards log mutations;
  * `.knowledge.lock` guards decisions.md / pitfalls.md — the caller picks the path.
  *
@@ -476,7 +476,6 @@ interface LearnOptions {
   reset?: boolean;
   purge?: boolean;
   review?: boolean;
-  purgeLegacyKnowledge?: boolean;
   dismissCapacity?: boolean;
 }
 
@@ -491,10 +490,9 @@ export const learnCommand = new Command('learn')
   .option('--reset', 'Remove all self-learning artifacts, log, and transient state')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
-  .option('--purge-legacy-knowledge', 'One-time removal of legacy low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)')
   .option('--dismiss-capacity', 'Dismiss the current capacity notification for a knowledge file')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.purgeLegacyKnowledge || options.dismissCapacity;
+    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -1210,103 +1208,6 @@ export const learnCommand = new Command('learn')
         return;
       }
 
-      return;
-    }
-
-    // --- --purge-legacy-knowledge ---
-    if (options.purgeLegacyKnowledge) {
-      // Hard-coded targets from the v2 signal-quality audit — these were the only
-      // agent-summary entries that survived review; widen this list only with
-      // another audit.
-      const LEGACY_IDS = ['ADR-002', 'PF-001', 'PF-003', 'PF-005'];
-      const memoryDirForPurge = path.join(process.cwd(), '.memory');
-      const knowledgeDir = path.join(memoryDirForPurge, 'knowledge');
-      const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-      const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
-
-      p.intro(color.bgYellow(color.black(' Purge Legacy Knowledge ')));
-      p.log.info(
-        `This will remove the following low-signal legacy entries:\n` +
-        LEGACY_IDS.map(id => `  - ${id}`).join('\n') +
-        '\n\nThese were created by agent-summary extraction (v1) and replaced by transcript-based extraction (v2).',
-      );
-
-      if (process.stdin.isTTY) {
-        const confirm = await p.confirm({
-          message: 'Proceed with removal? This cannot be undone.',
-          initialValue: false,
-        });
-        if (p.isCancel(confirm) || !confirm) {
-          p.cancel('Purge cancelled.');
-          return;
-        }
-      }
-
-      // Acquire the same `.knowledge.lock` used by json-helper.cjs render-ready /
-      // knowledge-append and by updateKnowledgeStatus — concurrent writers must
-      // all serialize on this single lock directory.
-      const knowledgeLockDir = path.join(memoryDirForPurge, '.knowledge.lock');
-      const purgeLockAcquired = await acquireMkdirLock(knowledgeLockDir);
-      if (!purgeLockAcquired) {
-        p.log.error('Knowledge files are currently being written. Try again in a moment.');
-        return;
-      }
-
-      let removed = 0;
-      try {
-        for (const filePath of [decisionsPath, pitfallsPath]) {
-          let content: string;
-          try {
-            content = await fs.readFile(filePath, 'utf-8');
-          } catch {
-            continue; // File doesn't exist
-          }
-
-          const prefix = filePath.includes('decisions') ? 'ADR' : 'PF';
-          const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
-
-          let updatedContent = content;
-          for (const legacyId of legacyInFile) {
-            // Remove the section from `## LEGACYID:` to the next `## ` or end-of-file
-            const sectionRegex = new RegExp(
-              `\\n## ${escapeRegExp(legacyId)}:[^\\n]*(?:\\n(?!## )[^\\n]*)*`,
-              'g',
-            );
-            const before = updatedContent;
-            updatedContent = updatedContent.replace(sectionRegex, '');
-            if (updatedContent !== before) removed++;
-          }
-
-          if (updatedContent !== content) {
-            // Update TL;DR count
-            const headingMatches = updatedContent.match(/^## (ADR|PF)-/gm) || [];
-            const count = headingMatches.length;
-            const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
-            updatedContent = updatedContent.replace(
-              /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
-              `<!-- TL;DR: ${count} ${label}. Key: -->`,
-            );
-            await writeFileAtomic(filePath, updatedContent);
-          }
-        }
-
-        // Remove orphan PROJECT-PATTERNS.md — stale artifact, nothing generates/reads it
-        const projectPatternsPath = path.join(memoryDirForPurge, 'PROJECT-PATTERNS.md');
-        try {
-          await fs.unlink(projectPatternsPath);
-          removed++;
-          p.log.info('Removed orphan PROJECT-PATTERNS.md');
-        } catch { /* File doesn't exist — fine */ }
-      } finally {
-        try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
-      }
-
-      if (removed === 0) {
-        p.log.info('No legacy entries found — already clean.');
-      } else {
-        p.log.success(`Removed ${removed} legacy entry(ies).`);
-      }
-      p.outro(color.green('Legacy purge complete.'));
       return;
     }
 

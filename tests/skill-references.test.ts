@@ -774,6 +774,7 @@ describe('Test infrastructure skill references', () => {
     // Files whose tests intentionally use old skill names as test data
     const ALLOWLIST_FILES = new Set([
       'init-logic.test.ts',
+      'shadow-overrides-migration.test.ts',
     ]);
 
     for (const relFile of testFiles) {
