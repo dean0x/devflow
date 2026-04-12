@@ -1072,8 +1072,6 @@ try {
 
           } else if (obs.type === 'decision' || obs.type === 'pitfall') {
             // --- Decision / Pitfall: append to knowledge file ---
-            // Capacity: max 50 entries per file
-            const CAPACITY = 50;
             const isDecision = obs.type === 'decision';
             const knowledgeDir = path.join(baseDir, '.memory', 'knowledge');
             const knowledgeFile = path.join(knowledgeDir, isDecision ? 'decisions.md' : 'pitfalls.md');
@@ -1093,15 +1091,34 @@ try {
                 ? fs.readFileSync(knowledgeFile, 'utf8')
                 : initKnowledgeContent(obs.type);
 
-              // Count existing entries
+              // existingMatches needed for nextKnowledgeId (uses Math.max on match groups)
               const existingMatches = [...existingContent.matchAll(headingRe)];
-              const count = existingMatches.length;
 
-              if (count >= CAPACITY) {
+              // D18: count only active (non-deprecated/superseded) headings for capacity check
+              const previousCount = countActiveHeadings(existingContent, obs.type);
+
+              const memoryDir = path.join(baseDir, '.memory');
+              const notifKey = isDecision ? 'knowledge-capacity-decisions' : 'knowledge-capacity-pitfalls';
+
+              // D17: hard ceiling at KNOWLEDGE_HARD_CEILING (100); softCapExceeded repurposed
+              // from old 50-entry soft cap — now signals the hard ceiling was hit.
+              if (previousCount >= KNOWLEDGE_HARD_CEILING) {
                 // D15: set softCapExceeded — surfaces to HUD and `devflow learn --review`
                 // so the user can decide which entry to deprecate before a new one lands.
                 obs.softCapExceeded = true;
-                learningLog(`Knowledge file at capacity (${count}/${CAPACITY}), skipping ${obs.id}`);
+                // Write error-level notification for hard ceiling
+                const notifications = readNotifications(memoryDir);
+                notifications[notifKey] = {
+                  active: true,
+                  threshold: KNOWLEDGE_HARD_CEILING,
+                  count: previousCount,
+                  ceiling: KNOWLEDGE_HARD_CEILING,
+                  dismissed_at_threshold: null,
+                  severity: 'error',
+                  created_at: new Date().toISOString(),
+                };
+                writeNotifications(memoryDir, notifications);
+                learningLog(`Knowledge file at hard ceiling (${previousCount}/${KNOWLEDGE_HARD_CEILING}), skipping ${obs.id}`);
                 skipped++;
                 continue; // lock still held; released in finally
               }
@@ -1172,11 +1189,23 @@ try {
               }
 
               const newContent = existingContent + entry;
-              const newCount = count + 1;
 
-              // Update TL;DR comment on line 1
-              // Collect top 5 most recent IDs
-              const allIds = [...existingMatches.map(m => `${entryPrefix}-${m[1].padStart(3,'0')}`), anchorId].slice(-5);
+              // D26: TL;DR shows active-only count (excludes deprecated/superseded)
+              const newCount = previousCount + 1;
+
+              // D26: Collect IDs of active-only entries for TL;DR Key list
+              const activeIds = [];
+              const headingReForIds = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
+              let hMatch;
+              while ((hMatch = headingReForIds.exec(existingContent)) !== null) {
+                const hIdx = hMatch.index;
+                const afterH = existingContent.slice(hIdx);
+                const statusM = afterH.match(/- \*\*Status\*\*:\s*(\w+)/);
+                if (statusM && (statusM[1] === 'Deprecated' || statusM[1] === 'Superseded')) continue;
+                activeIds.push(`${entryPrefix}-${hMatch[1].padStart(3, '0')}`);
+              }
+              activeIds.push(anchorId);
+              const allIds = activeIds.slice(-5);
               const tldrLabel = isDecision ? 'decisions' : 'pitfalls';
               const updatedContent = newContent.replace(
                 /^<!-- TL;DR:.*-->/m,
@@ -1184,6 +1213,46 @@ try {
               );
 
               writeFileAtomic(knowledgeFile, updatedContent);
+
+              // D20: register in usage tracking so cite counts start at 0
+              registerUsageEntry(memoryDir, anchorId);
+
+              // D21: first-run seed — if no .notifications.json existed and count >= KNOWLEDGE_SOFT_START,
+              // treat previous_count as 0 so all thresholds up to newCount fire on first pass.
+              const notifications = readNotifications(memoryDir);
+              const existingNotif = notifications[notifKey];
+              let effectivePrevCount = previousCount;
+              if (!existingNotif && newCount >= KNOWLEDGE_SOFT_START) {
+                // D21: first-run seed — pretend we started from 0 to fire all relevant thresholds
+                effectivePrevCount = 0;
+              }
+
+              // D22: check threshold crossings per-append; fire notification for highest crossed
+              const crossed = crossedThresholds(effectivePrevCount, newCount);
+              if (crossed.length > 0) {
+                const highestCrossed = crossed[crossed.length - 1];
+                // D24: severity escalates with count
+                let severity = 'dim';
+                if (highestCrossed >= 90) severity = 'error';
+                else if (highestCrossed >= 70) severity = 'warning';
+
+                notifications[notifKey] = {
+                  active: true,
+                  threshold: highestCrossed,
+                  count: newCount,
+                  ceiling: KNOWLEDGE_HARD_CEILING,
+                  dismissed_at_threshold: (existingNotif && existingNotif.dismissed_at_threshold) || null,
+                  severity,
+                  created_at: (existingNotif && existingNotif.created_at) || new Date().toISOString(),
+                };
+
+                // D28: if user dismissed at a lower threshold, re-fire at new threshold
+                if (existingNotif && existingNotif.dismissed_at_threshold && highestCrossed > existingNotif.dismissed_at_threshold) {
+                  notifications[notifKey].dismissed_at_threshold = null;
+                }
+
+                writeNotifications(memoryDir, notifications);
+              }
 
               obs.status = 'created';
               obs.artifact_path = `${knowledgeFile}#${anchorId}`;
@@ -1486,7 +1555,19 @@ try {
           ? fs.readFileSync(knowledgeFile, 'utf8')
           : initKnowledgeContent(entryType);
 
+        // existingMatches needed for nextKnowledgeId (uses Math.max on match groups)
         const existingMatches = [...existingContent.matchAll(headingRe)];
+
+        // D18: count only active headings (latent bug fix — knowledge-append never had capacity check)
+        const previousCount = countActiveHeadings(existingContent, entryType);
+
+        // D17: hard ceiling enforcement — same threshold as render-ready
+        if (previousCount >= KNOWLEDGE_HARD_CEILING) {
+          process.stderr.write(`knowledge-append: hard ceiling reached (${previousCount}/${KNOWLEDGE_HARD_CEILING})\n`);
+          console.log(JSON.stringify({ error: 'hard_ceiling', count: previousCount }));
+          break; // exits switch, lock released in finally
+        }
+
         const { anchorId } = nextKnowledgeId(existingMatches, entryPrefix);
 
         const detailsStr = obs.details || '';
@@ -1507,15 +1588,71 @@ try {
         }
 
         const newContent = existingContent + entry;
-        const newCount = existingMatches.length + 1;
-        const allIds = [...existingMatches.map(m => `${entryPrefix}-${m[1].padStart(3,'0')}`), anchorId].slice(-5);
+
+        // D26: TL;DR shows active-only count (excludes deprecated/superseded)
+        const newActiveCount = countActiveHeadings(newContent, entryType);
+
+        // D26: Collect IDs of active-only entries for TL;DR Key list
+        const activeIds = [];
+        const headingReForIds = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
+        let hMatch;
+        while ((hMatch = headingReForIds.exec(existingContent)) !== null) {
+          const hIdx = hMatch.index;
+          const afterH = existingContent.slice(hIdx);
+          const statusM = afterH.match(/- \*\*Status\*\*:\s*(\w+)/);
+          if (statusM && (statusM[1] === 'Deprecated' || statusM[1] === 'Superseded')) continue;
+          activeIds.push(`${entryPrefix}-${hMatch[1].padStart(3, '0')}`);
+        }
+        activeIds.push(anchorId);
+        const allIds = activeIds.slice(-5);
         const tldrLabel = isDecision ? 'decisions' : 'pitfalls';
         const updatedContent = newContent.replace(
           /^<!-- TL;DR:.*-->/m,
-          `<!-- TL;DR: ${newCount} ${tldrLabel}. Key: ${allIds.join(', ')} -->`
+          `<!-- TL;DR: ${newActiveCount} ${tldrLabel}. Key: ${allIds.join(', ')} -->`
         );
 
         writeFileAtomic(knowledgeFile, updatedContent);
+
+        // D20: register in usage tracking so cite counts start at 0
+        registerUsageEntry(memoryDir, anchorId);
+
+        // D21: first-run seed — if no .notifications.json existed and count >= KNOWLEDGE_SOFT_START,
+        // treat previous_count as 0 so all thresholds up to newActiveCount fire on first pass.
+        const notifKey = isDecision ? 'knowledge-capacity-decisions' : 'knowledge-capacity-pitfalls';
+        const notifications = readNotifications(memoryDir);
+        const existingNotif = notifications[notifKey];
+        let effectivePrevCount = previousCount;
+        if (!existingNotif && newActiveCount >= KNOWLEDGE_SOFT_START) {
+          // D21: first-run seed — pretend we started from 0 to fire all relevant thresholds
+          effectivePrevCount = 0;
+        }
+
+        // D22: check threshold crossings per-append; fire notification for highest crossed
+        const crossed = crossedThresholds(effectivePrevCount, newActiveCount);
+        if (crossed.length > 0) {
+          const highestCrossed = crossed[crossed.length - 1];
+          // D24: severity escalates with count
+          let severity = 'dim';
+          if (highestCrossed >= 90) severity = 'error';
+          else if (highestCrossed >= 70) severity = 'warning';
+
+          notifications[notifKey] = {
+            active: true,
+            threshold: highestCrossed,
+            count: newActiveCount,
+            ceiling: KNOWLEDGE_HARD_CEILING,
+            dismissed_at_threshold: (existingNotif && existingNotif.dismissed_at_threshold) || null,
+            severity,
+            created_at: (existingNotif && existingNotif.created_at) || new Date().toISOString(),
+          };
+
+          // D28: if user dismissed at a lower threshold, re-fire at new threshold
+          if (existingNotif && existingNotif.dismissed_at_threshold && highestCrossed > existingNotif.dismissed_at_threshold) {
+            notifications[notifKey].dismissed_at_threshold = null;
+          }
+
+          writeNotifications(memoryDir, notifications);
+        }
 
         console.log(JSON.stringify({ anchorId, file: knowledgeFile }));
       } finally {

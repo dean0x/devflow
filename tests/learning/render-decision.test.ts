@@ -133,8 +133,8 @@ describe('render-ready — decision type', () => {
     expect(result.rendered).toHaveLength(0);
   });
 
-  it('sets softCapExceeded when knowledge file is at capacity (50 entries)', () => {
-    // Create a decisions.md with 50 ADR entries
+  it('succeeds at 50 entries and fires notification (soft start)', () => {
+    // Create a decisions.md with 50 ADR entries (all Active)
     const header = '<!-- TL;DR: 50 decisions. Key: ADR-050 -->\n# Architectural Decisions\n\nAppend-only.\n';
     let entries = '';
     for (let i = 1; i <= 50; i++) {
@@ -143,7 +143,33 @@ describe('render-ready — decision type', () => {
     }
     fs.writeFileSync(knowledgeFile, header + entries);
 
-    const obs = makeReadyDecision('obs_capacity', 'this should be capacity-blocked');
+    const obs = makeReadyDecision('obs_at50', 'entry at soft start');
+    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
+
+    const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
+    // At 50, we're at KNOWLEDGE_SOFT_START — entry still succeeds (hard ceiling is 100)
+    expect(result.rendered).toHaveLength(1);
+    expect(result.skipped).toBe(0);
+
+    // Notification should have fired
+    const notifPath = path.join(tmpDir, '.memory', '.notifications.json');
+    expect(fs.existsSync(notifPath)).toBe(true);
+    const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
+    expect(notif['knowledge-capacity-decisions']).toBeDefined();
+    expect(notif['knowledge-capacity-decisions'].active).toBe(true);
+  });
+
+  it('sets softCapExceeded at hard ceiling (100 entries)', () => {
+    // Create a decisions.md with 100 ADR entries (all Active)
+    const header = '<!-- TL;DR: 100 decisions. Key: ADR-100 -->\n# Architectural Decisions\n\nAppend-only.\n';
+    let entries = '';
+    for (let i = 1; i <= 100; i++) {
+      const n = i.toString().padStart(3, '0');
+      entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
+    }
+    fs.writeFileSync(knowledgeFile, header + entries);
+
+    const obs = makeReadyDecision('obs_ceiling', 'should be ceiling-blocked');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
 
     const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
