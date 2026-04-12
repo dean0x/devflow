@@ -8,6 +8,7 @@ import { parseTranscript } from './transcript.js';
 import { fetchUsageData } from './usage-api.js';
 import { gatherConfigCounts } from './components/config-counts.js';
 import { getLearningCounts } from './learning-counts.js';
+import { getActiveNotification } from './notifications.js';
 import { render } from './render.js';
 import type { GatherContext } from './types.js';
 
@@ -55,6 +56,7 @@ async function run(): Promise<string> {
   const needsUsage = components.has('usageQuota');
   const needsConfigCounts = components.has('configCounts');
   const needsLearningCounts = components.has('learningCounts');
+  const needsNotifications = components.has('notifications');
 
   // Parallel data gathering — only fetch what's needed
   const [git, transcript, usage] = await Promise.all([
@@ -84,6 +86,11 @@ async function run(): Promise<string> {
     ? getLearningCounts(cwd)
     : null;
 
+  // D24: Notification data (fast, synchronous filesystem read)
+  const notificationsData = needsNotifications
+    ? getActiveNotification(cwd)
+    : null;
+
   // Terminal width via stderr (stdout is piped to Claude Code)
   const terminalWidth = process.stderr.columns || 120;
 
@@ -94,6 +101,7 @@ async function run(): Promise<string> {
     usage,
     configCounts: configCountsData,
     learningCounts: learningCountsData,
+    notifications: notificationsData,
     config: { ...config, components: resolved } as GatherContext['config'],
     devflowDir,
     sessionStartTime,

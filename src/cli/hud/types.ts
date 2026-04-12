@@ -15,7 +15,7 @@ export interface StdinData {
 }
 
 /**
- * Component IDs — the 15 HUD components.
+ * Component IDs — the 16 HUD components.
  */
 export type ComponentId =
   | 'directory'
@@ -32,7 +32,8 @@ export type ComponentId =
   | 'sessionCost'
   | 'releaseInfo'
   | 'worktreeCount'
-  | 'learningCounts';
+  | 'learningCounts'
+  | 'notifications';
 
 /**
  * HUD config persisted to ~/.devflow/hud.json.
@@ -115,6 +116,17 @@ export interface LearningCountsData {
 }
 
 /**
+ * D24: Notification data for the HUD notifications component.
+ */
+export interface NotificationData {
+  id: string;
+  severity: 'dim' | 'warning' | 'error';
+  text: string;
+  count?: number;
+  ceiling?: number;
+}
+
+/**
  * Gather context passed to all component render functions.
  */
 export interface GatherContext {
@@ -124,6 +136,7 @@ export interface GatherContext {
   usage: UsageData | null;
   configCounts: ConfigCountsData | null;
   learningCounts: LearningCountsData | null;
+  notifications?: NotificationData | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;
   sessionStartTime: number | null;

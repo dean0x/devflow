@@ -205,7 +205,7 @@ describe('config', () => {
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
-  it('HUD_COMPONENTS has 15 components', () => {
-    expect(HUD_COMPONENTS).toHaveLength(15);
+  it('HUD_COMPONENTS has 16 components', () => {
+    expect(HUD_COMPONENTS).toHaveLength(16);
   });
 });
