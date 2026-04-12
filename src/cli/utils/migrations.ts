@@ -47,7 +47,7 @@ export interface Migration {
  * The semantics are identical — the function is imported from its new home in
  * shadow-overrides-migration.ts.
  */
-export const MIGRATIONS: Migration[] = [
+export const MIGRATIONS: readonly Migration[] = [
   {
     id: 'shadow-overrides-v2-names',
     description: 'Rename shadow-override skill directories to V2 names',
@@ -148,7 +148,7 @@ export interface MigrationFailure {
 export async function runMigrations(
   ctx: Omit<MigrationContext, 'memoryDir' | 'projectRoot'>,
   discoveredProjects: string[],
-  registryOverride?: Migration[],
+  registryOverride?: readonly Migration[],
 ): Promise<{ newlyApplied: string[]; failures: MigrationFailure[] }> {
   const registry = registryOverride ?? MIGRATIONS;
   // Always read from home-dir devflow location so state is machine-wide
@@ -170,7 +170,7 @@ export async function runMigrations(
        * filesystem contention) while ensuring the migration is eventually applied.
        */
       try {
-        await migration.run({ ...ctx, devflowDir: ctx.devflowDir, memoryDir: '', projectRoot: '' });
+        await migration.run({ ...ctx, memoryDir: '', projectRoot: '' });
         newlyApplied.push(migration.id);
         // Persist after each successful migration so one failure doesn't lose
         // progress on previously completed migrations in this same run.
@@ -195,31 +195,25 @@ export async function runMigrations(
        * unapplied so the next `devflow init` (which may discover the same or
        * additional projects) can retry the failed projects.
        */
-      const projectsToSweep =
-        discoveredProjects.length > 0 ? discoveredProjects : [];
-
       const results = await Promise.allSettled(
-        projectsToSweep.map(async (projectRoot) => {
+        discoveredProjects.map(async (projectRoot) => {
           const memoryDir = path.join(projectRoot, '.memory');
           await migration.run({ ...ctx, memoryDir, projectRoot });
         }),
       );
 
-      let allSucceeded = true;
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
+      for (const [i, result] of results.entries()) {
         if (result.status === 'rejected') {
-          allSucceeded = false;
           failures.push({
             id: migration.id,
             scope: migration.scope,
-            project: projectsToSweep[i],
+            project: discoveredProjects[i],
             error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
           });
         }
       }
 
-      if (allSucceeded) {
+      if (results.every(r => r.status === 'fulfilled')) {
         newlyApplied.push(migration.id);
         // Persist incrementally so prior migrations aren't lost if this or a
         // later migration fails.

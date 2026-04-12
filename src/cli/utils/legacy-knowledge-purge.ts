@@ -115,7 +115,12 @@ export async function purgeLegacyKnowledgeEntries(options: {
   const modifiedFiles: string[] = [];
 
   try {
-    for (const filePath of [decisionsPath, pitfallsPath]) {
+    const filePrefixPairs: [string, string][] = [
+      [decisionsPath, 'ADR'],
+      [pitfallsPath, 'PF'],
+    ];
+
+    for (const [filePath, prefix] of filePrefixPairs) {
       let content: string;
       try {
         content = await fs.readFile(filePath, 'utf-8');
@@ -123,7 +128,6 @@ export async function purgeLegacyKnowledgeEntries(options: {
         continue; // File doesn't exist — skip
       }
 
-      const prefix = filePath.includes('decisions') ? 'ADR' : 'PF';
       const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
 
       let updatedContent = content;

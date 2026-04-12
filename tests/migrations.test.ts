@@ -267,6 +267,37 @@ describe('runMigrations', () => {
     expect(applied).not.toContain('test-per-project-failing');
   });
 
+  /**
+   * D37 edge case: when discoveredProjects is empty, a per-project migration has
+   * nothing to sweep and is marked applied via vacuous truth of
+   * `results.every(r => r.status === 'fulfilled')` on an empty array. This lock-in
+   * test asserts the documented behaviour — the migration is considered "done"
+   * without running anywhere, and a project cloned after this point won't be
+   * swept unless the marker is manually cleared.
+   */
+  it('marks per-project migration applied when discoveredProjects is empty (D37 edge case)', async () => {
+    const fakeHome = path.join(tmpDir, 'home', '.devflow');
+    let ranAnywhere = false;
+
+    const perProjectMigration: Migration = {
+      id: 'test-per-project-empty-sweep',
+      description: 'Test: per-project with no projects',
+      scope: 'per-project',
+      run: async () => { ranAnywhere = true; },
+    };
+
+    const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
+    const result = await runMigrations(ctx, [], [perProjectMigration]);
+
+    // D37: vacuous truth — migration marked applied even though it didn't run.
+    expect(ranAnywhere).toBe(false);
+    expect(result.failures).toEqual([]);
+    expect(result.newlyApplied).toContain('test-per-project-empty-sweep');
+
+    const applied = await readAppliedMigrations(fakeHome);
+    expect(applied).toContain('test-per-project-empty-sweep');
+  });
+
   it('is idempotent — second call with same state does nothing new', async () => {
     const fakeHome = path.join(tmpDir, 'home', '.devflow');
     const projectRoot = path.join(tmpDir, 'project-idem');

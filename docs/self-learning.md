@@ -93,8 +93,9 @@ npx devflow-kit learn --configure               # Interactive config (model, thr
 npx devflow-kit learn --clear                   # Reset all observations
 npx devflow-kit learn --purge                   # Remove invalid/corrupted entries
 npx devflow-kit learn --review                  # Inspect observations needing attention (stale, capped, low-quality)
-npx devflow-kit learn --purge-legacy-knowledge  # Remove pre-v2 command-phase-written knowledge entries
 ```
+
+Removal of pre-v2 low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005) and orphan `PROJECT-PATTERNS.md` now runs automatically as a one-time migration on `devflow init` — no CLI flag needed. Migration state is tracked at `~/.devflow/migrations.json`.
 
 ## HUD Row
 
