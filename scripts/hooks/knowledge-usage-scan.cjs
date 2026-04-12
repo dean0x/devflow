@@ -9,8 +9,14 @@ const path = require('path');
 
 // Parse --cwd argument
 const cwdIdx = process.argv.indexOf('--cwd');
-const cwd = cwdIdx !== -1 && process.argv[cwdIdx + 1] ? process.argv[cwdIdx + 1] : null;
-if (!cwd) process.exit(0); // silent fail
+const rawCwd = cwdIdx !== -1 && process.argv[cwdIdx + 1] ? process.argv[cwdIdx + 1] : null;
+if (!rawCwd) process.exit(0); // silent fail
+
+// Security: resolve and verify the path is absolute (prevents CWE-23 path traversal).
+// path.resolve normalizes traversal sequences; the isAbsolute check rejects relative inputs.
+// All legitimate callers (stop-hook) pass an absolute $CWD from bash.
+const cwd = path.resolve(rawCwd);
+if (!path.isAbsolute(cwd)) process.exit(0);
 
 const memoryDir = path.join(cwd, '.memory');
 if (!fs.existsSync(memoryDir)) process.exit(0); // no .memory dir — nothing to scan
