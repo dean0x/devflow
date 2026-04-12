@@ -770,6 +770,9 @@ export const learnCommand = new Command('learn')
           '.learning-batch-ids',
           '.learning-runs-today',
           '.learning-notified-at',
+          '.notifications.json',
+          '.knowledge-usage.json',
+          '.learning-manifest.json',
         ];
         let transientCount = 0;
         for (const f of transientFiles) {
@@ -817,6 +820,11 @@ export const learnCommand = new Command('learn')
             await fs.unlink(path.join(memoryDir, f));
           } catch { /* file may not exist */ }
         }
+
+        // Clean up knowledge-usage lock directory if stale
+        try {
+          await fs.rmdir(path.join(memoryDir, '.knowledge-usage.lock'));
+        } catch { /* doesn't exist or already cleaned */ }
 
         // Remove stale `enabled` field from learning.json (migration)
         const configPath = path.join(memoryDir, 'learning.json');
