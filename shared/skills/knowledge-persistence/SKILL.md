@@ -96,8 +96,8 @@ Area-specific gotchas, fragile areas, and past bugs.
 
 ## Capacity Limit
 
-Maximum 50 entries per file (`## ADR-` or `## PF-` headings). The background
-extractor checks capacity before writing. At capacity: new entries are skipped and
+Hard ceiling: 100 entries per file (`## ADR-` or `## PF-` headings). The background
+extractor checks capacity before writing. At hard ceiling: new entries are skipped and
 `softCapExceeded` is set on the corresponding observation for HUD review.
 
 ## Status Field Semantics
@@ -119,6 +119,14 @@ When writing, the background extractor uses a mkdir-based lock:
 - Timeout: 30 seconds (fail if lock not acquired)
 - Stale recovery: if lock directory is >60 seconds old, remove it and retry
 - Release lock after write completes (remove lock directory)
+
+---
+
+## Citation Requirement
+
+<!-- CITATION-SENTENCE-START -->
+When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfall from `.memory/knowledge/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
+<!-- CITATION-SENTENCE-END -->
 
 ---
 
