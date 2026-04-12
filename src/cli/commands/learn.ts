@@ -1069,6 +1069,14 @@ export const learnCommand = new Command('learn')
             await writeFileAtomic(filePath, updatedContent);
           }
         }
+
+        // Remove orphan PROJECT-PATTERNS.md — stale artifact, nothing generates/reads it
+        const projectPatternsPath = path.join(memoryDirForPurge, 'PROJECT-PATTERNS.md');
+        try {
+          await fs.unlink(projectPatternsPath);
+          removed++;
+          p.log.info('Removed orphan PROJECT-PATTERNS.md');
+        } catch { /* File doesn't exist — fine */ }
       } finally {
         try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
       }
