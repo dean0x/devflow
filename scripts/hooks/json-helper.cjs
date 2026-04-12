@@ -104,6 +104,12 @@ const THRESHOLDS = {
   pitfall:    { required: 2, spread: 0,          promote: 0.65 },
 };
 
+// D17: softCapExceeded repurposed to hard ceiling (100), not removed.
+// Threshold shifts from 50→100; most call sites unchanged.
+const KNOWLEDGE_SOFT_START = 50;
+const KNOWLEDGE_HARD_CEILING = 100;
+const KNOWLEDGE_THRESHOLDS = [50, 60, 70, 80, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100];
+
 function learningLog(msg) {
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   process.stderr.write(`[${ts}] ${msg}\n`);
@@ -162,6 +168,129 @@ function nextKnowledgeId(matches, prefix) {
   }
   const nextN = (maxN + 1).toString().padStart(3, '0');
   return { nextN, anchorId: `${prefix}-${nextN}` };
+}
+
+/**
+ * D18: Count only non-deprecated headings in a knowledge file.
+ * Scans ## ADR-NNN: or ## PF-NNN: headings, then checks the next Status
+ * line — if `Deprecated` or `Superseded`, the entry is excluded from the count.
+ * @param {string} content - File content
+ * @param {'decision'|'pitfall'} entryType
+ * @returns {number}
+ */
+function countActiveHeadings(content, entryType) {
+  const prefix = entryType === 'decision' ? 'ADR' : 'PF';
+  const headingRe = new RegExp(`^## ${prefix}-(\\d+):`, 'gm');
+  let count = 0;
+  let match;
+  while ((match = headingRe.exec(content)) !== null) {
+    // Check if the next Status line says Deprecated or Superseded
+    const afterHeading = content.slice(match.index);
+    const statusMatch = afterHeading.match(/- \*\*Status\*\*:\s*(\w+)/);
+    if (statusMatch) {
+      const status = statusMatch[1];
+      if (status === 'Deprecated' || status === 'Superseded') continue;
+    }
+    count++;
+  }
+  return count;
+}
+
+/**
+ * Read .knowledge-usage.json from .memory dir. Returns {version, entries} or empty default.
+ * @param {string} memoryDir
+ * @returns {{version: number, entries: Object}}
+ */
+function readUsageFile(memoryDir) {
+  const filePath = path.join(memoryDir, '.knowledge-usage.json');
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = JSON.parse(raw);
+    if (data && data.version === 1 && typeof data.entries === 'object') return data;
+  } catch { /* ENOENT or malformed — return default */ }
+  return { version: 1, entries: {} };
+}
+
+/**
+ * Write .knowledge-usage.json atomically.
+ * @param {string} memoryDir
+ * @param {{version: number, entries: Object}} data
+ */
+function writeUsageFile(memoryDir, data) {
+  writeFileAtomic(path.join(memoryDir, '.knowledge-usage.json'), JSON.stringify(data, null, 2) + '\n');
+}
+
+/**
+ * Read .notifications.json from .memory dir.
+ * @param {string} memoryDir
+ * @returns {Object}
+ */
+function readNotifications(memoryDir) {
+  const filePath = path.join(memoryDir, '.notifications.json');
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = JSON.parse(raw);
+    if (data && typeof data === 'object') return data;
+  } catch { /* ENOENT or malformed — return empty */ }
+  return {};
+}
+
+/**
+ * Write .notifications.json atomically.
+ * @param {string} memoryDir
+ * @param {Object} data
+ */
+function writeNotifications(memoryDir, data) {
+  writeFileAtomic(path.join(memoryDir, '.notifications.json'), JSON.stringify(data, null, 2) + '\n');
+}
+
+/**
+ * D22: Compute which thresholds were crossed going from prev to next count.
+ * Returns array of crossed threshold values (ascending).
+ * @param {number} prev
+ * @param {number} next
+ * @returns {number[]}
+ */
+function crossedThresholds(prev, next) {
+  if (next <= prev) return [];
+  return KNOWLEDGE_THRESHOLDS.filter(t => t > prev && t <= next);
+}
+
+/**
+ * D20: Register an entry in .knowledge-usage.json with initial cite count.
+ * @param {string} memoryDir
+ * @param {string} anchorId - e.g. 'ADR-001' or 'PF-003'
+ */
+function registerUsageEntry(memoryDir, anchorId) {
+  const data = readUsageFile(memoryDir);
+  if (!data.entries[anchorId]) {
+    data.entries[anchorId] = {
+      cites: 0,
+      last_cited: null,
+      created: new Date().toISOString(),
+    };
+    writeUsageFile(memoryDir, data);
+  }
+}
+
+/**
+ * Acquire .knowledge-usage.lock with a 2-second timeout.
+ * Separate from .knowledge.lock to avoid blocking knowledge writes.
+ * @param {string} memoryDir
+ * @returns {boolean}
+ */
+function acquireKnowledgeUsageLock(memoryDir) {
+  const lockDir = path.join(memoryDir, '.knowledge-usage.lock');
+  return acquireLock(lockDir, 2000, 5000);
+}
+
+/**
+ * Release .knowledge-usage.lock.
+ * @param {string} memoryDir
+ */
+function releaseKnowledgeUsageLock(memoryDir) {
+  const lockDir = path.join(memoryDir, '.knowledge-usage.lock');
+  releaseLock(lockDir);
 }
 
 /**
@@ -315,6 +444,7 @@ function parseArgs(argList) {
   return { ...result, ...jsonArgs };
 }
 
+if (require.main === module) {
 try {
   switch (op) {
     case 'get-field': {
@@ -1401,4 +1531,26 @@ try {
 } catch (err) {
   process.stderr.write(`json-helper error: ${err && err.message ? err.message : String(err)}\n`);
   process.exit(1);
+}
+} // end if (require.main === module)
+
+// Expose helpers for unit testing (only when required as a module, not run as CLI)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    countActiveHeadings,
+    readUsageFile,
+    writeUsageFile,
+    readNotifications,
+    writeNotifications,
+    crossedThresholds,
+    registerUsageEntry,
+    acquireKnowledgeUsageLock,
+    releaseKnowledgeUsageLock,
+    KNOWLEDGE_SOFT_START,
+    KNOWLEDGE_HARD_CEILING,
+    KNOWLEDGE_THRESHOLDS,
+    writeFileAtomic,
+    initKnowledgeContent,
+    nextKnowledgeId,
+  };
 }
