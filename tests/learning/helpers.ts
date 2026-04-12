@@ -40,7 +40,7 @@ export interface LogEntry {
   details: string;
   quality_ok?: boolean;
   artifact_path?: string;
-  /** Set by render-ready when a knowledge file has hit the 50-entry cap (D15). */
+  /** D17: Set by render-ready when a knowledge file hits the hard ceiling (100 entries). */
   softCapExceeded?: boolean;
   deprecated_at?: string;
   needsReview?: boolean;

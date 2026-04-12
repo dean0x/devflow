@@ -1661,6 +1661,23 @@ try {
       break;
     }
 
+    // -------------------------------------------------------------------------
+    // count-active <file> <type>
+    // D23: Single source of truth bridge — TS CLI calls this to get active count
+    // from countActiveHeadings without duplicating the logic.
+    // -------------------------------------------------------------------------
+    case 'count-active': {
+      const filePath = safePath(args[0]);
+      const entryType = args[1]; // 'decision' or 'pitfall'
+      let content = '';
+      try {
+        content = fs.readFileSync(filePath, 'utf8');
+      } catch { /* file doesn't exist — count is 0 */ }
+      const count = countActiveHeadings(content, entryType);
+      console.log(JSON.stringify({ count }));
+      break;
+    }
+
     default:
       process.stderr.write(`json-helper: unknown operation "${op}"\n`);
       process.exit(1);

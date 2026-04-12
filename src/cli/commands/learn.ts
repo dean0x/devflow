@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
@@ -29,7 +30,7 @@ export interface LearningObservation {
   /** Set by merge-observation when an incoming observation's details diverge
    *  significantly from the existing entry (Levenshtein ratio < 0.6). See D14. */
   needsReview?: boolean;
-  /** Set when knowledge file is at capacity (50 entries) */
+  /** D17: Set when knowledge file hits hard ceiling (100 entries) — repurposed from 50 soft cap */
   softCapExceeded?: boolean;
   quality_ok?: boolean;
 }
@@ -483,6 +484,7 @@ interface LearnOptions {
   purge?: boolean;
   review?: boolean;
   purgeLegacyKnowledge?: boolean;
+  dismissCapacity?: boolean;
 }
 
 export const learnCommand = new Command('learn')
@@ -497,8 +499,9 @@ export const learnCommand = new Command('learn')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
   .option('--purge-legacy-knowledge', 'One-time removal of legacy low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)')
+  .option('--dismiss-capacity', 'Dismiss the current capacity notification for a knowledge file')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.purgeLegacyKnowledge;
+    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.purgeLegacyKnowledge || options.dismissCapacity;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -510,7 +513,8 @@ export const learnCommand = new Command('learn')
         `${color.cyan('devflow learn --clear')}       Reset learning log\n` +
         `${color.cyan('devflow learn --reset')}       Remove artifacts + log + state\n` +
         `${color.cyan('devflow learn --purge')}       Remove invalid entries\n` +
-        `${color.cyan('devflow learn --review')}      Review flagged observations interactively`,
+        `${color.cyan('devflow learn --review')}      Review flagged observations interactively\n` +
+        `${color.cyan('devflow learn --dismiss-capacity')} Dismiss capacity notification`,
         'Usage',
       );
       p.outro(color.dim('Detects repeated workflows and creates slash commands automatically'));
@@ -876,120 +880,335 @@ export const learnCommand = new Command('learn')
 
     // --- --review ---
     if (options.review) {
-      const { observations, invalidCount } = await readObservations(logPath);
-      warnIfInvalid(invalidCount);
+      const mode = await p.select({
+        message: 'Review mode:',
+        options: [
+          { value: 'observations', label: 'Review flagged observations', hint: 'stale, missing, at capacity' },
+          { value: 'capacity', label: 'Review knowledge capacity', hint: 'deprecate least-used entries' },
+          { value: 'cancel', label: 'Cancel' },
+        ],
+      });
 
-      const flagged = observations.filter(
-        (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
-      );
-
-      if (flagged.length === 0) {
-        p.log.info('No observations flagged for review. All clear.');
+      if (p.isCancel(mode) || mode === 'cancel') {
         return;
       }
 
-      // Acquire .learning.lock so we don't race with background-learning during the
-      // interactive loop. The internal updateKnowledgeStatus call still takes its own
-      // .knowledge.lock — different lock directories, no deadlock.
-      const memoryDirForReview = path.join(process.cwd(), '.memory');
-      const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
-      const lockAcquired = await acquireMkdirLock(learningLockDir);
-      if (!lockAcquired) {
-        p.log.error('Learning system is currently running. Try again in a moment.');
-        return;
-      }
+      if (mode === 'observations') {
+        const { observations, invalidCount } = await readObservations(logPath);
+        warnIfInvalid(invalidCount);
 
-      p.intro(color.bgYellow(color.black(' Learning Review ')));
-      p.log.info(`${flagged.length} observation(s) flagged for review.`);
+        const flagged = observations.filter(
+          (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
+        );
 
-      const updatedObservations = [...observations];
-
-      try {
-        for (const obs of flagged) {
-          const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
-          const reason = formatStaleReason(obs);
-
-          p.log.info(
-            `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
-            `  Reason: ${color.yellow(reason)}\n` +
-            (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
-            `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
-          );
-
-          const action = await p.select({
-            message: 'Action:',
-            options: [
-              { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
-              { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
-              { value: 'skip', label: 'Skip', hint: 'No change' },
-            ],
-          });
-
-          if (p.isCancel(action)) {
-            // Persist any changes made so far before exiting so the user keeps
-            // partial progress (and log/knowledge stay consistent).
-            await writeObservations(logPath, updatedObservations);
-            p.cancel('Review cancelled — partial progress saved.');
-            return;
-          }
-
-          const idx = updatedObservations.findIndex(o => o.id === obs.id);
-          if (idx === -1) continue;
-
-          if (action === 'deprecate') {
-            updatedObservations[idx] = {
-              ...updatedObservations[idx],
-              status: 'deprecated',
-              mayBeStale: undefined,
-              needsReview: undefined,
-              softCapExceeded: undefined,
-            };
-
-            // Update Status: field in knowledge file for decisions/pitfalls
-            if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
-              const hashIdx = obs.artifact_path.indexOf('#');
-              if (hashIdx !== -1) {
-                const knowledgePath = obs.artifact_path.slice(0, hashIdx);
-                const anchorId = obs.artifact_path.slice(hashIdx + 1);
-                const absPath = path.isAbsolute(knowledgePath)
-                  ? knowledgePath
-                  : path.join(process.cwd(), knowledgePath);
-                const updated = await updateKnowledgeStatus(absPath, anchorId, 'Deprecated');
-                if (updated) {
-                  p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
-                } else {
-                  p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
-                }
-              }
-            }
-
-            // Persist log after each deprecation so Ctrl-C never leaves the log
-            // out of sync with the knowledge file updates.
-            await writeObservations(logPath, updatedObservations);
-            p.log.success(`Marked '${obs.pattern}' as deprecated.`);
-          } else if (action === 'keep') {
-            updatedObservations[idx] = {
-              ...updatedObservations[idx],
-              mayBeStale: undefined,
-              needsReview: undefined,
-              softCapExceeded: undefined,
-            };
-            // Keep writes are flag-clears only; still persist immediately for
-            // consistent on-disk state if the loop is interrupted.
-            await writeObservations(logPath, updatedObservations);
-            p.log.success(`Cleared review flags for '${obs.pattern}'.`);
-          }
-          // 'skip' — no change
+        if (flagged.length === 0) {
+          p.log.info('No observations flagged for review. All clear.');
+          return;
         }
 
-        // Final write is a no-op if every branch already persisted, but cheap
-        // and keeps the success path explicit.
-        await writeObservations(logPath, updatedObservations);
-      } finally {
-        try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
+        // Acquire .learning.lock so we don't race with background-learning during the
+        // interactive loop. The internal updateKnowledgeStatus call still takes its own
+        // .knowledge.lock — different lock directories, no deadlock.
+        const memoryDirForReview = path.join(process.cwd(), '.memory');
+        const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
+        const lockAcquired = await acquireMkdirLock(learningLockDir);
+        if (!lockAcquired) {
+          p.log.error('Learning system is currently running. Try again in a moment.');
+          return;
+        }
+
+        p.intro(color.bgYellow(color.black(' Learning Review ')));
+        p.log.info(`${flagged.length} observation(s) flagged for review.`);
+
+        const updatedObservations = [...observations];
+
+        try {
+          for (const obs of flagged) {
+            const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
+            const reason = formatStaleReason(obs);
+
+            p.log.info(
+              `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
+              `  Reason: ${color.yellow(reason)}\n` +
+              (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
+              `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
+            );
+
+            const action = await p.select({
+              message: 'Action:',
+              options: [
+                { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
+                { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
+                { value: 'skip', label: 'Skip', hint: 'No change' },
+              ],
+            });
+
+            if (p.isCancel(action)) {
+              // Persist any changes made so far before exiting so the user keeps
+              // partial progress (and log/knowledge stay consistent).
+              await writeObservations(logPath, updatedObservations);
+              p.cancel('Review cancelled — partial progress saved.');
+              return;
+            }
+
+            const idx = updatedObservations.findIndex(o => o.id === obs.id);
+            if (idx === -1) continue;
+
+            if (action === 'deprecate') {
+              updatedObservations[idx] = {
+                ...updatedObservations[idx],
+                status: 'deprecated',
+                mayBeStale: undefined,
+                needsReview: undefined,
+                softCapExceeded: undefined,
+              };
+
+              // Update Status: field in knowledge file for decisions/pitfalls
+              if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
+                const hashIdx = obs.artifact_path.indexOf('#');
+                if (hashIdx !== -1) {
+                  const knowledgePath = obs.artifact_path.slice(0, hashIdx);
+                  const anchorId = obs.artifact_path.slice(hashIdx + 1);
+                  const absPath = path.isAbsolute(knowledgePath)
+                    ? knowledgePath
+                    : path.join(process.cwd(), knowledgePath);
+                  const updated = await updateKnowledgeStatus(absPath, anchorId, 'Deprecated');
+                  if (updated) {
+                    p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+                  } else {
+                    p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
+                  }
+                }
+              }
+
+              // Persist log after each deprecation so Ctrl-C never leaves the log
+              // out of sync with the knowledge file updates.
+              await writeObservations(logPath, updatedObservations);
+              p.log.success(`Marked '${obs.pattern}' as deprecated.`);
+            } else if (action === 'keep') {
+              updatedObservations[idx] = {
+                ...updatedObservations[idx],
+                mayBeStale: undefined,
+                needsReview: undefined,
+                softCapExceeded: undefined,
+              };
+              // Keep writes are flag-clears only; still persist immediately for
+              // consistent on-disk state if the loop is interrupted.
+              await writeObservations(logPath, updatedObservations);
+              p.log.success(`Cleared review flags for '${obs.pattern}'.`);
+            }
+            // 'skip' — no change
+          }
+
+          // Final write is a no-op if every branch already persisted, but cheap
+          // and keeps the success path explicit.
+          await writeObservations(logPath, updatedObservations);
+        } finally {
+          try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
+        }
+
+        p.outro(color.green('Review complete.'));
+        return;
       }
 
-      p.outro(color.green('Review complete.'));
+      if (mode === 'capacity') {
+        const memoryDir = path.join(process.cwd(), '.memory');
+        const knowledgeDir = path.join(memoryDir, 'knowledge');
+        const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+        const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+
+        // D23: parse knowledge entries from both files
+        const allEntries: Array<{
+          id: string;
+          pattern: string;
+          file: string;
+          filePath: string;
+          status: string;
+          createdDate: string | null;
+        }> = [];
+
+        for (const [filePath, type] of [[decisionsPath, 'decision'], [pitfallsPath, 'pitfall']] as const) {
+          let content: string;
+          try {
+            content = await fs.readFile(filePath, 'utf-8');
+          } catch {
+            continue; // File doesn't exist
+          }
+
+          const prefix = type === 'decision' ? 'ADR' : 'PF';
+          const headingRe = new RegExp(`^## (${prefix}-\\d+):\\s*(.+)$`, 'gm');
+          let match;
+          while ((match = headingRe.exec(content)) !== null) {
+            const entryId = match[1];
+            const pattern = match[2].trim();
+
+            // Extract Status from section
+            const sectionStart = match.index;
+            const nextHeading = content.indexOf('\n## ', sectionStart + 1);
+            const section = nextHeading !== -1
+              ? content.slice(sectionStart, nextHeading)
+              : content.slice(sectionStart);
+            const statusMatch = section.match(/- \*\*Status\*\*:\s*(\w+)/);
+            const status = statusMatch ? statusMatch[1] : 'Unknown';
+
+            // Skip deprecated/superseded entries
+            if (status === 'Deprecated' || status === 'Superseded') continue;
+
+            // Extract Date for protection check
+            const dateMatch = section.match(/- \*\*Date\*\*:\s*(\d{4}-\d{2}-\d{2})/);
+            const createdDate = dateMatch ? dateMatch[1] : null;
+
+            allEntries.push({
+              id: entryId,
+              pattern,
+              file: type === 'decision' ? 'decisions' : 'pitfalls',
+              filePath,
+              status,
+              createdDate,
+            });
+          }
+        }
+
+        if (allEntries.length === 0) {
+          p.log.info('No active knowledge entries found.');
+          return;
+        }
+
+        // D23: Filter out entries created within 7 days (protected)
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const eligible = allEntries.filter(e => {
+          if (!e.createdDate) return true; // No date — eligible
+          return e.createdDate <= sevenDaysAgo;
+        });
+
+        if (eligible.length === 0) {
+          p.log.info('All active entries are within the 7-day protection window.');
+          return;
+        }
+
+        // Load usage data for sorting
+        let usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {};
+        try {
+          const raw = await fs.readFile(path.join(memoryDir, '.knowledge-usage.json'), 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.version === 1) usageData = parsed.entries || {};
+        } catch { /* no usage data — all cites=0 */ }
+
+        // D23: Sort by least used: (cites ASC, last_cited ASC NULLS FIRST, created ASC)
+        const sorted = [...eligible].sort((a, b) => {
+          const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
+          const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
+
+          // cites ASC
+          if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
+
+          // last_cited ASC NULLS FIRST
+          if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
+          if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
+          if (aUsage.last_cited && bUsage.last_cited) {
+            if (aUsage.last_cited < bUsage.last_cited) return -1;
+            if (aUsage.last_cited > bUsage.last_cited) return 1;
+          }
+
+          // created ASC
+          const aCreated = a.createdDate || '';
+          const bCreated = b.createdDate || '';
+          return aCreated.localeCompare(bCreated);
+        });
+
+        // Take top 20
+        const candidates = sorted.slice(0, 20);
+
+        p.intro(color.bgYellow(color.black(' Knowledge Capacity Review ')));
+        p.log.info(
+          `${allEntries.length} active entries across knowledge files.\n` +
+          `${eligible.length} eligible for review (${allEntries.length - eligible.length} within 7-day protection).\n` +
+          `Showing ${candidates.length} least-used entries.`,
+        );
+
+        // D23: p.multiselect with unchecked default
+        const selected = await p.multiselect({
+          message: 'Select entries to deprecate:',
+          options: candidates.map(e => ({
+            value: e.id,
+            label: `[${e.file}] ${e.id}: ${e.pattern}`,
+            hint: `${usageData[e.id]?.cites ?? 0} cites, ${e.status}`,
+          })),
+          required: false,
+        });
+
+        if (p.isCancel(selected) || !Array.isArray(selected) || selected.length === 0) {
+          p.log.info('No entries selected. Capacity review cancelled.');
+          return;
+        }
+
+        // Batch deprecation
+        const learningLockDir = path.join(memoryDir, '.learning.lock');
+        const lockAcquired = await acquireMkdirLock(learningLockDir);
+        if (!lockAcquired) {
+          p.log.error('Learning system is currently running. Try again in a moment.');
+          return;
+        }
+
+        try {
+          let deprecatedCount = 0;
+          for (const entryId of selected as string[]) {
+            const entry = candidates.find(e => e.id === entryId);
+            if (!entry) continue;
+
+            const updated = await updateKnowledgeStatus(entry.filePath, entry.id, 'Deprecated');
+            if (updated) {
+              deprecatedCount++;
+              p.log.success(`Deprecated ${entry.id}: ${entry.pattern}`);
+            } else {
+              p.log.warn(`Could not update ${entry.id} — update manually`);
+            }
+          }
+
+          // D28: Check if counts dropped below soft start, clear notifications if so
+          let notifications: Record<string, any> = {};
+          try {
+            notifications = JSON.parse(
+              await fs.readFile(path.join(memoryDir, '.notifications.json'), 'utf-8'),
+            );
+          } catch { /* no notifications file — nothing to clear */ }
+
+          const devflowDir = getDevFlowDirectory();
+          const jsonHelperPath = path.join(devflowDir, 'scripts', 'hooks', 'json-helper.cjs');
+
+          for (const [filePath, type, notifKey] of [
+            [decisionsPath, 'decision', 'knowledge-capacity-decisions'],
+            [pitfallsPath, 'pitfall', 'knowledge-capacity-pitfalls'],
+          ] as const) {
+            try {
+              // D23: Use count-active op via json-helper.cjs (single source of truth)
+              const result = JSON.parse(
+                execSync(
+                  `node "${jsonHelperPath}" count-active "${filePath}" "${type}"`,
+                  { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+                ).trim(),
+              );
+              const activeCount = result.count ?? 0;
+
+              // D28: if count dropped below soft start, clear notification
+              if (activeCount < 50 && notifications[notifKey]) {
+                notifications[notifKey].active = false;
+                notifications[notifKey].dismissed_at_threshold = null;
+              }
+            } catch { /* count-active failed — skip notification update */ }
+          }
+
+          await writeFileAtomic(path.join(memoryDir, '.notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
+
+          p.log.success(`Deprecated ${deprecatedCount} entry(ies).`);
+        } finally {
+          try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
+        }
+
+        p.outro(color.green('Capacity review complete.'));
+        return;
+      }
+
       return;
     }
 
@@ -1087,6 +1306,39 @@ export const learnCommand = new Command('learn')
         p.log.success(`Removed ${removed} legacy entry(ies).`);
       }
       p.outro(color.green('Legacy purge complete.'));
+      return;
+    }
+
+    // --- --dismiss-capacity ---
+    if (options.dismissCapacity) {
+      const memoryDir = path.join(process.cwd(), '.memory');
+      const notifPath = path.join(memoryDir, '.notifications.json');
+
+      let notifications: Record<string, any>;
+      try {
+        notifications = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
+      } catch {
+        p.log.info('No capacity notifications found.');
+        return;
+      }
+
+      const activeKeys = Object.entries(notifications)
+        .filter(([, v]) => v && v.active && (v.dismissed_at_threshold == null || v.dismissed_at_threshold < v.threshold))
+        .map(([k]) => k);
+
+      if (activeKeys.length === 0) {
+        p.log.info('No active capacity notifications to dismiss.');
+        return;
+      }
+
+      for (const key of activeKeys) {
+        const entry = notifications[key];
+        entry.dismissed_at_threshold = entry.threshold;
+        const fileType = key.replace('knowledge-capacity-', '');
+        p.log.success(`Dismissed capacity notification for ${fileType} (at threshold ${entry.threshold}).`);
+      }
+
+      await writeFileAtomic(notifPath, JSON.stringify(notifications, null, 2) + '\n');
       return;
     }
 

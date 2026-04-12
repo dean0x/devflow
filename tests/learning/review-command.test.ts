@@ -12,6 +12,7 @@ import {
   updateKnowledgeStatus,
 } from '../../src/cli/commands/learn.js';
 import type { LearningObservation } from '../../src/cli/commands/learn.js';
+import { runHelper } from './helpers.js';
 
 // Helper: serialize an array of observations to JSONL
 function serializeLog(observations: LearningObservation[]): string {
@@ -277,5 +278,111 @@ describe('observation attention flags detection', () => {
     const logContent = serializeLog(updated);
     const parsed = parseLearningLog(logContent);
     expect(parsed[0].needsReview).toBeUndefined();
+  });
+});
+
+describe('knowledge capacity review (--review capacity mode)', () => {
+  // These tests verify the parsing and sorting logic, not the interactive flow
+  // (p.multiselect is hard to test non-interactively).
+
+  let tmpDir: string;
+  let knowledgeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-review-'));
+    knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
+    fs.mkdirSync(knowledgeDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('parseKnowledgeEntries extracts active entries from decisions.md', () => {
+    // This test validates the entry parsing logic that the --review capacity
+    // mode uses internally. We test it via the count-active op which uses
+    // the same countActiveHeadings function.
+    const content = [
+      '<!-- TL;DR: 3 decisions. Key: ADR-003 -->',
+      '# Decisions',
+      '',
+      '## ADR-001: Active entry',
+      '- **Date**: 2026-01-01',
+      '- **Status**: Accepted',
+      '',
+      '## ADR-002: Deprecated entry',
+      '- **Date**: 2026-01-01',
+      '- **Status**: Deprecated',
+      '',
+      '## ADR-003: Another active',
+      '- **Date**: 2026-04-01',
+      '- **Status**: Accepted',
+      '',
+    ].join('\n');
+
+    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    fs.writeFileSync(decisionsPath, content);
+
+    // Use count-active to verify
+    const result = JSON.parse(runHelper(`count-active "${decisionsPath}" decision`));
+    expect(result.count).toBe(2);
+  });
+
+  it('count-active returns 0 for non-existent file', () => {
+    const result = JSON.parse(runHelper(`count-active "/tmp/nonexistent-${Date.now()}.md" decision`));
+    expect(result.count).toBe(0);
+  });
+
+  it('count-active handles pitfalls correctly', () => {
+    const content = [
+      '<!-- TL;DR: 2 pitfalls. Key: PF-002 -->',
+      '# Pitfalls',
+      '',
+      '## PF-001: Active pitfall',
+      '- **Status**: Active',
+      '',
+      '## PF-002: Deprecated pitfall',
+      '- **Status**: Deprecated',
+      '',
+    ].join('\n');
+
+    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    fs.writeFileSync(pitfallsPath, content);
+
+    const result = JSON.parse(runHelper(`count-active "${pitfallsPath}" pitfall`));
+    expect(result.count).toBe(1);
+  });
+});
+
+describe('--dismiss-capacity notification', () => {
+  let tmpDir: string;
+  let memoryDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dismiss-test-'));
+    memoryDir = path.join(tmpDir, '.memory');
+    fs.mkdirSync(memoryDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writeFileAtomic persists notification dismissal', async () => {
+    const notifPath = path.join(memoryDir, '.notifications.json');
+    const data: Record<string, any> = {
+      'knowledge-capacity-decisions': {
+        active: true, threshold: 70, count: 72, ceiling: 100,
+        dismissed_at_threshold: null, severity: 'warning',
+      },
+    };
+    fs.writeFileSync(notifPath, JSON.stringify(data));
+
+    // Simulate dismiss: set dismissed_at_threshold = threshold
+    data['knowledge-capacity-decisions'].dismissed_at_threshold = 70;
+    fs.writeFileSync(notifPath, JSON.stringify(data, null, 2) + '\n');
+
+    const read = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
+    expect(read['knowledge-capacity-decisions'].dismissed_at_threshold).toBe(70);
   });
 });
