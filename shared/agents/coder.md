@@ -39,6 +39,7 @@ You receive from orchestrator:
    - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
    - If `.memory/knowledge/decisions.md` exists, read it. Apply prior architectural decisions relevant to this task. Avoid contradicting accepted decisions without documenting a new ADR.
    - If `.memory/knowledge/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
+<!-- D25: Citation instruction placed inline in agents — no frontmatter injection -->
 <!-- CITATION-SENTENCE-START -->
 When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfall from `.memory/knowledge/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
 <!-- CITATION-SENTENCE-END -->
