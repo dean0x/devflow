@@ -49,9 +49,21 @@ describe('countActiveHeadings', () => {
 
   it('counts headings with no Status field as active', () => {
     const content = '## ADR-001: No status\n- **Date**: 2026-01-01\n';
-    // No Status line before next heading — should count as active
-    // Actually, the regex looks for the NEXT Status line. If there's none,
-    // statusMatch will be null, so it counts as active.
+    expect(helpers.countActiveHeadings(content, 'decision')).toBe(1);
+  });
+
+  it('does not bleed status from a later entry into an earlier one', () => {
+    // Regression: when entry N has no Status line, the lookup must not find
+    // entry N+1's Deprecated status and incorrectly skip entry N.
+    const content = [
+      '## ADR-001: Active without Status field',
+      '- **Date**: 2026-01-01',
+      '- **Context**: something',
+      '',
+      '## ADR-002: Deprecated entry',
+      '- **Date**: 2026-01-01',
+      '- **Status**: Deprecated',
+    ].join('\n');
     expect(helpers.countActiveHeadings(content, 'decision')).toBe(1);
   });
 });

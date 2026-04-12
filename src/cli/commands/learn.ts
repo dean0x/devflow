@@ -9,6 +9,21 @@ import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 
 /**
+ * Shape of a single entry in `.memory/.notifications.json`.
+ * Mirrors the NotificationEntry in `src/cli/hud/notifications.ts` (read-path)
+ * and the structure written by `json-helper.cjs` (write-path).
+ */
+interface NotificationFileEntry {
+  active?: boolean;
+  threshold?: number;
+  count?: number;
+  ceiling?: number;
+  dismissed_at_threshold?: number | null;
+  severity?: string;
+  created_at?: string;
+}
+
+/**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
  * v2 extends type to include 'decision' and 'pitfall', and adds attention flags.
  */
@@ -389,31 +404,9 @@ export async function updateKnowledgeStatus(
   // one level from the file's parent directory.
   const memoryDir = path.dirname(path.dirname(filePath));
   const lockPath = path.join(memoryDir, '.knowledge.lock');
-  const lockTimeout = 30_000;
-  const staleMs = 60_000;
-  const start = Date.now();
 
-  // Acquire lock
-  while (true) {
-    try {
-      await fs.mkdir(lockPath);
-      break; // Lock acquired
-    } catch {
-      // Check for stale lock
-      try {
-        const stat = await fs.stat(lockPath);
-        if (Date.now() - stat.mtimeMs > staleMs) {
-          try { await fs.rmdir(lockPath); } catch { /* race condition OK */ }
-          continue;
-        }
-      } catch { /* lock dir doesn't exist anymore */ }
-
-      if (Date.now() - start > lockTimeout) {
-        return false; // Timed out
-      }
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
+  const acquired = await acquireMkdirLock(lockPath);
+  if (!acquired) return false;
 
   try {
     let content: string;
@@ -1166,7 +1159,7 @@ export const learnCommand = new Command('learn')
           }
 
           // D28: Check if counts dropped below soft start, clear notifications if so
-          let notifications: Record<string, any> = {};
+          let notifications: Record<string, NotificationFileEntry> = {};
           try {
             notifications = JSON.parse(
               await fs.readFile(path.join(memoryDir, '.notifications.json'), 'utf-8'),
@@ -1314,7 +1307,7 @@ export const learnCommand = new Command('learn')
       const memoryDir = path.join(process.cwd(), '.memory');
       const notifPath = path.join(memoryDir, '.notifications.json');
 
-      let notifications: Record<string, any>;
+      let notifications: Record<string, NotificationFileEntry>;
       try {
         notifications = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
       } catch {
@@ -1323,7 +1316,7 @@ export const learnCommand = new Command('learn')
       }
 
       const activeKeys = Object.entries(notifications)
-        .filter(([, v]) => v && v.active && (v.dismissed_at_threshold == null || v.dismissed_at_threshold < v.threshold))
+        .filter(([, v]) => v && v.active && (v.dismissed_at_threshold == null || v.dismissed_at_threshold < (v.threshold ?? 0)))
         .map(([k]) => k);
 
       if (activeKeys.length === 0) {
