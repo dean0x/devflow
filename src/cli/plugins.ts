@@ -54,7 +54,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
     agents: ['git', 'skimmer', 'synthesizer', 'designer'],
-    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'knowledge-persistence', 'worktree-support'],
+    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'worktree-support'],
   },
   {
     name: 'devflow-implement',
@@ -82,7 +82,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Debugging workflows with competing hypothesis investigation using agent teams',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
-    skills: ['agent-teams', 'git', 'knowledge-persistence', 'worktree-support'],
+    skills: ['agent-teams', 'git', 'worktree-support'],
   },
   {
     name: 'devflow-self-review',
@@ -117,7 +117,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'dependencies',
       'documentation',
       'patterns',
-      'knowledge-persistence',
       'qa',
       'worktree-support',
       'gap-analysis',

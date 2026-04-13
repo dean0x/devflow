@@ -2,7 +2,7 @@
 name: Skimmer
 description: Codebase orientation using rskim to identify relevant files, functions, and patterns for a feature or task
 tools: ["Bash", "Read"]
-skills: devflow:knowledge-persistence, devflow:worktree-support
+skills: devflow:worktree-support
 model: sonnet
 ---
 

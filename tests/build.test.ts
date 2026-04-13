@@ -83,11 +83,17 @@ describe('agent references', () => {
 });
 
 describe('no orphaned declarations', () => {
+  // Skills that intentionally exist in shared/skills/ but are not distributed to any plugin.
+  // These are format specifications consumed by background processes, not by agents or commands.
+  // See D9 in .memory/knowledge/decisions.md for rationale.
+  const FORMAT_SPEC_SKILLS = new Set(['knowledge-persistence']);
+
   it('all skills in shared/skills/ are referenced by at least one plugin', async () => {
     const skillDirs = await fs.readdir(path.join(ROOT, 'shared', 'skills'));
     const referencedSkills = new Set(getAllSkillNames());
 
     for (const dir of skillDirs) {
+      if (FORMAT_SPEC_SKILLS.has(dir)) continue; // intentionally not plugin-distributed
       expect(referencedSkills.has(dir), `shared/skills/${dir} is not referenced by any plugin`).toBe(true);
     }
   });
