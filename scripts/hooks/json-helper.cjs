@@ -383,7 +383,7 @@ function registerUsageEntry(memoryDir, anchorId) {
  */
 function acquireKnowledgeUsageLock(memoryDir) {
   const lockDir = path.join(memoryDir, '.knowledge-usage.lock');
-  return acquireLock(lockDir, 2000, 5000);
+  return acquireMkdirLock(lockDir, 2000, 5000);
 }
 
 /**
@@ -418,15 +418,21 @@ function mergeEvidence(oldEvidence, newEvidence) {
 
 /**
  * Acquire a mkdir-based lock. Returns true on success, false on timeout.
- * Extracted from background-learning:56-81 pattern to avoid duplication.
- * DESIGN: Shared locking utility used by render-ready, reconcile-manifest, merge-observation.
+ * DESIGN: Shared locking utility used by render-ready, reconcile-manifest, merge-observation,
+ * and knowledge-append. Callers pass their own timeoutMs/staleMs to suit their workload:
+ *   - .knowledge.lock writes (render-ready, knowledge-append): 30 000 ms / 60 000 ms stale
+ *   - .learning.lock (reconcile-manifest): 15 000 ms / 60 000 ms stale
+ *   - .knowledge-usage.lock (acquireKnowledgeUsageLock): 2 000 ms / 5 000 ms stale
+ * The bash acquire_lock in background-learning uses different defaults (90 s wait / 300 s stale)
+ * because it guards the entire Sonnet analysis pipeline (up to 180 s watchdog timeout), not
+ * just file I/O. Those higher values are intentional — see background-learning:68-81.
  *
  * @param {string} lockDir - path to lock directory
  * @param {number} [timeoutMs=30000] - max wait in milliseconds
  * @param {number} [staleMs=60000] - age after which lock is considered stale
  * @returns {boolean}
  */
-function acquireLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
+function acquireMkdirLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
   const start = Date.now();
   while (true) {
     try {
@@ -1181,7 +1187,7 @@ try {
             const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
 
             // Acquire knowledge lock (D — lock protocol from knowledge-persistence SKILL.md)
-            if (!acquireLock(knowledgeLockDir, 30000, 60000)) {
+            if (!acquireMkdirLock(knowledgeLockDir, 30000, 60000)) {
               learningLog(`Timeout acquiring knowledge lock for ${obs.id} — skipping`);
               skipped++;
               continue;
@@ -1355,7 +1361,7 @@ try {
         break;
       }
 
-      if (!acquireLock(lockDir, 15000, 60000)) {
+      if (!acquireMkdirLock(lockDir, 15000, 60000)) {
         learningLog('reconcile-manifest: timeout acquiring lock, skipping');
         console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0 }));
         break;
@@ -1595,7 +1601,7 @@ try {
 
       fs.mkdirSync(knowledgeDir, { recursive: true });
 
-      if (!acquireLock(knowledgeLockDir, 30000, 60000)) {
+      if (!acquireMkdirLock(knowledgeLockDir, 30000, 60000)) {
         process.stderr.write(`knowledge-append: timeout acquiring lock at ${knowledgeLockDir}\n`);
         process.exit(1);
       }

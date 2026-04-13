@@ -51,7 +51,13 @@ get_mtime() {
   fi
 }
 
-STALE_THRESHOLD=300  # 5 min
+# DESIGN: These timeouts are intentionally higher than the Node acquireMkdirLock defaults
+# (30 s / 60 s in json-helper.cjs) because this lock guards the entire Sonnet analysis
+# pipeline, not just file I/O. The pipeline can legitimately run up to 180 s (TIMEOUT
+# watchdog in run_sonnet_analysis). A second concurrent instance should wait up to 90 s
+# before giving up. The stale threshold is 300 s (5 min) — a zombie bash process holding
+# the lock is only considered abandoned well after the maximum legitimate run could finish.
+STALE_THRESHOLD=300  # 5 min — intentionally > Node 60 s; see DESIGN comment above
 
 break_stale_lock() {
   if [ ! -d "$LOCK_DIR" ]; then return; fi
@@ -66,9 +72,11 @@ break_stale_lock() {
 }
 
 # --- Locking (mkdir-based, POSIX-atomic) ---
+# Same mkdir semantics as acquireMkdirLock in json-helper.cjs; timeouts differ — see DESIGN
+# comment above STALE_THRESHOLD.
 
 acquire_lock() {
-  local timeout=90
+  local timeout=90  # intentionally > Node 30 s; guards full Sonnet pipeline (up to 180 s)
   local waited=0
   while ! mkdir "$LOCK_DIR" 2>/dev/null; do
     if [ "$waited" -ge "$timeout" ]; then

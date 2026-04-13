@@ -114,11 +114,18 @@ PF (`pitfalls.md`) entries accept:
 
 ## Lock Protocol
 
-When writing, the background extractor uses a mkdir-based lock:
-- Lock path: `.memory/.knowledge.lock`
+When writing, the background extractor uses mkdir-based locks:
+
+**`.memory/.knowledge.lock`** — guards `decisions.md` / `pitfalls.md` writes:
 - Timeout: 30 seconds (fail if lock not acquired)
 - Stale recovery: if lock directory is >60 seconds old, remove it and retry
 - Release lock after write completes (remove lock directory)
+- Used by: `json-helper.cjs render-ready`, `knowledge-append`, `learn.ts`
+
+**`.memory/.learning.lock`** — guards `learning-log.jsonl` mutations:
+- Node callers (`json-helper.cjs reconcile-manifest`, `learn.ts`): 15–30 s timeout, 60 s stale
+- Bash caller (`background-learning`): 90 s timeout, 300 s stale — intentionally higher because
+  it guards the entire Sonnet analysis pipeline (up to 180 s watchdog), not just file I/O
 
 ---
 
