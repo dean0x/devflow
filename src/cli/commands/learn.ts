@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
@@ -21,6 +21,27 @@ interface NotificationFileEntry {
   dismissed_at_threshold?: number | null;
   severity?: string;
   created_at?: string;
+}
+
+/**
+ * D-SEC1: Runtime guard for `.notifications.json` parse results.
+ * Rejects arrays, primitives, and null — each value must be an object (or absent).
+ * On failure, callers treat the result as an empty map and warn rather than crash.
+ */
+function isNotificationMap(v: unknown): v is Record<string, NotificationFileEntry> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  return Object.values(v as object).every(
+    (entry) => typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+  );
+}
+
+/**
+ * D-SEC2: Runtime guard for the `count-active` JSON result from json-helper.cjs.
+ * Accepts any object that carries a numeric `count` field (extra fields are ignored).
+ */
+function isCountActiveResult(v: unknown): v is { count: number } {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) &&
+    typeof (v as Record<string, unknown>)['count'] === 'number';
 }
 
 /**
@@ -366,10 +387,24 @@ function warnIfInvalid(invalidCount: number): void {
  * Atomically write a text file by writing to a sibling `.tmp` file and renaming.
  * Mirrors scripts/hooks/json-helper.cjs writeFileAtomic — single POSIX rename
  * ensures readers either see the old content or the new content, never a partial write.
+ *
+ * D-SEC3: Uses `flag: 'wx'` (exclusive create) to detect a leftover `.tmp` from a
+ * prior crash. On EEXIST, unlinks the stale file and retries once — guards against
+ * symlink TOCTOU by never silently overwriting an unexpected `.tmp`.
  */
 async function writeFileAtomic(filePath: string, content: string): Promise<void> {
   const tmp = `${filePath}.tmp`;
-  await fs.writeFile(tmp, content, 'utf-8');
+  try {
+    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      // Stale .tmp from a prior crash — unlink and retry once.
+      await fs.unlink(tmp);
+      await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
+    } else {
+      throw err;
+    }
+  }
   await fs.rename(tmp, filePath);
 }
 
@@ -1090,7 +1125,18 @@ export const learnCommand = new Command('learn')
         try {
           const raw = await fs.readFile(path.join(memoryDir, '.knowledge-usage.json'), 'utf-8');
           const parsed = JSON.parse(raw);
-          if (parsed && parsed.version === 1) usageData = parsed.entries || {};
+          // D-SEC2: Guard against non-object/null/array shapes before narrowing into typed record.
+          if (
+            parsed !== null &&
+            typeof parsed === 'object' &&
+            !Array.isArray(parsed) &&
+            parsed.version === 1 &&
+            parsed.entries !== null &&
+            typeof parsed.entries === 'object' &&
+            !Array.isArray(parsed.entries)
+          ) {
+            usageData = parsed.entries as typeof usageData;
+          }
         } catch { /* no usage data — all cites=0 */ }
 
         // D23: Sort by least used: (cites ASC, last_cited ASC NULLS FIRST, created ASC)
@@ -1167,9 +1213,14 @@ export const learnCommand = new Command('learn')
           // D28: Check if counts dropped below soft start, clear notifications if so
           let notifications: Record<string, NotificationFileEntry> = {};
           try {
-            notifications = JSON.parse(
+            const raw = JSON.parse(
               await fs.readFile(path.join(memoryDir, '.notifications.json'), 'utf-8'),
             );
+            if (isNotificationMap(raw)) {
+              notifications = raw;
+            } else {
+              p.log.warn('Notifications file has unexpected shape — treating as empty.');
+            }
           } catch { /* no notifications file — nothing to clear */ }
 
           const devflowDir = getDevFlowDirectory();
@@ -1181,13 +1232,14 @@ export const learnCommand = new Command('learn')
           ] as const) {
             try {
               // D23: Use count-active op via json-helper.cjs (single source of truth)
-              const result = JSON.parse(
-                execSync(
-                  `node "${jsonHelperPath}" count-active "${filePath}" "${type}"`,
-                  { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
-                ).trim(),
+              // D-SEC3: execFileSync with argv array — no shell interpolation of cwd-derived paths.
+              const raw = JSON.parse(
+                execFileSync('node', [jsonHelperPath, 'count-active', filePath, type], {
+                  encoding: 'utf8',
+                  stdio: ['pipe', 'pipe', 'pipe'],
+                }).trim(),
               );
-              const activeCount = result.count ?? 0;
+              const activeCount = isCountActiveResult(raw) ? raw.count : 0;
 
               // D28: if count dropped below soft start, clear notification
               if (activeCount < 50 && notifications[notifKey]) {
@@ -1218,7 +1270,13 @@ export const learnCommand = new Command('learn')
 
       let notifications: Record<string, NotificationFileEntry>;
       try {
-        notifications = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
+        const raw = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
+        if (!isNotificationMap(raw)) {
+          p.log.warn('Notifications file has unexpected shape — treating as empty.');
+          p.log.info('No active capacity notifications to dismiss.');
+          return;
+        }
+        notifications = raw;
       } catch {
         p.log.info('No capacity notifications found.');
         return;
