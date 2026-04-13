@@ -51,11 +51,10 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   }
 
   if (!isNotificationMap(parsed)) return null;
-  const data = parsed as Record<string, NotificationEntry>;
 
   let worst: { key: string; entry: NotificationEntry; severity: number } | null = null;
 
-  for (const [key, entry] of Object.entries(data)) {
+  for (const [key, entry] of Object.entries(parsed)) {
     if (!entry || !entry.active) continue;
     // Skip dismissed (dismissed_at_threshold matches or exceeds current threshold)
     if (entry.dismissed_at_threshold != null && entry.dismissed_at_threshold >= (entry.threshold ?? 0)) continue;

@@ -65,14 +65,14 @@ export function parsePluginSelection(
   input: string,
   validPlugins: PluginDefinition[],
 ): { selected: string[]; invalid: string[] } {
-  const selected = input.split(',').map(p => {
-    const trimmed = p.trim();
+  const selected = input.split(',').map(raw => {
+    const trimmed = raw.trim();
     const normalized = trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
     return LEGACY_PLUGIN_NAMES[normalized] ?? normalized;
   });
 
-  const validNames = validPlugins.map(p => p.name);
-  const invalid = selected.filter(p => !validNames.includes(p));
+  const validNames = validPlugins.map(pl => pl.name);
+  const invalid = selected.filter(name => !validNames.includes(name));
   return { selected, invalid };
 }
 

@@ -41,7 +41,7 @@ function isNotificationMap(v: unknown): v is Record<string, NotificationFileEntr
  */
 function isCountActiveResult(v: unknown): v is { count: number } {
   return typeof v === 'object' && v !== null && !Array.isArray(v) &&
-    typeof (v as Record<string, unknown>)['count'] === 'number';
+    typeof (v as Record<string, unknown>).count === 'number';
 }
 
 /**
