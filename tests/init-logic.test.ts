@@ -11,12 +11,13 @@ import {
   mergeDenyList,
   discoverProjectGitRoots,
   migrateShadowOverrides,
+  runMigrationsWithFallback,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, prefixSkillName } from '../src/cli/plugins.js';
-import { runMigrations, type Migration, type GlobalMigrationContext } from '../src/cli/utils/migrations.js';
+import type { RunMigrationsResult } from '../src/cli/utils/migrations.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -854,116 +855,58 @@ describe('shadow migration → install ordering', () => {
   });
 });
 
-describe('runMigrations integration seam (D32/D35)', () => {
-  // Tests the integration between init's code path and runMigrations, using
-  // the registryOverride parameter so no real migrations run. This covers the
-  // seam that migrations.test.ts cannot cover (module-level isolation only).
-  let tmpDir: string;
-  let devflowDir: string;
-  let originalHome: string | undefined;
+describe('runMigrationsWithFallback (D32/D35/D37 init seam)', () => {
+  // Tests the init.ts integration seam — specifically the D37 fallback rule that
+  // computes `projectsForMigration` before calling runMigrations. These tests are
+  // distinct from migrations.test.ts (which covers runMigrations internals): they
+  // exercise the code path that init.ts owns.
 
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-migrations-seam-'));
-    devflowDir = path.join(tmpDir, 'home', '.devflow');
-    await fs.mkdir(devflowDir, { recursive: true });
-    // Redirect os.homedir() so runMigrations writes its state to our tmpdir
-    originalHome = process.env.HOME;
-    process.env.HOME = path.join(tmpDir, 'home');
+  const noopLogger = { warn: vi.fn(), info: vi.fn(), success: vi.fn() };
+  const emptyResult: RunMigrationsResult = { newlyApplied: [], failures: [], infos: [], warnings: [] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  afterEach(async () => {
-    if (originalHome !== undefined) {
-      process.env.HOME = originalHome;
-    } else {
-      delete process.env.HOME;
-    }
-    await fs.rm(tmpDir, { recursive: true, force: true });
+  it('passes discoveredProjects directly when non-empty', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
+    const projects = ['/abs/proj-a', '/abs/proj-b'];
+
+    await runMigrationsWithFallback(projects, null, '/home/.devflow', noopLogger, false, runner);
+
+    expect(runner).toHaveBeenCalledOnce();
+    const [, calledProjects] = runner.mock.calls[0];
+    expect(calledProjects).toEqual(projects);
   });
 
-  it('invokes runMigrations with correct devflowDir and discovered projects list', async () => {
-    // Use a probe migration injected via registryOverride to verify that
-    // runMigrations is called with the expected context.
-    const calls: { devflowDir: string }[] = [];
+  it('falls back to [gitRoot] when discoveredProjects is empty and gitRoot is set', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
+    const gitRoot = '/abs/fallback-root';
 
-    const probeMigration: Migration<'global'> = {
-      id: 'probe-seam-test',
-      description: 'Probe migration for integration seam test',
-      scope: 'global',
-      run: async (ctx: GlobalMigrationContext) => {
-        calls.push({ devflowDir: ctx.devflowDir });
-        return { infos: [], warnings: [] };
-      },
-    };
+    await runMigrationsWithFallback([], gitRoot, '/home/.devflow', noopLogger, false, runner);
 
-    const result = await runMigrations(
-      { devflowDir },
-      [],
-      [probeMigration],
-    );
-
-    // The probe migration must have been called exactly once
-    expect(calls).toHaveLength(1);
-    expect(calls[0].devflowDir).toBe(devflowDir);
-
-    // The migration ID must appear in newlyApplied
-    expect(result.newlyApplied).toContain('probe-seam-test');
-    expect(result.failures).toHaveLength(0);
+    expect(runner).toHaveBeenCalledOnce();
+    const [, calledProjects] = runner.mock.calls[0];
+    expect(calledProjects).toEqual([gitRoot]);
   });
 
-  it('passes discovered project roots to per-project migrations', async () => {
-    // Create two fake project roots
-    const projA = path.join(tmpDir, 'project-a');
-    const projB = path.join(tmpDir, 'project-b');
-    await fs.mkdir(projA, { recursive: true });
-    await fs.mkdir(projB, { recursive: true });
+  it('passes empty list when both discoveredProjects and gitRoot are absent', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
 
-    const seenRoots: string[] = [];
+    await runMigrationsWithFallback([], null, '/home/.devflow', noopLogger, false, runner);
 
-    const probeMigration: Migration<'per-project'> = {
-      id: 'probe-per-project-seam',
-      description: 'Per-project probe migration for seam test',
-      scope: 'per-project',
-      run: async (ctx) => {
-        seenRoots.push(ctx.projectRoot);
-        return { infos: [], warnings: [] };
-      },
-    };
-
-    const result = await runMigrations(
-      { devflowDir },
-      [projA, projB],
-      [probeMigration],
-    );
-
-    // Both discovered projects must have been processed
-    expect(seenRoots).toHaveLength(2);
-    expect(seenRoots).toContain(projA);
-    expect(seenRoots).toContain(projB);
-
-    // Migration must be marked applied (all succeeded)
-    expect(result.newlyApplied).toContain('probe-per-project-seam');
-    expect(result.failures).toHaveLength(0);
+    expect(runner).toHaveBeenCalledOnce();
+    const [, calledProjects] = runner.mock.calls[0];
+    expect(calledProjects).toEqual([]);
   });
 
-  it('does not re-run migrations that are already applied', async () => {
-    const callCount = { value: 0 };
+  it('passes the devflowDir context to the runner', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
+    const devflowDir = '/home/.devflow';
 
-    const probeMigration: Migration<'global'> = {
-      id: 'probe-already-applied',
-      description: 'Probe: should not run twice',
-      scope: 'global',
-      run: async () => {
-        callCount.value += 1;
-        return { infos: [], warnings: [] };
-      },
-    };
+    await runMigrationsWithFallback([], null, devflowDir, noopLogger, false, runner);
 
-    // First run: migration executes and is recorded as applied
-    await runMigrations({ devflowDir }, [], [probeMigration]);
-    expect(callCount.value).toBe(1);
-
-    // Second run with same devflowDir: migration must be skipped
-    await runMigrations({ devflowDir }, [], [probeMigration]);
-    expect(callCount.value).toBe(1); // unchanged — already applied
+    const [ctx] = runner.mock.calls[0];
+    expect(ctx.devflowDir).toBe(devflowDir);
   });
 });

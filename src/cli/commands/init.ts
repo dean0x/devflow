@@ -41,6 +41,71 @@ export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.j
 // Re-export migrateShadowOverrides under its original name for backward compatibility
 export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
 
+import type { RunMigrationsResult, Migration } from '../utils/migrations.js';
+
+/**
+ * Logger interface injected into runMigrationsWithFallback so the helper can be
+ * tested without a live clack prompt session.
+ */
+export interface MigrationLogger {
+  warn(msg: string): void;
+  info(msg: string): void;
+  success(msg: string): void;
+}
+
+/**
+ * D32/D35: Orchestrates the init-level migration-runner seam.
+ *
+ * Computes the project list with the D37 fallback rule:
+ *   1. Use discoveredProjects when non-empty.
+ *   2. Fall back to [gitRoot] when discoveredProjects is empty and gitRoot is set.
+ *   3. Run with no per-project targets when both are absent (global-only; per-project
+ *      migrations are vacuously applied per D37 semantics).
+ *
+ * Must run BEFORE installViaFileCopy (D7/PF-007) so V1→V2 shadow renames are
+ * complete before the installer looks for V2-named directories.
+ *
+ * The `runner` parameter accepts the runMigrations function — injected to make
+ * this helper testable without real filesystem migration state.
+ */
+export async function runMigrationsWithFallback(
+  discoveredProjects: string[],
+  gitRoot: string | null,
+  devflowDir: string,
+  logger: MigrationLogger,
+  verbose: boolean,
+  runner: (
+    ctx: { devflowDir: string },
+    projects: string[],
+    registry?: readonly Migration[],
+  ) => Promise<RunMigrationsResult>,
+): Promise<RunMigrationsResult> {
+  const projectsForMigration =
+    discoveredProjects.length > 0 ? discoveredProjects : (gitRoot ? [gitRoot] : []);
+
+  const migrationResult = await runner({ devflowDir }, projectsForMigration);
+
+  for (const f of migrationResult.failures) {
+    // D33: Non-fatal — warn but continue; migration will retry on next init
+    const where = f.project ? ` in ${path.basename(f.project)}` : '';
+    logger.warn(`Migration '${f.id}'${where} failed: ${f.error.message}`);
+  }
+  for (const info of migrationResult.infos) {
+    logger.info(info);
+  }
+  for (const warn of migrationResult.warnings) {
+    logger.warn(warn);
+  }
+  if (migrationResult.newlyApplied.length > 0) {
+    logger.success(`Applied ${migrationResult.newlyApplied.length} migration(s)`);
+  }
+  if (verbose) {
+    for (const id of migrationResult.newlyApplied) logger.info(`  ✓ ${id}`);
+  }
+
+  return migrationResult;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -768,29 +833,14 @@ export const initCommand = new Command('init')
     {
       const { runMigrations } = await import('../utils/migrations.js');
       const userDevflowDir = path.join(os.homedir(), '.devflow');
-      const projectsForMigration =
-        discoveredProjects.length > 0 ? discoveredProjects : (gitRoot ? [gitRoot] : []);
-      const migrationResult = await runMigrations(
-        { devflowDir: userDevflowDir },
-        projectsForMigration,
+      await runMigrationsWithFallback(
+        discoveredProjects,
+        gitRoot,
+        userDevflowDir,
+        { warn: p.log.warn, info: p.log.info, success: p.log.success },
+        verbose,
+        runMigrations,
       );
-      for (const f of migrationResult.failures) {
-        // D33: Non-fatal — warn but continue; migration will retry on next init
-        const where = f.project ? ` in ${path.basename(f.project)}` : '';
-        p.log.warn(`Migration '${f.id}'${where} failed: ${f.error.message}`);
-      }
-      for (const info of migrationResult.infos) {
-        p.log.info(info);
-      }
-      for (const warn of migrationResult.warnings) {
-        p.log.warn(warn);
-      }
-      if (migrationResult.newlyApplied.length > 0) {
-        p.log.success(`Applied ${migrationResult.newlyApplied.length} migration(s)`);
-      }
-      if (verbose) {
-        for (const id of migrationResult.newlyApplied) p.log.info(`  ✓ ${id}`);
-      }
     }
 
     // Install: try native CLI first, fall back to file copy
