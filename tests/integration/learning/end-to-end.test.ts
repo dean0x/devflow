@@ -16,7 +16,7 @@
 // Since we cannot easily patch the sleep, we accept the ~3s overhead for integration tests.
 // Total test timeout: 60s (background-learning with real dependencies).
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -53,15 +53,23 @@ describe('background-learning end-to-end pipeline', () => {
   let memoryDir: string;
   let claudeProjectsDir: string;
   let shimDir: string;
+  let fakeHome: string;
 
   beforeEach(() => {
+    // Isolate HOME before any path computation so os.homedir() and $HOME in
+    // spawned shell scripts both resolve to the fake directory. This prevents
+    // writes to the developer's real ~/.claude/projects/.
+    fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-fake-home-'));
+    vi.stubEnv('HOME', fakeHome);
+
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-learning-test-'));
     memoryDir = path.join(tmpDir, '.memory');
     fs.mkdirSync(memoryDir, { recursive: true });
 
-    // Claude project dir for session transcripts
+    // Claude project dir for session transcripts — use fakeHome so no real
+    // ~/.claude/projects/ directory is created or modified.
     const slug = encodePathToSlug(tmpDir);
-    claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects', `-${slug}`);
+    claudeProjectsDir = path.join(fakeHome, '.claude', 'projects', `-${slug}`);
     fs.mkdirSync(claudeProjectsDir, { recursive: true });
 
     // Shim directory for fake `claude` binary
@@ -69,10 +77,11 @@ describe('background-learning end-to-end pipeline', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(shimDir, { recursive: true, force: true });
-    // Clean up Claude project dirs (only our test dirs)
-    try { fs.rmSync(claudeProjectsDir, { recursive: true, force: true }); } catch { /* ok */ }
+    // fakeHome contains claudeProjectsDir — remove the whole fake home tree.
+    try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch { /* ok */ }
   });
 
   it('runs full pipeline: 3 sessions → 4 observation types → artifacts → reconcile', () => {
@@ -201,9 +210,8 @@ CANNED_EOF
     const env = {
       ...process.env,
       PATH: `${shimDir}:${process.env.PATH}`,
-      HOME: process.env.HOME,
-      // Prevent daily cap from blocking test
-      DEVFLOW_E2E_TEST: '1',
+      // HOME is already set via vi.stubEnv in beforeEach; process.env.HOME
+      // reflects the fake home so background-learning's $HOME also points there.
     };
 
     // Override the daily cap file to start fresh

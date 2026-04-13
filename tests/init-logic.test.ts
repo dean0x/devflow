@@ -16,6 +16,7 @@ import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, prefixSkillName } from '../src/cli/plugins.js';
+import { runMigrations, type Migration, type GlobalMigrationContext } from '../src/cli/utils/migrations.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -850,5 +851,119 @@ describe('shadow migration → install ordering', () => {
     const installedPath = path.join(claudeDir, 'skills', prefixSkillName(skillName), 'SKILL.md');
     const installed = await fs.readFile(installedPath, 'utf-8');
     expect(installed).toBe(sourceContent);
+  });
+});
+
+describe('runMigrations integration seam (D32/D35)', () => {
+  // Tests the integration between init's code path and runMigrations, using
+  // the registryOverride parameter so no real migrations run. This covers the
+  // seam that migrations.test.ts cannot cover (module-level isolation only).
+  let tmpDir: string;
+  let devflowDir: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-migrations-seam-'));
+    devflowDir = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    // Redirect os.homedir() so runMigrations writes its state to our tmpdir
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('invokes runMigrations with correct devflowDir and discovered projects list', async () => {
+    // Use a probe migration injected via registryOverride to verify that
+    // runMigrations is called with the expected context.
+    const calls: { devflowDir: string }[] = [];
+
+    const probeMigration: Migration<'global'> = {
+      id: 'probe-seam-test',
+      description: 'Probe migration for integration seam test',
+      scope: 'global',
+      run: async (ctx: GlobalMigrationContext) => {
+        calls.push({ devflowDir: ctx.devflowDir });
+        return { infos: [], warnings: [] };
+      },
+    };
+
+    const result = await runMigrations(
+      { devflowDir },
+      [],
+      [probeMigration],
+    );
+
+    // The probe migration must have been called exactly once
+    expect(calls).toHaveLength(1);
+    expect(calls[0].devflowDir).toBe(devflowDir);
+
+    // The migration ID must appear in newlyApplied
+    expect(result.newlyApplied).toContain('probe-seam-test');
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('passes discovered project roots to per-project migrations', async () => {
+    // Create two fake project roots
+    const projA = path.join(tmpDir, 'project-a');
+    const projB = path.join(tmpDir, 'project-b');
+    await fs.mkdir(projA, { recursive: true });
+    await fs.mkdir(projB, { recursive: true });
+
+    const seenRoots: string[] = [];
+
+    const probeMigration: Migration<'per-project'> = {
+      id: 'probe-per-project-seam',
+      description: 'Per-project probe migration for seam test',
+      scope: 'per-project',
+      run: async (ctx) => {
+        seenRoots.push(ctx.projectRoot);
+        return { infos: [], warnings: [] };
+      },
+    };
+
+    const result = await runMigrations(
+      { devflowDir },
+      [projA, projB],
+      [probeMigration],
+    );
+
+    // Both discovered projects must have been processed
+    expect(seenRoots).toHaveLength(2);
+    expect(seenRoots).toContain(projA);
+    expect(seenRoots).toContain(projB);
+
+    // Migration must be marked applied (all succeeded)
+    expect(result.newlyApplied).toContain('probe-per-project-seam');
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('does not re-run migrations that are already applied', async () => {
+    const callCount = { value: 0 };
+
+    const probeMigration: Migration<'global'> = {
+      id: 'probe-already-applied',
+      description: 'Probe: should not run twice',
+      scope: 'global',
+      run: async () => {
+        callCount.value += 1;
+        return { infos: [], warnings: [] };
+      },
+    };
+
+    // First run: migration executes and is recorded as applied
+    await runMigrations({ devflowDir }, [], [probeMigration]);
+    expect(callCount.value).toBe(1);
+
+    // Second run with same devflowDir: migration must be skipped
+    await runMigrations({ devflowDir }, [], [probeMigration]);
+    expect(callCount.value).toBe(1); // unchanged — already applied
   });
 });

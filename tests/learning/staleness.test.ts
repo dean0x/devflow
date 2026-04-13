@@ -1,46 +1,21 @@
 // tests/learning/staleness.test.ts
 // Tests for staleness pass in background-learning (D16).
-// Since the staleness pass is in the shell script, we test the underlying
-// logic by running it via a small node script that mirrors the grep-based check.
+// Imports the real checkStaleEntries from scripts/hooks/lib/staleness.cjs — the
+// single implementation shared with background-learning — so tests exercise the
+// actual algorithm rather than a TypeScript reimplementation.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execSync } from 'child_process'; // used by process-observations integration tests below
 import { JSON_HELPER } from './helpers.js';
+import { createRequire } from 'module';
 
-const BACKGROUND_LEARNING = path.resolve(__dirname, '../../scripts/hooks/background-learning');
-
-// Helper: minimal staleness check via node script that mirrors background-learning logic
-// (D16 — grep-based staleness: extract file refs from details/evidence, check existence)
-function checkStaleEntries(
-  entries: Record<string, unknown>[],
-  cwd: string,
-): Record<string, unknown>[] {
-  // Inline the staleness algorithm for testing without spawning the full shell script
-  const FILE_REF_RE = /[A-Za-z0-9_/.-]+\.(ts|tsx|js|cjs|md|sh|py|go|java|rs)/g;
-
-  return entries.map(entry => {
-    const combined = `${entry.details || ''} ${(entry.evidence as string[] || []).join(' ')}`;
-    const refs = combined.match(FILE_REF_RE) || [];
-    const uniqueRefs = [...new Set(refs)];
-
-    let staleRef: string | null = null;
-    for (const ref of uniqueRefs) {
-      const absPath = ref.startsWith('/') ? ref : path.join(cwd, ref);
-      if (!fs.existsSync(absPath)) {
-        staleRef = ref;
-        break;
-      }
-    }
-
-    if (staleRef) {
-      return { ...entry, mayBeStale: true, staleReason: `code-ref-missing:${staleRef}` };
-    }
-    return entry;
-  });
-}
+const require = createRequire(import.meta.url);
+const { checkStaleEntries } = require('../../scripts/hooks/lib/staleness.cjs') as {
+  checkStaleEntries: (entries: Record<string, unknown>[], cwd: string) => Record<string, unknown>[];
+};
 
 describe('staleness detection (D16)', () => {
   let tmpDir: string;

@@ -463,61 +463,23 @@ render_ready_observations() {
 # DESIGN: D16 — grep-based staleness check on active log entries.
 # Checks whether files/functions/commands referenced in details/evidence still exist.
 # Sets mayBeStale=true and staleReason on the entry if references are missing.
+# Delegates to lib/staleness.cjs — the single implementation shared with tests.
 
 check_staleness() {
   [ ! -f "$LEARNING_LOG" ] && return
 
-  local updated=0
-  local temp_log="${LEARNING_LOG}.stale.tmp"
-  > "$temp_log"
+  local staleness_module="$SCRIPT_DIR/lib/staleness.cjs"
+  if [ ! -f "$staleness_module" ]; then
+    log "staleness.cjs not found — skipping staleness pass"
+    return
+  fi
 
-  while IFS= read -r entry_line; do
-    [ -z "$entry_line" ] && continue
+  local output
+  output=$(node "$staleness_module" "$LEARNING_LOG" "$CWD" 2>/dev/null || true)
 
-    # Extract details and evidence text for reference scanning
-    local details evidence
-    details=$(printf '%s' "$entry_line" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d.details||'');}catch{}" 2>/dev/null || true)
-    evidence=$(printf '%s' "$entry_line" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log((d.evidence||[]).join(' '));}catch{}" 2>/dev/null || true)
-
-    local combined="${details} ${evidence}"
-
-    # Extract file path references matching *.ts, *.js, *.cjs, *.md, *.sh, *.py, *.go, *.java, *.rs
-    local stale_ref=""
-    local ref
-    while IFS= read -r ref; do
-      [ -z "$ref" ] && continue
-      # Skip if absolute path doesn't look like a project file
-      if [[ "$ref" == /* ]]; then
-        [ ! -f "$ref" ] && stale_ref="$ref" && break
-      else
-        # Check relative to CWD
-        [ ! -f "$CWD/$ref" ] && stale_ref="$ref" && break
-      fi
-    done < <(printf '%s\n' "$combined" | grep -oE '[A-Za-z0-9_/.-]+\.(ts|tsx|js|cjs|md|sh|py|go|java|rs)' | sort -u 2>/dev/null || true)
-
-    if [ -n "$stale_ref" ]; then
-      # Mark entry as potentially stale.
-      # Security: pass stale_ref as a positional argv[1] argument instead of interpolating
-      # it into the JS source string. This eliminates shell/JS injection if the grep
-      # regex is ever relaxed, and handles apostrophes in path names correctly.
-      entry_line=$(printf '%s' "$entry_line" | node -e "
-        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        d.mayBeStale=true;
-        d.staleReason='code-ref-missing:' + process.argv[1];
-        console.log(JSON.stringify(d));
-      " "$stale_ref" 2>/dev/null || printf '%s' "$entry_line")
-      updated=$((updated + 1))
-      [ "$DEBUG" = "true" ] && log "Staleness: ${stale_ref} missing, flagged entry"
-    fi
-
-    printf '%s\n' "$entry_line" >> "$temp_log"
-  done < "$LEARNING_LOG"
-
-  if [ "$updated" -gt 0 ]; then
-    mv "$temp_log" "$LEARNING_LOG"
-    log "Staleness pass: $updated entries flagged"
-  else
-    rm -f "$temp_log"
+  if [ -n "$output" ]; then
+    log "$output"
+    [ "$DEBUG" = "true" ] && log "Staleness pass output: $output"
   fi
 }
 
