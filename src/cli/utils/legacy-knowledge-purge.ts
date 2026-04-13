@@ -45,8 +45,8 @@ function escapeRegExp(str: string): string {
 
 /**
  * Acquire a mkdir-based lock, waiting up to timeoutMs.
- * Matches acquireMkdirLock in learn.ts so all lock holders use identical
- * staleness semantics.
+ * Uses the same 60 s stale threshold as acquireMkdirLock in learn.ts and
+ * json-helper.cjs (background-learning intentionally uses 300 s — see its DESIGN comment).
  */
 async function acquireMkdirLock(
   lockDir: string,

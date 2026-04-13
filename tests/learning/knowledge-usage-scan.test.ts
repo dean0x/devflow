@@ -175,20 +175,7 @@ describe('knowledge-usage-scan security hardening', () => {
       JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null, created: '2026-01-01' } } }, null, 2) + '\n',
     );
 
-    const run = () =>
-      new Promise<void>((resolve) => {
-        const child = spawnSync('node', [SCANNER, '--cwd', tmpDir], {
-          input: 'ADR-001 cited here',
-          encoding: 'utf8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-          timeout: 10000,
-        });
-        // spawnSync returns synchronously — just resolve so we can use Promise.all
-        void child;
-        resolve();
-      });
-
-    // Launch both synchronously but measure total elapsed time
+    // Launch both synchronously and measure total elapsed time
     const start = Date.now();
     const resultA = spawnSync('node', [SCANNER, '--cwd', tmpDir], {
       input: 'ADR-001 cited here',
@@ -203,8 +190,6 @@ describe('knowledge-usage-scan security hardening', () => {
       timeout: 10000,
     });
     const elapsed = Date.now() - start;
-
-    void run; // suppress unused warning
 
     // Both must complete (not hang)
     expect(elapsed).toBeLessThan(8000);

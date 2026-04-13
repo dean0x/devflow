@@ -10,12 +10,7 @@ import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/lear
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
 
-/**
- * D-SEC1: Runtime guard for `.notifications.json` parse results imported from
- * notifications-shape.ts. Uses the STRONGER definition that validates both the
- * top-level map and each entry value as a non-null, non-array object.
- * Re-exported alias kept for backward compatibility within this module.
- */
+// Re-export the consolidated alias for callers that previously imported it from this module.
 export type { NotificationFileEntry };
 
 /**
@@ -331,9 +326,9 @@ async function readObservations(logPath: string): Promise<{ observations: Learni
  * `.knowledge.lock` guards decisions.md / pitfalls.md — the caller picks the path.
  *
  * Stale detection: if the lock directory is older than `staleMs` we assume the
- * previous holder crashed and remove it. Matches the contract documented in
- * `shared/skills/knowledge-persistence/SKILL.md` and mirrored in json-helper.cjs
- * so all lock holders interpret staleness consistently.
+ * previous holder crashed and remove it. `json-helper.cjs` uses the same
+ * 60 s threshold; `background-learning` intentionally uses 300 s (guards the
+ * full Sonnet pipeline, not just file I/O — see DESIGN comment in that script).
  *
  * @returns true when the lock was acquired, false on timeout.
  */
