@@ -44,7 +44,9 @@ Per-type thresholds (in `json-helper.cjs THRESHOLDS`):
 | decision | 2 | 0 days (no spread) | 0.65 |
 | pitfall | 2 | 0 days (no spread) | 0.65 |
 
-An observation promotes to `ready` when: `quality_ok === true` AND `observations >= required` AND `daySpread >= spread`.
+An observation promotes to `ready` when: `quality_ok === true` AND `confidence >= promote` AND `daySpread >= spread`.
+
+Confidence is computed as `min(floor(count × 100 / required), 95) / 100`. For workflow (promote=0.60, required=3) this means promotion at count=2 (0.66 ≥ 0.60); for procedural (promote=0.70, required=4) at count=3 (0.75 ≥ 0.70). The `promote` threshold is what the code actually evaluates — not a raw count comparison.
 
 ### Rendering: Deterministic 4-Target Dispatch
 
@@ -78,7 +80,7 @@ On session start, `json-helper.cjs reconcile-manifest <cwd>` compares manifest e
 
 - **File deleted** → applies 0.3× confidence penalty to the observation (signals unwanted artifact)
 - **File edited** → ignored (per D13 — user edits are authoritative; don't fight them)
-- **File present and unchanged** → observation reinforced
+- **File present and unchanged** → counted in telemetry only (no confidence change)
 
 This creates a feedback loop: deleting a generated artifact reduces its observation's confidence, eventually causing it to stop promoting.
 
