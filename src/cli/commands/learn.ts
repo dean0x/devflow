@@ -7,33 +7,16 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
+import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
+import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
 
 /**
- * Shape of a single entry in `.memory/.notifications.json`.
- * Mirrors the NotificationEntry in `src/cli/hud/notifications.ts` (read-path)
- * and the structure written by `json-helper.cjs` (write-path).
+ * D-SEC1: Runtime guard for `.notifications.json` parse results imported from
+ * notifications-shape.ts. Uses the STRONGER definition that validates both the
+ * top-level map and each entry value as a non-null, non-array object.
+ * Re-exported alias kept for backward compatibility within this module.
  */
-interface NotificationFileEntry {
-  active?: boolean;
-  threshold?: number;
-  count?: number;
-  ceiling?: number;
-  dismissed_at_threshold?: number | null;
-  severity?: string;
-  created_at?: string;
-}
-
-/**
- * D-SEC1: Runtime guard for `.notifications.json` parse results.
- * Rejects arrays, primitives, and null — each value must be an object (or absent).
- * On failure, callers treat the result as an empty map and warn rather than crash.
- */
-function isNotificationMap(v: unknown): v is Record<string, NotificationFileEntry> {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-  return Object.values(v as object).every(
-    (entry) => typeof entry === 'object' && entry !== null && !Array.isArray(entry),
-  );
-}
+export type { NotificationFileEntry };
 
 /**
  * D-SEC2: Runtime guard for the `count-active` JSON result from json-helper.cjs.
@@ -384,40 +367,16 @@ function warnIfInvalid(invalidCount: number): void {
 }
 
 /**
- * Atomically write a text file by writing to a sibling `.tmp` file and renaming.
- * Mirrors scripts/hooks/json-helper.cjs writeFileAtomic — single POSIX rename
- * ensures readers either see the old content or the new content, never a partial write.
- *
- * D-SEC3: Uses `flag: 'wx'` (exclusive create) to detect a leftover `.tmp` from a
- * prior crash. On EEXIST, unlinks the stale file and retries once — guards against
- * symlink TOCTOU by never silently overwriting an unexpected `.tmp`.
- */
-async function writeFileAtomic(filePath: string, content: string): Promise<void> {
-  const tmp = `${filePath}.tmp`;
-  try {
-    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      // Stale .tmp from a prior crash — unlink and retry once.
-      await fs.unlink(tmp);
-      await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
-    } else {
-      throw err;
-    }
-  }
-  await fs.rename(tmp, filePath);
-}
-
-/**
  * Write observations back to the log file atomically.
  * Each observation is serialized as a JSON line. Uses a `.tmp` sibling + rename so
  * concurrent readers (e.g. background-learning during a race) never observe a
- * half-written file.
+ * half-written file. Delegates to `writeFileAtomicExclusive` in fs-atomic.ts
+ * (D34/D39: canonical TS atomic-write helper).
  */
 async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
   const lines = observations.map(o => JSON.stringify(o));
   const content = lines.join('\n') + (lines.length ? '\n' : '');
-  await writeFileAtomic(logPath, content);
+  await writeFileAtomicExclusive(logPath, content);
 }
 
 /**
@@ -472,9 +431,9 @@ export async function updateKnowledgeStatus(
         }
       }
       if (!changed) return false;
-      await writeFileAtomic(filePath, lines.join('\n'));
+      await writeFileAtomicExclusive(filePath, lines.join('\n'));
     } else {
-      await writeFileAtomic(filePath, updated);
+      await writeFileAtomicExclusive(filePath, updated);
     }
     return true;
   } finally {
@@ -1249,7 +1208,7 @@ export const learnCommand = new Command('learn')
             } catch { /* count-active failed — skip notification update */ }
           }
 
-          await writeFileAtomic(path.join(memoryDir, '.notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
+          await writeFileAtomicExclusive(path.join(memoryDir, '.notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
 
           p.log.success(`Deprecated ${deprecatedCount} entry(ies).`);
         } finally {
@@ -1298,7 +1257,7 @@ export const learnCommand = new Command('learn')
         p.log.success(`Dismissed capacity notification for ${fileType} (at threshold ${entry.threshold}).`);
       }
 
-      await writeFileAtomic(notifPath, JSON.stringify(notifications, null, 2) + '\n');
+      await writeFileAtomicExclusive(notifPath, JSON.stringify(notifications, null, 2) + '\n');
       return;
     }
 

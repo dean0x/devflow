@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
  * @file legacy-knowledge-purge.ts
@@ -19,6 +20,11 @@ import * as path from 'path';
  * The function acquires `.knowledge.lock` (same mkdir-based lock used by
  * json-helper.cjs render-ready and updateKnowledgeStatus in learn.ts) to
  * serialize against concurrent writers.
+ *
+ * D39: Atomic writes delegate to `writeFileAtomicExclusive` in fs-atomic.ts,
+ * using `{ flag: 'wx' }` (O_EXCL | O_WRONLY) to guard against TOCTOU symlink
+ * attacks. The unlink on EEXIST is race-tolerant (wrapped in try/catch before
+ * the retry write), matching the CJS counterpart in json-helper.cjs.
  */
 
 /**
@@ -35,29 +41,6 @@ export interface PurgeLegacyKnowledgeResult {
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Atomically write a file by writing to a sibling `.tmp` then renaming.
- * Mirrors writeFileAtomic in learn.ts — single POSIX rename ensures readers
- * never observe a partial write.
- *
- * D35: Uses `{ flag: 'wx' }` (O_EXCL | O_WRONLY) so the kernel rejects the
- * open if the path already exists — including a symlink an attacker placed
- * there between our decision to write and the actual open() call (TOCTOU).
- * On EEXIST we unlink the stale / adversarial `.tmp` and retry once.
- */
-async function writeFileAtomic(filePath: string, content: string): Promise<void> {
-  const tmp = `${filePath}.tmp`;
-  try {
-    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    // Stale or attacker-placed .tmp — remove it and retry once.
-    await fs.unlink(tmp);
-    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
-  }
-  await fs.rename(tmp, filePath);
 }
 
 /**
@@ -163,7 +146,7 @@ export async function purgeLegacyKnowledgeEntries(options: {
           /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
           `<!-- TL;DR: ${count} ${label}. Key: -->`,
         );
-        await writeFileAtomic(filePath, updatedContent);
+        await writeFileAtomicExclusive(filePath, updatedContent);
         modifiedFiles.push(filePath);
       }
     }

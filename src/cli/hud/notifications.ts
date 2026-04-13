@@ -5,16 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { NotificationData } from './types.js';
-
-interface NotificationEntry {
-  active?: boolean;
-  threshold?: number;
-  count?: number;
-  ceiling?: number;
-  dismissed_at_threshold?: number | null;
-  severity?: string;
-  created_at?: string;
-}
+import { type NotificationEntry, isNotificationMap } from '../utils/notifications-shape.js';
 
 const SEVERITY_VALUES = ['dim', 'warning', 'error'] as const;
 type Severity = typeof SEVERITY_VALUES[number];
@@ -23,10 +14,6 @@ const SEVERITY_ORDER: Record<string, number> = { dim: 0, warning: 1, error: 2 };
 
 function isSeverity(v: unknown): v is Severity {
   return typeof v === 'string' && (SEVERITY_VALUES as readonly string[]).includes(v);
-}
-
-function isNotificationMap(v: unknown): v is Record<string, NotificationEntry> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 /**

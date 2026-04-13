@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
  * @file migrations.ts
@@ -151,6 +152,9 @@ export async function readAppliedMigrations(devflowDir: string): Promise<string[
  * Uses exclusive-create tmp + rename so readers never observe a partial file
  * and a stale tmp from a previous crash does not silently overwrite good data.
  *
+ * Delegates to `writeFileAtomicExclusive` in fs-atomic.ts (D34/D39: canonical
+ * TS atomic-write helper with race-tolerant unlink before retry).
+ *
  * @param devflowDir - absolute path to `~/.devflow`
  * @param ids - full list of applied migration IDs (cumulative, not incremental)
  */
@@ -160,23 +164,9 @@ export async function writeAppliedMigrations(
 ): Promise<void> {
   await fs.mkdir(devflowDir, { recursive: true });
   const filePath = path.join(devflowDir, MIGRATIONS_FILE);
-  const tmp = `${filePath}.tmp`;
   const data: MigrationsFile = { applied: ids };
   const content = JSON.stringify(data, null, 2) + '\n';
-
-  // Exclusive-create: prevents writing into a symlink target (TOCTOU fix).
-  // On EEXIST (stale tmp from a previous crash), unlink + retry once.
-  try {
-    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      await fs.unlink(tmp);
-      await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
-    } else {
-      throw err;
-    }
-  }
-  await fs.rename(tmp, filePath);
+  await writeFileAtomicExclusive(filePath, content);
 }
 
 export interface MigrationFailure {
@@ -218,6 +208,112 @@ function normaliseRunResult(result: MigrationRunResult | void): MigrationRunResu
 }
 
 /**
+ * Run a single global migration, returning { applied, failure, infos, warnings }.
+ *
+ * D33: Non-fatal semantics — if a global migration fails, we record the failure
+ * and continue. The failing migration is NOT marked as applied so it retries on
+ * the next `devflow init` run (transient errors such as filesystem contention
+ * are eventually resolved without blocking the install).
+ */
+async function runGlobalMigration(
+  migration: Migration<'global'>,
+  ctx: GlobalMigrationContext,
+): Promise<{
+  applied: boolean;
+  failure: MigrationFailure | null;
+  infos: string[];
+  warnings: string[];
+}> {
+  try {
+    const raw = await migration.run(ctx);
+    const runResult = normaliseRunResult(raw);
+    return { applied: true, failure: null, infos: runResult.infos, warnings: runResult.warnings };
+  } catch (error) {
+    return {
+      applied: false,
+      failure: {
+        id: migration.id,
+        scope: migration.scope,
+        error: error instanceof Error ? error : new Error(String(error)),
+      },
+      infos: [],
+      warnings: [],
+    };
+  }
+}
+
+/**
+ * Run a single per-project migration across all discovered project roots with a
+ * concurrency cap, returning { applied, failures, infos, warnings }.
+ *
+ * D35: Per-project migrations run across all discovered projects with a
+ * concurrency cap of 16 to avoid EMFILE on machines with 50–200 projects.
+ * This matches the pattern used for .claudeignore multi-project install at
+ * init.ts:962-974 — each project has its own `.memory/.knowledge.lock` so
+ * there is no cross-project contention. Promise.allSettled collects all
+ * outcomes without short-circuiting on partial failures.
+ *
+ * Marking strategy: the migration is considered applied globally only when
+ * ALL projects succeed. Any per-project failure causes the ID to remain
+ * unapplied so the next `devflow init` (which may discover the same or
+ * additional projects) can retry the failed projects.
+ *
+ * D37: When discoveredProjects is empty, Promise.allSettled([]) resolves
+ * to [] and [].every(...) returns true (vacuous truth), which would mark
+ * the migration applied even though no projects were swept. This is the
+ * intended behaviour for machines that cloned a repo after the migration
+ * ran — there are no legacy entries to purge. Recovery: if you later find
+ * a project that was missed, remove ~/.devflow/migrations.json to force a
+ * re-sweep on the next `devflow init`.
+ */
+async function runPerProjectMigration(
+  migration: Migration<'per-project'>,
+  ctx: { devflowDir: string },
+  discoveredProjects: string[],
+): Promise<{
+  applied: boolean;
+  failures: MigrationFailure[];
+  infos: string[];
+  warnings: string[];
+}> {
+  const results = await pooled(
+    discoveredProjects,
+    16,
+    (projectRoot) => {
+      const memoryDir = path.join(projectRoot, '.memory');
+      return migration.run({
+        scope: 'per-project',
+        devflowDir: ctx.devflowDir,
+        memoryDir,
+        projectRoot,
+      });
+    },
+  );
+
+  const failures: MigrationFailure[] = [];
+  const infos: string[] = [];
+  const warnings: string[] = [];
+
+  for (const [i, result] of results.entries()) {
+    if (result.status === 'rejected') {
+      failures.push({
+        id: migration.id,
+        scope: migration.scope,
+        project: discoveredProjects[i],
+        error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+      });
+    } else {
+      const runResult = normaliseRunResult(result.value);
+      infos.push(...runResult.infos);
+      warnings.push(...runResult.warnings);
+    }
+  }
+
+  const applied = results.every(r => r.status === 'fulfilled');
+  return { applied, failures, infos, warnings };
+}
+
+/**
  * Run all unapplied migrations from MIGRATIONS.
  *
  * D32: Always-run-unapplied semantics (no fresh-vs-upgrade branch).
@@ -254,81 +350,28 @@ export async function runMigrations(
     if (applied.has(migration.id)) continue; // Already done — skip
 
     if (migration.scope === 'global') {
-      /**
-       * D33: Non-fatal semantics — if a global migration fails, we record the
-       * failure and continue to the next migration. The failing migration is NOT
-       * marked as applied so it will be retried on the next `devflow init` run.
-       * This approach avoids blocking the install on transient errors (e.g.,
-       * filesystem contention) while ensuring the migration is eventually applied.
-       */
-      try {
-        const raw = await (migration as Migration<'global'>).run({
-          scope: 'global',
-          devflowDir: ctx.devflowDir,
-        });
-        const runResult = normaliseRunResult(raw);
+      const globalCtx: GlobalMigrationContext = {
+        scope: 'global',
+        devflowDir: ctx.devflowDir,
+      };
+      // Type assertion required: TS narrows `migration.scope` to 'global' but cannot
+      // narrow the generic parameter S of Migration<S> — the discriminant check is the
+      // runtime guarantee. This replaces the original `as Migration<'global'>` cast.
+      const outcome = await runGlobalMigration(migration as Migration<'global'>, globalCtx);
+      if (outcome.applied) {
         newlyApplied.push(migration.id);
-        infos.push(...runResult.infos);
-        warnings.push(...runResult.warnings);
-      } catch (error) {
-        failures.push({
-          id: migration.id,
-          scope: migration.scope,
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
+        infos.push(...outcome.infos);
+        warnings.push(...outcome.warnings);
+      } else if (outcome.failure) {
+        failures.push(outcome.failure);
       }
     } else if (migration.scope === 'per-project') {
-      /**
-       * D35: Per-project migrations run across all discovered projects with a
-       * concurrency cap of 16 to avoid EMFILE on machines with 50–200 projects.
-       * This matches the pattern used for .claudeignore multi-project install at
-       * init.ts:962-974 — each project has its own `.memory/.knowledge.lock` so
-       * there is no cross-project contention. Promise.allSettled collects all
-       * outcomes without short-circuiting on partial failures.
-       *
-       * Marking strategy: the migration is considered applied globally only when
-       * ALL projects succeed. Any per-project failure causes the ID to remain
-       * unapplied so the next `devflow init` (which may discover the same or
-       * additional projects) can retry the failed projects.
-       *
-       * D37: When discoveredProjects is empty, Promise.allSettled([]) resolves
-       * to [] and [].every(...) returns true (vacuous truth), which would mark
-       * the migration applied even though no projects were swept. This is the
-       * intended behaviour for machines that cloned a repo after the migration
-       * ran — there are no legacy entries to purge. Recovery: if you later find
-       * a project that was missed, remove ~/.devflow/migrations.json to force a
-       * re-sweep on the next `devflow init`.
-       */
-      const results = await pooled(
-        discoveredProjects,
-        16,
-        (projectRoot) => {
-          const memoryDir = path.join(projectRoot, '.memory');
-          return (migration as Migration<'per-project'>).run({
-            scope: 'per-project',
-            devflowDir: ctx.devflowDir,
-            memoryDir,
-            projectRoot,
-          });
-        },
-      );
-
-      for (const [i, result] of results.entries()) {
-        if (result.status === 'rejected') {
-          failures.push({
-            id: migration.id,
-            scope: migration.scope,
-            project: discoveredProjects[i],
-            error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
-          });
-        } else {
-          const runResult = normaliseRunResult(result.value);
-          infos.push(...runResult.infos);
-          warnings.push(...runResult.warnings);
-        }
-      }
-
-      if (results.every(r => r.status === 'fulfilled')) {
+      // Same generic-narrowing constraint applies — discriminant check IS the guarantee.
+      const outcome = await runPerProjectMigration(migration as Migration<'per-project'>, ctx, discoveredProjects);
+      failures.push(...outcome.failures);
+      infos.push(...outcome.infos);
+      warnings.push(...outcome.warnings);
+      if (outcome.applied) {
         newlyApplied.push(migration.id);
       }
     } else {
