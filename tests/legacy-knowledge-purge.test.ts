@@ -214,4 +214,32 @@ describe('purgeLegacyKnowledgeEntries', () => {
     expect(result.files).toContain(decisionsPath);
     expect(result.files).toContain(pitfallsPath);
   });
+
+  it('does not follow a symlink placed at the .tmp path (TOCTOU hardening)', async () => {
+    // Arrange: create a decisions.md with a legacy entry to trigger an atomic write
+    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
+
+## ADR-002: Legacy
+
+- **Status**: accepted
+`, 'utf-8');
+
+    // Place a symlink at the .tmp location pointing to a sentinel file
+    const tmpPath = `${decisionsPath}.tmp`;
+    const sentinelPath = path.join(tmpDir, 'attacker-controlled.txt');
+    await fs.writeFile(sentinelPath, 'original-content', 'utf-8');
+    await fs.symlink(sentinelPath, tmpPath);
+
+    // Act: the purge should complete successfully (unlinks stale tmp and retries)
+    await purgeLegacyKnowledgeEntries({ memoryDir });
+
+    // Assert: the sentinel file was NOT overwritten — the symlink was not followed
+    const sentinelContent = await fs.readFile(sentinelPath, 'utf-8');
+    expect(sentinelContent).toBe('original-content');
+
+    // And decisions.md was still written correctly (ADR-002 removed)
+    const updated = await fs.readFile(decisionsPath, 'utf-8');
+    expect(updated).not.toContain('ADR-002');
+  });
 });

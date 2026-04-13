@@ -41,10 +41,22 @@ function escapeRegExp(str: string): string {
  * Atomically write a file by writing to a sibling `.tmp` then renaming.
  * Mirrors writeFileAtomic in learn.ts — single POSIX rename ensures readers
  * never observe a partial write.
+ *
+ * D35: Uses `{ flag: 'wx' }` (O_EXCL | O_WRONLY) so the kernel rejects the
+ * open if the path already exists — including a symlink an attacker placed
+ * there between our decision to write and the actual open() call (TOCTOU).
+ * On EEXIST we unlink the stale / adversarial `.tmp` and retry once.
  */
 async function writeFileAtomic(filePath: string, content: string): Promise<void> {
   const tmp = `${filePath}.tmp`;
-  await fs.writeFile(tmp, content, 'utf-8');
+  try {
+    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    // Stale or attacker-placed .tmp — remove it and retry once.
+    await fs.unlink(tmp);
+    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
+  }
   await fs.rename(tmp, filePath);
 }
 
