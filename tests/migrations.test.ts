@@ -6,9 +6,12 @@ import {
   readAppliedMigrations,
   writeAppliedMigrations,
   runMigrations,
+  reportMigrationResult,
   MIGRATIONS,
   type Migration,
   type MigrationContext,
+  type MigrationLogger,
+  type RunMigrationsResult,
 } from '../src/cli/utils/migrations.js';
 
 describe('readAppliedMigrations', () => {
@@ -367,5 +370,99 @@ describe('runMigrations', () => {
     await expect(
       fs.access(path.join(shadowsDir, 'software-design')),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('reportMigrationResult', () => {
+  // Exercises the extracted reporter helper — verifies that each branch of the
+  // reporting logic (failures, infos, warnings, newlyApplied, verbose) calls
+  // the correct logger method with the expected message.
+
+  function makeLogger(): { logger: MigrationLogger; calls: { method: string; msg: string }[] } {
+    const calls: { method: string; msg: string }[] = [];
+    const logger: MigrationLogger = {
+      warn: (msg) => calls.push({ method: 'warn', msg }),
+      info: (msg) => calls.push({ method: 'info', msg }),
+      success: (msg) => calls.push({ method: 'success', msg }),
+    };
+    return { logger, calls };
+  }
+
+  const emptyResult: RunMigrationsResult = {
+    newlyApplied: [], failures: [], infos: [], warnings: [],
+  };
+
+  it('does nothing when result is fully empty', () => {
+    const { logger, calls } = makeLogger();
+    reportMigrationResult(emptyResult, logger, false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('logs warnings for each failure with project context', () => {
+    const { logger, calls } = makeLogger();
+    const result: RunMigrationsResult = {
+      ...emptyResult,
+      failures: [
+        { id: 'mig-a', scope: 'per-project', project: '/abs/my-project', error: new Error('oops') },
+      ],
+    };
+    reportMigrationResult(result, logger, false);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe('warn');
+    expect(calls[0].msg).toContain("'mig-a'");
+    expect(calls[0].msg).toContain('my-project');
+    expect(calls[0].msg).toContain('oops');
+  });
+
+  it('logs failures without project when project is absent', () => {
+    const { logger, calls } = makeLogger();
+    const result: RunMigrationsResult = {
+      ...emptyResult,
+      failures: [{ id: 'mig-b', scope: 'global', error: new Error('global fail') }],
+    };
+    reportMigrationResult(result, logger, false);
+    expect(calls[0].msg).not.toContain(' in ');
+  });
+
+  it('logs infos via logger.info', () => {
+    const { logger, calls } = makeLogger();
+    const result: RunMigrationsResult = { ...emptyResult, infos: ['info-one', 'info-two'] };
+    reportMigrationResult(result, logger, false);
+    const infoCalls = calls.filter(c => c.method === 'info');
+    expect(infoCalls.map(c => c.msg)).toEqual(['info-one', 'info-two']);
+  });
+
+  it('logs warnings via logger.warn', () => {
+    const { logger, calls } = makeLogger();
+    const result: RunMigrationsResult = { ...emptyResult, warnings: ['warn-one'] };
+    reportMigrationResult(result, logger, false);
+    const warnCalls = calls.filter(c => c.method === 'warn');
+    expect(warnCalls.map(c => c.msg)).toEqual(['warn-one']);
+  });
+
+  it('emits success when newlyApplied is non-empty', () => {
+    const { logger, calls } = makeLogger();
+    const result: RunMigrationsResult = { ...emptyResult, newlyApplied: ['mig-x', 'mig-y'] };
+    reportMigrationResult(result, logger, false);
+    const successCall = calls.find(c => c.method === 'success');
+    expect(successCall).toBeDefined();
+    expect(successCall!.msg).toContain('2');
+  });
+
+  it('logs per-migration detail when verbose=true', () => {
+    const { logger, calls } = makeLogger();
+    const result: RunMigrationsResult = { ...emptyResult, newlyApplied: ['mig-x'] };
+    reportMigrationResult(result, logger, true);
+    const infoCalls = calls.filter(c => c.method === 'info');
+    expect(infoCalls.length).toBeGreaterThanOrEqual(1);
+    expect(infoCalls.some(c => c.msg.includes('mig-x'))).toBe(true);
+  });
+
+  it('does not log per-migration detail when verbose=false', () => {
+    const { logger, calls } = makeLogger();
+    const result: RunMigrationsResult = { ...emptyResult, newlyApplied: ['mig-x'] };
+    reportMigrationResult(result, logger, false);
+    const infoCalls = calls.filter(c => c.method === 'info');
+    expect(infoCalls.length).toBe(0);
   });
 });

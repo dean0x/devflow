@@ -154,6 +154,96 @@ describe('getLearningCounts', () => {
   });
 });
 
+describe('isRawObservation adversarial inputs (via getLearningCounts)', () => {
+  // isRawObservation is private; these tests exercise it indirectly by writing
+  // JSONL lines that contain adversarial shapes and verifying the guard rejects them
+  // (the entry is skipped, not counted) while valid entries still count correctly.
+
+  let tmpDir: string;
+  let memoryDir: string;
+  let logPath: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-counts-guard-test-'));
+    memoryDir = path.join(tmpDir, '.memory');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    logPath = path.join(memoryDir, 'learning-log.jsonl');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rejects entry with invalid type — does not count it', () => {
+    const invalid = JSON.stringify({ type: 'purple', status: 'created' });
+    const valid = makeEntry('workflow', 'created');
+    fs.writeFileSync(logPath, [invalid, valid].join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.workflows).toBe(1); // only the valid entry counted
+  });
+
+  it('rejects entry missing type field', () => {
+    const invalid = JSON.stringify({ status: 'created' });
+    const valid = makeEntry('decision', 'created');
+    fs.writeFileSync(logPath, [invalid, valid].join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.decisions).toBe(1);
+  });
+
+  it('rejects entry missing status field', () => {
+    const invalid = JSON.stringify({ type: 'workflow' });
+    const valid = makeEntry('procedural', 'created');
+    fs.writeFileSync(logPath, [invalid, valid].join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.procedural).toBe(1);
+  });
+
+  it('rejects null JSON value', () => {
+    const invalid = JSON.stringify(null);
+    const valid = makeEntry('pitfall', 'created');
+    fs.writeFileSync(logPath, [invalid, valid].join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.pitfalls).toBe(1);
+  });
+
+  it('rejects array JSON value', () => {
+    const invalid = JSON.stringify([]);
+    const valid = makeEntry('workflow', 'created');
+    fs.writeFileSync(logPath, [invalid, valid].join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.workflows).toBe(1);
+  });
+
+  it('rejects entry where mayBeStale is a non-boolean', () => {
+    const invalid = JSON.stringify({ type: 'workflow', status: 'created', mayBeStale: 'yes' });
+    const valid = makeEntry('workflow', 'created');
+    fs.writeFileSync(logPath, [invalid, valid].join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.workflows).toBe(1); // only the valid entry counted
+  });
+
+  it('accepts entry with no optional flags (all undefined)', () => {
+    const entry = JSON.stringify({ type: 'decision', status: 'created' });
+    fs.writeFileSync(logPath, entry + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.decisions).toBe(1);
+  });
+});
+
 describe('getLearningCounts HUD component output', () => {
   let tmpDir: string;
   let memoryDir: string;

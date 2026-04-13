@@ -184,6 +184,47 @@ export interface RunMigrationsResult {
 }
 
 /**
+ * Logger interface for surfacing migration output to the user.
+ * Injected so the reporter can be tested without a live clack prompt session.
+ */
+export interface MigrationLogger {
+  warn(msg: string): void;
+  info(msg: string): void;
+  success(msg: string): void;
+}
+
+/**
+ * Surface migration result infos, warnings, failures, and newly-applied IDs
+ * to the user via the provided logger.
+ *
+ * Extracted from runMigrationsWithFallback (init.ts) so reporting can be
+ * tested independently of the project-list routing logic.
+ */
+export function reportMigrationResult(
+  result: RunMigrationsResult,
+  logger: MigrationLogger,
+  verbose: boolean,
+): void {
+  for (const f of result.failures) {
+    // D33: Non-fatal — warn but continue; migration will retry on next init
+    const where = f.project ? ` in ${path.basename(f.project)}` : '';
+    logger.warn(`Migration '${f.id}'${where} failed: ${f.error.message}`);
+  }
+  for (const info of result.infos) {
+    logger.info(info);
+  }
+  for (const warn of result.warnings) {
+    logger.warn(warn);
+  }
+  if (result.newlyApplied.length > 0) {
+    logger.success(`Applied ${result.newlyApplied.length} migration(s)`);
+  }
+  if (verbose) {
+    for (const id of result.newlyApplied) logger.info(`  ✓ ${id}`);
+  }
+}
+
+/**
  * Process an array of items with at most `limit` concurrent Promises.
  * Returns PromiseSettledResult for every item in the original order.
  */

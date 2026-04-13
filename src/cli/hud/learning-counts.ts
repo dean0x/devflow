@@ -9,7 +9,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { LearningCountsData } from './types.js';
 
-type ObservationType = 'workflow' | 'procedural' | 'decision' | 'pitfall';
+/** Canonical list of valid observation types — drives both the guard and the switch. */
+const VALID_OBSERVATION_TYPES = ['workflow', 'procedural', 'decision', 'pitfall'] as const;
+type ObservationType = typeof VALID_OBSERVATION_TYPES[number];
 
 interface RawObservation {
   type: ObservationType;
@@ -19,17 +21,21 @@ interface RawObservation {
   softCapExceeded?: boolean;
 }
 
+/** Returns true when v is undefined, or a boolean. Rejects any other value. */
+function isOptBool(v: unknown): boolean {
+  return v === undefined || typeof v === 'boolean';
+}
+
 function isRawObservation(val: unknown): val is RawObservation {
   if (typeof val !== 'object' || val === null) return false;
   const o = val as Record<string, unknown>;
-  return (
-    typeof o.type === 'string' &&
-    typeof o.status === 'string' &&
-    ['workflow', 'procedural', 'decision', 'pitfall'].includes(o.type) &&
-    (o.mayBeStale === undefined || typeof o.mayBeStale === 'boolean') &&
-    (o.needsReview === undefined || typeof o.needsReview === 'boolean') &&
-    (o.softCapExceeded === undefined || typeof o.softCapExceeded === 'boolean')
-  );
+
+  // Phase 1: required fields
+  if (typeof o.type !== 'string' || typeof o.status !== 'string') return false;
+  if (!(VALID_OBSERVATION_TYPES as readonly string[]).includes(o.type)) return false;
+
+  // Phase 2: optional boolean flags
+  return isOptBool(o.mayBeStale) && isOptBool(o.needsReview) && isOptBool(o.softCapExceeded);
 }
 
 /**

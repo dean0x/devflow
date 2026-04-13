@@ -41,17 +41,9 @@ export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.j
 // Re-export migrateShadowOverrides under its original name for backward compatibility
 export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
 
-import type { RunMigrationsResult, Migration } from '../utils/migrations.js';
+import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../utils/migrations.js';
 
-/**
- * Logger interface injected into runMigrationsWithFallback so the helper can be
- * tested without a live clack prompt session.
- */
-export interface MigrationLogger {
-  warn(msg: string): void;
-  info(msg: string): void;
-  success(msg: string): void;
-}
+export type { MigrationLogger };
 
 /**
  * D32/D35: Orchestrates the init-level migration-runner seam.
@@ -85,23 +77,7 @@ export async function runMigrationsWithFallback(
 
   const migrationResult = await runner({ devflowDir }, projectsForMigration);
 
-  for (const f of migrationResult.failures) {
-    // D33: Non-fatal — warn but continue; migration will retry on next init
-    const where = f.project ? ` in ${path.basename(f.project)}` : '';
-    logger.warn(`Migration '${f.id}'${where} failed: ${f.error.message}`);
-  }
-  for (const info of migrationResult.infos) {
-    logger.info(info);
-  }
-  for (const warn of migrationResult.warnings) {
-    logger.warn(warn);
-  }
-  if (migrationResult.newlyApplied.length > 0) {
-    logger.success(`Applied ${migrationResult.newlyApplied.length} migration(s)`);
-  }
-  if (verbose) {
-    for (const id of migrationResult.newlyApplied) logger.info(`  ✓ ${id}`);
-  }
+  reportMigrationResult(migrationResult, logger, verbose);
 
   return migrationResult;
 }
