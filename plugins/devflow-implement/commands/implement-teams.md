@@ -361,14 +361,12 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
-### Phase 10: Report + Record Decisions
+### Phase 10: Report
 
 Display completion summary with phase status, PR info, and next steps.
 
-If the Coder's report includes Key Decisions with architectural significance:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record decisions to `.memory/knowledge/decisions.md`
-2. Source field: `/implement {TASK_ID}`
-3. Skip entirely if no architectural decisions were made
+<!-- D8: "Record Decisions" block removed — knowledge-persistence skill no longer has Write
+     capability; decision recording is handled by the background-learning extractor. -->
 
 ## Architecture
 
@@ -409,7 +407,7 @@ If the Coder's report includes Key Decisions with architectural significance:
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-└─ Phase 10: Report + Record Decisions (inline, if any)
+└─ Phase 10: Report
 ```
 
 ## Principles

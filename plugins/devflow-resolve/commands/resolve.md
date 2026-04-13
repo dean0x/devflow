@@ -256,7 +256,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Output Artifact
 
-Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
+Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary
