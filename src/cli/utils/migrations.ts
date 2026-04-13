@@ -12,18 +12,49 @@ import * as os from 'os';
 
 export type MigrationScope = 'global' | 'per-project';
 
-export interface MigrationContext {
+/**
+ * D38: Discriminated union for MigrationContext eliminates ISP violation.
+ *
+ * GlobalMigrationContext: only devflowDir — per-project fields (memoryDir,
+ * projectRoot) are structurally absent, so migrations that accidentally
+ * reference them fail at compile time rather than receiving empty-string
+ * sentinels. claudeDir is dropped entirely (was present in original but never
+ * consumed by any migration).
+ *
+ * PerProjectMigrationContext: adds memoryDir and projectRoot so per-project
+ * migrations can access them without receiving '' sentinels.
+ */
+export type GlobalMigrationContext = {
+  scope: 'global';
+  devflowDir: string;
+};
+
+export type PerProjectMigrationContext = {
+  scope: 'per-project';
+  devflowDir: string;
   memoryDir: string;
   projectRoot: string;
-  devflowDir: string;
-  claudeDir: string;
+};
+
+export type MigrationContext = GlobalMigrationContext | PerProjectMigrationContext;
+
+export interface MigrationRunResult {
+  infos: string[];
+  warnings: string[];
 }
 
-export interface Migration {
+/**
+ * Inline migrations return MigrationRunResult for structured output (infos/warnings
+ * surfaced to the user). Test overrides may return void — the runner treats void as
+ * { infos: [], warnings: [] } for backward compat.
+ */
+export interface Migration<S extends MigrationScope = MigrationScope> {
   id: string;
   description: string;
-  scope: MigrationScope;
-  run(ctx: MigrationContext): Promise<void>;
+  scope: S;
+  run(
+    ctx: S extends 'global' ? GlobalMigrationContext : PerProjectMigrationContext,
+  ): Promise<MigrationRunResult | void>;
 }
 
 /**
@@ -47,25 +78,37 @@ export interface Migration {
  * The semantics are identical — the function is imported from its new home in
  * shadow-overrides-migration.ts.
  */
+const MIGRATION_SHADOW_OVERRIDES: Migration<'global'> = {
+  id: 'shadow-overrides-v2-names',
+  description: 'Rename shadow-override skill directories to V2 names',
+  scope: 'global',
+  run: async (ctx: GlobalMigrationContext): Promise<MigrationRunResult> => {
+    const { migrateShadowOverridesRegistry } = await import('./shadow-overrides-migration.js');
+    const result = await migrateShadowOverridesRegistry(ctx.devflowDir);
+    const infos = result.migrated > 0
+      ? [`Migrated ${result.migrated} shadow override(s)`]
+      : [];
+    return { infos, warnings: result.warnings };
+  },
+};
+
+const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
+  id: 'purge-legacy-knowledge-v2',
+  description: 'Remove pre-v2 low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)',
+  scope: 'per-project',
+  run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
+    const { purgeLegacyKnowledgeEntries } = await import('./legacy-knowledge-purge.js');
+    const result = await purgeLegacyKnowledgeEntries({ memoryDir: ctx.memoryDir });
+    const infos = result.removed > 0
+      ? [`Purged ${result.removed} legacy knowledge entry(ies) in ${result.files.length} file(s)`]
+      : [];
+    return { infos, warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
-  {
-    id: 'shadow-overrides-v2-names',
-    description: 'Rename shadow-override skill directories to V2 names',
-    scope: 'global',
-    run: async (ctx) => {
-      const { migrateShadowOverridesRegistry } = await import('./shadow-overrides-migration.js');
-      await migrateShadowOverridesRegistry(ctx.devflowDir);
-    },
-  },
-  {
-    id: 'purge-legacy-knowledge-v2',
-    description: 'Remove pre-v2 low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)',
-    scope: 'per-project',
-    run: async (ctx) => {
-      const { purgeLegacyKnowledgeEntries } = await import('./legacy-knowledge-purge.js');
-      await purgeLegacyKnowledgeEntries({ memoryDir: ctx.memoryDir });
-    },
-  },
+  MIGRATION_SHADOW_OVERRIDES,
+  MIGRATION_PURGE_LEGACY_KNOWLEDGE,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
@@ -105,7 +148,8 @@ export async function readAppliedMigrations(devflowDir: string): Promise<string[
 
 /**
  * Write applied migration IDs to `~/.devflow/migrations.json` atomically.
- * Uses write-temp + rename so readers never observe a partial file.
+ * Uses exclusive-create tmp + rename so readers never observe a partial file
+ * and a stale tmp from a previous crash does not silently overwrite good data.
  *
  * @param devflowDir - absolute path to `~/.devflow`
  * @param ids - full list of applied migration IDs (cumulative, not incremental)
@@ -118,7 +162,20 @@ export async function writeAppliedMigrations(
   const filePath = path.join(devflowDir, MIGRATIONS_FILE);
   const tmp = `${filePath}.tmp`;
   const data: MigrationsFile = { applied: ids };
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+  const content = JSON.stringify(data, null, 2) + '\n';
+
+  // Exclusive-create: prevents writing into a symlink target (TOCTOU fix).
+  // On EEXIST (stale tmp from a previous crash), unlink + retry once.
+  try {
+    await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      await fs.unlink(tmp);
+      await fs.writeFile(tmp, content, { encoding: 'utf-8', flag: 'wx' });
+    } else {
+      throw err;
+    }
+  }
   await fs.rename(tmp, filePath);
 }
 
@@ -127,6 +184,37 @@ export interface MigrationFailure {
   scope: MigrationScope;
   project?: string;
   error: Error;
+}
+
+export interface RunMigrationsResult {
+  newlyApplied: string[];
+  failures: MigrationFailure[];
+  infos: string[];
+  warnings: string[];
+}
+
+/**
+ * Process an array of items with at most `limit` concurrent Promises.
+ * Returns PromiseSettledResult for every item in the original order.
+ */
+async function pooled<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = [];
+  for (let i = 0; i < items.length; i += limit) {
+    const chunk = items.slice(i, i + limit);
+    const chunkResults = await Promise.allSettled(chunk.map(fn));
+    results.push(...chunkResults);
+  }
+  return results;
+}
+
+/** Coerce a migration run result (may be void for test stubs) to { infos, warnings }. */
+function normaliseRunResult(result: MigrationRunResult | void): MigrationRunResult {
+  if (result == null) return { infos: [], warnings: [] };
+  return result;
 }
 
 /**
@@ -141,25 +229,29 @@ export interface MigrationFailure {
  * install" reliably, which is harder than it appears (partial installs, reinstalls,
  * migrations from local to user scope). The always-run path is simpler and correct.
  *
- * @param ctx - devflowDir and claudeDir (memoryDir and projectRoot filled per-project)
+ * @param ctx - devflowDir (memoryDir and projectRoot filled per-project)
  * @param discoveredProjects - absolute paths to discovered Claude-enabled project roots
  * @param registryOverride - override MIGRATIONS for testing (defaults to module-level MIGRATIONS)
  */
 export async function runMigrations(
-  ctx: Omit<MigrationContext, 'memoryDir' | 'projectRoot'>,
+  ctx: { devflowDir: string },
   discoveredProjects: string[],
   registryOverride?: readonly Migration[],
-): Promise<{ newlyApplied: string[]; failures: MigrationFailure[] }> {
+): Promise<RunMigrationsResult> {
   const registry = registryOverride ?? MIGRATIONS;
   // Always read from home-dir devflow location so state is machine-wide
   const homeDevflowDir = path.join(os.homedir(), '.devflow');
-  const applied = await readAppliedMigrations(homeDevflowDir);
+  const appliedArray = await readAppliedMigrations(homeDevflowDir);
+  // Convert to Set once for O(1) lookups throughout the loop (issue #9)
+  const applied = new Set(appliedArray);
 
   const newlyApplied: string[] = [];
   const failures: MigrationFailure[] = [];
+  const infos: string[] = [];
+  const warnings: string[] = [];
 
   for (const migration of registry) {
-    if (applied.includes(migration.id)) continue; // Already done — skip
+    if (applied.has(migration.id)) continue; // Already done — skip
 
     if (migration.scope === 'global') {
       /**
@@ -170,11 +262,14 @@ export async function runMigrations(
        * filesystem contention) while ensuring the migration is eventually applied.
        */
       try {
-        await migration.run({ ...ctx, memoryDir: '', projectRoot: '' });
+        const raw = await (migration as Migration<'global'>).run({
+          scope: 'global',
+          devflowDir: ctx.devflowDir,
+        });
+        const runResult = normaliseRunResult(raw);
         newlyApplied.push(migration.id);
-        // Persist after each successful migration so one failure doesn't lose
-        // progress on previously completed migrations in this same run.
-        await writeAppliedMigrations(homeDevflowDir, [...applied, ...newlyApplied]);
+        infos.push(...runResult.infos);
+        warnings.push(...runResult.warnings);
       } catch (error) {
         failures.push({
           id: migration.id,
@@ -182,9 +277,10 @@ export async function runMigrations(
           error: error instanceof Error ? error : new Error(String(error)),
         });
       }
-    } else {
+    } else if (migration.scope === 'per-project') {
       /**
-       * D35: Per-project migrations run in parallel across all discovered projects.
+       * D35: Per-project migrations run across all discovered projects with a
+       * concurrency cap of 16 to avoid EMFILE on machines with 50–200 projects.
        * This matches the pattern used for .claudeignore multi-project install at
        * init.ts:962-974 — each project has its own `.memory/.knowledge.lock` so
        * there is no cross-project contention. Promise.allSettled collects all
@@ -194,12 +290,27 @@ export async function runMigrations(
        * ALL projects succeed. Any per-project failure causes the ID to remain
        * unapplied so the next `devflow init` (which may discover the same or
        * additional projects) can retry the failed projects.
+       *
+       * D37: When discoveredProjects is empty, Promise.allSettled([]) resolves
+       * to [] and [].every(...) returns true (vacuous truth), which would mark
+       * the migration applied even though no projects were swept. This is the
+       * intended behaviour for machines that cloned a repo after the migration
+       * ran — there are no legacy entries to purge. Recovery: if you later find
+       * a project that was missed, remove ~/.devflow/migrations.json to force a
+       * re-sweep on the next `devflow init`.
        */
-      const results = await Promise.allSettled(
-        discoveredProjects.map(async (projectRoot) => {
+      const results = await pooled(
+        discoveredProjects,
+        16,
+        (projectRoot) => {
           const memoryDir = path.join(projectRoot, '.memory');
-          await migration.run({ ...ctx, memoryDir, projectRoot });
-        }),
+          return (migration as Migration<'per-project'>).run({
+            scope: 'per-project',
+            devflowDir: ctx.devflowDir,
+            memoryDir,
+            projectRoot,
+          });
+        },
       );
 
       for (const [i, result] of results.entries()) {
@@ -210,17 +321,27 @@ export async function runMigrations(
             project: discoveredProjects[i],
             error: result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
           });
+        } else {
+          const runResult = normaliseRunResult(result.value);
+          infos.push(...runResult.infos);
+          warnings.push(...runResult.warnings);
         }
       }
 
       if (results.every(r => r.status === 'fulfilled')) {
         newlyApplied.push(migration.id);
-        // Persist incrementally so prior migrations aren't lost if this or a
-        // later migration fails.
-        await writeAppliedMigrations(homeDevflowDir, [...applied, ...newlyApplied]);
       }
+    } else {
+      // Exhaustiveness check — catches unhandled MigrationScope values at runtime
+      const _exhaustive: never = migration.scope;
+      throw new Error(`Unknown migration scope: ${_exhaustive}`);
     }
   }
 
-  return { newlyApplied, failures };
+  // Write state once at end, accumulating all newly applied IDs (issue #5 — O(N²) → O(1))
+  if (newlyApplied.length > 0) {
+    await writeAppliedMigrations(homeDevflowDir, [...appliedArray, ...newlyApplied]);
+  }
+
+  return { newlyApplied, failures, infos, warnings };
 }

@@ -759,6 +759,40 @@ export const initCommand = new Command('init')
     // Agents: install only from selected plugins
     const { agentsMap } = buildAssetMaps(pluginsToInstall);
 
+    // D32/D35: Apply one-time migrations (global + per-project) tracked at ~/.devflow/migrations.json.
+    // Runs BEFORE installViaFileCopy so V1→V2 shadow renames are complete before the
+    // installer looks for V2-named directories. Migrations are always-run-unapplied:
+    // helpers short-circuit when the target data is absent, so fresh installs are safe
+    // no-ops. State lives at the home-dir ~/.devflow location regardless of install
+    // scope (D30).
+    {
+      const { runMigrations } = await import('../utils/migrations.js');
+      const userDevflowDir = path.join(os.homedir(), '.devflow');
+      const projectsForMigration =
+        discoveredProjects.length > 0 ? discoveredProjects : (gitRoot ? [gitRoot] : []);
+      const migrationResult = await runMigrations(
+        { devflowDir: userDevflowDir },
+        projectsForMigration,
+      );
+      for (const f of migrationResult.failures) {
+        // D33: Non-fatal — warn but continue; migration will retry on next init
+        const where = f.project ? ` in ${path.basename(f.project)}` : '';
+        p.log.warn(`Migration '${f.id}'${where} failed: ${f.error.message}`);
+      }
+      for (const info of migrationResult.infos) {
+        p.log.info(info);
+      }
+      for (const warn of migrationResult.warnings) {
+        p.log.warn(warn);
+      }
+      if (migrationResult.newlyApplied.length > 0) {
+        p.log.success(`Applied ${migrationResult.newlyApplied.length} migration(s)`);
+      }
+      if (verbose) {
+        for (const id of migrationResult.newlyApplied) p.log.info(`  ✓ ${id}`);
+      }
+    }
+
     // Install: try native CLI first, fall back to file copy
     const cliAvailable = isClaudeCliAvailable();
     const usedNativeCli = cliAvailable && installViaCli(pluginsToInstall, scope, s);
@@ -883,32 +917,6 @@ export const initCommand = new Command('init')
     if (memoryEnabled) {
       await createMemoryDir(verbose);
       await migrateMemoryFiles(verbose);
-    }
-
-    // D32/D35: Apply one-time migrations (global + per-project) tracked at ~/.devflow/migrations.json.
-    // Migrations are always-run-unapplied: helpers short-circuit when target data is absent,
-    // so fresh installs are safe no-ops. State lives at the home-dir ~/.devflow location
-    // regardless of install scope (D30).
-    {
-      const { runMigrations } = await import('../utils/migrations.js');
-      const userDevflowDir = path.join(os.homedir(), '.devflow');
-      const projectsForMigration =
-        discoveredProjects.length > 0 ? discoveredProjects : (gitRoot ? [gitRoot] : []);
-      const migrationResult = await runMigrations(
-        { devflowDir: userDevflowDir, claudeDir },
-        projectsForMigration,
-      );
-      for (const f of migrationResult.failures) {
-        // D33: Non-fatal — warn but continue; migration will retry on next init
-        const where = f.project ? ` in ${path.basename(f.project)}` : '';
-        p.log.warn(`Migration '${f.id}'${where} failed: ${f.error.message}`);
-      }
-      if (migrationResult.newlyApplied.length > 0) {
-        p.log.success(`Applied ${migrationResult.newlyApplied.length} migration(s)`);
-      }
-      if (verbose) {
-        for (const id of migrationResult.newlyApplied) p.log.info(`  ✓ ${id}`);
-      }
     }
 
     // Configure HUD
