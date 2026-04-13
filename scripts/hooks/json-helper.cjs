@@ -127,19 +127,37 @@ function stripLeadingFrontmatter(text) {
   return match ? trimmed.slice(match[0].length) : text;
 }
 
+/**
+ * Write `tmp` with O_EXCL (wx flag) so the kernel rejects the open if a file or
+ * symlink already exists at that path, preventing TOCTOU symlink-follow attacks.
+ * On EEXIST (stale or attacker-placed .tmp) we unlink and retry once.
+ * @param {string} tmp - Path to the temporary file.
+ * @param {string} content - Content to write.
+ */
+function writeExclusive(tmp, content) {
+  try {
+    fs.writeFileSync(tmp, content, { flag: 'wx' });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    // Stale or attacker-placed .tmp — remove it and retry once.
+    try { fs.unlinkSync(tmp); } catch { /* race — already removed */ }
+    fs.writeFileSync(tmp, content, { flag: 'wx' });
+  }
+}
+
 function writeJsonlAtomic(file, entries) {
   const tmp = file + '.tmp';
   const content = entries.length > 0
     ? entries.map(e => JSON.stringify(e)).join('\n') + '\n'
     : '';
-  fs.writeFileSync(tmp, content);
+  writeExclusive(tmp, content);
   fs.renameSync(tmp, file);
 }
 
 /** Atomically write a text file via a .tmp sibling and rename. */
 function writeFileAtomic(file, content) {
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, content, 'utf8');
+  writeExclusive(tmp, content);
   fs.renameSync(tmp, file);
 }
 

@@ -496,13 +496,16 @@ check_staleness() {
     done < <(printf '%s\n' "$combined" | grep -oE '[A-Za-z0-9_/.-]+\.(ts|tsx|js|cjs|md|sh|py|go|java|rs)' | sort -u 2>/dev/null || true)
 
     if [ -n "$stale_ref" ]; then
-      # Mark entry as potentially stale
+      # Mark entry as potentially stale.
+      # Security: pass stale_ref as a positional argv[1] argument instead of interpolating
+      # it into the JS source string. This eliminates shell/JS injection if the grep
+      # regex is ever relaxed, and handles apostrophes in path names correctly.
       entry_line=$(printf '%s' "$entry_line" | node -e "
         const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
         d.mayBeStale=true;
-        d.staleReason='code-ref-missing:${stale_ref}';
+        d.staleReason='code-ref-missing:' + process.argv[1];
         console.log(JSON.stringify(d));
-      " 2>/dev/null || printf '%s' "$entry_line")
+      " "$stale_ref" 2>/dev/null || printf '%s' "$entry_line")
       updated=$((updated + 1))
       [ "$DEBUG" = "true" ] && log "Staleness: ${stale_ref} missing, flagged entry"
     fi
