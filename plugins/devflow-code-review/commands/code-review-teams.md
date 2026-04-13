@@ -259,16 +259,10 @@ Check for existing inline comments at same file:line before creating new ones."
 Per worktree, after successful completion:
 1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
 
-### Phase 6: Record Pitfalls (Sequential)
+<!-- D8: "Record Pitfalls" phase removed — knowledge-persistence skill no longer has Write
+     capability; pitfall recording is handled by the background-learning extractor. -->
 
-**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
-
-Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
-2. Source field: `/code-review {branch}`
-3. Skip entirely if no CRITICAL/HIGH blocking issues
-
-### Phase 7: Cleanup and Report
+### Phase 6: Cleanup and Report
 
 Shut down all review teammates explicitly:
 
@@ -319,9 +313,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │
 ├─ Phase 5: Write .last-review-head per worktree
 │
-├─ Phase 6: Record Pitfalls (SEQUENTIAL across worktrees)
-│
-└─ Phase 7: Cleanup and display results
+└─ Phase 6: Cleanup and display results
 ```
 
 ## Edge Cases

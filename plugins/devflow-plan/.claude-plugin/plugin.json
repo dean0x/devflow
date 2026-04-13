@@ -26,7 +26,6 @@
     "gap-analysis",
     "design-review",
     "patterns",
-    "knowledge-persistence",
     "worktree-support"
   ]
 }

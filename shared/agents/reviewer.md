@@ -46,6 +46,10 @@ The orchestrator provides:
 
 1. **Load focus skill** - Read the pattern skill file for your focus area from the table above. This gives you detection rules and patterns specific to your review type.
 2. **Check known pitfalls** - If `.memory/knowledge/pitfalls.md` exists, read it. Check if any pitfall Areas overlap with files in the current diff. Verify the Resolution was applied. Flag if a known pitfall pattern is being reintroduced.
+<!-- D25: Citation instruction placed inline in agents — no frontmatter injection -->
+<!-- CITATION-SENTENCE-START -->
+When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfall from `.memory/knowledge/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
+<!-- CITATION-SENTENCE-END -->
 3. **Identify changed lines** - Get diff against base branch (main/master/develop/integration/trunk)
 4. **Apply 3-category classification** - Sort issues by where they occur
 5. **Apply focus-specific analysis** - Use pattern skill detection rules from the loaded skill file

@@ -11,11 +11,13 @@ import {
   mergeDenyList,
   discoverProjectGitRoots,
   migrateShadowOverrides,
+  runMigrationsWithFallback,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, prefixSkillName } from '../src/cli/plugins.js';
+import type { RunMigrationsResult } from '../src/cli/utils/migrations.js';
 
 describe('parsePluginSelection', () => {
   it('parses comma-separated plugin names', () => {
@@ -850,5 +852,61 @@ describe('shadow migration → install ordering', () => {
     const installedPath = path.join(claudeDir, 'skills', prefixSkillName(skillName), 'SKILL.md');
     const installed = await fs.readFile(installedPath, 'utf-8');
     expect(installed).toBe(sourceContent);
+  });
+});
+
+describe('runMigrationsWithFallback (D32/D35/D37 init seam)', () => {
+  // Tests the init.ts integration seam — specifically the D37 fallback rule that
+  // computes `projectsForMigration` before calling runMigrations. These tests are
+  // distinct from migrations.test.ts (which covers runMigrations internals): they
+  // exercise the code path that init.ts owns.
+
+  const noopLogger = { warn: vi.fn(), info: vi.fn(), success: vi.fn() };
+  const emptyResult: RunMigrationsResult = { newlyApplied: [], failures: [], infos: [], warnings: [] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes discoveredProjects directly when non-empty', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
+    const projects = ['/abs/proj-a', '/abs/proj-b'];
+
+    await runMigrationsWithFallback(projects, null, '/home/.devflow', noopLogger, false, runner);
+
+    expect(runner).toHaveBeenCalledOnce();
+    const [, calledProjects] = runner.mock.calls[0];
+    expect(calledProjects).toEqual(projects);
+  });
+
+  it('falls back to [gitRoot] when discoveredProjects is empty and gitRoot is set', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
+    const gitRoot = '/abs/fallback-root';
+
+    await runMigrationsWithFallback([], gitRoot, '/home/.devflow', noopLogger, false, runner);
+
+    expect(runner).toHaveBeenCalledOnce();
+    const [, calledProjects] = runner.mock.calls[0];
+    expect(calledProjects).toEqual([gitRoot]);
+  });
+
+  it('passes empty list when both discoveredProjects and gitRoot are absent', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
+
+    await runMigrationsWithFallback([], null, '/home/.devflow', noopLogger, false, runner);
+
+    expect(runner).toHaveBeenCalledOnce();
+    const [, calledProjects] = runner.mock.calls[0];
+    expect(calledProjects).toEqual([]);
+  });
+
+  it('passes the devflowDir context to the runner', async () => {
+    const runner = vi.fn().mockResolvedValue(emptyResult);
+    const devflowDir = '/home/.devflow';
+
+    await runMigrationsWithFallback([], null, devflowDir, noopLogger, false, runner);
+
+    const [ctx] = runner.mock.calls[0];
+    expect(ctx.devflowDir).toBe(devflowDir);
   });
 });

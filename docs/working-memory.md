@@ -65,6 +65,10 @@ Beyond session memory, Devflow persists architectural decisions and known pitfal
 
 These files are read by reviewers automatically during `/code-review`.
 
+## Self-Learning (Sibling System)
+
+Self-learning shares the `.memory/` directory but uses a completely different pipeline. Working memory captures every turn via a queue (`UserPromptSubmit` → `.pending-turns.jsonl`) and processes them in batch via a background `claude -p --model haiku` updater that writes `WORKING-MEMORY.md`. Self-learning instead uses a `SessionEnd` hook that accumulates session IDs, then triggers a background `claude -p --model sonnet` agent every 3 sessions to extract 4 observation types (workflow, procedural, decision, pitfall) from full transcript batches via channel-based filtering. The two systems operate independently and do not interfere. See [Self-Learning](self-learning.md) for the full architecture.
+
 ## Documentation Structure
 
 Devflow creates project documentation in `.docs/`:

@@ -45,10 +45,9 @@ npx devflow-kit init --plugin=implement
 - `tester` - Scenario-based QA testing
 - `validator` - Build/test validation
 
-### Skills (6)
+### Skills (5)
 - `agent-teams` - Agent Teams orchestration patterns
 - `patterns` - CRUD, API, events
-- `knowledge-persistence` - Architectural decision recording
 - `qa` - Scenario-based acceptance testing
 - `quality-gates` - 9-pillar framework
 - `worktree-support` - Worktree-aware path resolution

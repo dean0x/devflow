@@ -20,7 +20,7 @@ import {
   migrateMemoryFiles,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, SHADOW_RENAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
@@ -30,6 +30,7 @@ import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 import { getDefaultFlags, applyFlags, stripFlags, FLAG_REGISTRY } from '../utils/flags.js';
+import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
@@ -37,6 +38,49 @@ export { addAmbientHook, removeAmbientHook, removeLegacyAmbientHook, hasAmbientH
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addLearningHook, removeLearningHook, hasLearningHook } from './learn.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
+// Re-export migrateShadowOverrides under its original name for backward compatibility
+export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
+
+import { type RunMigrationsResult, type Migration, type MigrationLogger, reportMigrationResult } from '../utils/migrations.js';
+
+export type { MigrationLogger };
+
+/**
+ * D32/D35: Orchestrates the init-level migration-runner seam.
+ *
+ * Computes the project list with the D37 fallback rule:
+ *   1. Use discoveredProjects when non-empty.
+ *   2. Fall back to [gitRoot] when discoveredProjects is empty and gitRoot is set.
+ *   3. Run with no per-project targets when both are absent (global-only; per-project
+ *      migrations are vacuously applied per D37 semantics).
+ *
+ * Must run BEFORE installViaFileCopy (D7/PF-007) so V1→V2 shadow renames are
+ * complete before the installer looks for V2-named directories.
+ *
+ * The `runner` parameter accepts the runMigrations function — injected to make
+ * this helper testable without real filesystem migration state.
+ */
+export async function runMigrationsWithFallback(
+  discoveredProjects: string[],
+  gitRoot: string | null,
+  devflowDir: string,
+  logger: MigrationLogger,
+  verbose: boolean,
+  runner: (
+    ctx: { devflowDir: string },
+    projects: string[],
+    registry?: readonly Migration[],
+  ) => Promise<RunMigrationsResult>,
+): Promise<RunMigrationsResult> {
+  const projectsForMigration =
+    discoveredProjects.length > 0 ? discoveredProjects : (gitRoot ? [gitRoot] : []);
+
+  const migrationResult = await runner({ devflowDir }, projectsForMigration);
+
+  reportMigrationResult(migrationResult, logger, verbose);
+
+  return migrationResult;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,67 +98,6 @@ export function classifySafeDeleteState(
   return 'missing';
 }
 
-async function shadowExists(p: string): Promise<boolean> {
-  return fs.access(p).then(() => true, () => false);
-}
-
-/**
- * Migrate shadow skill overrides from old V2 skill names to new names.
- * Pure function suitable for testing — requires only the devflowDir path.
- *
- * Groups SHADOW_RENAMES entries by their target name so that multiple old
- * names mapping to the same target (e.g. git-safety, git-workflow,
- * github-patterns → git) are processed sequentially within the group.
- * Distinct-target groups still run in parallel via Promise.all, preserving
- * throughput while eliminating the TOCTOU race on shared targets.
- */
-export async function migrateShadowOverrides(devflowDir: string): Promise<{ migrated: number; warnings: string[] }> {
-  const shadowsRoot = path.join(devflowDir, 'skills');
-
-  // Group entries by target name so many-to-one mappings are serialized.
-  const groups = new Map<string, [string, string][]>();
-  for (const entry of SHADOW_RENAMES) {
-    const [, newName] = entry;
-    const group = groups.get(newName) ?? [];
-    group.push(entry);
-    groups.set(newName, group);
-  }
-
-  // Process distinct-target groups in parallel; entries within each group run
-  // sequentially so check-then-rename is effectively atomic per target.
-  const groupResults = await Promise.all(
-    [...groups.values()].map(async (entries) => {
-      let migrated = 0;
-      const warnings: string[] = [];
-
-      for (const [oldName, newName] of entries) {
-        const oldShadow = path.join(shadowsRoot, oldName);
-        const newShadow = path.join(shadowsRoot, newName);
-
-        if (!(await shadowExists(oldShadow))) continue;
-
-        if (await shadowExists(newShadow)) {
-          // Target already exists (from a previous entry in this group or a
-          // pre-existing user shadow) — warn, don't overwrite
-          warnings.push(`Shadow '${oldName}' found alongside '${newName}' — keeping '${newName}', old shadow at ${oldShadow}`);
-          continue;
-        }
-
-        // Target doesn't exist yet — rename
-        await fs.rename(oldShadow, newShadow);
-        migrated++;
-      }
-
-      return { migrated, warnings };
-    }),
-  );
-
-  return {
-    migrated: groupResults.reduce((sum, r) => sum + r.migrated, 0),
-    warnings: groupResults.flatMap(r => r.warnings),
-  };
-}
-
 /**
  * Parse a comma-separated plugin selection string into normalized plugin names.
  * Validates against known plugins; returns invalid names as errors.
@@ -123,14 +106,14 @@ export function parsePluginSelection(
   input: string,
   validPlugins: PluginDefinition[],
 ): { selected: string[]; invalid: string[] } {
-  const selected = input.split(',').map(p => {
-    const trimmed = p.trim();
+  const selected = input.split(',').map(raw => {
+    const trimmed = raw.trim();
     const normalized = trimmed.startsWith('devflow-') ? trimmed : `devflow-${trimmed}`;
     return LEGACY_PLUGIN_NAMES[normalized] ?? normalized;
   });
 
-  const validNames = validPlugins.map(p => p.name);
-  const invalid = selected.filter(p => !validNames.includes(p));
+  const validNames = validPlugins.map(pl => pl.name);
+  const invalid = selected.filter(name => !validNames.includes(name));
   return { selected, invalid };
 }
 
@@ -817,14 +800,23 @@ export const initCommand = new Command('init')
     // Agents: install only from selected plugins
     const { agentsMap } = buildAssetMaps(pluginsToInstall);
 
-    // Migrate shadow overrides from old V2 skill names BEFORE install,
-    // so the installer's shadow check finds them at the new name
-    const shadowsMigrated = await migrateShadowOverrides(devflowDir);
-    if (shadowsMigrated.migrated > 0) {
-      p.log.info(`Migrated ${shadowsMigrated.migrated} shadow override(s) to V2 names`);
-    }
-    for (const warning of shadowsMigrated.warnings) {
-      p.log.warn(warning);
+    // D32/D35: Apply one-time migrations (global + per-project) tracked at ~/.devflow/migrations.json.
+    // Runs BEFORE installViaFileCopy so V1→V2 shadow renames are complete before the
+    // installer looks for V2-named directories. Migrations are always-run-unapplied:
+    // helpers short-circuit when the target data is absent, so fresh installs are safe
+    // no-ops. State lives at the home-dir ~/.devflow location regardless of install
+    // scope (D30).
+    {
+      const { runMigrations } = await import('../utils/migrations.js');
+      const userDevflowDir = path.join(os.homedir(), '.devflow');
+      await runMigrationsWithFallback(
+        discoveredProjects,
+        gitRoot,
+        userDevflowDir,
+        { warn: p.log.warn, info: p.log.info, success: p.log.success },
+        verbose,
+        runMigrations,
+      );
     }
 
     // Install: try native CLI first, fall back to file copy

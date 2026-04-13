@@ -20,7 +20,6 @@ Shared patterns used by multiple agents.
 | `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug, /plan |
 | `router` | Intent classification and proportional skill loading for Devflow mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
-| `knowledge-persistence` | Record/load architectural decisions and pitfalls to `.memory/knowledge/` | /implement, /code-review, /resolve, /debug, /plan, /self-review |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
 ### Tier 1b: Pattern Skills
@@ -66,6 +65,12 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 | `python` | Type hints, protocols, dataclasses, async patterns | Python codebases |
 | `java` | Records, sealed classes, composition, modern Java | Java codebases |
 | `rust` | Ownership, borrowing, error handling, type-driven design | Rust codebases |
+
+### Format-Spec Skills (Not Plugin-Distributed)
+
+Some skills exist in `shared/skills/` but are not distributed to any plugin. They serve as on-disk format specifications consumed by background processes, not by agents or commands.
+
+- **knowledge-persistence** — Format spec for `.memory/knowledge/decisions.md` and `pitfalls.md` (entry format, lock protocol, capacity limits). Consumed by `scripts/hooks/background-learning` via `json-helper.cjs render-ready`. Not distributed to plugins per D9.
 
 ## How Skills Activate
 

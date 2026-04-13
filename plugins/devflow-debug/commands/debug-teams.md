@@ -193,11 +193,8 @@ Lead produces final report:
 {HIGH/MEDIUM/LOW based on consensus strength}
 ```
 
-### Phase 9: Record Pitfall (if root cause found)
-
-If root cause was identified with HIGH or MEDIUM confidence:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
-2. Source field: `/debug {bug description}`
+<!-- D8: "Record Pitfall" phase removed — knowledge-persistence skill no longer has Write
+     capability; pitfall recording is handled by the background-learning extractor. -->
 
 ## Architecture
 
@@ -224,9 +221,7 @@ If root cause was identified with HIGH or MEDIUM confidence:
 ├─ Phase 7: Cleanup
 │  └─ Shut down teammates, release resources
 │
-├─ Phase 8: Root cause report with confidence level
-│
-└─ Phase 9: Record Pitfall (inline, if root cause found)
+└─ Phase 8: Root cause report with confidence level
 ```
 
 ## Principles

@@ -2,6 +2,13 @@
 description: Process review issues - validate, assess risk, fix low-risk issues, defer high-risk to tech debt
 ---
 
+<!--
+@devflow-design-decision D8
+Phase 6 previously recorded pitfalls retrospectively after reading knowledge-persistence SKILL.
+Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
+from user transcripts by scripts/hooks/background-learning.
+-->
+
 # Resolve Command
 
 Process issues from code review reports: validate them (false positive check), assess risk for FIX vs TECH_DEBT decision, and implement fixes for low-risk issues. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.
@@ -127,16 +134,7 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-### Phase 6: Record Pitfalls (Sequential)
-
-**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
-
-For each issue deferred as TECH_DEBT:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
-2. Source field: `/resolve {branch}`
-3. Skip entirely if no TECH_DEBT deferrals
-
-### Phase 7: Simplify
+### Phase 6: Simplify
 
 If any fixes were made, spawn Simplifier agent to refine the changed code:
 
@@ -148,7 +146,7 @@ FILES_CHANGED: {list of files modified by Resolvers}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
-### Phase 8: Manage Tech Debt (Sequential)
+### Phase 7: Manage Tech Debt (Sequential)
 
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
@@ -163,7 +161,7 @@ TIMESTAMP: {timestamp}
 Note: Deferred issues from resolution are already in resolution-summary.md"
 ```
 
-### Phase 9: Report
+### Phase 8: Report
 
 **Write the resolution summary** to `{TARGET_DIR}/resolution-summary.md` using Write tool, then display:
 
@@ -221,15 +219,13 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred
 │
-├─ Phase 6: Record Pitfalls (SEQUENTIAL across worktrees)
-│
-├─ Phase 7: Simplify
+├─ Phase 6: Simplify
 │  └─ Simplifier agent (refine fixes)
 │
-├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
+├─ Phase 7: Git agent (manage-debt) — SEQUENTIAL across worktrees
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 9: Write resolution-summary.md + display results
+└─ Phase 8: Write resolution-summary.md + display results
 ```
 
 ## Edge Cases
@@ -260,7 +256,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Output Artifact
 
-Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
+Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary

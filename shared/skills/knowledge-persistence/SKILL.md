@@ -1,23 +1,40 @@
 ---
 name: knowledge-persistence
 description: >-
-  This skill should be used when recording architectural decisions or pitfalls
-  to project knowledge files, or when loading prior decisions and known pitfalls
-  for context during investigation, specification, or review.
+  Format specification for on-disk knowledge files (.memory/knowledge/decisions.md
+  and pitfalls.md). Used by commands that read knowledge for context. Writing is
+  performed exclusively by the background extractor.
 user-invocable: false
-allowed-tools: Read, Write, Bash
+allowed-tools: Read, Grep, Glob
 ---
 
-# Knowledge Persistence
+<!--
+@devflow-design-decision D9
+This skill is a format spec documenting the on-disk format and lock protocol.
+It is NOT invoked by commands. The only writer is scripts/hooks/background-learning
+via json-helper.cjs (render-ready → knowledge-append operation).
+Commands that previously used this skill to write knowledge (implement Phase 10,
+code-review Phase 5, debug Phase 6, resolve Phase 6) were removed in v2 because
+agent-summaries produced low-signal entries. Knowledge is now extracted from user
+transcripts by the background learning system.
+-->
 
-Record architectural decisions and pitfalls to `.memory/knowledge/` files. This is the single source of truth for the extraction procedure — commands reference this skill instead of inlining the steps.
+# Knowledge Persistence — Format Specification
+
+On-disk format for project knowledge files. This is the canonical reference for the
+entry format, capacity limit, lock protocol, and status field semantics.
+
+**Invocation note**: This skill is a format spec. Rendering is performed by the
+background extractor at `scripts/hooks/background-learning` via
+`json-helper.cjs render-ready`. Commands do not invoke this skill to write.
 
 ## Iron Law
 
-> **SINGLE SOURCE OF TRUTH**
+> **SINGLE SOURCE OF FORMAT TRUTH**
 >
-> All knowledge extraction follows this procedure exactly. Commands never inline
-> their own extraction steps — they read this skill and follow it.
+> All knowledge entries follow this exact format. The background extractor
+> writes entries atomically using the lock protocol below. Commands that read
+> knowledge for context do so without a lock (read-only is safe).
 
 ---
 
@@ -50,7 +67,7 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Context**: {Why this decision was needed}
 - **Decision**: {What was decided}
 - **Consequences**: {Tradeoffs and implications}
-- **Source**: {command and identifier, e.g. `/implement TASK-123`}
+- **Source**: {session ID or command identifier}
 ```
 
 ### pitfalls.md (PF entries)
@@ -71,58 +88,55 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Issue**: {What goes wrong}
 - **Impact**: {Consequences if hit}
 - **Resolution**: {How to fix or avoid}
-- **Source**: {command and identifier, e.g. `/code-review branch-name`}
+- **Status**: Active
+- **Source**: {session ID or command identifier}
 ```
 
 ---
 
-## Extraction Procedure
+## Capacity Limit
 
-Follow these steps when recording decisions or pitfalls:
+Hard ceiling: 100 entries per file (`## ADR-` or `## PF-` headings). The background
+extractor checks capacity before writing. At hard ceiling: new entries are skipped and
+`softCapExceeded` is set on the corresponding observation for HUD review.
 
-1. **Read** the target file (`.memory/knowledge/decisions.md` or `.memory/knowledge/pitfalls.md`). If it doesn't exist, create it with the template header above.
-2. **Check capacity** — count `## ADR-` or `## PF-` headings. If >=50, log "Knowledge base at capacity — skipping new entry" and stop.
-3. **Find next ID** — find highest NNN via regex (`/^## ADR-(\d+)/` or `/^## PF-(\d+)/`), default to 0. Increment by 1.
-4. **Deduplicate** (pitfalls only) — skip if an entry with the same Area + Issue already exists.
-5. **Append** the new entry using the format above.
-6. **Update TL;DR** — rewrite the `<!-- TL;DR: ... -->` comment on line 1 to reflect the new count and key topics.
+## Status Field Semantics
+
+ADR (`decisions.md`) entries accept:
+- `Accepted` — active decision, enforced
+- `Superseded` — replaced by a newer ADR (reference successor)
+- `Deprecated` — no longer applicable (set by `devflow learn --review`)
+- `Proposed` — under consideration (rare, set manually)
+
+PF (`pitfalls.md`) entries accept:
+- `Active` — pitfall still applies, watch for it
+- `Deprecated` — no longer relevant (fixed, refactored away, set by `devflow learn --review`)
 
 ## Lock Protocol
 
-When writing, use a mkdir-based lock:
-- Lock path: `.memory/.knowledge.lock`
+When writing, the background extractor uses mkdir-based locks:
+
+**`.memory/.knowledge.lock`** — guards `decisions.md` / `pitfalls.md` writes:
 - Timeout: 30 seconds (fail if lock not acquired)
 - Stale recovery: if lock directory is >60 seconds old, remove it and retry
 - Release lock after write completes (remove lock directory)
+- Used by: `json-helper.cjs render-ready`, `knowledge-append`, `learn.ts`
 
-## Loading Knowledge for Context
+**`.memory/.learning.lock`** — guards `learning-log.jsonl` mutations:
+- Node callers (`json-helper.cjs reconcile-manifest`, `learn.ts`): 15–30 s timeout, 60 s stale
+- Bash caller (`background-learning`): 90 s timeout, 300 s stale — intentionally higher because
+  it guards the entire Sonnet analysis pipeline (up to 180 s watchdog), not just file I/O
 
-When a command needs prior knowledge as input (not recording):
+---
 
-1. Read `.memory/knowledge/decisions.md` if it exists
-2. Read `.memory/knowledge/pitfalls.md` if it exists
-3. Pass content as context to downstream agents — prior decisions constrain scope, known pitfalls inform investigation
+## Citation Requirement
 
-If neither file exists, skip silently. No error, no empty-file creation.
-
-## Operation Budget
-
-Recording: do inline (no agent spawn), 2-3 Read/Write operations total.
-Loading: 1-2 Read operations, pass as context string.
+<!-- CITATION-SENTENCE-START -->
+When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfall from `.memory/knowledge/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
+<!-- CITATION-SENTENCE-END -->
 
 ---
 
 ## Extended References
 
-For entry examples and status lifecycle details:
-- `references/examples.md` - Full decision and pitfall entry examples
-
----
-
-## Success Criteria
-
-- [ ] Entry appended with correct sequential ID
-- [ ] No duplicate pitfalls (same Area + Issue)
-- [ ] TL;DR comment updated with current count
-- [ ] Lock acquired before write, released after
-- [ ] Capacity limit (50) respected
+- `references/examples.md` — Full decision and pitfall entry examples

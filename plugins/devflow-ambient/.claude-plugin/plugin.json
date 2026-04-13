@@ -50,7 +50,6 @@
     "dependencies",
     "documentation",
     "patterns",
-    "knowledge-persistence",
     "qa",
     "worktree-support",
     "gap-analysis",

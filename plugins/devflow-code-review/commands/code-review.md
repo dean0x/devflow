@@ -2,6 +2,13 @@
 description: Comprehensive branch review using specialized sub-agents for PR readiness
 ---
 
+<!--
+@devflow-design-decision D8
+Phase 5 previously recorded pitfalls retrospectively after reading knowledge-persistence SKILL.
+Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
+from user transcripts by scripts/hooks/background-learning.
+-->
+
 # Code Review Command
 
 Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments. Supports incremental reviews, timestamped report directories, and multi-worktree auto-discovery.
@@ -160,15 +167,6 @@ Per worktree, after successful completion:
 
 In multi-worktree mode, report results per worktree.
 
-### Phase 5: Record Pitfalls (Sequential)
-
-**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
-
-Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
-2. Source field: `/code-review {branch}`
-3. Skip entirely if no CRITICAL/HIGH blocking issues
-
 ## Architecture
 
 ```
@@ -198,8 +196,6 @@ Per worktree, if the review summary contains CRITICAL or HIGH blocking issues:
 │  │  └─ Synthesizer agent (mode: review)
 │  │
 │  └─ Phase 4: Write .last-review-head + display results
-│
-└─ Phase 5: Record Pitfalls (SEQUENTIAL across worktrees)
 ```
 
 ## Edge Cases

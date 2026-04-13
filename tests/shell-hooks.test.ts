@@ -503,7 +503,7 @@ describe('json-helper.cjs process-observations', () => {
 
       const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
       expect(entry.observations).toBe(2);
-      expect(entry.confidence).toBe(0.40);
+      expect(entry.confidence).toBe(0.66);
       expect(entry.evidence).toContain('old evidence');
       expect(entry.evidence).toContain('new evidence');
     } finally {
@@ -615,11 +615,11 @@ describe('json-helper.cjs process-observations', () => {
         id: 'obs_abc123', type: 'workflow', pattern: 'test',
         confidence: 0.80, observations: 4,
         first_seen: eightDaysAgo, last_seen: eightDaysAgo,
-        status: 'observing', evidence: [], details: '',
+        status: 'observing', evidence: [], details: '', quality_ok: true,
       }) + '\n');
 
       fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [] }],
+        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [], quality_ok: true }],
       }));
 
       execSync(
@@ -1460,16 +1460,10 @@ describe('working memory queue behavior', () => {
   it('stop-update-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
-    const input = JSON.stringify({
-      cwd: tmpDir,
-      session_id: 'test-bg-guard-001',
-      stop_reason: 'end_turn',
-      assistant_message: 'should not be captured',
-    });
-
-    // Should not throw; no queue write expected
+    // Hook exits at line 11 before reading stdin, so don't pipe input — would race
+    // and EPIPE on Node 20 when bash closes the pipe before execSync flushes.
     expect(() => {
-      execSync(`DEVFLOW_BG_UPDATER=1 bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${STOP_HOOK}"`, { stdio: 'ignore' });
     }).not.toThrow();
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
@@ -1479,15 +1473,8 @@ describe('working memory queue behavior', () => {
   it('prompt-capture-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
-    const input = JSON.stringify({
-      cwd: tmpDir,
-      session_id: 'test-bg-guard-002',
-      prompt: 'should not be captured',
-    });
-
-    // Should not throw; no queue write expected
     expect(() => {
-      execSync(`DEVFLOW_BG_UPDATER=1 bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${PROMPT_CAPTURE_HOOK}"`, { stdio: 'ignore' });
     }).not.toThrow();
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');

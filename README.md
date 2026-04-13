@@ -44,7 +44,7 @@ Devflow: IMPLEMENT/ORCHESTRATED
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.memory/knowledge/` and inform every future session. No manual bookkeeping.
 
-**It learns how you work.** A self-learning mechanism detects repeated workflows and procedural patterns across sessions, then creates reusable slash commands and skills automatically.
+**It learns how you work.** A self-learning mechanism detects 4 observation types across sessions — workflow patterns, procedural knowledge, architectural decisions, and recurring pitfalls. Workflow and procedural observations create reusable slash commands and skills automatically. Decisions and pitfalls are written directly to `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` — informing every future review and implementation session.
 
 **18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
 
@@ -108,7 +108,7 @@ npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit list                    # List available plugins
 npx devflow-kit ambient --enable        # Toggle ambient mode
-npx devflow-kit learn --enable          # Toggle self-learning
+npx devflow-kit learn --enable          # Toggle self-learning (4-type extraction: workflow, procedural, decision, pitfall)
 npx devflow-kit uninstall               # Remove Devflow
 ```
 

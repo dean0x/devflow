@@ -181,16 +181,10 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-### Phase 6: Record Pitfalls (Sequential)
+<!-- D8: "Record Pitfalls" phase removed — knowledge-persistence skill no longer has Write
+     capability; pitfall recording is handled by the background-learning extractor. -->
 
-**IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
-
-For each issue deferred as TECH_DEBT:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
-2. Source field: `/resolve {branch}`
-3. Skip entirely if no TECH_DEBT deferrals
-
-### Phase 7: Simplify
+### Phase 6: Simplify
 
 If any fixes were made, spawn Simplifier agent to refine the changed code:
 
@@ -202,7 +196,7 @@ FILES_CHANGED: {list of files modified by Resolvers}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
-### Phase 8: Manage Tech Debt (Sequential)
+### Phase 7: Manage Tech Debt (Sequential)
 
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
@@ -217,7 +211,7 @@ TIMESTAMP: {timestamp}
 Note: Deferred issues from resolution are already in resolution-summary.md"
 ```
 
-### Phase 9: Report
+### Phase 8: Report
 
 **Write the resolution summary** to `{TARGET_DIR}/resolution-summary.md` using Write tool, then display:
 
@@ -276,15 +270,13 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 5: Collect results
 │  └─ Aggregate fixed, false positives, deferred
 │
-├─ Phase 6: Record Pitfalls (SEQUENTIAL across worktrees)
-│
-├─ Phase 7: Simplify
+├─ Phase 6: Simplify
 │  └─ Simplifier agent (refine fixes)
 │
-├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
+├─ Phase 7: Git agent (manage-debt) — SEQUENTIAL across worktrees
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 9: Write resolution-summary.md + display results
+└─ Phase 8: Write resolution-summary.md + display results
 ```
 
 ## Edge Cases
@@ -315,7 +307,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Output Artifact
 
-Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
+Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary

@@ -15,7 +15,7 @@ export interface StdinData {
 }
 
 /**
- * Component IDs — the 14 HUD components.
+ * Component IDs — the 16 HUD components.
  */
 export type ComponentId =
   | 'directory'
@@ -31,7 +31,9 @@ export type ComponentId =
   | 'configCounts'
   | 'sessionCost'
   | 'releaseInfo'
-  | 'worktreeCount';
+  | 'worktreeCount'
+  | 'learningCounts'
+  | 'notifications';
 
 /**
  * HUD config persisted to ~/.devflow/hud.json.
@@ -100,6 +102,31 @@ export interface ConfigCountsData {
 }
 
 /**
+ * Learning counts data for the learningCounts HUD component.
+ * @devflow-design-decision D15: Hard ceiling (100) + HUD attention counter, not auto-pruning.
+ * We cannot reliably detect 'irrelevance' without human judgment. The hard ceiling (D17)
+ * prevents unbounded growth; the HUD shifts the decision to the user at the point where it matters.
+ */
+export interface LearningCountsData {
+  workflows: number;
+  procedural: number;
+  decisions: number;
+  pitfalls: number;
+  needReview: number;
+}
+
+/**
+ * D24: Notification data for the HUD notifications component.
+ */
+export interface NotificationData {
+  id: string;
+  severity: 'dim' | 'warning' | 'error';
+  text: string;
+  count?: number;
+  ceiling?: number;
+}
+
+/**
  * Gather context passed to all component render functions.
  */
 export interface GatherContext {
@@ -108,6 +135,8 @@ export interface GatherContext {
   transcript: TranscriptData | null;
   usage: UsageData | null;
   configCounts: ConfigCountsData | null;
+  learningCounts: LearningCountsData | null;
+  notifications?: NotificationData | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;
   sessionStartTime: number | null;

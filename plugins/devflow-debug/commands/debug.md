@@ -2,6 +2,14 @@
 description: Debug issues using competing hypothesis investigation with parallel agents
 ---
 
+<!--
+@devflow-design-decision D8
+Phase 6 previously recorded pitfalls retrospectively after reading knowledge-persistence SKILL.
+Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
+from user transcripts by scripts/hooks/background-learning. Phase 1 (Load Project Knowledge)
+is retained — it reads existing knowledge for context, which is still valid.
+-->
+
 # Debug Command
 
 Investigate bugs by spawning parallel agents, each pursuing a different hypothesis. Evidence is aggregated and synthesized to identify the root cause.
@@ -133,12 +141,6 @@ Produce the final report:
 {HIGH/MEDIUM/LOW based on evidence strength and investigator agreement}
 ```
 
-### Phase 6: Record Pitfall (if root cause found)
-
-If root cause was identified with HIGH or MEDIUM confidence:
-1. Read `~/.claude/skills/devflow:knowledge-persistence/SKILL.md` and follow its extraction procedure to record pitfalls to `.memory/knowledge/pitfalls.md`
-2. Source field: `/debug {bug description}`
-
 ## Architecture
 
 ```
@@ -155,9 +157,7 @@ If root cause was identified with HIGH or MEDIUM confidence:
 ├─ Phase 4: Synthesize
 │  └─ Synthesizer aggregates and compares findings
 │
-├─ Phase 5: Root cause report with confidence level
-│
-└─ Phase 6: Record Pitfall (inline, if root cause found)
+└─ Phase 5: Root cause report with confidence level
 ```
 
 ## Principles
