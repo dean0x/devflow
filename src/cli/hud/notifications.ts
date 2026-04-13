@@ -16,7 +16,18 @@ interface NotificationEntry {
   created_at?: string;
 }
 
+const SEVERITY_VALUES = ['dim', 'warning', 'error'] as const;
+type Severity = typeof SEVERITY_VALUES[number];
+
 const SEVERITY_ORDER: Record<string, number> = { dim: 0, warning: 1, error: 2 };
+
+function isSeverity(v: unknown): v is Severity {
+  return typeof v === 'string' && (SEVERITY_VALUES as readonly string[]).includes(v);
+}
+
+function isNotificationMap(v: unknown): v is Record<string, NotificationEntry> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
 
 /**
  * D27: Get the worst active+undismissed notification across per-file entries.
@@ -32,12 +43,15 @@ export function getActiveNotification(cwd: string): NotificationData | null {
     return null;
   }
 
-  let data: Record<string, NotificationEntry>;
+  let parsed: unknown;
   try {
-    data = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+
+  if (!isNotificationMap(parsed)) return null;
+  const data = parsed as Record<string, NotificationEntry>;
 
   let worst: { key: string; entry: NotificationEntry; severity: number } | null = null;
 
@@ -61,7 +75,7 @@ export function getActiveNotification(cwd: string): NotificationData | null {
 
   return {
     id: worst.key,
-    severity: (worst.entry.severity as NotificationData['severity']) ?? 'dim',
+    severity: isSeverity(worst.entry.severity) ? worst.entry.severity : 'dim',
     text: `\u26A0 Knowledge: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
     count,
     ceiling,

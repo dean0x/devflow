@@ -25,7 +25,10 @@ function isRawObservation(val: unknown): val is RawObservation {
   return (
     typeof o.type === 'string' &&
     typeof o.status === 'string' &&
-    ['workflow', 'procedural', 'decision', 'pitfall'].includes(o.type)
+    ['workflow', 'procedural', 'decision', 'pitfall'].includes(o.type) &&
+    (o.mayBeStale === undefined || typeof o.mayBeStale === 'boolean') &&
+    (o.needsReview === undefined || typeof o.needsReview === 'boolean') &&
+    (o.softCapExceeded === undefined || typeof o.softCapExceeded === 'boolean')
   );
 }
 
@@ -90,6 +93,10 @@ export function getLearningCounts(cwd: string): LearningCountsData | null {
       case 'pitfall':
         counts.pitfalls++;
         break;
+      default: {
+        const _exhaustive: never = parsed.type;
+        throw new Error(`unknown observation type: ${_exhaustive}`);
+      }
     }
   }
 
