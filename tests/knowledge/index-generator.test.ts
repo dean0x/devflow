@@ -220,24 +220,11 @@ describe('CLI dispatch — subcommand mode', () => {
 
   it('bare invocation emits deprecation notice to stderr', () => {
     const tmpDir = makeTmpWorktree(ACTIVE_ADR)
-    let stderr = ''
-    try {
-      execSync(`node "${CJS_PATH}" "${tmpDir}"`, { stdio: ['pipe', 'pipe', 'pipe'] })
-    } catch {
-      // may not throw
-    }
-    // Capture stderr separately
-    try {
-      execSync(`node "${CJS_PATH}" "${tmpDir}" 2>&1 >/dev/null`, { encoding: 'utf8' })
-    } catch {
-      // may fail
-    }
-    // Use a different approach: spawn with stderr captured
-    const result = execSync(`node "${CJS_PATH}" "${tmpDir}" 2>&1 1>/dev/null || true`, {
+    const stderr = execSync(`node "${CJS_PATH}" "${tmpDir}" 2>&1 1>/dev/null || true`, {
       encoding: 'utf8',
       shell: true,
     })
-    expect(result).toMatch(/deprecated|deprecat|use.*index/i)
+    expect(stderr).toMatch(/deprecated|deprecat|use.*index/i)
   })
 
   it('unknown subcommand exits with code 1 and prints usage', () => {

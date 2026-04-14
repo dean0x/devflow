@@ -1,25 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import * as path from 'path'
-
-const ROOT = path.resolve(import.meta.dirname, '../..')
-
-function loadFile(relPath: string): string {
-  return readFileSync(path.join(ROOT, relPath), 'utf8')
-}
-
-/**
- * Extract a named section from markdown content.
- * Returns the content from startAnchor to endAnchor (or end of string).
- */
-function extractSection(content: string, startAnchor: string, endAnchor: string | null): string {
-  const start = content.indexOf(startAnchor)
-  if (start === -1) throw new Error(`Anchor not found: "${startAnchor}"`)
-  if (endAnchor === null) return content.slice(start)
-  const end = content.indexOf(endAnchor, start + startAnchor.length)
-  if (end === -1) throw new Error(`End anchor not found after "${startAnchor}": "${endAnchor}"`)
-  return content.slice(start, end)
-}
+import { loadFile, extractSection } from './helpers'
 
 // -------------------------------------------------------------------------
 // Command surfaces — must reference knowledge-context.cjs index

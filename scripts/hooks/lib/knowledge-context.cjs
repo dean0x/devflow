@@ -121,8 +121,6 @@ function truncate(str, maxLen) {
  */
 function formatAdrLine(entry) {
   const title = truncate(entry.title, 60);
-  const statusTag = entry.status === 'Active' ? '[Active]' : entry.status ? `[${entry.status}]` : '[unknown]';
-  // Normalize unknown statuses to [unknown]
   const knownStatuses = ['Active', 'Deprecated', 'Superseded'];
   const tag = entry.status && knownStatuses.includes(entry.status) ? `[${entry.status}]` : '[unknown]';
   return `  ${entry.id}  ${title}  ${tag}`;
@@ -296,9 +294,7 @@ function usageExit() {
 if (require.main === module) {
   const argv = process.argv.slice(2);
 
-  // Determine if first argument is a known subcommand or a bare path
-  const SUBCOMMANDS = ['index', 'full'];
-  const KNOWN_SUBCOMMANDS = new Set(SUBCOMMANDS);
+  const KNOWN_SUBCOMMANDS = new Set(['index', 'full']);
 
   // Bare invocation: node knowledge-context.cjs <worktree>
   // Detected when: argv[0] looks like a path (starts with . / ~ or is absolute-ish)
