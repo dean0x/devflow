@@ -242,30 +242,29 @@ export async function purgeAllPreV2Knowledge(options: {
         continue; // File doesn't exist — skip
       }
 
-      // Split content into individual sections and filter out pre-v2 seeded ones.
-      // Strategy: collect which sections lack the self-learning marker and remove them.
+      // Remove sections lacking the self-learning marker — those are pre-v2 seeded content.
       let removedInFile = 0;
-      const updatedContent = content.replace(SECTION_REGEX, (section) => {
+      let updatedContent = content.replace(SECTION_REGEX, (section) => {
         if (!section.includes(SELF_LEARNING_SOURCE_MARKER)) {
           removedInFile++;
-          return ''; // Remove pre-v2 seeded section
+          return '';
         }
-        return section; // Preserve self-learning section
+        return section;
       });
 
       if (updatedContent !== content) {
         removed += removedInFile;
 
-        // Update TL;DR count — mirrors the pattern in purgeLegacyKnowledgeEntries
+        // Update TL;DR count
         const headingMatches = updatedContent.match(/^## (ADR|PF)-/gm) ?? [];
         const count = headingMatches.length;
         const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
-        const tldrUpdated = updatedContent.replace(
+        updatedContent = updatedContent.replace(
           /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
           `<!-- TL;DR: ${count} ${label}. Key: -->`,
         );
 
-        await writeFileAtomicExclusive(filePath, tldrUpdated);
+        await writeFileAtomicExclusive(filePath, updatedContent);
         modifiedFiles.push(filePath);
       }
     }
