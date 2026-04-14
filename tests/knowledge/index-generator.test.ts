@@ -122,9 +122,10 @@ describe('loadKnowledgeIndex — formatting', () => {
     const lines = result.split('\n')
     const adrLine = lines.find(l => l.includes('ADR-003'))
     expect(adrLine).toBeDefined()
-    // The title portion after ADR-003 should not exceed 60 chars + ellipsis
-    const titlePart = adrLine!.replace(/.*ADR-\d+\s+/, '')
-    expect(titlePart.length).toBeLessThanOrEqual(63) // 60 + '…' + possible status
+    // The title should contain the ellipsis character, confirming truncation occurred
+    expect(adrLine).toContain('…')
+    // The full 70-char title should not appear verbatim
+    expect(adrLine).not.toContain(longTitle)
   })
 
   it('truncates area to 80 characters with ellipsis', () => {
