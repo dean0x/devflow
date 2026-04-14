@@ -9,10 +9,14 @@
 // Test groups:
 //   1. Unit tests: filterKnowledgeContext (D-A filter) — imported from production module
 //   2. Unit tests: loadKnowledgeContext — imported from production module
-//   3. Structural tests: resolve.md — Step 0d presence + D-A + KNOWLEDGE_CONTEXT in Phase 4
+//   3. Structural tests: resolve.md — Step 0d presence + KNOWLEDGE_CONTEXT in Phase 4
+//      (knowledge-context.cjs index invocation covered by tests/knowledge/command-adoption.test.ts)
 //   4. Structural tests: resolve-teams.md — parity with base
+//      (knowledge-context.cjs index invocation covered by tests/knowledge/command-adoption.test.ts)
 //   5. Structural tests: resolve:orch SKILL.md — Phase 1.5 parity
+//      (knowledge-context.cjs index invocation covered by tests/knowledge/command-adoption.test.ts)
 //   6. Structural tests: resolver.md — Input Context + Apply Knowledge
+//      (ADR/PF citation format + hallucination guard covered by tests/knowledge/apply-knowledge-skill.test.ts)
 //   7. Cross-cutting: all four surfaces reference KNOWLEDGE_CONTEXT
 
 import { describe, it, expect } from 'vitest';
@@ -217,18 +221,6 @@ describe('resolve.md — base command', () => {
     expect(content).toMatch(/Step 0d.*Load Project Knowledge/i);
   });
 
-  it('Step 0d references decisions.md and pitfalls.md', () => {
-    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
-    expect(step0dSection).toContain('decisions.md');
-    expect(step0dSection).toContain('pitfalls.md');
-  });
-
-  it('Step 0d instructs stripping Deprecated and Superseded sections (D-A)', () => {
-    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
-    expect(step0dSection).toMatch(/Deprecated/);
-    expect(step0dSection).toMatch(/Superseded/);
-  });
-
   it('Step 0d instructs passing KNOWLEDGE_CONTEXT to Phase 4 Resolvers', () => {
     const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('KNOWLEDGE_CONTEXT');
@@ -268,18 +260,6 @@ describe('resolve-teams.md — teams variant parity', () => {
     expect(content).toMatch(/Step 0d.*Load Project Knowledge/i);
   });
 
-  it('Step 0d references decisions.md and pitfalls.md', () => {
-    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
-    expect(step0dSection).toContain('decisions.md');
-    expect(step0dSection).toContain('pitfalls.md');
-  });
-
-  it('Step 0d instructs stripping Deprecated and Superseded sections (D-A)', () => {
-    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
-    expect(step0dSection).toMatch(/Deprecated/);
-    expect(step0dSection).toMatch(/Superseded/);
-  });
-
   it('Phase 4 Resolver teammate prompt includes KNOWLEDGE_CONTEXT variable', () => {
     const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
     expect(phase4Section).toContain('KNOWLEDGE_CONTEXT');
@@ -299,18 +279,6 @@ describe('resolve:orch SKILL.md — ambient mode parity', () => {
 
   it('contains Phase 1.5: Load Project Knowledge between Phase 1 and Phase 2', () => {
     expect(content).toMatch(/Phase 1\.5.*Load Project Knowledge/i);
-  });
-
-  it('Phase 1.5 references decisions.md and pitfalls.md', () => {
-    const phase15Section = extractSection(content, 'Phase 1.5', '## Phase 2');
-    expect(phase15Section).toContain('decisions.md');
-    expect(phase15Section).toContain('pitfalls.md');
-  });
-
-  it('Phase 1.5 instructs stripping Deprecated and Superseded sections (D-A)', () => {
-    const phase15Section = extractSection(content, 'Phase 1.5', '## Phase 2');
-    expect(phase15Section).toMatch(/Deprecated/);
-    expect(phase15Section).toMatch(/Superseded/);
   });
 
   it('Phase 4 spawn block includes KNOWLEDGE_CONTEXT', () => {
@@ -338,23 +306,6 @@ describe('resolver.md — Input Context and Apply Knowledge section', () => {
 
   it('contains Apply Knowledge section', () => {
     expect(content).toMatch(/## Apply Knowledge|### Apply Knowledge/);
-  });
-
-  it('Apply Knowledge section references ADR and PF citation format', () => {
-    const applyStart = content.search(/## Apply Knowledge|### Apply Knowledge/);
-    if (applyStart === -1) throw new Error('Apply Knowledge section not found in resolver.md');
-    const applyAnchor = content.slice(applyStart, applyStart + 30);
-    const applySection = extractSection(content, applyAnchor.split('\n')[0], '\n## ');
-    expect(applySection).toContain('applies ADR-NNN');
-    expect(applySection).toContain('avoids PF-NNN');
-  });
-
-  it('Apply Knowledge section prohibits fabricating IDs (hallucination guard)', () => {
-    const applyStart = content.search(/## Apply Knowledge|### Apply Knowledge/);
-    if (applyStart === -1) throw new Error('Apply Knowledge section not found in resolver.md');
-    const applyAnchor = content.slice(applyStart, applyStart + 30);
-    const applySection = extractSection(content, applyAnchor.split('\n')[0], '\n## ');
-    expect(applySection).toMatch(/verbatim|do not fabricate|fabricat/i);
   });
 
   it('Apply Knowledge section describes citing inline in Reasoning column', () => {

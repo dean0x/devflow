@@ -1036,9 +1036,15 @@ describe('citation sentence propagation', () => {
     expect(coderSentence).toBe(canonical);
   });
 
-  it('reviewer.md has byte-identical citation sentence', () => {
-    const canonical = extractCitationSentence(skillPath);
+  it('reviewer.md has citation sentence referencing KNOWLEDGE_CONTEXT index and apply-knowledge skill', () => {
+    // reviewer.md uses the index+Read pattern (KNOWLEDGE_CONTEXT + devflow:apply-knowledge),
+    // not the direct-file-read pattern used by coder. The sentence intentionally differs from
+    // the canonical (coder-style) sentence.
     const reviewerSentence = extractCitationSentence(reviewerPath);
-    expect(reviewerSentence).toBe(canonical);
+    expect(reviewerSentence.trim()).toBeTruthy();
+    expect(reviewerSentence).toContain('KNOWLEDGE_CONTEXT');
+    expect(reviewerSentence).toContain('devflow:apply-knowledge');
+    expect(reviewerSentence).toContain('applies ADR-NNN');
+    expect(reviewerSentence).toContain('avoids PF-NNN');
   });
 });

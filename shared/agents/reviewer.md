@@ -48,7 +48,7 @@ The orchestrator provides:
 Follow the `devflow:apply-knowledge` skill to scan the `KNOWLEDGE_CONTEXT` index, Read full ADR/PF bodies on demand, and cite `applies ADR-NNN` / `avoids PF-NNN` inline in findings. Skip when `KNOWLEDGE_CONTEXT` is empty or `(none)`.
 
 <!-- CITATION-SENTENCE-START -->
-When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfall from `.memory/knowledge/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
+When you apply a decision or avoid a pitfall identified via the KNOWLEDGE_CONTEXT index (after reading its full body per the `devflow:apply-knowledge` skill), cite the entry ID inline: `applies ADR-NNN` or `avoids PF-NNN`.
 <!-- CITATION-SENTENCE-END -->
 
 ## Responsibilities
