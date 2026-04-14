@@ -164,3 +164,114 @@ export async function purgeLegacyKnowledgeEntries(options: {
 
   return { removed, files: modifiedFiles };
 }
+
+/**
+ * Regex matching any `## ADR-NNN:` or `## PF-NNN:` section heading and all
+ * lines that belong to that section (up to the next `## ` heading or end of
+ * file).  The leading `\n` is included so removal does not leave a blank line
+ * between sections when the preceding section ends with a newline.
+ */
+const SECTION_REGEX = /\n## (ADR|PF)-\d+:[^\n]*(?:\n(?!## )[^\n]*)*/g;
+
+/**
+ * Source marker that identifies a v2-era self-learning entry.  Any section
+ * containing this literal string is authored by the background-learning
+ * extractor and must be preserved.  Sections without it are pre-v2 seeded
+ * content injected at install time.
+ */
+const SELF_LEARNING_SOURCE_MARKER = '\n- **Source**: self-learning:';
+
+/**
+ * Remove ALL pre-v2 seeded knowledge entries from decisions.md and pitfalls.md.
+ *
+ * Unlike `purgeLegacyKnowledgeEntries` (which targets a fixed allow-list of 4
+ * IDs), this function uses a format discriminator: any `## ADR-NNN:` or
+ * `## PF-NNN:` section that does NOT contain the literal
+ * `- **Source**: self-learning:` marker is considered pre-v2 seeded content
+ * and is removed.  Self-learning entries always carry that marker; seeded
+ * entries never do.
+ *
+ * D-Fix3: This widens the v2 migration's coverage from 4 hardcoded IDs to
+ * ALL seeded entries, fixing the gap where 7 of the original 10 seed entries
+ * survived the v2 purge on upgraded projects.
+ *
+ * Returns immediately if `.memory/knowledge/` does not exist.
+ *
+ * Does NOT remove PROJECT-PATTERNS.md — that file is v2's responsibility and
+ * has already been handled by `purgeLegacyKnowledgeEntries`.
+ *
+ * @param options.memoryDir - absolute path to the `.memory/` directory
+ * @returns number of sections removed and list of files that were modified
+ * @throws if lock acquisition times out
+ */
+export async function purgeAllPreV2Knowledge(options: {
+  memoryDir: string;
+}): Promise<PurgeLegacyKnowledgeResult> {
+  const { memoryDir } = options;
+  const knowledgeDir = path.join(memoryDir, 'knowledge');
+  const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+  const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+
+  // Bail early: nothing to do if knowledge directory doesn't exist
+  try {
+    await fs.access(knowledgeDir);
+  } catch {
+    return { removed: 0, files: [] };
+  }
+
+  const knowledgeLockDir = path.join(memoryDir, '.knowledge.lock');
+  const lockAcquired = await acquireMkdirLock(knowledgeLockDir);
+  if (!lockAcquired) {
+    throw new Error('Knowledge files are currently being written. Try again in a moment.');
+  }
+
+  let removed = 0;
+  const modifiedFiles: string[] = [];
+
+  try {
+    const filePrefixPairs: [string, string][] = [
+      [decisionsPath, 'ADR'],
+      [pitfallsPath, 'PF'],
+    ];
+
+    for (const [filePath, prefix] of filePrefixPairs) {
+      let content: string;
+      try {
+        content = await fs.readFile(filePath, 'utf-8');
+      } catch {
+        continue; // File doesn't exist — skip
+      }
+
+      // Split content into individual sections and filter out pre-v2 seeded ones.
+      // Strategy: collect which sections lack the self-learning marker and remove them.
+      let removedInFile = 0;
+      const updatedContent = content.replace(SECTION_REGEX, (section) => {
+        if (!section.includes(SELF_LEARNING_SOURCE_MARKER)) {
+          removedInFile++;
+          return ''; // Remove pre-v2 seeded section
+        }
+        return section; // Preserve self-learning section
+      });
+
+      if (updatedContent !== content) {
+        removed += removedInFile;
+
+        // Update TL;DR count — mirrors the pattern in purgeLegacyKnowledgeEntries
+        const headingMatches = updatedContent.match(/^## (ADR|PF)-/gm) ?? [];
+        const count = headingMatches.length;
+        const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
+        const tldrUpdated = updatedContent.replace(
+          /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
+          `<!-- TL;DR: ${count} ${label}. Key: -->`,
+        );
+
+        await writeFileAtomicExclusive(filePath, tldrUpdated);
+        modifiedFiles.push(filePath);
+      }
+    }
+  } finally {
+    try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
+  }
+
+  return { removed, files: modifiedFiles };
+}
