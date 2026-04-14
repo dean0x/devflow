@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runHelper, type LogEntry } from './helpers.js';
+import { runHelper, djb2, type LogEntry } from './helpers.js';
 
 interface ManifestEntry {
   observationId: string;
@@ -169,15 +169,6 @@ describe('reconcile-manifest — edit detection (D13)', () => {
     const content = '# Stable\n\nThis content does not change\n';
     fs.writeFileSync(filePath, content);
 
-    // We need to get the real hash first by running render-ready on a file
-    // Instead, let's manually compute it using same djb2 algorithm
-    function djb2(s: string): string {
-      let h = 5381;
-      for (let i = 0; i < s.length; i++) {
-        h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
-      }
-      return h.toString(16);
-    }
     const hash = djb2(content);
 
     writeManifest(manifestPath, [{
@@ -307,15 +298,6 @@ describe('reconcile-manifest — stale manifest entries', () => {
 
 describe('reconcile-manifest — self-heal (Fix 2)', () => {
   let tmpDir: string;
-
-  // djb2 hash — matches contentHash() in json-helper.cjs
-  function djb2(s: string): string {
-    let h = 5381;
-    for (let i = 0; i < s.length; i++) {
-      h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
-    }
-    return h.toString(16);
-  }
 
   // Build a decisions.md with the given ADR sections
   function buildDecisionsFile(sections: Array<{ anchorId: string; heading: string; body: string }>): string {
@@ -630,5 +612,52 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
     // by the next render-ready pass, not paired to the pre-v2 ADR-001.
     const entries = readLog(logPath);
     expect(entries[0].status).toBe('ready');
+  });
+
+  it('heal: manifest absent + knowledge file with anchor + matching ready obs → heal triggers, manifest created (A1)', () => {
+    // Regression guard for the first-ever render-ready crash:
+    // render-ready wrote decisions.md but crashed before writing the manifest.
+    // reconcile-manifest must NOT short-circuit on the missing manifest — it must
+    // construct an empty in-memory manifest, run the heal path, and persist the
+    // newly reconstructed manifest.
+    const logPath = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const manifestPath = path.join(tmpDir, '.memory', '.learning-manifest.json');
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+
+    // Write the knowledge file (crash-window: file written, manifest never written)
+    const adrContent = `<!-- TL;DR: 1 decision. -->\n# Decisions\n\n## ADR-001: use pipes for composition\n\n- **Status**: Accepted\n- **Source**: self-learning:obs_a1_001\n`;
+    fs.writeFileSync(decisionFile, adrContent);
+
+    // Do NOT write a manifest — it doesn't exist yet
+    expect(fs.existsSync(manifestPath)).toBe(false);
+
+    // Log still shows status=ready (crash happened before log write too)
+    const obs: LogEntry = {
+      ...baseEntry('obs_a1_001', 'decision', 'ready'),
+      pattern: 'use pipes for composition',
+      confidence: 0.88,
+    };
+    fs.writeFileSync(logPath, JSON.stringify(obs) + '\n');
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    // Heal must trigger even though manifest was absent
+    expect(result.healed).toBe(1);
+    expect(result.deletions).toBe(0);
+
+    // Manifest must now exist and contain the healed entry
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    const manifest = readManifest(manifestPath);
+    const entry = manifest.entries.find(e => e.observationId === 'obs_a1_001');
+    expect(entry).toBeDefined();
+    expect(entry!.anchorId).toBe('ADR-001');
+    expect(entry!.path).toBe(decisionFile);
+    expect(entry!.contentHash).toBeTruthy();
+
+    // Log entry upgraded to created
+    const logEntries = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+    const healed = logEntries.find((e: LogEntry) => e.id === 'obs_a1_001');
+    expect(healed!.status).toBe('created');
+    expect(healed!.artifact_path).toContain('ADR-001');
   });
 });
