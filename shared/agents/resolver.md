@@ -78,7 +78,7 @@ This is the ONLY case where deferral is appropriate. "Touches many files" or "ch
 
 ## Apply Knowledge
 
-If `KNOWLEDGE_CONTEXT` is non-empty: scan for ADR and PF entries relevant to each issue's file, area, or category. When a prior decision constrains the fix shape, cite as `applies ADR-NNN` in the Reasoning column. When a known pitfall describes the same failure mode, cite as `avoids PF-NNN` in the Reasoning column. **Cite only IDs that appear verbatim in KNOWLEDGE_CONTEXT — do not fabricate.**
+If `KNOWLEDGE_CONTEXT` is non-empty and not the literal `(none)`: scan for ADR and PF entries relevant to each issue's file, area, or category. When a prior decision constrains the fix shape, cite as `applies ADR-NNN` in the Reasoning column. When a known pitfall describes the same failure mode, cite as `avoids PF-NNN` in the Reasoning column. **Cite only IDs that appear verbatim in KNOWLEDGE_CONTEXT — do not fabricate.** When `KNOWLEDGE_CONTEXT` is omitted, empty, or `(none)`, skip this step entirely.
 
 ## Decision Flow
 

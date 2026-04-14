@@ -223,6 +223,11 @@ function countActiveHeadings(content, entryType) {
  * the files but not tracked in the manifest. Returns an array of unmanaged anchor descriptors.
  * Used by reconcile-manifest to self-heal render-ready crash-window duplicates.
  *
+ * Only sections that contain the `- **Source**: self-learning:` marker qualify — pre-v2
+ * seeded entries (which lack the marker) are excluded so they cannot be falsely paired
+ * with a current `ready` log obs by normalised heading match. Pre-v2 entries are removed
+ * separately by the v3 migration; until that runs they must remain inert here.
+ *
  * @param {string} memoryDir - Path to .memory dir
  * @param {Set<string>} managedAnchors - Anchor IDs already tracked in the manifest
  * @returns {Array<{anchorId: string, type: string, path: string, headingText: string}>}
@@ -241,6 +246,14 @@ function findUnmanagedAnchors(memoryDir, managedAnchors) {
     let m;
     while ((m = re.exec(content)) !== null) {
       if (managedAnchors.has(m[1])) continue;
+      // Slice out this section's body (heading → next ## heading or eof) and require the
+      // self-learning source marker — this excludes pre-v2 seeded content from the heal path.
+      const sectionStart = m.index;
+      const nextHeadingIdx = content.indexOf('\n## ', sectionStart + 1);
+      const section = nextHeadingIdx !== -1
+        ? content.slice(sectionStart, nextHeadingIdx)
+        : content.slice(sectionStart);
+      if (!section.includes('\n- **Source**: self-learning:')) continue;
       result.push({ anchorId: m[1], type, path: file, headingText: m[2].trim() });
     }
   }

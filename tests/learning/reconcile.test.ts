@@ -594,4 +594,41 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
     expect(result).toHaveProperty('edits');
     expect(result).toHaveProperty('unchanged');
   });
+
+  it('heal: pre-v2 anchor lacking self-learning source marker → no-op even when log obs would match', () => {
+    // Regression guard: a pre-v2 seeded section whose heading happens to match a
+    // current ready obs by normalizeForDedup must NOT be paired. Pre-v2 entries
+    // are removed by the v3 migration; the heal path must not steal their anchor IDs.
+    const { manifestPath, logPath } = setup(tmpDir);
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+
+    // Pre-v2 seeded ADR — has no `- **Source**: self-learning:` marker
+    const preV2Content = buildDecisionsFile([{
+      anchorId: 'ADR-001',
+      heading: 'use result types everywhere',
+      body: '- **Status**: Accepted\n- **Source**: /code-review (seed v1)',
+    }]);
+    fs.writeFileSync(decisionFile, preV2Content);
+
+    writeManifest(manifestPath, []);
+
+    // Current ready obs whose pattern would normalise-match the pre-v2 heading
+    const obs: LogEntry = {
+      ...baseEntry('obs_collision_001', 'decision', 'ready'),
+      pattern: 'use result types everywhere',
+    };
+    writeLog(logPath, [obs]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    // Heal must NOT trigger — pre-v2 entries lack the source marker
+    expect(result.healed).toBe(0);
+    const manifest = readManifest(manifestPath);
+    expect(manifest.entries.length).toBe(0);
+
+    // Obs stays in `ready` state — it will be rendered as a NEW ADR (e.g., ADR-002)
+    // by the next render-ready pass, not paired to the pre-v2 ADR-001.
+    const entries = readLog(logPath);
+    expect(entries[0].status).toBe('ready');
+  });
 });
