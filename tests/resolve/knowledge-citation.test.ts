@@ -1,60 +1,66 @@
 // tests/resolve/knowledge-citation.test.ts
 // Tests for Fix 1: /resolve reads and cites project knowledge.
 //
-// Strategy: Since the resolve orchestration surfaces (resolve.md, resolve-teams.md,
-// resolve:orch SKILL.md, resolver.md) are markdown instruction files rather than
-// executable modules, these tests assert structural invariants in the markdown content:
-//   1. Phase 0d / Phase 1.5 knowledge-loading instructions are present
-//   2. KNOWLEDGE_CONTEXT appears in the Phase 4 Resolver spawn block
-//   3. resolver.md declares KNOWLEDGE_CONTEXT in Input Context and Apply Knowledge section
-//   4. D-A filtering instruction (Deprecated/Superseded) is present in all three surfaces
-//   5. D-B citation aggregation (## Knowledge Citations) is described in Phase 5/8/6
+// Strategy: The filter + loader logic lives in the production module
+// scripts/hooks/lib/knowledge-context.cjs; these tests import it directly
+// for real coverage. The markdown structural tests verify that the instruction
+// to invoke the module (or follow its algorithm) is present on every surface.
 //
-// For filter logic we also unit-test a pure JS helper that replicates the orchestrator's
-// filtering algorithm to verify correctness of Deprecated/Superseded stripping.
+// Test groups:
+//   1. Unit tests: filterKnowledgeContext (D-A filter) — imported from production module
+//   2. Unit tests: loadKnowledgeContext — imported from production module
+//   3. Structural tests: resolve.md — Step 0d presence + D-A + KNOWLEDGE_CONTEXT in Phase 4
+//   4. Structural tests: resolve-teams.md — parity with base
+//   5. Structural tests: resolve:orch SKILL.md — Phase 1.5 parity
+//   6. Structural tests: resolver.md — Input Context + Apply Knowledge
+//   7. Cross-cutting: all four surfaces reference KNOWLEDGE_CONTEXT
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, writeFileSync, mkdirSync } from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { createRequire } from 'module';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
+const require = createRequire(import.meta.url);
+
+// Import the production module — this is the real implementation, not a test copy.
+const { filterKnowledgeContext, loadKnowledgeContext } = require(
+  path.join(ROOT, 'scripts/hooks/lib/knowledge-context.cjs')
+) as {
+  filterKnowledgeContext: (raw: string) => string;
+  loadKnowledgeContext: (worktreePath: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string;
+};
 
 function loadFile(relPath: string): string {
   return readFileSync(path.join(ROOT, relPath), 'utf8');
 }
 
-// ---------------------------------------------------------------------------
-// Pure filter logic — replicated from the orchestrator markdown instruction.
-// Strips any ## ADR-NNN: or ## PF-NNN: section whose body contains
-// "- **Status**: Deprecated" or "- **Status**: Superseded".
-// ---------------------------------------------------------------------------
-
 /**
- * D2026-04-14-A: Filter implementation used both in tests and to verify the
- * markdown instructions are semantically correct. Section boundary = next ##
- * heading or end of string.
+ * Extract a named section from markdown content with a loud failure if the
+ * anchor is not present. Section runs from startAnchor to endAnchor (or to
+ * end-of-string if endAnchor is null).
+ *
+ * Uses exact string search (indexOf) to find anchors — fails loudly when the
+ * anchor is absent rather than silently returning unrelated content.
  */
-function filterKnowledgeContext(raw: string): string {
-  if (!raw.trim()) return '';
-  // Split on ADR-NNN / PF-NNN section boundaries using a lookahead so each
-  // section includes its own heading. Non-knowledge content before the first
-  // section header (e.g., a file-level title) is placed in sections[0] and
-  // always preserved.
-  const sections = raw.split(/(?=^## (?:ADR|PF)-\d+:)/m);
-  const kept = sections.filter(section => {
-    const isKnowledgeSection = /^## (?:ADR|PF)-\d+:/m.test(section);
-    if (!isKnowledgeSection) return true; // keep preamble / non-knowledge content
-    // Drop sections explicitly marked Deprecated or Superseded
-    return (
-      !/- \*\*Status\*\*: Deprecated/.test(section) &&
-      !/- \*\*Status\*\*: Superseded/.test(section)
-    );
-  });
-  return kept.join('').trim();
+function extractSection(content: string, startAnchor: string, endAnchor: string | null): string {
+  const start = content.indexOf(startAnchor);
+  if (start === -1) {
+    throw new Error(`Anchor not found in document: "${startAnchor}"`);
+  }
+  if (endAnchor === null) {
+    return content.slice(start);
+  }
+  const end = content.indexOf(endAnchor, start + startAnchor.length);
+  if (end === -1) {
+    throw new Error(`End anchor not found after "${startAnchor}": "${endAnchor}"`);
+  }
+  return content.slice(start, end);
 }
 
 // ---------------------------------------------------------------------------
-// Unit tests: filter helper
+// Unit tests: filterKnowledgeContext (D-A filter) — production module
 // ---------------------------------------------------------------------------
 
 describe('filterKnowledgeContext — Deprecated/Superseded filtering (D-A)', () => {
@@ -110,11 +116,93 @@ describe('filterKnowledgeContext — Deprecated/Superseded filtering (D-A)', () 
     expect(output).toContain('Watch out');
   });
 
-  it('returns (none) marker when all sections are removed', () => {
+  it('returns empty string when all sections are removed (orchestrator emits "(none)")', () => {
     const input = `## ADR-001: All deprecated\n\n- **Status**: Deprecated\n- **Decision**: Gone\n`;
     const output = filterKnowledgeContext(input);
     // Empty string signals orchestrator to emit "(none)"
     expect(output).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit tests: loadKnowledgeContext — production module
+// ---------------------------------------------------------------------------
+
+describe('loadKnowledgeContext — file loading + filtering', () => {
+  function makeTmpWorktree(
+    decisions?: string,
+    pitfalls?: string
+  ): string {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'knowledge-test-'));
+    const knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    if (decisions !== undefined) {
+      writeFileSync(path.join(knowledgeDir, 'decisions.md'), decisions, 'utf8');
+    }
+    if (pitfalls !== undefined) {
+      writeFileSync(path.join(knowledgeDir, 'pitfalls.md'), pitfalls, 'utf8');
+    }
+    return tmpDir;
+  }
+
+  it('returns "(none)" when both knowledge files are absent', () => {
+    const tmpDir = makeTmpWorktree();
+    expect(loadKnowledgeContext(tmpDir)).toBe('(none)');
+  });
+
+  it('returns "(none)" when both files are empty', () => {
+    const tmpDir = makeTmpWorktree('', '');
+    expect(loadKnowledgeContext(tmpDir)).toBe('(none)');
+  });
+
+  it('returns filtered decisions content when only decisions.md exists', () => {
+    const decisions = `## ADR-001: Use Result types\n\n- **Status**: Active\n- **Decision**: Always return Result<T,E>\n`;
+    const tmpDir = makeTmpWorktree(decisions);
+    const result = loadKnowledgeContext(tmpDir);
+    expect(result).toContain('ADR-001');
+    expect(result).not.toBe('(none)');
+  });
+
+  it('returns filtered pitfalls content when only pitfalls.md exists', () => {
+    const pitfalls = `## PF-001: Active pitfall\n\n- **Status**: Active\n- **Description**: Watch out\n`;
+    const tmpDir = makeTmpWorktree(undefined, pitfalls);
+    const result = loadKnowledgeContext(tmpDir);
+    expect(result).toContain('PF-001');
+    expect(result).not.toBe('(none)');
+  });
+
+  it('concatenates decisions and pitfalls content when both exist', () => {
+    const decisions = `## ADR-001: Use Result types\n\n- **Status**: Active\n- **Decision**: Always return Result<T,E>\n`;
+    const pitfalls = `## PF-001: Active pitfall\n\n- **Status**: Active\n- **Description**: Watch out\n`;
+    const tmpDir = makeTmpWorktree(decisions, pitfalls);
+    const result = loadKnowledgeContext(tmpDir);
+    expect(result).toContain('ADR-001');
+    expect(result).toContain('PF-001');
+  });
+
+  it('strips Deprecated sections from both files before concatenating', () => {
+    const decisions = `## ADR-001: Keep\n\n- **Status**: Active\n- **Decision**: Good\n\n## ADR-002: Drop\n\n- **Status**: Deprecated\n- **Decision**: Bad\n`;
+    const pitfalls = `## PF-001: Drop\n\n- **Status**: Deprecated\n- **Description**: Gone\n`;
+    const tmpDir = makeTmpWorktree(decisions, pitfalls);
+    const result = loadKnowledgeContext(tmpDir);
+    expect(result).toContain('ADR-001');
+    expect(result).not.toContain('ADR-002');
+    expect(result).not.toContain('PF-001');
+  });
+
+  it('returns "(none)" when all sections in both files are Deprecated', () => {
+    const decisions = `## ADR-001: Deprecated\n\n- **Status**: Deprecated\n- **Decision**: Gone\n`;
+    const pitfalls = `## PF-001: Deprecated\n\n- **Status**: Deprecated\n- **Description**: Gone\n`;
+    const tmpDir = makeTmpWorktree(decisions, pitfalls);
+    expect(loadKnowledgeContext(tmpDir)).toBe('(none)');
+  });
+
+  it('accepts custom file paths via opts for isolated testing', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'knowledge-test-opts-'));
+    const customFile = path.join(tmpDir, 'custom-decisions.md');
+    writeFileSync(customFile, `## ADR-042: Custom\n\n- **Status**: Active\n- **Decision**: Custom entry\n`, 'utf8');
+    const result = loadKnowledgeContext(tmpDir, { decisionsFile: 'custom-decisions.md' });
+    expect(result).toContain('ADR-042');
   });
 });
 
@@ -130,39 +218,29 @@ describe('resolve.md — base command', () => {
   });
 
   it('Step 0d references decisions.md and pitfalls.md', () => {
-    const step0dStart = content.indexOf('Step 0d');
-    const nextPhaseMatch = content.indexOf('\n### Phase 1', step0dStart);
-    const step0dSection = content.slice(step0dStart, nextPhaseMatch > 0 ? nextPhaseMatch : undefined);
+    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('decisions.md');
     expect(step0dSection).toContain('pitfalls.md');
   });
 
   it('Step 0d instructs stripping Deprecated and Superseded sections (D-A)', () => {
-    const step0dStart = content.indexOf('Step 0d');
-    const nextPhaseMatch = content.indexOf('\n### Phase 1', step0dStart);
-    const step0dSection = content.slice(step0dStart, nextPhaseMatch > 0 ? nextPhaseMatch : undefined);
+    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toMatch(/Deprecated/);
     expect(step0dSection).toMatch(/Superseded/);
   });
 
   it('Step 0d instructs passing KNOWLEDGE_CONTEXT to Phase 4 Resolvers', () => {
-    const step0dStart = content.indexOf('Step 0d');
-    const nextPhaseMatch = content.indexOf('\n### Phase 1', step0dStart);
-    const step0dSection = content.slice(step0dStart, nextPhaseMatch > 0 ? nextPhaseMatch : undefined);
+    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('KNOWLEDGE_CONTEXT');
   });
 
   it('Step 0d emits (none) when both files are absent or empty', () => {
-    const step0dStart = content.indexOf('Step 0d');
-    const nextPhaseMatch = content.indexOf('\n### Phase 1', step0dStart);
-    const step0dSection = content.slice(step0dStart, nextPhaseMatch > 0 ? nextPhaseMatch : undefined);
+    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('(none)');
   });
 
   it('Phase 4 Resolver spawn block includes KNOWLEDGE_CONTEXT variable', () => {
-    const phase4Start = content.indexOf('### Phase 4');
-    const phase5Start = content.indexOf('### Phase 5', phase4Start);
-    const phase4Section = content.slice(phase4Start, phase5Start > 0 ? phase5Start : undefined);
+    const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
     expect(phase4Section).toContain('KNOWLEDGE_CONTEXT');
   });
 
@@ -191,25 +269,19 @@ describe('resolve-teams.md — teams variant parity', () => {
   });
 
   it('Step 0d references decisions.md and pitfalls.md', () => {
-    const step0dStart = content.indexOf('Step 0d');
-    const nextPhaseMatch = content.indexOf('\n### Phase 1', step0dStart);
-    const step0dSection = content.slice(step0dStart, nextPhaseMatch > 0 ? nextPhaseMatch : undefined);
+    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toContain('decisions.md');
     expect(step0dSection).toContain('pitfalls.md');
   });
 
   it('Step 0d instructs stripping Deprecated and Superseded sections (D-A)', () => {
-    const step0dStart = content.indexOf('Step 0d');
-    const nextPhaseMatch = content.indexOf('\n### Phase 1', step0dStart);
-    const step0dSection = content.slice(step0dStart, nextPhaseMatch > 0 ? nextPhaseMatch : undefined);
+    const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
     expect(step0dSection).toMatch(/Deprecated/);
     expect(step0dSection).toMatch(/Superseded/);
   });
 
   it('Phase 4 Resolver teammate prompt includes KNOWLEDGE_CONTEXT variable', () => {
-    const phase4Start = content.indexOf('### Phase 4');
-    const phase5Start = content.indexOf('### Phase 5', phase4Start);
-    const phase4Section = content.slice(phase4Start, phase5Start > 0 ? phase5Start : undefined);
+    const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
     expect(phase4Section).toContain('KNOWLEDGE_CONTEXT');
   });
 
@@ -230,32 +302,24 @@ describe('resolve:orch SKILL.md — ambient mode parity', () => {
   });
 
   it('Phase 1.5 references decisions.md and pitfalls.md', () => {
-    const phase15Start = content.indexOf('Phase 1.5');
-    const phase2Start = content.indexOf('## Phase 2', phase15Start);
-    const phase15Section = content.slice(phase15Start, phase2Start > 0 ? phase2Start : undefined);
+    const phase15Section = extractSection(content, 'Phase 1.5', '## Phase 2');
     expect(phase15Section).toContain('decisions.md');
     expect(phase15Section).toContain('pitfalls.md');
   });
 
   it('Phase 1.5 instructs stripping Deprecated and Superseded sections (D-A)', () => {
-    const phase15Start = content.indexOf('Phase 1.5');
-    const phase2Start = content.indexOf('## Phase 2', phase15Start);
-    const phase15Section = content.slice(phase15Start, phase2Start > 0 ? phase2Start : undefined);
+    const phase15Section = extractSection(content, 'Phase 1.5', '## Phase 2');
     expect(phase15Section).toMatch(/Deprecated/);
     expect(phase15Section).toMatch(/Superseded/);
   });
 
   it('Phase 4 spawn block includes KNOWLEDGE_CONTEXT', () => {
-    const phase4Start = content.indexOf('## Phase 4');
-    const phase5Start = content.indexOf('## Phase 5', phase4Start);
-    const phase4Section = content.slice(phase4Start, phase5Start > 0 ? phase5Start : undefined);
+    const phase4Section = extractSection(content, '## Phase 4', '## Phase 5');
     expect(phase4Section).toContain('KNOWLEDGE_CONTEXT');
   });
 
   it('Phase 6 (Report) mentions Knowledge Citations (D-B)', () => {
-    const phase6Start = content.indexOf('## Phase 6');
-    const endMarker = content.indexOf('## Phase 7', phase6Start);
-    const phase6Section = content.slice(phase6Start, endMarker > 0 ? endMarker : undefined);
+    const phase6Section = extractSection(content, '## Phase 6', '## Error Handling');
     expect(phase6Section).toContain('Knowledge Citations');
   });
 });
@@ -268,12 +332,7 @@ describe('resolver.md — Input Context and Apply Knowledge section', () => {
   const content = loadFile('shared/agents/resolver.md');
 
   it('declares KNOWLEDGE_CONTEXT in Input Context section', () => {
-    const inputContextStart = content.indexOf('## Input Context');
-    const nextSection = content.indexOf('\n## ', inputContextStart + 1);
-    const inputContextSection = content.slice(
-      inputContextStart,
-      nextSection > 0 ? nextSection : undefined
-    );
+    const inputContextSection = extractSection(content, '## Input Context', '\n## ');
     expect(inputContextSection).toContain('KNOWLEDGE_CONTEXT');
   });
 
@@ -283,36 +342,33 @@ describe('resolver.md — Input Context and Apply Knowledge section', () => {
 
   it('Apply Knowledge section references ADR and PF citation format', () => {
     const applyStart = content.search(/## Apply Knowledge|### Apply Knowledge/);
-    const nextSection = content.indexOf('\n## ', applyStart + 1);
-    const applySection = content.slice(applyStart, nextSection > 0 ? nextSection : undefined);
+    if (applyStart === -1) throw new Error('Apply Knowledge section not found in resolver.md');
+    const applyAnchor = content.slice(applyStart, applyStart + 30);
+    const applySection = extractSection(content, applyAnchor.split('\n')[0], '\n## ');
     expect(applySection).toContain('applies ADR-NNN');
     expect(applySection).toContain('avoids PF-NNN');
   });
 
   it('Apply Knowledge section prohibits fabricating IDs (hallucination guard)', () => {
     const applyStart = content.search(/## Apply Knowledge|### Apply Knowledge/);
-    const nextSection = content.indexOf('\n## ', applyStart + 1);
-    const applySection = content.slice(applyStart, nextSection > 0 ? nextSection : undefined);
-    // Must contain the verbatim constraint
+    if (applyStart === -1) throw new Error('Apply Knowledge section not found in resolver.md');
+    const applyAnchor = content.slice(applyStart, applyStart + 30);
+    const applySection = extractSection(content, applyAnchor.split('\n')[0], '\n## ');
     expect(applySection).toMatch(/verbatim|do not fabricate|fabricat/i);
   });
 
   it('Apply Knowledge section describes citing inline in Reasoning column', () => {
     const applyStart = content.search(/## Apply Knowledge|### Apply Knowledge/);
-    const nextSection = content.indexOf('\n## ', applyStart + 1);
-    const applySection = content.slice(applyStart, nextSection > 0 ? nextSection : undefined);
+    if (applyStart === -1) throw new Error('Apply Knowledge section not found in resolver.md');
+    const applyAnchor = content.slice(applyStart, applyStart + 30);
+    const applySection = extractSection(content, applyAnchor.split('\n')[0], '\n## ');
     expect(applySection).toMatch(/[Rr]easoning/);
   });
 
   it('KNOWLEDGE_CONTEXT is marked optional in Input Context', () => {
-    const inputContextStart = content.indexOf('## Input Context');
-    const nextSection = content.indexOf('\n## ', inputContextStart + 1);
-    const inputContextSection = content.slice(
-      inputContextStart,
-      nextSection > 0 ? nextSection : undefined
-    );
-    // Should be marked optional (may say "optional" or "if provided" or "when provided")
+    const inputContextSection = extractSection(content, '## Input Context', '\n## ');
     const knowledgeIdx = inputContextSection.indexOf('KNOWLEDGE_CONTEXT');
+    if (knowledgeIdx === -1) throw new Error('KNOWLEDGE_CONTEXT not found in Input Context section');
     const surroundingText = inputContextSection.slice(
       Math.max(0, knowledgeIdx - 20),
       Math.min(inputContextSection.length, knowledgeIdx + 120)
@@ -322,10 +378,10 @@ describe('resolver.md — Input Context and Apply Knowledge section', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cross-cutting: all three surfaces reference KNOWLEDGE_CONTEXT
+// Cross-cutting: all four surfaces reference KNOWLEDGE_CONTEXT
 // ---------------------------------------------------------------------------
 
-describe('cross-cutting — KNOWLEDGE_CONTEXT on all three surfaces', () => {
+describe('cross-cutting — KNOWLEDGE_CONTEXT on all four surfaces', () => {
   it('resolve.md contains KNOWLEDGE_CONTEXT', () => {
     const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
     expect(content).toContain('KNOWLEDGE_CONTEXT');

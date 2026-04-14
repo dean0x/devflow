@@ -123,17 +123,31 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
   description: 'Remove all pre-v2 seeded knowledge entries (entries lacking self-learning: source marker)',
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
-    const { purgeAllPreV2Knowledge } = await import('./legacy-knowledge-purge.js');
-    const result = await purgeAllPreV2Knowledge({ memoryDir: ctx.memoryDir });
-    return {
-      infos: result.removed > 0
-        ? [`Purged ${result.removed} pre-v2 knowledge entry(ies) in ${result.files.length} file(s)`]
-        : [],
-      warnings: [],
-    };
+    const { purgeAllPreV2KnowledgeEntries } = await import('./legacy-knowledge-purge.js');
+    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir: ctx.memoryDir });
+    const infos = result.removed > 0
+      ? [`Purged ${result.removed} pre-v2 knowledge entry(ies) in ${result.files.length} file(s)`]
+      : [];
+    return { infos, warnings: [] };
   },
 };
 
+/**
+ * Migration ID suffix conventions:
+ *
+ * - `-vN`        A revision of a migration. `-v2`, `-v3`, etc. indicate
+ *                successive sweeps targeting the same data set (e.g. widening
+ *                the purge scope). Each revision runs independently so partially-
+ *                migrated machines get the incremental cleanup on next init.
+ *
+ * - `-vN-{tag}`  A named variant within a revision. The tag distinguishes
+ *                migrations that operate on the same version epoch but target
+ *                different data (e.g. `shadow-overrides-v2-names` vs a
+ *                hypothetical `shadow-overrides-v2-config`).
+ *
+ * All IDs are append-only — never rename an existing ID or already-applied
+ * machines will re-run the migration.
+ */
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,

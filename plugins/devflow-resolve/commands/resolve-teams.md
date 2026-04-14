@@ -257,7 +257,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel]
-│  └─ Step 0c: Target latest review directory per worktree
+│  ├─ Step 0c: Target latest review directory per worktree
+│  └─ Step 0d: Load project knowledge → KNOWLEDGE_CONTEXT
 │
 ├─ Phase 1: Parse issues from TARGET_DIR
 │  └─ Extract ALL issues (including Suggestions, exclude summaries)

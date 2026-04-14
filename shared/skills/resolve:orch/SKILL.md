@@ -30,6 +30,9 @@ If no unresolved review found: halt with "No unresolved review found. Run a revi
 
 Extract branch slug from the directory path.
 
+<!-- Phase 1.5 rather than Step 0d: ambient mode has no Phase 0 (no worktree
+     discovery, no pre-flight git check, no TARGET_DIR selection — those are
+     handled by Phase 1 here). Same content as resolve.md Step 0d. -->
 ## Phase 1.5: Load Project Knowledge
 
 Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` (skip silently if absent). Strip any `## ADR-NNN:` or `## PF-NNN:` section whose body contains `- **Status**: Deprecated` or `- **Status**: Superseded`. Pass the filtered concatenated content as `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4, or `(none)` if both files are empty or absent. Prior decisions constrain how fixes are framed; known pitfalls flag risks reviewers may have missed.
