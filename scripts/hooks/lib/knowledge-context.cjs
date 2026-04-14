@@ -85,8 +85,7 @@ function loadKnowledgeContext(worktreePath, opts = {}) {
   }
 
   if (parts.length === 0) return '(none)';
-  const combined = parts.join('\n\n').trim();
-  return combined || '(none)';
+  return parts.join('\n\n').trim();
 }
 
 // CLI interface: invoked by orchestrators as
