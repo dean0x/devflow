@@ -98,6 +98,51 @@ The reconciler detects and heals these orphans automatically:
 
 The `healed` field is present in all three reconcile-manifest output shapes (main path and both early-return paths) and is backward-compatible — callers that discard the output are unaffected.
 
+## Knowledge Index + On-Demand Read Pattern
+
+Knowledge consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
+
+### Step 1: Load compact index at orchestrator
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "<worktree>")
+```
+
+This produces a ~250-token index listing each active entry's ID, truncated title, status, and area:
+
+```
+Decisions (2):
+  ADR-001  Use Result types instead of thrown errors  [Active]
+  ...
+
+Pitfalls (3):
+  PF-004  Background hook scripts become god scripts  [Active] — scripts/hooks/
+  ...
+
+ADR-NNN entries live in {worktree}/.memory/knowledge/decisions.md
+PF-NNN  entries live in {worktree}/.memory/knowledge/pitfalls.md
+Read the relevant file and locate the matching heading for the full body.
+```
+
+### Step 2: Agent reads full body on demand
+
+Agents that receive `KNOWLEDGE_CONTEXT` follow the `devflow:apply-knowledge` skill algorithm:
+
+1. Scan the index and identify plausibly-relevant entries for the current task
+2. Use `Read` on the knowledge file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading
+3. Read the full entry body
+4. Cite `applies ADR-NNN` / `avoids PF-NNN` inline — verbatim IDs only, no fabrication
+
+### Commands using this pattern
+
+| Command / Orch | Agents that consume |
+|----------------|---------------------|
+| `/resolve`, `resolve:orch` | Resolver |
+| `/plan`, `plan:orch` | Designer, Explore |
+| `/self-review` | Simplifier, Scrutinizer |
+| `/code-review`, `review:orch` | Reviewer |
+| `debug:orch` | Orchestrator-local (not fanned to Explore) |
+
 ## CLI Commands
 
 ```bash

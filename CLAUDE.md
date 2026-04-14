@@ -142,12 +142,12 @@ Working memory files live in a dedicated `.memory/` directory:
 ## Agent & Command Roster
 
 **Orchestration commands** (spawn agents, never do agent work in main session):
-- `/plan` — Skimmer + Explore + Designer + Synthesizer + Plan + Designer → design artifact
+- `/plan` — Skimmer + Explore + Designer + Synthesizer + Plan + Designer → design artifact; consumes knowledge via index + on-demand Read via `devflow:apply-knowledge`
 - `/implement` — Git + Coder + Validator + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
-- `/code-review` — 7-11 Reviewer agents + Git + Synthesizer
-- `/resolve` — N Resolver agents + Git; reads `.memory/knowledge/decisions.md` + `pitfalls.md` per worktree (filtering Deprecated/Superseded sections), passes filtered content to each Resolver as `KNOWLEDGE_CONTEXT`, and aggregates cited ADR-NNN/PF-NNN IDs into a `## Knowledge Citations` section at the top of `resolution-summary.md`
+- `/code-review` — 7-11 Reviewer agents + Git + Synthesizer; consumes knowledge via index + on-demand Read via `devflow:apply-knowledge`
+- `/resolve` — N Resolver agents + Git; loads compact knowledge index (`knowledge-context.cjs index`) per worktree and passes it as `KNOWLEDGE_CONTEXT` to each Resolver; Resolvers use `devflow:apply-knowledge` to Read full bodies on demand; aggregates cited ADR-NNN/PF-NNN IDs into a `## Knowledge Citations` section at the top of `resolution-summary.md`
 - `/debug` — Agent Teams competing hypotheses
-- `/self-review` — Simplifier then Scrutinizer (sequential)
+- `/self-review` — Simplifier then Scrutinizer (sequential); consumes knowledge via index + on-demand Read via `devflow:apply-knowledge`
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
 **Shared agents** (12): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer
