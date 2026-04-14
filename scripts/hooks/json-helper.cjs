@@ -219,6 +219,35 @@ function countActiveHeadings(content, entryType) {
 }
 
 /**
+ * Scan decisions.md and pitfalls.md for anchors (ADR-NNN / PF-NNN) that are present in
+ * the files but not tracked in the manifest. Returns an array of unmanaged anchor descriptors.
+ * Used by reconcile-manifest to self-heal render-ready crash-window duplicates.
+ *
+ * @param {string} memoryDir - Path to .memory dir
+ * @param {Set<string>} managedAnchors - Anchor IDs already tracked in the manifest
+ * @returns {Array<{anchorId: string, type: string, path: string, headingText: string}>}
+ */
+function findUnmanagedAnchors(memoryDir, managedAnchors) {
+  // Use only literal (non-dynamic) regexes to avoid ReDoS surface on tainted data.
+  // prefix values are hardcoded: 'ADR' for decisions, 'PF' for pitfalls.
+  const result = [];
+  const files = [
+    { file: path.join(memoryDir, 'knowledge', 'decisions.md'), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
+    { file: path.join(memoryDir, 'knowledge', 'pitfalls.md'),  type: 'pitfall',  re: /^## (PF-\d+):\s*([^\n]+)/gm },
+  ];
+  for (const { file, type, re } of files) {
+    if (!fs.existsSync(file)) continue;
+    const content = fs.readFileSync(file, 'utf8');
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      if (managedAnchors.has(m[1])) continue;
+      result.push({ anchorId: m[1], type, path: file, headingText: m[2].trim() });
+    }
+  }
+  return result;
+}
+
+/**
  * Read .knowledge-usage.json from .memory dir. Returns {version, entries} or empty default.
  * @param {string} memoryDir
  * @returns {{version: number, entries: Object}}
@@ -1357,13 +1386,13 @@ try {
       const lockDir = path.join(cwd, '.memory', '.learning.lock');
 
       if (!fs.existsSync(manifestPath) || !fs.existsSync(logFile)) {
-        console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0 }));
+        console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0, healed: 0 }));
         break;
       }
 
       if (!acquireMkdirLock(lockDir, 15000, 60000)) {
         learningLog('reconcile-manifest: timeout acquiring lock, skipping');
-        console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0 }));
+        console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0, healed: 0 }));
         break;
       }
 
@@ -1373,14 +1402,14 @@ try {
           manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
           if (!manifest.entries) manifest.entries = [];
         } catch {
-          console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0 }));
+          console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0, healed: 0 }));
           break;
         }
 
         const logEntries = parseJsonl(logFile);
         const logMap = new Map(logEntries.map(e => [e.id, e]));
 
-        let deletions = 0, edits = 0, unchanged = 0;
+        let deletions = 0, edits = 0, unchanged = 0, healed = 0;
         const keptEntries = [];
 
         for (const entry of manifest.entries) {
@@ -1444,12 +1473,47 @@ try {
           keptEntries.push(entry);
         }
 
+        // --- Heal block: recover from render-ready crash-window duplicates (Fix 2) ---
+        // If render-ready wrote the knowledge file (line ~1305) but crashed before updating
+        // the log (line ~1337) and manifest (line ~1340), the anchor exists in the file
+        // but the log still shows status=ready and the manifest has no entry.
+        // We detect this by scanning knowledge files for anchors not tracked in the manifest,
+        // then matching them against ready log observations with a matching normalised pattern.
+        // DESIGN: D-D — skip silently when zero or multiple log entries match (ambiguity guard).
+        const memoryDir = path.join(cwd, '.memory');
+        const managedAnchors = new Set(keptEntries.filter(e => e.anchorId).map(e => e.anchorId));
+        const unmanaged = findUnmanagedAnchors(memoryDir, managedAnchors);
+        for (const u of unmanaged) {
+          const headingNorm = normalizeForDedup(u.headingText);
+          const candidates = Array.from(logMap.values()).filter(o =>
+            o.type === u.type && o.status === 'ready' &&
+            normalizeForDedup(o.pattern) === headingNorm,
+          );
+          if (candidates.length !== 1) continue; // 0 = user-curated, >1 = ambiguous (D-D: silent)
+          const obs = candidates[0];
+          obs.status = 'created';
+          obs.artifact_path = `${u.path}#${u.anchorId}`;
+          const fileContent = fs.readFileSync(u.path, 'utf8');
+          const safeAnchorId = u.anchorId.replace(/[^A-Z0-9-]/gi, '');
+          const sectionRe = new RegExp(`(##\\s+${safeAnchorId}[\\s\\S]*?)(?=\\n##\\s+(?:ADR|PF)-|\\s*$)`);
+          const section = fileContent.match(sectionRe);
+          keptEntries.push({
+            observationId: obs.id, type: u.type, path: u.path,
+            contentHash: contentHash(section ? section[1] : u.headingText),
+            renderedAt: new Date().toISOString(), anchorId: u.anchorId,
+          });
+          registerUsageEntry(memoryDir, u.anchorId);
+          healed++;
+          learningLog(`reconcile: healed ${obs.id} → ${u.anchorId}`);
+        }
+        // --- End heal block ---
+
         // Atomic writes
         writeJsonlAtomic(logFile, Array.from(logMap.values()));
         manifest.entries = keptEntries;
         writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2));
 
-        console.log(JSON.stringify({ deletions, edits, unchanged }));
+        console.log(JSON.stringify({ deletions, edits, unchanged, healed }));
       } finally {
         releaseLock(lockDir);
       }
