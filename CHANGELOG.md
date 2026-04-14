@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Self-learning system: detects repeated workflows and creates slash commands/skills automatically
 - **Learning**: `devflow learn --purge` command to remove invalid entries from learning log
 - **Learning**: debug logging mode (`devflow learn --configure`) — logs to `~/.devflow/logs/`
+- **`/resolve` project knowledge integration**: orchestrator reads `.memory/knowledge/decisions.md` + `pitfalls.md` per worktree (filtering Deprecated/Superseded sections) and passes filtered content as `KNOWLEDGE_CONTEXT` to each parallel Resolver. Resolvers cite matching ADR-NNN/PF-NNN IDs inline in Reasoning columns with an explicit hallucination guard (verbatim-only, no inference). Phase 5 extracts citations; Phase 8 aggregates them into a `## Knowledge Citations` bullet list at the top of `resolution-summary.md`. Applied across base command (`resolve.md`), Teams variant (`resolve-teams.md`), ambient orchestration skill (`resolve:orch`), and shared Resolver agent (`resolver.md`).
 
 ### Changed
 - **Learning**: Moved from Stop → SessionEnd hook with 3-session batching (adaptive: 5 at 15+ observations)
@@ -26,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Learning**: Race condition in batch file handoff (atomic `mv` replaces `cp`+`rm`)
 - **Learning**: `--enable` now auto-upgrades legacy Stop hook to SessionEnd
 - **Learning**: `--status` detects legacy hook and shows upgrade instructions
+- **Self-learning reconciler self-heal**: `reconcile-manifest` now recovers from `render-ready` crash-window states. When a knowledge file contains an ADR/PF anchor absent from the manifest, and exactly one `status: 'ready'` log observation matches by normalized pattern, the observation is upgraded to `status: 'created'` and the manifest entry is reconstructed. Zero matches are treated as user-curated (left alone); multiple matches are silently skipped as ambiguous. Adds `healed` counter to all reconcile-manifest output shapes. Heal is gated by the `- **Source**: self-learning:` marker on the knowledge-file section, preventing false-positive heals against pre-v2 seeded entries.
+- **Legacy knowledge purge v3 migration** (`purge-legacy-knowledge-v3`): sweeps all remaining pre-v2 seeded knowledge entries using the `- **Source**: self-learning:` format discriminator. Any ADR/PF section lacking this marker is removed. Replaces the v2 hardcoded allow-list approach with a format-based approach that catches entries the v2 migration missed. Self-learning-generated entries and user-opted-in entries (entries containing the source marker) survive.
 
 ---
 
@@ -36,9 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`devflow:explore`** orchestration skill for ambient EXPLORE intent
 - **TDD enforcement**: `test-driven-development` skill auto-loads for IMPLEMENT, PLAN, and CODER intents
 - **Stale skill name detector** in tests covers all renamed/deleted skills
-- **`/resolve` project knowledge integration**: orchestrator reads `.memory/knowledge/decisions.md` + `pitfalls.md` per worktree (filtering Deprecated/Superseded sections) and passes filtered content as `KNOWLEDGE_CONTEXT` to each parallel Resolver. Resolvers cite matching ADR-NNN/PF-NNN IDs inline in Reasoning columns with an explicit hallucination guard (verbatim-only, no inference). Phase 5 extracts citations; Phase 8 aggregates them into a `## Knowledge Citations` bullet list at the top of `resolution-summary.md`. Applied across base command (`resolve.md`), Teams variant (`resolve-teams.md`), ambient orchestration skill (`resolve:orch`), and shared Resolver agent (`resolver.md`).
-- **Self-learning reconciler self-heal**: `reconcile-manifest` now recovers from `render-ready` crash-window states. When a knowledge file contains an ADR/PF anchor absent from the manifest, and exactly one `status: 'ready'` log observation matches by normalized pattern, the observation is upgraded to `status: 'created'` and the manifest entry is reconstructed. Zero matches are treated as user-curated (left alone); multiple matches are silently skipped as ambiguous. Adds `healed` counter to all reconcile-manifest output shapes.
-- **Legacy knowledge purge v3 migration** (`purge-legacy-knowledge-v3`): sweeps all remaining pre-v2 seeded knowledge entries using the `- **Source**: self-learning:` format discriminator. Any ADR/PF section lacking this marker is removed. Replaces the v2 hardcoded allow-list approach with a format-based approach that catches entries the v2 migration missed. Self-learning-generated entries and user-opted-in entries (entries containing the source marker) survive.
 
 ### Changed
 - **Orchestration skills**: 7 skills renamed with `:orch` suffix — `implement:orch`, `explore:orch`, `debug:orch`, `plan:orch`, `review:orch`, `resolve:orch`, `pipeline:orch`
