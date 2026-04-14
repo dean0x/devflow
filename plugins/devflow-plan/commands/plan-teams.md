@@ -72,7 +72,13 @@ Run rskim on source directories (NOT repo root) to identify:
 Return codebase context for requirements analysis."
 ```
 
-While Skimmer runs, read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Pass Skimmer context and project knowledge to all subsequent agents and teammates.
+While Skimmer runs, run:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+```
+
+This produces a compact index (~250 tokens) of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 #### Phase 3: Exploration Team
 

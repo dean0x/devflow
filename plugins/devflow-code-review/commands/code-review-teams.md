@@ -82,6 +82,16 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 **Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, ui-design, go, java, python, rust) require their optional skill plugin to be installed. Before adding a conditional perspective, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that perspective** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
+### Phase 1b: Load Knowledge Index
+
+Load the knowledge index for the current worktree before spawning the review team:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index (~250 tokens) of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
 ### Phase 2: Spawn Review Team
 
 **Per worktree**, create an agent team for adversarial review. Always include 4 core perspectives; conditionally add more based on Phase 1 analysis.
@@ -116,9 +126,10 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
+    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
     1. Read your skill: `Read ~/.claude/skills/devflow:security/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: injection, auth bypass, crypto misuse, OWASP vulnerabilities
@@ -131,9 +142,10 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
+    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
     1. Read your skill: `Read ~/.claude/skills/devflow:architecture/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: SOLID violations, coupling, layering issues, modularity problems
@@ -146,9 +158,10 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
+    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
     1. Read your skill: `Read ~/.claude/skills/devflow:performance/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: N+1 queries, memory leaks, algorithm issues, I/O bottlenecks
@@ -161,13 +174,14 @@ Spawn review teammates with self-contained prompts:
   Prompt: |
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
+    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
     1. Read your skills:
        - `Read ~/.claude/skills/devflow:complexity/SKILL.md`
        - `Read ~/.claude/skills/devflow:consistency/SKILL.md`
        - `Read ~/.claude/skills/devflow:testing/SKILL.md`
        - `Read ~/.claude/skills/devflow:regression/SKILL.md`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Read `.memory/knowledge/pitfalls.md` if it exists. Check for known pitfall patterns in the diff.
+    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from devflow:review-methodology
     6. Focus: complexity, test gaps, pattern violations, regressions, naming

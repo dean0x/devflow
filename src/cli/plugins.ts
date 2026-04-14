@@ -47,7 +47,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
     agents: [],
-    skills: ['software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
+    skills: ['apply-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
     name: 'devflow-plan',
@@ -391,6 +391,8 @@ export const LEGACY_SKILL_NAMES: string[] = [
   // v2.x plan plugin: new skills bare names for pre-namespace installs
   'gap-analysis',
   'design-review',
+  // v2.x knowledge index pattern: new shared skill bare name for pre-namespace installs
+  'apply-knowledge',
 ];
 
 /**

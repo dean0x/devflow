@@ -24,6 +24,16 @@ This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Exclude
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
+## Phase 0: Load Knowledge Index (Orchestrator-Local)
+
+Before hypothesizing, load the knowledge index:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+```
+
+The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 1) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the orchestrator, not in the investigation workers.
+
 ## Phase 1: Hypothesize
 
 Analyze the bug description, error messages, and conversation context. Generate 3-5 hypotheses that are:

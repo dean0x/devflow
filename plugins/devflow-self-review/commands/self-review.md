@@ -21,7 +21,11 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
-5. Read `.memory/knowledge/pitfalls.md` and `.memory/knowledge/decisions.md`. Pass as KNOWLEDGE_CONTEXT to Simplifier and Scrutinizer — known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency.
+5. Load knowledge index:
+   ```bash
+   KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+   ```
+   Pass `KNOWLEDGE_CONTEXT` to Simplifier and Scrutinizer — the compact index lists active ADR/PF entries; agents use `devflow:apply-knowledge` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency.
 
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional)
 
@@ -99,7 +103,7 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
-│  └─ Read project knowledge (decisions.md + pitfalls.md)
+│  └─ Load knowledge index (knowledge-context.cjs index)
 │
 ├─ Phase 1: Simplifier
 │  └─ Code refinement (commits directly)

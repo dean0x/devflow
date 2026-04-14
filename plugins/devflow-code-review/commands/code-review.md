@@ -89,6 +89,16 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 **Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, ui-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
+### Phase 1b: Load Knowledge Index
+
+While file analysis runs (or just before spawning reviewers), load the knowledge index for the current worktree:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index (~250 tokens) of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
 ### Phase 2: Run Reviews (Parallel)
 
 Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add more based on changed file types:
@@ -122,6 +132,8 @@ Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
+KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
+Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand.
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 

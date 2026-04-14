@@ -62,7 +62,13 @@ Set `TARGET_DIR` to the selected review directory path.
 
 #### Step 0d: Load Project Knowledge
 
-For each worktree, read `{worktree}/.memory/knowledge/decisions.md` and `{worktree}/.memory/knowledge/pitfalls.md` (skip silently if absent). Strip any `## ADR-NNN:` or `## PF-NNN:` section whose body contains `- **Status**: Deprecated` or `- **Status**: Superseded`. Pass the filtered concatenated content as `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4, or `(none)` if both files are empty or absent. Prior decisions constrain how fixes are framed; known pitfalls flag risks reviewers may have missed.
+For each worktree, run:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "<worktree>")
+```
+
+This produces a compact index (~250 tokens) of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 ### Phase 1: Parse Issues
 
