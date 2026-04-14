@@ -298,3 +298,300 @@ describe('reconcile-manifest — stale manifest entries', () => {
     expect(result.unchanged).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Self-healing reconciler tests (Fix 2)
+// Validates that reconcile-manifest heals render-ready crash-window duplicates:
+// anchors present in knowledge files but missing from manifest + log shows status=ready
+// ---------------------------------------------------------------------------
+
+describe('reconcile-manifest — self-heal (Fix 2)', () => {
+  let tmpDir: string;
+
+  // djb2 hash — matches contentHash() in json-helper.cjs
+  function djb2(s: string): string {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) {
+      h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+    }
+    return h.toString(16);
+  }
+
+  // Build a decisions.md with the given ADR sections
+  function buildDecisionsFile(sections: Array<{ anchorId: string; heading: string; body: string }>): string {
+    const parts = sections.map(s =>
+      `## ${s.anchorId}: ${s.heading}\n\n${s.body}\n`
+    );
+    return `<!-- TL;DR: ${sections.length} decisions. -->\n# Decisions\n\n${parts.join('\n')}`;
+  }
+
+  // Build a pitfalls.md with the given PF sections
+  function buildPitfallsFile(sections: Array<{ anchorId: string; heading: string; body: string }>): string {
+    const parts = sections.map(s =>
+      `## ${s.anchorId}: ${s.heading}\n\n${s.body}\n`
+    );
+    return `<!-- TL;DR: ${sections.length} pitfalls. -->\n# Pitfalls\n\n${parts.join('\n')}`;
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile-heal-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('heal: anchor in file + ready log entry + missing manifest → status=created, manifest reconstructed', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+
+    // decisions.md has ADR-001 written (crash window: file written, log not updated yet)
+    const adrContent = buildDecisionsFile([{
+      anchorId: 'ADR-001',
+      heading: 'use result types everywhere',
+      body: '- **Status**: Accepted\n- **Source**: self-learning:obs_heal_001',
+    }]);
+    fs.writeFileSync(decisionFile, adrContent);
+
+    // Manifest is empty (crash happened before manifest write)
+    writeManifest(manifestPath, []);
+
+    // Log still shows status=ready (crash happened before log write)
+    const obs: LogEntry = {
+      ...baseEntry('obs_heal_001', 'decision', 'ready'),
+      pattern: 'use result types everywhere',
+      confidence: 0.90,
+    };
+    writeLog(logPath, [obs]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    // healed counter must be present and non-zero
+    expect(result.healed).toBe(1);
+
+    // Log entry upgraded to created
+    const entries = readLog(logPath);
+    const healed = entries.find(e => e.id === 'obs_heal_001');
+    expect(healed).toBeDefined();
+    expect(healed!.status).toBe('created');
+    expect(healed!.artifact_path).toContain('ADR-001');
+
+    // Manifest now has an entry for this obs
+    const manifest = readManifest(manifestPath);
+    const manifestEntry = manifest.entries.find(e => e.observationId === 'obs_heal_001');
+    expect(manifestEntry).toBeDefined();
+    expect(manifestEntry!.anchorId).toBe('ADR-001');
+    expect(manifestEntry!.path).toBe(decisionFile);
+    expect(manifestEntry!.contentHash).toBeTruthy();
+  });
+
+  it('heal: anchor in file, no matching log entry → no-op (user-curated entry)', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+
+    // decisions.md has ADR-001 but NO matching log entry (user manually added it)
+    const adrContent = buildDecisionsFile([{
+      anchorId: 'ADR-001',
+      heading: 'manual decision',
+      body: '- **Status**: Accepted',
+    }]);
+    fs.writeFileSync(decisionFile, adrContent);
+
+    writeManifest(manifestPath, []);
+
+    // Log has a different obs that doesn't match the heading
+    const obs: LogEntry = {
+      ...baseEntry('obs_other_001', 'decision', 'ready'),
+      pattern: 'completely different pattern',
+    };
+    writeLog(logPath, [obs]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    expect(result.healed).toBe(0);
+
+    // The manifest should remain empty
+    const manifest = readManifest(manifestPath);
+    expect(manifest.entries.length).toBe(0);
+  });
+
+  it('heal: anchor heading does not match any ready log pattern → no-op', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+
+    const adrContent = buildDecisionsFile([{
+      anchorId: 'ADR-001',
+      heading: 'use dependency injection',
+      body: '- **Status**: Accepted\n- **Source**: self-learning:obs_heal_002',
+    }]);
+    fs.writeFileSync(decisionFile, adrContent);
+
+    writeManifest(manifestPath, []);
+
+    // Pattern in log uses a different heading text → no match after normalizeForDedup
+    const obs: LogEntry = {
+      ...baseEntry('obs_heal_002', 'decision', 'ready'),
+      pattern: 'prefer factory methods over constructors',
+    };
+    writeLog(logPath, [obs]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    expect(result.healed).toBe(0);
+    const manifest = readManifest(manifestPath);
+    expect(manifest.entries.length).toBe(0);
+  });
+
+  it('heal: multiple log entries match the same anchor heading → no-op (D-D ambiguity guard)', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+
+    const heading = 'use result types everywhere';
+    const adrContent = buildDecisionsFile([{
+      anchorId: 'ADR-001',
+      heading,
+      body: '- **Status**: Accepted',
+    }]);
+    fs.writeFileSync(decisionFile, adrContent);
+
+    writeManifest(manifestPath, []);
+
+    // Two log entries with the same normalised pattern — ambiguous, must skip
+    const obs1: LogEntry = { ...baseEntry('obs_ambig_001', 'decision', 'ready'), pattern: heading };
+    const obs2: LogEntry = { ...baseEntry('obs_ambig_002', 'decision', 'ready'), pattern: heading };
+    writeLog(logPath, [obs1, obs2]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    expect(result.healed).toBe(0);
+    // Both log entries remain 'ready'
+    const entries = readLog(logPath);
+    expect(entries.every(e => e.status === 'ready')).toBe(true);
+  });
+
+  it('heal: pitfalls.md scanned with PF- prefix', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const pitfallFile = path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md');
+
+    const pfContent = buildPitfallsFile([{
+      anchorId: 'PF-001',
+      heading: 'avoid mutation in reducers',
+      body: '- **Area**: State management\n- **Issue**: Mutation causes silent bugs\n- **Source**: self-learning:obs_pf_001',
+    }]);
+    fs.writeFileSync(pitfallFile, pfContent);
+
+    writeManifest(manifestPath, []);
+
+    const obs: LogEntry = {
+      ...baseEntry('obs_pf_001', 'pitfall', 'ready'),
+      pattern: 'avoid mutation in reducers',
+    };
+    writeLog(logPath, [obs]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    expect(result.healed).toBe(1);
+
+    const entries = readLog(logPath);
+    const healed = entries.find(e => e.id === 'obs_pf_001');
+    expect(healed!.status).toBe('created');
+    expect(healed!.artifact_path).toContain('PF-001');
+
+    const manifest = readManifest(manifestPath);
+    const mEntry = manifest.entries.find(e => e.observationId === 'obs_pf_001');
+    expect(mEntry!.anchorId).toBe('PF-001');
+    expect(mEntry!.path).toBe(pitfallFile);
+  });
+
+  it('heal: multiple anchors healed in a single reconcile pass', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const pitfallFile = path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md');
+
+    // decisions.md has ADR-001 and ADR-002; pitfalls.md has PF-001
+    const adrContent = buildDecisionsFile([
+      { anchorId: 'ADR-001', heading: 'use immutable data structures', body: '- **Status**: Accepted\n- **Source**: self-learning:obs_multi_001' },
+      { anchorId: 'ADR-002', heading: 'inject dependencies explicitly', body: '- **Status**: Accepted\n- **Source**: self-learning:obs_multi_002' },
+    ]);
+    fs.writeFileSync(decisionFile, adrContent);
+
+    const pfContent = buildPitfallsFile([
+      { anchorId: 'PF-001', heading: 'avoid global state mutations', body: '- **Area**: State\n- **Issue**: Silent bugs\n- **Source**: self-learning:obs_multi_003' },
+    ]);
+    fs.writeFileSync(pitfallFile, pfContent);
+
+    writeManifest(manifestPath, []);
+
+    const obs1: LogEntry = { ...baseEntry('obs_multi_001', 'decision', 'ready'), pattern: 'use immutable data structures' };
+    const obs2: LogEntry = { ...baseEntry('obs_multi_002', 'decision', 'ready'), pattern: 'inject dependencies explicitly' };
+    const obs3: LogEntry = { ...baseEntry('obs_multi_003', 'pitfall', 'ready'), pattern: 'avoid global state mutations' };
+    writeLog(logPath, [obs1, obs2, obs3]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    expect(result.healed).toBe(3);
+
+    const manifest = readManifest(manifestPath);
+    expect(manifest.entries.length).toBe(3);
+
+    const anchorIds = manifest.entries.map(e => e.anchorId);
+    expect(anchorIds).toContain('ADR-001');
+    expect(anchorIds).toContain('ADR-002');
+    expect(anchorIds).toContain('PF-001');
+  });
+
+  it('heal: registerUsageEntry called — usage file has entry for healed anchorId', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+
+    const adrContent = buildDecisionsFile([{
+      anchorId: 'ADR-001',
+      heading: 'use result types everywhere',
+      body: '- **Status**: Accepted\n- **Source**: self-learning:obs_usage_001',
+    }]);
+    fs.writeFileSync(decisionFile, adrContent);
+
+    writeManifest(manifestPath, []);
+
+    const obs: LogEntry = {
+      ...baseEntry('obs_usage_001', 'decision', 'ready'),
+      pattern: 'use result types everywhere',
+    };
+    writeLog(logPath, [obs]);
+
+    runHelper(`reconcile-manifest "${tmpDir}"`);
+
+    // Verify usage file was written with ADR-001 entry
+    const usagePath = path.join(tmpDir, '.memory', '.knowledge-usage.json');
+    expect(fs.existsSync(usagePath)).toBe(true);
+    const usageData = JSON.parse(fs.readFileSync(usagePath, 'utf8'));
+    expect(usageData.entries['ADR-001']).toBeDefined();
+    expect(usageData.entries['ADR-001'].cites).toBe(0);
+  });
+
+  it('result JSON always includes healed counter — zero case (no anchors to heal)', () => {
+    const { manifestPath, logPath } = setup(tmpDir);
+    const filePath = path.join(tmpDir, 'my-workflow.md');
+    fs.writeFileSync(filePath, '# Workflow\n');
+
+    // Normal workflow entry — already tracked in manifest and log
+    writeManifest(manifestPath, [{
+      observationId: 'obs_zero_heal',
+      type: 'workflow',
+      path: filePath,
+      contentHash: djb2('# Workflow\n'),
+      renderedAt: NOW,
+    }]);
+    writeLog(logPath, [{ ...baseEntry('obs_zero_heal', 'workflow', 'created') }]);
+
+    const result = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
+
+    expect(result).toHaveProperty('healed');
+    expect(result.healed).toBe(0);
+    // Other fields still present
+    expect(result).toHaveProperty('deletions');
+    expect(result).toHaveProperty('edits');
+    expect(result).toHaveProperty('unchanged');
+  });
+});
