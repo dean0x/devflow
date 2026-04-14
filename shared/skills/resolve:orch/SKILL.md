@@ -64,7 +64,7 @@ Each receives:
 - **ISSUES**: Array of issues in the batch
 - **BRANCH**: Branch slug
 - **BATCH_ID**: Identifier for this batch
-- **KNOWLEDGE_CONTEXT**: Filtered content from Phase 1.5 (or `(none)`)
+- **KNOWLEDGE_CONTEXT**: Knowledge index from Phase 1.5 (or `(none)`). Resolvers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand.
 
 Resolvers follow a 3-tier risk approach:
 - **Standard fixes**: Applied directly

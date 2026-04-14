@@ -354,7 +354,7 @@ Display completion summary:
 │  │  └─ AskUserQuestion: Validate interpretation
 │  ├─ Phase 2: Orient + Load Knowledge
 │  │  ├─ Skimmer agent (codebase context)
-│  │  └─ Read decisions.md + pitfalls.md
+│  │  └─ Load knowledge index (knowledge-context.cjs index)
 │  ├─ Phase 3: Explore Requirements (PARALLEL)
 │  │  ├─ Explore: User perspective
 │  │  ├─ Explore: Similar features

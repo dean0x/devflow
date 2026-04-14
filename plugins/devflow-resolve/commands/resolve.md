@@ -126,8 +126,8 @@ Agent(subagent_type="Resolver"):
 BRANCH: {branch-slug}
 BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-KNOWLEDGE_CONTEXT: {filtered decisions.md + pitfalls.md content, or (none)}
-Validate, decide FIX vs TECH_DEBT, implement fixes"
+KNOWLEDGE_CONTEXT: {knowledge index from Step 0d, or (none)}
+Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-knowledge to Read full ADR/PF bodies on demand."
 ```
 
 > Resolvers follow a 3-tier risk approach:

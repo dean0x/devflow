@@ -36,9 +36,9 @@ Spawn Simplifier agent to refine code for clarity and consistency:
 Agent(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
+KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
 Simplify and refine the code for clarity and consistency while preserving functionality.
-If knowledge context is provided, verify no known pitfall patterns are being reintroduced."
+Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none)."
 
 **Wait for completion.** Simplifier commits changes directly.
 
@@ -49,9 +49,9 @@ Spawn Scrutinizer agent for quality evaluation and fixing:
 Agent(subagent_type="Scrutinizer", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
+KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
-If knowledge context is provided, check whether any known pitfall patterns are being reintroduced and verify architectural consistency with prior decisions."
+Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none)."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED), changes_made (bool)
 

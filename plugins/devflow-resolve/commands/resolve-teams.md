@@ -126,8 +126,9 @@ Each resolver teammate receives the following instructions (only the issue list 
 
     You are resolving review issues on branch {branch} (PR #{pr_number}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    KNOWLEDGE_CONTEXT: {filtered decisions.md + pitfalls.md content, or (none)}
+    KNOWLEDGE_CONTEXT: {knowledge index from Step 0d, or (none)}
     1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
+       Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
     2. Your issues to resolve:
        {BATCH_ISSUES}
     3. For each issue:
