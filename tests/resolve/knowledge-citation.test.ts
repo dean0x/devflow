@@ -35,28 +35,22 @@ function loadFile(relPath: string): string {
  * heading or end of string.
  */
 function filterKnowledgeContext(raw: string): string {
-  // Match each ADR-NNN or PF-NNN section including its body up to the next ## or EOF
-  const sectionRe = /^(## (?:ADR|PF)-\d+:[^\n]*\n)([\s\S]*?)(?=^## |\z)/gm;
-  let result = raw;
-  // Work backwards through matches so slice indices stay valid
-  const matches: Array<{ start: number; end: number; body: string }> = [];
-  let m: RegExpExecArray | null;
-  // We need full match positions; rebuild with index tracking
-  const fullRe = /^## (?:ADR|PF)-\d+:[^\n]*\n[\s\S]*?(?=\n## |\n*$)/gm;
-  while ((m = fullRe.exec(raw)) !== null) {
-    matches.push({ start: m.index, end: m.index + m[0].length, body: m[0] });
-  }
-  // Filter out deprecated/superseded sections (process in reverse for stable indices)
-  const toRemove = matches
-    .filter(({ body }) =>
-      /- \*\*Status\*\*: Deprecated/.test(body) ||
-      /- \*\*Status\*\*: Superseded/.test(body)
-    )
-    .reverse();
-  for (const { start, end } of toRemove) {
-    result = result.slice(0, start) + result.slice(end);
-  }
-  return result.trim();
+  if (!raw.trim()) return '';
+  // Split on ADR-NNN / PF-NNN section boundaries using a lookahead so each
+  // section includes its own heading. Non-knowledge content before the first
+  // section header (e.g., a file-level title) is placed in sections[0] and
+  // always preserved.
+  const sections = raw.split(/(?=^## (?:ADR|PF)-\d+:)/m);
+  const kept = sections.filter(section => {
+    const isKnowledgeSection = /^## (?:ADR|PF)-\d+:/m.test(section);
+    if (!isKnowledgeSection) return true; // keep preamble / non-knowledge content
+    // Drop sections explicitly marked Deprecated or Superseded
+    return (
+      !/- \*\*Status\*\*: Deprecated/.test(section) &&
+      !/- \*\*Status\*\*: Superseded/.test(section)
+    );
+  });
+  return kept.join('').trim();
 }
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ You receive from orchestrator:
 - **ISSUES**: Array of issues to resolve, each with `id`, `file`, `line`, `severity`, `type`, `description`, `suggested_fix`
 - **BRANCH**: Current branch slug
 - **BATCH_ID**: Identifier for this batch of issues
+- **KNOWLEDGE_CONTEXT** (optional): Filtered content from `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` for this worktree. `(none)` when both files are absent or empty.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
@@ -30,13 +31,15 @@ You receive from orchestrator:
    - Reviewer misunderstood context
    - Code is intentional (e.g., magic number with comment, deliberate complexity for performance, placeholder for planned feature)
 
-3. **Assess risk for valid issues**: Apply risk criteria to decide FIX vs TECH_DEBT.
+3. **Apply Knowledge**: See [Apply Knowledge](#apply-knowledge) section below.
 
-4. **Implement fixes**: Make changes following existing patterns. One logical change per commit.
+4. **Assess risk for valid issues**: Apply risk criteria to decide FIX vs TECH_DEBT.
 
-5. **Document all decisions**: Record reasoning for every classification and risk assessment.
+5. **Implement fixes**: Make changes following existing patterns. One logical change per commit.
 
-6. **Commit batch**: Create atomic commit with all fixes in this batch.
+6. **Document all decisions**: Record reasoning for every classification and risk assessment.
+
+7. **Commit batch**: Create atomic commit with all fixes in this batch.
 
 ## Risk Assessment
 
@@ -72,6 +75,10 @@ For careful fixes, follow the systematic refactoring protocol:
 - Changes that cannot be safely validated with tests alone
 
 This is the ONLY case where deferral is appropriate. "Touches many files" or "changes public API" are NOT reasons to defer — they're reasons to be careful.
+
+## Apply Knowledge
+
+If `KNOWLEDGE_CONTEXT` is non-empty: scan for ADR and PF entries relevant to each issue's file, area, or category. When a prior decision constrains the fix shape, cite as `applies ADR-NNN` in the Reasoning column. When a known pitfall describes the same failure mode, cite as `avoids PF-NNN` in the Reasoning column. **Cite only IDs that appear verbatim in KNOWLEDGE_CONTEXT — do not fabricate.**
 
 ## Decision Flow
 

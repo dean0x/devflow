@@ -60,6 +60,10 @@ For each worktree:
 
 Set `TARGET_DIR` to the selected review directory path.
 
+#### Step 0d: Load Project Knowledge
+
+For each worktree, read `{worktree}/.memory/knowledge/decisions.md` and `{worktree}/.memory/knowledge/pitfalls.md` (skip silently if absent). Strip any `## ADR-NNN:` or `## PF-NNN:` section whose body contains `- **Status**: Deprecated` or `- **Status**: Superseded`. Pass the filtered concatenated content as `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4, or `(none)` if both files are empty or absent. Prior decisions constrain how fixes are framed; known pitfalls flag risks reviewers may have missed.
+
 ### Phase 1: Parse Issues
 
 Read review reports from `{TARGET_DIR}/*.md` and extract:
@@ -116,6 +120,7 @@ Each resolver teammate receives the following instructions (only the issue list 
 
     You are resolving review issues on branch {branch} (PR #{pr_number}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
+    KNOWLEDGE_CONTEXT: {filtered decisions.md + pitfalls.md content, or (none)}
     1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
     2. Your issues to resolve:
        {BATCH_ISSUES}
@@ -180,6 +185,8 @@ Aggregate from all Resolvers:
 - **False positives**: Issues that don't exist or were misunderstood
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
+
+Extract all knowledge citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Knowledge Citations` section in Phase 8.
 
 <!-- D8: "Record Pitfalls" phase removed — knowledge-persistence skill no longer has Write
      capability; pitfall recording is handled by the background-learning extractor. -->
@@ -316,6 +323,13 @@ Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
 **Date**: {timestamp}
 **Review**: {TARGET_DIR}
 **Command**: /resolve
+
+## Knowledge Citations
+
+- applies ADR-{NNN} — {batch-id}, {issue-id}
+- avoids PF-{NNN} — {batch-id}, {issue-id}
+
+(Omit section if no citations were made)
 
 ## Statistics
 | Metric | Value |

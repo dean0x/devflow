@@ -30,6 +30,10 @@ If no unresolved review found: halt with "No unresolved review found. Run a revi
 
 Extract branch slug from the directory path.
 
+## Phase 1.5: Load Project Knowledge
+
+Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md` (skip silently if absent). Strip any `## ADR-NNN:` or `## PF-NNN:` section whose body contains `- **Status**: Deprecated` or `- **Status**: Superseded`. Pass the filtered concatenated content as `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4, or `(none)` if both files are empty or absent. Prior decisions constrain how fixes are framed; known pitfalls flag risks reviewers may have missed.
+
 ## Phase 2: Parse Issues
 
 Read all `{focus}.md` files in the timestamped directory (exclude `review-summary.md` and `resolution-summary.md`).
@@ -57,6 +61,7 @@ Each receives:
 - **ISSUES**: Array of issues in the batch
 - **BRANCH**: Branch slug
 - **BATCH_ID**: Identifier for this batch
+- **KNOWLEDGE_CONTEXT**: Filtered content from Phase 1.5 (or `(none)`)
 
 Resolvers follow a 3-tier risk approach:
 - **Standard fixes**: Applied directly
@@ -74,11 +79,14 @@ Spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
 Write `resolution-summary.md` to the same timestamped review directory.
 
+The report includes a `## Knowledge Citations` section at the top (before Statistics) listing all unique `applies ADR-NNN` and `avoids PF-NNN` references extracted from Resolver Reasoning columns. Omit the section entirely if no citations were made.
+
 Report to user:
 - Issues resolved vs deferred vs false positives
 - Files modified
 - Commits created
 - Remaining issues (if any deferred)
+- Knowledge citations applied (if any)
 
 ## Error Handling
 
