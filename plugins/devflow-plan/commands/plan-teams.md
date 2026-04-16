@@ -72,7 +72,13 @@ Run rskim on source directories (NOT repo root) to identify:
 Return codebase context for requirements analysis."
 ```
 
-While Skimmer runs, read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Pass Skimmer context and project knowledge to all subsequent agents and teammates.
+While Skimmer runs, run:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 #### Phase 3: Exploration Team
 
@@ -87,7 +93,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. Project knowledge: {Phase 2 decisions + pitfalls}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
+       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Target users, their goals, pain points, user journeys,
        and success scenarios. What does the user need this to do?
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -97,7 +104,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. Project knowledge: {Phase 2 decisions + pitfalls}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
+       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Comparable features in the codebase or domain, scope
        patterns, edge cases discovered from similar implementations.
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -107,7 +115,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. Project knowledge: {Phase 2 decisions + pitfalls}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
+       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Dependencies, business rules, security constraints,
        performance constraints, and prior architectural decisions that constrain scope.
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -117,7 +126,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. Project knowledge: {Phase 2 decisions + pitfalls}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
+       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Error states, edge cases, validation needs, known pitfalls,
        and failure scenarios that must be handled.
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -192,7 +202,7 @@ Each designer receives:
 - Focus: (their assigned focus)
 - Exploration synthesis from Phase 4
 - Skimmer context from Phase 2
-- Project knowledge from Phase 2
+- KNOWLEDGE_CONTEXT: knowledge index from Phase 2 (or `(none)`) — designers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand
 - Multi-issue: all issue bodies
 
 #### Phase 6: Synthesize Gap Analysis
@@ -405,7 +415,7 @@ Display: artifact path, issue URL, gap analysis summary, design review summary, 
 │  ├─ Phase 1: GATE 0 - Confirm Understanding ⛔ MANDATORY
 │  ├─ Phase 2: Orient + Load Knowledge
 │  │  ├─ Skimmer agent (codebase context)
-│  │  └─ Read decisions.md + pitfalls.md
+│  │  └─ Load knowledge index (knowledge-context.cjs index)
 │  ├─ Phase 3: Exploration Team (4 teammates + debate)
 │  │  ├─ user-perspective-explorer
 │  │  ├─ similar-features-explorer

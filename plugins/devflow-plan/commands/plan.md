@@ -72,11 +72,17 @@ Run rskim on source directories (NOT repo root) to identify:
 Return codebase context for requirements analysis."
 ```
 
-While Skimmer runs, read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Pass Skimmer context and project knowledge to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis.
+While Skimmer runs, run:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 #### Phase 3: Explore Requirements (Parallel)
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context and project knowledge:
+Spawn 4 Explore agents **in a single message**, each with Skimmer context and `KNOWLEDGE_CONTEXT` (from Phase 2). Include instruction: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT".
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -124,19 +130,20 @@ Each designer receives:
 - Focus: (their assigned focus from table)
 - Exploration synthesis from Phase 4
 - Skimmer context from Phase 2
-- Project knowledge from Phase 2
+- `KNOWLEDGE_CONTEXT` (index from Phase 2)
 - Multi-issue: all issue bodies
 
 ```
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: {completeness|architecture|security|performance|consistency|dependencies}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}
   Codebase context: {Phase 2 output}
-  Project knowledge: {decisions + pitfalls}
-Analyze only your assigned focus area. Cite evidence from provided artifacts."
+Analyze only your assigned focus area. Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT.
+Cite evidence from provided artifacts."
 ```
 
 #### Phase 6: Synthesize Gap Analysis
@@ -347,7 +354,7 @@ Display completion summary:
 │  │  └─ AskUserQuestion: Validate interpretation
 │  ├─ Phase 2: Orient + Load Knowledge
 │  │  ├─ Skimmer agent (codebase context)
-│  │  └─ Read decisions.md + pitfalls.md
+│  │  └─ Load knowledge index (knowledge-context.cjs index)
 │  ├─ Phase 3: Explore Requirements (PARALLEL)
 │  │  ├─ Explore: User perspective
 │  │  ├─ Explore: Similar features

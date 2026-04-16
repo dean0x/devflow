@@ -67,6 +67,16 @@ For each worktree:
 
 Set `TARGET_DIR` to the selected review directory path.
 
+#### Step 0d: Load Project Knowledge
+
+For each worktree, run:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+
 ### Phase 1: Parse Issues
 
 Read review reports from `{TARGET_DIR}/*.md` and extract:
@@ -116,7 +126,8 @@ Agent(subagent_type="Resolver"):
 BRANCH: {branch-slug}
 BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Validate, decide FIX vs TECH_DEBT, implement fixes"
+KNOWLEDGE_CONTEXT: {knowledge_context}
+Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-knowledge to Read full ADR/PF bodies on demand."
 ```
 
 > Resolvers follow a 3-tier risk approach:
@@ -133,6 +144,8 @@ Aggregate from all Resolvers:
 - **False positives**: Issues that don't exist or were misunderstood
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
+
+Extract all knowledge citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Knowledge Citations` section in Phase 8.
 
 ### Phase 6: Simplify
 
@@ -200,7 +213,8 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel]
-│  └─ Step 0c: Target latest review directory per worktree
+│  ├─ Step 0c: Target latest review directory per worktree
+│  └─ Step 0d: Load project knowledge → KNOWLEDGE_CONTEXT
 │
 ├─ Phase 1: Parse issues from TARGET_DIR
 │  └─ Extract ALL issues (including Suggestions, exclude summaries)
@@ -265,6 +279,13 @@ Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
 **Date**: {timestamp}
 **Review**: {TARGET_DIR}
 **Command**: /resolve
+
+## Knowledge Citations
+
+- applies ADR-{NNN} — {batch-id}, {issue-id}
+- avoids PF-{NNN} — {batch-id}, {issue-id}
+
+(Omit section if no citations were made)
 
 ## Statistics
 | Metric | Value |

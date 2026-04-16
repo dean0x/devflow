@@ -84,6 +84,67 @@ On session start, `json-helper.cjs reconcile-manifest <cwd>` compares manifest e
 
 This creates a feedback loop: deleting a generated artifact reduces its observation's confidence, eventually causing it to stop promoting.
 
+#### Self-Heal: Crash-Window Recovery
+
+`render-ready` writes to the knowledge file first, then updates the log and manifest. If the process crashes in the window between file write and log update, the knowledge file contains the new ADR/PF entry but the log still shows `status: 'ready'` — a duplicate would be written on the next render-ready call.
+
+The reconciler detects and heals these orphans automatically:
+
+1. Scans `decisions.md` and `pitfalls.md` for ADR/PF anchors not tracked in the manifest. Only sections containing the `- **Source**: self-learning:` marker qualify — pre-v2 seeded entries (which lack the marker) are excluded so they cannot be falsely paired with a current ready obs.
+2. For each unmanaged anchor, searches the log for `status: 'ready'` observations whose normalized pattern matches the anchor's heading text.
+3. **Exactly one match** → upgrades the observation to `status: 'created'`, reconstructs the manifest entry, and registers usage. The `healed` counter in the reconcile output increments.
+4. **Zero matches** → the entry is user-curated (written manually). Left untouched.
+5. **Multiple matches** → ambiguous; silently skipped. The `healed` counter does not increment.
+
+The `healed` field is present in all three reconcile-manifest output shapes (main path and both early-return paths) and is backward-compatible — callers that discard the output are unaffected.
+
+## Knowledge Index + On-Demand Read Pattern
+
+Knowledge consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
+
+### Step 1: Load compact index at orchestrator
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index listing each active entry's ID, truncated title, status, and area:
+
+```
+Decisions (2):
+  ADR-001  Use Result types instead of thrown errors  [Active]
+  ...
+
+Pitfalls (3):
+  PF-004  Background hook scripts become god scripts  [Active]  —  scripts/hooks/
+  ...
+
+ADR-NNN entries live in /path/to/project/.memory/knowledge/decisions.md
+PF-NNN  entries live in /path/to/project/.memory/knowledge/pitfalls.md
+Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
+```
+
+> **Note**: Pre-v2 seeded entries may show `[unknown]` instead of `[Active]` if they predate the standard `- **Status**: Active` line format. New entries created by the learning system always include the status line.
+
+### Step 2: Agent reads full body on demand
+
+Agents that receive `KNOWLEDGE_CONTEXT` follow the `devflow:apply-knowledge` skill algorithm:
+
+1. Scan the index and identify plausibly-relevant entries for the current task
+2. Use `Read` on the knowledge file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading
+3. Read the full entry body
+4. Cite `applies ADR-NNN` / `avoids PF-NNN` inline — verbatim IDs only, no fabrication
+
+### Commands using this pattern
+
+| Command / Orch | Agents that consume |
+|----------------|---------------------|
+| `/resolve`, `resolve:orch` | Resolver |
+| `/plan`, `plan:orch` | Designer, Explore |
+| `/self-review` | Simplifier, Scrutinizer |
+| `/code-review`, `review:orch` | Reviewer |
+| `debug:orch` | Orchestrator-local (not fanned to Explore) |
+
 ## CLI Commands
 
 ```bash
@@ -97,7 +158,11 @@ npx devflow-kit learn --purge                   # Remove invalid/corrupted entri
 npx devflow-kit learn --review                  # Inspect observations needing attention (stale, capped, low-quality)
 ```
 
-Removal of pre-v2 low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005) and orphan `PROJECT-PATTERNS.md` now runs automatically as a one-time migration on `devflow init` — no CLI flag needed. Migration state is tracked at `~/.devflow/migrations.json`.
+Two one-time migrations run automatically on `devflow init` to remove pre-v2 seeded knowledge entries — no CLI flag needed. Migration state is tracked at `~/.devflow/migrations.json`.
+
+**v2 migration (`purge-legacy-knowledge-v2`)**: Removes 4 hardcoded low-signal IDs (ADR-002, PF-001, PF-003, PF-005) and the orphan `PROJECT-PATTERNS.md` file seeded by earlier devflow versions.
+
+**v3 migration (`purge-legacy-knowledge-v3`)**: Sweeps all remaining pre-v2 seeded entries using a format discriminator. Any ADR/PF section in `decisions.md` or `pitfalls.md` that lacks the line `- **Source**: self-learning:` is treated as pre-v2 seeded content and removed. Self-learning-generated entries all carry this marker, so they are preserved. User-edited entries survive too — add the `- **Source**: self-learning:manual_xxx` line to any entry you want to keep through future migrations.
 
 ## HUD Row
 

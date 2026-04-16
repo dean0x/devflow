@@ -189,6 +189,37 @@ function nextKnowledgeId(matches, prefix) {
 }
 
 /**
+ * Extract the content of a single ADR-NNN / PF-NNN section from a knowledge file.
+ * Returns the text from the matching `## <anchorId>` heading through the next `## ADR-`
+ * or `## PF-` heading (exclusive), or to end-of-file.  Returns null when the anchor is
+ * not present.  The anchorId is sanitised before use to eliminate ReDoS surface.
+ *
+ * Shared by reconcileExisting (anchored hash path) and the heal block — eliminates the
+ * duplicated inline regex that appeared at three reconcile-manifest call sites (A2).
+ *
+ * @param {string} content   - Full file content
+ * @param {string} anchorId  - e.g. 'ADR-001' or 'PF-007'
+ * @returns {string|null}
+ */
+function sliceKnowledgeSection(content, anchorId) {
+  const safe = anchorId.replace(/[^A-Z0-9-]/gi, '');
+  const sectionRe = new RegExp(`(##\\s+${safe}[\\s\\S]*?)(?=\\n##\\s+(?:ADR|PF)-|\\s*$)`);
+  const m = content.match(sectionRe);
+  return m ? m[1] : null;
+}
+
+/**
+ * Return a zeroed reconcile-manifest result object.
+ * Centralises the five-place inline shape `{ deletions: 0, edits: 0, unchanged: 0, healed: 0 }`
+ * so that adding a counter in the future is a one-line change (C3).
+ *
+ * @returns {{ deletions: number, edits: number, unchanged: number, healed: number }}
+ */
+function emptyReconcileResult() {
+  return { deletions: 0, edits: 0, unchanged: 0, healed: 0 };
+}
+
+/**
  * D18: Count only non-deprecated headings in a knowledge file.
  * Scans ## ADR-NNN: or ## PF-NNN: headings, then checks the next Status
  * line — if `Deprecated` or `Superseded`, the entry is excluded from the count.
@@ -216,6 +247,59 @@ function countActiveHeadings(content, entryType) {
     count++;
   }
   return count;
+}
+
+/**
+ * Scan decisions.md and pitfalls.md for anchors (ADR-NNN / PF-NNN) that are present in
+ * the files but not tracked in the manifest. Returns an array of unmanaged anchor descriptors.
+ * Used by reconcile-manifest to self-heal render-ready crash-window duplicates.
+ *
+ * Only sections that contain the `- **Source**: self-learning:` marker qualify — pre-v2
+ * seeded entries (which lack the marker) are excluded so they cannot be falsely paired
+ * with a current `ready` log obs by normalised heading match. Pre-v2 entries are removed
+ * separately by the v3 migration; until that runs they must remain inert here.
+ *
+ * `fileContent` is threaded through the returned descriptor so the heal block can reuse
+ * the already-read bytes instead of re-reading the file a second time (A3).
+ *
+ * Skips scanning when `logMap` contains no `ready` observations — there is nothing to
+ * pair with, so the I/O would be wasted (P2).
+ *
+ * @param {string} memoryDir - Path to .memory dir
+ * @param {Set<string>} managedAnchors - Anchor IDs already tracked in the manifest
+ * @param {Map<string,Object>} logMap - Current observation log keyed by obs ID
+ * @returns {Array<{anchorId: string, type: string, path: string, headingText: string, fileContent: string}>}
+ */
+function findUnmanagedAnchors(memoryDir, managedAnchors, logMap) {
+  // P2: short-circuit when no ready observations exist — nothing can be healed.
+  if (!Array.from(logMap.values()).some(o => o.status === 'ready')) return [];
+
+  // Use only literal (non-dynamic) regexes to avoid ReDoS surface on tainted data.
+  // prefix values are hardcoded: 'ADR' for decisions, 'PF' for pitfalls.
+  const result = [];
+  const files = [
+    { file: path.join(memoryDir, 'knowledge', 'decisions.md'), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
+    { file: path.join(memoryDir, 'knowledge', 'pitfalls.md'),  type: 'pitfall',  re: /^## (PF-\d+):\s*([^\n]+)/gm },
+  ];
+  for (const { file, type, re } of files) {
+    if (!fs.existsSync(file)) continue;
+    const content = fs.readFileSync(file, 'utf8');
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      if (managedAnchors.has(m[1])) continue;
+      // Slice out this section's body (heading → next ## heading or eof) and require the
+      // self-learning source marker — this excludes pre-v2 seeded content from the heal path.
+      const sectionStart = m.index;
+      const nextHeadingIdx = content.indexOf('\n## ', sectionStart + 1);
+      const section = nextHeadingIdx !== -1
+        ? content.slice(sectionStart, nextHeadingIdx)
+        : content.slice(sectionStart);
+      if (!section.includes('\n- **Source**: self-learning:')) continue;
+      // A3: thread fileContent so the heal block does not re-read this file.
+      result.push({ anchorId: m[1], type, path: file, headingText: m[2].trim(), fileContent: content });
+    }
+  }
+  return result;
 }
 
 /**
@@ -1356,31 +1440,42 @@ try {
       const logFile = path.join(cwd, '.memory', 'learning-log.jsonl');
       const lockDir = path.join(cwd, '.memory', '.learning.lock');
 
-      if (!fs.existsSync(manifestPath) || !fs.existsSync(logFile)) {
-        console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0 }));
+      // A1: require only the log file (not the manifest) before proceeding.
+      // The heal path must be able to run even when the manifest has never been written
+      // (e.g. render-ready crashed before its manifest write).  A missing manifest is
+      // treated as an empty one; the heal block then reconstructs it from the log + files.
+      if (!fs.existsSync(logFile)) {
+        console.log(JSON.stringify(emptyReconcileResult()));
         break;
       }
 
       if (!acquireMkdirLock(lockDir, 15000, 60000)) {
         learningLog('reconcile-manifest: timeout acquiring lock, skipping');
-        console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0 }));
+        console.log(JSON.stringify(emptyReconcileResult()));
         break;
       }
 
       try {
+        // C1: loadReconcileState — read manifest (or construct empty) + build logMap.
         let manifest;
-        try {
-          manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-          if (!manifest.entries) manifest.entries = [];
-        } catch {
-          console.log(JSON.stringify({ deletions: 0, edits: 0, unchanged: 0 }));
-          break;
+        if (fs.existsSync(manifestPath)) {
+          try {
+            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            if (!manifest.entries) manifest.entries = [];
+          } catch {
+            // Corrupt manifest — treat as empty so the heal path can still recover.
+            manifest = { schemaVersion: 1, entries: [] };
+          }
+        } else {
+          // A1: no manifest yet; construct empty in-memory so heal can populate it.
+          manifest = { schemaVersion: 1, entries: [] };
         }
 
         const logEntries = parseJsonl(logFile);
         const logMap = new Map(logEntries.map(e => [e.id, e]));
 
-        let deletions = 0, edits = 0, unchanged = 0;
+        // C1: reconcileExisting — walk manifest entries, detect deletions / edits.
+        const counters = emptyReconcileResult();
         const keptEntries = [];
 
         for (const entry of manifest.entries) {
@@ -1399,7 +1494,7 @@ try {
             obs.status = 'deprecated';
             obs.deprecated_at = new Date().toISOString();
             learningLog(`reconcile: deletion detected for ${entry.observationId}, confidence -> ${obs.confidence}`);
-            deletions++;
+            counters.deletions++;
             // Remove manifest entry (don't keep it)
             continue;
           }
@@ -1414,20 +1509,18 @@ try {
               obs.status = 'deprecated';
               obs.deprecated_at = new Date().toISOString();
               learningLog(`reconcile: anchor ${entry.anchorId} missing for ${entry.observationId}`);
-              deletions++;
+              counters.deletions++;
               continue;
             }
-            // For anchored entries, hash just the section bytes
-            const sectionRe = new RegExp(`(##\\s+${entry.anchorId}[\\s\\S]*?)(?=\\n##\\s+(?:ADR|PF)-|\\s*$)`);
-            const sectionMatch = content.match(sectionRe);
-            const sectionContent = sectionMatch ? sectionMatch[1] : content;
+            // A2: use shared sliceKnowledgeSection — eliminates duplicated inline regex.
+            const sectionContent = sliceKnowledgeSection(content, entry.anchorId) ?? content;
             const currentHash = contentHash(sectionContent);
             if (currentHash !== entry.contentHash) {
               // D13: silently update hash only, no confidence penalty
               entry.contentHash = currentHash;
-              edits++;
+              counters.edits++;
             } else {
-              unchanged++;
+              counters.unchanged++;
             }
           } else {
             const content = fs.readFileSync(filePath, 'utf8');
@@ -1435,21 +1528,55 @@ try {
             if (currentHash !== entry.contentHash) {
               // D13: silently update hash only
               entry.contentHash = currentHash;
-              edits++;
+              counters.edits++;
             } else {
-              unchanged++;
+              counters.unchanged++;
             }
           }
 
           keptEntries.push(entry);
         }
 
+        // C1: healUnmanagedAnchors — recover from render-ready crash-window duplicates.
+        // If render-ready wrote the knowledge file but crashed before updating the log
+        // and manifest, the anchor exists in the file but the log still shows status=ready
+        // and the manifest has no entry.  We detect this by scanning knowledge files for
+        // anchors not tracked in the manifest, then matching them against ready log
+        // observations with a matching normalised pattern.
+        // DESIGN: D-D — skip silently when zero or multiple log entries match (ambiguity guard).
+        const memoryDir = path.join(cwd, '.memory');
+        const managedAnchors = new Set(keptEntries.filter(e => e.anchorId).map(e => e.anchorId));
+        // P2 early-exit is inside findUnmanagedAnchors; pass logMap so it can check.
+        const unmanaged = findUnmanagedAnchors(memoryDir, managedAnchors, logMap);
+        for (const u of unmanaged) {
+          const headingNorm = normalizeForDedup(u.headingText);
+          const candidates = Array.from(logMap.values()).filter(o =>
+            o.type === u.type && o.status === 'ready' &&
+            normalizeForDedup(o.pattern) === headingNorm,
+          );
+          if (candidates.length !== 1) continue; // 0 = user-curated, >1 = ambiguous (D-D: silent)
+          const obs = candidates[0];
+          obs.status = 'created';
+          obs.artifact_path = `${u.path}#${u.anchorId}`;
+          // A2: use shared sliceKnowledgeSection; A3: use fileContent already read by findUnmanagedAnchors.
+          const section = sliceKnowledgeSection(u.fileContent, u.anchorId);
+          keptEntries.push({
+            observationId: obs.id, type: u.type, path: u.path,
+            contentHash: contentHash(section ?? u.headingText),
+            renderedAt: new Date().toISOString(), anchorId: u.anchorId,
+          });
+          registerUsageEntry(memoryDir, u.anchorId);
+          counters.healed++;
+          learningLog(`reconcile: healed ${obs.id} → ${u.anchorId}`);
+        }
+
         // Atomic writes
         writeJsonlAtomic(logFile, Array.from(logMap.values()));
         manifest.entries = keptEntries;
+        fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
         writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2));
 
-        console.log(JSON.stringify({ deletions, edits, unchanged }));
+        console.log(JSON.stringify(counters));
       } finally {
         releaseLock(lockDir);
       }

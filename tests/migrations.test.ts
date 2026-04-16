@@ -124,6 +124,27 @@ describe('MIGRATIONS', () => {
     expect(m).toBeDefined();
     expect(m?.scope).toBe('per-project');
   });
+
+  it('contains purge-legacy-knowledge-v3 with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-legacy-knowledge-v3');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+    expect(m?.description).toBeTruthy();
+    expect(typeof m?.run).toBe('function');
+  });
+
+  it('v3 description explains source discriminator approach', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-legacy-knowledge-v3');
+    expect(m?.description).toContain('pre-v2');
+    expect(m?.description).toContain('self-learning');
+  });
+
+  it('v3 is after v2 in the MIGRATIONS array (ordering preserved)', () => {
+    const v2Index = MIGRATIONS.findIndex(m => m.id === 'purge-legacy-knowledge-v2');
+    const v3Index = MIGRATIONS.findIndex(m => m.id === 'purge-legacy-knowledge-v3');
+    expect(v2Index).toBeGreaterThanOrEqual(0);
+    expect(v3Index).toBeGreaterThan(v2Index);
+  });
 });
 
 describe('runMigrations', () => {
@@ -344,6 +365,42 @@ describe('runMigrations', () => {
     for (const p of [project1, project2]) {
       await expect(fs.access(path.join(p, '.memory', 'PROJECT-PATTERNS.md'))).rejects.toThrow();
     }
+  });
+
+  it('v3 migration runs independently even when v2 is already applied', async () => {
+    const fakeHome = path.join(tmpDir, 'home', '.devflow');
+
+    // Mark v2 (and global migrations) as already applied — v3 has NOT been applied yet
+    const appliedBefore = [
+      ...MIGRATIONS.filter(m => m.scope === 'global').map(m => m.id),
+      'purge-legacy-knowledge-v2',
+    ];
+    await writeAppliedMigrations(fakeHome, appliedBefore);
+
+    // Create a project with a seeded entry (no self-learning: source)
+    const projectRoot = path.join(tmpDir, 'project-v3-independent');
+    const knowledgeDir = path.join(projectRoot, '.memory', 'knowledge');
+    await fs.mkdir(knowledgeDir, { recursive: true });
+    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
+
+## ADR-003: Seeded entry lacking self-learning marker
+
+- **Status**: accepted
+- **Source**: /code-review (seed)
+`, 'utf-8');
+
+    const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
+    const result = await runMigrations(ctx, [projectRoot]);
+
+    // v3 should have run and succeeded
+    expect(result.failures).toEqual([]);
+    expect(result.newlyApplied).toContain('purge-legacy-knowledge-v3');
+    expect(result.newlyApplied).not.toContain('purge-legacy-knowledge-v2'); // v2 was pre-applied
+
+    // The seeded entry should be gone
+    const updated = await fs.readFile(decisionsPath, 'utf-8');
+    expect(updated).not.toContain('ADR-003');
   });
 
   it('runs global migrations against devflowDir (not project root)', async () => {

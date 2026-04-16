@@ -21,7 +21,11 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
-5. Read `.memory/knowledge/pitfalls.md` and `.memory/knowledge/decisions.md`. Pass as KNOWLEDGE_CONTEXT to Simplifier and Scrutinizer — known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency.
+5. Load knowledge index:
+   ```bash
+   KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+   ```
+   Pass `KNOWLEDGE_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-knowledge` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume knowledge — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
 
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional)
 
@@ -32,9 +36,7 @@ Spawn Simplifier agent to refine code for clarity and consistency:
 Agent(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
-Simplify and refine the code for clarity and consistency while preserving functionality.
-If knowledge context is provided, verify no known pitfall patterns are being reintroduced."
+Simplify and refine the code for clarity and consistency while preserving functionality."
 
 **Wait for completion.** Simplifier commits changes directly.
 
@@ -45,9 +47,9 @@ Spawn Scrutinizer agent for quality evaluation and fixing:
 Agent(subagent_type="Scrutinizer", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-KNOWLEDGE_CONTEXT: {knowledge_context or 'None'}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
-If knowledge context is provided, check whether any known pitfall patterns are being reintroduced and verify architectural consistency with prior decisions."
+Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none)."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED), changes_made (bool)
 
@@ -99,7 +101,7 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
-│  └─ Read project knowledge (decisions.md + pitfalls.md)
+│  └─ Load knowledge index (knowledge-context.cjs index)
 │
 ├─ Phase 1: Simplifier
 │  └─ Code refinement (commits directly)

@@ -107,9 +107,51 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
   },
 };
 
+/**
+ * D-Fix3: Widens the v2 purge from 4 hardcoded IDs to ALL pre-v2 seeded
+ * entries. The discriminator is the `- **Source**: self-learning:` marker:
+ * any ADR/PF section lacking that marker is pre-v2 seeded content and is
+ * removed. This fixes the gap where 7 of 10 seed entries survived the v2
+ * migration on upgraded projects.
+ *
+ * v2 and v3 run independently — both must complete for the migration to be
+ * considered done. On fresh installs, both are no-ops (no knowledge files
+ * exist). On projects where only v2 ran, v3 cleans up the remaining 7 entries.
+ */
+const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
+  id: 'purge-legacy-knowledge-v3',
+  description: 'Remove all pre-v2 seeded knowledge entries (entries lacking self-learning: source marker)',
+  scope: 'per-project',
+  run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
+    const { purgeAllPreV2KnowledgeEntries } = await import('./legacy-knowledge-purge.js');
+    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir: ctx.memoryDir });
+    const infos = result.removed > 0
+      ? [`Purged ${result.removed} pre-v2 knowledge entry(ies) in ${result.files.length} file(s)`]
+      : [];
+    return { infos, warnings: [] };
+  },
+};
+
+/**
+ * Migration ID suffix conventions:
+ *
+ * - `-vN`        A revision of a migration. `-v2`, `-v3`, etc. indicate
+ *                successive sweeps targeting the same data set (e.g. widening
+ *                the purge scope). Each revision runs independently so partially-
+ *                migrated machines get the incremental cleanup on next init.
+ *
+ * - `-vN-{tag}`  A named variant within a revision. The tag distinguishes
+ *                migrations that operate on the same version epoch but target
+ *                different data (e.g. `shadow-overrides-v2-names` vs a
+ *                hypothetical `shadow-overrides-v2-config`).
+ *
+ * All IDs are append-only — never rename an existing ID or already-applied
+ * machines will re-run the migration.
+ */
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
+  MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

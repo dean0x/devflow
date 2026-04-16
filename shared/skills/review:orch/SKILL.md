@@ -37,6 +37,16 @@ Check `.docs/reviews/{branch_slug}/.last-review-head`:
 Generate timestamp: `YYYY-MM-DD_HHMM`
 Create directory: `mkdir -p .docs/reviews/{branch_slug}/{timestamp}`
 
+## Phase 2b: Load Knowledge Index
+
+After incremental detection, load the knowledge index:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
 ## Phase 3: File Analysis
 
 Run `git diff --name-only {DIFF_RANGE}` to get changed files.
@@ -72,6 +82,7 @@ Each reviewer receives:
 - **Branch context**: branch → base_branch
 - **Output path**: `.docs/reviews/{branch_slug}/{timestamp}/{focus}.md`
 - **DIFF_COMMAND**: `git diff {DIFF_RANGE}` (incremental or full)
+- **KNOWLEDGE_CONTEXT**: compact index from Phase 2b (or `(none)` when absent) — follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand
 
 ## Phase 5: Synthesis (Parallel)
 

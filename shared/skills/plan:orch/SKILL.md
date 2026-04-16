@@ -34,6 +34,16 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 ---
 
+## Phase 0: Load Knowledge Index
+
+Before spawning any agents, load the knowledge index for the current worktree:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
 ## Phase 1: Orient
 
 Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the planning question:
@@ -51,6 +61,8 @@ Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **i
 - **Pattern explorer**: Find existing implementations of similar features to follow as templates
 - **Constraint explorer**: Identify constraints — test infrastructure, build system, CI requirements, deployment concerns
 
+Each Explore agent receives `KNOWLEDGE_CONTEXT` (from Phase 0) and the instruction: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT".
+
 Adjust explorer focus based on the specific planning question.
 
 ## Phase 3: Gap Analysis Lite
@@ -61,20 +73,24 @@ Spawn 2 `Agent(subagent_type="Designer")` agents **in a single message** (parall
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: completeness
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 2 outputs}
   Codebase context: {Phase 1 output}
-Identify missing requirements, undefined error states, vague acceptance criteria."
+Identify missing requirements, undefined error states, vague acceptance criteria.
+Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT."
 
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: architecture
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 2 outputs}
   Codebase context: {Phase 1 output}
-Identify pattern violations, missing integration points, layering issues."
+Identify pattern violations, missing integration points, layering issues.
+Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT."
 ```
 
 ## Phase 4: Synthesize

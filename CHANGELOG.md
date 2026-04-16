@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Self-learning system: detects repeated workflows and creates slash commands/skills automatically
 - **Learning**: `devflow learn --purge` command to remove invalid entries from learning log
 - **Learning**: debug logging mode (`devflow learn --configure`) — logs to `~/.devflow/logs/`
+- **Knowledge citations in review & resolve outputs**: Resolvers and Reviewers cite matching ADR-NNN/PF-NNN IDs inline with an explicit hallucination guard (verbatim-only, no inference). `/resolve` aggregates cited IDs into a `## Knowledge Citations` section at the top of `resolution-summary.md`.
 
 ### Changed
+- **Knowledge index + on-demand Read pattern across all knowledge-consuming commands**: `/resolve`, `/plan`, `/self-review`, `/code-review`, and `/debug` (plus their Teams variants and ambient orch equivalents `resolve:orch`, `plan:orch`, `review:orch`, `debug:orch`) now fan a compact index instead of the full ADR/PF corpus. Downstream agents (resolver, designer, simplifier, scrutinizer, reviewer) Read full entry bodies on demand. For `/debug`, knowledge stays orchestrator-local (hypothesis generation) and is not fanned to Explore investigators. Shared algorithm extracted to new `devflow:apply-knowledge` skill. Unified placeholder convention: all 11 invocation sites use `"{worktree}"`. Closes PF-011 and fills pre-existing ambient gaps for plan:orch, review:orch, and debug:orch. Token savings: ~75K/run at 10 resolvers with current corpus; scales as O(1) instead of O(entries × agents) as corpus grows.
 - **Learning**: Moved from Stop → SessionEnd hook with 3-session batching (adaptive: 5 at 15+ observations)
 - **Learning**: Raised procedural thresholds from 2 to 3 observations with 24h+ temporal spread for both types
 - **Learning**: Reduced default `max_daily_runs` from 10 to 5
@@ -26,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Learning**: Race condition in batch file handoff (atomic `mv` replaces `cp`+`rm`)
 - **Learning**: `--enable` now auto-upgrades legacy Stop hook to SessionEnd
 - **Learning**: `--status` detects legacy hook and shows upgrade instructions
+- **Self-learning reconciler self-heal**: `reconcile-manifest` now recovers from `render-ready` crash-window states. When a knowledge file contains an ADR/PF anchor absent from the manifest, and exactly one `status: 'ready'` log observation matches by normalized pattern, the observation is upgraded to `status: 'created'` and the manifest entry is reconstructed. Zero matches are treated as user-curated (left alone); multiple matches are silently skipped as ambiguous. Adds `healed` counter to all reconcile-manifest output shapes. Heal is gated by the `- **Source**: self-learning:` marker on the knowledge-file section, preventing false-positive heals against pre-v2 seeded entries.
+- **Legacy knowledge purge v3 migration** (`purge-legacy-knowledge-v3`): sweeps all remaining pre-v2 seeded knowledge entries using the `- **Source**: self-learning:` format discriminator. Any ADR/PF section lacking this marker is removed. Replaces the v2 hardcoded allow-list approach with a format-based approach that catches entries the v2 migration missed. Self-learning-generated entries and user-opted-in entries (entries containing the source marker) survive.
 
 ---
 

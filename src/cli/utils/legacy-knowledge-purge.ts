@@ -39,6 +39,9 @@ export interface PurgeLegacyKnowledgeResult {
   files: string[];
 }
 
+/** Typed pair of (file path, section-prefix). Prefix is 'ADR' for decisions.md, 'PF' for pitfalls.md. */
+type KnowledgeFilePair = readonly [string, 'ADR' | 'PF'];
+
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -73,6 +76,96 @@ async function acquireMkdirLock(
 }
 
 /**
+ * Regex matching any `## ADR-NNN:` or `## PF-NNN:` section heading and all
+ * lines that belong to that section (up to the next `## ` heading or end of
+ * file).  The leading `\n` is included so removal does not leave a blank line
+ * between sections when the preceding section ends with a newline.
+ */
+const SECTION_REGEX = /\n## (?:ADR|PF)-\d+:[^\n]*(?:\n(?!## )[^\n]*)*/g;
+
+/**
+ * Source marker that identifies a v2-era self-learning entry.  Any section
+ * containing this literal string is authored by the background-learning
+ * extractor and must be preserved.  Sections without it are pre-v2 seeded
+ * content injected at install time.
+ */
+const SELF_LEARNING_SOURCE_MARKER = '\n- **Source**: self-learning:';
+
+/**
+ * Shared lock-and-loop helper used by both purge functions.
+ *
+ * Acquires the knowledge lock, then for each file in `filePrefixPairs`:
+ *   1. Reads the file (skips if absent).
+ *   2. Calls `rewriteContent(content, prefix)` to get an updated string and a
+ *      removed-section count.
+ *   3. If the content changed, rewrites the TL;DR comment and writes atomically.
+ *
+ * The `rewriteContent` callback owns all domain-specific removal logic
+ * (allowlist-based for v2, source-marker-based for v3), keeping this helper
+ * free of policy.
+ *
+ * @param memoryDir     Absolute path to `.memory/`
+ * @param filePrefixPairs  Files to process with their heading prefix
+ * @param rewriteContent  Per-file transform: returns updated content + sections removed
+ */
+async function withKnowledgeFiles(
+  memoryDir: string,
+  filePrefixPairs: readonly KnowledgeFilePair[],
+  rewriteContent: (content: string, prefix: 'ADR' | 'PF') => { updated: string; removedCount: number },
+): Promise<PurgeLegacyKnowledgeResult> {
+  const knowledgeDir = path.join(memoryDir, 'knowledge');
+
+  // Bail early: nothing to do if knowledge directory doesn't exist
+  try {
+    await fs.access(knowledgeDir);
+  } catch {
+    return { removed: 0, files: [] };
+  }
+
+  const knowledgeLockDir = path.join(memoryDir, '.knowledge.lock');
+  const lockAcquired = await acquireMkdirLock(knowledgeLockDir);
+  if (!lockAcquired) {
+    throw new Error('Knowledge files are currently being written. Try again in a moment.');
+  }
+
+  let removed = 0;
+  const modifiedFiles: string[] = [];
+
+  try {
+    for (const [filePath, prefix] of filePrefixPairs) {
+      let content: string;
+      try {
+        content = await fs.readFile(filePath, 'utf-8');
+      } catch {
+        continue; // File doesn't exist — skip
+      }
+
+      const { updated, removedCount } = rewriteContent(content, prefix);
+
+      if (updated !== content) {
+        removed += removedCount;
+
+        // Update TL;DR count
+        const headingMatches = updated.match(/^## (?:ADR|PF)-/gm) ?? [];
+        const count = headingMatches.length;
+        const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
+        const withTldr = updated.replace(
+          /<!-- TL;DR: \d+ (?:decisions|pitfalls)[^>]*-->/,
+          `<!-- TL;DR: ${count} ${label}. Key: -->`,
+        );
+
+        await writeFileAtomicExclusive(filePath, withTldr);
+        modifiedFiles.push(filePath);
+      }
+    }
+  } finally {
+    try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
+  }
+
+  return { removed, files: modifiedFiles };
+}
+
+/**
  * Remove pre-v2 low-signal knowledge entries from decisions.md and pitfalls.md.
  *
  * The entries targeted are:
@@ -93,74 +186,89 @@ export async function purgeLegacyKnowledgeEntries(options: {
   const decisionsPath = path.join(knowledgeDir, 'decisions.md');
   const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
 
-  // Bail early: nothing to do if knowledge directory doesn't exist
-  try {
-    await fs.access(knowledgeDir);
-  } catch {
-    return { removed: 0, files: [] };
-  }
+  const filePrefixPairs: readonly KnowledgeFilePair[] = [
+    [decisionsPath, 'ADR'],
+    [pitfallsPath, 'PF'],
+  ];
 
-  const knowledgeLockDir = path.join(memoryDir, '.knowledge.lock');
-  const lockAcquired = await acquireMkdirLock(knowledgeLockDir);
-  if (!lockAcquired) {
-    throw new Error('Knowledge files are currently being written. Try again in a moment.');
-  }
-
-  let removed = 0;
-  const modifiedFiles: string[] = [];
-
-  try {
-    const filePrefixPairs: [string, string][] = [
-      [decisionsPath, 'ADR'],
-      [pitfallsPath, 'PF'],
-    ];
-
-    for (const [filePath, prefix] of filePrefixPairs) {
-      let content: string;
-      try {
-        content = await fs.readFile(filePath, 'utf-8');
-      } catch {
-        continue; // File doesn't exist — skip
-      }
-
-      const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
-
-      let updatedContent = content;
-      for (const legacyId of legacyInFile) {
-        // Remove the section from `## LEGACYID:` to the next `## ` or end-of-file
-        const sectionRegex = new RegExp(
-          `\\n## ${escapeRegExp(legacyId)}:[^\\n]*(?:\\n(?!## )[^\\n]*)*`,
-          'g',
-        );
-        const before = updatedContent;
-        updatedContent = updatedContent.replace(sectionRegex, '');
-        if (updatedContent !== before) removed++;
-      }
-
-      if (updatedContent !== content) {
-        // Update TL;DR count
-        const headingMatches = updatedContent.match(/^## (ADR|PF)-/gm) ?? [];
-        const count = headingMatches.length;
-        const label = prefix === 'ADR' ? 'decisions' : 'pitfalls';
-        updatedContent = updatedContent.replace(
-          /<!-- TL;DR: \d+ (decisions|pitfalls)[^>]*-->/,
-          `<!-- TL;DR: ${count} ${label}. Key: -->`,
-        );
-        await writeFileAtomicExclusive(filePath, updatedContent);
-        modifiedFiles.push(filePath);
-      }
+  const result = await withKnowledgeFiles(memoryDir, filePrefixPairs, (content, prefix) => {
+    const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
+    let updated = content;
+    let removedCount = 0;
+    for (const legacyId of legacyInFile) {
+      // Remove the section from `## LEGACYID:` to the next `## ` or end-of-file
+      const sectionRegex = new RegExp(
+        `\\n## ${escapeRegExp(legacyId)}:[^\\n]*(?:\\n(?!## )[^\\n]*)*`,
+        'g',
+      );
+      const before = updated;
+      updated = updated.replace(sectionRegex, '');
+      if (updated !== before) removedCount++;
     }
+    return { updated, removedCount };
+  });
 
-    // Remove orphan PROJECT-PATTERNS.md — stale artifact, nothing generates/reads it
-    const projectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
-    try {
+  // Remove orphan PROJECT-PATTERNS.md — stale artifact, nothing generates/reads it
+  // D39-consistent: lstat guard ensures we only unlink regular files (defense-in-depth)
+  const projectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
+  try {
+    const stat = await fs.lstat(projectPatternsPath);
+    if (stat.isFile()) {
       await fs.unlink(projectPatternsPath);
-      removed++;
-      modifiedFiles.push(projectPatternsPath);
-    } catch { /* File doesn't exist — fine */ }
-  } finally {
-    try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
-  }
+      result.removed++;
+      result.files.push(projectPatternsPath);
+    }
+  } catch { /* File doesn't exist — fine */ }
 
-  return { removed, files: modifiedFiles };
+  return result;
+}
+
+/**
+ * Remove ALL pre-v2 seeded knowledge entries from decisions.md and pitfalls.md.
+ *
+ * Unlike `purgeLegacyKnowledgeEntries` (which targets a fixed allow-list of 4
+ * IDs), this function uses a format discriminator: any `## ADR-NNN:` or
+ * `## PF-NNN:` section that does NOT contain the literal
+ * `- **Source**: self-learning:` marker is considered pre-v2 seeded content
+ * and is removed.  Self-learning entries always carry that marker; seeded
+ * entries never do.
+ *
+ * D-Fix3: This widens the v2 migration's coverage from 4 hardcoded IDs to
+ * ALL seeded entries, fixing the gap where 7 of the original 10 seed entries
+ * survived the v2 purge on upgraded projects.
+ *
+ * Returns immediately if `.memory/knowledge/` does not exist.
+ *
+ * Does NOT remove PROJECT-PATTERNS.md — that file is v2's responsibility and
+ * has already been handled by `purgeLegacyKnowledgeEntries`.
+ *
+ * @param options.memoryDir - absolute path to the `.memory/` directory
+ * @returns number of sections removed and list of files that were modified
+ * @throws if lock acquisition times out
+ */
+export async function purgeAllPreV2KnowledgeEntries(options: {
+  memoryDir: string;
+}): Promise<PurgeLegacyKnowledgeResult> {
+  const { memoryDir } = options;
+  const knowledgeDir = path.join(memoryDir, 'knowledge');
+  const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+  const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+
+  const filePrefixPairs: readonly KnowledgeFilePair[] = [
+    [decisionsPath, 'ADR'],
+    [pitfallsPath, 'PF'],
+  ];
+
+  return withKnowledgeFiles(memoryDir, filePrefixPairs, (content) => {
+    // Remove sections lacking the self-learning marker — those are pre-v2 seeded content.
+    let removedCount = 0;
+    const updated = content.replace(SECTION_REGEX, (section) => {
+      if (!section.includes(SELF_LEARNING_SOURCE_MARKER)) {
+        removedCount++;
+        return '';
+      }
+      return section;
+    });
+    return { updated, removedCount };
+  });
 }

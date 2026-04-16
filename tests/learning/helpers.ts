@@ -49,6 +49,19 @@ export interface LogEntry {
 }
 
 /**
+ * djb2 hash — matches the contentHash() implementation in json-helper.cjs.
+ * Exported so all test files can share a single copy (T3: eliminates duplicate
+ * inline definitions in reconcile.test.ts and any future test files).
+ */
+export function djb2(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16);
+}
+
+/**
  * Return a base log entry for the given id and type.
  * Suitable as a starting point for any test fixture.
  */
