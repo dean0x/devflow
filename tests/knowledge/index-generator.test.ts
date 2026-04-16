@@ -1,62 +1,25 @@
-import { describe, it, expect } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync } from 'fs'
+import { describe, it, expect, afterAll } from 'vitest'
 import * as path from 'path'
-import * as os from 'os'
 import { execSync } from 'child_process'
 import { createRequire } from 'module'
+import {
+  ACTIVE_ADR, ACTIVE_PF, DEPRECATED_ADR, SUPERSEDED_PF,
+  makeTmpWorktree, cleanupTmpWorktrees,
+} from './fixtures'
+
+afterAll(() => cleanupTmpWorktrees())
 
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const require = createRequire(import.meta.url)
 
-const { filterKnowledgeContext, loadKnowledgeContext, loadKnowledgeIndex } = require(
+const { filterKnowledgeContext, loadKnowledgeIndex } = require(
   path.join(ROOT, 'scripts/hooks/lib/knowledge-context.cjs')
 ) as {
   filterKnowledgeContext: (raw: string) => string
-  loadKnowledgeContext: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string
   loadKnowledgeIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string
 }
 
 const CJS_PATH = path.join(ROOT, 'scripts/hooks/lib/knowledge-context.cjs')
-
-function makeTmpWorktree(decisions?: string, pitfalls?: string): string {
-  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'knowledge-index-test-'))
-  const knowledgeDir = path.join(tmpDir, '.memory', 'knowledge')
-  mkdirSync(knowledgeDir, { recursive: true })
-  if (decisions !== undefined) {
-    writeFileSync(path.join(knowledgeDir, 'decisions.md'), decisions, 'utf8')
-  }
-  if (pitfalls !== undefined) {
-    writeFileSync(path.join(knowledgeDir, 'pitfalls.md'), pitfalls, 'utf8')
-  }
-  return tmpDir
-}
-
-const ACTIVE_ADR = `## ADR-001: Use Result types everywhere across the codebase for errors
-
-- **Status**: Active
-- **Decision**: Always return Result<T,E>
-- **Context**: TypeScript project enforcing functional error handling
-`
-
-const ACTIVE_PF = `## PF-004: Background hook scripts grow into god scripts over time
-
-- **Status**: Active
-- **Area**: scripts/hooks/foo.cjs, scripts/hooks/background-learning
-- **Description**: Watch out for growing scripts
-`
-
-const DEPRECATED_ADR = `## ADR-002: Old approach no longer relevant
-
-- **Status**: Deprecated
-- **Decision**: Do the old thing
-`
-
-const SUPERSEDED_PF = `## PF-005: Superseded pitfall
-
-- **Status**: Superseded
-- **Area**: some/file.ts
-- **Description**: No longer relevant
-`
 
 // -------------------------------------------------------------------------
 // loadKnowledgeIndex — formatting
@@ -204,27 +167,18 @@ describe('CLI dispatch — subcommand mode', () => {
     expect(output).toContain('PF-004')
   })
 
-  it('full subcommand produces full corpus format', () => {
-    const tmpDir = makeTmpWorktree(ACTIVE_ADR, ACTIVE_PF)
-    const output = execSync(`node "${CJS_PATH}" full "${tmpDir}"`).toString()
-    // Full corpus contains full ADR/PF section content
-    expect(output).toContain('ADR-001')
-    expect(output).toContain('Always return Result<T,E>')
-  })
-
-  it('bare invocation (no subcommand) produces full corpus format', () => {
+  it('bare invocation (no subcommand) exits with code 1', () => {
     const tmpDir = makeTmpWorktree(ACTIVE_ADR)
-    const output = execSync(`node "${CJS_PATH}" "${tmpDir}" 2>/dev/null`).toString()
-    expect(output).toContain('Always return Result<T,E>')
-  })
-
-  it('bare invocation emits deprecation notice to stderr', () => {
-    const tmpDir = makeTmpWorktree(ACTIVE_ADR)
-    const stderr = execSync(`node "${CJS_PATH}" "${tmpDir}" 2>&1 1>/dev/null || true`, {
-      encoding: 'utf8',
-      shell: true,
-    })
-    expect(stderr).toMatch(/deprecated|deprecat|use.*index/i)
+    let threw = false
+    try {
+      execSync(`node "${CJS_PATH}" "${tmpDir}"`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(true)
   })
 
   it('unknown subcommand exits with code 1 and prints usage', () => {
@@ -266,16 +220,6 @@ describe('Observability — stderr log on successful invocation', () => {
     expect(stderr).toContain('[knowledge-context]')
     expect(stderr).toContain('mode=index')
     expect(stderr).toContain('entries=2')
-  })
-
-  it('full subcommand logs mode and worktree to stderr', () => {
-    const tmpDir = makeTmpWorktree(ACTIVE_ADR)
-    const stderr = execSync(
-      `node "${CJS_PATH}" full "${tmpDir}" 2>&1 1>/dev/null`,
-      { encoding: 'utf8', shell: true }
-    )
-    expect(stderr).toContain('[knowledge-context]')
-    expect(stderr).toContain('mode=full')
   })
 
   it('does not log observability when result is "(none)"', () => {

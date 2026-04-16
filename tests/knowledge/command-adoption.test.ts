@@ -14,12 +14,14 @@ describe('Command surfaces — knowledge-context.cjs index invocation', () => {
     ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
     ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
     ['code-review-teams.md', 'plugins/devflow-code-review/commands/code-review-teams.md'],
+    ['debug.md', 'plugins/devflow-debug/commands/debug.md'],
+    ['debug-teams.md', 'plugins/devflow-debug/commands/debug-teams.md'],
   ]
 
   for (const [label, relPath] of surfaces) {
-    it(`${label} invokes knowledge-context.cjs index`, () => {
+    it(`${label} invokes knowledge-context.cjs index with {worktree} placeholder`, () => {
       const content = loadFile(relPath)
-      expect(content).toContain('knowledge-context.cjs index')
+      expect(content).toContain('knowledge-context.cjs index "{worktree}"')
     })
   }
 })
@@ -37,9 +39,9 @@ describe('Orch skill surfaces — knowledge-context.cjs index invocation', () =>
   ]
 
   for (const [label, relPath] of orchSkills) {
-    it(`${label} SKILL.md invokes knowledge-context.cjs index`, () => {
+    it(`${label} SKILL.md invokes knowledge-context.cjs index with {worktree} placeholder`, () => {
       const content = loadFile(relPath)
-      expect(content).toContain('knowledge-context.cjs index')
+      expect(content).toContain('knowledge-context.cjs index "{worktree}"')
     })
   }
 })
@@ -64,6 +66,64 @@ describe('debug:orch — knowledge is orchestrator-local, not fanned to Explore 
 })
 
 // -------------------------------------------------------------------------
+// debug.md & debug-teams.md — knowledge orchestrator-local, not fanned
+// -------------------------------------------------------------------------
+
+describe('debug.md — knowledge is orchestrator-local, not fanned to Explore investigators', () => {
+  it('debug.md contains KNOWLEDGE_CONTEXT (orchestrator uses it)', () => {
+    const content = loadFile('plugins/devflow-debug/commands/debug.md')
+    expect(content).toContain('KNOWLEDGE_CONTEXT')
+  })
+
+  it('debug.md Investigate phase does NOT pass KNOWLEDGE_CONTEXT to Explore investigators', () => {
+    const content = loadFile('plugins/devflow-debug/commands/debug.md')
+    const phase3 = extractSection(content, 'Phase 3: Investigate', '### Phase 4')
+    expect(phase3).not.toContain('KNOWLEDGE_CONTEXT')
+  })
+})
+
+describe('debug-teams.md — knowledge is orchestrator-local, not fanned to teammates', () => {
+  it('debug-teams.md contains KNOWLEDGE_CONTEXT (orchestrator uses it)', () => {
+    const content = loadFile('plugins/devflow-debug/commands/debug-teams.md')
+    expect(content).toContain('KNOWLEDGE_CONTEXT')
+  })
+
+  it('debug-teams.md teammate spawn block does NOT pass KNOWLEDGE_CONTEXT to investigators', () => {
+    const content = loadFile('plugins/devflow-debug/commands/debug-teams.md')
+    const phase3 = extractSection(content, 'Phase 3: Spawn Investigation Team', '### Phase 4')
+    expect(phase3).not.toContain('KNOWLEDGE_CONTEXT')
+  })
+})
+
+// -------------------------------------------------------------------------
+// KNOWLEDGE_CONTEXT substitution template — single canonical form
+// -------------------------------------------------------------------------
+
+describe('KNOWLEDGE_CONTEXT template — uses canonical {knowledge_context} form without fallback', () => {
+  const templateSurfaces: Array<[string, string]> = [
+    ['plan.md', 'plugins/devflow-plan/commands/plan.md'],
+    ['plan-teams.md', 'plugins/devflow-plan/commands/plan-teams.md'],
+    ['resolve.md', 'plugins/devflow-resolve/commands/resolve.md'],
+    ['resolve-teams.md', 'plugins/devflow-resolve/commands/resolve-teams.md'],
+    ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
+    ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
+    ['code-review-teams.md', 'plugins/devflow-code-review/commands/code-review-teams.md'],
+    ['plan:orch', 'shared/skills/plan:orch/SKILL.md'],
+  ]
+
+  for (const [label, relPath] of templateSurfaces) {
+    it(`${label} does not use the legacy quoted or prose-fallback forms`, () => {
+      const content = loadFile(relPath)
+      // Quoted fallback (Form A)
+      expect(content).not.toContain(`{knowledge_context or '(none)'}`)
+      // Prose-descriptive fallback (Form B)
+      expect(content).not.toMatch(/\{knowledge index from[^}]+, or \(none\)\}/)
+      expect(content).not.toMatch(/\{Phase \d+ knowledge index, or \(none\)\}/)
+    })
+  }
+})
+
+// -------------------------------------------------------------------------
 // Consumer agents — must reference devflow:apply-knowledge in skills frontmatter
 // -------------------------------------------------------------------------
 
@@ -71,7 +131,6 @@ describe('Consumer agents — devflow:apply-knowledge in skills frontmatter', ()
   const agents: Array<[string, string]> = [
     ['resolver.md', 'shared/agents/resolver.md'],
     ['designer.md', 'shared/agents/designer.md'],
-    ['simplifier.md', 'shared/agents/simplifier.md'],
     ['scrutinizer.md', 'shared/agents/scrutinizer.md'],
     ['reviewer.md', 'shared/agents/reviewer.md'],
   ]
@@ -84,6 +143,37 @@ describe('Consumer agents — devflow:apply-knowledge in skills frontmatter', ()
       expect(frontmatterMatch).toBeTruthy()
       const frontmatter = frontmatterMatch![1]
       expect(frontmatter).toContain('devflow:apply-knowledge')
+    })
+  }
+
+  it('simplifier.md does NOT reference devflow:apply-knowledge (code-shape role, not quality gate)', () => {
+    const content = loadFile('shared/agents/simplifier.md')
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/m)
+    expect(frontmatterMatch).toBeTruthy()
+    const frontmatter = frontmatterMatch![1]
+    expect(frontmatter).not.toContain('devflow:apply-knowledge')
+  })
+})
+
+// -------------------------------------------------------------------------
+// KNOWLEDGE_CONTEXT input description — canonical form across consumer agents
+// -------------------------------------------------------------------------
+
+describe('KNOWLEDGE_CONTEXT input declaration — canonical form', () => {
+  const CANONICAL_DESCRIPTION =
+    '**KNOWLEDGE_CONTEXT** (optional): Compact index of active ADR/PF entries for this worktree (generated by `knowledge-context.cjs index`). `(none)` when absent. Use `devflow:apply-knowledge` to Read full bodies on demand.'
+
+  const consumerAgents: Array<[string, string]> = [
+    ['resolver.md', 'shared/agents/resolver.md'],
+    ['designer.md', 'shared/agents/designer.md'],
+    ['scrutinizer.md', 'shared/agents/scrutinizer.md'],
+    ['reviewer.md', 'shared/agents/reviewer.md'],
+  ]
+
+  for (const [label, relPath] of consumerAgents) {
+    it(`${label} declares KNOWLEDGE_CONTEXT with canonical description`, () => {
+      const content = loadFile(relPath)
+      expect(content).toContain(CANONICAL_DESCRIPTION)
     })
   }
 })

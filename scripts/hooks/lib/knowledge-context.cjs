@@ -1,27 +1,18 @@
 // scripts/hooks/lib/knowledge-context.cjs
-// Deterministic project knowledge loader for the resolve pipeline.
+// Deterministic project knowledge loader for orchestration surfaces.
 //
-// DESIGN: The resolve orchestration surfaces (resolve.md, resolve-teams.md,
-// resolve:orch/SKILL.md) all instruct the orchestrator to strip Deprecated and
-// Superseded knowledge entries before passing KNOWLEDGE_CONTEXT to Resolver agents.
+// DESIGN: Orchestration surfaces (resolve.md, plan.md, code-review.md, etc.)
+// instruct the orchestrator to strip Deprecated and Superseded knowledge entries
+// before passing KNOWLEDGE_CONTEXT to consumer agents.
 // Having this logic as a pure CJS module gives us:
 //   1. Deterministic filtering — not LLM-interpreted, always consistent.
 //   2. Real test coverage — tests import this module directly.
-//   3. CLI interface — orchestrators can invoke as:
+//   3. CLI interface — orchestrators invoke as:
 //        node scripts/hooks/lib/knowledge-context.cjs index {worktree}
-//      and capture the output as KNOWLEDGE_CONTEXT (index format).
-//      The `full` subcommand returns the full corpus (for backwards compatibility).
-//      The bare invocation (no subcommand) is deprecated — emits full corpus with
-//      a deprecation notice to stderr.
+//      and capture the output as KNOWLEDGE_CONTEXT (compact index format).
 //
 // This module is the single source of truth for the D-A filter algorithm
 // (strip ## ADR-NNN / ## PF-NNN sections marked Deprecated or Superseded).
-//
-// CLI dispatch mirrors json-helper.cjs:8-36 subcommand style:
-//   node knowledge-context.cjs index  <worktree>  → index format (~250 tokens)
-//   node knowledge-context.cjs full   <worktree>  → full corpus
-//   node knowledge-context.cjs        <worktree>  → full corpus + deprecation notice
-//   node knowledge-context.cjs foo    <worktree>  → exit 1 + usage
 
 'use strict';
 
@@ -29,6 +20,25 @@ const fs = require('fs');
 const path = require('path');
 
 /** @typedef {{ id: string, title: string, status: string, area: string|null }} IndexEntry */
+
+/** Statuses recognised by the index formatter — everything else renders as [unknown]. */
+const KNOWN_STATUSES = ['Active', 'Deprecated', 'Superseded'];
+
+/**
+ * Return true when a markdown section is marked Deprecated or Superseded.
+ * This is the single predicate backing the D-A filter algorithm described in
+ * the DESIGN comment above — every call-site that needs to strip inactive
+ * knowledge entries should use this function.
+ *
+ * @param {string} section - raw text of one ## ADR-NNN / ## PF-NNN section
+ * @returns {boolean}
+ */
+function isDeprecatedOrSuperseded(section) {
+  return (
+    /- \*\*Status\*\*: Deprecated/.test(section) ||
+    /- \*\*Status\*\*: Superseded/.test(section)
+  );
+}
 
 /**
  * Filter raw decisions.md / pitfalls.md content, removing any ## ADR-NNN: or
@@ -50,11 +60,7 @@ function filterKnowledgeContext(raw) {
   const kept = sections.filter(section => {
     const isKnowledgeSection = /^## (?:ADR|PF)-\d+:/m.test(section);
     if (!isKnowledgeSection) return true; // keep preamble / non-knowledge content
-    // Drop sections explicitly marked Deprecated or Superseded
-    return (
-      !/- \*\*Status\*\*: Deprecated/.test(section) &&
-      !/- \*\*Status\*\*: Superseded/.test(section)
-    );
+    return !isDeprecatedOrSuperseded(section);
   });
   return kept.join('').trim();
 }
@@ -76,13 +82,7 @@ function extractIndexEntries(raw) {
     const headingMatch = section.match(/^## ((?:ADR|PF)-\d+): (.+)/m);
     if (!headingMatch) continue; // preamble or non-knowledge content
 
-    // Apply D-A filter — skip Deprecated / Superseded
-    if (
-      /- \*\*Status\*\*: Deprecated/.test(section) ||
-      /- \*\*Status\*\*: Superseded/.test(section)
-    ) {
-      continue;
-    }
+    if (isDeprecatedOrSuperseded(section)) continue;
 
     const id = headingMatch[1];
     const rawTitle = headingMatch[2].trim();
@@ -114,28 +114,15 @@ function truncate(str, maxLen) {
 }
 
 /**
- * Format a single index line for an ADR entry.
+ * Format a single index line for an ADR or PF entry.
+ * ADR entries have `area: null`, so the area suffix is naturally omitted.
  *
  * @param {IndexEntry} entry
  * @returns {string}
  */
-function formatAdrLine(entry) {
+function formatEntryLine(entry) {
   const title = truncate(entry.title, 60);
-  const knownStatuses = ['Active', 'Deprecated', 'Superseded'];
-  const tag = entry.status && knownStatuses.includes(entry.status) ? `[${entry.status}]` : '[unknown]';
-  return `  ${entry.id}  ${title}  ${tag}`;
-}
-
-/**
- * Format a single index line for a PF entry.
- *
- * @param {IndexEntry} entry
- * @returns {string}
- */
-function formatPfLine(entry) {
-  const title = truncate(entry.title, 60);
-  const knownStatuses = ['Active', 'Deprecated', 'Superseded'];
-  const tag = entry.status && knownStatuses.includes(entry.status) ? `[${entry.status}]` : '[unknown]';
+  const tag = entry.status && KNOWN_STATUSES.includes(entry.status) ? `[${entry.status}]` : '[unknown]';
   const areaSuffix = entry.area ? `  —  ${truncate(entry.area, 80)}` : '';
   return `  ${entry.id}  ${title}  ${tag}${areaSuffix}`;
 }
@@ -143,7 +130,7 @@ function formatPfLine(entry) {
 /**
  * Load a compact index of project knowledge entries for a given worktree.
  *
- * Returns a ~250-token summary listing each ADR/PF entry with ID, truncated
+ * Returns a compact index listing each ADR/PF entry with ID, truncated
  * title, status, and (for pitfalls) area. Includes a footer describing how to
  * Read full bodies on demand. Returns '(none)' when both files are absent or
  * their filtered content is empty.
@@ -192,7 +179,7 @@ function loadKnowledgeIndex(worktreePath, opts = {}) {
   if (adrEntries.length > 0) {
     const lines = [`Decisions (${adrEntries.length}):`];
     for (const entry of adrEntries) {
-      lines.push(formatAdrLine(entry));
+      lines.push(formatEntryLine(entry));
     }
     blocks.push(lines.join('\n'));
   }
@@ -200,7 +187,7 @@ function loadKnowledgeIndex(worktreePath, opts = {}) {
   if (pfEntries.length > 0) {
     const lines = [`Pitfalls (${pfEntries.length}):`];
     for (const entry of pfEntries) {
-      lines.push(formatPfLine(entry));
+      lines.push(formatEntryLine(entry));
     }
     blocks.push(lines.join('\n'));
   }
@@ -226,142 +213,35 @@ function loadKnowledgeIndex(worktreePath, opts = {}) {
   return blocks.join('\n\n');
 }
 
-/**
- * Load and filter project knowledge for a given worktree.
- *
- * Reads `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`
- * from the worktree root, applies D-A filtering, concatenates, and returns the
- * result. Returns the string `'(none)'` when both files are absent or their
- * filtered content is empty.
- *
- * @param {string} worktreePath - absolute path to the worktree root
- * @param {{ decisionsFile?: string, pitfallsFile?: string }} [opts] - override
- *   file paths for testing (relative paths resolved against worktreePath)
- * @returns {string} filtered context string, or '(none)'
- */
-function loadKnowledgeContext(worktreePath, opts = {}) {
-  const decisionsFile = opts.decisionsFile
-    ? path.resolve(worktreePath, opts.decisionsFile)
-    : path.join(worktreePath, '.memory', 'knowledge', 'decisions.md');
-
-  const pitfallsFile = opts.pitfallsFile
-    ? path.resolve(worktreePath, opts.pitfallsFile)
-    : path.join(worktreePath, '.memory', 'knowledge', 'pitfalls.md');
-
-  let parts = [];
-
-  for (const filePath of [decisionsFile, pitfallsFile]) {
-    let raw;
-    try {
-      raw = fs.readFileSync(filePath, 'utf8');
-    } catch {
-      // Skip silently if absent
-      continue;
-    }
-    const filtered = filterKnowledgeContext(raw);
-    if (filtered) parts.push(filtered);
-  }
-
-  if (parts.length === 0) return '(none)';
-  return parts.join('\n\n').trim();
-}
-
 // ---------------------------------------------------------------------------
-// CLI interface — subcommand dispatch
-//
-// Mirrors json-helper.cjs dispatch style (lines 8-36).
+// CLI interface
 //
 // Usage:
-//   node knowledge-context.cjs index  <worktree>  → index format (preferred)
-//   node knowledge-context.cjs full   <worktree>  → full corpus
-//   node knowledge-context.cjs        <worktree>  → full corpus (deprecated)
-//   node knowledge-context.cjs foo    <worktree>  → exit 1 + usage
+//   node knowledge-context.cjs index <worktree>  → compact index
 // ---------------------------------------------------------------------------
-
-/**
- * Print usage and exit 1.
- */
-function usageExit() {
-  process.stderr.write(
-    'Usage: node knowledge-context.cjs <subcommand> <worktree-path>\n' +
-    'Subcommands:\n' +
-    '  index  <worktree>  — compact index (~250 tokens)\n' +
-    '  full   <worktree>  — full filtered corpus\n'
-  );
-  process.exit(1);
-}
 
 if (require.main === module) {
   const argv = process.argv.slice(2);
 
-  const KNOWN_SUBCOMMANDS = new Set(['index', 'full']);
-
-  // Bare invocation: node knowledge-context.cjs <worktree>
-  // Detected when: argv[0] looks like a path (starts with . / ~ or is absolute-ish)
-  // OR argv[0] is not a known subcommand and argv[1] is undefined.
-  const firstArg = argv[0];
-
-  if (!firstArg) {
-    usageExit();
-  }
-
-  let mode;
-  let worktreeArg;
-
-  if (firstArg === 'index' || firstArg === 'full') {
-    mode = firstArg;
-    worktreeArg = argv[1];
-  } else if (!KNOWN_SUBCOMMANDS.has(firstArg) && (firstArg.startsWith('/') || firstArg.startsWith('.') || firstArg.startsWith('~') || firstArg.includes('/'))) {
-    // Bare deprecated form: first arg is a path
-    mode = 'bare';
-    worktreeArg = firstArg;
-  } else if (!KNOWN_SUBCOMMANDS.has(firstArg)) {
-    // Unknown subcommand
-    usageExit();
-  }
-
-  if (!worktreeArg) {
-    usageExit();
-  }
-
-  const worktreePath = path.resolve(worktreeArg);
-
-  if (mode === 'bare') {
-    // Deprecated — emit deprecation notice to stderr, then full corpus
+  if (argv[0] !== 'index' || !argv[1]) {
     process.stderr.write(
-      '[knowledge-context] DEPRECATED: bare invocation without subcommand. ' +
-      'Use `node knowledge-context.cjs index <worktree>` instead.\n'
+      'Usage: node knowledge-context.cjs index <worktree-path>\n'
     );
-    const result = loadKnowledgeContext(worktreePath);
-    process.stdout.write(result + '\n');
-    process.exit(0);
+    process.exit(1);
   }
 
-  if (mode === 'index') {
-    const result = loadKnowledgeIndex(worktreePath);
-    if (result !== '(none)') {
-      // Count total entries for observability log
-      const adrCount = (result.match(/^\s+ADR-\d+/gm) || []).length;
-      const pfCount = (result.match(/^\s+PF-\d+/gm) || []).length;
-      const entries = adrCount + pfCount;
-      process.stderr.write(
-        `[knowledge-context] mode=index worktree=${worktreePath} entries=${entries}\n`
-      );
-    }
-    process.stdout.write(result + '\n');
-    process.exit(0);
+  const worktreePath = path.resolve(argv[1]);
+  const result = loadKnowledgeIndex(worktreePath);
+  if (result !== '(none)') {
+    const adrCount = (result.match(/^\s+ADR-\d+/gm) || []).length;
+    const pfCount = (result.match(/^\s+PF-\d+/gm) || []).length;
+    const entries = adrCount + pfCount;
+    process.stderr.write(
+      `[knowledge-context] mode=index worktree=${worktreePath} entries=${entries}\n`
+    );
   }
-
-  if (mode === 'full') {
-    const result = loadKnowledgeContext(worktreePath);
-    if (result !== '(none)') {
-      process.stderr.write(
-        `[knowledge-context] mode=full worktree=${worktreePath}\n`
-      );
-    }
-    process.stdout.write(result + '\n');
-    process.exit(0);
-  }
+  process.stdout.write(result + '\n');
+  process.exit(0);
 }
 
-module.exports = { filterKnowledgeContext, loadKnowledgeContext, loadKnowledgeIndex, extractIndexEntries };
+module.exports = { filterKnowledgeContext, loadKnowledgeIndex, extractIndexEntries };

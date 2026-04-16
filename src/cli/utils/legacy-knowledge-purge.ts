@@ -209,11 +209,15 @@ export async function purgeLegacyKnowledgeEntries(options: {
   });
 
   // Remove orphan PROJECT-PATTERNS.md — stale artifact, nothing generates/reads it
+  // D39-consistent: lstat guard ensures we only unlink regular files (defense-in-depth)
   const projectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
   try {
-    await fs.unlink(projectPatternsPath);
-    result.removed++;
-    result.files.push(projectPatternsPath);
+    const stat = await fs.lstat(projectPatternsPath);
+    if (stat.isFile()) {
+      await fs.unlink(projectPatternsPath);
+      result.removed++;
+      result.files.push(projectPatternsPath);
+    }
   } catch { /* File doesn't exist — fine */ }
 
   return result;

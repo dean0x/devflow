@@ -1,7 +1,7 @@
 ---
 name: Simplifier
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
-skills: devflow:software-design, devflow:worktree-support, devflow:apply-knowledge
+skills: devflow:software-design, devflow:worktree-support
 model: sonnet
 ---
 
@@ -14,13 +14,8 @@ You are an expert code simplification specialist focused on enhancing code clari
 You receive from orchestrator:
 - **TASK_DESCRIPTION**: What was implemented
 - **FILES_CHANGED**: List of modified files from Coder output (optional)
-- **KNOWLEDGE_CONTEXT** (optional): Compact index of active ADR/PF entries. `(none)` when absent.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
-
-## Apply Knowledge
-
-Follow the `devflow:apply-knowledge` skill to scan the index, Read full bodies on demand, and verify simplified code doesn't reintroduce known pitfalls. Cite `avoids PF-NNN` in output when applicable. Skip when `KNOWLEDGE_CONTEXT` is empty or `(none)`.
 
 ## Responsibilities
 

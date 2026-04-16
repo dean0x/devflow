@@ -23,9 +23,9 @@ Detect changed files and build context:
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
 5. Load knowledge index:
    ```bash
-   KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+   KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
    ```
-   Pass `KNOWLEDGE_CONTEXT` to Simplifier and Scrutinizer — the compact index lists active ADR/PF entries; agents use `devflow:apply-knowledge` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency.
+   Pass `KNOWLEDGE_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-knowledge` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume knowledge — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
 
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional)
 
@@ -36,9 +36,7 @@ Spawn Simplifier agent to refine code for clarity and consistency:
 Agent(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
-Simplify and refine the code for clarity and consistency while preserving functionality.
-Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none)."
+Simplify and refine the code for clarity and consistency while preserving functionality."
 
 **Wait for completion.** Simplifier commits changes directly.
 
@@ -49,7 +47,7 @@ Spawn Scrutinizer agent for quality evaluation and fixing:
 Agent(subagent_type="Scrutinizer", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
 Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none)."
 

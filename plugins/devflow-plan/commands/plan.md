@@ -75,10 +75,10 @@ Return codebase context for requirements analysis."
 While Skimmer runs, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a compact index (~250 tokens) of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 #### Phase 3: Explore Requirements (Parallel)
 
@@ -137,7 +137,7 @@ Each designer receives:
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: {completeness|architecture|security|performance|consistency|dependencies}
-KNOWLEDGE_CONTEXT: {knowledge index from Phase 2, or (none)}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}

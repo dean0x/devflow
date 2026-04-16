@@ -75,10 +75,10 @@ Return codebase context for requirements analysis."
 While Skimmer runs, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a compact index (~250 tokens) of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 #### Phase 3: Exploration Team
 
@@ -93,7 +93,7 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {Phase 2 knowledge index, or (none)}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
        Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Target users, their goals, pain points, user journeys,
        and success scenarios. What does the user need this to do?
@@ -104,7 +104,7 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {Phase 2 knowledge index, or (none)}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
        Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Comparable features in the codebase or domain, scope
        patterns, edge cases discovered from similar implementations.
@@ -115,7 +115,7 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {Phase 2 knowledge index, or (none)}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
        Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Dependencies, business rules, security constraints,
        performance constraints, and prior architectural decisions that constrain scope.
@@ -126,7 +126,7 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {Phase 2 knowledge index, or (none)}
+    2. KNOWLEDGE_CONTEXT: {knowledge_context}
        Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Error states, edge cases, validation needs, known pitfalls,
        and failure scenarios that must be handled.

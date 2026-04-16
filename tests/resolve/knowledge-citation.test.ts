@@ -8,7 +8,7 @@
 //
 // Test groups:
 //   1. Unit tests: filterKnowledgeContext (D-A filter) — imported from production module
-//   2. Unit tests: loadKnowledgeContext — imported from production module
+//   2. Unit tests: filterKnowledgeContext — imported from production module
 //   3. Structural tests: resolve.md — Step 0d presence + KNOWLEDGE_CONTEXT in Phase 4
 //      (knowledge-context.cjs index invocation covered by tests/knowledge/command-adoption.test.ts)
 //   4. Structural tests: resolve-teams.md — parity with base
@@ -20,48 +20,23 @@
 //   7. Cross-cutting: all four surfaces reference KNOWLEDGE_CONTEXT
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, mkdtempSync, writeFileSync, mkdirSync } from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { createRequire } from 'module';
+import {
+  ACTIVE_ADR, ACTIVE_PF, DEPRECATED_ADR, DEPRECATED_PF,
+  SUPERSEDED_ADR,
+} from '../knowledge/fixtures';
+import { loadFile, extractSection } from '../knowledge/helpers';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
 // Import the production module — this is the real implementation, not a test copy.
-const { filterKnowledgeContext, loadKnowledgeContext } = require(
+const { filterKnowledgeContext } = require(
   path.join(ROOT, 'scripts/hooks/lib/knowledge-context.cjs')
 ) as {
   filterKnowledgeContext: (raw: string) => string;
-  loadKnowledgeContext: (worktreePath: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string;
 };
-
-function loadFile(relPath: string): string {
-  return readFileSync(path.join(ROOT, relPath), 'utf8');
-}
-
-/**
- * Extract a named section from markdown content with a loud failure if the
- * anchor is not present. Section runs from startAnchor to endAnchor (or to
- * end-of-string if endAnchor is null).
- *
- * Uses exact string search (indexOf) to find anchors — fails loudly when the
- * anchor is absent rather than silently returning unrelated content.
- */
-function extractSection(content: string, startAnchor: string, endAnchor: string | null): string {
-  const start = content.indexOf(startAnchor);
-  if (start === -1) {
-    throw new Error(`Anchor not found in document: "${startAnchor}"`);
-  }
-  if (endAnchor === null) {
-    return content.slice(start);
-  }
-  const end = content.indexOf(endAnchor, start + startAnchor.length);
-  if (end === -1) {
-    throw new Error(`End anchor not found after "${startAnchor}": "${endAnchor}"`);
-  }
-  return content.slice(start, end);
-}
 
 // ---------------------------------------------------------------------------
 // Unit tests: filterKnowledgeContext (D-A filter) — production module
@@ -73,140 +48,48 @@ describe('filterKnowledgeContext — Deprecated/Superseded filtering (D-A)', () 
   });
 
   it('preserves Active ADR sections unchanged', () => {
-    const input = `## ADR-001: Use Result types\n\n- **Status**: Active\n- **Decision**: Always return Result<T,E>\n`;
-    const output = filterKnowledgeContext(input);
+    const output = filterKnowledgeContext(ACTIVE_ADR);
     expect(output).toContain('ADR-001');
     expect(output).toContain('Always return Result<T,E>');
   });
 
   it('removes Deprecated ADR sections', () => {
-    const input = `## ADR-002: Old approach\n\n- **Status**: Deprecated\n- **Decision**: Do the old thing\n`;
-    const output = filterKnowledgeContext(input);
+    const output = filterKnowledgeContext(DEPRECATED_ADR);
     expect(output).not.toContain('ADR-002');
     expect(output).not.toContain('Do the old thing');
   });
 
   it('removes Superseded ADR sections', () => {
-    const input = `## ADR-003: Superseded approach\n\n- **Status**: Superseded\n- **Decision**: Outdated pattern\n`;
-    const output = filterKnowledgeContext(input);
+    const output = filterKnowledgeContext(SUPERSEDED_ADR);
     expect(output).not.toContain('ADR-003');
   });
 
   it('removes Deprecated PF sections', () => {
-    const input = `## PF-001: Old pitfall\n\n- **Status**: Deprecated\n- **Description**: No longer relevant\n`;
-    const output = filterKnowledgeContext(input);
+    const output = filterKnowledgeContext(DEPRECATED_PF);
     expect(output).not.toContain('PF-001');
   });
 
   it('keeps Active PF sections', () => {
-    const input = `## PF-002: Active pitfall\n\n- **Status**: Active\n- **Description**: Still relevant gotcha\n`;
-    const output = filterKnowledgeContext(input);
-    expect(output).toContain('PF-002');
-    expect(output).toContain('Still relevant gotcha');
+    const output = filterKnowledgeContext(ACTIVE_PF);
+    expect(output).toContain('PF-004');
+    expect(output).toContain('Watch out for growing scripts');
   });
 
   it('preserves Active sections when mixed with Deprecated sections', () => {
-    const input = [
-      `## ADR-001: Keep this\n\n- **Status**: Active\n- **Decision**: Good choice\n`,
-      `## ADR-002: Remove this\n\n- **Status**: Deprecated\n- **Decision**: Bad choice\n`,
-      `## PF-001: Keep this pitfall\n\n- **Status**: Active\n- **Description**: Watch out\n`,
-    ].join('\n');
+    const input = [ACTIVE_ADR, DEPRECATED_ADR, ACTIVE_PF].join('\n');
     const output = filterKnowledgeContext(input);
     expect(output).toContain('ADR-001');
-    expect(output).toContain('Good choice');
+    expect(output).toContain('Always return Result<T,E>');
     expect(output).not.toContain('ADR-002');
-    expect(output).not.toContain('Bad choice');
-    expect(output).toContain('PF-001');
-    expect(output).toContain('Watch out');
+    expect(output).not.toContain('Do the old thing');
+    expect(output).toContain('PF-004');
+    expect(output).toContain('Watch out for growing scripts');
   });
 
   it('returns empty string when all sections are removed (orchestrator emits "(none)")', () => {
-    const input = `## ADR-001: All deprecated\n\n- **Status**: Deprecated\n- **Decision**: Gone\n`;
-    const output = filterKnowledgeContext(input);
+    const output = filterKnowledgeContext(DEPRECATED_ADR);
     // Empty string signals orchestrator to emit "(none)"
     expect(output).toBe('');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Unit tests: loadKnowledgeContext — production module
-// ---------------------------------------------------------------------------
-
-describe('loadKnowledgeContext — file loading + filtering', () => {
-  function makeTmpWorktree(
-    decisions?: string,
-    pitfalls?: string
-  ): string {
-    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'knowledge-test-'));
-    const knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
-    mkdirSync(knowledgeDir, { recursive: true });
-    if (decisions !== undefined) {
-      writeFileSync(path.join(knowledgeDir, 'decisions.md'), decisions, 'utf8');
-    }
-    if (pitfalls !== undefined) {
-      writeFileSync(path.join(knowledgeDir, 'pitfalls.md'), pitfalls, 'utf8');
-    }
-    return tmpDir;
-  }
-
-  it('returns "(none)" when both knowledge files are absent', () => {
-    const tmpDir = makeTmpWorktree();
-    expect(loadKnowledgeContext(tmpDir)).toBe('(none)');
-  });
-
-  it('returns "(none)" when both files are empty', () => {
-    const tmpDir = makeTmpWorktree('', '');
-    expect(loadKnowledgeContext(tmpDir)).toBe('(none)');
-  });
-
-  it('returns filtered decisions content when only decisions.md exists', () => {
-    const decisions = `## ADR-001: Use Result types\n\n- **Status**: Active\n- **Decision**: Always return Result<T,E>\n`;
-    const tmpDir = makeTmpWorktree(decisions);
-    const result = loadKnowledgeContext(tmpDir);
-    expect(result).toContain('ADR-001');
-    expect(result).not.toBe('(none)');
-  });
-
-  it('returns filtered pitfalls content when only pitfalls.md exists', () => {
-    const pitfalls = `## PF-001: Active pitfall\n\n- **Status**: Active\n- **Description**: Watch out\n`;
-    const tmpDir = makeTmpWorktree(undefined, pitfalls);
-    const result = loadKnowledgeContext(tmpDir);
-    expect(result).toContain('PF-001');
-    expect(result).not.toBe('(none)');
-  });
-
-  it('concatenates decisions and pitfalls content when both exist', () => {
-    const decisions = `## ADR-001: Use Result types\n\n- **Status**: Active\n- **Decision**: Always return Result<T,E>\n`;
-    const pitfalls = `## PF-001: Active pitfall\n\n- **Status**: Active\n- **Description**: Watch out\n`;
-    const tmpDir = makeTmpWorktree(decisions, pitfalls);
-    const result = loadKnowledgeContext(tmpDir);
-    expect(result).toContain('ADR-001');
-    expect(result).toContain('PF-001');
-  });
-
-  it('strips Deprecated sections from both files before concatenating', () => {
-    const decisions = `## ADR-001: Keep\n\n- **Status**: Active\n- **Decision**: Good\n\n## ADR-002: Drop\n\n- **Status**: Deprecated\n- **Decision**: Bad\n`;
-    const pitfalls = `## PF-001: Drop\n\n- **Status**: Deprecated\n- **Description**: Gone\n`;
-    const tmpDir = makeTmpWorktree(decisions, pitfalls);
-    const result = loadKnowledgeContext(tmpDir);
-    expect(result).toContain('ADR-001');
-    expect(result).not.toContain('ADR-002');
-    expect(result).not.toContain('PF-001');
-  });
-
-  it('returns "(none)" when all sections in both files are Deprecated', () => {
-    const decisions = `## ADR-001: Deprecated\n\n- **Status**: Deprecated\n- **Decision**: Gone\n`;
-    const pitfalls = `## PF-001: Deprecated\n\n- **Status**: Deprecated\n- **Description**: Gone\n`;
-    const tmpDir = makeTmpWorktree(decisions, pitfalls);
-    expect(loadKnowledgeContext(tmpDir)).toBe('(none)');
-  });
-
-  it('accepts custom file paths via opts for isolated testing', () => {
-    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'knowledge-test-opts-'));
-    const customFile = path.join(tmpDir, 'custom-decisions.md');
-    writeFileSync(customFile, `## ADR-042: Custom\n\n- **Status**: Active\n- **Decision**: Custom entry\n`, 'utf8');
-    const result = loadKnowledgeContext(tmpDir, { decisionsFile: 'custom-decisions.md' });
-    expect(result).toContain('ADR-042');
   });
 });
 

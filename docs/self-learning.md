@@ -105,10 +105,10 @@ Knowledge consumers (slash commands and orch skills) do not fan the full ADR/PF 
 ### Step 1: Load compact index at orchestrator
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "<worktree>")
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a ~250-token index listing each active entry's ID, truncated title, status, and area:
+This produces a compact index listing each active entry's ID, truncated title, status, and area:
 
 ```
 Decisions (2):
@@ -116,13 +116,15 @@ Decisions (2):
   ...
 
 Pitfalls (3):
-  PF-004  Background hook scripts become god scripts  [Active] — scripts/hooks/
+  PF-004  Background hook scripts become god scripts  [Active]  —  scripts/hooks/
   ...
 
-ADR-NNN entries live in {worktree}/.memory/knowledge/decisions.md
-PF-NNN  entries live in {worktree}/.memory/knowledge/pitfalls.md
-Read the relevant file and locate the matching heading for the full body.
+ADR-NNN entries live in /path/to/project/.memory/knowledge/decisions.md
+PF-NNN  entries live in /path/to/project/.memory/knowledge/pitfalls.md
+Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
 ```
+
+> **Note**: Pre-v2 seeded entries may show `[unknown]` instead of `[Active]` if they predate the standard `- **Status**: Active` line format. New entries created by the learning system always include the status line.
 
 ### Step 2: Agent reads full body on demand
 

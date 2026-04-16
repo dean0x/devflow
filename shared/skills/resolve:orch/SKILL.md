@@ -35,7 +35,7 @@ Extract branch slug from the directory path.
      handled by Phase 1 here). Same content as resolve.md Step 0d. -->
 ## Phase 1.5: Load Project Knowledge
 
-Run `node scripts/hooks/lib/knowledge-context.cjs index "."` to produce a compact index (~250 tokens) of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+Run `node scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 ## Phase 2: Parse Issues
 

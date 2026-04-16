@@ -42,10 +42,10 @@ Create directory: `mkdir -p .docs/reviews/{branch_slug}/{timestamp}`
 After incremental detection, load the knowledge index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a compact index (~250 tokens) of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ## Phase 3: File Analysis
 

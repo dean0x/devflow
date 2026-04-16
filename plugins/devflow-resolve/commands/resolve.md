@@ -72,10 +72,10 @@ Set `TARGET_DIR` to the selected review directory path.
 For each worktree, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "<worktree>")
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a compact index (~250 tokens) of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 ### Phase 1: Parse Issues
 
@@ -126,7 +126,7 @@ Agent(subagent_type="Resolver"):
 BRANCH: {branch-slug}
 BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-KNOWLEDGE_CONTEXT: {knowledge index from Step 0d, or (none)}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-knowledge to Read full ADR/PF bodies on demand."
 ```
 

@@ -90,7 +90,7 @@ Load the knowledge index for the current worktree before spawning the review tea
 KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a compact index (~250 tokens) of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ### Phase 2: Spawn Review Team
 
@@ -120,81 +120,51 @@ This produces a compact index (~250 tokens) of active ADR/PF entries. Pass `KNOW
 ```
 Create a team named "review-{branch_slug}" to review PR #{pr_number}.
 
-Spawn review teammates with self-contained prompts:
+Spawn review teammates. For each teammate, compose a self-contained prompt using the template below, substituting the per-reviewer values from the table.
 
-- Name: "security-reviewer"
-  Prompt: |
+**Reviewer prompt template:**
+
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
-    1. Read your skill: `Read ~/.claude/skills/devflow:security/SKILL.md`
+    KNOWLEDGE_CONTEXT: {knowledge_context}
+    1. Read your skill(s): `Read {SKILL_PATHS}`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
     4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     5. Apply the 6-step review process from devflow:review-methodology
-    6. Focus: injection, auth bypass, crypto misuse, OWASP vulnerabilities
+    6. Focus: {FOCUS}
     7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
     8. Include file:line references for every finding
-    9. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/security.md`
-    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Security review done")
+    9. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/{REPORT_NAME}.md`
+    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "{SUMMARY}")
 
-- Name: "architecture-reviewer"
-  Prompt: |
-    You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
-    WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
-    1. Read your skill: `Read ~/.claude/skills/devflow:architecture/SKILL.md`
-    2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
-    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from devflow:review-methodology
-    6. Focus: SOLID violations, coupling, layering issues, modularity problems
-    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    8. Include file:line references for every finding
-    9. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/architecture.md`
-    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Architecture review done")
+**Core reviewers (always spawn):**
 
-- Name: "performance-reviewer"
-  Prompt: |
-    You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
-    WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
-    1. Read your skill: `Read ~/.claude/skills/devflow:performance/SKILL.md`
-    2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
-    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from devflow:review-methodology
-    6. Focus: N+1 queries, memory leaks, algorithm issues, I/O bottlenecks
-    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    8. Include file:line references for every finding
-    9. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/performance.md`
-    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Performance review done")
+| Name | SKILL_PATHS | FOCUS | REPORT_NAME | SUMMARY |
+|------|-------------|-------|-------------|---------|
+| security-reviewer | `~/.claude/skills/devflow:security/SKILL.md` | injection, auth bypass, crypto misuse, OWASP vulnerabilities | security | Security review done |
+| architecture-reviewer | `~/.claude/skills/devflow:architecture/SKILL.md` | SOLID violations, coupling, layering issues, modularity problems | architecture | Architecture review done |
+| performance-reviewer | `~/.claude/skills/devflow:performance/SKILL.md` | N+1 queries, memory leaks, algorithm issues, I/O bottlenecks | performance | Performance review done |
+| quality-reviewer | `~/.claude/skills/devflow:complexity/SKILL.md`, `~/.claude/skills/devflow:consistency/SKILL.md`, `~/.claude/skills/devflow:testing/SKILL.md`, `~/.claude/skills/devflow:regression/SKILL.md` | complexity, test gaps, pattern violations, regressions, naming | quality | Quality review done |
 
-- Name: "quality-reviewer"
-  Prompt: |
-    You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
-    WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
-    1. Read your skills:
-       - `Read ~/.claude/skills/devflow:complexity/SKILL.md`
-       - `Read ~/.claude/skills/devflow:consistency/SKILL.md`
-       - `Read ~/.claude/skills/devflow:testing/SKILL.md`
-       - `Read ~/.claude/skills/devflow:regression/SKILL.md`
-    2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
-    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from devflow:review-methodology
-    6. Focus: complexity, test gaps, pattern violations, regressions, naming
-    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    8. Include file:line references for every finding
-    9. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/quality.md`
-    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "Quality review done")
+**Conditional reviewers** — add based on Phase 1 changed-file analysis, using the same template:
 
-[Add conditional perspectives based on Phase 1 — follow same pattern:
- explicit skill path, diff command with DIFF_RANGE, output path in timestamped dir, SendMessage for completion]
+| Name | Condition | SKILL_PATHS | FOCUS | REPORT_NAME |
+|------|-----------|-------------|-------|-------------|
+| typescript-reviewer | .ts/.tsx changed | `devflow:typescript` | type safety, generics, utility types | typescript |
+| react-reviewer | .tsx/.jsx changed | `devflow:react` | hooks, state, rendering, composition | react |
+| accessibility-reviewer | .tsx/.jsx changed | `devflow:accessibility` | ARIA, keyboard nav, focus management | accessibility |
+| frontend-design-reviewer | .tsx/.jsx/.css changed | `devflow:ui-design` | visual consistency, spacing, typography | frontend-design |
+| go-reviewer | .go changed | `devflow:go` | error handling, interfaces, concurrency | go |
+| java-reviewer | .java changed | `devflow:java` | records, sealed classes, composition | java |
+| python-reviewer | .py changed | `devflow:python` | type hints, protocols, data modeling | python |
+| rust-reviewer | .rs changed | `devflow:rust` | ownership, error handling, type system | rust |
+| database-reviewer | DB files changed | `devflow:database` | schema, queries, migrations, indexes | database |
+| dependencies-reviewer | package files changed | `devflow:dependencies` | CVEs, versions, licenses, supply chain | dependencies |
+| documentation-reviewer | docs or significant code changed | `devflow:documentation` | doc drift, missing docs, stale comments | documentation |
 ```
 
-### Phase 3: Debate Round
+### Phase 2b: Debate Round
 
 After all reviewers complete initial analysis, lead initiates adversarial debate:
 
@@ -224,7 +194,7 @@ Reviewers message each other directly using SendMessage:
 - `SendMessage(type: "message", recipient: "team-lead", summary: "Escalation: {topic}")` for unresolvable disagreements
 - Update or withdraw findings based on peer evidence
 
-### Phase 4: Synthesis and PR Comments
+### Phase 3: Synthesis and PR Comments
 
 **WAIT** for debate to complete, then lead produces outputs.
 
@@ -268,7 +238,7 @@ Check for existing inline comments at same file:line before creating new ones."
 {Key exchanges that changed findings}
 ```
 
-### Phase 5: Write Review Head Marker
+### Phase 4: Write Review Head Marker
 
 Per worktree, after successful completion:
 1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
@@ -276,7 +246,7 @@ Per worktree, after successful completion:
 <!-- D8: "Record Pitfalls" phase removed — knowledge-persistence skill no longer has Write
      capability; pitfall recording is handled by the background-learning extractor. -->
 
-### Phase 6: Cleanup and Report
+### Phase 5: Cleanup and Report
 
 Shut down all review teammates explicitly:
 
@@ -318,16 +288,16 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  ├─ Quality Reviewer (teammate)
 │  └─ [Conditional: TypeScript, React, A11y, Design, Go, Java, Python, Rust, DB, Deps, Docs]
 │
-├─ Phase 3: Debate round
+├─ Phase 2b: Debate round
 │  └─ Reviewers challenge each other (max 2 rounds)
 │
-├─ Phase 4: Synthesis
+├─ Phase 3: Synthesis
 │  ├─ Git agent (comment-pr with consensus findings + dedup)
 │  └─ Lead writes review-summary with confidence levels
 │
-├─ Phase 5: Write .last-review-head per worktree
+├─ Phase 4: Write .last-review-head per worktree
 │
-└─ Phase 6: Cleanup and display results
+└─ Phase 5: Cleanup and display results
 ```
 
 ## Edge Cases

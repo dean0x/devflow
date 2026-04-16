@@ -39,10 +39,10 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 Before spawning any agents, load the knowledge index for the current worktree:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index ".")
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a compact index (~250 tokens) of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ## Phase 1: Orient
 
@@ -73,7 +73,7 @@ Spawn 2 `Agent(subagent_type="Designer")` agents **in a single message** (parall
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: completeness
-KNOWLEDGE_CONTEXT: {knowledge index from Phase 0, or (none)}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 2 outputs}
@@ -84,7 +84,7 @@ Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT."
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: architecture
-KNOWLEDGE_CONTEXT: {knowledge index from Phase 0, or (none)}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 2 outputs}

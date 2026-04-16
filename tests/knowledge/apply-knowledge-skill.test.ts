@@ -109,3 +109,28 @@ describe('apply-knowledge skill — skip guard', () => {
     expect(content).toContain('(none)')
   })
 })
+
+// -------------------------------------------------------------------------
+// Footer-as-source-of-truth — no hardcoded paths in Step 3 or Worked Example
+// -------------------------------------------------------------------------
+
+describe('apply-knowledge skill — defers to footer for file paths', () => {
+  it('Step 3 instructs to use the footer, not hardcoded paths', () => {
+    const content = loadSkill()
+    expect(content).toMatch(/footer is the single source of truth/i)
+  })
+
+  it('Step 3 example uses {worktree-from-footer} placeholder, not hardcoded .memory/knowledge/', () => {
+    const content = loadSkill()
+    // Step 3 section up to Step 4
+    const step3 = content.slice(
+      content.indexOf('### Step 3'),
+      content.indexOf('### Step 4')
+    )
+    // Must use the footer placeholder in the example
+    expect(step3).toContain('{worktree-from-footer}')
+    // Must not show a bare hardcoded .memory/knowledge/decisions.md arrow example
+    expect(step3).not.toMatch(/^\s*\.memory\/knowledge\/decisions\.md\s+→/m)
+    expect(step3).not.toMatch(/^\s*\.memory\/knowledge\/pitfalls\.md\s+→/m)
+  })
+})

@@ -97,7 +97,7 @@ While file analysis runs (or just before spawning reviewers), load the knowledge
 KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
 ```
 
-This produces a compact index (~250 tokens) of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ### Phase 2: Run Reviews (Parallel)
 
@@ -132,7 +132,7 @@ Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
-KNOWLEDGE_CONTEXT: {knowledge_context or '(none)'}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand.
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```

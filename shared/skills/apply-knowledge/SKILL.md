@@ -49,12 +49,14 @@ Titles are truncated to 60 characters — if a truncated title looks relevant, p
 
 ### Step 3: Read the full body
 
-For each plausibly-relevant entry, use the Read tool to open the knowledge file listed in the footer and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading. Read the full section to confirm relevance and understand the decision or pitfall completely.
+For each plausibly-relevant entry, use the Read tool to open the knowledge file listed in the `KNOWLEDGE_CONTEXT` footer and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading. Read the full section to confirm relevance and understand the decision or pitfall completely.
+
+**The footer is the single source of truth for file paths.** Never substitute hardcoded paths — the footer resolves to the correct worktree, which may differ from your cwd in multi-worktree flows.
 
 ```
-Read the relevant file, e.g.:
-  .memory/knowledge/decisions.md   → find ## ADR-NNN: heading
-  .memory/knowledge/pitfalls.md    → find ## PF-NNN: heading
+Use the exact paths from the KNOWLEDGE_CONTEXT footer, e.g.:
+  {worktree-from-footer}/.memory/knowledge/decisions.md   → find ## ADR-NNN: heading
+  {worktree-from-footer}/.memory/knowledge/pitfalls.md    → find ## PF-NNN: heading
 ```
 
 Only cite an entry after you have read its full body and confirmed it applies.
@@ -75,7 +77,7 @@ Cite only IDs that appear verbatim in `KNOWLEDGE_CONTEXT`. Do not guess at IDs t
 
 1. **Scan** — Index shows `PF-004  Background hook god scripts  [Active]  —  scripts/hooks/foo.cjs`
 2. **Identify** — Area field includes `scripts/hooks/` which overlaps with the file under review
-3. **Read** — Open `.memory/knowledge/pitfalls.md`, find `## PF-004:` section, read full body
+3. **Read** — Open the pitfalls file at the path given in the KNOWLEDGE_CONTEXT footer (e.g., `<worktree>/.memory/knowledge/pitfalls.md`), find `## PF-004:` section, read full body
 4. **Cite** — If the file shows signs of the god-script pattern, note `avoids PF-004` in reasoning
 5. **Verbatim** — ID `PF-004` appeared in the index; citation is valid
 

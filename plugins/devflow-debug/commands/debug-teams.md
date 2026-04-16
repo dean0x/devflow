@@ -23,9 +23,15 @@ Investigate bugs by spawning a team of agents, each pursuing a different hypothe
 
 ## Phases
 
-### Phase 1: Load Project Knowledge
+### Phase 1: Load Knowledge Index (Orchestrator-Local)
 
-Read `.memory/knowledge/decisions.md` and `.memory/knowledge/pitfalls.md`. Known pitfalls from prior debugging sessions and code reviews can directly inform hypothesis generation — pass their content as context to investigators in Phase 2.
+Before hypothesizing, load the knowledge index:
+
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+
+The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to investigator teammates** — knowledge context stays in the orchestrator; teammates examine code directly.
 
 ### Phase 2: Context Gathering
 
@@ -201,7 +207,7 @@ Lead produces final report:
 ```
 /debug (orchestrator)
 │
-├─ Phase 1: Load Project Knowledge
+├─ Phase 1: Load Knowledge Index (Orchestrator-Local)
 │
 ├─ Phase 2: Context gathering
 │  └─ Git agent (fetch issue, if #N provided)
