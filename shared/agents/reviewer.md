@@ -56,7 +56,8 @@ When you apply a decision or avoid a pitfall identified via the KNOWLEDGE_CONTEX
 
 ## Responsibilities
 
-1. **First action — load focus skill**: Before any analysis, invoke the Skill tool: `Skill(skill="devflow:{FOCUS}")` (substituting your assigned focus area). If the Skill invocation fails, report BLOCKED to the orchestrator with the error and stop.
+<!-- Dynamic loading used here because the focus set is unbounded (security, performance, architecture, etc.) — preloading all focus skills in frontmatter would load unused skills on every spawn. -->
+1. **Load focus skill**: Before any analysis, invoke the Skill tool: `Skill(skill="devflow:{FOCUS}")` (substituting your assigned focus area). If the Skill invocation fails, proceed with the review using your built-in knowledge — the focus skill provides additional detection patterns but is not required for a useful review.
 2. **Apply Knowledge** - Follow `devflow:apply-knowledge` (see section above) to scan the index and cite relevant entries in findings.
 3. **Identify changed lines** - Get diff against base branch (main/master/develop/integration/trunk)
 4. **Apply 3-category classification** - Sort issues by where they occur

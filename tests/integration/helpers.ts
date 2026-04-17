@@ -103,17 +103,22 @@ export function runClaudeStreaming(
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
-          const event = JSON.parse(line);
+          const event: unknown = JSON.parse(line);
 
           // Detect Skill tool_use in assistant messages
-          if (event.type === 'assistant' && event.message?.content) {
-            for (const block of event.message.content) {
+          if (
+            typeof event === 'object' && event !== null &&
+            (event as Record<string, unknown>).type === 'assistant' &&
+            Array.isArray((event as Record<string, unknown>).message?.content)
+          ) {
+            const msg = event as { type: string; message: { content: Record<string, unknown>[] } };
+            for (const block of msg.message.content) {
               // tool_use block for Skill
-              if (block.type === 'tool_use' && block.name === 'Skill' && block.input?.skill) {
-                skills.push(block.input.skill);
+              if (block.type === 'tool_use' && block.name === 'Skill' && typeof (block.input as Record<string, unknown>)?.skill === 'string') {
+                skills.push((block.input as Record<string, unknown>).skill as string);
               }
               // text block — capture for classification detection
-              if (block.type === 'text' && block.text) {
+              if (block.type === 'text' && typeof block.text === 'string') {
                 textFragments.push(block.text);
               }
             }

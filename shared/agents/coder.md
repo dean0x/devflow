@@ -53,7 +53,8 @@ When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfa
 <!-- CITATION-SENTENCE-END -->
    - If `.docs/handoff.md` exists, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
-2. **First action — load domain skills**: Before any analysis, invoke the Skill tool for each domain skill matching DOMAIN hint. If a Skill invocation fails, report BLOCKED to the orchestrator with the error and stop.
+<!-- Dynamic loading used here because the domain set is unbounded (TypeScript/Go/Java/Python/Rust/React/etc.) — preloading all variants in frontmatter would load unused skills on every spawn. -->
+2. **Load domain skills**: Before any analysis, invoke the Skill tool for each domain skill matching DOMAIN hint. If a Skill invocation fails, skip that skill and continue — domain skills are optional enhancements, not required for task completion.
    - `backend` (TypeScript): `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:boundary-validation")`
    - `backend` (Go): `Skill(skill="devflow:go")`
    - `backend` (Java): `Skill(skill="devflow:java")`
