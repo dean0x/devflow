@@ -208,6 +208,14 @@ export function extractDepth(result: StreamResult): string | null {
   return match ? match[2].toUpperCase() : null;
 }
 
+/**
+ * Check whether the result contains a Devflow classification tag.
+ *
+ * @see hasClassification — functionally identical after both helpers were
+ * unified on {@link CLASSIFICATION_PATTERN}. Kept as a distinct export so
+ * existing test assertions that describe "branding presence" (vs. "a
+ * classification exists") remain self-documenting at the call site.
+ */
 export function hasDevFlowBranding(result: StreamResult): boolean {
   const text = result.textFragments.join(' ');
   return CLASSIFICATION_PATTERN.test(text);
@@ -223,15 +231,95 @@ export function hasRequiredSkills(result: StreamResult, required: string[]): boo
   );
 }
 
+// COUPLING: depends on Claude Code's internal transcript layout:
+//   ~/.claude/projects/-{encoded-project-path}/{sessionId}/subagents/agent-{agentId}.jsonl
+// Each JSONL line is a streaming event; the first user message contains <command-name>
+// tags listing preloaded skills. If Claude Code changes this format, these helpers
+// return empty arrays (graceful degradation via catch).
+
+/** Max session directories to scan. Transcripts are in recent sessions only. */
+const SESSION_SCAN_LIMIT = 20;
+
 /**
- * Find the most recent subagent transcript written after `since` and return
- * the set of preloaded skill names (parsed from <command-name> tags in the
- * initial user message).
+ * Walk the project directory and collect subagent transcript paths written at or
+ * after `since`. Only the most recent {@link SESSION_SCAN_LIMIT} session directories
+ * are examined to keep this fast on machines with many sessions.
+ */
+function findRecentSubagentTranscripts(
+  projectDir: string,
+  since: Date,
+): Array<{ path: string; mtime: Date }> {
+  const sessionEntries = readdirSync(projectDir)
+    .map((d) => {
+      const full = resolve(projectDir, d);
+      try {
+        const s = statSync(full);
+        return s.isDirectory() ? { path: full, mtime: s.mtime } : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is { path: string; mtime: Date } => e !== null)
+    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+    .slice(0, SESSION_SCAN_LIMIT);
+
+  const transcripts: Array<{ path: string; mtime: Date }> = [];
+  for (const session of sessionEntries) {
+    const subagentsDir = resolve(session.path, 'subagents');
+    try {
+      const files = readdirSync(subagentsDir).filter(
+        (f) => f.startsWith('agent-') && f.endsWith('.jsonl'),
+      );
+      for (const file of files) {
+        const filePath = resolve(subagentsDir, file);
+        const stat = statSync(filePath);
+        if (stat.mtime >= since) {
+          transcripts.push({ path: filePath, mtime: stat.mtime });
+        }
+      }
+    } catch {
+      // No subagents dir in this session — skip
+    }
+  }
+  return transcripts;
+}
+
+/**
+ * Read a subagent transcript and return the skill names declared in the first
+ * user message via `<command-name>` tags. The `devflow:` namespace prefix is
+ * stripped for consistency with test assertions.
+ */
+function parsePreloadedSkills(transcriptPath: string): string[] {
+  const content = readFileSync(transcriptPath, 'utf-8');
+  const lines = content.split('\n').filter(Boolean);
+
+  for (const line of lines) {
+    try {
+      const event: unknown = JSON.parse(line);
+      if (typeof event !== 'object' || event === null) continue;
+      const e = event as Record<string, unknown>;
+      if (e.type !== 'user' && e.role !== 'user') continue;
+
+      // Extract skill names from <command-name> tags
+      const text =
+        typeof e.message === 'string'
+          ? e.message
+          : JSON.stringify(e.message?.content ?? e.content ?? '');
+      const skillMatches = text.matchAll(/<command-name>([\w:/-]+)<\/command-name>/g);
+      return [...skillMatches].map((m) => m[1].replace(/^devflow:/, ''));
+    } catch {
+      // Malformed line — skip
+    }
+  }
+  return [];
+}
+
+/**
+ * Find the most recent subagent transcript written at or after `since` and
+ * return the preloaded skill names from its initial user message.
  *
- * Claude Code writes subagent transcripts to:
- *   ~/.claude/projects/-{encoded-project-path}/{sessionId}/subagents/agent-{agentId}.jsonl
- *
- * Returns an empty array if no transcript is found or the structure changes.
+ * Returns an empty array if no transcript is found or the directory structure
+ * has changed (graceful degradation).
  */
 export function getLatestSubagentPreloadedSkills(since: Date): string[] {
   const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
@@ -241,62 +329,12 @@ export function getLatestSubagentPreloadedSkills(since: Date): string[] {
   const projectDir = resolve(homeDir, '.claude', 'projects', encodedPath);
 
   try {
-    // Walk sessionId directories
-    const sessionDirs = readdirSync(projectDir)
-      .map(d => resolve(projectDir, d))
-      .filter(d => {
-        try { return statSync(d).isDirectory(); } catch { return false; }
-      });
-
-    // Collect all subagent transcript files newer than `since`
-    const transcripts: Array<{ path: string; mtime: Date }> = [];
-    for (const sessionDir of sessionDirs) {
-      const subagentsDir = resolve(sessionDir, 'subagents');
-      try {
-        const files = readdirSync(subagentsDir).filter(f => f.startsWith('agent-') && f.endsWith('.jsonl'));
-        for (const file of files) {
-          const filePath = resolve(subagentsDir, file);
-          const stat = statSync(filePath);
-          if (stat.mtime > since) {
-            transcripts.push({ path: filePath, mtime: stat.mtime });
-          }
-        }
-      } catch {
-        // No subagents dir in this session — skip
-      }
-    }
-
+    const transcripts = findRecentSubagentTranscripts(projectDir, since);
     if (transcripts.length === 0) return [];
 
-    // Sort by mtime descending — most recent first
+    // Most recent transcript first
     transcripts.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-
-    // Parse the most recent transcript for preloaded skills
-    const content = readFileSync(transcripts[0].path, 'utf-8');
-    const lines = content.split('\n').filter(Boolean);
-
-    // Find the first user message (contains preloaded skills)
-    for (const line of lines) {
-      try {
-        const event = JSON.parse(line);
-        if (event.type === 'user' || (event.role === 'user')) {
-          // Extract skill names from <command-name> tags
-          const text = typeof event.message === 'string'
-            ? event.message
-            : JSON.stringify(event.message?.content ?? event.content ?? '');
-          const skillMatches = text.matchAll(/<command-name>([\w:/-]+)<\/command-name>/g);
-          return [...skillMatches].map(m => {
-            const name = m[1];
-            // Strip devflow: prefix for consistency with test assertions
-            return name.replace(/^devflow:/, '');
-          });
-        }
-      } catch {
-        // Malformed line — skip
-      }
-    }
-
-    return [];
+    return parsePreloadedSkills(transcripts[0].path);
   } catch {
     // Project dir doesn't exist or structure changed — return empty gracefully
     return [];
