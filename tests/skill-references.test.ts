@@ -157,7 +157,7 @@ function filterNonSkillRefs(names: string[]): string[] {
 // ---------------------------------------------------------------------------
 
 describe('Format 1: Plugin manifest skill arrays', () => {
-  it('every skill in plugin.json skills[] exists in canonical set', async () => {
+  it('every skill in plugin.json skills[] exists in canonical set', () => {
     const canonicalSkills = new Set(getAllSkillNames());
 
     for (const plugin of DEVFLOW_PLUGINS) {
@@ -179,7 +179,7 @@ describe('Format 1: Plugin manifest skill arrays', () => {
     }
   });
 
-  it('plugin.json skills[] matches plugins.ts skills[] for every plugin', async () => {
+  it('plugin.json skills[] matches plugins.ts skills[] for every plugin', () => {
     for (const plugin of DEVFLOW_PLUGINS) {
       const manifestPath = path.join(ROOT, 'plugins', plugin.name, '.claude-plugin', 'plugin.json');
       let manifest: { skills?: string[] };
@@ -214,7 +214,7 @@ describe('Format 1: Plugin manifest skill arrays', () => {
 // ---------------------------------------------------------------------------
 
 describe('Format 2: Agent frontmatter skills', () => {
-  it('every skill in shared agent frontmatter exists in canonical set', async () => {
+  it('every skill in shared agent frontmatter exists in canonical set', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const agentFiles = readdirSync(path.join(ROOT, 'shared', 'agents')).filter(f => f.endsWith('.md'));
 
@@ -363,7 +363,7 @@ describe('Format 4: Source directory path references', () => {
     }
   });
 
-  it('all shared/skills/NAME/ references in docs/reference/ are canonical', async () => {
+  it('all shared/skills/NAME/ references in docs/reference/ are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const refDir = path.join(ROOT, 'docs', 'reference');
     const docFiles = readdirSync(refDir).filter(f => f.endsWith('.md'));
@@ -671,7 +671,7 @@ function collectTsFiles(dir: string, baseDir: string): string[] {
 }
 
 describe('Test infrastructure skill references', () => {
-  it('all devflow:NAME references in tests/**/*.ts are canonical or command refs', async () => {
+  it('all devflow:NAME references in tests/**/*.ts are canonical or command refs', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const testsDir = path.join(ROOT, 'tests');
     const testFiles = collectTsFiles(testsDir, testsDir).filter(f =>
