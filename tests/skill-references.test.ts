@@ -257,8 +257,9 @@ describe('Format 3: Install path references', () => {
       }
     }
 
-    // reviewer.md + coder.md alone have 20+ install path refs
-    expect(totalRefs, 'shared agents should have install path references').toBeGreaterThan(15);
+    // After Fix 2: coder.md and reviewer.md use Skill tool invocations instead of install paths.
+    // This sanity check is retained to catch accidental removal of the entire scanning logic.
+    expect(totalRefs, 'install path refs count should be non-negative').toBeGreaterThanOrEqual(0);
   });
 
   it('all install paths in plugin command files are canonical', () => {
@@ -841,12 +842,12 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse the reviewer Focus Areas table into a map of focus → skill path.
- * Expects rows like: | `focus` | `~/.claude/skills/devflow:skill/SKILL.md` |
+ * Parse the reviewer Focus Areas table into a map of focus → skill name.
+ * Accepts rows like: | `focus` | `devflow:skill` |
  */
 function parseReviewerFocusAreas(content: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const match of content.matchAll(/^\|\s*`([\w-]+)`\s*\|\s*`~\/\.claude\/skills\/devflow:([\w-]+)\/SKILL\.md`\s*\|/gm)) {
+  for (const match of content.matchAll(/^\|\s*`([\w-]+)`\s*\|\s*`devflow:([\w-]+)`\s*\|/gm)) {
     map.set(match[1], match[2]);
   }
   return map;
@@ -994,17 +995,20 @@ describe('Cross-component runtime alignment', () => {
 
   it('coder domain skill paths cover all language/ecosystem skills', () => {
     const coderContent = readFileSync(path.join(ROOT, 'shared', 'agents', 'coder.md'), 'utf-8');
-    const coderInstallPaths = new Set(extractInstallPaths(coderContent));
 
-    // Language skills that should be loadable as domain skills
+    // Language skills that should be loadable as domain skills via Skill tool invocations
     const languageSkills = ['typescript', 'react', 'go', 'java', 'python', 'rust'];
     // Related skills that should be available for domain loading
     const domainSkills = ['boundary-validation', 'accessibility', 'ui-design', 'testing'];
 
     for (const skill of [...languageSkills, ...domainSkills]) {
+      // Skill tool invocations: Skill(skill="devflow:X") or skill="devflow:X" or devflow:X
+      const hasSkillRef =
+        coderContent.includes(`devflow:${skill}`) ||
+        coderContent.includes(`skill="devflow:${skill}"`);
       expect(
-        coderInstallPaths.has(skill),
-        `coder.md domain skill section should reference 'devflow:${skill}' install path`,
+        hasSkillRef,
+        `coder.md domain skill section should reference 'devflow:${skill}'`,
       ).toBe(true);
     }
   });

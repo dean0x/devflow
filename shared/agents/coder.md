@@ -53,16 +53,15 @@ When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfa
 <!-- CITATION-SENTENCE-END -->
    - If `.docs/handoff.md` exists, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
-2. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
-   - `backend` (TypeScript): Read `~/.claude/skills/devflow:typescript/SKILL.md`, `~/.claude/skills/devflow:boundary-validation/SKILL.md`
-   - `backend` (Go): Read `~/.claude/skills/devflow:go/SKILL.md`
-   - `backend` (Java): Read `~/.claude/skills/devflow:java/SKILL.md`
-   - `backend` (Python): Read `~/.claude/skills/devflow:python/SKILL.md`
-   - `backend` (Rust): Read `~/.claude/skills/devflow:rust/SKILL.md`
-   - `frontend`: Read `~/.claude/skills/devflow:react/SKILL.md`, `~/.claude/skills/devflow:typescript/SKILL.md`, `~/.claude/skills/devflow:accessibility/SKILL.md`, `~/.claude/skills/devflow:ui-design/SKILL.md`
-   - `tests`: Read `~/.claude/skills/devflow:testing/SKILL.md`, `~/.claude/skills/devflow:typescript/SKILL.md`
+2. **First action — load domain skills**: Before any analysis, invoke the Skill tool for each domain skill matching DOMAIN hint. If a Skill invocation fails, report BLOCKED to the orchestrator with the error and stop.
+   - `backend` (TypeScript): `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:boundary-validation")`
+   - `backend` (Go): `Skill(skill="devflow:go")`
+   - `backend` (Java): `Skill(skill="devflow:java")`
+   - `backend` (Python): `Skill(skill="devflow:python")`
+   - `backend` (Rust): `Skill(skill="devflow:rust")`
+   - `frontend`: `Skill(skill="devflow:react")`, `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:accessibility")`, `Skill(skill="devflow:ui-design")`
+   - `tests`: `Skill(skill="devflow:testing")`, `Skill(skill="devflow:typescript")`
    - `fullstack`: Combine backend + frontend skills
-   - If a Read fails (skill not installed), skip it silently and continue.
 
 3. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 
