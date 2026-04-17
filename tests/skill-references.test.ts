@@ -38,11 +38,14 @@ function extractSourceDirRefs(content: string): string[] {
   return [...matches].map(m => m[1]);
 }
 
-/** Parse frontmatter skills line: `skills: devflow:a, devflow:b` → ['a', 'b']. */
+/** Parse frontmatter skills block-list: `skills:\n  - devflow:a\n  - devflow:b` → ['a', 'b']. */
 function parseFrontmatterSkills(content: string): string[] {
-  const match = content.match(/^skills:\s*(.+)$/m);
-  if (!match) return [];
-  return match[1].split(',').map(s => s.trim().replace(/^devflow:/, ''));
+  const blockMatch = content.match(/^skills:\s*\n((?:\s+-\s+.+\n?)+)/m);
+  if (!blockMatch) return [];
+  return blockMatch[1]
+    .split('\n')
+    .map(l => l.trim().replace(/^-\s+/, '').replace(/^devflow:/, ''))
+    .filter(Boolean);
 }
 
 /**

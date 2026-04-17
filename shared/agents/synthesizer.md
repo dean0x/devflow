@@ -2,7 +2,10 @@
 name: Synthesizer
 description: Combines outputs from multiple agents into actionable summaries (modes: exploration, planning, review, design)
 model: haiku
-skills: devflow:review-methodology, devflow:docs-framework, devflow:worktree-support
+skills:
+  - devflow:review-methodology
+  - devflow:docs-framework
+  - devflow:worktree-support
 ---
 
 # Synthesizer Agent

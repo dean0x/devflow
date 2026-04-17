@@ -2,7 +2,9 @@
 name: Designer
 description: Design analysis agent with mode-driven skill loading. Modes: gap-analysis (completeness, architecture, security, performance, consistency, dependencies), design-review (anti-pattern detection).
 model: opus
-skills: devflow:worktree-support, devflow:apply-knowledge
+skills:
+  - devflow:worktree-support
+  - devflow:apply-knowledge
 ---
 
 # Designer Agent
