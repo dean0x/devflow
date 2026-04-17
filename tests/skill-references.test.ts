@@ -231,6 +231,21 @@ describe('Format 2: Agent frontmatter skills', () => {
       }
     }
   });
+
+  it('every shared agent declares at least one skill in frontmatter', () => {
+    const agentFiles = readdirSync(path.join(ROOT, 'shared', 'agents')).filter(f => f.endsWith('.md'));
+
+    for (const file of agentFiles) {
+      const filePath = path.join(ROOT, 'shared', 'agents', file);
+      const content = readFileSync(filePath, 'utf-8');
+      const skillNames = parseFrontmatterSkills(content);
+
+      expect(
+        skillNames.length,
+        `shared/agents/${file}: parseFrontmatterSkills returned empty — missing or malformed skills: block in frontmatter`,
+      ).toBeGreaterThan(0);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

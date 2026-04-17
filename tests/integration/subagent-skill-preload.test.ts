@@ -27,6 +27,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       { timeout: 60000, model: 'haiku' },
     );
     const preloaded = getLatestSubagentPreloadedSkills(since);
+    expect(preloaded.length, 'No subagent transcript found — check Claude Code transcript path format').toBeGreaterThan(0);
     expect(preloaded).toEqual(expect.arrayContaining([
       'software-design', 'worktree-support',
     ]));
@@ -41,6 +42,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       { timeout: 60000, model: 'haiku' },
     );
     const preloaded = getLatestSubagentPreloadedSkills(since);
+    expect(preloaded.length, 'No subagent transcript found — check Claude Code transcript path format').toBeGreaterThan(0);
     expect(preloaded).toEqual(expect.arrayContaining([
       'quality-gates', 'software-design', 'worktree-support', 'apply-knowledge',
     ]));
@@ -53,6 +55,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       { timeout: 60000, model: 'haiku' },
     );
     const preloaded = getLatestSubagentPreloadedSkills(since);
+    expect(preloaded.length, 'No subagent transcript found — check Claude Code transcript path format').toBeGreaterThan(0);
     expect(preloaded).toEqual(expect.arrayContaining([
       'review-methodology', 'worktree-support', 'apply-knowledge',
     ]));
@@ -65,6 +68,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       { timeout: 60000, model: 'haiku' },
     );
     const preloaded = getLatestSubagentPreloadedSkills(since);
+    expect(preloaded.length, 'No subagent transcript found — check Claude Code transcript path format').toBeGreaterThan(0);
     expect(preloaded).toEqual(expect.arrayContaining([
       'software-design', 'git', 'patterns', 'testing',
       'test-driven-development', 'research', 'boundary-validation', 'worktree-support',
@@ -78,6 +82,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       { timeout: 60000, model: 'haiku' },
     );
     const preloaded = getLatestSubagentPreloadedSkills(since);
+    expect(preloaded.length, 'No subagent transcript found — check Claude Code transcript path format').toBeGreaterThan(0);
     expect(preloaded).toEqual(expect.arrayContaining([
       'worktree-support', 'apply-knowledge', 'gap-analysis', 'design-review',
     ]));
@@ -90,6 +95,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
       { timeout: 60000, model: 'haiku' },
     );
     const preloaded = getLatestSubagentPreloadedSkills(since);
+    expect(preloaded.length, 'No subagent transcript found — check Claude Code transcript path format').toBeGreaterThan(0);
     expect(preloaded).toEqual(expect.arrayContaining([
       'git', 'worktree-support',
     ]));
