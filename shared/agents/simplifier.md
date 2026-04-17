@@ -1,10 +1,10 @@
 ---
 name: Simplifier
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
+model: sonnet
 skills:
   - devflow:software-design
   - devflow:worktree-support
-model: sonnet
 ---
 
 # Simplifier Agent

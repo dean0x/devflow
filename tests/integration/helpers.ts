@@ -57,7 +57,7 @@ export function runClaudeStreaming(
   const timeout = options?.timeout ?? 45000;
   const model = options?.model ?? 'haiku';
 
-  return new Promise((resolve) => {
+  return new Promise((done) => {
     const startTime = Date.now();
     const skills: string[] = [];
     const textFragments: string[] = [];
@@ -84,7 +84,7 @@ export function runClaudeStreaming(
       clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
       try { proc.kill('SIGTERM'); } catch { /* already dead */ }
-      resolve({
+      done({
         skills: [...new Set(skills)],
         textFragments,
         killedEarly,

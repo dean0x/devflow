@@ -1,10 +1,10 @@
 ---
 name: Skimmer
 description: Codebase orientation using rskim to identify relevant files, functions, and patterns for a feature or task
+model: sonnet
 tools: ["Bash", "Read"]
 skills:
   - devflow:worktree-support
-model: sonnet
 ---
 
 # Skimmer Agent
