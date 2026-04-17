@@ -243,11 +243,10 @@ describe('Format 3: Install path references', () => {
     const agentsDir = path.join(ROOT, 'shared', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
-    let totalRefs = 0;
+    // After Fix 2: coder.md and reviewer.md use Skill tool invocations instead of install paths.
     for (const file of agentFiles) {
       const content = readFileSync(path.join(agentsDir, file), 'utf-8');
       const refs = extractInstallPaths(content);
-      totalRefs += refs.length;
 
       for (const ref of refs) {
         expect(
@@ -256,10 +255,6 @@ describe('Format 3: Install path references', () => {
         ).toBe(true);
       }
     }
-
-    // After Fix 2: coder.md and reviewer.md use Skill tool invocations instead of install paths.
-    // This sanity check is retained to catch accidental removal of the entire scanning logic.
-    expect(totalRefs, 'install path refs count should be non-negative').toBeGreaterThanOrEqual(0);
   });
 
   it('all install paths in plugin command files are canonical', () => {
@@ -1034,7 +1029,7 @@ describe('citation sentence propagation', () => {
 
   it('canonical sentence exists in SKILL.md', () => {
     const sentence = extractCitationSentence(skillPath);
-    expect(sentence.trim()).toBeTruthy();
+    expect(sentence.trim().length).toBeGreaterThan(0);
   });
 
   it('coder.md has byte-identical citation sentence', () => {

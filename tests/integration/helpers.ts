@@ -21,7 +21,7 @@ export function isClaudeAvailable(): boolean {
  * Simulates SessionStart injection for integration tests.
  */
 function loadRouterContext(): string {
-  const rulesPath = resolve(__dirname, '../../shared/skills/router/references/classification-rules.md');
+  const rulesPath = resolve(import.meta.dirname, '../../shared/skills/router/references/classification-rules.md');
   return readFileSync(rulesPath, 'utf-8').trim();
 }
 
@@ -126,10 +126,6 @@ export function runClaudeStreaming(
             }
           }
 
-          // Also check tool_result events — if Skill tool returned content, it worked
-          if (event.type === 'user' && event.tool_use_result && skills.length > 0) {
-            // Skill loaded successfully — we can finish soon
-          }
         } catch {
           // Partial JSON line, skip
         }
@@ -209,7 +205,7 @@ export function extractDepth(result: StreamResult): string | null {
 
 export function hasDevFlowBranding(result: StreamResult): boolean {
   const text = result.textFragments.join(' ');
-  return /devflow:\s*(CHAT|EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE)/i.test(text);
+  return CLASSIFICATION_PATTERN.test(text);
 }
 
 /**
