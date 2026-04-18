@@ -21,13 +21,13 @@ export function isClaudeAvailable(): boolean {
  * Simulates SessionStart injection for integration tests.
  */
 function loadRouterContext(): string {
-  const rulesPath = resolve(import.meta.dirname, '../../shared/skills/router/references/classification-rules.md');
+  const rulesPath = resolve(import.meta.dirname, '../../shared/skills/router/classification-rules.md');
   return readFileSync(rulesPath, 'utf-8').trim();
 }
 
 // Simulates SessionStart injection (classification rules) + per-message preamble
 const DEVFLOW_PREAMBLE = loadRouterContext() +
-  '\nClassify this request\'s intent and depth, then load devflow:router via Skill tool.';
+  '\nClassify this request\'s intent and depth. If GUIDED or ORCHESTRATED, load devflow:router via Skill tool.';
 
 /** Result from a streaming claude invocation */
 export interface StreamResult {

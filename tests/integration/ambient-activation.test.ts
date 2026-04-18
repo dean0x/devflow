@@ -4,6 +4,7 @@ import {
   runClaudeStreaming,
   runClaudeStreamingWithRetry,
   hasSkillInvocations,
+  hasClassification,
   getSkillInvocations,
   hasRequiredSkills,
 } from './helpers.js';
@@ -34,12 +35,14 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     // "thanks" is ≤2 words — preamble's word-count filter skips it before classification runs
     const result = await runClaudeStreaming('thanks', { timeout: 20000 });
     expect(hasSkillInvocations(result)).toBe(false);
+    expect(hasClassification(result)).toBe(false);
     console.log(`preamble filter (single-word): no skills (${result.durationMs}ms)`);
   });
 
   it('QUICK — explore: "where is the config?" loads no skills', async () => {
     const result = await runClaudeStreaming('where is the config file?', { timeout: 20000 });
     expect(hasSkillInvocations(result)).toBe(false);
+    expect(hasClassification(result)).toBe(false);
     console.log(`QUICK explore: no skills (${result.durationMs}ms)`);
   });
 
@@ -47,6 +50,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     // Passes preamble's word-count filter (>2 words) but classified CHAT/QUICK — no skills loaded
     const result = await runClaudeStreaming('sounds good, thanks for explaining that', { timeout: 20000 });
     expect(hasSkillInvocations(result)).toBe(false);
+    expect(hasClassification(result)).toBe(false);
     console.log(`CHAT/QUICK (multi-word): no skills (${result.durationMs}ms)`);
   });
 

@@ -703,7 +703,7 @@ describe('Test infrastructure skill references', () => {
   it('DEVFLOW_PREAMBLE reads classification-rules.md which has valid refs', () => {
     // helpers.ts loads DEVFLOW_PREAMBLE from classification-rules.md at runtime.
     // Verify the classification rules reference devflow:router (loaded via Skill tool).
-    const rulesPath = path.join(ROOT, 'shared', 'skills', 'router', 'references', 'classification-rules.md');
+    const rulesPath = path.join(ROOT, 'shared', 'skills', 'router', 'classification-rules.md');
     const rulesContent = readFileSync(rulesPath, 'utf-8');
 
     const rulesRefs = extractPrefixedRefs(rulesContent);

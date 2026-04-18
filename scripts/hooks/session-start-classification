@@ -15,12 +15,12 @@ INPUT=$(cat)
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then exit 0; fi
 
-CLASSIFICATION_RULES="$HOME/.claude/skills/devflow:router/references/classification-rules.md"
+CLASSIFICATION_RULES="$HOME/.claude/skills/devflow:router/classification-rules.md"
+CLASSIFICATION_RULES_LEGACY="$HOME/.claude/skills/devflow:router/references/classification-rules.md"
 if [ -f "$CLASSIFICATION_RULES" ]; then
   CONTEXT=$(cat "$CLASSIFICATION_RULES")
-elif [ -f "$HOME/.claude/skills/devflow:router/SKILL.md" ]; then
-  # Fallback for upgrade window: old install without classification-rules.md
-  CONTEXT=$(awk '/^---$/{n++; next} n>=2' "$HOME/.claude/skills/devflow:router/SKILL.md")
+elif [ -f "$CLASSIFICATION_RULES_LEGACY" ]; then
+  CONTEXT=$(cat "$CLASSIFICATION_RULES_LEGACY")
 else
   exit 0
 fi

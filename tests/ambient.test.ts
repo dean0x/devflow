@@ -489,7 +489,7 @@ function parseClassificationIntents(content: string): string[] {
 
 describe('router structural validation', () => {
   const routerPath = path.resolve(__dirname, '../shared/skills/router/SKILL.md');
-  const rulesPath = path.resolve(__dirname, '../shared/skills/router/references/classification-rules.md');
+  const rulesPath = path.resolve(__dirname, '../shared/skills/router/classification-rules.md');
   const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
 
   it('router covers all ORCHESTRATED intents (every non-CHAT intent has a row)', async () => {
@@ -594,7 +594,7 @@ describe('preamble drift detection', () => {
   });
 
   it('classification-rules.md contains required classification elements', async () => {
-    const rulesPath = path.resolve(__dirname, '../shared/skills/router/references/classification-rules.md');
+    const rulesPath = path.resolve(__dirname, '../shared/skills/router/classification-rules.md');
     const rulesContent = await fs.readFile(rulesPath, 'utf-8');
 
     // Must contain Intent Signals heading
