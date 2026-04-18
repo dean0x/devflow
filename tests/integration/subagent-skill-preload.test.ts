@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isClaudeAvailable,
-  runClaudeStreaming,
+  runClaudeAndWait,
   getLatestSubagentPreloadedSkills,
 } from './helpers.js';
 
@@ -11,12 +11,15 @@ import {
  */
 async function spawnAgentAndGetPreloads(agentType: string, prompt: string): Promise<string[]> {
   const since = new Date();
-  await runClaudeStreaming(
+  const result = await runClaudeAndWait(
     `Use the Agent tool with subagent_type="${agentType}" to ${prompt}. Only spawn the agent, do not do any other work.`,
-    { timeout: 60000, model: 'haiku' },
+    { timeout: 60000, model: 'haiku', allowedTools: 'Agent' },
   );
   const preloaded = getLatestSubagentPreloadedSkills(since);
-  expect(preloaded.length, 'No subagent transcript found — check Claude Code transcript path format').toBeGreaterThan(0);
+  expect(
+    preloaded.length,
+    `No subagent transcript found for ${agentType} (exit=${result.exitCode}, ${result.durationMs}ms, cwd=${process.cwd()})`,
+  ).toBeGreaterThan(0);
   return preloaded;
 }
 

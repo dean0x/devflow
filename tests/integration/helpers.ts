@@ -52,12 +52,14 @@ export interface StreamResult {
  */
 export function runClaudeStreaming(
   prompt: string,
-  options?: { timeout?: number; model?: string },
+  options?: { timeout?: number; model?: string; allowedTools?: string; systemPrompt?: string | false },
 ): Promise<StreamResult> {
   const timeout = options?.timeout ?? 45000;
   const model = options?.model ?? 'haiku';
+  const allowedTools = options?.allowedTools ?? 'Skill';
+  const systemPrompt = options?.systemPrompt !== undefined ? options.systemPrompt : DEVFLOW_PREAMBLE;
 
-  return new Promise((done) => {
+  return new Promise((resolve) => {
     const startTime = Date.now();
     const skills: string[] = [];
     const textFragments: string[] = [];
@@ -67,8 +69,8 @@ export function runClaudeStreaming(
     const args = [
       '-p', '--output-format', 'stream-json', '--verbose',
       '--model', model,
-      '--allowedTools', 'Skill',
-      '--append-system-prompt', DEVFLOW_PREAMBLE,
+      '--allowedTools', allowedTools,
+      ...(systemPrompt !== false ? ['--append-system-prompt', systemPrompt] : []),
       prompt,
     ];
 
@@ -84,7 +86,7 @@ export function runClaudeStreaming(
       clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
       try { proc.kill('SIGTERM'); } catch { /* already dead */ }
-      done({
+      resolve({
         skills: [...new Set(skills)],
         textFragments,
         killedEarly,
@@ -231,6 +233,46 @@ export function hasRequiredSkills(result: StreamResult, required: string[]): boo
   );
 }
 
+/**
+ * Run a prompt through claude CLI and wait for completion. No early-exit logic —
+ * just spawns the process and resolves when it exits. Used for subagent tests
+ * where we need the process to finish so transcripts are written to disk.
+ */
+export function runClaudeAndWait(
+  prompt: string,
+  options?: { timeout?: number; model?: string; allowedTools?: string },
+): Promise<{ durationMs: number; exitCode: number | null }> {
+  const timeout = options?.timeout ?? 45000;
+  const model = options?.model ?? 'haiku';
+  const allowedTools = options?.allowedTools ?? 'Agent';
+
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+
+    const proc = spawn('claude', [
+      '-p', '--model', model,
+      '--allowedTools', allowedTools,
+      '--dangerously-skip-permissions',
+      prompt,
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+      resolve({ durationMs: Date.now() - startTime, exitCode: null });
+    }, timeout);
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ durationMs: Date.now() - startTime, exitCode: code });
+    });
+
+    proc.on('error', () => {
+      clearTimeout(timer);
+      resolve({ durationMs: Date.now() - startTime, exitCode: null });
+    });
+  });
+}
+
 // COUPLING: depends on Claude Code's internal transcript layout:
 //   ~/.claude/projects/-{encoded-project-path}/{sessionId}/subagents/agent-{agentId}.jsonl
 // Each JSONL line is a streaming event; the first user message contains <command-name>
@@ -292,26 +334,29 @@ function findRecentSubagentTranscripts(
 function parsePreloadedSkills(transcriptPath: string): string[] {
   const content = readFileSync(transcriptPath, 'utf-8');
   const lines = content.split('\n').filter(Boolean);
+  const skills: string[] = [];
 
   for (const line of lines) {
     try {
       const event: unknown = JSON.parse(line);
       if (typeof event !== 'object' || event === null) continue;
       const e = event as Record<string, unknown>;
-      if (e.type !== 'user' && e.role !== 'user') continue;
+      // Skills are injected as isMeta user messages with <command-name> tags.
+      // Skills appear only at the top, before any assistant turn.
+      if (e.type !== 'user') break;
 
-      // Extract skill names from <command-name> tags
       const text =
         typeof e.message === 'string'
           ? e.message
-          : JSON.stringify(e.message?.content ?? e.content ?? '');
-      const skillMatches = text.matchAll(/<command-name>([\w:/-]+)<\/command-name>/g);
-      return [...skillMatches].map((m) => m[1].replace(/^devflow:/, ''));
+          : JSON.stringify((e.message as Record<string, unknown>)?.content ?? e.content ?? '');
+      for (const m of text.matchAll(/<command-name>([\w:/-]+)<\/command-name>/g)) {
+        skills.push(m[1].replace(/^devflow:/, ''));
+      }
     } catch {
       // Malformed line — skip
     }
   }
-  return [];
+  return skills;
 }
 
 /**
