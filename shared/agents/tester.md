@@ -3,7 +3,10 @@ name: Tester
 description: Scenario-based QA agent. Designs and executes acceptance tests from criteria and implementation. Reports pass/fail with evidence — never fixes code.
 model: sonnet
 tools: ["Read", "Grep", "Glob", "Bash", "mcp__claude-in-chrome__tabs_context_mcp", "mcp__claude-in-chrome__tabs_create_mcp", "mcp__claude-in-chrome__navigate", "mcp__claude-in-chrome__get_page_text", "mcp__claude-in-chrome__read_page", "mcp__claude-in-chrome__find", "mcp__claude-in-chrome__form_input", "mcp__claude-in-chrome__javascript_tool", "mcp__claude-in-chrome__read_console_messages"]
-skills: devflow:qa, devflow:testing, devflow:worktree-support
+skills:
+  - devflow:qa
+  - devflow:testing
+  - devflow:worktree-support
 ---
 
 # Tester Agent

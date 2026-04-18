@@ -38,11 +38,14 @@ function extractSourceDirRefs(content: string): string[] {
   return [...matches].map(m => m[1]);
 }
 
-/** Parse frontmatter skills line: `skills: devflow:a, devflow:b` → ['a', 'b']. */
+/** Parse frontmatter skills block-list: `skills:\n  - devflow:a\n  - devflow:b` → ['a', 'b']. */
 function parseFrontmatterSkills(content: string): string[] {
-  const match = content.match(/^skills:\s*(.+)$/m);
-  if (!match) return [];
-  return match[1].split(',').map(s => s.trim().replace(/^devflow:/, ''));
+  const blockMatch = content.match(/^skills:\s*\n((?:\s+-\s+.+\n?)+)/m);
+  if (!blockMatch) return [];
+  return blockMatch[1]
+    .split('\n')
+    .map(l => l.trim().replace(/^-\s+/, '').replace(/^devflow:/, ''))
+    .filter(Boolean);
 }
 
 /**
@@ -154,7 +157,7 @@ function filterNonSkillRefs(names: string[]): string[] {
 // ---------------------------------------------------------------------------
 
 describe('Format 1: Plugin manifest skill arrays', () => {
-  it('every skill in plugin.json skills[] exists in canonical set', async () => {
+  it('every skill in plugin.json skills[] exists in canonical set', () => {
     const canonicalSkills = new Set(getAllSkillNames());
 
     for (const plugin of DEVFLOW_PLUGINS) {
@@ -176,7 +179,7 @@ describe('Format 1: Plugin manifest skill arrays', () => {
     }
   });
 
-  it('plugin.json skills[] matches plugins.ts skills[] for every plugin', async () => {
+  it('plugin.json skills[] matches plugins.ts skills[] for every plugin', () => {
     for (const plugin of DEVFLOW_PLUGINS) {
       const manifestPath = path.join(ROOT, 'plugins', plugin.name, '.claude-plugin', 'plugin.json');
       let manifest: { skills?: string[] };
@@ -211,7 +214,7 @@ describe('Format 1: Plugin manifest skill arrays', () => {
 // ---------------------------------------------------------------------------
 
 describe('Format 2: Agent frontmatter skills', () => {
-  it('every skill in shared agent frontmatter exists in canonical set', async () => {
+  it('every skill in shared agent frontmatter exists in canonical set', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const agentFiles = readdirSync(path.join(ROOT, 'shared', 'agents')).filter(f => f.endsWith('.md'));
 
@@ -228,6 +231,21 @@ describe('Format 2: Agent frontmatter skills', () => {
       }
     }
   });
+
+  it('every shared agent declares at least one skill in frontmatter', () => {
+    const agentFiles = readdirSync(path.join(ROOT, 'shared', 'agents')).filter(f => f.endsWith('.md'));
+
+    for (const file of agentFiles) {
+      const filePath = path.join(ROOT, 'shared', 'agents', file);
+      const content = readFileSync(filePath, 'utf-8');
+      const skillNames = parseFrontmatterSkills(content);
+
+      expect(
+        skillNames.length,
+        `shared/agents/${file}: parseFrontmatterSkills returned empty — missing or malformed skills: block in frontmatter`,
+      ).toBeGreaterThan(0);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -240,11 +258,10 @@ describe('Format 3: Install path references', () => {
     const agentsDir = path.join(ROOT, 'shared', 'agents');
     const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md'));
 
-    let totalRefs = 0;
+    // After Fix 2: coder.md and reviewer.md use Skill tool invocations instead of install paths.
     for (const file of agentFiles) {
       const content = readFileSync(path.join(agentsDir, file), 'utf-8');
       const refs = extractInstallPaths(content);
-      totalRefs += refs.length;
 
       for (const ref of refs) {
         expect(
@@ -253,9 +270,6 @@ describe('Format 3: Install path references', () => {
         ).toBe(true);
       }
     }
-
-    // reviewer.md + coder.md alone have 20+ install path refs
-    expect(totalRefs, 'shared agents should have install path references').toBeGreaterThan(15);
   });
 
   it('all install paths in plugin command files are canonical', () => {
@@ -349,7 +363,7 @@ describe('Format 4: Source directory path references', () => {
     }
   });
 
-  it('all shared/skills/NAME/ references in docs/reference/ are canonical', async () => {
+  it('all shared/skills/NAME/ references in docs/reference/ are canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const refDir = path.join(ROOT, 'docs', 'reference');
     const docFiles = readdirSync(refDir).filter(f => f.endsWith('.md'));
@@ -657,7 +671,7 @@ function collectTsFiles(dir: string, baseDir: string): string[] {
 }
 
 describe('Test infrastructure skill references', () => {
-  it('all devflow:NAME references in tests/**/*.ts are canonical or command refs', async () => {
+  it('all devflow:NAME references in tests/**/*.ts are canonical or command refs', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     const testsDir = path.join(ROOT, 'tests');
     const testFiles = collectTsFiles(testsDir, testsDir).filter(f =>
@@ -838,12 +852,12 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse the reviewer Focus Areas table into a map of focus → skill path.
- * Expects rows like: | `focus` | `~/.claude/skills/devflow:skill/SKILL.md` |
+ * Parse the reviewer Focus Areas table into a map of focus → skill name.
+ * Accepts rows like: | `focus` | `devflow:skill` |
  */
 function parseReviewerFocusAreas(content: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const match of content.matchAll(/^\|\s*`([\w-]+)`\s*\|\s*`~\/\.claude\/skills\/devflow:([\w-]+)\/SKILL\.md`\s*\|/gm)) {
+  for (const match of content.matchAll(/^\|\s*`([\w-]+)`\s*\|\s*`devflow:([\w-]+)`\s*\|/gm)) {
     map.set(match[1], match[2]);
   }
   return map;
@@ -991,17 +1005,20 @@ describe('Cross-component runtime alignment', () => {
 
   it('coder domain skill paths cover all language/ecosystem skills', () => {
     const coderContent = readFileSync(path.join(ROOT, 'shared', 'agents', 'coder.md'), 'utf-8');
-    const coderInstallPaths = new Set(extractInstallPaths(coderContent));
 
-    // Language skills that should be loadable as domain skills
+    // Language skills that should be loadable as domain skills via Skill tool invocations
     const languageSkills = ['typescript', 'react', 'go', 'java', 'python', 'rust'];
     // Related skills that should be available for domain loading
     const domainSkills = ['boundary-validation', 'accessibility', 'ui-design', 'testing'];
 
     for (const skill of [...languageSkills, ...domainSkills]) {
+      // Skill tool invocations: Skill(skill="devflow:X") or skill="devflow:X" or devflow:X
+      const hasSkillRef =
+        coderContent.includes(`devflow:${skill}`) ||
+        coderContent.includes(`skill="devflow:${skill}"`);
       expect(
-        coderInstallPaths.has(skill),
-        `coder.md domain skill section should reference 'devflow:${skill}' install path`,
+        hasSkillRef,
+        `coder.md domain skill section should reference 'devflow:${skill}'`,
       ).toBe(true);
     }
   });
@@ -1027,7 +1044,7 @@ describe('citation sentence propagation', () => {
 
   it('canonical sentence exists in SKILL.md', () => {
     const sentence = extractCitationSentence(skillPath);
-    expect(sentence.trim()).toBeTruthy();
+    expect(sentence.trim().length).toBeGreaterThan(0);
   });
 
   it('coder.md has byte-identical citation sentence', () => {

@@ -2,7 +2,15 @@
 name: Coder
 description: Autonomous task implementation on feature branch. Implements, tests, and commits.
 model: sonnet
-skills: devflow:software-design, devflow:git, devflow:patterns, devflow:testing, devflow:test-driven-development, devflow:research, devflow:boundary-validation, devflow:worktree-support
+skills:
+  - devflow:software-design
+  - devflow:git
+  - devflow:patterns
+  - devflow:testing
+  - devflow:test-driven-development
+  - devflow:research
+  - devflow:boundary-validation
+  - devflow:worktree-support
 ---
 
 # Coder Agent
@@ -45,16 +53,16 @@ When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfa
 <!-- CITATION-SENTENCE-END -->
    - If `.docs/handoff.md` exists, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
-2. **Load domain skills**: Based on DOMAIN hint and files in scope, dynamically load relevant language/ecosystem skills by reading their SKILL.md. Only load skills that are installed:
-   - `backend` (TypeScript): Read `~/.claude/skills/devflow:typescript/SKILL.md`, `~/.claude/skills/devflow:boundary-validation/SKILL.md`
-   - `backend` (Go): Read `~/.claude/skills/devflow:go/SKILL.md`
-   - `backend` (Java): Read `~/.claude/skills/devflow:java/SKILL.md`
-   - `backend` (Python): Read `~/.claude/skills/devflow:python/SKILL.md`
-   - `backend` (Rust): Read `~/.claude/skills/devflow:rust/SKILL.md`
-   - `frontend`: Read `~/.claude/skills/devflow:react/SKILL.md`, `~/.claude/skills/devflow:typescript/SKILL.md`, `~/.claude/skills/devflow:accessibility/SKILL.md`, `~/.claude/skills/devflow:ui-design/SKILL.md`
-   - `tests`: Read `~/.claude/skills/devflow:testing/SKILL.md`, `~/.claude/skills/devflow:typescript/SKILL.md`
+<!-- Dynamic loading used here because the domain set is unbounded (TypeScript/Go/Java/Python/Rust/React/etc.) — preloading all variants in frontmatter would load unused skills on every spawn. -->
+2. **Load domain skills**: Before any analysis, invoke the Skill tool for each domain skill matching DOMAIN hint. If a Skill invocation fails, skip that skill and continue — domain skills are optional enhancements, not required for task completion.
+   - `backend` (TypeScript): `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:boundary-validation")`
+   - `backend` (Go): `Skill(skill="devflow:go")`
+   - `backend` (Java): `Skill(skill="devflow:java")`
+   - `backend` (Python): `Skill(skill="devflow:python")`
+   - `backend` (Rust): `Skill(skill="devflow:rust")`
+   - `frontend`: `Skill(skill="devflow:react")`, `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:accessibility")`, `Skill(skill="devflow:ui-design")`
+   - `tests`: `Skill(skill="devflow:testing")`, `Skill(skill="devflow:typescript")`
    - `fullstack`: Combine backend + frontend skills
-   - If a Read fails (skill not installed), skip it silently and continue.
 
 3. **Implement the plan**: Work through execution steps systematically, creating and modifying files. Follow existing patterns. Type everything. Use Result types if codebase uses them.
 

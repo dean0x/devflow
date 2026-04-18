@@ -2,7 +2,9 @@
 name: Git
 description: Unified agent for all git/GitHub operations - issues, PR comments, tech debt, releases
 model: haiku
-skills: devflow:git, devflow:worktree-support
+skills:
+  - devflow:git
+  - devflow:worktree-support
 ---
 
 # Git Agent
