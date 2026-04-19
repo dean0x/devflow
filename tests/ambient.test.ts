@@ -7,8 +7,8 @@ import {
   hasClassification,
   extractIntent,
   extractDepth,
-  hasDevFlowBranding,
   hasSkillInvocations,
+  parseStreamEvent,
 } from './integration/helpers.js';
 
 /** Helper to create a StreamResult from text for unit-testing classification helpers. */
@@ -421,12 +421,68 @@ describe('classification helpers', () => {
     expect(extractDepth(textResult('no classification here'))).toBeNull();
   });
 
-  it('detects Devflow branding', () => {
-    expect(hasDevFlowBranding(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:patterns.'))).toBe(true);
+  it('CLASSIFICATION_PATTERN matches model output variations', () => {
+    // Canonical format (model instruction says "Devflow: INTENT/DEPTH")
+    expect(hasClassification(textResult('Devflow: IMPLEMENT/GUIDED'))).toBe(true);
+    // Lowercase (model might vary casing)
+    expect(hasClassification(textResult('devflow: implement/guided'))).toBe(true);
+    // No space after colon
+    expect(hasClassification(textResult('Devflow:CHAT/QUICK'))).toBe(true);
+    // Extra whitespace
+    expect(hasClassification(textResult('Devflow:  PLAN / ORCHESTRATED'))).toBe(true);
+  });
+});
+
+describe('parseStreamEvent', () => {
+  it('extracts skills from assistant tool_use events', () => {
+    const event = {
+      type: 'assistant',
+      message: { content: [
+        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:router' } },
+      ] },
+    };
+    const parsed = parseStreamEvent(event);
+    expect(parsed.skills).toEqual(['devflow:router']);
+    expect(parsed.textFragments).toEqual([]);
   });
 
-  it('returns false for non-Devflow branding', () => {
-    expect(hasDevFlowBranding(textResult('Some random text without branding.'))).toBe(false);
+  it('extracts text from assistant text blocks', () => {
+    const event = {
+      type: 'assistant',
+      message: { content: [
+        { type: 'text', text: 'Devflow: IMPLEMENT/GUIDED' },
+      ] },
+    };
+    const parsed = parseStreamEvent(event);
+    expect(parsed.textFragments).toEqual(['Devflow: IMPLEMENT/GUIDED']);
+    expect(parsed.skills).toEqual([]);
+  });
+
+  it('returns empty arrays for non-assistant events', () => {
+    expect(parseStreamEvent({ type: 'user', message: { content: [] } })).toEqual({ skills: [], textFragments: [] });
+    expect(parseStreamEvent({ type: 'system', message: { content: [] } })).toEqual({ skills: [], textFragments: [] });
+  });
+
+  it('returns empty arrays for malformed events', () => {
+    expect(parseStreamEvent(null)).toEqual({ skills: [], textFragments: [] });
+    expect(parseStreamEvent(undefined)).toEqual({ skills: [], textFragments: [] });
+    expect(parseStreamEvent({})).toEqual({ skills: [], textFragments: [] });
+    expect(parseStreamEvent({ type: 'assistant' })).toEqual({ skills: [], textFragments: [] });
+    expect(parseStreamEvent({ type: 'assistant', message: {} })).toEqual({ skills: [], textFragments: [] });
+  });
+
+  it('handles mixed content blocks', () => {
+    const event = {
+      type: 'assistant',
+      message: { content: [
+        { type: 'text', text: 'Devflow: DEBUG/ORCHESTRATED' },
+        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:debug:orch' } },
+        { type: 'text', text: 'Loading debug orchestrator.' },
+      ] },
+    };
+    const parsed = parseStreamEvent(event);
+    expect(parsed.skills).toEqual(['devflow:debug:orch']);
+    expect(parsed.textFragments).toEqual(['Devflow: DEBUG/ORCHESTRATED', 'Loading debug orchestrator.']);
   });
 });
 
