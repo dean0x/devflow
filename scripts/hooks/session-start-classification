@@ -16,11 +16,8 @@ CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then exit 0; fi
 
 CLASSIFICATION_RULES="$HOME/.claude/skills/devflow:router/classification-rules.md"
-CLASSIFICATION_RULES_LEGACY="$HOME/.claude/skills/devflow:router/references/classification-rules.md"
 if [ -f "$CLASSIFICATION_RULES" ]; then
   CONTEXT=$(cat "$CLASSIFICATION_RULES")
-elif [ -f "$CLASSIFICATION_RULES_LEGACY" ]; then
-  CONTEXT=$(cat "$CLASSIFICATION_RULES_LEGACY")
 else
   exit 0
 fi
