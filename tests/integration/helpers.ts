@@ -21,13 +21,48 @@ export function isClaudeAvailable(): boolean {
  * Simulates SessionStart injection for integration tests.
  */
 function loadRouterContext(): string {
-  const rulesPath = resolve(import.meta.dirname, '../../shared/skills/router/references/classification-rules.md');
+  const rulesPath = resolve(import.meta.dirname, '../../shared/skills/router/classification-rules.md');
   return readFileSync(rulesPath, 'utf-8').trim();
 }
 
 // Simulates SessionStart injection (classification rules) + per-message preamble
 const DEVFLOW_PREAMBLE = loadRouterContext() +
-  '\nClassify this request\'s intent and depth, then load devflow:router via Skill tool.';
+  '\nClassify this request\'s intent and depth. If GUIDED or ORCHESTRATED, load devflow:router via Skill tool.';
+
+/** Parsed fields from a single streaming event */
+export interface ParsedStreamEvent {
+  skills: string[];
+  textFragments: string[];
+}
+
+/**
+ * Extract skill invocations and text fragments from a single streaming event.
+ * Only processes assistant messages with content arrays.
+ */
+export function parseStreamEvent(event: unknown): ParsedStreamEvent {
+  const skills: string[] = [];
+  const textFragments: string[] = [];
+
+  if (
+    typeof event !== 'object' || event === null ||
+    (event as Record<string, unknown>).type !== 'assistant' ||
+    !Array.isArray((event as { message?: { content?: unknown } }).message?.content)
+  ) {
+    return { skills, textFragments };
+  }
+
+  const msg = event as { type: string; message: { content: Record<string, unknown>[] } };
+  for (const block of msg.message.content) {
+    if (block.type === 'tool_use' && block.name === 'Skill' && typeof (block.input as Record<string, unknown>)?.skill === 'string') {
+      skills.push((block.input as Record<string, unknown>).skill as string);
+    }
+    if (block.type === 'text' && typeof block.text === 'string') {
+      textFragments.push(block.text as string);
+    }
+  }
+
+  return { skills, textFragments };
+}
 
 /** Result from a streaming claude invocation */
 export interface StreamResult {
@@ -106,33 +141,14 @@ export function runClaudeStreaming(
         if (!line.trim()) continue;
         try {
           const event: unknown = JSON.parse(line);
+          const parsed = parseStreamEvent(event);
+          skills.push(...parsed.skills);
+          textFragments.push(...parsed.textFragments);
 
-          // Detect Skill tool_use in assistant messages
-          if (
-            typeof event === 'object' && event !== null &&
-            (event as Record<string, unknown>).type === 'assistant' &&
-            Array.isArray((event as Record<string, unknown>).message?.content)
-          ) {
-            const msg = event as { type: string; message: { content: Record<string, unknown>[] } };
-            for (const block of msg.message.content) {
-              // tool_use block for Skill
-              if (block.type === 'tool_use' && block.name === 'Skill' && typeof (block.input as Record<string, unknown>)?.skill === 'string') {
-                skills.push((block.input as Record<string, unknown>).skill as string);
-              }
-              // text block — capture for classification detection
-              if (block.type === 'text' && typeof block.text === 'string') {
-                textFragments.push(block.text);
-              }
-            }
-
-            // Once we have skills, give a brief window for more, then finish
-            if (skills.length > 0 && !graceTimer) {
-              graceTimer = setTimeout(() => {
-                finish(true);
-              }, 8000); // 8s grace for additional skill loads after first detection
-            }
+          // Once we have skills, give a brief window for more, then finish
+          if (skills.length > 0 && !graceTimer) {
+            graceTimer = setTimeout(() => finish(true), 8000);
           }
-
         } catch {
           // Partial JSON line, skip
         }
@@ -208,19 +224,6 @@ export function extractDepth(result: StreamResult): string | null {
   const text = result.textFragments.join(' ');
   const match = text.match(CLASSIFICATION_PATTERN);
   return match ? match[2].toUpperCase() : null;
-}
-
-/**
- * Check whether the result contains a Devflow classification tag.
- *
- * @see hasClassification — functionally identical after both helpers were
- * unified on {@link CLASSIFICATION_PATTERN}. Kept as a distinct export so
- * existing test assertions that describe "branding presence" (vs. "a
- * classification exists") remain self-documenting at the call site.
- */
-export function hasDevFlowBranding(result: StreamResult): boolean {
-  const text = result.textFragments.join(' ');
-  return CLASSIFICATION_PATTERN.test(text);
 }
 
 /**
@@ -360,13 +363,18 @@ function parsePreloadedSkills(transcriptPath: string): string[] {
 }
 
 /**
- * Find the most recent subagent transcript written at or after `since` and
- * return the preloaded skill names from its initial user message.
+ * Find all subagent transcripts written at or after `since` and return the
+ * preloaded skill names from each transcript's initial user message.
  *
- * Returns an empty array if no transcript is found or the directory structure
+ * Returns one string[] per transcript. The caller can assert that at least one
+ * transcript contains the expected skills — this avoids a race condition where
+ * Claude spawns auxiliary subagents (e.g., Git) alongside the target agent,
+ * and the auxiliary transcript has a later mtime.
+ *
+ * Returns an empty array if no transcripts are found or the directory structure
  * has changed (graceful degradation).
  */
-export function getLatestSubagentPreloadedSkills(since: Date): string[] {
+export function getAllSubagentPreloadedSkills(since: Date): string[][] {
   const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
   const cwd = process.cwd();
   // Claude Code encodes the project path by replacing / with -
@@ -379,7 +387,7 @@ export function getLatestSubagentPreloadedSkills(since: Date): string[] {
 
     // Most recent transcript first
     transcripts.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-    return parsePreloadedSkills(transcripts[0].path);
+    return transcripts.map((t) => parsePreloadedSkills(t.path));
   } catch {
     // Project dir doesn't exist or structure changed — return empty gracefully
     return [];
