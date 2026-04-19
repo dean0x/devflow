@@ -58,6 +58,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     // Preamble filters prompts starting with "/" — no classification or skill loading
     const result = await runClaudeStreaming('/help with something', { timeout: 20000 });
     expect(hasSkillInvocations(result)).toBe(false);
+    expect(hasClassification(result)).toBe(false);
     console.log(`preamble filter (slash command): no skills (${result.durationMs}ms)`);
   });
 
