@@ -363,13 +363,18 @@ function parsePreloadedSkills(transcriptPath: string): string[] {
 }
 
 /**
- * Find the most recent subagent transcript written at or after `since` and
- * return the preloaded skill names from its initial user message.
+ * Find all subagent transcripts written at or after `since` and return the
+ * preloaded skill names from each transcript's initial user message.
  *
- * Returns an empty array if no transcript is found or the directory structure
+ * Returns one string[] per transcript. The caller can assert that at least one
+ * transcript contains the expected skills — this avoids a race condition where
+ * Claude spawns auxiliary subagents (e.g., Git) alongside the target agent,
+ * and the auxiliary transcript has a later mtime.
+ *
+ * Returns an empty array if no transcripts are found or the directory structure
  * has changed (graceful degradation).
  */
-export function getLatestSubagentPreloadedSkills(since: Date): string[] {
+export function getAllSubagentPreloadedSkills(since: Date): string[][] {
   const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? '';
   const cwd = process.cwd();
   // Claude Code encodes the project path by replacing / with -
@@ -382,7 +387,7 @@ export function getLatestSubagentPreloadedSkills(since: Date): string[] {
 
     // Most recent transcript first
     transcripts.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-    return parsePreloadedSkills(transcripts[0].path);
+    return transcripts.map((t) => parsePreloadedSkills(t.path));
   } catch {
     // Project dir doesn't exist or structure changed — return empty gracefully
     return [];
