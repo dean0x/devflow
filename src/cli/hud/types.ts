@@ -12,6 +12,10 @@ export interface StdinData {
   cost?: { total_cost_usd?: number };
   session_id?: string;
   transcript_path?: string;
+  rate_limits?: {
+    five_hour?: { used_percentage?: number; resets_at?: number };
+    seven_day?: { used_percentage?: number; resets_at?: number };
+  };
 }
 
 /**
@@ -84,11 +88,21 @@ export interface TranscriptData {
 }
 
 /**
- * Usage API data.
+ * Usage quota data extracted from stdin rate_limits.
  */
 export interface UsageData {
   fiveHourPercent: number | null;
   sevenDayPercent: number | null;
+  fiveHourResetsAt: number | null;
+  sevenDayResetsAt: number | null;
+}
+
+/**
+ * Aggregated cost across sessions for weekly/monthly tracking.
+ */
+export interface CostAggregation {
+  weeklyCost: number | null;
+  monthlyCost: number | null;
 }
 
 /**
@@ -137,6 +151,7 @@ export interface GatherContext {
   configCounts: ConfigCountsData | null;
   learningCounts: LearningCountsData | null;
   notifications?: NotificationData | null;
+  costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;
   sessionStartTime: number | null;
