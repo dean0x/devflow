@@ -34,11 +34,16 @@ function extractUsageFromStdin(stdin: StdinData): UsageData | null {
       ? Math.max(0, Math.min(100, sevenDay.used_percentage))
       : null;
 
+  const fiveHourResetsAt =
+    typeof fiveHour?.resets_at === 'number' ? fiveHour.resets_at : null;
+  const sevenDayResetsAt =
+    typeof sevenDay?.resets_at === 'number' ? sevenDay.resets_at : null;
+
   return {
     fiveHourPercent,
     sevenDayPercent,
-    fiveHourResetsAt: fiveHour?.resets_at ?? null,
-    sevenDayResetsAt: sevenDay?.resets_at ?? null,
+    fiveHourResetsAt,
+    sevenDayResetsAt,
   };
 }
 
@@ -125,7 +130,7 @@ async function run(): Promise<string> {
   const sessionId = stdin.session_id;
   const costUsd = stdin.cost?.total_cost_usd ?? 0;
 
-  if (sessionId && costUsd) {
+  if (needsSessionCost && sessionId && costUsd) {
     persistSessionCost(sessionId, costUsd, cwd);
   }
 

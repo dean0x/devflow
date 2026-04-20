@@ -13,13 +13,13 @@ export interface StdinData {
   session_id?: string;
   transcript_path?: string;
   rate_limits?: {
-    five_hour?: { used_percentage?: number; resets_at?: number };
-    seven_day?: { used_percentage?: number; resets_at?: number };
+    five_hour?: { used_percentage?: number; /** Epoch seconds */ resets_at?: number };
+    seven_day?: { used_percentage?: number; /** Epoch seconds */ resets_at?: number };
   };
 }
 
 /**
- * Component IDs — the 16 HUD components.
+ * Component IDs — all HUD component identifiers. Not all may be enabled by default (see HUD_COMPONENTS in config.ts).
  */
 export type ComponentId =
   | 'directory'

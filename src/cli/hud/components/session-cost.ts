@@ -1,6 +1,7 @@
 import type { ComponentResult, GatherContext } from '../types.js';
 import { dim } from '../colors.js';
 
+/** Session cost with optional rolling 7-day (/wk) and 30-day (/mo) totals. */
 export default async function sessionCost(
   ctx: GatherContext,
 ): Promise<ComponentResult | null> {
