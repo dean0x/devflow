@@ -148,7 +148,7 @@ function archiveStaleSessionFiles(
  * Clean up stale session files, orphaned .tmp files, and trim archive.
  * Called periodically from persistSessionCost.
  */
-function runCleanup(): void {
+export function runCleanup(): void {
   try {
     const { sessionsDir, archivePath } = getCostFilePaths();
     const nowSeconds = nowEpoch();

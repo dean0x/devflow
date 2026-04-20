@@ -141,7 +141,7 @@ describe('persistSessionCost', () => {
   });
 });
 
-describe('runCleanup (via persistSessionCost)', () => {
+describe('runCleanup', () => {
   it('archives session files older than 24 hours to archive.jsonl', async () => {
     const { persistSessionCost } = await importCostHistory();
 
@@ -201,6 +201,110 @@ describe('runCleanup (via persistSessionCost)', () => {
       }
     });
     expect(found).toBe(true);
+  });
+
+  it('removes orphaned .tmp files older than 1 hour', async () => {
+    const { runCleanup } = await importCostHistory();
+    const sessionsDir = getSessionsDir();
+    fs.mkdirSync(sessionsDir, { recursive: true });
+
+    const tmpPath = path.join(sessionsDir, 'stale.json.tmp');
+    fs.writeFileSync(tmpPath, 'stale-data');
+    // Backdate mtime to 2 hours ago
+    const twoHoursAgo = Date.now() - 2 * 3600 * 1000;
+    fs.utimesSync(tmpPath, new Date(twoHoursAgo), new Date(twoHoursAgo));
+
+    runCleanup();
+
+    expect(fs.existsSync(tmpPath)).toBe(false);
+  });
+
+  it('keeps .tmp files younger than 1 hour', async () => {
+    const { runCleanup } = await importCostHistory();
+    const sessionsDir = getSessionsDir();
+    fs.mkdirSync(sessionsDir, { recursive: true });
+
+    const tmpPath = path.join(sessionsDir, 'recent.json.tmp');
+    fs.writeFileSync(tmpPath, 'recent-data');
+    // mtime is now (just created) — well within 1 hour
+
+    runCleanup();
+
+    expect(fs.existsSync(tmpPath)).toBe(true);
+  });
+
+  it('trims archive entries older than 90 days when exceeding threshold', async () => {
+    const { runCleanup } = await importCostHistory();
+    const sessionsDir = getSessionsDir();
+    const archivePath = getArchivePath();
+    fs.mkdirSync(sessionsDir, { recursive: true });
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lines: string[] = [];
+
+    // 300 entries from 100 days ago (older than 90-day cutoff)
+    for (let i = 0; i < 300; i++) {
+      lines.push(JSON.stringify({
+        session_id: `old-${i}`,
+        cost_usd: 1.00,
+        timestamp: nowSec - 100 * 86400,
+        cwd: '/cwd',
+      }));
+    }
+    // 250 entries from 10 days ago (within 90-day cutoff)
+    for (let i = 0; i < 250; i++) {
+      lines.push(JSON.stringify({
+        session_id: `recent-${i}`,
+        cost_usd: 2.00,
+        timestamp: nowSec - 10 * 86400,
+        cwd: '/cwd',
+      }));
+    }
+
+    fs.writeFileSync(archivePath, lines.join('\n') + '\n');
+    expect(lines).toHaveLength(550); // exceeds 500 threshold
+
+    runCleanup();
+
+    const trimmed = fs.readFileSync(archivePath, 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    // Only the 250 recent entries should remain
+    expect(trimmed).toHaveLength(250);
+    const allRecent = trimmed.every((line) => {
+      const entry = JSON.parse(line) as { session_id: string };
+      return entry.session_id.startsWith('recent-');
+    });
+    expect(allRecent).toBe(true);
+  });
+
+  it('does not trim archive when under threshold', async () => {
+    const { runCleanup } = await importCostHistory();
+    const sessionsDir = getSessionsDir();
+    const archivePath = getArchivePath();
+    fs.mkdirSync(sessionsDir, { recursive: true });
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lines: string[] = [];
+    // 100 entries (well under 500 threshold), all old
+    for (let i = 0; i < 100; i++) {
+      lines.push(JSON.stringify({
+        session_id: `old-${i}`,
+        cost_usd: 1.00,
+        timestamp: nowSec - 100 * 86400,
+        cwd: '/cwd',
+      }));
+    }
+
+    fs.writeFileSync(archivePath, lines.join('\n') + '\n');
+
+    runCleanup();
+
+    const after = fs.readFileSync(archivePath, 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    // All 100 entries remain — under threshold, no trimming
+    expect(after).toHaveLength(100);
   });
 });
 
