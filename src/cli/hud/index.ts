@@ -5,14 +5,47 @@ import { readStdin } from './stdin.js';
 import { loadConfig, resolveComponents } from './config.js';
 import { gatherGitStatus } from './git.js';
 import { parseTranscript } from './transcript.js';
-import { fetchUsageData } from './usage-api.js';
+import { persistSessionCost, aggregateCosts } from './cost-history.js';
 import { gatherConfigCounts } from './components/config-counts.js';
 import { getLearningCounts } from './learning-counts.js';
 import { getActiveNotification } from './notifications.js';
 import { render } from './render.js';
-import type { GatherContext } from './types.js';
+import type { GatherContext, StdinData, UsageData } from './types.js';
 
 const OVERALL_TIMEOUT = 2000; // 2 second overall timeout
+
+/**
+ * Extract usage quota data from stdin rate_limits field.
+ * Returns null if rate_limits is absent.
+ * Percentages are clamped to 0-100.
+ */
+function extractUsageFromStdin(stdin: StdinData): UsageData | null {
+  if (!stdin.rate_limits) return null;
+
+  const fiveHour = stdin.rate_limits.five_hour;
+  const sevenDay = stdin.rate_limits.seven_day;
+
+  const fiveHourPercent =
+    typeof fiveHour?.used_percentage === 'number'
+      ? Math.max(0, Math.min(100, fiveHour.used_percentage))
+      : null;
+  const sevenDayPercent =
+    typeof sevenDay?.used_percentage === 'number'
+      ? Math.max(0, Math.min(100, sevenDay.used_percentage))
+      : null;
+
+  const fiveHourResetsAt =
+    typeof fiveHour?.resets_at === 'number' ? fiveHour.resets_at : null;
+  const sevenDayResetsAt =
+    typeof sevenDay?.resets_at === 'number' ? sevenDay.resets_at : null;
+
+  return {
+    fiveHourPercent,
+    sevenDayPercent,
+    fiveHourResetsAt,
+    sevenDayResetsAt,
+  };
+}
 
 async function main(): Promise<void> {
   const timeoutPromise = new Promise<never>((_, reject) =>
@@ -53,19 +86,21 @@ async function run(): Promise<string> {
   const needsTranscript =
     components.has('todoProgress') ||
     components.has('configCounts');
-  const needsUsage = components.has('usageQuota');
   const needsConfigCounts = components.has('configCounts');
   const needsLearningCounts = components.has('learningCounts');
   const needsNotifications = components.has('notifications');
+  const needsSessionCost = components.has('sessionCost');
 
   // Parallel data gathering — only fetch what's needed
-  const [git, transcript, usage] = await Promise.all([
+  const [git, transcript] = await Promise.all([
     needsGit ? gatherGitStatus(cwd) : Promise.resolve(null),
     needsTranscript && stdin.transcript_path
       ? parseTranscript(stdin.transcript_path)
       : Promise.resolve(null),
-    needsUsage ? fetchUsageData() : Promise.resolve(null),
   ]);
+
+  // Extract usage quota from stdin rate_limits (replaces OAuth fetch)
+  const usage = components.has('usageQuota') ? extractUsageFromStdin(stdin) : null;
 
   // Session start time from transcript file creation time
   let sessionStartTime: number | null = null;
@@ -91,6 +126,18 @@ async function run(): Promise<string> {
     ? getActiveNotification(cwd)
     : null;
 
+  // Cost tracking: persist current session cost, aggregate for weekly/monthly
+  const sessionId = stdin.session_id;
+  const costUsd = stdin.cost?.total_cost_usd ?? 0;
+
+  if (needsSessionCost && sessionId && costUsd) {
+    persistSessionCost(sessionId, costUsd, cwd);
+  }
+
+  const costHistory = needsSessionCost && sessionId
+    ? aggregateCosts(sessionId, costUsd)
+    : null;
+
   // Terminal width via stderr (stdout is piped to Claude Code)
   const terminalWidth = process.stderr.columns || 120;
 
@@ -102,6 +149,7 @@ async function run(): Promise<string> {
     configCounts: configCountsData,
     learningCounts: learningCountsData,
     notifications: notificationsData,
+    costHistory,
     config: { ...config, components: resolved } as GatherContext['config'],
     devflowDir,
     sessionStartTime,

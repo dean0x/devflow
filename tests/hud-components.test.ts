@@ -9,7 +9,7 @@ import diffStats from '../src/cli/hud/components/diff-stats.js';
 import model from '../src/cli/hud/components/model.js';
 import contextUsage from '../src/cli/hud/components/context-usage.js';
 import sessionDuration from '../src/cli/hud/components/session-duration.js';
-import usageQuota from '../src/cli/hud/components/usage-quota.js';
+import usageQuota, { formatCountdown } from '../src/cli/hud/components/usage-quota.js';
 import todoProgress from '../src/cli/hud/components/todo-progress.js';
 import sessionCost from '../src/cli/hud/components/session-cost.js';
 import releaseInfo from '../src/cli/hud/components/release-info.js';
@@ -24,6 +24,8 @@ function makeCtx(overrides: Partial<GatherContext> = {}): GatherContext {
     transcript: null,
     usage: null,
     configCounts: null,
+    learningCounts: null,
+    costHistory: null,
     config: { enabled: true, detail: false, components: [] },
     devflowDir: '/test/.devflow',
     sessionStartTime: null,
@@ -248,7 +250,7 @@ describe('contextUsage component', () => {
     });
     const result = await contextUsage(ctx);
     expect(result).not.toBeNull();
-    expect(result!.raw).toContain('Current Session ');
+    expect(result!.raw).toContain('Context ');
     expect(result!.raw).toContain('25%');
     expect(result!.raw).toContain('\u2588'); // filled bar
     expect(result!.raw).toContain('\u2591'); // empty bar
@@ -347,11 +349,13 @@ describe('sessionDuration component', () => {
 });
 
 describe('usageQuota component', () => {
-  it('shows Session label with both windows when available', async () => {
-    const ctx = makeCtx({ usage: { fiveHourPercent: 45, sevenDayPercent: 70 } });
+  it('shows both windows when available (no Session prefix)', async () => {
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 45, sevenDayPercent: 70, fiveHourResetsAt: null, sevenDayResetsAt: null },
+    });
     const result = await usageQuota(ctx);
     expect(result).not.toBeNull();
-    expect(result!.raw).toContain('Session');
+    expect(result!.raw).not.toContain('Session');
     expect(result!.raw).toContain('5h');
     expect(result!.raw).toContain('45%');
     expect(result!.raw).toContain('7d');
@@ -360,20 +364,24 @@ describe('usageQuota component', () => {
   });
 
   it('shows only 5h window when 7d is null', async () => {
-    const ctx = makeCtx({ usage: { fiveHourPercent: 30, sevenDayPercent: null } });
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 30, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
+    });
     const result = await usageQuota(ctx);
     expect(result).not.toBeNull();
-    expect(result!.raw).toContain('Session');
+    expect(result!.raw).not.toContain('Session');
     expect(result!.raw).toContain('5h');
     expect(result!.raw).toContain('30%');
     expect(result!.raw).not.toContain('7d');
   });
 
   it('shows only 7d window when 5h is null', async () => {
-    const ctx = makeCtx({ usage: { fiveHourPercent: null, sevenDayPercent: 70 } });
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: null, sevenDayPercent: 70, fiveHourResetsAt: null, sevenDayResetsAt: null },
+    });
     const result = await usageQuota(ctx);
     expect(result).not.toBeNull();
-    expect(result!.raw).toContain('Session');
+    expect(result!.raw).not.toContain('Session');
     expect(result!.raw).toContain('7d');
     expect(result!.raw).toContain('70%');
     expect(result!.raw).not.toContain('5h');
@@ -386,9 +394,110 @@ describe('usageQuota component', () => {
   });
 
   it('returns null when both percentages are null', async () => {
-    const ctx = makeCtx({ usage: { fiveHourPercent: null, sevenDayPercent: null } });
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: null, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
+    });
     const result = await usageQuota(ctx);
     expect(result).toBeNull();
+  });
+
+  it('shows countdown with hours+minutes for 5h window', async () => {
+    // Add 30 extra seconds as buffer to avoid off-by-one-minute edge cases
+    const twoHours15MinFromNow = Math.floor(Date.now() / 1000) + 2 * 3600 + 15 * 60 + 30;
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 45, sevenDayPercent: null, fiveHourResetsAt: twoHours15MinFromNow, sevenDayResetsAt: null },
+    });
+    const result = await usageQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toContain('(2h 15m)');
+  });
+
+  it('shows countdown with days+hours for 7d window', async () => {
+    // Add 30 extra seconds as buffer
+    const threeDays12HoursFromNow = Math.floor(Date.now() / 1000) + 3 * 86400 + 12 * 3600 + 30;
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: null, sevenDayPercent: 70, fiveHourResetsAt: null, sevenDayResetsAt: threeDays12HoursFromNow },
+    });
+    const result = await usageQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toContain('(3d 12h)');
+  });
+
+  it('shows countdown with minutes only', async () => {
+    // Add 30 extra seconds as buffer
+    const fortyFiveMinFromNow = Math.floor(Date.now() / 1000) + 45 * 60 + 30;
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 20, sevenDayPercent: null, fiveHourResetsAt: fortyFiveMinFromNow, sevenDayResetsAt: null },
+    });
+    const result = await usageQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toContain('(45m)');
+  });
+
+  it('countdown is placed after percent in parentheses', async () => {
+    const twoHoursFromNow = Math.floor(Date.now() / 1000) + 2 * 3600;
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 45, sevenDayPercent: null, fiveHourResetsAt: twoHoursFromNow, sevenDayResetsAt: null },
+    });
+    const result = await usageQuota(ctx);
+    expect(result).not.toBeNull();
+    const raw = result!.raw;
+    const percentIdx = raw.indexOf('45%');
+    const parenIdx = raw.indexOf('(');
+    expect(percentIdx).toBeLessThan(parenIdx);
+  });
+
+  it('expired resets_at shows no countdown', async () => {
+    const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 45, sevenDayPercent: null, fiveHourResetsAt: oneHourAgo, sevenDayResetsAt: null },
+    });
+    const result = await usageQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).not.toContain('(');
+  });
+
+  it('null resets_at shows no countdown', async () => {
+    const ctx = makeCtx({
+      usage: { fiveHourPercent: 45, sevenDayPercent: 70, fiveHourResetsAt: null, sevenDayResetsAt: null },
+    });
+    const result = await usageQuota(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).not.toContain('(');
+  });
+});
+
+describe('formatCountdown', () => {
+  it('returns empty string for a past timestamp', () => {
+    const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
+    expect(formatCountdown(oneHourAgo)).toBe('');
+  });
+
+  it('returns hours and minutes for a 2h 30m remaining timestamp', () => {
+    const twoHours30Min = Math.floor(Date.now() / 1000) + 2 * 3600 + 30 * 60 + 30;
+    expect(formatCountdown(twoHours30Min)).toBe('2h 30m');
+  });
+
+  it('returns days and hours for a 2d 5h remaining timestamp', () => {
+    const twoDays5Hours = Math.floor(Date.now() / 1000) + 2 * 86400 + 5 * 3600 + 30;
+    expect(formatCountdown(twoDays5Hours)).toBe('2d 5h');
+  });
+
+  it('returns minutes only when under 1 hour remaining', () => {
+    const fortyFiveMin = Math.floor(Date.now() / 1000) + 45 * 60 + 30;
+    expect(formatCountdown(fortyFiveMin)).toBe('45m');
+  });
+
+  it('omits zero-minute sub-unit for exact day counts', () => {
+    // Exactly 3 days: no leftover hours
+    const exactlyThreeDays = Math.floor(Date.now() / 1000) + 3 * 86400 + 30;
+    expect(formatCountdown(exactlyThreeDays)).toBe('3d');
+  });
+
+  it('omits zero-minute sub-unit for exact hour counts', () => {
+    // Exactly 2 hours: no leftover minutes
+    const exactlyTwoHours = Math.floor(Date.now() / 1000) + 2 * 3600 + 30;
+    expect(formatCountdown(exactlyTwoHours)).toBe('2h');
   });
 });
 
@@ -445,6 +554,41 @@ describe('sessionCost component', () => {
     });
     const result = await sessionCost(ctx);
     expect(result).toBeNull();
+  });
+
+  it('shows weekly and monthly cost when costHistory is present', async () => {
+    const ctx = makeCtx({
+      stdin: { cost: { total_cost_usd: 1.42 } },
+      costHistory: { weeklyCost: 18.50, monthlyCost: 62.30 },
+    });
+    const result = await sessionCost(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toContain('$1.42');
+    expect(result!.raw).toContain('$18.50/wk');
+    expect(result!.raw).toContain('$62.30/mo');
+  });
+
+  it('shows session cost only when costHistory is null', async () => {
+    const ctx = makeCtx({
+      stdin: { cost: { total_cost_usd: 1.42 } },
+      costHistory: null,
+    });
+    const result = await sessionCost(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toBe('$1.42');
+    expect(result!.raw).not.toContain('/wk');
+    expect(result!.raw).not.toContain('/mo');
+  });
+
+  it('shows weekly but not monthly when only weeklyCost is present', async () => {
+    const ctx = makeCtx({
+      stdin: { cost: { total_cost_usd: 1.42 } },
+      costHistory: { weeklyCost: 18.50, monthlyCost: null },
+    });
+    const result = await sessionCost(ctx);
+    expect(result).not.toBeNull();
+    expect(result!.raw).toContain('$18.50/wk');
+    expect(result!.raw).not.toContain('/mo');
   });
 });
 

@@ -12,10 +12,14 @@ export interface StdinData {
   cost?: { total_cost_usd?: number };
   session_id?: string;
   transcript_path?: string;
+  rate_limits?: {
+    five_hour?: { used_percentage?: number; /** Epoch seconds */ resets_at?: number };
+    seven_day?: { used_percentage?: number; /** Epoch seconds */ resets_at?: number };
+  };
 }
 
 /**
- * Component IDs — the 16 HUD components.
+ * Component IDs — all HUD component identifiers. Not all may be enabled by default (see HUD_COMPONENTS in config.ts).
  */
 export type ComponentId =
   | 'directory'
@@ -84,11 +88,21 @@ export interface TranscriptData {
 }
 
 /**
- * Usage API data.
+ * Usage quota data extracted from stdin rate_limits.
  */
 export interface UsageData {
   fiveHourPercent: number | null;
   sevenDayPercent: number | null;
+  fiveHourResetsAt: number | null;
+  sevenDayResetsAt: number | null;
+}
+
+/**
+ * Aggregated cost across sessions for weekly/monthly tracking.
+ */
+export interface CostAggregation {
+  weeklyCost: number | null;
+  monthlyCost: number | null;
 }
 
 /**
@@ -137,6 +151,7 @@ export interface GatherContext {
   configCounts: ConfigCountsData | null;
   learningCounts: LearningCountsData | null;
   notifications?: NotificationData | null;
+  costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
   devflowDir: string;
   sessionStartTime: number | null;

@@ -44,9 +44,9 @@ export default async function contextUsage(
     suffix = ` (in: ${inK}k)`;
   }
 
-  const raw = `Current Session ${filledBar}${emptyBar} ${pct}%${suffix}`;
+  const raw = `Context ${filledBar}${emptyBar} ${pct}%${suffix}`;
   const text =
-    dim('Current Session ') +
+    dim('Context ') +
     colorFn(filledBar) +
     dim(emptyBar) +
     ' ' +
