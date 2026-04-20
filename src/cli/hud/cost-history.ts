@@ -259,11 +259,6 @@ export function aggregateCosts(
       upsertMax(sessionMap, entry);
     }
 
-    if (sessionMap.size === 0 && !currentCostUsd) {
-      cachedAggregation = { value: null, expiresAt: Date.now() + CACHE_TTL_MS };
-      return null;
-    }
-
     // Override/add current session from stdin (authoritative), only when cost > 0
     if (currentCostUsd > 0) {
       const currentEntry: SessionEntry = {
