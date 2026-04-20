@@ -51,7 +51,7 @@ const LINE_GROUPS: (ComponentId[] | null)[] = [
   // Section 1: Info (3 lines)
   ['directory', 'gitBranch', 'gitAheadBehind', 'releaseInfo', 'worktreeCount', 'diffStats'],
   ['contextUsage', 'usageQuota'],
-  ['model', 'sessionDuration', 'sessionCost', 'configCounts'],
+  ['model', 'configCounts', 'sessionDuration', 'sessionCost'],
   // --- section break ---
   null,
   // Section 2: Activity
