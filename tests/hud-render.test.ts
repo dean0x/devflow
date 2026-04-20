@@ -38,6 +38,7 @@ function makeCtx(
     usage: null,
     configCounts: null,
     learningCounts: null,
+    costHistory: null,
     config: {
       enabled: true,
       detail: false,
@@ -76,7 +77,7 @@ describe('render', () => {
   it('shows session data when available', async () => {
     const ctx = makeCtx({
       sessionStartTime: Date.now() - 15 * 60 * 1000,
-      usage: { fiveHourPercent: 30, sevenDayPercent: null },
+      usage: { fiveHourPercent: 30, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
     });
     const output = await render(ctx);
     const lines = output.split('\n').filter((l) => l.length > 0);
@@ -84,14 +85,14 @@ describe('render', () => {
     expect(lines).toHaveLength(3);
     const raw = stripAnsi(output);
     expect(raw).toContain('15m');
-    expect(raw).toContain('Session');
+    expect(raw).toContain('5h');
     expect(raw).toContain('30%');
   });
 
   it('shows activity section with todos and config counts', async () => {
     const ctx = makeCtx({
       sessionStartTime: Date.now() - 5 * 60 * 1000,
-      usage: { fiveHourPercent: 20, sevenDayPercent: null },
+      usage: { fiveHourPercent: 20, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
       transcript: {
         tools: [],
         agents: [],
@@ -116,7 +117,7 @@ describe('render', () => {
     expect(raw).toContain('3 rules');
     expect(raw).toContain('1 MCPs');
     expect(raw).toContain('4 hooks');
-    expect(raw).toContain('Session');
+    expect(raw).toContain('5h');
   });
 
   it('components that return null are excluded', async () => {
@@ -145,7 +146,7 @@ describe('render', () => {
   it('inserts blank line between info and activity sections', async () => {
     const ctx = makeCtx({
       sessionStartTime: Date.now() - 5 * 60 * 1000,
-      usage: { fiveHourPercent: 20, sevenDayPercent: null },
+      usage: { fiveHourPercent: 20, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
       transcript: {
         tools: [],
         agents: [],
@@ -167,7 +168,7 @@ describe('render', () => {
   it('no blank line when activity section is empty', async () => {
     const ctx = makeCtx({
       sessionStartTime: Date.now() - 5 * 60 * 1000,
-      usage: { fiveHourPercent: 20, sevenDayPercent: null },
+      usage: { fiveHourPercent: 20, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
     });
     const output = await render(ctx);
     const lines = output.split('\n');
