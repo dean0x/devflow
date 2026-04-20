@@ -74,9 +74,8 @@ describe('render', () => {
     expect(raw).toContain('\u00B7');
   });
 
-  it('shows session data when available', async () => {
+  it('shows usage quota when available', async () => {
     const ctx = makeCtx({
-      sessionStartTime: Date.now() - 15 * 60 * 1000,
       usage: { fiveHourPercent: 30, sevenDayPercent: null, fiveHourResetsAt: null, sevenDayResetsAt: null },
     });
     const output = await render(ctx);
@@ -84,7 +83,6 @@ describe('render', () => {
 
     expect(lines).toHaveLength(3);
     const raw = stripAnsi(output);
-    expect(raw).toContain('15m');
     expect(raw).toContain('5h');
     expect(raw).toContain('30%');
   });
@@ -206,7 +204,7 @@ describe('config', () => {
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
-  it('HUD_COMPONENTS has 16 components', () => {
-    expect(HUD_COMPONENTS).toHaveLength(16);
+  it('HUD_COMPONENTS has 15 components (sessionDuration retained but omitted from defaults)', () => {
+    expect(HUD_COMPONENTS).toHaveLength(15);
   });
 });

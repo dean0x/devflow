@@ -4,7 +4,9 @@ import { homedir } from 'node:os';
 import type { HudConfig, ComponentId } from './types.js';
 
 /**
- * All 16 HUD components in display order.
+ * Default HUD components in display order.
+ * sessionDuration is intentionally omitted — the component is retained
+ * in the type system and render map but excluded from display by default.
  */
 export const HUD_COMPONENTS: readonly ComponentId[] = [
   'directory',
@@ -16,7 +18,6 @@ export const HUD_COMPONENTS: readonly ComponentId[] = [
   'model',
   'contextUsage',
   'versionBadge',
-  'sessionDuration',
   'sessionCost',
   'usageQuota',
   'todoProgress',
