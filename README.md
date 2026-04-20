@@ -56,12 +56,12 @@ Devflow: IMPLEMENT/ORCHESTRATED
 
 **Everything is composable.** 17 plugins (8 core + 9 language/ecosystem). Install only what you need. Six commands cover the entire development lifecycle.
 
-**HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, session duration, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
+**HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
 
 ```
 ~/devflow · main · +2 -1 · v2.0.0+3
-▓▓▓▓▓▓▓▓ 100% · 5h ↻2h15m ████░░░░ 45% · 7d ↻3d12h ████████ 70%
-Opus 4.6 (1M) · 3 MCPs 2 rules · ⏱ 15m · $1.42 · $18.50/wk · $62.30/mo
+Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m) · 7d ████████ 70% (3d 12h)
+Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
 **Security.** Deny lists block dangerous tool patterns out of the box — configurable during init.
