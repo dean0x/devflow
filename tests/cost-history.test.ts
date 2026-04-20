@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-// Must set DEVFLOW_DIR before importing to control getCostFilePaths
-// We reset between tests via env manipulation.
+// Must set DEVFLOW_DIR before importing to control getCostFilePaths.
+// cost-history.ts has module-level singletons (sessionsDirCreated, cachedAggregation)
+// that must be reset between tests. vi.resetModules() clears the module cache so each
+// dynamic import gets a fresh module instance with those singletons reset to initial values.
 
 let tmpDir: string;
 
@@ -23,7 +25,9 @@ function getArchivePath(): string {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cost-history-test-'));
   setDevflowDir(tmpDir);
-  // Re-import to pick up updated DEVFLOW_DIR
+  // Reset module cache so module-level singletons (sessionsDirCreated, cachedAggregation)
+  // are re-initialized on the next dynamic import.
+  vi.resetModules();
 });
 
 afterEach(() => {
@@ -33,7 +37,7 @@ afterEach(() => {
 
 // Dynamic imports so DEVFLOW_DIR is respected
 async function importCostHistory() {
-  // Use dynamic import with cache-busting to pick up env changes
+  // Dynamic import — getCostFilePaths reads DEVFLOW_DIR at call time
   const mod = await import('../src/cli/hud/cost-history.js');
   return mod;
 }
@@ -116,6 +120,87 @@ describe('persistSessionCost', () => {
     expect(files).toContain('session-a.json');
     expect(files).toContain('session-b.json');
     expect(files).toContain('session-c.json');
+  });
+
+  it('path traversal guard: sessionId containing / does not create a file', async () => {
+    const { persistSessionCost } = await importCostHistory();
+    persistSessionCost('../../etc/passwd', 1.00, '/cwd');
+    expect(fs.existsSync(getSessionsDir())).toBe(false);
+  });
+
+  it('path traversal guard: sessionId containing \\ does not create a file', async () => {
+    const { persistSessionCost } = await importCostHistory();
+    persistSessionCost('..\\evil', 1.00, '/cwd');
+    expect(fs.existsSync(getSessionsDir())).toBe(false);
+  });
+
+  it('path traversal guard: empty string sessionId does not create a file', async () => {
+    const { persistSessionCost } = await importCostHistory();
+    persistSessionCost('', 1.00, '/cwd');
+    expect(fs.existsSync(getSessionsDir())).toBe(false);
+  });
+});
+
+describe('runCleanup (via persistSessionCost)', () => {
+  it('archives session files older than 24 hours to archive.jsonl', async () => {
+    const { persistSessionCost } = await importCostHistory();
+
+    // Directly write a stale session file (timestamp > 24h ago)
+    const sessionsDir = getSessionsDir();
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const staleTimestamp = Math.floor(Date.now() / 1000) - 2 * 86400; // 2 days ago
+    const staleEntry = {
+      session_id: 'stale-session',
+      cost_usd: 3.50,
+      timestamp: staleTimestamp,
+      cwd: '/cwd',
+    };
+    fs.writeFileSync(
+      path.join(sessionsDir, 'stale-session.json'),
+      JSON.stringify(staleEntry),
+    );
+
+    // Trigger cleanup by calling persistSessionCost with a timestamp divisible by 50.
+    // We control the clock indirectly: find the next epoch second % 50 === 0.
+    // Simpler approach: call the internal via a sessionId that triggers it on a
+    // matching second. Instead, directly call with a cost and verify via side-effects
+    // by calling persistSessionCost repeatedly until cleanup fires — this is fragile.
+    // Better: export runCleanup or test it via the archiveStaleSessionFiles path.
+    // Since runCleanup is not exported, we write a fresh session and then manually
+    // verify by directly writing a file with a stale timestamp and calling
+    // persistSessionCost with a specially crafted epoch.
+    //
+    // The simplest approach without exporting runCleanup: write the stale file,
+    // then use the module's internal trigger (timestamp % 50 === 0).
+    // We mock Date.now to return an epoch where the seconds % 50 === 0.
+    const nowMs = Date.now();
+    const nowSec = Math.floor(nowMs / 1000);
+    // Find the nearest future second divisible by 50
+    const targetSec = nowSec + (50 - (nowSec % 50)) % 50;
+    const savedNow = Date.now;
+    // Temporarily override Date.now so that nowEpoch() returns targetSec
+    Date.now = () => targetSec * 1000;
+    try {
+      persistSessionCost('trigger-cleanup', 1.00, '/cwd');
+    } finally {
+      Date.now = savedNow;
+    }
+
+    // stale-session.json should have been archived
+    expect(fs.existsSync(path.join(sessionsDir, 'stale-session.json'))).toBe(false);
+    const archivePath = getArchivePath();
+    expect(fs.existsSync(archivePath)).toBe(true);
+    const archiveContent = fs.readFileSync(archivePath, 'utf-8');
+    const lines = archiveContent.split('\n').filter((l) => l.trim().length > 0);
+    const found = lines.some((line) => {
+      try {
+        const parsed = JSON.parse(line) as { session_id: string };
+        return parsed.session_id === 'stale-session';
+      } catch {
+        return false;
+      }
+    });
+    expect(found).toBe(true);
   });
 });
 
