@@ -14,6 +14,8 @@
     "scripts/hooks/",
     "scripts/hud.sh",
     "scripts/hud/",
+    "scripts/utils/",
+    "scripts/package.json",
     "src/templates/",
     "README.md",
     "LICENSE",
