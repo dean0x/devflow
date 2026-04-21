@@ -70,7 +70,9 @@ Apply DRY, extract patterns, improve readability.
 
 **Checkpoint:** All tests still pass. Code is clean. Repeat from Step 1 for next behavior.
 
-### Cycle Verification
+---
+
+## Cycle Verification
 
 After each RED-GREEN-REFACTOR cycle, ALL must hold:
 
@@ -90,7 +92,7 @@ If any fails: you skipped TDD. Back up and redo the cycle correctly.
 These are the excuses developers use to skip TDD. Recognize and reject them.
 
 | Excuse | Why It Feels Right | Why It's Wrong | Correct Action |
-|--------|-------------------|---------------|----------------|
+|--------|-------------------|----------------|----------------|
 | "I'll write tests after" | Need to see the shape first | Tests ARE the shape — they define the interface before implementation exists | Write the test first |
 | "Too simple to test" | It's just a getter/setter | Getters break, defaults change, edge cases hide in "simple" code | Write it — takes 30 seconds |
 | "I'll refactor later" | Just get it working now | "Later" never comes; technical debt compounds silently | Refactor now in Step 3 |
@@ -109,7 +111,7 @@ See `references/rationalization-prevention.md` for extended examples with code.
 The rationalization table above catches excuses you make *before starting*. These red flags catch you *mid-work* — thoughts that signal you are about to skip a step.
 
 | Thought | Correction |
-|---------|-----------|
+|---------|------------|
 | "Let me write the implementation first, tests after" | Delete the code. Write the test. Watch it fail. Then rewrite. |
 | "I need to see the shape before I can test" | The test IS the shape. It defines the interface before implementation. |
 | "The test setup is too complex for this" | Complex setup = too much coupling. Simplify the design first. |
@@ -167,7 +169,7 @@ When implementing any feature under ambient IMPLEMENT/GUIDED or IMPLEMENT/ORCHES
 ### What to Test
 
 | Test | Don't Test |
-|------|-----------|
+|------|------------|
 | Public API behavior | Private implementation details |
 | Error conditions and edge cases | Framework internals |
 | Integration points (boundaries) | Third-party library correctness |

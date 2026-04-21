@@ -24,10 +24,7 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 
 For GUIDED depth, the main session performs planning directly:
 
-0. **Discover** — If the planning question is open-ended, ask 1-2 clarifying
-   questions (AskUserQuestion, one per message) and present 2-3 approaches with
-   tradeoffs before orienting. Skip if the user's prompt is already specific.
-   On "just proceed": skip questions, present inferred scope for confirmation.
+0. **Discover** — If the planning question is open-ended, ask 1-2 clarifying questions (AskUserQuestion, one per message) and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
 1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
 2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 3. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
