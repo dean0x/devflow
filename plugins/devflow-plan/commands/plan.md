@@ -33,7 +33,7 @@ For **multi-issue** mode: collect all `#N` tokens from `$ARGUMENTS` as `ISSUE_NU
 
 | Gate | Phase | Purpose |
 |------|-------|---------|
-| Gate 0 | Phase 1 | Confirm understanding before exploration |
+| Gate 0 | Phase 1 | Requirements discovery before exploration |
 | Gate 1 | Phase 7 | Validate scope + gap analysis results |
 | Gate 2 | Phase 13 | Confirm final plan + design review |
 
@@ -62,7 +62,7 @@ Explore the user's intent through focused Socratic questioning before spawning a
 
 For multi-issue: present unified scope across all issues after individual discovery.
 
-If the user says "skip" or "just proceed" — skip remaining questions, present inferred understanding (core problem, users, outcome, assumptions, recommended approach) in one message for confirmation, then proceed. Gate 0 is satisfied by the confirmation, not by the discovery questions. This matches plan:orch behavior.
+If the user says "skip" or "just proceed" — skip remaining questions, present inferred understanding (core problem, users, outcome, assumptions, recommended approach) in one message for confirmation, then proceed. Gate 0 is satisfied by the confirmation, not by the discovery questions.
 
 **MANDATORY**: Do not spawn any agents until Gate 0 is confirmed.
 
