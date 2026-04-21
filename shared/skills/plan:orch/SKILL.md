@@ -24,7 +24,7 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 
 For GUIDED depth, the main session performs planning directly:
 
-0. **Discover** — If the planning question is open-ended, ask 1-2 clarifying questions (AskUserQuestion, one per message) and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
+0. **Discover** — If the planning question is open-ended, ask clarifying questions via AskUserQuestion and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
 1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
 2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 3. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
@@ -66,7 +66,7 @@ Before committing to an approach, surface ambiguity through focused Socratic que
 **Process:**
 
 1. **Assess** — Does the request have meaningful ambiguity or multiple valid approaches? If not, skip to Phase 1.
-2. **Question** — Ask 1-4 clarifying questions via AskUserQuestion. ONE question per message. Prefer multiple choice (2-4 options) when tradeoffs exist. Scale: focused feature → 1-2 questions; system design → 3-4.
+2. **Question** — Ask clarifying questions via AskUserQuestion. Prefer multiple choice (2-4 options) when tradeoffs exist.
 3. **Propose approaches** — Present 2-3 options with explicit tradeoffs:
    - Lead with your recommended approach and why
    - Each option: 2-3 sentences + key tradeoff (complexity, performance, maintenance)

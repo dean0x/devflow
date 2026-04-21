@@ -53,10 +53,10 @@ Explore the user's intent through focused Socratic questioning before spawning a
 - User has specified WHAT to build, HOW it should behave, and WHERE it integrates
 - User input references an existing design document or detailed issue
 
-**Process (1-4 questions, ONE per message):**
+**Process:**
 
 1. **First question**: Confirm your understanding of the core problem and expected outcome. Frame as multiple choice when 2-3 interpretations exist.
-2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs. One question per message. Scale to complexity — simple features need 1-2 questions, system-level designs need 3-4.
+2. **Follow-up questions** (if ambiguity remains): Probe constraints, scope boundaries, or tradeoffs via AskUserQuestion.
 3. **Present approaches**: When multiple valid approaches exist, present 2-3 options with explicit tradeoffs. Lead with your recommendation and why.
 4. **Confirm scope**: Summarize understanding including: core problem, target users, expected outcome, key assumptions, chosen approach (if applicable).
 
