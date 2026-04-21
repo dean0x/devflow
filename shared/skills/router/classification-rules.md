@@ -21,7 +21,10 @@ Classify each prompt by **intent** and **depth** before responding.
 
 Default to ORCHESTRATED for substantive work — it produces better results.
 Reserve GUIDED for small focused changes where orchestration adds no value.
-Prefer GUIDED over QUICK for any prompt involving code changes.
+Prefer GUIDED over QUICK for any prompt involving code changes — UNLESS the
+change AND target are both explicit and trivial (e.g., "rename foo to bar in
+utils.ts", "change color from red to blue in header.tsx"). Such single-site,
+obvious edits stay QUICK.
 
 ## Action
 
