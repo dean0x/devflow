@@ -80,4 +80,11 @@ while (queue.length > 0) {
   }
 }
 
+// All compiled .js files use ESM syntax — Node needs this to resolve imports
+// across sibling directories (e.g. hud/ importing from ../utils/).
+const pkgJsonPath = path.join(scriptsRoot, 'package.json');
+if (!fs.existsSync(pkgJsonPath)) {
+  fs.writeFileSync(pkgJsonPath, '{"type": "module"}\n');
+}
+
 console.log(`\u2713 HUD distribution: ${visited.size} files copied to ${scriptsRoot}`);

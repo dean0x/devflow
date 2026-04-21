@@ -12,6 +12,7 @@ plugins/*/skills/
 # any transitive dist/ dependencies the HUD imports — currently scripts/utils/).
 scripts/hud/
 scripts/utils/
+scripts/package.json
 
 # Generated shared agents (copied from shared/agents/ at build time)
 # Note: plugin-specific agents (catch-up.md, devlog.md) are committed in their plugins
