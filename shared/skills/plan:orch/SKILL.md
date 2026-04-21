@@ -24,6 +24,7 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 
 For GUIDED depth, the main session performs planning directly:
 
+0. **Discover** — If the planning question is open-ended, ask clarifying questions via AskUserQuestion and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
 1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
 2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 3. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
@@ -43,6 +44,41 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 ```
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
+## Phase 0.5: Requirements Discovery
+
+Before committing to an approach, surface ambiguity through focused Socratic questioning.
+
+**Skip when** (semantic assessment, not word count):
+- User has specified WHAT to build, HOW it should behave, and WHERE it integrates — regardless of prompt length
+- Invoked from within another pipeline (pipeline:orch, implement:orch)
+- Single clear approach exists with no meaningful alternatives
+
+**Skip examples** (proceed directly to Phase 1):
+- "Add retry with exponential backoff to HttpClient in src/http.ts, max 3 retries, configurable timeout" — specific files, clear behavior, defined parameters
+- "Implement the design from .docs/design/caching.md" — pre-existing specification
+
+**Discover examples** (run Phase 0.5):
+- "Add a caching layer" — open-ended, multiple valid approaches
+- "Improve the auth flow" — vague scope, unclear what aspects need improvement
+- "Design a notification system" — system-level, many architectural choices
+
+**Process:**
+
+1. **Assess** — Does the request have meaningful ambiguity or multiple valid approaches? If not, skip to Phase 1.
+2. **Question** — Ask clarifying questions via AskUserQuestion. Prefer multiple choice (2-4 options) when tradeoffs exist.
+3. **Propose approaches** — Present 2-3 options with explicit tradeoffs:
+   - Lead with your recommended approach and why
+   - Each option: 2-3 sentences + key tradeoff (complexity, performance, maintenance)
+   - Final option: "Other — describe your preferred approach"
+4. **Confirm** — Get user's choice, then proceed to Phase 1 with a constrained problem.
+
+If the user says "skip", "just proceed", or signals impatience — skip remaining questions, present your inferred understanding (problem, scope, recommended approach) in one message for confirmation, then proceed to Phase 1 after confirmation. This matches /plan Gate 0 behavior.
+
+**Question design:**
+- Ask about constraints and goals, not implementation details
+- Surface hidden assumptions ("Does this need to handle concurrent writes?")
+- Reveal scope boundaries ("Just the API layer, or the UI as well?")
 
 ## Phase 1: Orient
 
