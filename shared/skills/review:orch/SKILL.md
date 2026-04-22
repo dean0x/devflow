@@ -19,7 +19,11 @@ This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. E
 
 ---
 
+**Continuation**: Phase 2 handles incremental detection via `.last-review-head` — no separate continuation path needed.
+
 ## Phase 1: Pre-flight
+
+**Produces:** BRANCH_INFO, PR_INFO
 
 Spawn `Agent(subagent_type="Git")` with action `ensure-pr-ready`:
 - Extract: branch, base_branch, branch_slug, pr_number
@@ -28,6 +32,9 @@ Spawn `Agent(subagent_type="Git")` with action `ensure-pr-ready`:
 Determine base branch: use PR target if PR exists, otherwise `main`/`master`.
 
 ## Phase 2: Incremental Detection
+
+**Produces:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP
+**Requires:** BRANCH_INFO
 
 Check `.docs/reviews/{branch_slug}/.last-review-head`:
 - If file exists and SHA matches HEAD: "No new commits since last review. Nothing to do." → stop
@@ -39,6 +46,9 @@ Create directory: `mkdir -p .docs/reviews/{branch_slug}/{timestamp}`
 
 ## Phase 2b: Load Knowledge Index
 
+**Produces:** KNOWLEDGE_CONTEXT
+**Requires:** REVIEW_DIR
+
 After incremental detection, load the knowledge index:
 
 ```bash
@@ -48,6 +58,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ## Phase 3: File Analysis
+
+**Produces:** REVIEWER_LIST
+**Requires:** DIFF_RANGE
 
 Run `git diff --name-only {DIFF_RANGE}` to get changed files.
 
@@ -69,6 +82,9 @@ Detect conditional reviewers from file types:
 
 ## Phase 4: Reviews (Parallel)
 
+**Produces:** REVIEWER_OUTPUTS
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, REVIEWER_LIST
+
 Spawn all reviewers in a single message (parallel execution):
 
 **7 core reviewers** (always):
@@ -86,12 +102,16 @@ Each reviewer receives:
 
 ## Phase 5: Synthesis (Parallel)
 
+**Requires:** REVIEWER_OUTPUTS, REVIEW_DIR, PR_INFO
+
 After all reviewers complete, spawn in parallel:
 
 1. `Agent(subagent_type="Git")` with action `comment-pr` — post review summary as PR comment (deduplicate: check existing comments first)
 2. `Agent(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`
 
 ## Phase 6: Finalize
+
+**Requires:** BRANCH_INFO, REVIEW_DIR
 
 Write HEAD SHA to `.docs/reviews/{branch_slug}/.last-review-head` for next incremental review.
 
@@ -107,3 +127,17 @@ Report to user:
 - **No changed files**: "No changes to review." → stop
 - **Reviewer fails**: Report which reviewer failed, continue with remaining
 - **Synthesizer fails**: Reports are still on disk — user can read them directly
+
+## Phase Completion Checklist
+
+Before reporting results, verify every phase was announced:
+
+- [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured
+- [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
+- [ ] Phase 2b: Load Knowledge Index → KNOWLEDGE_CONTEXT captured
+- [ ] Phase 3: File Analysis → REVIEWER_LIST captured
+- [ ] Phase 4: Reviews → REVIEWER_OUTPUTS written to disk
+- [ ] Phase 5: Synthesis → review-summary.md written
+- [ ] Phase 6: Finalize → .last-review-head updated, results reported
+
+If any phase is unchecked, execute it before proceeding.

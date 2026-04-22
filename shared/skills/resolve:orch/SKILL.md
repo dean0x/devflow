@@ -22,6 +22,8 @@ This is a lightweight variant of `/resolve` for ambient mode. Excluded: pitfall 
 
 ## Phase 1: Target Review Directory
 
+**Produces:** REVIEW_DIR, BRANCH_SLUG
+
 Find the latest timestamped directory under `.docs/reviews/` that:
 1. Contains a `review-summary.md` (has been reviewed)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
@@ -35,9 +37,15 @@ Extract branch slug from the directory path.
      handled by Phase 1 here). Same content as resolve.md Step 0d. -->
 ## Phase 1.5: Load Project Knowledge
 
+**Produces:** KNOWLEDGE_CONTEXT
+**Requires:** REVIEW_DIR
+
 Run `node scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 ## Phase 2: Parse Issues
+
+**Produces:** ISSUES
+**Requires:** REVIEW_DIR
 
 Read all `{focus}.md` files in the timestamped directory (exclude `review-summary.md` and `resolution-summary.md`).
 
@@ -49,6 +57,9 @@ If no actionable issues found: "Review is clean — no issues to resolve." → s
 
 ## Phase 3: Analyze & Batch
 
+**Produces:** BATCHES
+**Requires:** ISSUES
+
 Group issues by file/function for efficient resolution:
 - Issues in the same file → same batch
 - Issues with cross-file dependencies → same batch
@@ -57,6 +68,9 @@ Group issues by file/function for efficient resolution:
 Determine execution: batches with no shared files can run in parallel.
 
 ## Phase 4: Resolve (Parallel)
+
+**Produces:** RESOLUTION_RESULTS
+**Requires:** BATCHES, KNOWLEDGE_CONTEXT, BRANCH_SLUG
 
 Spawn `Agent(subagent_type="Resolver")` agents — one per batch, parallel where possible.
 
@@ -73,12 +87,17 @@ Resolvers follow a 3-tier risk approach:
 
 ## Phase 5: Collect & Simplify
 
+**Produces:** SIMPLIFICATION_RESULTS
+**Requires:** RESOLUTION_RESULTS
+
 Aggregate results from all Resolver agents:
 - Count: fixed, false positives, deferred
 
 Spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
 ## Phase 6: Report
+
+**Requires:** RESOLUTION_RESULTS, SIMPLIFICATION_RESULTS, REVIEW_DIR
 
 Write `resolution-summary.md` to the same timestamped review directory.
 
@@ -97,3 +116,17 @@ Report to user:
 - **All issues false positive**: Report findings, write resolution-summary noting no changes needed
 - **Resolver BLOCKED**: Report which batch blocked, continue with remaining
 - **Simplifier fails**: Resolution still valid — report that simplification was skipped
+
+## Phase Completion Checklist
+
+Before reporting results, verify every phase was announced:
+
+- [ ] Phase 1: Target Review Directory → REVIEW_DIR captured
+- [ ] Phase 1.5: Load Project Knowledge → KNOWLEDGE_CONTEXT captured
+- [ ] Phase 2: Parse Issues → ISSUES captured (or stopped: no actionable issues)
+- [ ] Phase 3: Analyze & Batch → BATCHES captured
+- [ ] Phase 4: Resolve → RESOLUTION_RESULTS captured per batch
+- [ ] Phase 5: Collect & Simplify → SIMPLIFICATION_RESULTS captured
+- [ ] Phase 6: Report → resolution-summary.md written
+
+If any phase is unchecked, execute it before proceeding.

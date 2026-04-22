@@ -693,6 +693,11 @@ describe('preamble drift detection', () => {
     expect(routerContent).toContain('DEBUG');
     expect(routerContent).toContain('PLAN');
     expect(routerContent).toContain('REVIEW');
+
+    // Must contain Phase Protocol section
+    expect(routerContent).toContain('## Phase Protocol');
+    expect(routerContent).toContain('Announce');
+    expect(routerContent).toContain('No silent skips');
   });
 
   it('session-start-classification hook reads classification-rules.md', async () => {
@@ -700,5 +705,87 @@ describe('preamble drift detection', () => {
     const hookContent = await fs.readFile(hookPath, 'utf-8');
 
     expect(hookContent).toContain('classification-rules.md');
+  });
+});
+
+describe('phase protocol structural validation', () => {
+  const orchSkills = [
+    'plan:orch',
+    'implement:orch',
+    'review:orch',
+    'resolve:orch',
+    'debug:orch',
+    'explore:orch',
+    'pipeline:orch',
+  ];
+
+  const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
+
+  it('every orch skill has a Phase Completion Checklist', async () => {
+    for (const skill of orchSkills) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Phase Completion Checklist`).toContain(
+        '## Phase Completion Checklist',
+      );
+    }
+  });
+
+  it('every orch skill has Produces: annotations', async () => {
+    for (const skill of orchSkills) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Produces: annotations`).toContain(
+        '**Produces:**',
+      );
+    }
+  });
+
+  it('every orch skill has Requires: annotations', async () => {
+    for (const skill of orchSkills) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Requires: annotations`).toContain(
+        '**Requires:**',
+      );
+    }
+  });
+
+  it('plan:orch and implement:orch have Continuation Detection', async () => {
+    for (const skill of ['plan:orch', 'implement:orch']) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Continuation Detection`).toContain(
+        '## Continuation Detection',
+      );
+    }
+  });
+
+  it('checklist item count matches phase count in each orch skill', async () => {
+    for (const skill of orchSkills) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+
+      // Count phase headings (## Phase N or ### Phase N — digit distinguishes from ## Phase Completion Checklist)
+      const phaseHeadings = content.match(/^#{2,3}\s+Phase\s+\d/gm) ?? [];
+
+      // Count checklist items (- [ ] Phase)
+      const checklistItems = content.match(/^- \[ \] Phase/gm) ?? [];
+
+      expect(
+        checklistItems.length,
+        `${skill}: ${checklistItems.length} checklist items but ${phaseHeadings.length} phases`,
+      ).toBe(phaseHeadings.length);
+    }
   });
 });

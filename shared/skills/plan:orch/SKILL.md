@@ -35,7 +35,29 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 ---
 
+## Continuation Detection
+
+Before starting the full pipeline, check for prior planning context:
+
+- **Existing artifact**: `.docs/design/` contains a file matching the current topic
+- **Accepted plan in session**: A structured plan was already presented and accepted in this conversation
+
+**Override**: If the user explicitly requests a fresh plan ("start from scratch", "ignore the old plan", "new approach"), execute the full pipeline regardless of prior artifacts.
+
+If EITHER condition is true (and no override) → execute **Refinement Path** instead of Phases 0-8:
+
+1. Read the existing plan (disk artifact or conversation context)
+2. Run Phase 2 (Explore) targeting only areas affected by the new request
+3. Update the plan with changes, preserving unchanged sections
+4. Run Phase 6 (Design Review Lite) on updated sections only
+5. Present the delta (what changed and why)
+6. Proceed to Phase 8 (Persist) if updated plan is substantial
+
+If NEITHER condition is met → proceed with the full pipeline below.
+
 ## Phase 0: Load Knowledge Index
+
+**Produces:** KNOWLEDGE_CONTEXT
 
 Before spawning any agents, load the knowledge index for the current worktree:
 
@@ -46,6 +68,8 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ## Phase 0.5: Requirements Discovery
+
+**Produces:** CONSTRAINED_PROBLEM
 
 Before committing to an approach, surface ambiguity through focused Socratic questioning.
 
@@ -82,6 +106,9 @@ If the user says "skip", "just proceed", or signals impatience — skip remainin
 
 ## Phase 1: Orient
 
+**Produces:** ORIENT_OUTPUT
+**Requires:** CONSTRAINED_PROBLEM (or original prompt if Phase 0.5 skipped)
+
 Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the planning question:
 
 - Existing patterns and conventions in the affected area
@@ -90,6 +117,9 @@ Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the 
 - Related prior implementations (similar features, analogous patterns)
 
 ## Phase 2: Explore
+
+**Produces:** EXPLORE_OUTPUT
+**Requires:** ORIENT_OUTPUT, KNOWLEDGE_CONTEXT
 
 Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **in a single message** (parallel execution):
 
@@ -102,6 +132,9 @@ Each Explore agent receives `KNOWLEDGE_CONTEXT` (from Phase 0) and the instructi
 Adjust explorer focus based on the specific planning question.
 
 ## Phase 3: Gap Analysis Lite
+
+**Produces:** GAP_OUTPUT
+**Requires:** EXPLORE_OUTPUT, ORIENT_OUTPUT, KNOWLEDGE_CONTEXT
 
 Spawn 2 `Agent(subagent_type="Designer")` agents **in a single message** (parallel execution):
 
@@ -131,6 +164,9 @@ Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT."
 
 ## Phase 4: Synthesize
 
+**Produces:** SYNTHESIS_OUTPUT
+**Requires:** GAP_OUTPUT, EXPLORE_OUTPUT
+
 Spawn `Agent(subagent_type="Synthesizer")` combining gap analysis and explore outputs:
 
 ```
@@ -142,6 +178,9 @@ Combine gap findings with exploration context into blocking vs. should-address c
 
 ## Phase 5: Plan
 
+**Produces:** PLAN_OUTPUT
+**Requires:** ORIENT_OUTPUT, EXPLORE_OUTPUT, SYNTHESIS_OUTPUT, KNOWLEDGE_CONTEXT
+
 Spawn `Agent(subagent_type="Plan")` with all findings:
 
 - Design implementation approach with file-level specificity
@@ -151,6 +190,9 @@ Spawn `Agent(subagent_type="Plan")` with all findings:
 - Flag areas where existing patterns conflict with the proposed approach
 
 ## Phase 6: Design Review Lite
+
+**Produces:** REVIEW_NOTES
+**Requires:** PLAN_OUTPUT
 
 Main session reviews the plan inline using the loaded `devflow:design-review` skill:
 
@@ -165,6 +207,8 @@ Note findings directly in the plan presentation. This is inline review — no ag
 
 ## Phase 7: Present
 
+**Requires:** PLAN_OUTPUT, SYNTHESIS_OUTPUT, REVIEW_NOTES
+
 Present plan to user with:
 - Implementation approach (file-level)
 - Gap analysis findings (from Phase 4 synthesis)
@@ -174,6 +218,8 @@ Present plan to user with:
 Use AskUserQuestion for any ambiguous design choices that need user input before proceeding to IMPLEMENT.
 
 ## Phase 8: Persist
+
+**Requires:** PLAN_OUTPUT
 
 If the plan is substantial (>10 implementation steps or HIGH/CRITICAL context risk):
 - Write to `.docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md` with YAML frontmatter
@@ -196,3 +242,20 @@ Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
 - Risks and mitigations
 - Open questions (if any)
 - Design artifact path (if written to disk)
+
+## Phase Completion Checklist
+
+Before presenting output, verify every phase was announced:
+
+- [ ] Phase 0: Load Knowledge Index → KNOWLEDGE_CONTEXT captured
+- [ ] Phase 0.5: Requirements Discovery → CONSTRAINED_PROBLEM captured (or skipped with stated reason)
+- [ ] Phase 1: Orient → ORIENT_OUTPUT captured
+- [ ] Phase 2: Explore → EXPLORE_OUTPUT captured
+- [ ] Phase 3: Gap Analysis Lite → GAP_OUTPUT captured
+- [ ] Phase 4: Synthesize → SYNTHESIS_OUTPUT captured
+- [ ] Phase 5: Plan → PLAN_OUTPUT captured
+- [ ] Phase 6: Design Review Lite → REVIEW_NOTES captured
+- [ ] Phase 7: Present → Output delivered to user
+- [ ] Phase 8: Persist → Artifact written (or skipped with stated reason)
+
+If any phase is unchecked, execute it before proceeding.

@@ -30,6 +30,8 @@ For GUIDED depth, the main session performs exploration directly:
 
 ### Phase 1: Orient
 
+**Produces:** ORIENT_OUTPUT
+
 Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the exploration question:
 
 - File structure and module boundaries in the target area
@@ -37,6 +39,9 @@ Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the 
 - Related patterns and conventions
 
 ### Phase 2: Explore
+
+**Produces:** EXPLORE_OUTPUT
+**Requires:** ORIENT_OUTPUT
 
 Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **in a single message** (parallel execution):
 
@@ -48,6 +53,9 @@ Adjust explorer focus based on the specific exploration question.
 
 ### Phase 3: Synthesize
 
+**Produces:** MERGED_FINDINGS
+**Requires:** EXPLORE_OUTPUT
+
 Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined findings:
 
 - Merge overlapping discoveries from parallel explorers
@@ -55,6 +63,8 @@ Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined f
 - Organize into the Output format below
 
 ### Phase 4: Present
+
+**Requires:** MERGED_FINDINGS
 
 Main session reviews synthesis for:
 
@@ -78,3 +88,14 @@ Structured exploration findings with concrete code references:
 - Integration Points (module boundaries, shared types, external dependencies)
 - Patterns (recurring conventions, design decisions observed)
 - Key Insights (non-obvious findings, surprises, potential concerns)
+
+## Phase Completion Checklist
+
+Before presenting findings, verify every phase was announced:
+
+- [ ] Phase 1: Orient → ORIENT_OUTPUT captured
+- [ ] Phase 2: Explore → EXPLORE_OUTPUT captured
+- [ ] Phase 3: Synthesize → MERGED_FINDINGS captured
+- [ ] Phase 4: Present → Findings delivered with file:line references
+
+If any phase is unchecked, execute it before proceeding.
