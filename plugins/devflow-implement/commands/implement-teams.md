@@ -29,6 +29,8 @@ Orchestrate a single task through implementation by spawning specialized agent t
 
 ### Phase 1: Setup
 
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
+
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
 Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:
@@ -59,6 +61,9 @@ Return the branch setup summary."
 6. Captured values override defaults from Git agent where present
 
 ### Phase 2: Implement
+
+**Produces:** CODER_OUTPUT, FILES_CHANGED
+**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
 
 Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
 
@@ -157,6 +162,9 @@ DOMAIN: {subtask 2 domain}"
 
 ### Phase 3: Validate
 
+**Produces:** VALIDATION_RESULT
+**Requires:** FILES_CHANGED
+
 After Coder completes, spawn Validator to verify correctness:
 
 ```
@@ -187,6 +195,9 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
 
 ### Phase 4: Simplify
 
+**Produces:** SIMPLIFIER_OUTPUT
+**Requires:** FILES_CHANGED
+
 After validation passes, spawn Simplifier to polish the code:
 
 ```
@@ -198,6 +209,9 @@ Focus on code modified by Coder, apply project standards, enhance clarity"
 ```
 
 ### Phase 5: Self-Review
+
+**Produces:** SCRUTINIZER_OUTPUT
+**Requires:** FILES_CHANGED
 
 After Simplifier completes, spawn Scrutinizer as final quality gate:
 
@@ -211,6 +225,9 @@ Evaluate 9 pillars, fix P0/P1 issues, report status"
 If Scrutinizer returns BLOCKED, report to user and halt.
 
 ### Phase 6: Re-Validate (if Scrutinizer made changes)
+
+**Produces:** REVALIDATION_RESULT
+**Requires:** SCRUTINIZER_OUTPUT
 
 If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
 
@@ -226,6 +243,9 @@ Verify Scrutinizer's fixes didn't break anything."
 **If PASS:** Continue to Phase 7
 
 ### Phase 7: Evaluator↔Coder Dialogue
+
+**Produces:** ALIGNMENT_RESULT
+**Requires:** FILES_CHANGED, EXECUTION_PLAN
 
 After Scrutinizer passes (and re-validation if needed), check alignment using direct dialogue:
 
@@ -318,6 +338,9 @@ Step 3: GATE — Verify TeamDelete succeeded
 
 ### Phase 8: QA Testing
 
+**Produces:** QA_RESULT
+**Requires:** FILES_CHANGED, EXECUTION_PLAN
+
 After Evaluator passes, spawn Tester for scenario-based acceptance testing (standalone agent, not a teammate — testing is sequential, not debate):
 
 ```
@@ -357,11 +380,16 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 
 ### Phase 9: Create PR
 
+**Produces:** PR_URL
+**Requires:** BASE_BRANCH, TASK_ID
+
 **For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
 ### Phase 10: Report
+
+**Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
 
 Display completion summary with phase status, PR info, and next steps.
 

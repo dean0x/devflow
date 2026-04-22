@@ -47,6 +47,8 @@ No gate may be skipped. If user says "proceed" or "whatever you think", state re
 
 #### Phase 1: Gate 0 — Confirm Understanding
 
+**Produces:** CONFIRMED_SCOPE
+
 Present interpretation using AskUserQuestion:
 - Core problem this solves
 - Target users
@@ -58,6 +60,9 @@ For multi-issue: present unified scope across all issues.
 **MANDATORY**: Do not spawn any agents or teams until Gate 0 is confirmed.
 
 #### Phase 2: Orient + Load Knowledge
+
+**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Requires:** CONFIRMED_SCOPE
 
 Spawn Skimmer agent for codebase context:
 
@@ -81,6 +86,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 #### Phase 3: Exploration Team
+
+**Produces:** EXPLORE_OUTPUTS
+**Requires:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
 
 Create an agent team for collaborative requirements exploration:
 
@@ -165,6 +173,9 @@ Step 3: GATE — Verify TeamDelete succeeded
 
 #### Phase 4: Synthesize Exploration
 
+**Produces:** EXPLORATION_SYNTHESIS
+**Requires:** EXPLORE_OUTPUTS
+
 ```
 Agent(subagent_type="Synthesizer"):
 "Synthesize EXPLORATION outputs for: {feature/issues}
@@ -178,6 +189,9 @@ Combine into: user needs, similar features, constraints, failure modes"
 ### Block 2: Gap Analysis
 
 #### Phase 5: Gap Analysis (Parallel Subagents)
+
+**Produces:** GAP_OUTPUTS
+**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
 
 Gap analysis uses parallel subagents, not a team — designers work independently on different focus areas; debate between them has no value.
 
@@ -207,6 +221,9 @@ Each designer receives:
 
 #### Phase 6: Synthesize Gap Analysis
 
+**Produces:** GAP_SYNTHESIS
+**Requires:** GAP_OUTPUTS
+
 ```
 Agent(subagent_type="Synthesizer"):
 "Synthesize GAP ANALYSIS outputs for: {feature/issues}
@@ -220,6 +237,9 @@ Deduplicate, boost confidence for multi-agent flags, categorize by severity."
 ### Block 3: Scope Approval
 
 #### Phase 7: Gate 1 — Validate Scope + Gaps
+
+**Produces:** ACCEPTED_SCOPE, ACCEPTED_GAPS
+**Requires:** GAP_SYNTHESIS, EXPLORATION_SYNTHESIS
 
 Use AskUserQuestion to present:
 
@@ -236,6 +256,9 @@ User can: accept, modify scope, or override specific gaps.
 
 #### Phase 8: Explore Implementation (Parallel Subagents)
 
+**Produces:** IMPL_EXPLORE_OUTPUTS
+**Requires:** SKIMMER_CONTEXT, ACCEPTED_SCOPE
+
 Spawn 4 Explore agents **in a single message**, each with Skimmer context + accepted scope:
 
 | Focus | Thoroughness | Find |
@@ -247,6 +270,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context + acce
 
 #### Phase 9: Synthesize Implementation Exploration
 
+**Produces:** IMPL_EXPLORATION_SYNTHESIS
+**Requires:** IMPL_EXPLORE_OUTPUTS
+
 ```
 Agent(subagent_type="Synthesizer"):
 "Synthesize IMPLEMENTATION EXPLORATION outputs for: {feature/issues}
@@ -256,6 +282,9 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 ```
 
 #### Phase 10: Planning Team
+
+**Produces:** PLAN_OUTPUTS
+**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, KNOWLEDGE_CONTEXT
 
 Create an agent team for collaborative implementation planning:
 
@@ -326,6 +355,9 @@ Step 3: GATE — Verify TeamDelete succeeded
 
 #### Phase 11: Synthesize Planning
 
+**Produces:** PLANNING_SYNTHESIS
+**Requires:** PLAN_OUTPUTS
+
 ```
 Agent(subagent_type="Synthesizer"):
 "Synthesize PLANNING outputs for: {feature/issues}
@@ -340,6 +372,9 @@ Combine into: execution plan with strategy decision, gap mitigations integrated"
 
 #### Phase 12: Design Review (Single Subagent)
 
+**Produces:** REVIEW_FINDINGS
+**Requires:** PLANNING_SYNTHESIS
+
 Design review uses a single independent agent — not a team.
 
 ```
@@ -353,6 +388,9 @@ Review the full plan for all 6 anti-patterns. Report all findings with evidence.
 ```
 
 #### Phase 13: Gate 2 — Confirm Plan + Design Review
+
+**Produces:** APPROVED_PLAN
+**Requires:** PLANNING_SYNTHESIS, REVIEW_FINDINGS, GAP_SYNTHESIS
 
 Use AskUserQuestion to present:
 1. Implementation plan summary (execution strategy, key steps, test strategy)
@@ -369,6 +407,8 @@ User can: accept, revise (re-run phases 10-12), or cancel.
 ### Block 6: Output
 
 #### Phase 14: Output
+
+**Requires:** APPROVED_PLAN
 
 **Store design artifact:**
 

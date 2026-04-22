@@ -25,6 +25,8 @@ Investigate bugs by spawning a team of agents, each pursuing a different hypothe
 
 ### Phase 1: Load Knowledge Index (Orchestrator-Local)
 
+**Produces:** KNOWLEDGE_CONTEXT
+
 Before hypothesizing, load the knowledge index:
 
 ```bash
@@ -34,6 +36,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to investigator teammates** — knowledge context stays in the orchestrator; teammates examine code directly.
 
 ### Phase 2: Context Gathering
+
+**Produces:** HYPOTHESES, BUG_CONTEXT
+**Requires:** KNOWLEDGE_CONTEXT
 
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
@@ -50,6 +55,8 @@ Analyze the bug description (from arguments or issue) and identify 3-5 plausible
 - **Distinct**: Does not overlap significantly with other hypotheses
 
 ### Phase 3: Spawn Investigation Team
+
+**Requires:** HYPOTHESES, BUG_CONTEXT
 
 Create an agent team with one investigator per hypothesis:
 
@@ -111,6 +118,9 @@ Spawn investigator teammates with self-contained prompts:
 
 ### Phase 4: Investigation
 
+**Produces:** INVESTIGATION_RESULTS
+**Requires:** HYPOTHESES
+
 Teammates investigate in parallel:
 - Read relevant source files
 - Trace execution paths
@@ -119,6 +129,8 @@ Teammates investigate in parallel:
 - Build evidence for or against their hypothesis
 
 ### Phase 5: Adversarial Debate
+
+**Requires:** INVESTIGATION_RESULTS
 
 Lead initiates debate via broadcast:
 
@@ -147,6 +159,9 @@ Teammates challenge each other directly using SendMessage:
 
 ### Phase 6: Convergence
 
+**Produces:** CONVERGENCE_RESULTS
+**Requires:** INVESTIGATION_RESULTS
+
 After debate (max 2 rounds), lead collects results:
 
 ```
@@ -158,6 +173,8 @@ Lead broadcast:
 ```
 
 ### Phase 7: Cleanup
+
+**Requires:** CONVERGENCE_RESULTS
 
 Shut down all investigator teammates explicitly:
 
@@ -171,6 +188,8 @@ Verify TeamDelete succeeded. If failed, retry once after 5s. If retry fails, HAL
 ```
 
 ### Phase 8: Report
+
+**Requires:** CONVERGENCE_RESULTS
 
 Lead produces final report:
 

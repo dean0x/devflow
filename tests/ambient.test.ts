@@ -784,3 +784,72 @@ describe('phase protocol structural validation', () => {
     }
   });
 });
+
+describe('command Produces/Requires validation', () => {
+  const pluginsDir = path.resolve(__dirname, '../plugins');
+
+  async function discoverCommandFiles(): Promise<string[]> {
+    const plugins = await fs.readdir(pluginsDir);
+    const files: string[] = [];
+    for (const plugin of plugins) {
+      const cmdDir = path.join(pluginsDir, plugin, 'commands');
+      try {
+        const entries = await fs.readdir(cmdDir);
+        for (const f of entries) {
+          if (f.endsWith('.md')) files.push(path.join(cmdDir, f));
+        }
+      } catch { /* no commands dir */ }
+    }
+    return files.sort();
+  }
+
+  it('every command file has Produces: annotations', async () => {
+    for (const file of await discoverCommandFiles()) {
+      const content = await fs.readFile(file, 'utf-8');
+      const name = path.relative(pluginsDir, file);
+      expect(content, `${name} missing Produces:`).toContain('**Produces:**');
+    }
+  });
+
+  it('every command file has Requires: annotations', async () => {
+    for (const file of await discoverCommandFiles()) {
+      const content = await fs.readFile(file, 'utf-8');
+      const name = path.relative(pluginsDir, file);
+      expect(content, `${name} missing Requires:`).toContain('**Requires:**');
+    }
+  });
+
+  it('every phase/step heading is followed by a Produces or Requires annotation', async () => {
+    const headingPattern = /^#{2,4}\s+(Phase|Step)\s+\d/;
+
+    for (const file of await discoverCommandFiles()) {
+      const content = await fs.readFile(file, 'utf-8');
+      const name = path.relative(pluginsDir, file);
+      const lines = content.split('\n');
+
+      const headingIndices: number[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (headingPattern.test(lines[i])) headingIndices.push(i);
+      }
+
+      for (let h = 0; h < headingIndices.length; h++) {
+        const idx = headingIndices[h];
+        const currentLevel = (lines[idx].match(/^(#+)/) ?? ['', ''])[1].length;
+
+        // Skip container headings (next heading is deeper level = substeps)
+        if (h + 1 < headingIndices.length) {
+          const nextLevel = (lines[headingIndices[h + 1]].match(/^(#+)/) ?? ['', ''])[1].length;
+          if (nextLevel > currentLevel) continue;
+        }
+
+        const endIdx = h + 1 < headingIndices.length ? headingIndices[h + 1] : lines.length;
+        const body = lines.slice(idx + 1, endIdx).join('\n');
+
+        expect(
+          body.includes('**Produces:**') || body.includes('**Requires:**'),
+          `${name}: "${lines[idx].trim()}" missing Produces/Requires annotation`,
+        ).toBe(true);
+      }
+    }
+  });
+});

@@ -47,6 +47,8 @@ No gate may be skipped. If user says "proceed" or "whatever you think", state re
 
 #### Phase 1: Gate 0 — Requirements Discovery
 
+**Produces:** CONFIRMED_SCOPE
+
 Explore the user's intent through focused Socratic questioning before spawning agents.
 
 **Skip discovery when** (semantic assessment, not word count):
@@ -67,6 +69,9 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 **MANDATORY**: Do not spawn any agents until Gate 0 is confirmed.
 
 #### Phase 2: Orient + Load Knowledge
+
+**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Requires:** CONFIRMED_SCOPE
 
 Spawn Skimmer agent for codebase context:
 
@@ -91,6 +96,9 @@ This produces a compact index of active ADR/PF entries. Pass Skimmer context and
 
 #### Phase 3: Explore Requirements (Parallel)
 
+**Produces:** EXPLORE_OUTPUTS
+**Requires:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+
 Spawn 4 Explore agents **in a single message**, each with Skimmer context and `KNOWLEDGE_CONTEXT` (from Phase 2). Include instruction: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT".
 
 | Focus | Thoroughness | Find |
@@ -101,6 +109,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context and `K
 | Failure modes | quick | Error states, edge cases, known pitfalls |
 
 #### Phase 4: Synthesize Exploration
+
+**Produces:** EXPLORATION_SYNTHESIS
+**Requires:** EXPLORE_OUTPUTS
 
 **WAIT** for Phase 3 to complete.
 
@@ -117,6 +128,9 @@ Combine into: user needs, similar features, constraints, failure modes"
 ### Block 2: Gap Analysis
 
 #### Phase 5: Gap Analysis (Parallel)
+
+**Produces:** GAP_OUTPUTS
+**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
 
 **Single-issue**: Spawn 4 Designer agents **in a single message**:
 
@@ -157,6 +171,9 @@ Cite evidence from provided artifacts."
 
 #### Phase 6: Synthesize Gap Analysis
 
+**Produces:** GAP_SYNTHESIS
+**Requires:** GAP_OUTPUTS
+
 **WAIT** for Phase 5 to complete.
 
 ```
@@ -172,6 +189,9 @@ Deduplicate, boost confidence for multi-agent flags, categorize by severity."
 ### Block 3: Scope Approval
 
 #### Phase 7: Gate 1 — Validate Scope + Gaps
+
+**Produces:** ACCEPTED_SCOPE, ACCEPTED_GAPS
+**Requires:** GAP_SYNTHESIS, EXPLORATION_SYNTHESIS
 
 Use AskUserQuestion to present and validate:
 
@@ -199,6 +219,9 @@ User can:
 
 #### Phase 8: Explore Implementation (Parallel)
 
+**Produces:** IMPL_EXPLORE_OUTPUTS
+**Requires:** SKIMMER_CONTEXT, ACCEPTED_SCOPE
+
 Spawn 4 Explore agents **in a single message**, each with Skimmer context + accepted scope:
 
 | Focus | Thoroughness | Find |
@@ -209,6 +232,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context + acce
 | Edge cases | quick | Error scenarios, race conditions, permission failures |
 
 #### Phase 9: Synthesize Implementation Exploration
+
+**Produces:** IMPL_EXPLORATION_SYNTHESIS
+**Requires:** IMPL_EXPLORE_OUTPUTS
 
 **WAIT** for Phase 8 to complete.
 
@@ -222,6 +248,9 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 
 #### Phase 10: Plan Implementation (Parallel)
 
+**Produces:** PLAN_OUTPUTS
+**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, KNOWLEDGE_CONTEXT
+
 Spawn 3 Plan agents **in a single message**, each with implementation exploration synthesis:
 
 | Focus | Output |
@@ -233,6 +262,9 @@ Spawn 3 Plan agents **in a single message**, each with implementation exploratio
 Implementation steps planner: include explicit gap mitigations (from Phase 6) in the relevant steps.
 
 #### Phase 11: Synthesize Planning
+
+**Produces:** PLANNING_SYNTHESIS
+**Requires:** PLAN_OUTPUTS
 
 **WAIT** for Phase 10 to complete.
 
@@ -250,6 +282,9 @@ Combine into: execution plan with strategy decision, gap mitigations integrated"
 
 #### Phase 12: Design Review
 
+**Produces:** REVIEW_FINDINGS
+**Requires:** PLANNING_SYNTHESIS
+
 Spawn 1 Designer agent with mode `design-review`:
 
 ```
@@ -263,6 +298,9 @@ Review the full plan for all 6 anti-patterns. Report all findings with evidence.
 ```
 
 #### Phase 13: Gate 2 — Confirm Plan + Design Review
+
+**Produces:** APPROVED_PLAN
+**Requires:** PLANNING_SYNTHESIS, REVIEW_FINDINGS, GAP_SYNTHESIS
 
 Use AskUserQuestion to present:
 
@@ -293,6 +331,8 @@ User can:
 ### Block 6: Output
 
 #### Phase 14: Output
+
+**Requires:** APPROVED_PLAN
 
 **Store design artifact:**
 

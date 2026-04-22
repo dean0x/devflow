@@ -19,6 +19,8 @@ Audit CLAUDE.md files against Anthropic's best practices. Finds oversized files,
 
 ### Phase 1: Discovery
 
+**Produces:** CLAUDE_FILES
+
 Find all CLAUDE.md files to audit:
 
 ```bash
@@ -36,6 +38,9 @@ If a specific path argument was provided, use only that file.
 
 ### Phase 2: Analysis
 
+**Produces:** AUDIT_RESULTS
+**Requires:** CLAUDE_FILES
+
 For each discovered file, spawn a `claude-md-auditor` agent:
 
 ```
@@ -52,6 +57,8 @@ Task(
 Run agents in parallel when multiple files are found.
 
 ### Phase 3: Report
+
+**Requires:** AUDIT_RESULTS
 
 Combine all agent outputs into a single report:
 
