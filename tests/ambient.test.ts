@@ -709,20 +709,15 @@ describe('preamble drift detection', () => {
 });
 
 describe('phase protocol structural validation', () => {
-  const orchSkills = [
-    'plan:orch',
-    'implement:orch',
-    'review:orch',
-    'resolve:orch',
-    'debug:orch',
-    'explore:orch',
-    'pipeline:orch',
-  ];
-
   const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
 
+  async function discoverOrchSkills(): Promise<string[]> {
+    const entries = await fs.readdir(sharedSkillsDir);
+    return entries.filter(e => e.endsWith(':orch')).sort();
+  }
+
   it('every orch skill has a Phase Completion Checklist', async () => {
-    for (const skill of orchSkills) {
+    for (const skill of await discoverOrchSkills()) {
       const content = await fs.readFile(
         path.join(sharedSkillsDir, skill, 'SKILL.md'),
         'utf-8',
@@ -734,7 +729,7 @@ describe('phase protocol structural validation', () => {
   });
 
   it('every orch skill has Produces: annotations', async () => {
-    for (const skill of orchSkills) {
+    for (const skill of await discoverOrchSkills()) {
       const content = await fs.readFile(
         path.join(sharedSkillsDir, skill, 'SKILL.md'),
         'utf-8',
@@ -746,7 +741,7 @@ describe('phase protocol structural validation', () => {
   });
 
   it('every orch skill has Requires: annotations', async () => {
-    for (const skill of orchSkills) {
+    for (const skill of await discoverOrchSkills()) {
       const content = await fs.readFile(
         path.join(sharedSkillsDir, skill, 'SKILL.md'),
         'utf-8',
@@ -770,7 +765,7 @@ describe('phase protocol structural validation', () => {
   });
 
   it('checklist item count matches phase count in each orch skill', async () => {
-    for (const skill of orchSkills) {
+    for (const skill of await discoverOrchSkills()) {
       const content = await fs.readFile(
         path.join(sharedSkillsDir, skill, 'SKILL.md'),
         'utf-8',

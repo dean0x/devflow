@@ -167,6 +167,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - Target: ~120-150 lines per SKILL.md with progressive disclosure to `references/`
 - Skills default to read-only (`allowed-tools: Read, Grep, Glob`); exceptions: git/review skills add `Bash`, interactive skills add `AskUserQuestion`, `quality-gates` adds `Write` for state persistence, and `router` omits `allowed-tools` entirely (unrestricted, as the main-session orchestrator)
 - All skills live in `shared/skills/` — add to plugin `plugin.json` `skills` array, then `npm run build`
+- Orchestration skills (`*:orch`) follow the Phase Protocol (defined in `router/SKILL.md`) — each phase needs `**Produces:**`/`**Requires:**` annotations and a `## Phase Completion Checklist`
 
 ### Agents
 
