@@ -787,6 +787,11 @@ describe('phase protocol structural validation', () => {
 
 describe('command Produces/Requires validation', () => {
   const pluginsDir = path.resolve(__dirname, '../plugins');
+  const phaseStepPattern = /^#{2,4}\s+(Phase|Step)\s+\d/;
+
+  function headingLevel(line: string): number {
+    return (line.match(/^(#+)/) ?? ['', ''])[1].length;
+  }
 
   async function discoverCommandFiles(): Promise<string[]> {
     const plugins = await fs.readdir(pluginsDir);
@@ -820,8 +825,6 @@ describe('command Produces/Requires validation', () => {
   });
 
   it('every phase/step heading is followed by a Produces or Requires annotation', async () => {
-    const headingPattern = /^#{2,4}\s+(Phase|Step)\s+\d/;
-
     for (const file of await discoverCommandFiles()) {
       const content = await fs.readFile(file, 'utf-8');
       const name = path.relative(pluginsDir, file);
@@ -829,17 +832,16 @@ describe('command Produces/Requires validation', () => {
 
       const headingIndices: number[] = [];
       for (let i = 0; i < lines.length; i++) {
-        if (headingPattern.test(lines[i])) headingIndices.push(i);
+        if (phaseStepPattern.test(lines[i])) headingIndices.push(i);
       }
 
       for (let h = 0; h < headingIndices.length; h++) {
         const idx = headingIndices[h];
-        const currentLevel = (lines[idx].match(/^(#+)/) ?? ['', ''])[1].length;
+        const currentLevel = headingLevel(lines[idx]);
 
         // Skip container headings (next heading is deeper level = substeps)
         if (h + 1 < headingIndices.length) {
-          const nextLevel = (lines[headingIndices[h + 1]].match(/^(#+)/) ?? ['', ''])[1].length;
-          if (nextLevel > currentLevel) continue;
+          if (headingLevel(lines[headingIndices[h + 1]]) > currentLevel) continue;
         }
 
         const endIdx = h + 1 < headingIndices.length ? headingIndices[h + 1] : lines.length;
