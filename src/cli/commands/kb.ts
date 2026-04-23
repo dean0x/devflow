@@ -1,12 +1,13 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { isClaudeCliAvailable } from '../utils/cli.js';
+import { getGitRoot } from '../utils/git.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,41 +15,24 @@ const __dirname = path.dirname(__filename);
 /** @internal */
 const _require = createRequire(import.meta.url);
 
-/**
- * Resolve the path to feature-kb.cjs relative to this file's dist location.
- * In the build, cli.js lands in dist/cli/, so we go up two levels to reach
- * the project root (where scripts/ lives).
- */
-function getFeatureKbPath(): string {
-  // dist/cli/commands/kb.js → ../../.. → project root
-  return path.join(__dirname, '..', '..', '..', 'scripts', 'hooks', 'lib', 'feature-kb.cjs');
-}
-
-/**
- * Load the feature-kb CJS module functions.
- */
-function loadFeatureKb(): {
+interface FeatureKbModule {
   listKBs: (worktreePath: string) => Array<{ slug: string; name: string; category: string; directories: string[]; lastUpdated: string }>;
   checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   removeEntry: (worktreePath: string, slug: string) => void;
-} {
-  return _require(getFeatureKbPath());
+  validateSlug: (slug: string) => void;
 }
+
+// dist/cli/commands/kb.js → ../../.. → project root (where scripts/ lives)
+const featureKb: FeatureKbModule = _require(
+  path.join(__dirname, '..', '..', '..', 'scripts', 'hooks', 'lib', 'feature-kb.cjs')
+);
 
 /**
  * Get the git root for the current directory, or cwd if not in a git repo.
  */
-function getWorktreePath(): string {
-  try {
-    const result = execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return result.trim();
-  } catch {
-    return process.cwd();
-  }
+async function getWorktreePath(): Promise<string> {
+  return (await getGitRoot()) ?? process.cwd();
 }
 
 export const kbCommand = new Command('kb')
@@ -64,19 +48,9 @@ kbCommand
   .action(async () => {
     p.intro(color.cyan('Feature Knowledge Bases'));
 
-    const worktreePath = getWorktreePath();
-
-    let kbs: ReturnType<ReturnType<typeof loadFeatureKb>['listKBs']>;
-    let staleness: Record<string, { stale: boolean; changedFiles: string[] }>;
-
-    try {
-      const featureKb = loadFeatureKb();
-      kbs = featureKb.listKBs(worktreePath);
-      staleness = featureKb.checkAllStaleness(worktreePath);
-    } catch (err) {
-      p.log.error(`Failed to load feature KBs: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
-    }
+    const worktreePath = await getWorktreePath();
+    const kbs = featureKb.listKBs(worktreePath);
+    const staleness = featureKb.checkAllStaleness(worktreePath);
 
     if (kbs.length === 0) {
       p.log.info(
@@ -93,9 +67,7 @@ kbCommand
     for (const kb of kbs) {
       const staleInfo = staleness[kb.slug];
       const isStale = staleInfo?.stale ?? false;
-      const statusBadge = isStale
-        ? color.yellow('[STALE]')
-        : color.green('[current]');
+      const statusBadge = isStale ? color.yellow('[STALE]') : color.green('[current]');
 
       console.log(`  ${color.bold(kb.name)} ${statusBadge}`);
       console.log(`    slug:       ${color.dim(kb.slug)}`);
@@ -103,7 +75,9 @@ kbCommand
       console.log(`    updated:    ${color.dim(kb.lastUpdated)}`);
       console.log(`    dirs:       ${color.dim(kb.directories.join(', '))}`);
       if (isStale && staleInfo.changedFiles.length > 0) {
-        console.log(`    changed:    ${color.yellow(staleInfo.changedFiles.slice(0, 3).join(', '))}${staleInfo.changedFiles.length > 3 ? ` +${staleInfo.changedFiles.length - 3} more` : ''}`);
+        const shown = staleInfo.changedFiles.slice(0, 3).join(', ');
+        const overflow = staleInfo.changedFiles.length > 3 ? ` +${staleInfo.changedFiles.length - 3} more` : '';
+        console.log(`    changed:    ${color.yellow(shown)}${overflow}`);
       }
       console.log('');
     }
@@ -121,19 +95,9 @@ kbCommand
   .action(async () => {
     p.intro(color.cyan('KB Staleness Check'));
 
-    const worktreePath = getWorktreePath();
-
-    let staleness: Record<string, { stale: boolean; changedFiles: string[] }>;
-    let kbs: ReturnType<ReturnType<typeof loadFeatureKb>['listKBs']>;
-
-    try {
-      const featureKb = loadFeatureKb();
-      kbs = featureKb.listKBs(worktreePath);
-      staleness = featureKb.checkAllStaleness(worktreePath);
-    } catch (err) {
-      p.log.error(`Failed to check KBs: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
-    }
+    const worktreePath = await getWorktreePath();
+    const kbs = featureKb.listKBs(worktreePath);
+    const staleness = featureKb.checkAllStaleness(worktreePath);
 
     if (kbs.length === 0) {
       p.log.info('No feature KBs found.');
@@ -175,6 +139,13 @@ kbCommand
   .command('create <slug>')
   .description('Create a new KB via claude -p exploration')
   .action(async (slug: string) => {
+    try {
+      featureKb.validateSlug(slug);
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
     p.intro(color.cyan(`Create Feature KB: ${slug}`));
 
     if (!isClaudeCliAvailable()) {
@@ -182,7 +153,7 @@ kbCommand
       process.exit(1);
     }
 
-    const worktreePath = getWorktreePath();
+    const worktreePath = await getWorktreePath();
 
     const name = await p.text({
       message: 'Feature name (human-readable)',
@@ -264,8 +235,7 @@ kbCommand
       process.exit(1);
     }
 
-    const worktreePath = getWorktreePath();
-    const featureKb = loadFeatureKb();
+    const worktreePath = await getWorktreePath();
 
     // Determine which slugs to refresh
     let slugsToRefresh: string[];
@@ -342,6 +312,13 @@ kbCommand
   .command('remove <slug>')
   .description('Remove a KB and its index entry')
   .action(async (slug: string) => {
+    try {
+      featureKb.validateSlug(slug);
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
     p.intro(color.cyan(`Remove KB: ${slug}`));
 
     const confirmed = await p.confirm({
@@ -353,10 +330,9 @@ kbCommand
       return;
     }
 
-    const worktreePath = getWorktreePath();
+    const worktreePath = await getWorktreePath();
 
     try {
-      const featureKb = loadFeatureKb();
       featureKb.removeEntry(worktreePath, slug);
       p.log.success(`KB '${slug}' removed`);
     } catch (err) {

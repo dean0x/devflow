@@ -26,6 +26,35 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
+
+/**
+ * Validate that a slug is safe for use as a directory name.
+ * Rejects path traversal attempts (e.g., '../etc'), absolute paths,
+ * and characters unsafe for filesystem use.
+ *
+ * D52: Defense-in-depth — even though callers are trusted orchestration
+ * scripts, validate at the boundary closest to the filesystem operation.
+ *
+ * @param {string} slug
+ * @returns {void}
+ * @throws {Error} if slug is invalid
+ */
+function validateSlug(slug) {
+  if (!slug || typeof slug !== 'string') {
+    throw new Error('Slug must be a non-empty string');
+  }
+  if (slug.includes('..') || slug.includes('/') || slug.includes('\\')) {
+    throw new Error(`Invalid slug '${slug}': must not contain '..', '/', or '\\'`);
+  }
+  if (slug.startsWith('.')) {
+    throw new Error(`Invalid slug '${slug}': must not start with '.'`);
+  }
+  // Only allow kebab-case identifiers: lowercase letters, digits, hyphens
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    throw new Error(`Invalid slug '${slug}': must be kebab-case (lowercase letters, digits, hyphens)`);
+  }
+}
 
 /**
  * @typedef {{
@@ -65,6 +94,7 @@ function loadIndex(worktreePath) {
  * @returns {string | null}
  */
 function loadKBContent(worktreePath, slug) {
+  validateSlug(slug);
   const kbPath = path.join(worktreePath, '.features', slug, 'KNOWLEDGE.md');
   try {
     return fs.readFileSync(kbPath, 'utf8');
@@ -82,11 +112,11 @@ function loadKBContent(worktreePath, slug) {
  * @returns {{ stale: boolean, changedFiles: string[] }}
  */
 function checkStaleness(worktreePath, slug) {
+  validateSlug(slug);
   const index = loadIndex(worktreePath);
   if (!index || !index.features[slug]) return { stale: false, changedFiles: [] };
 
   const entry = index.features[slug];
-  const { execFileSync } = require('child_process');
 
   try {
     // Check if in git repo — use execFileSync to avoid shell injection
@@ -189,6 +219,7 @@ function releaseLock(lockPath) {
  * }} entry
  */
 function updateIndex(worktreePath, entry) {
+  validateSlug(entry.slug);
   const featuresDir = path.join(worktreePath, '.features');
   const lockPath = path.join(featuresDir, '.kb.lock');
   const indexPath = path.join(featuresDir, 'index.json');
@@ -252,6 +283,7 @@ function markStale(worktreePath, changedFiles) {
  * @param {string} slug
  */
 function removeEntry(worktreePath, slug) {
+  validateSlug(slug);
   const featuresDir = path.join(worktreePath, '.features');
   const lockPath = path.join(featuresDir, '.kb.lock');
   const indexPath = path.join(featuresDir, 'index.json');
@@ -431,4 +463,4 @@ if (require.main === module) {
   process.exit(1);
 }
 
-module.exports = { loadIndex, loadKBContent, checkStaleness, checkAllStaleness, updateIndex, markStale, removeEntry, listKBs };
+module.exports = { loadIndex, loadKBContent, checkStaleness, checkAllStaleness, updateIndex, markStale, removeEntry, listKBs, validateSlug };

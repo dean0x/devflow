@@ -56,8 +56,8 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 41 skills (single source of truth)
-├── shared/agents/          # 12 shared agents (single source of truth)
+├── shared/skills/          # 44 skills (single source of truth)
+├── shared/agents/          # 13 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)

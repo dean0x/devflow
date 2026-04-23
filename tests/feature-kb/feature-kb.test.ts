@@ -23,6 +23,7 @@ const {
   markStale,
   removeEntry,
   listKBs,
+  validateSlug,
 } = require(path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs')) as {
   loadIndex: (worktreePath: string) => { version: number; features: Record<string, unknown> } | null;
   loadKBContent: (worktreePath: string, slug: string) => string | null;
@@ -32,6 +33,7 @@ const {
   markStale: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string) => void;
   listKBs: (worktreePath: string) => Array<{ slug: string } & Record<string, unknown>>;
+  validateSlug: (slug: string) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -245,5 +247,48 @@ describe('checkAllStaleness', () => {
     expect(result['cli-commands']).toBeDefined();
     expect(result['cli-commands']).toHaveProperty('stale');
     expect(result['cli-commands']).toHaveProperty('changedFiles');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateSlug
+// ---------------------------------------------------------------------------
+
+describe('validateSlug', () => {
+  it('accepts valid kebab-case slugs', () => {
+    expect(() => validateSlug('cli-commands')).not.toThrow();
+    expect(() => validateSlug('payments')).not.toThrow();
+    expect(() => validateSlug('my-feature-123')).not.toThrow();
+    expect(() => validateSlug('a')).not.toThrow();
+  });
+
+  it('rejects path traversal attempts', () => {
+    expect(() => validateSlug('../etc')).toThrow(/must not contain/);
+    expect(() => validateSlug('../../dangerous')).toThrow(/must not contain/);
+    expect(() => validateSlug('foo/../bar')).toThrow(/must not contain/);
+  });
+
+  it('rejects slugs with slashes', () => {
+    expect(() => validateSlug('foo/bar')).toThrow(/must not contain/);
+    expect(() => validateSlug('foo\\bar')).toThrow(/must not contain/);
+  });
+
+  it('rejects slugs starting with a dot', () => {
+    expect(() => validateSlug('.hidden')).toThrow(/must not start with/);
+  });
+
+  it('rejects non-kebab-case slugs', () => {
+    expect(() => validateSlug('MyFeature')).toThrow(/kebab-case/);
+    expect(() => validateSlug('my_feature')).toThrow(/kebab-case/);
+    expect(() => validateSlug('MY-FEATURE')).toThrow(/kebab-case/);
+    expect(() => validateSlug('')).toThrow(/non-empty/);
+  });
+
+  it('rejects empty and non-string values', () => {
+    expect(() => validateSlug('')).toThrow();
+    // @ts-expect-error testing runtime behavior
+    expect(() => validateSlug(null)).toThrow();
+    // @ts-expect-error testing runtime behavior
+    expect(() => validateSlug(undefined)).toThrow();
   });
 });

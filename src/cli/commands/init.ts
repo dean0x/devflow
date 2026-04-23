@@ -946,7 +946,8 @@ export const initCommand = new Command('init')
     }
 
     // Create .features/ directory with empty index (feature knowledge bases)
-    if (scope === 'local' && gitRoot) {
+    // .features/ is committed to the project repo (not scope-dependent)
+    if (gitRoot) {
       const featuresDir = path.join(gitRoot, '.features');
       await fs.mkdir(featuresDir, { recursive: true });
       const featuresIndexPath = path.join(featuresDir, 'index.json');
