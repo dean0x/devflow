@@ -27,7 +27,8 @@
     "git",
     "synthesizer",
     "resolver",
-    "designer"
+    "designer",
+    "kb-builder"
   ],
   "skills": [
     "router",
@@ -53,6 +54,8 @@
     "qa",
     "worktree-support",
     "gap-analysis",
-    "design-review"
+    "design-review",
+    "feature-kb",
+    "apply-feature-kb"
   ]
 }

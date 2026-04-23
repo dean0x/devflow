@@ -21,6 +21,7 @@
   "skills": [
     "agent-teams",
     "git",
-    "worktree-support"
+    "worktree-support",
+    "apply-feature-kb"
   ]
 }

@@ -33,6 +33,7 @@
     "review-methodology",
     "security",
     "testing",
-    "worktree-support"
+    "worktree-support",
+    "apply-feature-kb"
   ]
 }

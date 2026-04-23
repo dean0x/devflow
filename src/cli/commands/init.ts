@@ -945,6 +945,21 @@ export const initCommand = new Command('init')
       await migrateMemoryFiles(verbose);
     }
 
+    // Create .features/ directory with empty index (feature knowledge bases)
+    if (scope === 'local' && gitRoot) {
+      const featuresDir = path.join(gitRoot, '.features');
+      await fs.mkdir(featuresDir, { recursive: true });
+      const featuresIndexPath = path.join(featuresDir, 'index.json');
+      try {
+        await fs.access(featuresIndexPath);
+      } catch {
+        await fs.writeFile(featuresIndexPath, JSON.stringify({ version: 1, features: {} }, null, 2) + '\n');
+        if (verbose) {
+          p.log.success('.features/index.json created');
+        }
+      }
+    }
+
     // Configure HUD
     const existingHud = loadHudConfig();
     saveHudConfig({ enabled: hudEnabled, detail: existingHud.detail });

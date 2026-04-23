@@ -19,13 +19,16 @@
     "git",
     "skimmer",
     "synthesizer",
-    "designer"
+    "designer",
+    "kb-builder"
   ],
   "skills": [
     "agent-teams",
     "gap-analysis",
     "design-review",
     "patterns",
-    "worktree-support"
+    "worktree-support",
+    "feature-kb",
+    "apply-feature-kb"
   ]
 }

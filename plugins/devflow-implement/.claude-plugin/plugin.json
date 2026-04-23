@@ -30,6 +30,7 @@
     "patterns",
     "qa",
     "quality-gates",
-    "worktree-support"
+    "worktree-support",
+    "apply-feature-kb"
   ]
 }

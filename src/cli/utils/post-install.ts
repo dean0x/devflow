@@ -473,7 +473,7 @@ export async function updateGitignore(
 ): Promise<void> {
   try {
     const gitignorePath = path.join(gitRoot, '.gitignore');
-    const entriesToAdd = ['.claude/', '.devflow/', '.memory/', '.docs/'];
+    const entriesToAdd = ['.claude/', '.devflow/', '.memory/', '.docs/', '.features/.kb.lock'];
 
     let gitignoreContent = '';
     try {
