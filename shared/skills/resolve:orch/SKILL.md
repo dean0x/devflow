@@ -37,10 +37,16 @@ Extract branch slug from the directory path.
      handled by Phase 1 here). Same content as resolve.md Step 0d. -->
 ## Phase 1.5: Load Project Knowledge
 
-**Produces:** KNOWLEDGE_CONTEXT
+**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** REVIEW_DIR
 
 Run `node scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+
+Also load feature knowledge:
+1. Read `.features/index.json` if it exists
+2. Based on file paths from review report issue entries, identify relevant KBs
+3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`
+4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 2: Parse Issues
 
@@ -70,7 +76,7 @@ Determine execution: batches with no shared files can run in parallel.
 ## Phase 4: Resolve (Parallel)
 
 **Produces:** RESOLUTION_RESULTS
-**Requires:** BATCHES, KNOWLEDGE_CONTEXT, BRANCH_SLUG
+**Requires:** BATCHES, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_SLUG
 
 Spawn `Agent(subagent_type="Resolver")` agents — one per batch, parallel where possible.
 
@@ -79,6 +85,7 @@ Each receives:
 - **BRANCH**: Branch slug
 - **BATCH_ID**: Identifier for this batch
 - **KNOWLEDGE_CONTEXT**: Knowledge index from Phase 1.5 (or `(none)`). Resolvers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand.
+- **FEATURE_KNOWLEDGE**: Feature area context from Phase 1.5 (or `(none)`). Follow `devflow:apply-feature-kb` for consumption algorithm.
 
 Resolvers follow a 3-tier risk approach:
 - **Standard fixes**: Applied directly
@@ -122,7 +129,7 @@ Report to user:
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Target Review Directory → REVIEW_DIR captured
-- [ ] Phase 1.5: Load Project Knowledge → KNOWLEDGE_CONTEXT captured
+- [ ] Phase 1.5: Load Project Knowledge → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
 - [ ] Phase 2: Parse Issues → ISSUES captured (or stopped: no actionable issues)
 - [ ] Phase 3: Analyze & Batch → BATCHES captured
 - [ ] Phase 4: Resolve → RESOLUTION_RESULTS captured per batch

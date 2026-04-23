@@ -25,8 +25,9 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 For GUIDED depth, the main session performs planning directly:
 
 0. **Discover** — If the planning question is open-ended, ask clarifying questions via AskUserQuestion and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
+0.5. **Load Feature KBs** — Read `.features/index.json` if it exists. Based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
 1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
-2. **Design** — Using Skimmer findings + loaded pattern/design skills, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
+2. **Design** — Using Skimmer findings + loaded pattern/design skills + `FEATURE_KNOWLEDGE`, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 3. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
 
 ## Worktree Support
@@ -67,7 +68,30 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
-## Phase 0.5: Requirements Discovery
+## Phase 0.5: Load Feature Knowledge
+
+**Produces:** FEATURE_KNOWLEDGE
+
+1. Check if `.features/index.json` exists (Read tool). If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
+2. Read `.features/index.json` to see available feature KBs.
+3. Based on the current task description, identify which KBs are relevant (LLM judgment — match task intent against each KB's `description` and `directories` fields).
+4. For each relevant KB:
+   a. Run `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}` to check staleness
+   b. Read `.features/{slug}/KNOWLEDGE.md`
+   c. If stale, prefix content with `[STALE — referenced files changed since last update. Verify against current code.]`
+5. Concatenate all relevant KB content as `FEATURE_KNOWLEDGE`:
+   ```
+   --- Feature KB: {slug1} ---
+   [content]
+
+   --- Feature KB: {slug2} ---
+   [content]
+   ```
+6. Pass `FEATURE_KNOWLEDGE` to downstream agents alongside `KNOWLEDGE_CONTEXT`.
+
+If no KBs exist or none are relevant, set `FEATURE_KNOWLEDGE = (none)`.
+
+## Phase 0.6: Requirements Discovery
 
 **Produces:** CONSTRAINED_PROBLEM
 
@@ -119,7 +143,7 @@ Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the 
 ## Phase 2: Explore
 
 **Produces:** EXPLORE_OUTPUT
-**Requires:** ORIENT_OUTPUT, KNOWLEDGE_CONTEXT
+**Requires:** ORIENT_OUTPUT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **in a single message** (parallel execution):
 
@@ -127,14 +151,14 @@ Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **i
 - **Pattern explorer**: Find existing implementations of similar features to follow as templates
 - **Constraint explorer**: Identify constraints — test infrastructure, build system, CI requirements, deployment concerns
 
-Each Explore agent receives `KNOWLEDGE_CONTEXT` (from Phase 0) and the instruction: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT".
+Each Explore agent receives `KNOWLEDGE_CONTEXT` (from Phase 0), `FEATURE_KNOWLEDGE` (from Phase 0.5), and the instructions: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus exploration on areas the KB doesn't cover and changes since it was last updated."
 
 Adjust explorer focus based on the specific planning question.
 
 ## Phase 3: Gap Analysis Lite
 
 **Produces:** GAP_OUTPUT
-**Requires:** EXPLORE_OUTPUT, ORIENT_OUTPUT, KNOWLEDGE_CONTEXT
+**Requires:** EXPLORE_OUTPUT, ORIENT_OUTPUT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 Spawn 2 `Agent(subagent_type="Designer")` agents **in a single message** (parallel execution):
 
@@ -143,6 +167,7 @@ Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: completeness
 KNOWLEDGE_CONTEXT: {knowledge_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 2 outputs}
@@ -154,6 +179,7 @@ Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: architecture
 KNOWLEDGE_CONTEXT: {knowledge_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 2 outputs}
@@ -179,9 +205,9 @@ Combine gap findings with exploration context into blocking vs. should-address c
 ## Phase 5: Plan
 
 **Produces:** PLAN_OUTPUT
-**Requires:** ORIENT_OUTPUT, EXPLORE_OUTPUT, SYNTHESIS_OUTPUT, KNOWLEDGE_CONTEXT
+**Requires:** ORIENT_OUTPUT, EXPLORE_OUTPUT, SYNTHESIS_OUTPUT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
-Spawn `Agent(subagent_type="Plan")` with all findings:
+Spawn `Agent(subagent_type="Plan")` with all findings, including `FEATURE_KNOWLEDGE`:
 
 - Design implementation approach with file-level specificity
 - Reference existing patterns discovered in Phases 1-2
@@ -227,6 +253,30 @@ If the plan is substantial (>10 implementation steps or HIGH/CRITICAL context ri
 
 Otherwise: plan stays in conversation context, ready for IMPLEMENT to consume directly.
 
+## Phase 8.5: Feature KB Generation (Conditional)
+
+If Phase 1-2 explored a feature area that does NOT have a matching KB:
+
+1. Identify the feature area slug and name from the explored directories
+2. Spawn Agent(subagent_type="KB Builder"):
+   ```
+   "FEATURE_SLUG: {slug}
+   FEATURE_NAME: {name}
+   EXPLORATION_OUTPUTS: {combined Phase 1 + Phase 2 outputs}
+   DIRECTORIES: {directory prefixes explored}
+   KNOWLEDGE_CONTEXT: {from Phase 0}"
+   ```
+3. Report: "Created feature KB: {slug}"
+
+Skip if all explored areas already have matching KBs.
+
+If a stale KB was detected in Phase 0.5, also refresh it here — spawn KB Builder with `EXISTING_KB` content + `CHANGED_FILES` from staleness check.
+
+**Failure handling**: KB Builder failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
+
+**Produces:** `.features/{slug}/KNOWLEDGE.md`, updated `.features/index.json`
+**Requires:** Phase 1-2 exploration outputs
+
 ---
 
 ## Output
@@ -248,7 +298,8 @@ Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
 Before presenting output, verify every phase was announced:
 
 - [ ] Phase 0: Load Knowledge Index → KNOWLEDGE_CONTEXT captured
-- [ ] Phase 0.5: Requirements Discovery → CONSTRAINED_PROBLEM captured (or skipped with stated reason)
+- [ ] Phase 0.5: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.features/` absent)
+- [ ] Phase 0.6: Requirements Discovery → CONSTRAINED_PROBLEM captured (or skipped with stated reason)
 - [ ] Phase 1: Orient → ORIENT_OUTPUT captured
 - [ ] Phase 2: Explore → EXPLORE_OUTPUT captured
 - [ ] Phase 3: Gap Analysis Lite → GAP_OUTPUT captured
@@ -257,5 +308,6 @@ Before presenting output, verify every phase was announced:
 - [ ] Phase 6: Design Review Lite → REVIEW_NOTES captured
 - [ ] Phase 7: Present → Output delivered to user
 - [ ] Phase 8: Persist → Artifact written (or skipped with stated reason)
+- [ ] Phase 8.5: Feature KB Generation → KB Builder spawned for new feature areas (or skipped if KB exists)
 
 If any phase is unchecked, execute it before proceeding.

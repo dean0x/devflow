@@ -15,7 +15,7 @@ Run Simplifier and Scrutinizer sequentially on changed files for post-implementa
 
 ### Phase 0: Context Gathering
 
-**Produces:** FILES_CHANGED, TASK_DESCRIPTION, KNOWLEDGE_CONTEXT
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 Detect changed files and build context:
 
@@ -28,8 +28,14 @@ Detect changed files and build context:
    KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
    ```
    Pass `KNOWLEDGE_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-knowledge` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume knowledge — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
+6. Load feature knowledge:
+   - Read `.features/index.json` if it exists
+   - Based on FILES_CHANGED, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
+   - For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+   - Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+   - Pass `FEATURE_KNOWLEDGE` to Scrutinizer
 
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional)
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional)
 
 ### Phase 1: Simplifier (Code Refinement)
 
@@ -56,8 +62,10 @@ Agent(subagent_type="Scrutinizer", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
 KNOWLEDGE_CONTEXT: {knowledge_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
-Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none)."
+Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
+Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE. Skip if (none)."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED), changes_made (bool)
 

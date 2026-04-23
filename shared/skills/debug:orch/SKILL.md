@@ -26,7 +26,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 ## Phase 0: Load Knowledge Index (Orchestrator-Local)
 
-**Produces:** KNOWLEDGE_CONTEXT
+**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 Before hypothesizing, load the knowledge index:
 
@@ -35,6 +35,13 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 ```
 
 The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 1) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the orchestrator, not in the investigation workers.
+
+Also load feature knowledge:
+1. Read `.features/index.json` if it exists
+2. Based on the bug description, identify relevant KBs
+3. Read matching KB files, check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`
+4. Use `FEATURE_KNOWLEDGE` **locally** for hypothesis generation — feature-specific gotchas and anti-patterns suggest root causes
+5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as KNOWLEDGE_CONTEXT)
 
 ## Phase 1: Hypothesize
 
@@ -101,7 +108,7 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 Before reporting results, verify every phase was announced:
 
-- [ ] Phase 0: Load Knowledge Index → KNOWLEDGE_CONTEXT captured
+- [ ] Phase 0: Load Knowledge Index → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
 - [ ] Phase 1: Hypothesize → HYPOTHESES captured (3-5 distinct)
 - [ ] Phase 2: Investigate → INVESTIGATION_RESULTS captured per hypothesis
 - [ ] Phase 3: Converge → CONVERGENCE_DECISION captured

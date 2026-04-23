@@ -29,7 +29,7 @@ Orchestrate a single task through implementation by spawning specialized agent t
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, FEATURE_KNOWLEDGE
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
@@ -60,6 +60,12 @@ Return the branch setup summary."
 5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
 6. Captured values override defaults from Git agent where present
 
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on task description and file targets, identify relevant KBs
+3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+
 ### Phase 2: Implement
 
 **Produces:** CODER_OUTPUT, FILES_CHANGED
@@ -89,7 +95,8 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {full plan from setup context}
 PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
-DOMAIN: {detected domain or 'fullstack'}"
+DOMAIN: {detected domain or 'fullstack'}
+FEATURE_KNOWLEDGE: {feature_knowledge}"
 ```
 
 ---
@@ -219,6 +226,7 @@ After Simplifier completes, spawn Scrutinizer as final quality gate:
 Agent(subagent_type="Scrutinizer"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {list of files from Coder output}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
@@ -390,6 +398,11 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 ### Phase 10: Report
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
+
+After quality gates pass, mark stale feature KBs based on changed files:
+```bash
+node scripts/hooks/lib/feature-kb.cjs mark-stale "{worktree}" {files_changed...}
+```
 
 Display completion summary with phase status, PR info, and next steps.
 

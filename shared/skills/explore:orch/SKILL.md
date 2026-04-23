@@ -22,11 +22,23 @@ Agent pipeline for EXPLORE intent in ambient GUIDED and ORCHESTRATED modes. Code
 
 For GUIDED depth, the main session performs exploration directly:
 
-1. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
-2. **Trace** — Using Skimmer findings, trace the flow or analyze the subsystem directly in main session. Follow call chains, read key files, map integration points.
-3. **Present** — Deliver structured findings using the Output format below. Use AskUserQuestion to offer drill-down into specific areas.
+1. **Load Feature KBs** — Read `.features/index.json` if it exists. Based on the exploration question, identify relevant KBs and read them as context. Set `FEATURE_KNOWLEDGE = (none)` if none are relevant.
+2. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
+3. **Trace** — Using Skimmer findings + `FEATURE_KNOWLEDGE`, trace the flow or analyze the subsystem directly in main session. Follow call chains, read key files, map integration points.
+4. **Present** — Deliver structured findings using the Output format below. Use AskUserQuestion to offer drill-down into specific areas.
 
 ## ORCHESTRATED Pipeline
+
+### Phase 0.5: Load Feature Knowledge
+
+**Produces:** FEATURE_KNOWLEDGE
+
+1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
+2. Identify relevant KBs from the exploration question (match task intent against KB descriptions and directories).
+3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`.
+4. Pass as `FEATURE_KNOWLEDGE` to Explore agents.
+
+**Explore agent framing**: "The KB is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the KB doesn't cover and things that may have changed."
 
 ### Phase 1: Orient
 
@@ -93,6 +105,7 @@ Structured exploration findings with concrete code references:
 
 Before presenting findings, verify every phase was announced:
 
+- [ ] Phase 0.5: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.features/` absent)
 - [ ] Phase 1: Orient → ORIENT_OUTPUT captured
 - [ ] Phase 2: Explore → EXPLORE_OUTPUT captured
 - [ ] Phase 3: Synthesize → MERGED_FINDINGS captured

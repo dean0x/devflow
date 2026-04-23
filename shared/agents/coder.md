@@ -11,6 +11,7 @@ skills:
   - devflow:research
   - devflow:boundary-validation
   - devflow:worktree-support
+  - devflow:apply-feature-kb
 ---
 
 # Coder Agent
@@ -29,6 +30,7 @@ You receive from orchestrator:
 
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
+- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context — patterns, architecture, anti-patterns, gotchas
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
@@ -39,7 +41,7 @@ You receive from orchestrator:
 
 ## Responsibilities
 
-1. **Orient on branch state** (always, before any implementation):
+1. **Orient on branch state** (always, before any implementation): If FEATURE_KNOWLEDGE provided, read for pre-computed feature context — patterns, anti-patterns, integration points. Use as starting point; verify against current code. Follow `devflow:apply-feature-kb`.
    - Run `git log --oneline --stat -n 10` to scan recent commit history on this branch
    - Run `git status` and `git diff --stat` and `git diff --cached --stat` to see uncommitted/unstaged work
    - Cross-reference changed files against EXECUTION_PLAN to identify what's relevant to your task

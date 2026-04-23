@@ -70,7 +70,7 @@ Set `TARGET_DIR` to the selected review directory path.
 
 #### Step 0d: Load Project Knowledge
 
-**Produces:** KNOWLEDGE_CONTEXT
+**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 For each worktree, run:
 
@@ -79,6 +79,14 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 ```
 
 This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on file paths from review report issue entries, identify relevant KBs
+3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+
+Pass `FEATURE_KNOWLEDGE` to every Resolver teammate in Phase 4.
 
 ### Phase 1: Parse Issues
 
@@ -149,8 +157,10 @@ Each resolver teammate receives the following instructions (only the issue list 
     You are resolving review issues on branch {branch} (PR #{pr_number}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
     KNOWLEDGE_CONTEXT: {knowledge_context}
+    FEATURE_KNOWLEDGE: {feature_knowledge}
     1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
        Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
+       Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature patterns inform whether a fix follows area conventions. Skip if (none).
     2. Your issues to resolve:
        {BATCH_ISSUES}
     3. For each issue:

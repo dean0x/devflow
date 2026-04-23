@@ -56,6 +56,16 @@ Return the branch setup summary."
 
 Capture `branch name` and `BASE_BRANCH` from Git agent output for use throughout the pipeline.
 
+## Phase 1.5: Load Feature Knowledge
+
+**Produces:** FEATURE_KNOWLEDGE
+
+1. Check if `.features/index.json` exists. If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
+2. Read `.features/index.json`.
+3. Based on the EXECUTION_PLAN file targets and task description, identify relevant KBs.
+4. For each relevant KB: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`, mark stale if needed.
+5. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no matches).
+
 ## Phase 2: Plan Synthesis
 
 **Produces:** EXECUTION_PLAN
@@ -87,6 +97,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **PATTERNS**: Codebase patterns from conversation context
 - **CREATE_PR**: `false` (commit only, no push)
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
+- **FEATURE_KNOWLEDGE**: From Phase 1.5 (or `(none)`)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -118,7 +129,7 @@ Run sequentially — each gate must pass before the next:
 
 1. `Agent(subagent_type="Validator")` (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
 2. `Agent(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
-3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED
+3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED, with `FEATURE_KNOWLEDGE` from Phase 1.5
 4. `Agent(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
 5. `Agent(subagent_type="Evaluator")` — verify implementation matches original request — retry up to 2× if misalignment found
 6. `Agent(subagent_type="Tester")` — scenario-based acceptance testing from user's perspective — retry up to 2× if QA fails
@@ -130,6 +141,12 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 **Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS
 
 Cleanup: delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
+
+After quality gates pass, check if FILES_CHANGED overlap with any KB's `referencedFiles` and mark stale:
+```bash
+node scripts/hooks/lib/feature-kb.cjs mark-stale "{worktree}" {files_changed...}
+```
+This signals staleness for the next plan cycle.
 
 Report results:
 - Commits created (from Coder)
@@ -149,10 +166,11 @@ Report results:
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
+- [ ] Phase 1.5: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped)
 - [ ] Phase 2: Plan Synthesis → EXECUTION_PLAN captured
 - [ ] Phase 3: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
 - [ ] Phase 4: FILES_CHANGED Detection → FILES_CHANGED captured
 - [ ] Phase 5: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)
-- [ ] Phase 6: Completion → Results reported
+- [ ] Phase 6: Completion → Results reported, stale KBs marked
 
 If any phase is unchecked, execute it before proceeding.
