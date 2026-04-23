@@ -28,6 +28,8 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 #### Step 0a: Discover Worktrees
 
+**Produces:** WORKTREES
+
 1. **Discover reviewable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
@@ -37,6 +39,9 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
+
+**Produces:** BRANCH_INFO, PR_INFO
+**Requires:** WORKTREES
 
 For each reviewable worktree, spawn Git agent:
 
@@ -56,6 +61,9 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 #### Step 0c: Incremental Detection & Timestamp Setup
 
+**Produces:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP
+**Requires:** BRANCH_INFO
+
 For each worktree:
 
 1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
@@ -70,6 +78,9 @@ For each worktree:
      - Set `DIFF_RANGE` to `{base_branch}...HEAD`
 
 ### Phase 1: Analyze Changed Files
+
+**Produces:** REVIEWER_LIST
+**Requires:** DIFF_RANGE
 
 Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews:
 
@@ -91,6 +102,8 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 ### Phase 1b: Load Knowledge Index
 
+**Produces:** KNOWLEDGE_CONTEXT
+
 While file analysis runs (or just before spawning reviewers), load the knowledge index for the current worktree:
 
 ```bash
@@ -100,6 +113,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ### Phase 2: Run Reviews (Parallel)
+
+**Produces:** REVIEWER_OUTPUTS
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, REVIEWER_LIST
 
 Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add more based on changed file types:
 
@@ -141,6 +157,9 @@ In multi-worktree mode, process worktrees **sequentially** (one worktree at a ti
 
 ### Phase 3: Synthesis (Parallel)
 
+**Produces:** REVIEW_SUMMARY
+**Requires:** REVIEWER_OUTPUTS, REVIEW_DIR, PR_INFO
+
 **WAIT** for Phase 2, then spawn agents per worktree **in a single message**:
 
 **Git Agent (PR Comments)** per worktree:
@@ -168,6 +187,8 @@ Output: {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/review-summary.m
 ```
 
 ### Phase 4: Write Review Head Marker & Report
+
+**Requires:** BRANCH_INFO, REVIEW_DIR
 
 Per worktree, after successful completion:
 1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`

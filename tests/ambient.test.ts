@@ -693,6 +693,11 @@ describe('preamble drift detection', () => {
     expect(routerContent).toContain('DEBUG');
     expect(routerContent).toContain('PLAN');
     expect(routerContent).toContain('REVIEW');
+
+    // Must contain Phase Protocol section
+    expect(routerContent).toContain('## Phase Protocol');
+    expect(routerContent).toContain('Announce');
+    expect(routerContent).toContain('No silent skips');
   });
 
   it('session-start-classification hook reads classification-rules.md', async () => {
@@ -700,5 +705,153 @@ describe('preamble drift detection', () => {
     const hookContent = await fs.readFile(hookPath, 'utf-8');
 
     expect(hookContent).toContain('classification-rules.md');
+  });
+});
+
+describe('phase protocol structural validation', () => {
+  const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
+
+  async function discoverOrchSkills(): Promise<string[]> {
+    const entries = await fs.readdir(sharedSkillsDir);
+    return entries.filter(e => e.endsWith(':orch')).sort();
+  }
+
+  it('every orch skill has a Phase Completion Checklist', async () => {
+    for (const skill of await discoverOrchSkills()) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Phase Completion Checklist`).toContain(
+        '## Phase Completion Checklist',
+      );
+    }
+  });
+
+  it('every orch skill has Produces: annotations', async () => {
+    for (const skill of await discoverOrchSkills()) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Produces: annotations`).toContain(
+        '**Produces:**',
+      );
+    }
+  });
+
+  it('every orch skill has Requires: annotations', async () => {
+    for (const skill of await discoverOrchSkills()) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Requires: annotations`).toContain(
+        '**Requires:**',
+      );
+    }
+  });
+
+  it('plan:orch and implement:orch have Continuation Detection', async () => {
+    for (const skill of ['plan:orch', 'implement:orch']) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+      expect(content, `${skill} missing Continuation Detection`).toContain(
+        '## Continuation Detection',
+      );
+    }
+  });
+
+  it('checklist item count matches phase count in each orch skill', async () => {
+    for (const skill of await discoverOrchSkills()) {
+      const content = await fs.readFile(
+        path.join(sharedSkillsDir, skill, 'SKILL.md'),
+        'utf-8',
+      );
+
+      // Count phase headings (## Phase N or ### Phase N — digit distinguishes from ## Phase Completion Checklist)
+      const phaseHeadings = content.match(/^#{2,3}\s+Phase\s+\d/gm) ?? [];
+
+      // Count checklist items (- [ ] Phase)
+      const checklistItems = content.match(/^- \[ \] Phase/gm) ?? [];
+
+      expect(
+        checklistItems.length,
+        `${skill}: ${checklistItems.length} checklist items but ${phaseHeadings.length} phases`,
+      ).toBe(phaseHeadings.length);
+    }
+  });
+});
+
+describe('command Produces/Requires validation', () => {
+  const pluginsDir = path.resolve(__dirname, '../plugins');
+  const phaseStepPattern = /^#{2,4}\s+(Phase|Step)\s+\d/;
+
+  function headingLevel(line: string): number {
+    return (line.match(/^(#+)/) ?? ['', ''])[1].length;
+  }
+
+  async function discoverCommandFiles(): Promise<string[]> {
+    const plugins = await fs.readdir(pluginsDir);
+    const files: string[] = [];
+    for (const plugin of plugins) {
+      const cmdDir = path.join(pluginsDir, plugin, 'commands');
+      try {
+        const entries = await fs.readdir(cmdDir);
+        for (const f of entries) {
+          if (f.endsWith('.md')) files.push(path.join(cmdDir, f));
+        }
+      } catch { /* no commands dir */ }
+    }
+    return files.sort();
+  }
+
+  it('every command file has Produces: annotations', async () => {
+    for (const file of await discoverCommandFiles()) {
+      const content = await fs.readFile(file, 'utf-8');
+      const name = path.relative(pluginsDir, file);
+      expect(content, `${name} missing Produces:`).toContain('**Produces:**');
+    }
+  });
+
+  it('every command file has Requires: annotations', async () => {
+    for (const file of await discoverCommandFiles()) {
+      const content = await fs.readFile(file, 'utf-8');
+      const name = path.relative(pluginsDir, file);
+      expect(content, `${name} missing Requires:`).toContain('**Requires:**');
+    }
+  });
+
+  it('every phase/step heading is followed by a Produces or Requires annotation', async () => {
+    for (const file of await discoverCommandFiles()) {
+      const content = await fs.readFile(file, 'utf-8');
+      const name = path.relative(pluginsDir, file);
+      const lines = content.split('\n');
+
+      const headingIndices: number[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (phaseStepPattern.test(lines[i])) headingIndices.push(i);
+      }
+
+      for (let h = 0; h < headingIndices.length; h++) {
+        const idx = headingIndices[h];
+        const currentLevel = headingLevel(lines[idx]);
+
+        // Skip container headings (next heading is deeper level = substeps)
+        if (h + 1 < headingIndices.length) {
+          if (headingLevel(lines[headingIndices[h + 1]]) > currentLevel) continue;
+        }
+
+        const endIdx = h + 1 < headingIndices.length ? headingIndices[h + 1] : lines.length;
+        const body = lines.slice(idx + 1, endIdx).join('\n');
+
+        expect(
+          body.includes('**Produces:**') || body.includes('**Requires:**'),
+          `${name}: "${lines[idx].trim()}" missing Produces/Requires annotation`,
+        ).toBe(true);
+      }
+    }
   });
 });

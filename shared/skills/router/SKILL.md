@@ -13,6 +13,16 @@ GUIDED: work directly in main session. Spawn Simplifier after code changes.
 - GUIDED PLAN: spawn Skimmer for orientation, then plan directly.
 ORCHESTRATED: follow the loaded orchestration skill's pipeline.
 
+## Phase Protocol
+
+All ORCHESTRATED pipelines follow this protocol:
+
+1. **Announce** — Before executing each phase, output: `Phase N: {name}`. No phase may execute without this announcement. Skipping the announcement and doing the work anyway is a protocol violation.
+2. **Produce** — Each phase declares what it `Produces:`. Capture that output by name. Subsequent phases reference it via `Requires:`.
+3. **No silent skips** — If a phase's preconditions are not met (e.g., no issues found), announce the phase, state why it is being skipped, and move to the next phase. The announcement must still appear.
+4. **Verify** — Before presenting final output, check the skill's Phase Completion Checklist. Every phase must show as announced. If any phase was missed, execute it before proceeding.
+5. **Scoped nesting** — When a pipeline delegates to another orchestration skill (e.g., pipeline:orch → implement:orch), the inner skill's phases use a scoped prefix: `{Outer} > Phase N: {name}` (e.g., `Implement > Phase 1: Pre-flight`).
+
 ## GUIDED
 
 | Intent | Skills |

@@ -26,6 +26,8 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 ## Phase 0: Load Knowledge Index (Orchestrator-Local)
 
+**Produces:** KNOWLEDGE_CONTEXT
+
 Before hypothesizing, load the knowledge index:
 
 ```bash
@@ -35,6 +37,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 1) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the orchestrator, not in the investigation workers.
 
 ## Phase 1: Hypothesize
+
+**Produces:** HYPOTHESES
+**Requires:** KNOWLEDGE_CONTEXT
 
 Analyze the bug description, error messages, and conversation context. Generate 3-5 hypotheses that are:
 
@@ -46,6 +51,9 @@ If fewer than 3 hypotheses are possible, proceed with 2.
 
 ## Phase 2: Investigate (Parallel)
 
+**Produces:** INVESTIGATION_RESULTS
+**Requires:** HYPOTHESES
+
 Spawn one `Agent(subagent_type="Explore")` per hypothesis **in a single message** (parallel execution):
 
 - Each investigator searches for evidence FOR and AGAINST its hypothesis
@@ -54,6 +62,9 @@ Spawn one `Agent(subagent_type="Explore")` per hypothesis **in a single message*
 
 ## Phase 3: Converge
 
+**Produces:** CONVERGENCE_DECISION
+**Requires:** INVESTIGATION_RESULTS
+
 Evaluate investigation results:
 
 - **One CONFIRMED**: Spawn 1-2 additional `Agent(subagent_type="Explore")` agents to validate from different angles (prevent confirmation bias)
@@ -61,6 +72,9 @@ Evaluate investigation results:
 - **All DISPROVED**: Report honestly — "No root cause identified from initial hypotheses." Generate 2-3 second-round hypotheses if conversation context suggests avenues not yet explored.
 
 ## Phase 4: Report
+
+**Produces:** ROOT_CAUSE_REPORT
+**Requires:** CONVERGENCE_DECISION, INVESTIGATION_RESULTS
 
 Present root cause analysis:
 
@@ -71,6 +85,8 @@ Present root cause analysis:
 
 ## Phase 5: Offer Fix
 
+**Requires:** ROOT_CAUSE_REPORT
+
 Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 - **YES** → Implement the fix directly in main session using GUIDED approach: load devflow:patterns, devflow:research, and devflow:test-driven-development skills, then code the fix. Spawn `Agent(subagent_type="Simplifier")` on changed files after.
@@ -80,3 +96,16 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 - **All hypotheses disproved, no second-round ideas**: Report "No root cause identified" with summary of what was investigated and ruled out
 - **Explore agents return insufficient evidence**: Report LOW confidence with available evidence, suggest manual investigation areas
+
+## Phase Completion Checklist
+
+Before reporting results, verify every phase was announced:
+
+- [ ] Phase 0: Load Knowledge Index → KNOWLEDGE_CONTEXT captured
+- [ ] Phase 1: Hypothesize → HYPOTHESES captured (3-5 distinct)
+- [ ] Phase 2: Investigate → INVESTIGATION_RESULTS captured per hypothesis
+- [ ] Phase 3: Converge → CONVERGENCE_DECISION captured
+- [ ] Phase 4: Report → ROOT_CAUSE_REPORT presented
+- [ ] Phase 5: Offer Fix → User asked, response handled
+
+If any phase is unchecked, execute it before proceeding.

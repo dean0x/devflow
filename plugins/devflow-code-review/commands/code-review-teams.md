@@ -21,6 +21,8 @@ Run a comprehensive code review of the current branch by spawning a review team 
 
 #### Step 0a: Discover Worktrees
 
+**Produces:** WORKTREES
+
 1. **Discover reviewable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
@@ -30,6 +32,9 @@ Run a comprehensive code review of the current branch by spawning a review team 
 4. **If multiple reviewable worktrees:** report "Found N worktrees with reviewable branches: {list with paths and branches}" and proceed with multi-worktree flow
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
+
+**Produces:** BRANCH_INFO, PR_INFO
+**Requires:** WORKTREES
 
 For each reviewable worktree, spawn Git agent:
 
@@ -49,6 +54,9 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 #### Step 0c: Incremental Detection & Timestamp Setup
 
+**Produces:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP
+**Requires:** BRANCH_INFO
+
 For each worktree:
 
 1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
@@ -63,6 +71,9 @@ For each worktree:
      - Set `DIFF_RANGE` to `{base_branch}...HEAD`
 
 ### Phase 1: Analyze Changed Files
+
+**Produces:** REVIEWER_LIST
+**Requires:** DIFF_RANGE
 
 Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditional reviews:
 
@@ -84,6 +95,8 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 ### Phase 1b: Load Knowledge Index
 
+**Produces:** KNOWLEDGE_CONTEXT
+
 Load the knowledge index for the current worktree before spawning the review team:
 
 ```bash
@@ -93,6 +106,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
 ### Phase 2: Spawn Review Team
+
+**Produces:** REVIEWER_OUTPUTS
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, REVIEWER_LIST
 
 **Per worktree**, create an agent team for adversarial review. Always include 4 core perspectives; conditionally add more based on Phase 1 analysis.
 
@@ -166,6 +182,8 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
 
 ### Phase 2b: Debate Round
 
+**Requires:** REVIEWER_OUTPUTS
+
 After all reviewers complete initial analysis, lead initiates adversarial debate:
 
 Lead initiates debate via broadcast:
@@ -195,6 +213,9 @@ Reviewers message each other directly using SendMessage:
 - Update or withdraw findings based on peer evidence
 
 ### Phase 3: Synthesis and PR Comments
+
+**Produces:** REVIEW_SUMMARY
+**Requires:** REVIEWER_OUTPUTS, REVIEW_DIR, PR_INFO
 
 **WAIT** for debate to complete, then lead produces outputs.
 
@@ -240,6 +261,8 @@ Check for existing inline comments at same file:line before creating new ones."
 
 ### Phase 4: Write Review Head Marker
 
+**Requires:** BRANCH_INFO, REVIEW_DIR
+
 Per worktree, after successful completion:
 1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
 
@@ -247,6 +270,8 @@ Per worktree, after successful completion:
      capability; pitfall recording is handled by the background-learning extractor. -->
 
 ### Phase 5: Cleanup and Report
+
+**Requires:** REVIEW_SUMMARY
 
 Shut down all review teammates explicitly:
 

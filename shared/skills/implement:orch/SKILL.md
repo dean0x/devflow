@@ -20,7 +20,24 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 
 ---
 
+## Continuation Detection
+
+Before starting the full pipeline, check for re-validation context:
+
+- **Re-validation after manual fix**: User explicitly asks to re-validate, re-check, or re-run gates after making their own changes
+
+If this condition is true → execute **Re-validation Path**:
+1. **Branch safety check**: If current branch is protected (main, master, etc.), execute Phase 1 first to create/switch to a work branch. If already on a work branch, skip Phase 1.
+2. Skip Phases 2-3 (no Coder needed)
+3. Run Phase 4 (FILES_CHANGED Detection) using the existing branch
+4. Run Phase 5 (Quality Gates) on detected changes
+5. Proceed to Phase 6 (Completion)
+
+If not → proceed with the full pipeline below.
+
 ## Phase 1: Pre-flight — Branch Safety
+
+**Produces:** BASE_BRANCH, FEATURE_BRANCH
 
 Detect branch type before spawning Coder:
 
@@ -41,6 +58,9 @@ Capture `branch name` and `BASE_BRANCH` from Git agent output for use throughout
 
 ## Phase 2: Plan Synthesis
 
+**Produces:** EXECUTION_PLAN
+**Requires:** FEATURE_BRANCH
+
 Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
 
 - **If a plan exists** in conversation context (from plan mode — accepted in-session or injected after "accept and clear") → use the plan as-is.
@@ -53,6 +73,9 @@ Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
 ## Phase 3: Coder Execution
+
+**Produces:** CODER_COMMITS, PRE_CODER_SHA
+**Requires:** EXECUTION_PLAN, FEATURE_BRANCH
 
 Record git SHA before first Coder: `git rev-parse HEAD`
 
@@ -75,6 +98,9 @@ If Coder returns **BLOCKED**, halt the pipeline and report to user.
 
 ## Phase 4: FILES_CHANGED Detection
 
+**Produces:** FILES_CHANGED
+**Requires:** PRE_CODER_SHA
+
 After Coder completes, detect changed files:
 
 ```bash
@@ -84,6 +110,9 @@ git diff --name-only {starting_sha}...HEAD
 Pass FILES_CHANGED to all quality gate agents.
 
 ## Phase 5: Quality Gates
+
+**Produces:** GATE_RESULTS
+**Requires:** FILES_CHANGED, CODER_COMMITS
 
 Run sequentially — each gate must pass before the next:
 
@@ -97,6 +126,8 @@ Run sequentially — each gate must pass before the next:
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
 
 ## Phase 6: Completion
+
+**Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS
 
 Cleanup: delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
 
@@ -112,3 +143,16 @@ Report results:
 - **Validator fails after retries**: Report specific failures, halt pipeline
 - **Evaluator misalignment after retries**: Report misalignment details, let user decide next steps
 - **Tester QA failures after retries**: Report QA failure details, let user decide next steps
+
+## Phase Completion Checklist
+
+Before reporting results, verify every phase was announced:
+
+- [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
+- [ ] Phase 2: Plan Synthesis → EXECUTION_PLAN captured
+- [ ] Phase 3: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
+- [ ] Phase 4: FILES_CHANGED Detection → FILES_CHANGED captured
+- [ ] Phase 5: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)
+- [ ] Phase 6: Completion → Results reported
+
+If any phase is unchecked, execute it before proceeding.

@@ -33,6 +33,8 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 
 ### Phase 1: Load Knowledge Index (Orchestrator-Local)
 
+**Produces:** KNOWLEDGE_CONTEXT
+
 Before hypothesizing, load the knowledge index:
 
 ```bash
@@ -42,6 +44,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore investigators** — knowledge context stays in the orchestrator; investigators examine code directly.
 
 ### Phase 2: Context Gathering
+
+**Produces:** HYPOTHESES, BUG_CONTEXT
+**Requires:** KNOWLEDGE_CONTEXT
 
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
@@ -58,6 +63,9 @@ Analyze the bug description (from arguments or issue) and identify 3-5 plausible
 - **Distinct**: Does not overlap significantly with other hypotheses
 
 ### Phase 3: Investigate (Parallel)
+
+**Produces:** INVESTIGATION_RESULTS
+**Requires:** HYPOTHESES
 
 Spawn one Explore agent per hypothesis in a **single message** (parallel execution):
 
@@ -102,6 +110,9 @@ Focus area: {specific code area, mechanism, or condition}
 
 ### Phase 4: Synthesize
 
+**Produces:** ROOT_CAUSE_SYNTHESIS
+**Requires:** INVESTIGATION_RESULTS
+
 Once all investigators return, spawn a Synthesizer agent to aggregate findings:
 
 ```
@@ -119,6 +130,8 @@ Instructions:
 ```
 
 ### Phase 5: Report
+
+**Requires:** ROOT_CAUSE_SYNTHESIS
 
 Produce the final report:
 

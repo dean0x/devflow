@@ -28,6 +28,8 @@ Process issues from code review reports: validate them (false positive check), a
 
 #### Step 0a: Discover Worktrees
 
+**Produces:** WORKTREES
+
 1. **Discover resolvable worktrees** using the `devflow:worktree-support` skill discovery algorithm:
    - Run `git worktree list --porcelain` → parse, filter (skip protected/detached/mid-rebase), dedup by branch, sort by recent commit
    - See `~/.claude/skills/devflow:worktree-support/SKILL.md` for the full 7-step algorithm and canonical protected branch list
@@ -38,6 +40,9 @@ Process issues from code review reports: validate them (false positive check), a
 4. **If multiple resolvable worktrees:** report "Found N worktrees with unresolved reviews: {list}" and proceed with multi-worktree flow
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
+
+**Produces:** BRANCH_INFO
+**Requires:** WORKTREES
 
 For each resolvable worktree, spawn Git agent:
 
@@ -57,6 +62,9 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 #### Step 0c: Target Review Directory
 
+**Produces:** TARGET_DIR
+**Requires:** BRANCH_INFO
+
 For each worktree:
 
 1. List directories in `{worktree}/.docs/reviews/{branch-slug}/`
@@ -69,6 +77,8 @@ Set `TARGET_DIR` to the selected review directory path.
 
 #### Step 0d: Load Project Knowledge
 
+**Produces:** KNOWLEDGE_CONTEXT
+
 For each worktree, run:
 
 ```bash
@@ -78,6 +88,9 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 ### Phase 1: Parse Issues
+
+**Produces:** ISSUES
+**Requires:** TARGET_DIR
 
 Read review reports from `{TARGET_DIR}/*.md` and extract:
 
@@ -101,6 +114,9 @@ Issues are extracted from `{TARGET_DIR}` only — never cross-reference reviews 
 
 ### Phase 2: Analyze Dependencies
 
+**Produces:** DEPENDENCY_GRAPH
+**Requires:** ISSUES
+
 Group issues by relationship:
 
 1. **Same file** - Issues in same file go in same batch
@@ -111,12 +127,18 @@ Build dependency graph to determine execution order.
 
 ### Phase 3: Plan Batches
 
+**Produces:** BATCHES
+**Requires:** DEPENDENCY_GRAPH
+
 Create execution plan:
 - **Independent batches** - Mark for PARALLEL execution
 - **Dependent batches** - Mark for SEQUENTIAL execution
 - **Max 5 issues per batch** - Keep batches manageable
 
 ### Phase 4: Resolve (Parallel where possible)
+
+**Produces:** RESOLUTION_RESULTS
+**Requires:** BATCHES, KNOWLEDGE_CONTEXT, BRANCH_INFO
 
 Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
 
@@ -139,6 +161,9 @@ For dependent batches, spawn sequentially and wait for completion before spawnin
 
 ### Phase 5: Collect Results
 
+**Produces:** AGGREGATED_RESULTS, KNOWLEDGE_CITATIONS
+**Requires:** RESOLUTION_RESULTS
+
 Aggregate from all Resolvers:
 - **Fixed**: Issues resolved with commits
 - **False positives**: Issues that don't exist or were misunderstood
@@ -148,6 +173,9 @@ Aggregate from all Resolvers:
 Extract all knowledge citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Knowledge Citations` section in Phase 8.
 
 ### Phase 6: Simplify
+
+**Produces:** SIMPLIFICATION_RESULT
+**Requires:** RESOLUTION_RESULTS
 
 If any fixes were made, spawn Simplifier agent to refine the changed code:
 
@@ -160,6 +188,9 @@ Simplify and refine the fixes for clarity and consistency"
 ```
 
 ### Phase 7: Manage Tech Debt (Sequential)
+
+**Produces:** DEBT_RESULT
+**Requires:** RESOLUTION_RESULTS, TARGET_DIR
 
 **IMPORTANT**: Run sequentially across all worktrees (not in parallel) to avoid GitHub API conflicts.
 
@@ -175,6 +206,8 @@ Note: Deferred issues from resolution are already in resolution-summary.md"
 ```
 
 ### Phase 8: Report
+
+**Requires:** AGGREGATED_RESULTS, KNOWLEDGE_CITATIONS, TARGET_DIR
 
 **Write the resolution summary** to `{TARGET_DIR}/resolution-summary.md` using Write tool, then display:
 

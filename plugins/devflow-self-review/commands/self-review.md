@@ -15,6 +15,8 @@ Run Simplifier and Scrutinizer sequentially on changed files for post-implementa
 
 ### Phase 0: Context Gathering
 
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, KNOWLEDGE_CONTEXT
+
 Detect changed files and build context:
 
 1. If arguments provided, use those as FILES_CHANGED
@@ -31,6 +33,9 @@ Detect changed files and build context:
 
 ### Phase 1: Simplifier (Code Refinement)
 
+**Produces:** SIMPLIFIER_COMMITS
+**Requires:** FILES_CHANGED, TASK_DESCRIPTION
+
 Spawn Simplifier agent to refine code for clarity and consistency:
 
 Agent(subagent_type="Simplifier", run_in_background=false):
@@ -41,6 +46,9 @@ Simplify and refine the code for clarity and consistency while preserving functi
 **Wait for completion.** Simplifier commits changes directly.
 
 ### Phase 2: Scrutinizer (9-Pillar Quality Gate)
+
+**Produces:** SCRUTINIZER_STATUS, SCRUTINIZER_CHANGES
+**Requires:** FILES_CHANGED, TASK_DESCRIPTION, KNOWLEDGE_CONTEXT
 
 Spawn Scrutinizer agent for quality evaluation and fixing:
 
@@ -55,6 +63,9 @@ Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bo
 
 ### Phase 3: Conditional Validation
 
+**Produces:** VALIDATION_RESULT
+**Requires:** SCRUTINIZER_CHANGES
+
 If Scrutinizer made changes (STATUS == FIXED):
 
 Agent(subagent_type="Validator", run_in_background=false):
@@ -66,6 +77,8 @@ Run build, typecheck, lint, test on modified files"
 **If PASS:** Continue to report
 
 ### Phase 4: Report
+
+**Requires:** SCRUTINIZER_STATUS, VALIDATION_RESULT
 
 Display summary:
 
