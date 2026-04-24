@@ -347,7 +347,6 @@ function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
     try {
       index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
     } catch {
-      releaseLock(lockPath);
       return; // nothing to remove — preserve existing (possibly corrupt) file
     }
 

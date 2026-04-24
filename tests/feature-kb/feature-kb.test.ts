@@ -52,8 +52,6 @@ describe('loadIndex', () => {
 
   it('returns null for missing directory', () => {
     const tmp = makeTmpFeatureWorktree(); // no index written
-    // Remove the .features dir to simulate completely missing
-    const { rmSync } = require('fs');
     rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
     expect(loadIndex(tmp)).toBeNull();
   });
