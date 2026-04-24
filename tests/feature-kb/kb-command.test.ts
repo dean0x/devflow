@@ -56,4 +56,26 @@ describe('feature-kb.cjs CLI', () => {
     const index = JSON.parse(readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8'));
     expect(index.features['cli-commands']).toBeUndefined();
   });
+
+  // T6: Unknown command and invalid worktree
+  it('exits 1 for unknown subcommand', () => {
+    expect(() => execSync(`node ${CJS_PATH} unknown-command /tmp`, { encoding: 'utf8', stdio: 'pipe' })).toThrow();
+  });
+
+  it('exits 1 for invalid worktree path', () => {
+    expect(() => execSync(`node ${CJS_PATH} list /nonexistent/path/that/does/not/exist`, { encoding: 'utf8', stdio: 'pipe' })).toThrow();
+  });
+
+  it('find-overlapping returns overlapping slugs', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    const result = execSync(`node ${CJS_PATH} find-overlapping ${tmp} src/cli/cli.ts`, { encoding: 'utf8' });
+    const slugs = JSON.parse(result);
+    expect(slugs).toContain('cli-commands');
+  });
+
+  it('find-overlapping returns empty for non-overlapping files', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    const result = execSync(`node ${CJS_PATH} find-overlapping ${tmp} src/payments/checkout.ts`, { encoding: 'utf8' });
+    expect(JSON.parse(result)).toEqual([]);
+  });
 });

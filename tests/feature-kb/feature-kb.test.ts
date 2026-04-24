@@ -1,7 +1,8 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, rmdirSync } from 'fs';
+import { execSync } from 'child_process';
 import {
   SAMPLE_INDEX,
   SAMPLE_KB_CONTENT,
@@ -29,9 +30,9 @@ const {
   loadKBContent: (worktreePath: string, slug: string) => string | null;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
-  updateIndex: (worktreePath: string, entry: Record<string, unknown>) => void;
+  updateIndex: (worktreePath: string, entry: Record<string, unknown>, lockTimeoutMs?: number) => void;
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
-  removeEntry: (worktreePath: string, slug: string) => void;
+  removeEntry: (worktreePath: string, slug: string, lockTimeoutMs?: number) => void;
   listKBs: (worktreePath: string) => Array<{ slug: string } & Record<string, unknown>>;
   validateSlug: (slug: string) => void;
 };
@@ -104,6 +105,62 @@ describe('checkStaleness', () => {
 });
 
 // ---------------------------------------------------------------------------
+// checkStaleness (positive — git repo)
+// ---------------------------------------------------------------------------
+
+// T2: Positive staleness detection in a real git repo
+describe('checkStaleness (positive — git repo)', () => {
+  it('detects stale KB when referenced file changed after lastUpdated', () => {
+    const tmp = makeTmpFeatureWorktree();
+    // Remove auto-created .features dir — we'll set it up after git init
+    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+
+    // Initialize git repo with initial commit
+    execSync('git init', { cwd: tmp, stdio: 'pipe' });
+    execSync('git config user.email "test@test.com"', { cwd: tmp, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: tmp, stdio: 'pipe' });
+
+    // Create a tracked file and commit it
+    const srcDir = path.join(tmp, 'src', 'cli');
+    mkdirSync(srcDir, { recursive: true });
+    writeFileSync(path.join(srcDir, 'cli.ts'), 'export const v = 1;');
+    execSync('git add .', { cwd: tmp, stdio: 'pipe' });
+    execSync('git commit -m "initial"', { cwd: tmp, stdio: 'pipe' });
+
+    // Set lastUpdated to just before now
+    const lastUpdated = new Date(Date.now() - 5000).toISOString();
+
+    // Create the index with a KB that references src/cli/cli.ts
+    const featuresDir = path.join(tmp, '.features');
+    mkdirSync(featuresDir, { recursive: true });
+    const index = {
+      version: 1,
+      features: {
+        'my-feature': {
+          name: 'My Feature',
+          description: '',
+          directories: ['src/cli/'],
+          referencedFiles: ['src/cli/cli.ts'],
+          category: 'test',
+          lastUpdated,
+          createdBy: 'test',
+        },
+      },
+    };
+    writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify(index, null, 2));
+
+    // Modify the file and commit
+    writeFileSync(path.join(srcDir, 'cli.ts'), 'export const v = 2;');
+    execSync('git add .', { cwd: tmp, stdio: 'pipe' });
+    execSync('git commit -m "update cli.ts"', { cwd: tmp, stdio: 'pipe' });
+
+    const result = checkStaleness(tmp, 'my-feature');
+    expect(result.stale).toBe(true);
+    expect(result.changedFiles).toContain('src/cli/cli.ts');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // updateIndex
 // ---------------------------------------------------------------------------
 
@@ -159,6 +216,47 @@ describe('updateIndex', () => {
     expect(updated >= before).toBe(true);
     expect(updated <= after).toBe(true);
   });
+
+  // T1: Lock failure
+  it('throws when lock cannot be acquired within timeout', () => {
+    const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
+    const lockPath = path.join(tmp, '.features', '.kb.lock');
+    // Pre-create lock directory to simulate a held lock
+    mkdirSync(lockPath);
+
+    expect(() => updateIndex(tmp, {
+      slug: 'test-lock',
+      name: 'Test',
+      directories: [],
+      referencedFiles: [],
+      category: 'test',
+    }, 500)).toThrow(/lock/i);
+
+    // Lock dir should still exist (not cleaned up by our failed attempt)
+    expect(existsSync(lockPath)).toBe(true);
+    // Clean up
+    rmdirSync(lockPath);
+  });
+
+  // T4: Creates missing .features/ directory
+  it('creates .features/ directory if missing', () => {
+    const tmp = makeTmpFeatureWorktree();
+    // Remove the .features dir
+    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+    expect(existsSync(path.join(tmp, '.features'))).toBe(false);
+
+    updateIndex(tmp, {
+      slug: 'new-feature',
+      name: 'New Feature',
+      directories: ['src/new/'],
+      referencedFiles: ['src/new/index.ts'],
+      category: 'component-patterns',
+    });
+
+    expect(existsSync(path.join(tmp, '.features'))).toBe(true);
+    const index = loadIndex(tmp);
+    expect(index!.features['new-feature']).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -185,6 +283,16 @@ describe('removeEntry', () => {
     // Original entry should still exist
     const index = loadIndex(tmp);
     expect(index!.features['cli-commands']).toBeDefined();
+  });
+
+  // T5: No-op when .features/ directory is missing
+  it('is a no-op when .features/ directory does not exist', () => {
+    const tmp = makeTmpFeatureWorktree();
+    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+    expect(existsSync(path.join(tmp, '.features'))).toBe(false);
+
+    // Should not throw
+    expect(() => removeEntry(tmp, 'nonexistent')).not.toThrow();
   });
 });
 
@@ -216,6 +324,35 @@ describe('findOverlapping', () => {
     // 'src/cli' should NOT match 'src/clitools/foo.ts' (no dir boundary)
     const overlapping = findOverlapping(tmp, ['src/clitools/foo.ts']);
     expect(overlapping).not.toContain('cli-commands');
+  });
+
+  // T3: Directory boundary matching
+  // referencedFiles uses no trailing slash so the startsWith(ref + '/') logic
+  // in findOverlapping correctly matches nested files while rejecting
+  // files that merely share a prefix (e.g. src/client vs src/cli).
+  it('matches files under a referenced directory prefix', () => {
+    const index = {
+      version: 1,
+      features: {
+        'cli-feature': {
+          name: 'CLI',
+          description: '',
+          directories: ['src/cli/'],
+          referencedFiles: ['src/cli'],
+          category: 'test',
+          lastUpdated: new Date().toISOString(),
+          createdBy: 'test',
+        },
+      },
+    };
+    const tmp = makeTmpFeatureWorktree(index);
+
+    // File under the directory prefix — should match (src/cli is a prefix of src/cli/deep/file.ts)
+    expect(findOverlapping(tmp, ['src/cli/deep/file.ts'])).toContain('cli-feature');
+
+    // File NOT under the directory but sharing prefix — should NOT match
+    // (src/cli is NOT a prefix of src/client.ts since there's no / after cli)
+    expect(findOverlapping(tmp, ['src/client.ts'])).toEqual([]);
   });
 });
 
