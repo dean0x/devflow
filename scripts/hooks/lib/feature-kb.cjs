@@ -19,7 +19,7 @@
 //   node feature-kb.cjs list <worktree>
 //   node feature-kb.cjs stale <worktree> [slug]
 //   node feature-kb.cjs update-index <worktree> --slug=X --name=Y ...
-//   node feature-kb.cjs mark-stale <worktree> <file1> [file2...]
+//   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
 //   node feature-kb.cjs remove <worktree> <slug>
 
 'use strict';
@@ -146,6 +146,7 @@ function checkStaleness(worktreePath, slug) {
 
 /**
  * Check staleness for all KBs in the index.
+ * Loads the index once and checks git-dir once to avoid N+1 overhead.
  *
  * @param {string} worktreePath
  * @returns {Record<string, { stale: boolean, changedFiles: string[] }>}
@@ -153,11 +154,62 @@ function checkStaleness(worktreePath, slug) {
 function checkAllStaleness(worktreePath) {
   const index = loadIndex(worktreePath);
   if (!index) return {};
+
+  // Check git-dir once for the whole batch
+  try {
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath, stdio: 'pipe' });
+  } catch {
+    // Non-git repo — all entries non-stale
+    const results = {};
+    for (const slug of Object.keys(index.features)) {
+      results[slug] = { stale: false, changedFiles: [] };
+    }
+    return results;
+  }
+
   const results = {};
   for (const slug of Object.keys(index.features)) {
-    results[slug] = checkStaleness(worktreePath, slug);
+    const entry = index.features[slug];
+    const files = entry.referencedFiles || [];
+    if (files.length === 0) {
+      results[slug] = { stale: false, changedFiles: [] };
+      continue;
+    }
+    try {
+      const result = execFileSync(
+        'git',
+        ['log', `--after=${entry.lastUpdated}`, '--name-only', '--pretty=format:', '--', ...files],
+        { cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      const changedFiles = [...new Set(result.split('\n').map(l => l.trim()).filter(Boolean))];
+      results[slug] = { stale: changedFiles.length > 0, changedFiles };
+    } catch {
+      results[slug] = { stale: false, changedFiles: [] };
+    }
   }
   return results;
+}
+
+/**
+ * Attempt to break a stale mkdir-based lock.
+ * Returns true when the lock is gone (either removed or already absent),
+ * false when the lock is still live (within staleMs).
+ *
+ * @param {string} lockPath
+ * @param {number} staleMs
+ * @returns {boolean}
+ */
+function tryBreakStaleLock(lockPath, staleMs) {
+  try {
+    const stat = fs.statSync(lockPath);
+    if (Date.now() - stat.mtimeMs > staleMs) {
+      try { fs.rmdirSync(lockPath); } catch { /* ignore */ }
+      return true;
+    }
+  } catch {
+    return true; // lock disappeared
+  }
+  return false;
 }
 
 /**
@@ -176,20 +228,12 @@ function acquireLock(lockPath, timeoutMs = 30000, staleMs = 60000) {
       fs.mkdirSync(lockPath);
       return true;
     } catch {
-      // Check whether the lock is stale
-      try {
-        const stat = fs.statSync(lockPath);
-        if (Date.now() - stat.mtimeMs > staleMs) {
-          try { fs.rmdirSync(lockPath); } catch { /* ignore */ }
-          continue;
-        }
-      } catch {
-        continue; // lock disappeared — retry
+      if (!tryBreakStaleLock(lockPath, staleMs)) {
+        // Wait 100ms before retrying (Atomics.wait avoids shell dependency)
+        try {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+        } catch { /* Node < 16 fallback: busy-wait */ }
       }
-      // Wait 100ms before retrying (Atomics.wait avoids shell dependency)
-      try {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-      } catch { /* Node < 16 fallback: busy-wait */ }
     }
   }
   return false;
@@ -217,14 +261,16 @@ function releaseLock(lockPath) {
  *   category: string,
  *   createdBy?: string
  * }} entry
+ * @param {number} [lockTimeoutMs=30000] optional lock timeout for testability
  */
-function updateIndex(worktreePath, entry) {
+function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
   validateSlug(entry.slug);
   const featuresDir = path.join(worktreePath, '.features');
+  fs.mkdirSync(featuresDir, { recursive: true });
   const lockPath = path.join(featuresDir, '.kb.lock');
   const indexPath = path.join(featuresDir, 'index.json');
 
-  if (!acquireLock(lockPath)) {
+  if (!acquireLock(lockPath, lockTimeoutMs)) {
     throw new Error('Failed to acquire .features/.kb.lock within timeout');
   }
 
@@ -252,43 +298,45 @@ function updateIndex(worktreePath, entry) {
 }
 
 /**
- * Mark KBs as stale whose referencedFiles overlap with the given file list.
- * Unlike checkStaleness (git-based), this programmatically flags overlap.
- * Returns the list of slugs that have overlapping referenced files.
+ * Find KBs whose referencedFiles overlap with the given changed file list.
+ * Uses directory-boundary matching to avoid false positives (e.g., `src/foo`
+ * matching `src/foobar`). Returns the list of slugs with overlapping files.
  *
  * @param {string} worktreePath
  * @param {string[]} changedFiles
  * @returns {string[]} slugs that have overlapping referenced files
  */
-function markStale(worktreePath, changedFiles) {
+function findOverlapping(worktreePath, changedFiles) {
   const index = loadIndex(worktreePath);
   if (!index) return [];
 
-  const staleSlugsList = [];
+  const overlappingSlugs = [];
   for (const [slug, entry] of Object.entries(index.features)) {
     const refs = entry.referencedFiles || [];
     const overlap = refs.some(ref =>
-      changedFiles.some(f => f === ref || f.startsWith(ref) || ref.startsWith(f))
+      changedFiles.some(f => f === ref || f.startsWith(ref + '/') || ref.startsWith(f + '/'))
     );
-    if (overlap) staleSlugsList.push(slug);
+    if (overlap) overlappingSlugs.push(slug);
   }
-  return staleSlugsList;
+  return overlappingSlugs;
 }
 
 /**
  * Remove a KB entry from index.json and delete its directory.
- * No-op if the slug does not exist in the index.
+ * No-op if the slug does not exist in the index or if .features/ is absent.
  *
  * @param {string} worktreePath
  * @param {string} slug
+ * @param {number} [lockTimeoutMs=30000] optional lock timeout for testability
  */
-function removeEntry(worktreePath, slug) {
+function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
   validateSlug(slug);
   const featuresDir = path.join(worktreePath, '.features');
+  if (!fs.existsSync(featuresDir)) return;
   const lockPath = path.join(featuresDir, '.kb.lock');
   const indexPath = path.join(featuresDir, 'index.json');
 
-  if (!acquireLock(lockPath)) {
+  if (!acquireLock(lockPath, lockTimeoutMs)) {
     throw new Error('Failed to acquire .features/.kb.lock within timeout');
   }
 
@@ -296,14 +344,11 @@ function removeEntry(worktreePath, slug) {
     let index = { version: 1, features: {} };
     try {
       index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-    } catch {
-      return; // nothing to remove
-    }
+    } catch { /* no index to modify */ }
 
     delete index.features[slug];
     fs.writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n');
 
-    // Remove KB directory
     const kbDir = path.join(featuresDir, slug);
     try {
       fs.rmSync(kbDir, { recursive: true, force: true });
@@ -332,7 +377,7 @@ function listKBs(worktreePath) {
 //   node feature-kb.cjs list <worktree>
 //   node feature-kb.cjs stale <worktree> [slug]
 //   node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' --category=X [--description=Y] [--createdBy=Z]
-//   node feature-kb.cjs mark-stale <worktree> <file1> [file2...]
+//   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
 //   node feature-kb.cjs remove <worktree> <slug>
 // ---------------------------------------------------------------------------
 
@@ -359,108 +404,118 @@ if (require.main === module) {
     '  node feature-kb.cjs list <worktree>',
     '  node feature-kb.cjs stale <worktree> [slug]',
     '  node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' --category=X [--description=Y] [--createdBy=Z]',
-    '  node feature-kb.cjs mark-stale <worktree> <file1> [file2...]',
+    '  node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]',
     '  node feature-kb.cjs remove <worktree> <slug>',
   ].join('\n');
+
+  /**
+   * Resolve and validate a worktree path argument.
+   * Exits with an error message if missing or not a valid directory.
+   * @param {string[]} cliArgv
+   * @returns {string}
+   */
+  function requireWorktree(cliArgv) {
+    const p = cliArgv[1] ? path.resolve(cliArgv[1]) : null;
+    if (!p) {
+      process.stderr.write('Error: missing worktree argument\n' + USAGE + '\n');
+      process.exit(1);
+    }
+    if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) {
+      process.stderr.write(`Error: '${p}' is not a valid directory\n`);
+      process.exit(1);
+    }
+    return p;
+  }
+
+  /** @type {Record<string, () => void>} */
+  const dispatch = {
+    list() {
+      const worktreePath = requireWorktree(argv);
+      const entries = listKBs(worktreePath);
+      process.stderr.write(`[feature-kb] mode=list worktree=${worktreePath} count=${entries.length}\n`);
+      process.stdout.write(JSON.stringify(entries, null, 2) + '\n');
+      process.exit(0);
+    },
+
+    stale() {
+      const worktreePath = requireWorktree(argv);
+      const slug = argv[2];
+      if (slug) {
+        const result = checkStaleness(worktreePath, slug);
+        process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} slug=${slug} stale=${result.stale}\n`);
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      } else {
+        const result = checkAllStaleness(worktreePath);
+        process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} all=true\n`);
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      }
+      process.exit(0);
+    },
+
+    'update-index'() {
+      const worktreePath = requireWorktree(argv);
+      const kv = parseKeyValue(argv.slice(2));
+      if (!kv.slug || !kv.name || !kv.directories || !kv.referencedFiles || !kv.category) {
+        process.stderr.write('Error: missing required flags (slug, name, directories, referencedFiles, category)\n' + USAGE + '\n');
+        process.exit(1);
+      }
+      let directories;
+      let referencedFiles;
+      try {
+        directories = JSON.parse(kv.directories);
+        referencedFiles = JSON.parse(kv.referencedFiles);
+      } catch (e) {
+        process.stderr.write(`Error: --directories and --referencedFiles must be valid JSON arrays: ${e.message}\n`);
+        process.exit(1);
+      }
+      updateIndex(worktreePath, {
+        slug: kv.slug,
+        name: kv.name,
+        description: kv.description,
+        directories,
+        referencedFiles,
+        category: kv.category,
+        createdBy: kv.createdBy,
+      });
+      process.stderr.write(`[feature-kb] mode=update-index worktree=${worktreePath} slug=${kv.slug}\n`);
+      process.stdout.write(JSON.stringify({ ok: true, slug: kv.slug }) + '\n');
+      process.exit(0);
+    },
+
+    'find-overlapping'() {
+      const worktreePath = requireWorktree(argv);
+      const changedFiles = argv.slice(2);
+      const overlapping = findOverlapping(worktreePath, changedFiles);
+      process.stderr.write(`[feature-kb] mode=find-overlapping worktree=${worktreePath} overlappingCount=${overlapping.length}\n`);
+      process.stdout.write(JSON.stringify(overlapping, null, 2) + '\n');
+      process.exit(0);
+    },
+
+    remove() {
+      const worktreePath = requireWorktree(argv);
+      const slug = argv[2];
+      if (!slug) {
+        process.stderr.write('Error: missing slug argument\n' + USAGE + '\n');
+        process.exit(1);
+      }
+      removeEntry(worktreePath, slug);
+      process.stderr.write(`[feature-kb] mode=remove worktree=${worktreePath} slug=${slug}\n`);
+      process.stdout.write(JSON.stringify({ ok: true, slug }) + '\n');
+      process.exit(0);
+    },
+  };
 
   if (!subcommand) {
     process.stderr.write(USAGE + '\n');
     process.exit(1);
   }
 
-  if (subcommand === 'list') {
-    const worktreePath = argv[1] ? path.resolve(argv[1]) : null;
-    if (!worktreePath) {
-      process.stderr.write('Error: missing worktree argument\n' + USAGE + '\n');
-      process.exit(1);
-    }
-    const entries = listKBs(worktreePath);
-    process.stderr.write(`[feature-kb] mode=list worktree=${worktreePath} count=${entries.length}\n`);
-    process.stdout.write(JSON.stringify(entries, null, 2) + '\n');
-    process.exit(0);
+  const handler = dispatch[subcommand];
+  if (!handler) {
+    process.stderr.write(`Error: unknown subcommand '${subcommand}'\n` + USAGE + '\n');
+    process.exit(1);
   }
-
-  if (subcommand === 'stale') {
-    const worktreePath = argv[1] ? path.resolve(argv[1]) : null;
-    if (!worktreePath) {
-      process.stderr.write('Error: missing worktree argument\n' + USAGE + '\n');
-      process.exit(1);
-    }
-    const slug = argv[2];
-    if (slug) {
-      const result = checkStaleness(worktreePath, slug);
-      process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} slug=${slug} stale=${result.stale}\n`);
-      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-    } else {
-      const result = checkAllStaleness(worktreePath);
-      process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} all=true\n`);
-      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-    }
-    process.exit(0);
-  }
-
-  if (subcommand === 'update-index') {
-    const worktreePath = argv[1] ? path.resolve(argv[1]) : null;
-    if (!worktreePath) {
-      process.stderr.write('Error: missing worktree argument\n' + USAGE + '\n');
-      process.exit(1);
-    }
-    const kv = parseKeyValue(argv.slice(2));
-    if (!kv.slug || !kv.name || !kv.directories || !kv.referencedFiles || !kv.category) {
-      process.stderr.write('Error: missing required flags (slug, name, directories, referencedFiles, category)\n' + USAGE + '\n');
-      process.exit(1);
-    }
-    let directories;
-    let referencedFiles;
-    try {
-      directories = JSON.parse(kv.directories);
-      referencedFiles = JSON.parse(kv.referencedFiles);
-    } catch (e) {
-      process.stderr.write(`Error: --directories and --referencedFiles must be valid JSON arrays: ${e.message}\n`);
-      process.exit(1);
-    }
-    updateIndex(worktreePath, {
-      slug: kv.slug,
-      name: kv.name,
-      description: kv.description,
-      directories,
-      referencedFiles,
-      category: kv.category,
-      createdBy: kv.createdBy,
-    });
-    process.stderr.write(`[feature-kb] mode=update-index worktree=${worktreePath} slug=${kv.slug}\n`);
-    process.stdout.write(JSON.stringify({ ok: true, slug: kv.slug }) + '\n');
-    process.exit(0);
-  }
-
-  if (subcommand === 'mark-stale') {
-    const worktreePath = argv[1] ? path.resolve(argv[1]) : null;
-    if (!worktreePath) {
-      process.stderr.write('Error: missing worktree argument\n' + USAGE + '\n');
-      process.exit(1);
-    }
-    const changedFiles = argv.slice(2);
-    const stale = markStale(worktreePath, changedFiles);
-    process.stderr.write(`[feature-kb] mode=mark-stale worktree=${worktreePath} staleCount=${stale.length}\n`);
-    process.stdout.write(JSON.stringify(stale, null, 2) + '\n');
-    process.exit(0);
-  }
-
-  if (subcommand === 'remove') {
-    const worktreePath = argv[1] ? path.resolve(argv[1]) : null;
-    const slug = argv[2];
-    if (!worktreePath || !slug) {
-      process.stderr.write('Error: missing worktree or slug argument\n' + USAGE + '\n');
-      process.exit(1);
-    }
-    removeEntry(worktreePath, slug);
-    process.stderr.write(`[feature-kb] mode=remove worktree=${worktreePath} slug=${slug}\n`);
-    process.stdout.write(JSON.stringify({ ok: true, slug }) + '\n');
-    process.exit(0);
-  }
-
-  process.stderr.write(`Error: unknown subcommand '${subcommand}'\n` + USAGE + '\n');
-  process.exit(1);
+  handler();
 }
 
-module.exports = { loadIndex, loadKBContent, checkStaleness, checkAllStaleness, updateIndex, markStale, removeEntry, listKBs, validateSlug };
+module.exports = { loadIndex, loadKBContent, checkStaleness, checkAllStaleness, updateIndex, findOverlapping, removeEntry, listKBs, validateSlug };
