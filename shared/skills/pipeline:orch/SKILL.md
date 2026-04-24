@@ -19,7 +19,7 @@ Meta-orchestrator chaining implement → review → resolve with status reportin
 
 ## Feature Knowledge
 
-`FEATURE_KNOWLEDGE` loading is handled by each sub-orchestrator (implement:orch Phase 1.5, review:orch Phase 2b, resolve:orch Phase 1.5). Pipeline:orch does NOT load KBs itself — it delegates to the inner skills which handle loading, staleness checks, and agent distribution independently.
+`FEATURE_KNOWLEDGE` loading is handled by each sub-orchestrator (implement:orch Phase 2, review:orch Phase 3, resolve:orch Phase 2). Pipeline:orch does NOT load KBs itself — it delegates to the inner skills which handle loading, staleness checks, and agent distribution independently.
 
 ## Cost Communication
 
