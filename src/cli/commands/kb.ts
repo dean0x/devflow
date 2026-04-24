@@ -19,6 +19,7 @@ interface FeatureKbModule {
   listKBs: (worktreePath: string) => Array<{ slug: string; name: string; category: string; directories: string[]; lastUpdated: string }>;
   checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
+  findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string) => void;
   validateSlug: (slug: string) => void;
 }
@@ -173,7 +174,7 @@ kbCommand
     const dirList = directories.map((d) => `"${d}"`).join(', ');
 
     const s = p.spinner();
-    s.start('Running KB Builder agent...');
+    s.start('Creating KB...');
 
     const prompt = [
       `You are the KB Builder agent. Create a feature knowledge base for the following area:`,
@@ -202,7 +203,7 @@ kbCommand
     try {
       execFileSync('claude', [
         '-p', prompt,
-        '--allowedTools', 'Read,Grep,Glob,Write,Bash',
+        '--allowedTools', 'Read,Grep,Glob,Write',
         '--dangerously-skip-permissions',
       ], {
         cwd: worktreePath,
@@ -229,6 +230,15 @@ kbCommand
   .description('Refresh stale KB(s). Omit slug to refresh all stale KBs.')
   .action(async (slug?: string) => {
     p.intro(color.cyan(slug ? `Refresh KB: ${slug}` : 'Refresh Stale KBs'));
+
+    if (slug) {
+      try {
+        featureKb.validateSlug(slug);
+      } catch (err) {
+        p.log.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    }
 
     if (!isClaudeCliAvailable()) {
       p.log.error('claude CLI not found on PATH. Install Claude Code first.');
@@ -287,7 +297,7 @@ kbCommand
       try {
         execFileSync('claude', [
           '-p', prompt,
-          '--allowedTools', 'Read,Grep,Glob,Write,Bash',
+          '--allowedTools', 'Read,Grep,Glob,Write',
           '--dangerously-skip-permissions',
         ], {
           cwd: worktreePath,
