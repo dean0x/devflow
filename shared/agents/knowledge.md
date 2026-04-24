@@ -15,7 +15,7 @@ tools:
   - Write
 ---
 
-# KB Builder Agent
+# Knowledge Agent
 
 ## Input Context
 

@@ -15,7 +15,7 @@ devflow/
 │   │   │   └── references/
 │   │   ├── software-design/
 │   │   └── ...
-│   └── agents/                       # SINGLE SOURCE OF TRUTH (12 shared agents)
+│   └── agents/                       # SINGLE SOURCE OF TRUTH (13 shared agents)
 │       ├── git.md
 │       ├── synthesizer.md
 │       ├── coder.md
@@ -138,7 +138,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 ### Shared vs Plugin-Specific Agents
 
-- **Shared** (12): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`
+- **Shared** (13): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`
 - **Plugin-specific** (1): `claude-md-auditor` — committed directly in its plugin
 
 ## Settings Override

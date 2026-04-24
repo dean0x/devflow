@@ -404,10 +404,10 @@ Display completion summary:
 
 **Requires:** Phase 3 and Phase 8 exploration outputs
 
-If the exploration in earlier phases covered a feature area without an existing KB, spawn KB Builder agent to create one:
+If the exploration in earlier phases covered a feature area without an existing KB, spawn Knowledge agent to create one:
 
 ```
-Agent(subagent_type="KB Builder"):
+Agent(subagent_type="Knowledge"):
 "FEATURE_SLUG: {slug}
 FEATURE_NAME: {name}
 EXPLORATION_OUTPUTS: {combined exploration outputs from Phases 3+8}
@@ -417,9 +417,9 @@ KNOWLEDGE_CONTEXT: {from Phase 2}"
 
 Skip if all explored areas already have matching KBs.
 
-If a stale KB was detected in Phase 2, also refresh it — spawn KB Builder with `EXISTING_KB` content + `CHANGED_FILES` from staleness check.
+If a stale KB was detected in Phase 2, also refresh it — spawn Knowledge agent with `EXISTING_KB` content + `CHANGED_FILES` from staleness check.
 
-**Failure handling**: KB Builder failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
+**Failure handling**: Knowledge agent failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
 
 ---
 
@@ -486,7 +486,7 @@ If a stale KB was detected in Phase 2, also refresh it — spawn KB Builder with
 │
 └─ Block 7: Feature KB (Conditional)
    └─ Phase 15: Feature KB Generation
-      └─ KB Builder agent (if new/stale feature area)
+      └─ Knowledge agent (if new/stale feature area)
 ```
 
 ## Principles

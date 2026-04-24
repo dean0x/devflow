@@ -153,7 +153,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - `/self-review` — Simplifier then Scrutinizer (sequential); consumes knowledge via index + on-demand Read via `devflow:apply-knowledge`
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
-**Shared agents** (13): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, kb-builder
+**Shared agents** (13): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge
 
 **Plugin-specific agents** (1): claude-md-auditor
 

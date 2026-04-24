@@ -29,7 +29,7 @@ const featureKb: FeatureKbModule = _require(
   path.join(__dirname, '..', '..', '..', 'scripts', 'hooks', 'lib', 'feature-kb.cjs')
 );
 
-/** Tools passed to `claude -p` when spawning the KB Builder agent. */
+/** Tools passed to `claude -p` when spawning the Knowledge agent. */
 const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write,Bash';
 
 /**
@@ -187,7 +187,7 @@ kbCommand
     s.start('Creating KB...');
 
     const prompt = [
-      `You are the KB Builder agent. Create a feature knowledge base for the following area:`,
+      `You are the Knowledge agent. Create a feature knowledge base for the following area:`,
       ``,
       `FEATURE_SLUG: ${slug}`,
       `FEATURE_NAME: ${name as string}`,
@@ -281,7 +281,7 @@ kbCommand
       } catch { /* new KB */ }
 
       const prompt = [
-        `You are the KB Builder agent refreshing a stale feature knowledge base.`,
+        `You are the Knowledge agent refreshing a stale feature knowledge base.`,
         ``,
         `FEATURE_SLUG: ${kbSlug}`,
         `WORKTREE_PATH: ${worktreePath}`,

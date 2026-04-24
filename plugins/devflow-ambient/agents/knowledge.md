@@ -1,5 +1,5 @@
 ---
-name: KB Builder
+name: Knowledge
 description: Structures codebase exploration into a feature knowledge base
 model: sonnet
 skills:
@@ -15,7 +15,7 @@ tools:
   - Write
 ---
 
-# KB Builder Agent
+# Knowledge Agent
 
 ## Input Context
 

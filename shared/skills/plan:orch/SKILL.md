@@ -258,7 +258,7 @@ Otherwise: plan stays in conversation context, ready for IMPLEMENT to consume di
 If Phases 4-5 explored a feature area that does NOT have a matching KB:
 
 1. Identify the feature area slug and name from the explored directories
-2. Spawn Agent(subagent_type="KB Builder"):
+2. Spawn Agent(subagent_type="Knowledge"):
    ```
    "FEATURE_SLUG: {slug}
    FEATURE_NAME: {name}
@@ -270,9 +270,9 @@ If Phases 4-5 explored a feature area that does NOT have a matching KB:
 
 Skip if all explored areas already have matching KBs.
 
-If a stale KB was detected in Phase 2, also refresh it here — spawn KB Builder with `EXISTING_KB` content + `CHANGED_FILES` from staleness check.
+If a stale KB was detected in Phase 2, also refresh it here — spawn Knowledge agent with `EXISTING_KB` content + `CHANGED_FILES` from staleness check.
 
-**Failure handling**: KB Builder failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
+**Failure handling**: Knowledge agent failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
 
 **Produces:** `.features/{slug}/KNOWLEDGE.md`, updated `.features/index.json`
 **Requires:** Phase 4-5 exploration outputs
@@ -308,6 +308,6 @@ Before presenting output, verify every phase was announced:
 - [ ] Phase 9: Design Review Lite → REVIEW_NOTES captured
 - [ ] Phase 10: Present → Output delivered to user
 - [ ] Phase 11: Persist → Artifact written (or skipped with stated reason)
-- [ ] Phase 12: Feature KB Generation → KB Builder spawned for new feature areas (or skipped if KB exists)
+- [ ] Phase 12: Feature KB Generation → Knowledge agent spawned for new feature areas (or skipped if KB exists)
 
 If any phase is unchecked, execute it before proceeding.
