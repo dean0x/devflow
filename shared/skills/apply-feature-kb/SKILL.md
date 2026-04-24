@@ -1,11 +1,7 @@
 ---
 name: apply-feature-kb
 description: Consumption algorithm for FEATURE_KNOWLEDGE variable — pre-computed feature context
-trigger: agent-loaded
-allowed-tools:
-  - Read
-  - Grep
-  - Glob
+allowed-tools: Read
 ---
 
 # Apply Feature Knowledge

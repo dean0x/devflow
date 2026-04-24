@@ -47,7 +47,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
     agents: [],
-    skills: ['apply-knowledge', 'apply-feature-kb', 'feature-kb', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
+    skills: ['apply-knowledge', 'apply-feature-kb', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
     name: 'devflow-plan',
