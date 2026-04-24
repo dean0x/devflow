@@ -32,10 +32,10 @@ If no unresolved review found: halt with "No unresolved review found. Run a revi
 
 Extract branch slug from the directory path.
 
-<!-- Phase 1.5 rather than Step 0d: ambient mode has no Phase 0 (no worktree
+<!-- Phase 2 rather than Step 0d: ambient mode has no Phase 0 (no worktree
      discovery, no pre-flight git check, no TARGET_DIR selection — those are
      handled by Phase 1 here). Same content as resolve.md Step 0d. -->
-## Phase 1.5: Load Project Knowledge
+## Phase 2: Load Project Knowledge
 
 **Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** REVIEW_DIR
@@ -48,7 +48,7 @@ Also load feature knowledge:
 3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
-## Phase 2: Parse Issues
+## Phase 3: Parse Issues
 
 **Produces:** ISSUES
 **Requires:** REVIEW_DIR
@@ -61,7 +61,7 @@ For each issue, extract: id (generated), file, line, severity, category (blockin
 
 If no actionable issues found: "Review is clean — no issues to resolve." → stop.
 
-## Phase 3: Analyze & Batch
+## Phase 4: Analyze & Batch
 
 **Produces:** BATCHES
 **Requires:** ISSUES
@@ -73,7 +73,7 @@ Group issues by file/function for efficient resolution:
 
 Determine execution: batches with no shared files can run in parallel.
 
-## Phase 4: Resolve (Parallel)
+## Phase 5: Resolve (Parallel)
 
 **Produces:** RESOLUTION_RESULTS
 **Requires:** BATCHES, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_SLUG
@@ -84,15 +84,15 @@ Each receives:
 - **ISSUES**: Array of issues in the batch
 - **BRANCH**: Branch slug
 - **BATCH_ID**: Identifier for this batch
-- **KNOWLEDGE_CONTEXT**: Knowledge index from Phase 1.5 (or `(none)`). Resolvers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand.
-- **FEATURE_KNOWLEDGE**: Feature area context from Phase 1.5 (or `(none)`). Follow `devflow:apply-feature-kb` for consumption algorithm.
+- **KNOWLEDGE_CONTEXT**: Knowledge index from Phase 2 (or `(none)`). Resolvers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand.
+- **FEATURE_KNOWLEDGE**: Feature area context from Phase 2 (or `(none)`). Follow `devflow:apply-feature-kb` for consumption algorithm.
 
 Resolvers follow a 3-tier risk approach:
 - **Standard fixes**: Applied directly
 - **Careful fixes** (public API, shared state, >3 files): Systematic refactoring — understand context, plan, test, implement, verify
 - **Architectural overhaul**: Defer to tech debt (LAST RESORT — avoided at almost all costs, only when complete system redesign required)
 
-## Phase 5: Collect & Simplify
+## Phase 6: Collect & Simplify
 
 **Produces:** SIMPLIFICATION_RESULTS
 **Requires:** RESOLUTION_RESULTS
@@ -102,7 +102,7 @@ Aggregate results from all Resolver agents:
 
 Spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
-## Phase 6: Report
+## Phase 7: Report
 
 **Requires:** RESOLUTION_RESULTS, SIMPLIFICATION_RESULTS, REVIEW_DIR
 
@@ -129,11 +129,11 @@ Report to user:
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Target Review Directory → REVIEW_DIR captured
-- [ ] Phase 1.5: Load Project Knowledge → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
-- [ ] Phase 2: Parse Issues → ISSUES captured (or stopped: no actionable issues)
-- [ ] Phase 3: Analyze & Batch → BATCHES captured
-- [ ] Phase 4: Resolve → RESOLUTION_RESULTS captured per batch
-- [ ] Phase 5: Collect & Simplify → SIMPLIFICATION_RESULTS captured
-- [ ] Phase 6: Report → resolution-summary.md written
+- [ ] Phase 2: Load Project Knowledge → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
+- [ ] Phase 3: Parse Issues → ISSUES captured (or stopped: no actionable issues)
+- [ ] Phase 4: Analyze & Batch → BATCHES captured
+- [ ] Phase 5: Resolve → RESOLUTION_RESULTS captured per batch
+- [ ] Phase 6: Collect & Simplify → SIMPLIFICATION_RESULTS captured
+- [ ] Phase 7: Report → resolution-summary.md written
 
 If any phase is unchecked, execute it before proceeding.

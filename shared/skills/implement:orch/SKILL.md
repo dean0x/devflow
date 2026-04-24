@@ -28,10 +28,10 @@ Before starting the full pipeline, check for re-validation context:
 
 If this condition is true → execute **Re-validation Path**:
 1. **Branch safety check**: If current branch is protected (main, master, etc.), execute Phase 1 first to create/switch to a work branch. If already on a work branch, skip Phase 1.
-2. Skip Phases 2-3 (no Coder needed)
-3. Run Phase 4 (FILES_CHANGED Detection) using the existing branch
-4. Run Phase 5 (Quality Gates) on detected changes
-5. Proceed to Phase 6 (Completion)
+2. Skip Phases 3-4 (no Coder needed)
+3. Run Phase 5 (FILES_CHANGED Detection) using the existing branch
+4. Run Phase 6 (Quality Gates) on detected changes
+5. Proceed to Phase 7 (Completion)
 
 If not → proceed with the full pipeline below.
 
@@ -56,7 +56,7 @@ Return the branch setup summary."
 
 Capture `branch name` and `BASE_BRANCH` from Git agent output for use throughout the pipeline.
 
-## Phase 1.5: Load Feature Knowledge
+## Phase 2: Load Feature Knowledge
 
 **Produces:** FEATURE_KNOWLEDGE
 
@@ -66,7 +66,7 @@ Capture `branch name` and `BASE_BRANCH` from Git agent output for use throughout
 4. For each relevant KB: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`, mark stale if needed.
 5. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no matches).
 
-## Phase 2: Plan Synthesis
+## Phase 3: Plan Synthesis
 
 **Produces:** EXECUTION_PLAN
 **Requires:** FEATURE_BRANCH
@@ -82,7 +82,7 @@ Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
-## Phase 3: Coder Execution
+## Phase 4: Coder Execution
 
 **Produces:** CODER_COMMITS, PRE_CODER_SHA
 **Requires:** EXECUTION_PLAN, FEATURE_BRANCH
@@ -93,11 +93,11 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **TASK_ID**: Generated from timestamp (e.g., `task-2026-03-19_1430`)
 - **TASK_DESCRIPTION**: From conversation context
 - **BASE_BRANCH**: Current branch (or newly created branch from Phase 1)
-- **EXECUTION_PLAN**: From Phase 2
+- **EXECUTION_PLAN**: From Phase 3
 - **PATTERNS**: Codebase patterns from conversation context
 - **CREATE_PR**: `false` (commit only, no push)
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
-- **FEATURE_KNOWLEDGE**: From Phase 1.5 (or `(none)`)
+- **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -107,7 +107,7 @@ If Coder returns **BLOCKED**, halt the pipeline and report to user.
 
 **Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.docs/handoff.md` using the Write tool. The next Coder reads this on startup (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
 
-## Phase 4: FILES_CHANGED Detection
+## Phase 5: FILES_CHANGED Detection
 
 **Produces:** FILES_CHANGED
 **Requires:** PRE_CODER_SHA
@@ -120,7 +120,7 @@ git diff --name-only {starting_sha}...HEAD
 
 Pass FILES_CHANGED to all quality gate agents.
 
-## Phase 5: Quality Gates
+## Phase 6: Quality Gates
 
 **Produces:** GATE_RESULTS
 **Requires:** FILES_CHANGED, CODER_COMMITS
@@ -129,22 +129,22 @@ Run sequentially — each gate must pass before the next:
 
 1. `Agent(subagent_type="Validator")` (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
 2. `Agent(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
-3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED, with `FEATURE_KNOWLEDGE` from Phase 1.5
+3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED, with `FEATURE_KNOWLEDGE` from Phase 2
 4. `Agent(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
 5. `Agent(subagent_type="Evaluator")` — verify implementation matches original request — retry up to 2× if misalignment found
 6. `Agent(subagent_type="Tester")` — scenario-based acceptance testing from user's perspective — retry up to 2× if QA fails
 
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
 
-## Phase 6: Completion
+## Phase 7: Completion
 
 **Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS
 
 Cleanup: delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
 
-After quality gates pass, check if FILES_CHANGED overlap with any KB's `referencedFiles` and mark stale:
+After quality gates pass, check for overlapping KBs whose `referencedFiles` intersect FILES_CHANGED:
 ```bash
-node scripts/hooks/lib/feature-kb.cjs mark-stale "{worktree}" {files_changed...}
+node scripts/hooks/lib/feature-kb.cjs find-overlapping "{worktree}" {files_changed...}
 ```
 This signals staleness for the next plan cycle.
 
@@ -166,11 +166,11 @@ Report results:
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
-- [ ] Phase 1.5: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped)
-- [ ] Phase 2: Plan Synthesis → EXECUTION_PLAN captured
-- [ ] Phase 3: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
-- [ ] Phase 4: FILES_CHANGED Detection → FILES_CHANGED captured
-- [ ] Phase 5: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)
-- [ ] Phase 6: Completion → Results reported, stale KBs marked
+- [ ] Phase 2: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped)
+- [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured
+- [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
+- [ ] Phase 5: FILES_CHANGED Detection → FILES_CHANGED captured
+- [ ] Phase 6: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)
+- [ ] Phase 7: Completion → Results reported, overlapping KBs checked
 
 If any phase is unchecked, execute it before proceeding.

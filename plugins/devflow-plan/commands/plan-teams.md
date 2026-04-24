@@ -453,7 +453,7 @@ If the feature does not already have a GitHub issue, create via `gh issue create
 
 Display: artifact path, issue URL, gap analysis summary, design review summary, suggested next step (`/implement`).
 
-#### Phase 14.5: Feature KB Generation (Conditional)
+#### Phase 15: Feature KB Generation (Conditional)
 
 **Requires:** Phase 3 and Phase 8 exploration outputs
 

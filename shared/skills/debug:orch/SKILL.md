@@ -24,7 +24,7 @@ This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Exclude
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
-## Phase 0: Load Knowledge Index (Orchestrator-Local)
+## Phase 1: Load Knowledge Index (Orchestrator-Local)
 
 **Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
@@ -43,7 +43,7 @@ Also load feature knowledge:
 4. Use `FEATURE_KNOWLEDGE` **locally** for hypothesis generation — feature-specific gotchas and anti-patterns suggest root causes
 5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as KNOWLEDGE_CONTEXT)
 
-## Phase 1: Hypothesize
+## Phase 2: Hypothesize
 
 **Produces:** HYPOTHESES
 **Requires:** KNOWLEDGE_CONTEXT
@@ -56,7 +56,7 @@ Analyze the bug description, error messages, and conversation context. Generate 
 
 If fewer than 3 hypotheses are possible, proceed with 2.
 
-## Phase 2: Investigate (Parallel)
+## Phase 3: Investigate (Parallel)
 
 **Produces:** INVESTIGATION_RESULTS
 **Requires:** HYPOTHESES
@@ -67,7 +67,7 @@ Spawn one `Agent(subagent_type="Explore")` per hypothesis **in a single message*
 - Must provide file:line references for all evidence
 - Returns verdict: **CONFIRMED** | **DISPROVED** | **PARTIAL** (some evidence supports, some contradicts)
 
-## Phase 3: Converge
+## Phase 4: Converge
 
 **Produces:** CONVERGENCE_DECISION
 **Requires:** INVESTIGATION_RESULTS
@@ -78,7 +78,7 @@ Evaluate investigation results:
 - **Multiple PARTIAL**: Look for a unifying root cause that explains all partial evidence
 - **All DISPROVED**: Report honestly — "No root cause identified from initial hypotheses." Generate 2-3 second-round hypotheses if conversation context suggests avenues not yet explored.
 
-## Phase 4: Report
+## Phase 5: Report
 
 **Produces:** ROOT_CAUSE_REPORT
 **Requires:** CONVERGENCE_DECISION, INVESTIGATION_RESULTS
@@ -90,7 +90,7 @@ Present root cause analysis:
 - **Root cause**: Clear statement of what's wrong and why
 - **Recommended fix**: Specific changes with file references
 
-## Phase 5: Offer Fix
+## Phase 6: Offer Fix
 
 **Requires:** ROOT_CAUSE_REPORT
 
@@ -108,11 +108,11 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 Before reporting results, verify every phase was announced:
 
-- [ ] Phase 0: Load Knowledge Index → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
-- [ ] Phase 1: Hypothesize → HYPOTHESES captured (3-5 distinct)
-- [ ] Phase 2: Investigate → INVESTIGATION_RESULTS captured per hypothesis
-- [ ] Phase 3: Converge → CONVERGENCE_DECISION captured
-- [ ] Phase 4: Report → ROOT_CAUSE_REPORT presented
-- [ ] Phase 5: Offer Fix → User asked, response handled
+- [ ] Phase 1: Load Knowledge Index → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
+- [ ] Phase 2: Hypothesize → HYPOTHESES captured (3-5 distinct)
+- [ ] Phase 3: Investigate → INVESTIGATION_RESULTS captured per hypothesis
+- [ ] Phase 4: Converge → CONVERGENCE_DECISION captured
+- [ ] Phase 5: Report → ROOT_CAUSE_REPORT presented
+- [ ] Phase 6: Offer Fix → User asked, response handled
 
 If any phase is unchecked, execute it before proceeding.

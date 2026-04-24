@@ -29,7 +29,7 @@ For GUIDED depth, the main session performs exploration directly:
 
 ## ORCHESTRATED Pipeline
 
-### Phase 0.5: Load Feature Knowledge
+### Phase 1: Load Feature Knowledge
 
 **Produces:** FEATURE_KNOWLEDGE
 
@@ -40,7 +40,7 @@ For GUIDED depth, the main session performs exploration directly:
 
 **Explore agent framing**: "The KB is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the KB doesn't cover and things that may have changed."
 
-### Phase 1: Orient
+### Phase 2: Orient
 
 **Produces:** ORIENT_OUTPUT
 
@@ -50,7 +50,7 @@ Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the 
 - Entry points and key abstractions
 - Related patterns and conventions
 
-### Phase 2: Explore
+### Phase 3: Explore
 
 **Produces:** EXPLORE_OUTPUT
 **Requires:** ORIENT_OUTPUT
@@ -63,7 +63,7 @@ Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **i
 
 Adjust explorer focus based on the specific exploration question.
 
-### Phase 3: Synthesize
+### Phase 4: Synthesize
 
 **Produces:** MERGED_FINDINGS
 **Requires:** EXPLORE_OUTPUT
@@ -74,7 +74,7 @@ Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined f
 - Resolve any contradictions between explorer findings
 - Organize into the Output format below
 
-### Phase 4: Present
+### Phase 5: Present
 
 **Requires:** MERGED_FINDINGS
 
@@ -105,10 +105,10 @@ Structured exploration findings with concrete code references:
 
 Before presenting findings, verify every phase was announced:
 
-- [ ] Phase 0.5: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.features/` absent)
-- [ ] Phase 1: Orient → ORIENT_OUTPUT captured
-- [ ] Phase 2: Explore → EXPLORE_OUTPUT captured
-- [ ] Phase 3: Synthesize → MERGED_FINDINGS captured
-- [ ] Phase 4: Present → Findings delivered with file:line references
+- [ ] Phase 1: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.features/` absent)
+- [ ] Phase 2: Orient → ORIENT_OUTPUT captured
+- [ ] Phase 3: Explore → EXPLORE_OUTPUT captured
+- [ ] Phase 4: Synthesize → MERGED_FINDINGS captured
+- [ ] Phase 5: Present → Findings delivered with file:line references
 
 If any phase is unchecked, execute it before proceeding.

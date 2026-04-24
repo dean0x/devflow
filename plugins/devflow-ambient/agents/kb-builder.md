@@ -4,6 +4,8 @@ description: Structures codebase exploration into a feature knowledge base
 model: sonnet
 skills:
   - devflow:feature-kb
+  - devflow:apply-feature-kb
+  - devflow:apply-knowledge
   - devflow:worktree-support
 tools:
   - Read

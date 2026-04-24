@@ -400,7 +400,7 @@ Display completion summary:
 - Design review summary (N anti-patterns found, M mitigated in plan)
 - Suggested next step: `/implement {artifact-path}` or `/implement #{issue-number}`
 
-#### Phase 14.5: Feature KB Generation (Conditional)
+#### Phase 15: Feature KB Generation (Conditional)
 
 **Requires:** Phase 3 and Phase 8 exploration outputs
 

@@ -58,10 +58,10 @@ describe('debug:orch — knowledge is orchestrator-local, not fanned to Explore 
 
   it('debug:orch Explore spawn blocks do NOT pass KNOWLEDGE_CONTEXT to sub-agents', () => {
     const content = loadFile('shared/skills/debug:orch/SKILL.md')
-    // Find the Phase 2 Investigate section (Explore spawns)
-    const phase2Section = extractSection(content, 'Phase 2: Investigate', '## Phase 3')
+    // Find the Phase 3 Investigate section (Explore spawns)
+    const phase3Section = extractSection(content, 'Phase 3: Investigate', '## Phase 4')
     // KNOWLEDGE_CONTEXT should NOT appear in Explore spawn block parameters
-    expect(phase2Section).not.toContain('KNOWLEDGE_CONTEXT')
+    expect(phase3Section).not.toContain('KNOWLEDGE_CONTEXT')
   })
 })
 
@@ -234,8 +234,8 @@ describe('plan:orch — knowledge loading phase', () => {
   it('Explore spawn blocks receive KNOWLEDGE_CONTEXT', () => {
     const content = loadFile('shared/skills/plan:orch/SKILL.md')
     // The Explore phase section should mention KNOWLEDGE_CONTEXT
-    const phase2 = extractSection(content, 'Phase 2: Explore', '## Phase 3')
-    expect(phase2).toContain('KNOWLEDGE_CONTEXT')
+    const phase5 = extractSection(content, 'Phase 5: Explore', '## Phase 6')
+    expect(phase5).toContain('KNOWLEDGE_CONTEXT')
   })
 })
 
@@ -249,9 +249,9 @@ describe('review:orch — knowledge loading phase', () => {
     expect(content).toMatch(/[Ll]oad.*[Kk]nowledge|[Kk]nowledge.*[Ll]oad/i)
   })
 
-  it('Phase 4 Reviews section receives KNOWLEDGE_CONTEXT', () => {
+  it('Phase 5 Reviews section receives KNOWLEDGE_CONTEXT', () => {
     const content = loadFile('shared/skills/review:orch/SKILL.md')
-    const phase4 = extractSection(content, 'Phase 4: Reviews', '## Phase 5')
-    expect(phase4).toContain('KNOWLEDGE_CONTEXT')
+    const phase5 = extractSection(content, 'Phase 5: Reviews', '## Phase 6')
+    expect(phase5).toContain('KNOWLEDGE_CONTEXT')
   })
 })
