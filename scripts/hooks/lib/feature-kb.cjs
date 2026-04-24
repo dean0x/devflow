@@ -28,6 +28,18 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+/** Sentinel returned whenever a KB is confirmed non-stale or a fallback is needed. */
+const NOT_STALE = Object.freeze({ stale: false, changedFiles: [] });
+
+/**
+ * Parse git log output into a deduplicated list of changed file paths.
+ * @param {string} output - raw stdout from `git log --name-only`
+ * @returns {string[]}
+ */
+function parseGitChangedFiles(output) {
+  return [...new Set(output.split('\n').map(l => l.trim()).filter(Boolean))];
+}
+
 /**
  * Validate that a slug is safe for use as a directory name.
  * Rejects path traversal attempts (e.g., '../etc'), absolute paths,
@@ -114,7 +126,7 @@ function loadKBContent(worktreePath, slug) {
 function checkStaleness(worktreePath, slug) {
   validateSlug(slug);
   const index = loadIndex(worktreePath);
-  if (!index || !index.features[slug]) return { stale: false, changedFiles: [] };
+  if (!index || !index.features[slug]) return NOT_STALE;
 
   const entry = index.features[slug];
 
@@ -122,11 +134,11 @@ function checkStaleness(worktreePath, slug) {
     // Check if in git repo — use execFileSync to avoid shell injection
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath, stdio: 'pipe' });
   } catch {
-    return { stale: false, changedFiles: [] }; // Non-git fallback
+    return NOT_STALE; // Non-git fallback
   }
 
   const files = entry.referencedFiles || [];
-  if (files.length === 0) return { stale: false, changedFiles: [] };
+  if (files.length === 0) return NOT_STALE;
 
   try {
     // Use execFileSync with array args to prevent command injection.
@@ -137,10 +149,10 @@ function checkStaleness(worktreePath, slug) {
       ['log', `--after=${entry.lastUpdated}`, '--name-only', '--pretty=format:', '--', ...files],
       { cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
-    const changedFiles = [...new Set(result.split('\n').map(l => l.trim()).filter(Boolean))];
+    const changedFiles = parseGitChangedFiles(result);
     return { stale: changedFiles.length > 0, changedFiles };
   } catch {
-    return { stale: false, changedFiles: [] };
+    return NOT_STALE;
   }
 }
 
@@ -160,11 +172,7 @@ function checkAllStaleness(worktreePath) {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath, stdio: 'pipe' });
   } catch {
     // Non-git repo — all entries non-stale
-    const results = {};
-    for (const slug of Object.keys(index.features)) {
-      results[slug] = { stale: false, changedFiles: [] };
-    }
-    return results;
+    return Object.fromEntries(Object.keys(index.features).map(slug => [slug, NOT_STALE]));
   }
 
   const results = {};
@@ -172,7 +180,7 @@ function checkAllStaleness(worktreePath) {
     const entry = index.features[slug];
     const files = entry.referencedFiles || [];
     if (files.length === 0) {
-      results[slug] = { stale: false, changedFiles: [] };
+      results[slug] = NOT_STALE;
       continue;
     }
     try {
@@ -181,10 +189,10 @@ function checkAllStaleness(worktreePath) {
         ['log', `--after=${entry.lastUpdated}`, '--name-only', '--pretty=format:', '--', ...files],
         { cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
       );
-      const changedFiles = [...new Set(result.split('\n').map(l => l.trim()).filter(Boolean))];
+      const changedFiles = parseGitChangedFiles(result);
       results[slug] = { stale: changedFiles.length > 0, changedFiles };
     } catch {
-      results[slug] = { stale: false, changedFiles: [] };
+      results[slug] = NOT_STALE;
     }
   }
   return results;
@@ -283,7 +291,7 @@ function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
     const existing = index.features[entry.slug] || {};
     index.features[entry.slug] = {
       name: entry.name,
-      description: entry.description !== undefined ? entry.description : (existing.description || ''),
+      description: entry.description ?? existing.description ?? '',
       directories: entry.directories,
       referencedFiles: entry.referencedFiles,
       category: entry.category,

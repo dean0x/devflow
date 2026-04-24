@@ -29,6 +29,22 @@ const featureKb: FeatureKbModule = _require(
   path.join(__dirname, '..', '..', '..', 'scripts', 'hooks', 'lib', 'feature-kb.cjs')
 );
 
+/** Tools passed to `claude -p` when spawning the KB Builder agent. */
+const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write,Bash';
+
+/**
+ * Validate a KB slug and exit with an error message if invalid.
+ * Centralises the repeated try/catch pattern across create/refresh/remove.
+ */
+function exitOnInvalidSlug(slug: string): void {
+  try {
+    featureKb.validateSlug(slug);
+  } catch (err) {
+    p.log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+}
+
 /**
  * Get the git root for the current directory, or cwd if not in a git repo.
  */
@@ -140,13 +156,7 @@ kbCommand
   .command('create <slug>')
   .description('Create a new KB via claude -p exploration')
   .action(async (slug: string) => {
-    try {
-      featureKb.validateSlug(slug);
-    } catch (err) {
-      p.log.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    }
-
+    exitOnInvalidSlug(slug);
     p.intro(color.cyan(`Create Feature KB: ${slug}`));
 
     if (!isClaudeCliAvailable()) {
@@ -203,7 +213,7 @@ kbCommand
     try {
       execFileSync('claude', [
         '-p', prompt,
-        '--allowedTools', 'Read,Grep,Glob,Write',
+        '--allowedTools', KB_AGENT_TOOLS,
         '--dangerously-skip-permissions',
       ], {
         cwd: worktreePath,
@@ -231,14 +241,7 @@ kbCommand
   .action(async (slug?: string) => {
     p.intro(color.cyan(slug ? `Refresh KB: ${slug}` : 'Refresh Stale KBs'));
 
-    if (slug) {
-      try {
-        featureKb.validateSlug(slug);
-      } catch (err) {
-        p.log.error(err instanceof Error ? err.message : String(err));
-        process.exit(1);
-      }
-    }
+    if (slug) exitOnInvalidSlug(slug);
 
     if (!isClaudeCliAvailable()) {
       p.log.error('claude CLI not found on PATH. Install Claude Code first.');
@@ -297,7 +300,7 @@ kbCommand
       try {
         execFileSync('claude', [
           '-p', prompt,
-          '--allowedTools', 'Read,Grep,Glob,Write',
+          '--allowedTools', KB_AGENT_TOOLS,
           '--dangerously-skip-permissions',
         ], {
           cwd: worktreePath,
@@ -322,13 +325,7 @@ kbCommand
   .command('remove <slug>')
   .description('Remove a KB and its index entry')
   .action(async (slug: string) => {
-    try {
-      featureKb.validateSlug(slug);
-    } catch (err) {
-      p.log.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    }
-
+    exitOnInvalidSlug(slug);
     p.intro(color.cyan(`Remove KB: ${slug}`));
 
     const confirmed = await p.confirm({

@@ -403,7 +403,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
 
-After quality gates pass, mark stale feature KBs based on changed files:
+After quality gates pass, check for overlapping feature KBs whose `referencedFiles` intersect the changed files:
 ```bash
 node scripts/hooks/lib/feature-kb.cjs find-overlapping "{worktree}" {files_changed...}
 ```
