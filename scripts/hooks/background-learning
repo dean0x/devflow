@@ -391,6 +391,7 @@ run_sonnet_analysis() {
   DEVFLOW_BG_UPDATER=1 DEVFLOW_BG_LEARNER=1 "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --dangerously-skip-permissions \
+    --allowedTools 'Read' \
     --output-format text \
     "$PROMPT" \
     > "$RESPONSE_FILE" 2>> "$LOG_FILE" &
