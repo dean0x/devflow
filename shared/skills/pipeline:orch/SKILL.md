@@ -32,7 +32,7 @@ Classification statement must warn about scope:
 
 **Produces:** IMPLEMENT_RESULT
 
-Load `devflow:implement:orch` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → plan synthesis → Coder → FILES_CHANGED detection → quality gates → completion). The quality gates are non-negotiable: Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
+Load `devflow:implement:orch` via the Skill tool, then execute its full pipeline (Phases 1-7: pre-flight → feature knowledge → plan synthesis → Coder → FILES_CHANGED detection → quality gates → completion). The quality gates are non-negotiable: Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
 
 If implementation returns **BLOCKED**: halt entire pipeline, report blocker.
 
@@ -53,7 +53,7 @@ Auto-proceed to Phase 3.
 **Produces:** REVIEW_RESULT
 **Requires:** IMPLEMENT_RESULT
 
-Load `devflow:review:orch` via the Skill tool, then execute its full pipeline (Phases 1-6: pre-flight → incremental detection → file analysis → parallel reviewers (7 core + conditional) → synthesis → finalize). All 7 core reviewers (security, architecture, performance, complexity, consistency, testing, regression) are mandatory.
+Load `devflow:review:orch` via the Skill tool, then execute its full pipeline (Phases 1-7: pre-flight → incremental detection → knowledge index → file analysis → parallel reviewers (7 core + conditional) → synthesis → finalize). All 7 core reviewers (security, architecture, performance, complexity, consistency, testing, regression) are mandatory.
 
 Report review results (merge recommendation, issue counts).
 
@@ -75,7 +75,7 @@ If **no blocking issues**:
 **Produces:** RESOLVE_RESULT
 **Requires:** RESOLVE_DECISION, REVIEW_RESULT
 
-Load `devflow:resolve:orch` via the Skill tool, then execute its full pipeline (Phases 1-6: target review directory → parse issues → analyze & batch → parallel resolvers → collect & simplify → report).
+Load `devflow:resolve:orch` via the Skill tool, then execute its full pipeline (Phases 1-7: target review directory → project knowledge → parse issues → analyze & batch → parallel resolvers → collect & simplify → report).
 
 ## Phase 6: Summary
 
