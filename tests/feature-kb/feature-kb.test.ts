@@ -176,6 +176,7 @@ describe('updateIndex', () => {
       createdBy: 'test',
     });
     const index = loadIndex(tmp);
+    expect(index).not.toBeNull();
     expect(index!.features['payments']).toBeDefined();
     const entry = index!.features['payments'] as Record<string, unknown>;
     expect(entry.name).toBe('Payment Processing');
@@ -192,6 +193,7 @@ describe('updateIndex', () => {
       category: 'conventions',
     });
     const index = loadIndex(tmp);
+    expect(index).not.toBeNull();
     const entry = index!.features['cli-commands'] as Record<string, unknown>;
     expect(entry.name).toBe('CLI Command System Updated');
     expect(entry.category).toBe('conventions');
@@ -211,6 +213,7 @@ describe('updateIndex', () => {
     });
     const after = new Date().toISOString();
     const index = loadIndex(tmp);
+    expect(index).not.toBeNull();
     const entry = index!.features['test-slug'] as Record<string, unknown>;
     const updated = entry.lastUpdated as string;
     expect(updated >= before).toBe(true);
@@ -230,7 +233,7 @@ describe('updateIndex', () => {
       directories: [],
       referencedFiles: [],
       category: 'test',
-    }, 500)).toThrow(/lock/i);
+    }, 200)).toThrow(/lock/i);
 
     // Lock dir should still exist (not cleaned up by our failed attempt)
     expect(existsSync(lockPath)).toBe(true);
@@ -255,6 +258,7 @@ describe('updateIndex', () => {
 
     expect(existsSync(path.join(tmp, '.features'))).toBe(true);
     const index = loadIndex(tmp);
+    expect(index).not.toBeNull();
     expect(index!.features['new-feature']).toBeDefined();
   });
 });
@@ -272,6 +276,7 @@ describe('removeEntry', () => {
     removeEntry(tmp, 'cli-commands');
 
     const index = loadIndex(tmp);
+    expect(index).not.toBeNull();
     expect(index!.features['cli-commands']).toBeUndefined();
     expect(existsSync(kbDir)).toBe(false);
   });
@@ -282,6 +287,7 @@ describe('removeEntry', () => {
     expect(() => removeEntry(tmp, 'nonexistent')).not.toThrow();
     // Original entry should still exist
     const index = loadIndex(tmp);
+    expect(index).not.toBeNull();
     expect(index!.features['cli-commands']).toBeDefined();
   });
 
@@ -293,6 +299,14 @@ describe('removeEntry', () => {
 
     // Should not throw
     expect(() => removeEntry(tmp, 'nonexistent')).not.toThrow();
+  });
+
+  it('preserves corrupt index.json on remove instead of overwriting', () => {
+    const tmp = makeTmpFeatureWorktree();
+    writeFileSync(path.join(tmp, '.features', 'index.json'), 'not-valid-json');
+    removeEntry(tmp, 'nonexistent');
+    const raw = readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8');
+    expect(raw).toBe('not-valid-json');
   });
 });
 

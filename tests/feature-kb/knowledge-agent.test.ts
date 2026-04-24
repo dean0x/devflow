@@ -4,8 +4,8 @@ import * as path from 'path';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
-describe('kb-builder agent', () => {
-  const content = readFileSync(path.join(ROOT, 'shared/agents/kb-builder.md'), 'utf8');
+describe('knowledge agent', () => {
+  const content = readFileSync(path.join(ROOT, 'shared/agents/knowledge.md'), 'utf8');
 
   it('has correct model', () => { expect(content).toContain('model: sonnet'); });
   it('has feature-kb skill', () => { expect(content).toContain('devflow:feature-kb'); });
