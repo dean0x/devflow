@@ -20,7 +20,7 @@ const {
   checkStaleness,
   checkAllStaleness,
   updateIndex,
-  markStale,
+  findOverlapping,
   removeEntry,
   listKBs,
   validateSlug,
@@ -30,7 +30,7 @@ const {
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
   updateIndex: (worktreePath: string, entry: Record<string, unknown>) => void;
-  markStale: (worktreePath: string, changedFiles: string[]) => string[];
+  findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string) => void;
   listKBs: (worktreePath: string) => Array<{ slug: string } & Record<string, unknown>>;
   validateSlug: (slug: string) => void;
@@ -189,26 +189,33 @@ describe('removeEntry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// markStale
+// findOverlapping
 // ---------------------------------------------------------------------------
 
-describe('markStale', () => {
+describe('findOverlapping', () => {
   it('identifies KBs whose referencedFiles overlap with changed files', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    const stale = markStale(tmp, ['src/cli/cli.ts', 'some/other/file.ts']);
-    expect(stale).toContain('cli-commands');
+    const overlapping = findOverlapping(tmp, ['src/cli/cli.ts', 'some/other/file.ts']);
+    expect(overlapping).toContain('cli-commands');
   });
 
   it('returns empty array when no overlap', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    const stale = markStale(tmp, ['src/payments/checkout.ts', 'src/unrelated.ts']);
-    expect(stale).toEqual([]);
+    const overlapping = findOverlapping(tmp, ['src/payments/checkout.ts', 'src/unrelated.ts']);
+    expect(overlapping).toEqual([]);
   });
 
   it('returns empty array for missing index', () => {
     const tmp = makeTmpFeatureWorktree();
-    const stale = markStale(tmp, ['src/cli/cli.ts']);
-    expect(stale).toEqual([]);
+    const overlapping = findOverlapping(tmp, ['src/cli/cli.ts']);
+    expect(overlapping).toEqual([]);
+  });
+
+  it('does not match on common prefix without directory boundary', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    // 'src/cli' should NOT match 'src/clitools/foo.ts' (no dir boundary)
+    const overlapping = findOverlapping(tmp, ['src/clitools/foo.ts']);
+    expect(overlapping).not.toContain('cli-commands');
   });
 });
 
