@@ -115,6 +115,7 @@ EXECUTION_PLAN: {phase 1 steps}
 PATTERNS: {patterns from plan document or empty}
 CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 HANDOFF_REQUIRED: true"
 ```
 
@@ -130,6 +131,7 @@ CREATE_PR: {true if last phase, false otherwise}
 DOMAIN: {phase N domain, e.g., 'frontend'}
 PRIOR_PHASE_SUMMARY: {summary from previous Coder}
 FILES_FROM_PRIOR_PHASE: {list of files created}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 HANDOFF_REQUIRED: {true if not last phase}"
 ```
 
@@ -149,7 +151,8 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 1 steps}
 PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: {subtask 1 domain}"
+DOMAIN: {subtask 1 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
 "TASK_ID: {task-id}-part2
@@ -158,7 +161,8 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 2 steps}
 PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: {subtask 2 domain}"
+DOMAIN: {subtask 2 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODERS):
@@ -401,7 +405,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 
 After quality gates pass, mark stale feature KBs based on changed files:
 ```bash
-node scripts/hooks/lib/feature-kb.cjs mark-stale "{worktree}" {files_changed...}
+node scripts/hooks/lib/feature-kb.cjs find-overlapping "{worktree}" {files_changed...}
 ```
 
 Display completion summary with phase status, PR info, and next steps.

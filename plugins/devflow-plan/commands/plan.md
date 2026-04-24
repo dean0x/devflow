@@ -478,11 +478,15 @@ If a stale KB was detected in Phase 2, also refresh it — spawn KB Builder with
 │  └─ Phase 13: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
 │     └─ AskUserQuestion: Final plan approval
 │
-└─ Block 6: Output
-   └─ Phase 14: Output
-      ├─ Store design artifact (.docs/design/)
-      ├─ Create GitHub issue (optional)
-      └─ Report summary + next step
+├─ Block 6: Output
+│  └─ Phase 14: Output
+│     ├─ Store design artifact (.docs/design/)
+│     ├─ Create GitHub issue (optional)
+│     └─ Report summary + next step
+│
+└─ Block 7: Feature KB (Conditional)
+   └─ Phase 15: Feature KB Generation
+      └─ KB Builder agent (if new/stale feature area)
 ```
 
 ## Principles
