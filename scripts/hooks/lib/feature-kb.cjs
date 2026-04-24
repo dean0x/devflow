@@ -116,27 +116,14 @@ function loadKBContent(worktreePath, slug) {
 }
 
 /**
- * Check if a KB is stale by comparing lastUpdated against git log of referencedFiles.
- * Returns { stale: false } for non-git repos or when the entry is not found.
+ * Check staleness for a single feature entry by running git log against its referencedFiles.
+ * Callers are responsible for the git-dir check — this helper assumes the repo exists.
  *
  * @param {string} worktreePath
- * @param {string} slug
+ * @param {FeatureEntry} entry
  * @returns {{ stale: boolean, changedFiles: string[] }}
  */
-function checkStaleness(worktreePath, slug) {
-  validateSlug(slug);
-  const index = loadIndex(worktreePath);
-  if (!index || !index.features[slug]) return NOT_STALE;
-
-  const entry = index.features[slug];
-
-  try {
-    // Check if in git repo — use execFileSync to avoid shell injection
-    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath, stdio: 'pipe' });
-  } catch {
-    return NOT_STALE; // Non-git fallback
-  }
-
+function checkEntryFiles(worktreePath, entry) {
   const files = entry.referencedFiles || [];
   if (files.length === 0) return NOT_STALE;
 
@@ -154,6 +141,29 @@ function checkStaleness(worktreePath, slug) {
   } catch {
     return NOT_STALE;
   }
+}
+
+/**
+ * Check if a KB is stale by comparing lastUpdated against git log of referencedFiles.
+ * Returns { stale: false } for non-git repos or when the entry is not found.
+ *
+ * @param {string} worktreePath
+ * @param {string} slug
+ * @returns {{ stale: boolean, changedFiles: string[] }}
+ */
+function checkStaleness(worktreePath, slug) {
+  validateSlug(slug);
+  const index = loadIndex(worktreePath);
+  if (!index || !index.features[slug]) return NOT_STALE;
+
+  try {
+    // Check if in git repo — use execFileSync to avoid shell injection
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath, stdio: 'pipe' });
+  } catch {
+    return NOT_STALE; // Non-git fallback
+  }
+
+  return checkEntryFiles(worktreePath, index.features[slug]);
 }
 
 /**
@@ -177,23 +187,7 @@ function checkAllStaleness(worktreePath) {
 
   const results = {};
   for (const slug of Object.keys(index.features)) {
-    const entry = index.features[slug];
-    const files = entry.referencedFiles || [];
-    if (files.length === 0) {
-      results[slug] = NOT_STALE;
-      continue;
-    }
-    try {
-      const result = execFileSync(
-        'git',
-        ['log', `--after=${entry.lastUpdated}`, '--name-only', '--pretty=format:', '--', ...files],
-        { cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-      );
-      const changedFiles = parseGitChangedFiles(result);
-      results[slug] = { stale: changedFiles.length > 0, changedFiles };
-    } catch {
-      results[slug] = NOT_STALE;
-    }
+    results[slug] = checkEntryFiles(worktreePath, index.features[slug]);
   }
   return results;
 }
@@ -349,10 +343,13 @@ function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
   }
 
   try {
-    let index = { version: 1, features: {} };
+    let index;
     try {
       index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-    } catch { /* no index to modify */ }
+    } catch {
+      releaseLock(lockPath);
+      return; // nothing to remove — preserve existing (possibly corrupt) file
+    }
 
     delete index.features[slug];
     fs.writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n');
