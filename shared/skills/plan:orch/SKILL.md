@@ -255,6 +255,8 @@ Otherwise: plan stays in conversation context, ready for IMPLEMENT to consume di
 
 ## Phase 12: Feature KB Generation (Conditional)
 
+If `.features/.disabled` exists, skip KB generation entirely — the KB feature is disabled.
+
 If Phases 4-5 explored a feature area that does NOT have a matching KB:
 
 1. Identify the feature area slug and name from the explored directories

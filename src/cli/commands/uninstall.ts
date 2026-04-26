@@ -13,6 +13,7 @@ import { removeAmbientHook } from './ambient.js';
 import { removeMemoryHooks } from './memory.js';
 import { removeLearningHook } from './learn.js';
 import { removeHudStatusLine } from './hud.js';
+import { removeKbHook } from './kb.js';
 import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
@@ -400,6 +401,7 @@ export const uninstallCommand = new Command('uninstall')
           settingsContent = removeMemoryHooks(settingsContent);
           settingsContent = removeLearningHook(settingsContent);
           settingsContent = removeHudStatusLine(settingsContent);
+          settingsContent = removeKbHook(settingsContent);
           settingsContent = stripFlags(settingsContent);
 
           if (settingsContent !== originalContent) {
