@@ -8,7 +8,7 @@ user-invocable: false
 
 Agent pipeline for IMPLEMENT intent in ambient ORCHESTRATED mode. Pre-flight checks, plan synthesis, Coder execution, and quality gates.
 
-This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Excluded: strategy selection (single/sequential/parallel Coders), retry loops, PR creation, knowledge loading.
+This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Excluded: strategy selection (single/sequential/parallel Coders), retry loops, PR creation.
 
 ## Iron Law
 
@@ -56,9 +56,15 @@ Return the branch setup summary."
 
 Capture `branch name` and `BASE_BRANCH` from Git agent output for use throughout the pipeline.
 
-## Phase 2: Load Feature Knowledge
+## Phase 2: Load Knowledge
 
-**Produces:** FEATURE_KNOWLEDGE
+**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+
+Load the knowledge index:
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+Pass `KNOWLEDGE_CONTEXT` to Coder (Phase 4) and Scrutinizer (Phase 6).
 
 1. Check if `.features/index.json` exists. If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
 2. Read `.features/index.json`.
@@ -98,6 +104,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **CREATE_PR**: `false` (commit only, no push)
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
+- **KNOWLEDGE_CONTEXT**: From Phase 2 (or `(none)`)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -129,9 +136,9 @@ Run sequentially — each gate must pass before the next:
 
 1. `Agent(subagent_type="Validator")` (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
 2. `Agent(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
-3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED, with `FEATURE_KNOWLEDGE` from Phase 2
+3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED, with `KNOWLEDGE_CONTEXT` and `FEATURE_KNOWLEDGE` from Phase 2
 4. `Agent(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
-5. `Agent(subagent_type="Evaluator")` — verify implementation matches original request — retry up to 2× if misalignment found
+5. `Agent(subagent_type="Evaluator")` — verify implementation matches original request, with `FEATURE_KNOWLEDGE` from Phase 2 — retry up to 2× if misalignment found
 6. `Agent(subagent_type="Tester")` — scenario-based acceptance testing from user's perspective — retry up to 2× if QA fails
 
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
@@ -166,7 +173,7 @@ Report results:
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
-- [ ] Phase 2: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped)
+- [ ] Phase 2: Load Knowledge → KNOWLEDGE_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
 - [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured
 - [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
 - [ ] Phase 5: FILES_CHANGED Detection → FILES_CHANGED captured
