@@ -78,4 +78,44 @@ describe('feature-kb.cjs CLI', () => {
     const result = execSync(`node ${CJS_PATH} find-overlapping ${tmp} src/payments/checkout.ts`, { encoding: 'utf8' });
     expect(JSON.parse(result)).toEqual([]);
   });
+
+  it('stale-slugs outputs only stale slugs one per line', () => {
+    // Non-git worktree — checkAllStaleness returns stale:false for non-git paths
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    const result = execSync(`node ${CJS_PATH} stale-slugs ${tmp}`, { encoding: 'utf8' });
+    // Non-git worktree => no stale slugs
+    expect(result.trim()).toBe('');
+  });
+
+  it('stale-slugs outputs nothing for empty index', () => {
+    const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
+    const result = execSync(`node ${CJS_PATH} stale-slugs ${tmp}`, { encoding: 'utf8' });
+    expect(result.trim()).toBe('');
+  });
+
+  it('refresh-context outputs tab-separated metadata', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    const result = execSync(`node ${CJS_PATH} refresh-context ${tmp} cli-commands`, { encoding: 'utf8' });
+    const parts = result.trim().split('\t');
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toBe('CLI Command System'); // name
+    expect(JSON.parse(parts[1])).toEqual(['src/cli/commands/', 'src/cli/utils/']); // directories JSON
+    expect(parts[2]).toBe('component-patterns'); // category
+    // changedFiles is a JSON array (could be empty for non-git)
+    expect(() => JSON.parse(parts[3])).not.toThrow();
+  });
+
+  it('refresh-context exits 1 for missing slug argument', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    expect(() =>
+      execSync(`node ${CJS_PATH} refresh-context ${tmp}`, { encoding: 'utf8', stdio: 'pipe' })
+    ).toThrow();
+  });
+
+  it('refresh-context exits 1 for unknown slug', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    expect(() =>
+      execSync(`node ${CJS_PATH} refresh-context ${tmp} nonexistent`, { encoding: 'utf8', stdio: 'pipe' })
+    ).toThrow();
+  });
 });
