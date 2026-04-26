@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, rmdirSync } from 'fs';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import {
   SAMPLE_INDEX,
   SAMPLE_KB_CONTENT,
@@ -446,5 +446,126 @@ describe('validateSlug', () => {
     expect(() => validateSlug(null)).toThrow();
     // @ts-expect-error testing runtime behavior
     expect(() => validateSlug(undefined)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI: stale-slugs subcommand
+// ---------------------------------------------------------------------------
+
+const FEATURE_KB_CJS = path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs');
+
+describe('CLI stale-slugs', () => {
+  it('outputs nothing for non-stale index (non-git repo)', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    // Non-git repo → checkAllStaleness returns stale: false for everything
+    const output = execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
+    expect(output.trim()).toBe('');
+  });
+
+  it('outputs stale slugs one per line for a git repo with changes', () => {
+    const tmp = makeTmpFeatureWorktree();
+    // Remove auto-created .features dir — we'll set it up after git init
+    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+
+    execSync('git init', { cwd: tmp, stdio: 'pipe' });
+    execSync('git config user.email "test@test.com"', { cwd: tmp, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: tmp, stdio: 'pipe' });
+
+    const srcDir = path.join(tmp, 'src', 'cli');
+    mkdirSync(srcDir, { recursive: true });
+    writeFileSync(path.join(srcDir, 'cli.ts'), 'export const v = 1;');
+    execSync('git add .', { cwd: tmp, stdio: 'pipe' });
+    execSync('git commit -m "initial"', { cwd: tmp, stdio: 'pipe' });
+
+    const lastUpdated = new Date(Date.now() - 5000).toISOString();
+    const featuresDir = path.join(tmp, '.features');
+    mkdirSync(featuresDir, { recursive: true });
+    writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
+      version: 1,
+      features: {
+        'stale-feature': {
+          name: 'Stale Feature',
+          description: '',
+          directories: ['src/cli/'],
+          referencedFiles: ['src/cli/cli.ts'],
+          category: 'test',
+          lastUpdated,
+          createdBy: 'test',
+        },
+      },
+    }, null, 2));
+
+    // Modify the referenced file and commit after lastUpdated
+    writeFileSync(path.join(srcDir, 'cli.ts'), 'export const v = 2;');
+    execSync('git add .', { cwd: tmp, stdio: 'pipe' });
+    execSync('git commit -m "update cli.ts"', { cwd: tmp, stdio: 'pipe' });
+
+    const output = execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
+    expect(output.trim().split('\n')).toContain('stale-feature');
+  });
+
+  it('exits non-zero and prints usage when worktree argument is missing', () => {
+    let threw = false;
+    try {
+      execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs'], { encoding: 'utf8', stdio: 'pipe' });
+    } catch (e: unknown) {
+      threw = true;
+      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
+    }
+    expect(threw).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI: refresh-context subcommand
+// ---------------------------------------------------------------------------
+
+describe('CLI refresh-context', () => {
+  it('outputs tab-separated metadata for an existing KB entry', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    const output = execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, 'cli-commands'], { encoding: 'utf8' });
+    const parts = output.trim().split('\t');
+    expect(parts).toHaveLength(4);
+    expect(parts[0]).toBe('CLI Command System');           // name
+    expect(JSON.parse(parts[1])).toBeInstanceOf(Array);   // directories JSON
+    expect(parts[2]).toBe('component-patterns');           // category
+    expect(JSON.parse(parts[3])).toBeInstanceOf(Array);   // changed files JSON
+  });
+
+  it('exits non-zero when slug is missing', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    let threw = false;
+    try {
+      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp], { encoding: 'utf8', stdio: 'pipe' });
+    } catch (e: unknown) {
+      threw = true;
+      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('exits non-zero when slug is not found in index', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    let threw = false;
+    try {
+      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, 'nonexistent'], { encoding: 'utf8', stdio: 'pipe' });
+    } catch (e: unknown) {
+      threw = true;
+      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('exits non-zero for invalid slug (path traversal)', () => {
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
+    let threw = false;
+    try {
+      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, '../etc'], { encoding: 'utf8', stdio: 'pipe' });
+    } catch (e: unknown) {
+      threw = true;
+      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
+    }
+    expect(threw).toBe(true);
   });
 });

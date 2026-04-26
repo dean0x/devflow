@@ -383,6 +383,8 @@ function listKBs(worktreePath) {
 //   node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' --category=X [--description=Y] [--createdBy=Z]
 //   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
 //   node feature-kb.cjs remove <worktree> <slug>
+//   node feature-kb.cjs stale-slugs <worktree>
+//   node feature-kb.cjs refresh-context <worktree> <slug>
 // ---------------------------------------------------------------------------
 
 if (require.main === module) {
@@ -410,6 +412,8 @@ if (require.main === module) {
     '  node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' --category=X [--description=Y] [--createdBy=Z]',
     '  node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]',
     '  node feature-kb.cjs remove <worktree> <slug>',
+    '  node feature-kb.cjs stale-slugs <worktree>',
+    '  node feature-kb.cjs refresh-context <worktree> <slug>',
   ].join('\n');
 
   /**
@@ -505,6 +509,42 @@ if (require.main === module) {
       removeEntry(worktreePath, slug);
       process.stderr.write(`[feature-kb] mode=remove worktree=${worktreePath} slug=${slug}\n`);
       process.stdout.write(JSON.stringify({ ok: true, slug }) + '\n');
+      process.exit(0);
+    },
+
+    'stale-slugs'() {
+      const worktreePath = requireWorktree(argv);
+      const staleness = checkAllStaleness(worktreePath);
+      for (const [slug, info] of Object.entries(staleness)) {
+        if (info.stale) {
+          process.stdout.write(slug + '\n');
+        }
+      }
+      process.exit(0);
+    },
+
+    'refresh-context'() {
+      const worktreePath = requireWorktree(argv);
+      const slug = argv[2];
+      if (!slug) {
+        process.stderr.write('Error: missing slug argument\n' + USAGE + '\n');
+        process.exit(1);
+      }
+      validateSlug(slug);
+      const index = loadIndex(worktreePath);
+      if (!index || !index.features[slug]) {
+        process.stderr.write(`Error: KB '${slug}' not found in index\n`);
+        process.exit(1);
+      }
+      const entry = index.features[slug];
+      const staleness = checkStaleness(worktreePath, slug);
+      // Tab-separated: name, directories JSON, category, changed files JSON
+      process.stdout.write([
+        entry.name,
+        JSON.stringify(entry.directories),
+        entry.category,
+        JSON.stringify(staleness.changedFiles),
+      ].join('\t') + '\n');
       process.exit(0);
     },
   };

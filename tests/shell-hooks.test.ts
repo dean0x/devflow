@@ -20,6 +20,8 @@ const HOOK_SCRIPTS = [
   'preamble',
   'json-parse',
   'get-mtime',
+  'session-end-kb-refresh',
+  'background-kb-refresh',
 ];
 
 describe('shell hook syntax checks', () => {
