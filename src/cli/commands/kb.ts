@@ -8,6 +8,9 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { isClaudeCliAvailable } from '../utils/cli.js';
 import { getGitRoot } from '../utils/git.js';
+import type { HookMatcher, Settings } from '../utils/hooks.js';
+import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import { readManifest, writeManifest } from '../utils/manifest.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,8 +55,199 @@ async function getWorktreePath(): Promise<string> {
   return (await getGitRoot()) ?? process.cwd();
 }
 
+const KB_HOOK_MARKER = 'session-end-kb-refresh';
+
+/**
+ * Add the KB SessionEnd hook to settings JSON.
+ * Idempotent — returns unchanged JSON if hook already exists.
+ */
+export function addKbHook(settingsJson: string, devflowDir: string): string {
+  if (hasKbHook(settingsJson)) {
+    return settingsJson;
+  }
+
+  const cleanedJson = removeKbHook(settingsJson);
+  const settings: Settings = JSON.parse(cleanedJson);
+
+  if (!settings.hooks) {
+    settings.hooks = {};
+  }
+
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-end-kb-refresh';
+
+  const newEntry: HookMatcher = {
+    hooks: [
+      {
+        type: 'command',
+        command: hookCommand,
+        timeout: 10,
+      },
+    ],
+  };
+
+  if (!settings.hooks.SessionEnd) {
+    settings.hooks.SessionEnd = [];
+  }
+
+  settings.hooks.SessionEnd.push(newEntry);
+
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+/**
+ * Remove the KB hook from settings JSON.
+ * Idempotent — returns unchanged JSON if hook not present.
+ * Preserves other hooks. Cleans empty arrays/objects.
+ */
+export function removeKbHook(settingsJson: string): string {
+  const settings: Settings = JSON.parse(settingsJson);
+  let changed = false;
+
+  const matchers = settings.hooks?.SessionEnd;
+  if (matchers) {
+    const before = matchers.length;
+    settings.hooks!.SessionEnd = matchers.filter(
+      (m) => !m.hooks.some((h) => h.command.includes(KB_HOOK_MARKER)),
+    );
+    if (settings.hooks!.SessionEnd!.length < before) changed = true;
+    if (settings.hooks!.SessionEnd!.length === 0) delete settings.hooks!.SessionEnd;
+  }
+
+  if (!changed) {
+    return settingsJson;
+  }
+
+  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
+    delete settings.hooks;
+  }
+
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+/**
+ * Check if the KB hook is registered in settings JSON or parsed Settings object.
+ */
+export function hasKbHook(input: string | Settings): boolean {
+  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
+  return settings.hooks?.SessionEnd?.some((matcher) =>
+    matcher.hooks.some((h) => h.command.includes(KB_HOOK_MARKER)),
+  ) ?? false;
+}
+
 export const kbCommand = new Command('kb')
-  .description('Manage per-feature knowledge bases');
+  .description('Manage per-feature knowledge bases')
+  .option('--enable', 'Enable per-feature knowledge bases')
+  .option('--disable', 'Disable per-feature knowledge bases')
+  .option('--status', 'Show KB feature status')
+  .action(async (options: { enable?: boolean; disable?: boolean; status?: boolean }) => {
+    if (!options.enable && !options.disable && !options.status) return;
+
+    if (options.enable) {
+      p.intro(color.cyan('Enable Feature Knowledge Bases'));
+      const worktreePath = await getWorktreePath();
+      const claudeDir = getClaudeDirectory();
+      const devflowDir = getDevFlowDirectory();
+
+      // Create .features/index.json if missing
+      const featuresDir = path.join(worktreePath, '.features');
+      await fs.mkdir(featuresDir, { recursive: true });
+      const indexPath = path.join(featuresDir, 'index.json');
+      try {
+        await fs.access(indexPath);
+      } catch {
+        await fs.writeFile(indexPath, JSON.stringify({ version: 1, features: {} }, null, 2) + '\n');
+      }
+
+      // Remove .disabled sentinel
+      try { await fs.unlink(path.join(featuresDir, '.disabled')); } catch { /* doesn't exist */ }
+
+      // Add SessionEnd hook
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      try {
+        const content = await fs.readFile(settingsPath, 'utf-8');
+        const updated = addKbHook(content, devflowDir);
+        if (updated !== content) {
+          await fs.writeFile(settingsPath, updated, 'utf-8');
+        }
+      } catch { /* settings.json may not exist */ }
+
+      // Update manifest
+      const manifest = await readManifest(devflowDir);
+      if (manifest) {
+        manifest.features.kb = true;
+        manifest.updatedAt = new Date().toISOString();
+        await writeManifest(devflowDir, manifest);
+      }
+
+      p.log.success('Feature knowledge bases enabled');
+      p.outro(`SessionEnd hook installed. Run ${color.cyan('devflow kb create <slug>')} to create a KB.`);
+
+    } else if (options.disable) {
+      p.intro(color.cyan('Disable Feature Knowledge Bases'));
+      const worktreePath = await getWorktreePath();
+      const claudeDir = getClaudeDirectory();
+      const devflowDir = getDevFlowDirectory();
+
+      // Create .disabled sentinel
+      const featuresDir = path.join(worktreePath, '.features');
+      await fs.mkdir(featuresDir, { recursive: true });
+      await fs.writeFile(path.join(featuresDir, '.disabled'), '', 'utf-8');
+
+      // Remove SessionEnd hook
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      try {
+        const content = await fs.readFile(settingsPath, 'utf-8');
+        const updated = removeKbHook(content);
+        if (updated !== content) {
+          await fs.writeFile(settingsPath, updated, 'utf-8');
+        }
+      } catch { /* settings.json may not exist */ }
+
+      // Update manifest
+      const manifest = await readManifest(devflowDir);
+      if (manifest) {
+        manifest.features.kb = false;
+        manifest.updatedAt = new Date().toISOString();
+        await writeManifest(devflowDir, manifest);
+      }
+
+      p.log.success('Feature knowledge bases disabled');
+      p.log.info('Existing KBs preserved. Manual commands (create/refresh) still work.');
+      p.outro('');
+
+    } else if (options.status) {
+      p.intro(color.cyan('Feature KB Status'));
+      const worktreePath = await getWorktreePath();
+      const claudeDir = getClaudeDirectory();
+      const devflowDir = getDevFlowDirectory();
+
+      // Check hook
+      let hookPresent = false;
+      try {
+        const content = await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf-8');
+        hookPresent = hasKbHook(content);
+      } catch { /* settings.json may not exist */ }
+
+      // Check sentinel
+      let disabled = false;
+      try {
+        await fs.access(path.join(worktreePath, '.features', '.disabled'));
+        disabled = true;
+      } catch { /* not disabled */ }
+
+      // Count KBs
+      const kbs = featureKb.listKBs(worktreePath);
+
+      const status = hookPresent && !disabled ? 'enabled' : 'disabled';
+      p.log.info(`Status: ${status === 'enabled' ? color.green('enabled') : color.yellow('disabled')}`);
+      p.log.info(`Hook:   ${hookPresent ? color.green('installed') : color.dim('not installed')}`);
+      p.log.info(`KBs:    ${kbs.length}`);
+      if (disabled) {
+        p.log.info(`Sentinel: ${color.yellow('.features/.disabled present')}`);
+      }
+      p.outro('');
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // devflow kb list
@@ -200,12 +394,17 @@ kbCommand
       `3. Distill into actionable cross-cutting knowledge`,
       `4. Write .features/${slug}/KNOWLEDGE.md with all required sections`,
       ``,
-      `Then run: node scripts/hooks/lib/feature-kb.cjs update-index "${worktreePath}" \\`,
-      `  --slug="${slug}" --name="${name as string}" \\`,
-      `  --directories='${JSON.stringify(directories)}' \\`,
-      `  --referencedFiles='[]' \\`,
-      `  --category="component-patterns" \\`,
-      `  --createdBy="devflow-kb"`,
+      `After writing KNOWLEDGE.md, register it in the index:`,
+      `1. Select 5-10 key files from the explored directories for staleness tracking`,
+      `2. Determine the best category: architecture, conventions, component-patterns, domain-knowledge, or lessons-learned`,
+      `3. Write a one-line description starting with "Use when" for relevance matching`,
+      `4. Run: node scripts/hooks/lib/feature-kb.cjs update-index "${worktreePath}" \\`,
+      `     --slug="${slug}" --name="${name as string}" \\`,
+      `     --directories='${JSON.stringify(directories)}' \\`,
+      `     --referencedFiles='[<your selected files>]' \\`,
+      `     --category="<your determined category>" \\`,
+      `     --description="<your description>" \\`,
+      `     --createdBy="devflow-kb"`,
       ``,
       `Create the directory if needed. Report KB_STATUS when done.`,
     ].join('\n');
@@ -274,6 +473,10 @@ kbCommand
       s.start(`Refreshing ${kbSlug}...`);
 
       const staleInfo = featureKb.checkStaleness(worktreePath, kbSlug);
+      const kbs = featureKb.listKBs(worktreePath);
+      const kbEntry = kbs.find((k: { slug: string }) => k.slug === kbSlug);
+      const featureName = kbEntry?.name ?? kbSlug;
+      const kbDirectories = kbEntry?.directories ?? [];
       const kbPath = path.join(worktreePath, '.features', kbSlug, 'KNOWLEDGE.md');
       let existingContent = '';
       try {
@@ -284,6 +487,8 @@ kbCommand
         `You are the Knowledge agent refreshing a stale feature knowledge base.`,
         ``,
         `FEATURE_SLUG: ${kbSlug}`,
+        `FEATURE_NAME: ${featureName}`,
+        `DIRECTORIES: ${JSON.stringify(kbDirectories)}`,
         `WORKTREE_PATH: ${worktreePath}`,
         `CHANGED_FILES: ${JSON.stringify(staleInfo.changedFiles)}`,
         ``,
@@ -294,7 +499,13 @@ kbCommand
         `- Preserve any manually added content`,
         `- Do not regenerate from scratch`,
         `- Write the updated KB to .features/${kbSlug}/KNOWLEDGE.md`,
-        `- Run update-index to refresh lastUpdated timestamp`,
+        `- After writing, run update-index with updated metadata:`,
+        `  node scripts/hooks/lib/feature-kb.cjs update-index "${worktreePath}" \\`,
+        `    --slug="${kbSlug}" --name="${featureName}" \\`,
+        `    --directories='${JSON.stringify(kbDirectories)}' \\`,
+        `    --referencedFiles='[<current or updated key files>]' \\`,
+        `    --category="${kbEntry?.category ?? 'component-patterns'}" \\`,
+        `    --createdBy="devflow-kb"`,
       ].filter(Boolean).join('\n');
 
       try {
