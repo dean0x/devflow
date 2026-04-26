@@ -138,15 +138,29 @@ Instructions:
     --category=\"$CATEGORY\" \\
     --createdBy=\"devflow-kb\""
 
-  # Spawn claude -p with 180s timeout watchdog
-  DEVFLOW_BG_KB_REFRESH=1 timeout 180 "$CLAUDE_BIN" -p \
+  # Spawn claude -p with 180s watchdog (POSIX-compatible, no GNU timeout)
+  DEVFLOW_BG_KB_REFRESH=1 "$CLAUDE_BIN" -p \
     --model sonnet \
     --dangerously-skip-permissions \
     --allowedTools 'Read,Grep,Glob,Write,Bash' \
     --output-format text \
-    "$PROMPT" >> "$LOG_FILE" 2>&1 || {
-      log "Failed to refresh $SLUG (exit $?)"
-    }
+    "$PROMPT" >> "$LOG_FILE" 2>&1 &
+  CLAUDE_PID=$!
+
+  ( sleep 180 && kill "$CLAUDE_PID" 2>/dev/null ) &
+  WATCHDOG_PID=$!
+
+  if ! wait "$CLAUDE_PID" 2>/dev/null; then
+    EXIT_CODE=$?
+    if [ "$EXIT_CODE" -gt 128 ]; then
+      log "Refresh of $SLUG timed out (killed after 180s)"
+    else
+      log "Failed to refresh $SLUG (exit $EXIT_CODE)"
+    fi
+  fi
+
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+  wait "$WATCHDOG_PID" 2>/dev/null || true
 done
 
 log "Done. Refreshed $COUNT KB(s)."
