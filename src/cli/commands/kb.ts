@@ -66,14 +66,13 @@ export function addKbHook(settingsJson: string, devflowDir: string): string {
     return settingsJson;
   }
 
-  const cleanedJson = removeKbHook(settingsJson);
-  const settings: Settings = JSON.parse(cleanedJson);
+  const settings: Settings = JSON.parse(settingsJson);
 
   if (!settings.hooks) {
     settings.hooks = {};
   }
 
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-end-kb-refresh';
+  const hookCommand = `${path.join(devflowDir, 'scripts', 'hooks', 'run-hook')} session-end-kb-refresh`;
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -105,12 +104,15 @@ export function removeKbHook(settingsJson: string): string {
 
   const matchers = settings.hooks?.SessionEnd;
   if (matchers) {
-    const before = matchers.length;
-    settings.hooks!.SessionEnd = matchers.filter(
+    const filtered = matchers.filter(
       (m) => !m.hooks.some((h) => h.command.includes(KB_HOOK_MARKER)),
     );
-    if (settings.hooks!.SessionEnd!.length < before) changed = true;
-    if (settings.hooks!.SessionEnd!.length === 0) delete settings.hooks!.SessionEnd;
+    if (filtered.length < matchers.length) changed = true;
+    if (filtered.length === 0) {
+      delete settings.hooks!.SessionEnd;
+    } else {
+      settings.hooks!.SessionEnd = filtered;
+    }
   }
 
   if (!changed) {
@@ -142,11 +144,13 @@ export const kbCommand = new Command('kb')
   .action(async (options: { enable?: boolean; disable?: boolean; status?: boolean }) => {
     if (!options.enable && !options.disable && !options.status) return;
 
+    const worktreePath = await getWorktreePath();
+    const claudeDir = getClaudeDirectory();
+    const devflowDir = getDevFlowDirectory();
+    const settingsPath = path.join(claudeDir, 'settings.json');
+
     if (options.enable) {
       p.intro(color.cyan('Enable Feature Knowledge Bases'));
-      const worktreePath = await getWorktreePath();
-      const claudeDir = getClaudeDirectory();
-      const devflowDir = getDevFlowDirectory();
 
       // Create .features/index.json if missing
       const featuresDir = path.join(worktreePath, '.features');
@@ -162,7 +166,6 @@ export const kbCommand = new Command('kb')
       try { await fs.unlink(path.join(featuresDir, '.disabled')); } catch { /* doesn't exist */ }
 
       // Add SessionEnd hook
-      const settingsPath = path.join(claudeDir, 'settings.json');
       try {
         const content = await fs.readFile(settingsPath, 'utf-8');
         const updated = addKbHook(content, devflowDir);
@@ -184,9 +187,6 @@ export const kbCommand = new Command('kb')
 
     } else if (options.disable) {
       p.intro(color.cyan('Disable Feature Knowledge Bases'));
-      const worktreePath = await getWorktreePath();
-      const claudeDir = getClaudeDirectory();
-      const devflowDir = getDevFlowDirectory();
 
       // Create .disabled sentinel
       const featuresDir = path.join(worktreePath, '.features');
@@ -194,7 +194,6 @@ export const kbCommand = new Command('kb')
       await fs.writeFile(path.join(featuresDir, '.disabled'), '', 'utf-8');
 
       // Remove SessionEnd hook
-      const settingsPath = path.join(claudeDir, 'settings.json');
       try {
         const content = await fs.readFile(settingsPath, 'utf-8');
         const updated = removeKbHook(content);
@@ -215,16 +214,14 @@ export const kbCommand = new Command('kb')
       p.log.info('Existing KBs preserved. Manual commands (create/refresh) still work.');
       p.outro('');
 
-    } else if (options.status) {
+    } else {
+      // options.status
       p.intro(color.cyan('Feature KB Status'));
-      const worktreePath = await getWorktreePath();
-      const claudeDir = getClaudeDirectory();
-      const devflowDir = getDevFlowDirectory();
 
       // Check hook
       let hookPresent = false;
       try {
-        const content = await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf-8');
+        const content = await fs.readFile(settingsPath, 'utf-8');
         hookPresent = hasKbHook(content);
       } catch { /* settings.json may not exist */ }
 
@@ -238,8 +235,8 @@ export const kbCommand = new Command('kb')
       // Count KBs
       const kbs = featureKb.listKBs(worktreePath);
 
-      const status = hookPresent && !disabled ? 'enabled' : 'disabled';
-      p.log.info(`Status: ${status === 'enabled' ? color.green('enabled') : color.yellow('disabled')}`);
+      const enabled = hookPresent && !disabled;
+      p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);
       p.log.info(`Hook:   ${hookPresent ? color.green('installed') : color.dim('not installed')}`);
       p.log.info(`KBs:    ${kbs.length}`);
       if (disabled) {
@@ -468,12 +465,13 @@ kbCommand
 
     p.log.info(`Refreshing ${slugsToRefresh.length} KB${slugsToRefresh.length === 1 ? '' : 's'}: ${slugsToRefresh.join(', ')}`);
 
+    const kbs = featureKb.listKBs(worktreePath);
+
     for (const kbSlug of slugsToRefresh) {
       const s = p.spinner();
       s.start(`Refreshing ${kbSlug}...`);
 
       const staleInfo = featureKb.checkStaleness(worktreePath, kbSlug);
-      const kbs = featureKb.listKBs(worktreePath);
       const kbEntry = kbs.find((k: { slug: string }) => k.slug === kbSlug);
       const featureName = kbEntry?.name ?? kbSlug;
       const kbDirectories = kbEntry?.directories ?? [];
