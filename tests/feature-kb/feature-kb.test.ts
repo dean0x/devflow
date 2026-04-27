@@ -1,7 +1,9 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, afterEach } from 'vitest';
 import * as path from 'path';
+import * as os from 'os';
 import { createRequire } from 'module';
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, rmdirSync } from 'fs';
+import { promises as fsPromises } from 'fs';
 import { execSync, execFileSync } from 'child_process';
 import {
   SAMPLE_INDEX,
@@ -536,5 +538,122 @@ describe('CLI refresh-context', () => {
     expect(() =>
       execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, '../etc'], { encoding: 'utf8', stdio: 'pipe' })
     ).toThrow(expect.objectContaining({ status: 1 }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI stale-slugs: empty index
+// ---------------------------------------------------------------------------
+
+describe('CLI stale-slugs', () => {
+  it('outputs nothing for empty index', () => {
+    const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
+    const output = execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
+    expect(output.trim()).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// json-helper.cjs read-sidecar
+// ---------------------------------------------------------------------------
+
+const JSON_HELPER_CJS = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
+
+describe('json-helper read-sidecar', () => {
+  it('returns parsed JSON array for valid sidecar with array field', () => {
+    const sidecar = path.join(os.tmpdir(), `test-sidecar-${Date.now()}.json`);
+    writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'] }));
+    try {
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'], { encoding: 'utf8' });
+      expect(JSON.parse(output.trim())).toEqual(['src/a.ts', 'src/b.ts']);
+    } finally {
+      try { rmSync(sidecar); } catch { /* best-effort */ }
+    }
+  });
+
+  it('returns [] for missing file', () => {
+    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', '/nonexistent/path/file.json', 'referencedFiles'], { encoding: 'utf8' });
+    expect(output.trim()).toBe('[]');
+  });
+
+  it('returns [] for malformed JSON', () => {
+    const sidecar = path.join(os.tmpdir(), `test-sidecar-bad-${Date.now()}.json`);
+    writeFileSync(sidecar, 'not-json');
+    try {
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'], { encoding: 'utf8' });
+      expect(output.trim()).toBe('[]');
+    } finally {
+      try { rmSync(sidecar); } catch { /* best-effort */ }
+    }
+  });
+
+  it('returns [] when field value is not an array', () => {
+    const sidecar = path.join(os.tmpdir(), `test-sidecar-noarray-${Date.now()}.json`);
+    writeFileSync(sidecar, JSON.stringify({ referencedFiles: 'not-an-array' }));
+    try {
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'], { encoding: 'utf8' });
+      expect(output.trim()).toBe('[]');
+    } finally {
+      try { rmSync(sidecar); } catch { /* best-effort */ }
+    }
+  });
+
+  it('returns [] when args are missing', () => {
+    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar'], { encoding: 'utf8' });
+    expect(output.trim()).toBe('[]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readSidecar helper (TypeScript)
+// ---------------------------------------------------------------------------
+
+import { readSidecar } from '../../src/cli/commands/kb.js';
+
+describe('readSidecar', () => {
+  const tmpFiles: string[] = [];
+
+  afterEach(() => {
+    for (const f of tmpFiles) {
+      try { rmSync(f); } catch { /* best-effort */ }
+    }
+    tmpFiles.length = 0;
+  });
+
+  function writeTmp(content: string): string {
+    const f = path.join(os.tmpdir(), `test-read-sidecar-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    writeFileSync(f, content);
+    tmpFiles.push(f);
+    return f;
+  }
+
+  it('returns referencedFiles and description for valid sidecar', async () => {
+    const f = writeTmp(JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'], description: 'Use when X' }));
+    const result = await readSidecar(f);
+    expect(result.referencedFiles).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(result.description).toBe('Use when X');
+  });
+
+  it('returns {} for missing file', async () => {
+    const result = await readSidecar('/nonexistent/path/file.json');
+    expect(result).toEqual({});
+  });
+
+  it('returns {} for invalid JSON', async () => {
+    const f = writeTmp('not-valid-json');
+    const result = await readSidecar(f);
+    expect(result).toEqual({});
+  });
+
+  it('omits referencedFiles when value is a string not array', async () => {
+    const f = writeTmp(JSON.stringify({ referencedFiles: 'should-be-array' }));
+    const result = await readSidecar(f);
+    expect(result.referencedFiles).toBeUndefined();
+  });
+
+  it('filters mixed-type referencedFiles array to strings only', async () => {
+    const f = writeTmp(JSON.stringify({ referencedFiles: ['src/a.ts', 42, null, 'src/b.ts'] }));
+    const result = await readSidecar(f);
+    expect(result.referencedFiles).toEqual(['src/a.ts', 'src/b.ts']);
   });
 });
