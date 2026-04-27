@@ -12,9 +12,9 @@ CLAUDE_BIN="${3:-claude}"
 
 # Source JSON parsing helpers (jq with node fallback)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/json-parse"
+source "$SCRIPT_DIR/json-parse" || { echo "background-learning: failed to source json-parse" >&2; exit 1; }
 
-source "$SCRIPT_DIR/log-paths"
+source "$SCRIPT_DIR/log-paths" || { echo "background-learning: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 LOCK_DIR="$CWD/.memory/.learning.lock"
 LEARNING_LOG="$CWD/.memory/learning-log.jsonl"

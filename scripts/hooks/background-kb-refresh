@@ -10,7 +10,7 @@ CLAUDE_BIN="${2:-claude}"
 PRE_SLUGS="$3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/log-paths"
+source "$SCRIPT_DIR/log-paths" || { echo "background-kb-refresh: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.kb-refresh.log"
 LOCK_DIR="$CWD/.features/.kb-refresh.lock"
 
@@ -31,7 +31,7 @@ rotate_log() {
 # --- Cross-platform mtime ---
 # Source the get-mtime helper for portable stat usage.
 # shellcheck source=get-mtime
-source "$SCRIPT_DIR/get-mtime"
+source "$SCRIPT_DIR/get-mtime" || { echo "background-kb-refresh: failed to source get-mtime" >&2; exit 1; }
 
 # --- Cleanup trap ---
 cleanup() { rmdir "$LOCK_DIR" 2>/dev/null || true; }
