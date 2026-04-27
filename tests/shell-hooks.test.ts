@@ -1508,3 +1508,81 @@ describe('get-mtime behavioral', () => {
     }
   });
 });
+
+describe('session-end-kb-refresh guard clauses', () => {
+  const KB_HOOK = path.join(HOOKS_DIR, 'session-end-kb-refresh');
+
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-kb-hook-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('exits cleanly when DEVFLOW_BG_KB_REFRESH=1', () => {
+    expect(() => {
+      execSync(`DEVFLOW_BG_KB_REFRESH=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
+    }).not.toThrow();
+  });
+
+  it('exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+    expect(() => {
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
+    }).not.toThrow();
+  });
+
+  it('exits cleanly when no .features/index.json exists', () => {
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-001' });
+    expect(() => {
+      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+  });
+
+  it('exits cleanly when .features/.disabled sentinel exists', () => {
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
+    fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
+
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-002' });
+    expect(() => {
+      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+  });
+
+  it('exits cleanly when .kb-last-refresh is recent (throttled)', () => {
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
+    fs.writeFileSync(path.join(featuresDir, '.kb-last-refresh'), String(Math.floor(Date.now() / 1000)));
+
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-003' });
+    expect(() => {
+      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+  });
+
+  it('exits cleanly when no stale KBs are found', () => {
+    // Non-git tmpDir → checkAllStaleness returns stale:false
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
+      version: 1,
+      features: {
+        'test-feature': {
+          name: 'Test', description: '', directories: ['src/'],
+          referencedFiles: ['src/index.ts'], category: 'test',
+          lastUpdated: new Date().toISOString(), createdBy: 'test',
+        },
+      },
+    }));
+
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-004' });
+    expect(() => {
+      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+  });
+});
