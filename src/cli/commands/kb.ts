@@ -18,8 +18,34 @@ const __dirname = path.dirname(__filename);
 /** @internal */
 const _require = createRequire(import.meta.url);
 
+export interface SidecarData {
+  referencedFiles?: string[];
+  description?: string;
+}
+
+export async function readSidecar(sidecarPath: string): Promise<SidecarData> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
+  } catch {
+    return {};
+  }
+  if (typeof raw !== 'object' || raw === null) return {};
+  const data = raw as Record<string, unknown>;
+  const result: SidecarData = {};
+  if (Array.isArray(data.referencedFiles)) {
+    result.referencedFiles = data.referencedFiles.filter(
+      (f): f is string => typeof f === 'string'
+    );
+  }
+  if (typeof data.description === 'string') {
+    result.description = data.description;
+  }
+  return result;
+}
+
 interface FeatureKbModule {
-  listKBs: (worktreePath: string) => Array<{ slug: string; name: string; directories: string[]; lastUpdated: string; referencedFiles?: string[] }>;
+  listKBs: (worktreePath: string) => Array<{ slug: string; name: string; directories: string[]; lastUpdated: string; referencedFiles?: string[]; description?: string; createdBy?: string }>;
   checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
@@ -406,6 +432,7 @@ kbCommand
     try {
       execFileSync('claude', [
         '-p', prompt,
+        '--model', 'sonnet',
         '--allowedTools', KB_AGENT_TOOLS,
         '--dangerously-skip-permissions',
       ], {
@@ -414,10 +441,7 @@ kbCommand
         encoding: 'utf8',
       });
 
-      let sidecar: { referencedFiles?: string[]; description?: string } = {};
-      try {
-        sidecar = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
-      } catch { /* agent didn't write sidecar */ }
+      const sidecar = await readSidecar(sidecarPath);
 
       featureKb.updateIndex(worktreePath, {
         slug,
@@ -463,11 +487,12 @@ kbCommand
 
     // Determine which slugs to refresh
     let slugsToRefresh: string[];
+    let stalenessMap: Record<string, { stale: boolean; changedFiles: string[] }> | undefined;
     if (slug) {
       slugsToRefresh = [slug];
     } else {
-      const staleness = featureKb.checkAllStaleness(worktreePath);
-      slugsToRefresh = Object.entries(staleness)
+      stalenessMap = featureKb.checkAllStaleness(worktreePath);
+      slugsToRefresh = Object.entries(stalenessMap)
         .filter(([, info]) => info.stale)
         .map(([s]) => s);
     }
@@ -486,7 +511,7 @@ kbCommand
       const s = p.spinner();
       s.start(`Refreshing ${kbSlug}...`);
 
-      const staleInfo = featureKb.checkStaleness(worktreePath, kbSlug);
+      const staleInfo = stalenessMap?.[kbSlug] ?? featureKb.checkStaleness(worktreePath, kbSlug);
       const kbEntry = kbs.find((k: { slug: string }) => k.slug === kbSlug);
       const featureName = kbEntry?.name ?? kbSlug;
       const kbDirectories = kbEntry?.directories ?? [];
@@ -524,10 +549,7 @@ kbCommand
           encoding: 'utf8',
         });
 
-        let sidecar: { referencedFiles?: string[] } = {};
-        try {
-          sidecar = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
-        } catch { /* agent didn't write sidecar */ }
+        const sidecar = await readSidecar(sidecarPath);
 
         featureKb.updateIndex(worktreePath, {
           slug: kbSlug,
