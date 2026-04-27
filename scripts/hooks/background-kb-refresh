@@ -108,14 +108,14 @@ for SLUG in $STALE_SLUGS; do
   SIDECAR="$CWD/.features/$SLUG/.refresh-result.json"
   rm -f "$SIDECAR"
 
-  # Get structured metadata (tab-separated: name, dirs, category, changed)
+  # Get structured metadata (tab-separated: name, dirs, changed)
   CONTEXT_LINE=$(node "$SCRIPT_DIR/lib/feature-kb.cjs" refresh-context "$CWD" "$SLUG" 2>/dev/null || true)
   if [ -z "$CONTEXT_LINE" ]; then
     log "Failed to get refresh-context for $SLUG — skipping"
     continue
   fi
 
-  IFS=$'\t' read -r NAME DIRS CATEGORY CHANGED <<< "$CONTEXT_LINE"
+  IFS=$'\t' read -r NAME DIRS CHANGED <<< "$CONTEXT_LINE"
 
   PROMPT="You are the Knowledge agent refreshing a stale feature knowledge base.
 
@@ -165,7 +165,6 @@ Instructions:
       --slug="$SLUG" --name="$NAME" \
       --directories="$DIRS" \
       --referencedFiles="$REF_FILES" \
-      --category="$CATEGORY" \
       --createdBy="devflow-kb" >> "$LOG_FILE" 2>&1 || log "Failed to update index for $SLUG"
     rm -f "$SIDECAR"
   else

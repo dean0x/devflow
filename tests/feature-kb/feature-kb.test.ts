@@ -139,7 +139,6 @@ describe('checkStaleness (positive — git repo)', () => {
           description: '',
           directories: ['src/cli/'],
           referencedFiles: ['src/cli/cli.ts'],
-          category: 'test',
           lastUpdated,
           createdBy: 'test',
         },
@@ -170,7 +169,6 @@ describe('updateIndex', () => {
       name: 'Payment Processing',
       directories: ['src/payments/'],
       referencedFiles: ['src/payments/checkout.ts'],
-      category: 'component-patterns',
       createdBy: 'test',
     });
     const index = loadIndex(tmp);
@@ -178,7 +176,6 @@ describe('updateIndex', () => {
     expect(index!.features['payments']).toBeDefined();
     const entry = index!.features['payments'] as Record<string, unknown>;
     expect(entry.name).toBe('Payment Processing');
-    expect(entry.category).toBe('component-patterns');
   });
 
   it('upserts an existing entry, preserving createdBy', () => {
@@ -188,13 +185,11 @@ describe('updateIndex', () => {
       name: 'CLI Command System Updated',
       directories: ['src/cli/'],
       referencedFiles: ['src/cli/cli.ts'],
-      category: 'conventions',
     });
     const index = loadIndex(tmp);
     expect(index).not.toBeNull();
     const entry = index!.features['cli-commands'] as Record<string, unknown>;
     expect(entry.name).toBe('CLI Command System Updated');
-    expect(entry.category).toBe('conventions');
     // createdBy should be preserved from original
     expect(entry.createdBy).toBe('plan:orch');
   });
@@ -207,7 +202,6 @@ describe('updateIndex', () => {
       name: 'Test',
       directories: [],
       referencedFiles: [],
-      category: 'architecture',
     });
     const after = new Date().toISOString();
     const index = loadIndex(tmp);
@@ -230,7 +224,6 @@ describe('updateIndex', () => {
       name: 'Test',
       directories: [],
       referencedFiles: [],
-      category: 'test',
     }, 200)).toThrow(/lock/i);
 
     // Lock dir should still exist (not cleaned up by our failed attempt)
@@ -251,7 +244,6 @@ describe('updateIndex', () => {
       name: 'New Feature',
       directories: ['src/new/'],
       referencedFiles: ['src/new/index.ts'],
-      category: 'component-patterns',
     });
 
     expect(existsSync(path.join(tmp, '.features'))).toBe(true);
@@ -351,7 +343,6 @@ describe('findOverlapping', () => {
           description: '',
           directories: ['src/cli/'],
           referencedFiles: ['src/cli'],
-          category: 'test',
           lastUpdated: new Date().toISOString(),
           createdBy: 'test',
         },
@@ -489,7 +480,6 @@ describe('CLI stale-slugs', () => {
           description: '',
           directories: ['src/cli/'],
           referencedFiles: ['src/cli/cli.ts'],
-          category: 'test',
           lastUpdated,
           createdBy: 'test',
         },
@@ -521,11 +511,10 @@ describe('CLI refresh-context', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     const output = execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, 'cli-commands'], { encoding: 'utf8' });
     const parts = output.trim().split('\t');
-    expect(parts).toHaveLength(4);
+    expect(parts).toHaveLength(3);
     expect(parts[0]).toBe('CLI Command System');           // name
     expect(JSON.parse(parts[1])).toEqual(['src/cli/commands/', 'src/cli/utils/']); // directories JSON
-    expect(parts[2]).toBe('component-patterns');           // category
-    expect(() => JSON.parse(parts[3])).not.toThrow();     // changed files JSON
+    expect(() => JSON.parse(parts[2])).not.toThrow();     // changed files JSON
   });
 
   it('exits non-zero when slug is missing', () => {

@@ -56,7 +56,6 @@ Write the KNOWLEDGE.md file with this structure:
 ---
 feature: {slug}
 name: {human-readable name}
-category: {architecture|conventions|component-patterns|domain-knowledge|lessons-learned}
 directories: [{dir prefixes}]
 referencedFiles: [{key files for staleness tracking}]
 created: {ISO date}
@@ -95,16 +94,6 @@ updated: {ISO date}
 
 ---
 
-## Category Templates
-
-| Category | Focus | Example |
-|----------|-------|---------|
-| `architecture` | Module boundaries, dependency graph | "Payment Processing Architecture" |
-| `conventions` | Naming, file org, API style | "CLI Command Conventions" |
-| `component-patterns` | Reusable structures, composition | "React Form Patterns" |
-| `domain-knowledge` | Business rules, invariants | "Billing Domain Rules" |
-| `lessons-learned` | Post-incident, migration lessons | "Auth Migration Lessons" |
-
 ## Quality Self-Checks
 
 | Red Flag | Fix |
@@ -124,7 +113,6 @@ node scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
   --slug="{slug}" --name="{name}" \
   --directories='["{dir1}", "{dir2}"]' \
   --referencedFiles='["{file1}", "{file2}"]' \
-  --category="{category}" \
   --description="Use when {trigger description}" \
   --createdBy="{source}"
 ```

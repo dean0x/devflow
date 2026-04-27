@@ -74,7 +74,6 @@ function validateSlug(slug) {
  *   description: string,
  *   directories: string[],
  *   referencedFiles: string[],
- *   category: string,
  *   lastUpdated: string,
  *   createdBy: string
  * }} FeatureEntry
@@ -260,7 +259,6 @@ function releaseLock(lockPath) {
  *   description?: string,
  *   directories: string[],
  *   referencedFiles: string[],
- *   category: string,
  *   createdBy?: string
  * }} entry
  * @param {number} [lockTimeoutMs=30000] optional lock timeout for testability
@@ -288,7 +286,6 @@ function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
       description: entry.description ?? existing.description ?? '',
       directories: entry.directories,
       referencedFiles: entry.referencedFiles,
-      category: entry.category,
       lastUpdated: new Date().toISOString(),
       createdBy: entry.createdBy || existing.createdBy || 'manual',
     };
@@ -380,7 +377,7 @@ function listKBs(worktreePath) {
 // Usage:
 //   node feature-kb.cjs list <worktree>
 //   node feature-kb.cjs stale <worktree> [slug]
-//   node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' --category=X [--description=Y] [--createdBy=Z]
+//   node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' [--description=Y] [--createdBy=Z]
 //   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
 //   node feature-kb.cjs remove <worktree> <slug>
 //   node feature-kb.cjs stale-slugs <worktree>
@@ -409,7 +406,7 @@ if (require.main === module) {
     'Usage:',
     '  node feature-kb.cjs list <worktree>',
     '  node feature-kb.cjs stale <worktree> [slug]',
-    '  node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' --category=X [--description=Y] [--createdBy=Z]',
+    '  node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' [--description=Y] [--createdBy=Z]',
     '  node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]',
     '  node feature-kb.cjs remove <worktree> <slug>',
     '  node feature-kb.cjs stale-slugs <worktree>',
@@ -463,8 +460,8 @@ if (require.main === module) {
     'update-index'() {
       const worktreePath = requireWorktree(argv);
       const kv = parseKeyValue(argv.slice(2));
-      if (!kv.slug || !kv.name || !kv.directories || !kv.referencedFiles || !kv.category) {
-        process.stderr.write('Error: missing required flags (slug, name, directories, referencedFiles, category)\n' + USAGE + '\n');
+      if (!kv.slug || !kv.name || !kv.directories || !kv.referencedFiles) {
+        process.stderr.write('Error: missing required flags (slug, name, directories, referencedFiles)\n' + USAGE + '\n');
         process.exit(1);
       }
       let directories;
@@ -482,7 +479,6 @@ if (require.main === module) {
         description: kv.description,
         directories,
         referencedFiles,
-        category: kv.category,
         createdBy: kv.createdBy,
       });
       process.stderr.write(`[feature-kb] mode=update-index worktree=${worktreePath} slug=${kv.slug}\n`);
@@ -538,11 +534,10 @@ if (require.main === module) {
       }
       const entry = index.features[slug];
       const staleness = checkStaleness(worktreePath, slug);
-      // Tab-separated: name, directories JSON, category, changed files JSON
+      // Tab-separated: name, directories JSON, changed files JSON
       process.stdout.write([
         entry.name,
         JSON.stringify(entry.directories),
-        entry.category,
         JSON.stringify(staleness.changedFiles),
       ].join('\t') + '\n');
       process.exit(0);

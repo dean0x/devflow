@@ -1574,7 +1574,7 @@ describe('session-end-kb-refresh guard clauses', () => {
       features: {
         'test-feature': {
           name: 'Test', description: '', directories: ['src/'],
-          referencedFiles: ['src/index.ts'], category: 'test',
+          referencedFiles: ['src/index.ts'],
           lastUpdated: new Date().toISOString(), createdBy: 'test',
         },
       },

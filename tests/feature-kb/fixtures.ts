@@ -12,7 +12,6 @@ export const SAMPLE_INDEX = {
       description: 'Use when adding CLI subcommands, modifying plugin registration, or changing the init flow.',
       directories: ['src/cli/commands/', 'src/cli/utils/'],
       referencedFiles: ['src/cli/cli.ts', 'src/cli/plugins.ts'],
-      category: 'component-patterns',
       lastUpdated: '2026-04-20T14:30:00Z',
       createdBy: 'plan:orch',
     },
@@ -22,7 +21,6 @@ export const SAMPLE_INDEX = {
 export const SAMPLE_KB_CONTENT = `---
 feature: cli-commands
 name: CLI Command System
-category: component-patterns
 directories:
   - src/cli/commands/
   - src/cli/utils/

@@ -14,7 +14,6 @@ describe('feature-kb skill', () => {
     expect(content).toContain('### Phase 3: Distill');
     expect(content).toContain('### Phase 4: Forge');
   });
-  it('has category templates', () => { expect(content).toContain('## Category Templates'); });
   it('has quality self-checks', () => { expect(content).toContain('## Quality Self-Checks'); });
   it('has KB format template with required sections', () => {
     expect(content).toContain('## Overview');

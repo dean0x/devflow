@@ -19,13 +19,13 @@ const __dirname = path.dirname(__filename);
 const _require = createRequire(import.meta.url);
 
 interface FeatureKbModule {
-  listKBs: (worktreePath: string) => Array<{ slug: string; name: string; category: string; directories: string[]; lastUpdated: string }>;
+  listKBs: (worktreePath: string) => Array<{ slug: string; name: string; directories: string[]; lastUpdated: string; referencedFiles?: string[] }>;
   checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string) => void;
   validateSlug: (slug: string) => void;
-  updateIndex: (worktreePath: string, entry: { slug: string; name: string; description?: string; directories: string[]; referencedFiles: string[]; category: string; createdBy?: string }, lockTimeoutMs?: number) => void;
+  updateIndex: (worktreePath: string, entry: { slug: string; name: string; description?: string; directories: string[]; referencedFiles: string[]; createdBy?: string }, lockTimeoutMs?: number) => void;
 }
 
 // dist/cli/commands/kb.js → ../../.. → project root (where scripts/ lives)
@@ -280,7 +280,6 @@ kbCommand
 
       console.log(`  ${color.bold(kb.name)} ${statusBadge}`);
       console.log(`    slug:       ${color.dim(kb.slug)}`);
-      console.log(`    category:   ${color.dim(kb.category)}`);
       console.log(`    updated:    ${color.dim(kb.lastUpdated)}`);
       console.log(`    dirs:       ${color.dim(kb.directories.join(', '))}`);
       if (isStale && staleInfo.changedFiles.length > 0) {
@@ -398,7 +397,6 @@ kbCommand
       `After writing KNOWLEDGE.md, write .features/${slug}/.create-result.json with:`,
       `{`,
       `  "referencedFiles": [<5-10 key files from the explored directories for staleness tracking>],`,
-      `  "category": "<best category: architecture, conventions, component-patterns, domain-knowledge, or lessons-learned>",`,
       `  "description": "<one-line description starting with 'Use when' for relevance matching>"`,
       `}`,
       ``,
@@ -416,7 +414,7 @@ kbCommand
         encoding: 'utf8',
       });
 
-      let sidecar: { referencedFiles?: string[]; category?: string; description?: string } = {};
+      let sidecar: { referencedFiles?: string[]; description?: string } = {};
       try {
         sidecar = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
       } catch { /* agent didn't write sidecar */ }
@@ -426,7 +424,6 @@ kbCommand
         name: name as string,
         directories,
         referencedFiles: sidecar.referencedFiles ?? [],
-        category: sidecar.category ?? 'component-patterns',
         description: sidecar.description,
         createdBy: 'devflow-kb',
       });
@@ -536,8 +533,7 @@ kbCommand
           slug: kbSlug,
           name: featureName,
           directories: kbDirectories,
-          referencedFiles: sidecar.referencedFiles ?? (kbEntry as Record<string, unknown>)?.referencedFiles as string[] ?? [],
-          category: kbEntry?.category ?? 'component-patterns',
+          referencedFiles: sidecar.referencedFiles ?? kbEntry?.referencedFiles ?? [],
           createdBy: 'devflow-kb',
         });
 

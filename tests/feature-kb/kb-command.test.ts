@@ -42,7 +42,7 @@ describe('feature-kb.cjs CLI', () => {
   it('update-index creates entry', () => {
     const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
     execSync(
-      `node ${CJS_PATH} update-index ${tmp} --slug=payments --name="Payment Processing" --directories='["src/payments/"]' --referencedFiles='["src/payments/checkout.ts"]' --category=component-patterns`,
+      `node ${CJS_PATH} update-index ${tmp} --slug=payments --name="Payment Processing" --directories='["src/payments/"]' --referencedFiles='["src/payments/checkout.ts"]'`,
       { encoding: 'utf8' }
     );
     const index = JSON.parse(readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8'));
