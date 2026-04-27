@@ -5,9 +5,9 @@
 # invocation with Sonnet to refresh up to 3 stale KBs.
 # On failure: logs error, does nothing (missing updates are better than corrupt data).
 
-set -e
 CWD="$1"
 CLAUDE_BIN="${2:-claude}"
+PRE_SLUGS="$3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 source "$SCRIPT_DIR/log-paths"
@@ -85,8 +85,12 @@ fi
 # Record refresh timestamp (so next session-end-kb-refresh respects throttle)
 date +%s > "$CWD/.features/.kb-last-refresh"
 
-# Get stale slugs (one per line, cap at 3)
-STALE_SLUGS=$(node "$SCRIPT_DIR/lib/feature-kb.cjs" stale-slugs "$CWD" 2>/dev/null | head -3)
+# Get stale slugs: use pre-computed list from session-end if available, else compute
+if [ -n "$PRE_SLUGS" ]; then
+  STALE_SLUGS=$(printf '%s' "$PRE_SLUGS" | head -3)
+else
+  STALE_SLUGS=$(node "$SCRIPT_DIR/lib/feature-kb.cjs" stale-slugs "$CWD" 2>/dev/null | head -3)
+fi
 
 if [ -z "$STALE_SLUGS" ]; then
   log "No stale KBs found — done"
@@ -98,10 +102,11 @@ for SLUG in $STALE_SLUGS; do
   COUNT=$((COUNT + 1))
   log "Refreshing $SLUG ($COUNT/3)..."
 
-  # Read existing KB content
   KB_PATH="$CWD/.features/$SLUG/KNOWLEDGE.md"
   [ -f "$KB_PATH" ] || { log "KB file missing for $SLUG — skipping"; continue; }
-  EXISTING=$(cat "$KB_PATH")
+
+  SIDECAR="$CWD/.features/$SLUG/.refresh-result.json"
+  rm -f "$SIDECAR"
 
   # Get structured metadata (tab-separated: name, dirs, category, changed)
   CONTEXT_LINE=$(node "$SCRIPT_DIR/lib/feature-kb.cjs" refresh-context "$CWD" "$SLUG" 2>/dev/null || true)
@@ -112,7 +117,6 @@ for SLUG in $STALE_SLUGS; do
 
   IFS=$'\t' read -r NAME DIRS CATEGORY CHANGED <<< "$CONTEXT_LINE"
 
-  # Build refresh prompt
   PROMPT="You are the Knowledge agent refreshing a stale feature knowledge base.
 
 FEATURE_SLUG: $SLUG
@@ -121,28 +125,20 @@ DIRECTORIES: $DIRS
 WORKTREE_PATH: $CWD
 CHANGED_FILES: $CHANGED
 
-EXISTING_KB:
-$EXISTING
-
 Instructions:
+- Read .features/$SLUG/KNOWLEDGE.md to see the existing KB content
 - Read the CHANGED_FILES to understand what changed
 - Update the stale sections based on changes
 - Preserve any manually added content
 - Do not regenerate from scratch
 - Write the updated KB to .features/$SLUG/KNOWLEDGE.md
-- After writing, run update-index with updated metadata:
-  node scripts/hooks/lib/feature-kb.cjs update-index \"$CWD\" \\
-    --slug=\"$SLUG\" --name=\"$NAME\" \\
-    --directories='$DIRS' \\
-    --referencedFiles='[<current or updated key files>]' \\
-    --category=\"$CATEGORY\" \\
-    --createdBy=\"devflow-kb\""
+- Write .features/$SLUG/.refresh-result.json with: {\"referencedFiles\": [<5-10 key files from explored directories for staleness tracking>]}"
 
   # Spawn claude -p with 180s watchdog (POSIX-compatible, no GNU timeout)
   DEVFLOW_BG_KB_REFRESH=1 "$CLAUDE_BIN" -p \
     --model sonnet \
     --dangerously-skip-permissions \
-    --allowedTools 'Read,Grep,Glob,Write,Bash' \
+    --allowedTools 'Read,Grep,Glob,Write' \
     --output-format text \
     "$PROMPT" >> "$LOG_FILE" 2>&1 &
   CLAUDE_PID=$!
@@ -161,6 +157,28 @@ Instructions:
 
   kill "$WATCHDOG_PID" 2>/dev/null || true
   wait "$WATCHDOG_PID" 2>/dev/null || true
+
+  # Read sidecar and update index
+  if [ -f "$SIDECAR" ]; then
+    REF_FILES=$(node -e "
+      try {
+        const d = JSON.parse(require('fs').readFileSync('$SIDECAR','utf8'));
+        console.log(JSON.stringify(d.referencedFiles || []));
+      } catch { console.log('[]'); }
+    " 2>/dev/null || echo "[]")
+    node "$SCRIPT_DIR/lib/feature-kb.cjs" update-index "$CWD" \
+      --slug="$SLUG" --name="$NAME" \
+      --directories="$DIRS" \
+      --referencedFiles="$REF_FILES" \
+      --category="$CATEGORY" \
+      --createdBy="devflow-kb" >> "$LOG_FILE" 2>&1 || log "Failed to update index for $SLUG"
+    rm -f "$SIDECAR"
+  else
+    log "No sidecar file for $SLUG — skipping index update"
+  fi
+
+  # Refresh lock mtime so watchdog doesn't break it between sequential refreshes
+  touch "$LOCK_DIR"
 done
 
 log "Done. Refreshed $COUNT KB(s)."

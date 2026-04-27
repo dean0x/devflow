@@ -51,7 +51,7 @@ LOG_FILE="$(devflow_log_dir "$CWD")/.kb-refresh.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 DEVFLOW_BG_KB_REFRESH=1 nohup bash "$SCRIPT_DIR/background-kb-refresh" \
-  "$CWD" "$CLAUDE_BIN" >> "$LOG_FILE" 2>&1 &
+  "$CWD" "$CLAUDE_BIN" "$STALE_SLUGS" >> "$LOG_FILE" 2>&1 &
 disown
 
 exit 0

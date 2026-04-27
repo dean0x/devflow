@@ -6,8 +6,6 @@
 # invocation with Sonnet to detect patterns and update learning-log.jsonl.
 # On failure: logs error, does nothing (missing patterns are better than fake data).
 
-set -e
-
 CWD="$1"
 MODE="${2:---batch}"
 CLAUDE_BIN="${3:-claude}"

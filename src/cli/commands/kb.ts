@@ -25,6 +25,7 @@ interface FeatureKbModule {
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string) => void;
   validateSlug: (slug: string) => void;
+  updateIndex: (worktreePath: string, entry: { slug: string; name: string; description?: string; directories: string[]; referencedFiles: string[]; category: string; createdBy?: string }, lockTimeoutMs?: number) => void;
 }
 
 // dist/cli/commands/kb.js → ../../.. → project root (where scripts/ lives)
@@ -33,7 +34,7 @@ const featureKb: FeatureKbModule = _require(
 );
 
 /** Tools passed to `claude -p` when spawning the Knowledge agent. */
-const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write,Bash';
+const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write';
 
 /**
  * Validate a KB slug and exit with an error message if invalid.
@@ -377,6 +378,9 @@ kbCommand
     const s = p.spinner();
     s.start('Creating KB...');
 
+    const sidecarPath = path.join(worktreePath, '.features', slug, '.create-result.json');
+    try { await fs.unlink(sidecarPath); } catch { /* doesn't exist */ }
+
     const prompt = [
       `You are the Knowledge agent. Create a feature knowledge base for the following area:`,
       ``,
@@ -391,17 +395,12 @@ kbCommand
       `3. Distill into actionable cross-cutting knowledge`,
       `4. Write .features/${slug}/KNOWLEDGE.md with all required sections`,
       ``,
-      `After writing KNOWLEDGE.md, register it in the index:`,
-      `1. Select 5-10 key files from the explored directories for staleness tracking`,
-      `2. Determine the best category: architecture, conventions, component-patterns, domain-knowledge, or lessons-learned`,
-      `3. Write a one-line description starting with "Use when" for relevance matching`,
-      `4. Run: node scripts/hooks/lib/feature-kb.cjs update-index "${worktreePath}" \\`,
-      `     --slug="${slug}" --name="${name as string}" \\`,
-      `     --directories='${JSON.stringify(directories)}' \\`,
-      `     --referencedFiles='[<your selected files>]' \\`,
-      `     --category="<your determined category>" \\`,
-      `     --description="<your description>" \\`,
-      `     --createdBy="devflow-kb"`,
+      `After writing KNOWLEDGE.md, write .features/${slug}/.create-result.json with:`,
+      `{`,
+      `  "referencedFiles": [<5-10 key files from the explored directories for staleness tracking>],`,
+      `  "category": "<best category: architecture, conventions, component-patterns, domain-knowledge, or lessons-learned>",`,
+      `  "description": "<one-line description starting with 'Use when' for relevance matching>"`,
+      `}`,
       ``,
       `Create the directory if needed. Report KB_STATUS when done.`,
     ].join('\n');
@@ -416,9 +415,28 @@ kbCommand
         stdio: 'pipe',
         encoding: 'utf8',
       });
+
+      let sidecar: { referencedFiles?: string[]; category?: string; description?: string } = {};
+      try {
+        sidecar = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
+      } catch { /* agent didn't write sidecar */ }
+
+      featureKb.updateIndex(worktreePath, {
+        slug,
+        name: name as string,
+        directories,
+        referencedFiles: sidecar.referencedFiles ?? [],
+        category: sidecar.category ?? 'component-patterns',
+        description: sidecar.description,
+        createdBy: 'devflow-kb',
+      });
+
+      try { await fs.unlink(sidecarPath); } catch { /* already cleaned */ }
+
       s.stop('KB created successfully');
       p.log.success(`KB written to .features/${slug}/KNOWLEDGE.md`);
     } catch (err) {
+      try { await fs.unlink(sidecarPath); } catch { /* cleanup */ }
       s.stop('KB creation failed');
       p.log.error(`claude exited with error: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
@@ -475,11 +493,9 @@ kbCommand
       const kbEntry = kbs.find((k: { slug: string }) => k.slug === kbSlug);
       const featureName = kbEntry?.name ?? kbSlug;
       const kbDirectories = kbEntry?.directories ?? [];
-      const kbPath = path.join(worktreePath, '.features', kbSlug, 'KNOWLEDGE.md');
-      let existingContent = '';
-      try {
-        existingContent = await fs.readFile(kbPath, 'utf8');
-      } catch { /* new KB */ }
+
+      const sidecarPath = path.join(worktreePath, '.features', kbSlug, '.refresh-result.json');
+      try { await fs.unlink(sidecarPath); } catch { /* doesn't exist */ }
 
       const prompt = [
         `You are the Knowledge agent refreshing a stale feature knowledge base.`,
@@ -490,21 +506,15 @@ kbCommand
         `WORKTREE_PATH: ${worktreePath}`,
         `CHANGED_FILES: ${JSON.stringify(staleInfo.changedFiles)}`,
         ``,
-        existingContent ? `EXISTING_KB:\n${existingContent}` : '',
-        ``,
         `Instructions:`,
-        `- Update the stale sections based on CHANGED_FILES`,
+        `- Read .features/${kbSlug}/KNOWLEDGE.md to see the existing KB content`,
+        `- Read the CHANGED_FILES to understand what changed`,
+        `- Update the stale sections based on changes`,
         `- Preserve any manually added content`,
         `- Do not regenerate from scratch`,
         `- Write the updated KB to .features/${kbSlug}/KNOWLEDGE.md`,
-        `- After writing, run update-index with updated metadata:`,
-        `  node scripts/hooks/lib/feature-kb.cjs update-index "${worktreePath}" \\`,
-        `    --slug="${kbSlug}" --name="${featureName}" \\`,
-        `    --directories='${JSON.stringify(kbDirectories)}' \\`,
-        `    --referencedFiles='[<current or updated key files>]' \\`,
-        `    --category="${kbEntry?.category ?? 'component-patterns'}" \\`,
-        `    --createdBy="devflow-kb"`,
-      ].filter(Boolean).join('\n');
+        `- Write .features/${kbSlug}/.refresh-result.json with: {"referencedFiles": [<5-10 key files from explored directories for staleness tracking>]}`,
+      ].join('\n');
 
       try {
         execFileSync('claude', [
@@ -516,8 +526,26 @@ kbCommand
           stdio: 'pipe',
           encoding: 'utf8',
         });
+
+        let sidecar: { referencedFiles?: string[] } = {};
+        try {
+          sidecar = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
+        } catch { /* agent didn't write sidecar */ }
+
+        featureKb.updateIndex(worktreePath, {
+          slug: kbSlug,
+          name: featureName,
+          directories: kbDirectories,
+          referencedFiles: sidecar.referencedFiles ?? (kbEntry as Record<string, unknown>)?.referencedFiles as string[] ?? [],
+          category: kbEntry?.category ?? 'component-patterns',
+          createdBy: 'devflow-kb',
+        });
+
+        try { await fs.unlink(sidecarPath); } catch { /* already cleaned */ }
+
         s.stop(`${kbSlug} refreshed`);
       } catch (err) {
+        try { await fs.unlink(sidecarPath); } catch { /* cleanup */ }
         s.stop(`${kbSlug} refresh failed`);
         p.log.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }

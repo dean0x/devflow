@@ -6,8 +6,6 @@
 # `claude -p` invocation to update .memory/WORKING-MEMORY.md.
 # On failure: logs error, does nothing (stale memory is better than fake data).
 
-set -e
-
 CWD="$1"
 CLAUDE_BIN="$2"
 
