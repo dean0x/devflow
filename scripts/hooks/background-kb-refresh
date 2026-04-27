@@ -160,12 +160,7 @@ Instructions:
 
   # Read sidecar and update index
   if [ -f "$SIDECAR" ]; then
-    REF_FILES=$(node -e "
-      try {
-        const d = JSON.parse(require('fs').readFileSync('$SIDECAR','utf8'));
-        console.log(JSON.stringify(d.referencedFiles || []));
-      } catch { console.log('[]'); }
-    " 2>/dev/null || echo "[]")
+    REF_FILES=$(node "$SCRIPT_DIR/json-helper.cjs" read-sidecar "$SIDECAR" referencedFiles 2>/dev/null || echo "[]")
     node "$SCRIPT_DIR/lib/feature-kb.cjs" update-index "$CWD" \
       --slug="$SLUG" --name="$NAME" \
       --directories="$DIRS" \
