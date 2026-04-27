@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (41 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (44 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -42,7 +42,7 @@ devflow/
 │   ├── build-hud.js                  # Copies dist/hud/ → scripts/hud/
 │   ├── hud.sh                        # Thin wrapper: exec node hud/index.js
 │   ├── hud/                          # GENERATED — compiled HUD module (gitignored)
-│   └── hooks/                        # Working Memory + ambient + learning hooks
+│   └── hooks/                        # Working Memory + ambient + learning + KB hooks
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
@@ -52,9 +52,16 @@ devflow/
 │       ├── session-end-learning      # SessionEnd hook: batched learning trigger
 │       ├── stop-update-learning     # Stop hook: deprecated stub (upgrade via devflow learn)
 │       ├── background-learning      # Background: pattern detection via Sonnet
+│       ├── session-end-kb-refresh   # SessionEnd hook: stale KB detection + background spawn
+│       ├── background-kb-refresh    # Background: KB refresher via Sonnet
 │       ├── get-mtime                # Shared helper: portable mtime (BSD/GNU stat)
 │       ├── json-helper.cjs           # Node.js jq-equivalent operations
-│       └── json-parse               # Shell wrapper: jq with node fallback
+│       ├── json-parse               # Shell wrapper: jq with node fallback
+│       └── lib/                      # Node.js helper modules
+│           ├── feature-kb.cjs        # Feature KB index operations (CRUD, staleness)
+│           ├── knowledge-context.cjs  # Knowledge context index builder
+│           ├── staleness.cjs          # Code reference staleness checker
+│           └── transcript-filter.cjs  # Transcript channel extractor
 └── src/
     └── cli/
         ├── commands/
@@ -147,7 +154,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
-- `hooks` - Working Memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) + Learning Stop hook
+- `hooks` - Working Memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) + Learning SessionEnd hook + KB SessionEnd hook
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
@@ -158,7 +165,9 @@ Included settings:
 
 Four hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
 
-A fifth hook (`session-end-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
+A fifth hook (`session-end-kb-refresh`) provides feature KB maintenance. Toggleable via `devflow kb --enable/--disable/--status` or `devflow init --kb/--no-kb`.
+
+A sixth hook (`session-end-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
 
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|
@@ -167,6 +176,8 @@ A fifth hook (`session-end-learning`) provides self-learning. Toggleable via `de
 | `background-memory-update` | (background) | `.memory/WORKING-MEMORY.md` | Queue-based updater spawned by stop-update-memory. Reads queued turns + git state, writes WORKING-MEMORY.md via `claude -p --model haiku`. |
 | `session-start-memory` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. Injects pre-compact snapshot when compaction occurred mid-session. |
 | `pre-compact-memory` | PreCompact | `.memory/backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
+| `session-end-kb-refresh` | SessionEnd | `.features/index.json` | Checks for stale feature KBs. Throttled (<2h). Spawns background-kb-refresh. |
+| `background-kb-refresh` | (background) | `.features/{slug}/KNOWLEDGE.md` | KB refresher. Up to 3 stale KBs via `claude -p --model sonnet`. |
 
 **Flow**: User sends prompt → UserPromptSubmit hook (prompt-capture-memory) appends user turn to `.memory/.pending-turns.jsonl`. Session ends → Stop hook appends assistant turn to queue, checks throttle (skips if <2min fresh), spawns background updater → background updater reads queued turns + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
 
