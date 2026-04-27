@@ -24,6 +24,7 @@
     "agent-teams",
     "patterns",
     "security",
-    "worktree-support"
+    "worktree-support",
+    "apply-feature-kb"
   ]
 }

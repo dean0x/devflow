@@ -110,6 +110,10 @@ fi
 
 # --- Section 1.5: Project Knowledge TL;DR ---
 KNOWLEDGE_DIR="$CWD/.memory/knowledge"
+# Heal older installs that have .memory/ but not .memory/knowledge/
+if [ -d "$CWD/.memory" ] && [ ! -d "$KNOWLEDGE_DIR" ]; then
+  mkdir -p "$KNOWLEDGE_DIR" 2>/dev/null || true
+fi
 if [ -d "$KNOWLEDGE_DIR" ]; then
   KNOWLEDGE_TLDR=""
   for kf in "$KNOWLEDGE_DIR"/decisions.md "$KNOWLEDGE_DIR"/pitfalls.md; do

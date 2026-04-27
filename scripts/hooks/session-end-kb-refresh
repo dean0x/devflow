@@ -1,0 +1,57 @@
+#!/bin/bash
+# SessionEnd hook: check for stale feature KBs and spawn background refresh
+#
+# Flow:
+#   1. Guard clauses (skip if background process, no JSON tools, etc.)
+#   2. Check that .features/index.json exists
+#   3. Throttle: skip if refreshed within last 2 hours
+#   4. Query stale-slugs from feature-kb.cjs
+#   5. Spawn background-kb-refresh in detached background process
+#
+set -e
+
+# Guard: prevent recursion from background claude -p
+[ "${DEVFLOW_BG_KB_REFRESH:-}" = "1" ] && exit 0
+[ "${DEVFLOW_BG_UPDATER:-}" = "1" ] && exit 0
+
+# Source json-parse library (must be available before reading stdin JSON)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=json-parse
+source "$SCRIPT_DIR/json-parse"
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+# Read hook input from stdin
+INPUT=$(cat)
+CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
+[ -z "$CWD" ] && exit 0
+
+# Quick guards
+[ -f "$CWD/.features/index.json" ] || exit 0
+[ -f "$CWD/.features/.disabled" ] && exit 0
+
+# Throttle: skip if refreshed within last 2 hours
+MARKER="$CWD/.features/.kb-last-refresh"
+if [ -f "$MARKER" ]; then
+  LAST=$(cat "$MARKER")
+  NOW=$(date +%s)
+  [ $((NOW - LAST)) -lt 7200 ] && exit 0
+fi
+
+# Check for stale KBs (bash-friendly output, one slug per line)
+STALE_SLUGS=$(node "$SCRIPT_DIR/lib/feature-kb.cjs" stale-slugs "$CWD" 2>/dev/null)
+[ -z "$STALE_SLUGS" ] && exit 0
+
+# Resolve claude binary (PATH lookup, exit silently if missing)
+CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
+[ -z "$CLAUDE_BIN" ] && exit 0
+
+# Spawn background refresh
+source "$SCRIPT_DIR/log-paths"
+LOG_FILE="$(devflow_log_dir "$CWD")/.kb-refresh.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+DEVFLOW_BG_KB_REFRESH=1 nohup bash "$SCRIPT_DIR/background-kb-refresh" \
+  "$CWD" "$CLAUDE_BIN" "$STALE_SLUGS" >> "$LOG_FILE" 2>&1 &
+disown
+
+exit 0

@@ -31,6 +31,8 @@ Based on [Google Engineering Practices](https://google.github.io/eng-practices/r
 ### P0 - Design
 Does the implementation fit the architecture? Follows existing patterns, respects layer boundaries, dependencies injected.
 
+If `FEATURE_KNOWLEDGE` is provided, verify implementation respects the feature area's documented architecture and anti-patterns. Flag deviations as P0-Design issues when the documented pattern is clearly intentional.
+
 ### P0 - Functionality
 Does the code work? Happy path, edge cases (null, empty, boundary), no race conditions.
 

@@ -46,6 +46,8 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Claude Code Flags**: Typed registry (`src/cli/utils/flags.ts`) for managing Claude Code feature flags (env vars and top-level settings). Pure functions `applyFlags`/`stripFlags`/`getDefaultFlags` follow the `applyTeamsConfig`/`stripTeamsConfig` pattern. Initial flags: `tool-search`, `lsp`, `clear-context-on-plan` (default ON), `brief`, `disable-1m-context` (default OFF). Manageable via `devflow flags --enable/--disable/--status/--list`. Stored in manifest `features.flags: string[]`.
 
+**Feature Knowledge Bases**: Per-feature `.features/` directory containing KNOWLEDGE.md files that capture area-specific patterns, conventions, architecture, and gotchas. KBs are created as side-effects of planning (plan:orch Phase 12), loaded automatically across all workflows via `FEATURE_KNOWLEDGE` variable (companion to `KNOWLEDGE_CONTEXT`), and use staleness detection via git log against `referencedFiles`. Index at `.features/index.json` (object keyed by slug). Managed via `devflow kb list|create|check|refresh|remove`. Knowledge agent (sonnet) structures exploration outputs into KNOWLEDGE.md. `apply-feature-kb` skill provides consumption algorithm for agents. `.features/.kb.lock` is gitignored (transient lock directory for concurrent index writes, added automatically by `devflow init`). `devflow kb list` — List all feature KBs with staleness status. `devflow kb create <slug>` — Create a new KB via claude -p exploration. `devflow kb check` — Check all KBs for staleness. `devflow kb refresh [slug]` — Refresh stale KB(s). `devflow kb remove <slug>` — Remove a KB and its index entry. Note: debug:orch keeps FEATURE_KNOWLEDGE orchestrator-local (investigation workers examine code without pre-loaded context). Toggleable via `devflow kb --enable/--disable/--status` or `devflow init --kb/--no-kb`. SessionEnd hook auto-refreshes stale KBs (throttled to once per 2 hours, max 3 per run). `.features/.disabled` sentinel gates Phase 12 generation and refresh hook.
+
 **Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learn ON, HUD ON, teams OFF, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list.
 
 **Migrations**: Run-once migrations execute automatically on `devflow init`, tracked at `~/.devflow/migrations.json` (scope-independent; single file regardless of user-scope vs local-scope installs). Registry: append an entry to `MIGRATIONS` in `src/cli/utils/migrations.ts`. Scopes: `global` (runs once per machine, no project context) vs `per-project` (sweeps all discovered Claude-enabled projects in parallel). Failures are non-fatal — migrations retry on next init. Currently registered per-project migrations include `purge-legacy-knowledge-v2` (removes 4 hardcoded pre-v2 ADR/PF IDs and orphan `PROJECT-PATTERNS.md`) and `purge-legacy-knowledge-v3` (v3: sweeps all remaining pre-v2 seeded entries using the `- **Source**: self-learning:` format discriminator — any ADR/PF section lacking this marker is removed; entries the user edited to include the marker survive). **D37 edge case**: a project cloned *after* migrations have run won't be swept (the marker is global, not per-project). Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
@@ -54,15 +56,16 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 ```
 devflow/
-├── shared/skills/          # 41 skills (single source of truth)
-├── shared/agents/          # 12 shared agents (single source of truth)
+├── shared/skills/          # 44 skills (single source of truth)
+├── shared/agents/          # 13 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 17 plugins (8 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, stop-update-learning [deprecated], background-learning, get-mtime)
-├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, flags)
+│   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, stop-update-learning [deprecated], background-learning, get-mtime, session-end-kb-refresh, background-kb-refresh)
+├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, flags, kb)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
+├── .features/              # Per-feature knowledge bases (committed to git)
 └── .memory/                # Working memory files — per-project
 ```
 
@@ -150,7 +153,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - `/self-review` — Simplifier then Scrutinizer (sequential); consumes knowledge via index + on-demand Read via `devflow:apply-knowledge`
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
-**Shared agents** (12): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer
+**Shared agents** (13): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge
 
 **Plugin-specific agents** (1): claude-md-auditor
 

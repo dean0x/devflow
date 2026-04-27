@@ -36,7 +36,7 @@ Orchestrate a single task through implementation by spawning specialized agents.
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
@@ -67,6 +67,18 @@ Return the branch setup summary."
 5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
 6. Captured values override defaults from Git agent where present
 
+**Load Knowledge Context:**
+```bash
+KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+```
+Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
+
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on task description and file targets, identify relevant KBs
+3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+
 ### Phase 2: Implement
 
 **Produces:** CODER_OUTPUT, FILES_CHANGED
@@ -96,7 +108,9 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {full plan from setup context}
 PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
-DOMAIN: {detected domain or 'fullstack'}"
+DOMAIN: {detected domain or 'fullstack'}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+KNOWLEDGE_CONTEXT: {knowledge_context}"
 ```
 
 ---
@@ -115,6 +129,8 @@ EXECUTION_PLAN: {phase 1 steps}
 PATTERNS: {patterns from plan document or empty}
 CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 HANDOFF_REQUIRED: true"
 ```
 
@@ -130,6 +146,8 @@ CREATE_PR: {true if last phase, false otherwise}
 DOMAIN: {phase N domain, e.g., 'frontend'}
 PRIOR_PHASE_SUMMARY: {summary from previous Coder}
 FILES_FROM_PRIOR_PHASE: {list of files created}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+KNOWLEDGE_CONTEXT: {knowledge_context}
 HANDOFF_REQUIRED: {true if not last phase}"
 ```
 
@@ -149,7 +167,9 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 1 steps}
 PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: {subtask 1 domain}"
+DOMAIN: {subtask 1 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+KNOWLEDGE_CONTEXT: {knowledge_context}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
 "TASK_ID: {task-id}-part2
@@ -158,7 +178,9 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 2 steps}
 PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: {subtask 2 domain}"
+DOMAIN: {subtask 2 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+KNOWLEDGE_CONTEXT: {knowledge_context}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODERS):
@@ -226,6 +248,8 @@ After Simplifier completes, spawn Scrutinizer as final quality gate:
 Agent(subagent_type="Scrutinizer"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {list of files from Coder output}
+KNOWLEDGE_CONTEXT: {knowledge_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
@@ -262,6 +286,7 @@ Agent(subagent_type="Evaluator"):
 EXECUTION_PLAN: {execution plan from Phase 1}
 FILES_CHANGED: {list of files from Coder output}
 ACCEPTANCE_CRITERIA: {extracted criteria if available}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
@@ -345,6 +370,11 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 ### Phase 10: Report
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
+
+After quality gates pass, check for overlapping feature KBs whose `referencedFiles` intersect the changed files:
+```bash
+node scripts/hooks/lib/feature-kb.cjs find-overlapping "{worktree}" {files_changed...}
+```
 
 Display completion summary with phase status, PR info, and next steps.
 

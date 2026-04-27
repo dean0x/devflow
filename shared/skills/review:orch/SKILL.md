@@ -44,9 +44,9 @@ Check `.docs/reviews/{branch_slug}/.last-review-head`:
 Generate timestamp: `YYYY-MM-DD_HHMM`
 Create directory: `mkdir -p .docs/reviews/{branch_slug}/{timestamp}`
 
-## Phase 2b: Load Knowledge Index
+## Phase 3: Load Knowledge Index
 
-**Produces:** KNOWLEDGE_CONTEXT
+**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** REVIEW_DIR
 
 After incremental detection, load the knowledge index:
@@ -57,7 +57,13 @@ KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktre
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
 
-## Phase 3: File Analysis
+Also load feature knowledge:
+1. Read `.features/index.json` if it exists
+2. Based on changed files from Phase 4 file analysis, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
+3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
+
+## Phase 4: File Analysis
 
 **Produces:** REVIEWER_LIST
 **Requires:** DIFF_RANGE
@@ -80,17 +86,17 @@ Detect conditional reviewers from file types:
 | `package.json`, lock files | dependencies |
 | `*.md`, doc files | documentation |
 
-## Phase 4: Reviews (Parallel)
+## Phase 5: Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, REVIEWER_LIST
 
 Spawn all reviewers in a single message (parallel execution):
 
 **7 core reviewers** (always):
 - security, architecture, performance, complexity, consistency, testing, regression
 
-**Conditional reviewers** (from Phase 3 file analysis):
+**Conditional reviewers** (from Phase 4 file analysis):
 - typescript, react, database, dependencies, documentation, go, java, python, rust, accessibility, ui-design
 
 Each reviewer receives:
@@ -98,9 +104,10 @@ Each reviewer receives:
 - **Branch context**: branch → base_branch
 - **Output path**: `.docs/reviews/{branch_slug}/{timestamp}/{focus}.md`
 - **DIFF_COMMAND**: `git diff {DIFF_RANGE}` (incremental or full)
-- **KNOWLEDGE_CONTEXT**: compact index from Phase 2b (or `(none)` when absent) — follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand
+- **KNOWLEDGE_CONTEXT**: compact index from Phase 3 (or `(none)` when absent) — follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand
+- **FEATURE_KNOWLEDGE**: feature area context from Phase 3 (or `(none)`) — follow `devflow:apply-feature-kb` for consumption algorithm
 
-## Phase 5: Synthesis (Parallel)
+## Phase 6: Synthesis (Parallel)
 
 **Requires:** REVIEWER_OUTPUTS, REVIEW_DIR, PR_INFO
 
@@ -109,7 +116,7 @@ After all reviewers complete, spawn in parallel:
 1. `Agent(subagent_type="Git")` with action `comment-pr` — post review summary as PR comment (deduplicate: check existing comments first)
 2. `Agent(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`
 
-## Phase 6: Finalize
+## Phase 7: Finalize
 
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
@@ -134,10 +141,10 @@ Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured
 - [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
-- [ ] Phase 2b: Load Knowledge Index → KNOWLEDGE_CONTEXT captured
-- [ ] Phase 3: File Analysis → REVIEWER_LIST captured
-- [ ] Phase 4: Reviews → REVIEWER_OUTPUTS written to disk
-- [ ] Phase 5: Synthesis → review-summary.md written
-- [ ] Phase 6: Finalize → .last-review-head updated, results reported
+- [ ] Phase 3: Load Knowledge Index → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
+- [ ] Phase 4: File Analysis → REVIEWER_LIST captured
+- [ ] Phase 5: Reviews → REVIEWER_OUTPUTS written to disk
+- [ ] Phase 6: Synthesis → review-summary.md written
+- [ ] Phase 7: Finalize → .last-review-head updated, results reported
 
 If any phase is unchecked, execute it before proceeding.

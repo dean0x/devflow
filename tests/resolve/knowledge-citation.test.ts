@@ -160,18 +160,18 @@ describe('resolve-teams.md — teams variant parity', () => {
 describe('resolve:orch SKILL.md — ambient mode parity', () => {
   const content = loadFile('shared/skills/resolve:orch/SKILL.md');
 
-  it('contains Phase 1.5: Load Project Knowledge between Phase 1 and Phase 2', () => {
-    expect(content).toMatch(/Phase 1\.5.*Load Project Knowledge/i);
+  it('contains Phase 2: Load Project Knowledge between Phase 1 and Phase 3', () => {
+    expect(content).toMatch(/Phase 2.*Load Project Knowledge/i);
   });
 
-  it('Phase 4 spawn block includes KNOWLEDGE_CONTEXT', () => {
-    const phase4Section = extractSection(content, '## Phase 4', '## Phase 5');
-    expect(phase4Section).toContain('KNOWLEDGE_CONTEXT');
+  it('Phase 5 spawn block includes KNOWLEDGE_CONTEXT', () => {
+    const phase5Section = extractSection(content, '## Phase 5', '## Phase 6');
+    expect(phase5Section).toContain('KNOWLEDGE_CONTEXT');
   });
 
-  it('Phase 6 (Report) mentions Knowledge Citations (D-B)', () => {
-    const phase6Section = extractSection(content, '## Phase 6', '## Error Handling');
-    expect(phase6Section).toContain('Knowledge Citations');
+  it('Phase 7 (Report) mentions Knowledge Citations (D-B)', () => {
+    const phase7Section = extractSection(content, '## Phase 7', '## Error Handling');
+    expect(phase7Section).toContain('Knowledge Citations');
   });
 });
 

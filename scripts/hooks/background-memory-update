@@ -6,8 +6,6 @@
 # `claude -p` invocation to update .memory/WORKING-MEMORY.md.
 # On failure: logs error, does nothing (stale memory is better than fake data).
 
-set -e
-
 CWD="$1"
 CLAUDE_BIN="$2"
 
@@ -20,9 +18,9 @@ MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
 
 # Source JSON parsing helpers (jq with node fallback)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/json-parse"
+source "$SCRIPT_DIR/json-parse" || { echo "background-memory-update: failed to source json-parse" >&2; exit 1; }
 
-source "$SCRIPT_DIR/log-paths"
+source "$SCRIPT_DIR/log-paths" || { echo "background-memory-update: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
 LOCK_DIR="$CWD/.memory/.working-memory.lock"
 
@@ -44,7 +42,7 @@ rotate_log() {
 
 # --- Stale Lock Recovery ---
 
-source "$SCRIPT_DIR/get-mtime"
+source "$SCRIPT_DIR/get-mtime" || { echo "background-memory-update: failed to source get-mtime" >&2; exit 1; }
 
 STALE_THRESHOLD=300  # 5 min
 
@@ -268,6 +266,7 @@ TIMEOUT=120
 DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
   --model haiku \
   --dangerously-skip-permissions \
+  --allowedTools 'Read,Write' \
   --output-format text \
   "$PROMPT" \
   >> "$LOG_FILE" 2>&1 &

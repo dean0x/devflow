@@ -34,6 +34,7 @@
 //   reconcile-manifest <cwd>             Session-start reconciler: sync manifest vs FS (D6, D13)
 //   merge-observation <log> <newObsJson> Dedup/reinforce with in-place merge (D14)
 //   knowledge-append <file> <type> <obs> Append ADR/PF entry to knowledge file
+//   read-sidecar <file> <field>          Read array field from sidecar JSON file (returns [] on any error)
 
 'use strict';
 
@@ -1806,6 +1807,23 @@ try {
       } catch { /* file doesn't exist — count is 0 */ }
       const count = countActiveHeadings(content, entryType);
       console.log(JSON.stringify({ count }));
+      break;
+    }
+
+    case 'read-sidecar': {
+      if (!args[0] || !args[1]) {
+        console.log('[]');
+        break;
+      }
+      const sidecarFile = safePath(args[0]);
+      const field = args[1];
+      try {
+        const data = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'));
+        const value = data[field];
+        console.log(Array.isArray(value) ? JSON.stringify(value) : '[]');
+      } catch {
+        console.log('[]');
+      }
       break;
     }
 
