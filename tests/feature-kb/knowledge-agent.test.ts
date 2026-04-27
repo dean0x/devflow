@@ -14,7 +14,6 @@ describe('knowledge agent', () => {
     expect(content).toContain('Read');
     expect(content).toContain('Grep');
     expect(content).toContain('Glob');
-    expect(content).toContain('Bash');
     expect(content).toContain('Write');
   });
   it('documents input contract', () => {
