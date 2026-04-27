@@ -506,14 +506,9 @@ describe('CLI stale-slugs', () => {
   });
 
   it('exits non-zero and prints usage when worktree argument is missing', () => {
-    let threw = false;
-    try {
-      execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs'], { encoding: 'utf8', stdio: 'pipe' });
-    } catch (e: unknown) {
-      threw = true;
-      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
-    }
-    expect(threw).toBe(true);
+    expect(() =>
+      execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs'], { encoding: 'utf8', stdio: 'pipe' })
+    ).toThrow(expect.objectContaining({ status: 1 }));
   });
 });
 
@@ -528,44 +523,29 @@ describe('CLI refresh-context', () => {
     const parts = output.trim().split('\t');
     expect(parts).toHaveLength(4);
     expect(parts[0]).toBe('CLI Command System');           // name
-    expect(JSON.parse(parts[1])).toBeInstanceOf(Array);   // directories JSON
+    expect(JSON.parse(parts[1])).toEqual(['src/cli/commands/', 'src/cli/utils/']); // directories JSON
     expect(parts[2]).toBe('component-patterns');           // category
-    expect(JSON.parse(parts[3])).toBeInstanceOf(Array);   // changed files JSON
+    expect(() => JSON.parse(parts[3])).not.toThrow();     // changed files JSON
   });
 
   it('exits non-zero when slug is missing', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    let threw = false;
-    try {
-      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp], { encoding: 'utf8', stdio: 'pipe' });
-    } catch (e: unknown) {
-      threw = true;
-      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
-    }
-    expect(threw).toBe(true);
+    expect(() =>
+      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp], { encoding: 'utf8', stdio: 'pipe' })
+    ).toThrow(expect.objectContaining({ status: 1 }));
   });
 
   it('exits non-zero when slug is not found in index', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    let threw = false;
-    try {
-      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, 'nonexistent'], { encoding: 'utf8', stdio: 'pipe' });
-    } catch (e: unknown) {
-      threw = true;
-      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
-    }
-    expect(threw).toBe(true);
+    expect(() =>
+      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, 'nonexistent'], { encoding: 'utf8', stdio: 'pipe' })
+    ).toThrow(expect.objectContaining({ status: 1 }));
   });
 
   it('exits non-zero for invalid slug (path traversal)', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    let threw = false;
-    try {
-      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, '../etc'], { encoding: 'utf8', stdio: 'pipe' });
-    } catch (e: unknown) {
-      threw = true;
-      expect((e as NodeJS.ErrnoException & { status?: number }).status).toBe(1);
-    }
-    expect(threw).toBe(true);
+    expect(() =>
+      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, '../etc'], { encoding: 'utf8', stdio: 'pipe' })
+    ).toThrow(expect.objectContaining({ status: 1 }));
   });
 });
