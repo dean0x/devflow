@@ -11,7 +11,6 @@ tools:
   - Read
   - Grep
   - Glob
-  - Bash
   - Write
 ---
 
@@ -36,7 +35,7 @@ tools:
 4. **Cross-reference knowledge**: If KNOWLEDGE_CONTEXT is provided, reference relevant ADR/PF entries in the KB's "Related" section
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on CHANGED_FILES while preserving any manually added content (user edits). Don't regenerate from scratch.
 6. **Write KNOWLEDGE.md**: Write to `.features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
-7. **Update index**: Run `node scripts/hooks/lib/feature-kb.cjs update-index` with all required fields
+7. **Write sidecar**: Write sidecar JSON file (`.create-result.json` or `.refresh-result.json`) with `referencedFiles` and `description` so the host process can update the index
 8. **Report**: Output what was created/updated
 
 ## Output

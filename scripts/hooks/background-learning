@@ -18,6 +18,9 @@ source "$SCRIPT_DIR/log-paths" || { echo "background-learning: failed to source 
 LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 LOCK_DIR="$CWD/.memory/.learning.lock"
 LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
+
+# shellcheck source=get-mtime
+source "$SCRIPT_DIR/get-mtime" || { echo "background-learning: failed to source get-mtime" >&2; exit 1; }
 RESPONSE_FILE="$CWD/.memory/.learning-response.tmp"
 
 # --- Logging ---
@@ -40,14 +43,6 @@ rotate_log() {
 }
 
 # --- Stale Lock Recovery ---
-
-get_mtime() {
-  if stat --version &>/dev/null 2>&1; then
-    stat -c %Y "$1"
-  else
-    stat -f %m "$1"
-  fi
-}
 
 # DESIGN: These timeouts are intentionally higher than the Node acquireMkdirLock defaults
 # (30 s / 60 s in json-helper.cjs) because this lock guards the entire Sonnet analysis

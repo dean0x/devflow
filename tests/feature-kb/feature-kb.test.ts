@@ -545,7 +545,7 @@ describe('CLI refresh-context', () => {
 // CLI stale-slugs: empty index
 // ---------------------------------------------------------------------------
 
-describe('CLI stale-slugs', () => {
+describe('CLI stale-slugs (empty index)', () => {
   it('outputs nothing for empty index', () => {
     const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
     const output = execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });

@@ -541,6 +541,7 @@ kbCommand
       try {
         execFileSync('claude', [
           '-p', prompt,
+          '--model', 'sonnet',
           '--allowedTools', KB_AGENT_TOOLS,
           '--dangerously-skip-permissions',
         ], {
