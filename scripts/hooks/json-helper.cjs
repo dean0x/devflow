@@ -44,6 +44,9 @@ const path = require('path');
 const op = process.argv[2];
 const args = process.argv.slice(3);
 
+// Domain modules — routed before the main switch to keep this file focused.
+const sidecarOps = require('./lib/sidecar-ops.cjs');
+
 /**
  * Resolve a file path argument to an absolute path.
  * Note: path.resolve() normalizes away '..' segments, so the includes check
@@ -639,6 +642,11 @@ function parseArgs(argList) {
 
 if (require.main === module) {
 try {
+  // Route to domain modules first; fall through to the main switch if not handled.
+  if (sidecarOps.handle(op, args)) {
+    process.exit(0);
+  }
+
   switch (op) {
     case 'get-field': {
       const input = JSON.parse(readStdin());
@@ -1807,23 +1815,6 @@ try {
       } catch { /* file doesn't exist — count is 0 */ }
       const count = countActiveHeadings(content, entryType);
       console.log(JSON.stringify({ count }));
-      break;
-    }
-
-    case 'read-sidecar': {
-      if (!args[0] || !args[1]) {
-        console.log('[]');
-        break;
-      }
-      const sidecarFile = safePath(args[0]);
-      const field = args[1];
-      try {
-        const data = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'));
-        const value = data[field];
-        console.log(Array.isArray(value) ? JSON.stringify(value.filter(v => typeof v === 'string')) : '[]');
-      } catch {
-        console.log('[]');
-      }
       break;
     }
 
