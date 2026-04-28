@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { createRequire } from 'module';
@@ -11,9 +10,9 @@ import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
-import { readSidecar } from '../utils/sidecar.js';
 export type { SidecarData } from '../utils/sidecar.js';
 export { readSidecar } from '../utils/sidecar.js';
+import { runKbAgent } from '../utils/kb-agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,9 +35,6 @@ interface FeatureKbModule {
 const featureKb: FeatureKbModule = _require(
   path.join(__dirname, '..', '..', '..', 'scripts', 'hooks', 'lib', 'feature-kb.cjs')
 );
-
-/** Tools passed to `claude -p` when spawning the Knowledge agent. */
-const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write';
 
 /**
  * Validate a KB slug and exit with an error message if invalid.
@@ -381,9 +377,6 @@ kbCommand
     const s = p.spinner();
     s.start('Creating KB...');
 
-    const sidecarPath = path.join(worktreePath, '.features', slug, '.create-result.json');
-    try { await fs.unlink(sidecarPath); } catch { /* doesn't exist */ }
-
     const prompt = [
       `You are the Knowledge agent. Create a feature knowledge base for the following area:`,
       ``,
@@ -408,18 +401,7 @@ kbCommand
     ].join('\n');
 
     try {
-      execFileSync('claude', [
-        '-p', prompt,
-        '--model', 'sonnet',
-        '--allowedTools', KB_AGENT_TOOLS,
-        '--dangerously-skip-permissions',
-      ], {
-        cwd: worktreePath,
-        stdio: 'pipe',
-        encoding: 'utf8',
-      });
-
-      const sidecar = await readSidecar(sidecarPath);
+      const { sidecar } = await runKbAgent({ worktreePath, slug, prompt, sidecarName: '.create-result.json' });
 
       featureKb.updateIndex(worktreePath, {
         slug,
@@ -430,12 +412,9 @@ kbCommand
         createdBy: 'devflow-kb',
       });
 
-      try { await fs.unlink(sidecarPath); } catch { /* already cleaned */ }
-
       s.stop('KB created successfully');
       p.log.success(`KB written to .features/${slug}/KNOWLEDGE.md`);
     } catch (err) {
-      try { await fs.unlink(sidecarPath); } catch { /* cleanup */ }
       s.stop('KB creation failed');
       p.log.error(`claude exited with error: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
@@ -494,9 +473,6 @@ kbCommand
       const featureName = kbEntry?.name ?? kbSlug;
       const kbDirectories = kbEntry?.directories ?? [];
 
-      const sidecarPath = path.join(worktreePath, '.features', kbSlug, '.refresh-result.json');
-      try { await fs.unlink(sidecarPath); } catch { /* doesn't exist */ }
-
       const prompt = [
         `You are the Knowledge agent refreshing a stale feature knowledge base.`,
         ``,
@@ -517,18 +493,7 @@ kbCommand
       ].join('\n');
 
       try {
-        execFileSync('claude', [
-          '-p', prompt,
-          '--model', 'sonnet',
-          '--allowedTools', KB_AGENT_TOOLS,
-          '--dangerously-skip-permissions',
-        ], {
-          cwd: worktreePath,
-          stdio: 'pipe',
-          encoding: 'utf8',
-        });
-
-        const sidecar = await readSidecar(sidecarPath);
+        const { sidecar } = await runKbAgent({ worktreePath, slug: kbSlug, prompt, sidecarName: '.refresh-result.json' });
 
         featureKb.updateIndex(worktreePath, {
           slug: kbSlug,
@@ -538,11 +503,8 @@ kbCommand
           createdBy: 'devflow-kb',
         });
 
-        try { await fs.unlink(sidecarPath); } catch { /* already cleaned */ }
-
         s.stop(`${kbSlug} refreshed`);
       } catch (err) {
-        try { await fs.unlink(sidecarPath); } catch { /* cleanup */ }
         s.stop(`${kbSlug} refresh failed`);
         p.log.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
