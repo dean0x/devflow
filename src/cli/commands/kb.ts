@@ -11,6 +11,9 @@ import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
+import { readSidecar } from '../utils/sidecar.js';
+export type { SidecarData } from '../utils/sidecar.js';
+export { readSidecar } from '../utils/sidecar.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,31 +21,6 @@ const __dirname = path.dirname(__filename);
 /** @internal */
 const _require = createRequire(import.meta.url);
 
-export interface SidecarData {
-  referencedFiles?: string[];
-  description?: string;
-}
-
-export async function readSidecar(sidecarPath: string): Promise<SidecarData> {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
-  } catch {
-    return {};
-  }
-  if (typeof raw !== 'object' || raw === null) return {};
-  const data = raw as Record<string, unknown>;
-  const result: SidecarData = {};
-  if (Array.isArray(data.referencedFiles)) {
-    result.referencedFiles = data.referencedFiles.filter(
-      (f): f is string => typeof f === 'string'
-    );
-  }
-  if (typeof data.description === 'string') {
-    result.description = data.description;
-  }
-  return result;
-}
 
 interface FeatureKbModule {
   listKBs: (worktreePath: string) => Array<{ slug: string; name: string; directories: string[]; lastUpdated: string; referencedFiles?: string[]; description?: string; createdBy?: string }>;
