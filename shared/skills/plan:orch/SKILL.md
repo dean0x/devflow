@@ -268,7 +268,20 @@ If Phases 4-5 explored a feature area that does NOT have a matching KB:
    DIRECTORIES: {directory prefixes explored}
    KNOWLEDGE_CONTEXT: {from Phase 1}"
    ```
-3. Report: "Created feature KB: {slug}"
+3. After the Knowledge agent completes, read the sidecar file (`.features/{slug}/.create-result.json`)
+   using the Read tool to get `referencedFiles` and `description`, then run:
+   ```bash
+   node scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
+     --slug="{slug}" --name="{name}" \
+     --directories='["{dir1}", "{dir2}"]' \
+     --referencedFiles='{referencedFiles_json_from_sidecar}' \
+     --description="{description_from_sidecar}" \
+     --createdBy="plan"
+   ```
+   Then clean up: `rm -f .features/{slug}/.create-result.json`
+   If the sidecar file does not exist (agent failed to write it), use empty defaults:
+   `referencedFiles='[]'`, `description=""`.
+4. Report: "Created feature KB: {slug}"
 
 Skip if all explored areas already have matching KBs.
 
@@ -276,7 +289,7 @@ If a stale KB was detected in Phase 2, also refresh it here — spawn Knowledge 
 
 **Failure handling**: Knowledge agent failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
 
-**Produces:** `.features/{slug}/KNOWLEDGE.md`, updated `.features/index.json`
+**Produces:** `.features/{slug}/KNOWLEDGE.md`, updated `.features/index.json` (via step 3 sidecar read + CLI call)
 **Requires:** Phase 4-5 exploration outputs
 
 ---
@@ -310,6 +323,6 @@ Before presenting output, verify every phase was announced:
 - [ ] Phase 9: Design Review Lite → REVIEW_NOTES captured
 - [ ] Phase 10: Present → Output delivered to user
 - [ ] Phase 11: Persist → Artifact written (or skipped with stated reason)
-- [ ] Phase 12: Feature KB Generation → Knowledge agent spawned for new feature areas (or skipped if KB exists)
+- [ ] Phase 12: Feature KB Generation → Knowledge agent spawned, sidecar read, index updated (or skipped if KB exists or feature disabled)
 
 If any phase is unchecked, execute it before proceeding.
