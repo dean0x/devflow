@@ -17,7 +17,7 @@ set -e
 # Source json-parse library (must be available before reading stdin JSON)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=json-parse
-source "$SCRIPT_DIR/json-parse"
+source "$SCRIPT_DIR/json-parse" || { echo "session-end-kb-refresh: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 # Read hook input from stdin
@@ -46,7 +46,7 @@ CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
 [ -z "$CLAUDE_BIN" ] && exit 0
 
 # Spawn background refresh
-source "$SCRIPT_DIR/log-paths"
+source "$SCRIPT_DIR/log-paths" || { echo "session-end-kb-refresh: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.kb-refresh.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 

@@ -8,7 +8,7 @@ set -e
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/json-parse"
+source "$SCRIPT_DIR/json-parse" || { echo "session-start-memory: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
@@ -28,7 +28,7 @@ if [ -f "$MEMORY_FILE" ]; then
   MEMORY_CONTENT=$(cat "$MEMORY_FILE")
 
   # Compute staleness warning
-  source "$SCRIPT_DIR/get-mtime"
+  source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
   FILE_MTIME=$(get_mtime "$MEMORY_FILE")
   NOW=$(date +%s)
   AGE=$(( NOW - FILE_MTIME ))

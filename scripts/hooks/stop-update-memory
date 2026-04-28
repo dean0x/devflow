@@ -14,7 +14,7 @@ if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # JSON parsing (jq with node fallback)
-source "$SCRIPT_DIR/json-parse"
+source "$SCRIPT_DIR/json-parse" || { echo "stop-update-memory: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
@@ -37,10 +37,10 @@ if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 # Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
-source "$SCRIPT_DIR/get-mtime"
+source "$SCRIPT_DIR/get-mtime" || { echo "stop-update-memory: failed to source get-mtime" >&2; exit 1; }
 
 # Logging
-source "$SCRIPT_DIR/log-paths"
+source "$SCRIPT_DIR/log-paths" || { echo "stop-update-memory: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [stop-hook] $1" >> "$LOG_FILE"; }
 
