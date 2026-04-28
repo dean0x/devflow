@@ -3,7 +3,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, rmdirSync } from 'fs';
-import { promises as fsPromises } from 'fs';
 import { execSync, execFileSync } from 'child_process';
 import {
   SAMPLE_INDEX,
@@ -655,5 +654,16 @@ describe('readSidecar', () => {
     const f = writeTmp(JSON.stringify({ referencedFiles: ['src/a.ts', 42, null, 'src/b.ts'] }));
     const result = await readSidecar(f);
     expect(result.referencedFiles).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('returns {} when JSON parses to a non-object (primitive)', async () => {
+    const tmp = path.join(os.tmpdir(), `sidecar-primitive-${Date.now()}.json`);
+    writeFileSync(tmp, '42');
+    try {
+      const result = await readSidecar(tmp);
+      expect(result).toEqual({});
+    } finally {
+      rmSync(tmp, { force: true });
+    }
   });
 });
