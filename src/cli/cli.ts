@@ -13,7 +13,7 @@ import { skillsCommand } from './commands/skills.js';
 import { hudCommand } from './commands/hud.js';
 import { learnCommand } from './commands/learn.js';
 import { flagsCommand } from './commands/flags.js';
-import { kbCommand } from './commands/kb.js';
+import { kbCommand } from './commands/kb/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
