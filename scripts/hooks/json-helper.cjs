@@ -1820,7 +1820,7 @@ try {
       try {
         const data = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'));
         const value = data[field];
-        console.log(Array.isArray(value) ? JSON.stringify(value) : '[]');
+        console.log(Array.isArray(value) ? JSON.stringify(value.filter(v => typeof v === 'string')) : '[]');
       } catch {
         console.log('[]');
       }
