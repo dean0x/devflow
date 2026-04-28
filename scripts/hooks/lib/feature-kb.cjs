@@ -178,10 +178,11 @@ function checkStaleness(worktreePath, slug) {
  * — false-positive staleness triggers a refresh that confirms the KB is current.
  *
  * @param {string} worktreePath
+ * @param {{ version: number; features: Record<string, unknown> } | null} [cachedIndex] - Optional pre-loaded index to avoid double reads
  * @returns {Record<string, { stale: boolean, changedFiles: string[] }>}
  */
-function checkAllStaleness(worktreePath) {
-  const index = loadIndex(worktreePath);
+function checkAllStaleness(worktreePath, cachedIndex) {
+  const index = cachedIndex !== undefined ? cachedIndex : loadIndex(worktreePath);
   if (!index) return {};
 
   const slugs = Object.keys(index.features);
@@ -428,8 +429,12 @@ function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
  * @param {string} worktreePath
  * @returns {Array<{ slug: string } & FeatureEntry>}
  */
-function listKBs(worktreePath) {
-  const index = loadIndex(worktreePath);
+/**
+ * @param {string} worktreePath
+ * @param {{ version: number; features: Record<string, unknown> } | null} [cachedIndex] - Optional pre-loaded index to avoid double reads
+ */
+function listKBs(worktreePath, cachedIndex) {
+  const index = cachedIndex !== undefined ? cachedIndex : loadIndex(worktreePath);
   if (!index) return [];
   return Object.entries(index.features).map(([slug, entry]) => ({ slug, ...entry }));
 }
@@ -621,3 +626,5 @@ if (require.main === module) {
 }
 
 module.exports = { loadIndex, loadKBContent, checkStaleness, checkAllStaleness, updateIndex, findOverlapping, removeEntry, listKBs, validateSlug };
+// Note: loadIndex is already exported above, enabling callers to read the index once
+// and pass it to listKBs/checkAllStaleness via their optional cachedIndex parameter.

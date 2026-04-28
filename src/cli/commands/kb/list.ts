@@ -6,8 +6,10 @@ export async function handleList(): Promise<void> {
   p.intro(color.cyan('Feature Knowledge Bases'));
 
   const worktreePath = await getWorktreePath();
-  const kbs = featureKb.listKBs(worktreePath);
-  const staleness = featureKb.checkAllStaleness(worktreePath);
+  // Load index once and pass to both functions to avoid double file reads
+  const index = featureKb.loadIndex(worktreePath);
+  const kbs = featureKb.listKBs(worktreePath, index);
+  const staleness = featureKb.checkAllStaleness(worktreePath, index);
 
   if (kbs.length === 0) {
     p.log.info(

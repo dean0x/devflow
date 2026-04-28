@@ -17,12 +17,16 @@ export async function handleRefresh(slug?: string): Promise<void> {
   const worktreePath = await getWorktreePath();
 
   // Determine which slugs to refresh
+  // Load index once and reuse across staleness check + listKBs to avoid double reads
+  const index = featureKb.loadIndex(worktreePath);
+  const kbs = featureKb.listKBs(worktreePath, index);
+
   let slugsToRefresh: string[];
   let stalenessMap: Record<string, { stale: boolean; changedFiles: string[] }> | undefined;
   if (slug) {
     slugsToRefresh = [slug];
   } else {
-    stalenessMap = featureKb.checkAllStaleness(worktreePath);
+    stalenessMap = featureKb.checkAllStaleness(worktreePath, index);
     slugsToRefresh = Object.entries(stalenessMap)
       .filter(([, info]) => info.stale)
       .map(([s]) => s);
@@ -35,8 +39,6 @@ export async function handleRefresh(slug?: string): Promise<void> {
   }
 
   p.log.info(`Refreshing ${slugsToRefresh.length} KB${slugsToRefresh.length === 1 ? '' : 's'}: ${slugsToRefresh.join(', ')}`);
-
-  const kbs = featureKb.listKBs(worktreePath);
 
   for (const kbSlug of slugsToRefresh) {
     const s = p.spinner();

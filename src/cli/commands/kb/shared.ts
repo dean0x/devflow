@@ -13,9 +13,13 @@ const __dirname = path.dirname(__filename);
 
 const _require = createRequire(import.meta.url);
 
+export type KbIndex = { version: number; features: Record<string, unknown> } | null;
+export type KbEntry = { slug: string; name: string; directories: string[]; lastUpdated: string; referencedFiles?: string[]; description?: string; createdBy?: string };
+
 export interface FeatureKbModule {
-  listKBs: (worktreePath: string) => Array<{ slug: string; name: string; directories: string[]; lastUpdated: string; referencedFiles?: string[]; description?: string; createdBy?: string }>;
-  checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
+  loadIndex: (worktreePath: string) => KbIndex;
+  listKBs: (worktreePath: string, cachedIndex?: KbIndex) => KbEntry[];
+  checkAllStaleness: (worktreePath: string, cachedIndex?: KbIndex) => Record<string, { stale: boolean; changedFiles: string[] }>;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string) => void;

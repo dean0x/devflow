@@ -31,11 +31,11 @@ const {
   loadIndex: (worktreePath: string) => { version: number; features: Record<string, unknown> } | null;
   loadKBContent: (worktreePath: string, slug: string) => string | null;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
-  checkAllStaleness: (worktreePath: string) => Record<string, { stale: boolean; changedFiles: string[] }>;
+  checkAllStaleness: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Record<string, { stale: boolean; changedFiles: string[] }>;
   updateIndex: (worktreePath: string, entry: Record<string, unknown>, lockTimeoutMs?: number) => void;
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string, lockTimeoutMs?: number) => void;
-  listKBs: (worktreePath: string) => Array<{ slug: string } & Record<string, unknown>>;
+  listKBs: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Array<{ slug: string } & Record<string, unknown>>;
   validateSlug: (slug: string) => void;
 };
 
