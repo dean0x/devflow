@@ -167,7 +167,15 @@ function checkStaleness(worktreePath, slug) {
 
 /**
  * Check staleness for all KBs in the index.
- * Loads the index once and checks git-dir once to avoid N+1 overhead.
+ * Loads the index once, checks git-dir once, and runs a single git log call
+ * to detect all changed files since the oldest lastUpdated timestamp.
+ * Each entry's staleness is then determined by intersecting its referencedFiles
+ * with the global changed-files set.
+ *
+ * NOTE: This uses the oldest timestamp as the --since cutoff, which may produce
+ * false-positive staleness for entries with newer timestamps if files changed
+ * between the oldest and their own timestamps. This is intentionally conservative
+ * — false-positive staleness triggers a refresh that confirms the KB is current.
  *
  * @param {string} worktreePath
  * @returns {Record<string, { stale: boolean, changedFiles: string[] }>}
@@ -176,17 +184,72 @@ function checkAllStaleness(worktreePath) {
   const index = loadIndex(worktreePath);
   if (!index) return {};
 
+  const slugs = Object.keys(index.features);
+  if (slugs.length === 0) return {};
+
   // Check git-dir once for the whole batch
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath, stdio: 'pipe' });
   } catch {
     // Non-git repo — all entries non-stale
-    return Object.fromEntries(Object.keys(index.features).map(slug => [slug, NOT_STALE]));
+    return Object.fromEntries(slugs.map(slug => [slug, NOT_STALE]));
   }
 
+  // Collect all referenced files and find the oldest lastUpdated timestamp
+  const allFiles = [];
+  let oldestTimestamp = null;
+  for (const slug of slugs) {
+    const entry = index.features[slug];
+    const files = entry.referencedFiles || [];
+    for (const f of files) {
+      if (!allFiles.includes(f)) allFiles.push(f);
+    }
+    if (entry.lastUpdated) {
+      const ts = new Date(entry.lastUpdated).getTime();
+      if (!isNaN(ts) && (oldestTimestamp === null || ts < oldestTimestamp)) {
+        oldestTimestamp = ts;
+      }
+    }
+  }
+
+  // If no files or no timestamp, fall back to per-entry checks
+  if (allFiles.length === 0 || oldestTimestamp === null) {
+    const results = {};
+    for (const slug of slugs) {
+      results[slug] = checkEntryFiles(worktreePath, index.features[slug]);
+    }
+    return results;
+  }
+
+  // Single git log call for all files since oldest timestamp
+  let changedFilesGlobal;
+  try {
+    const gitOutput = execFileSync(
+      'git',
+      ['log', `--after=${new Date(oldestTimestamp).toISOString()}`, '--name-only', '--pretty=format:', '--', ...allFiles],
+      { cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    changedFilesGlobal = new Set(parseGitChangedFiles(gitOutput));
+  } catch {
+    // Git call failed — fall back to per-entry checks
+    const results = {};
+    for (const slug of slugs) {
+      results[slug] = checkEntryFiles(worktreePath, index.features[slug]);
+    }
+    return results;
+  }
+
+  // For each entry, intersect its referencedFiles with the global changed set
   const results = {};
-  for (const slug of Object.keys(index.features)) {
-    results[slug] = checkEntryFiles(worktreePath, index.features[slug]);
+  for (const slug of slugs) {
+    const entry = index.features[slug];
+    const files = entry.referencedFiles || [];
+    if (files.length === 0) {
+      results[slug] = NOT_STALE;
+      continue;
+    }
+    const changedForEntry = files.filter(f => changedFilesGlobal.has(f));
+    results[slug] = { stale: changedForEntry.length > 0, changedFiles: changedForEntry };
   }
   return results;
 }
