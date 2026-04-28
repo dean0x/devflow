@@ -106,12 +106,17 @@ updated: {ISO date}
 
 ## Integration
 
-After writing KNOWLEDGE.md, update the index:
-```bash
-node scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
-  --slug="{slug}" --name="{name}" \
-  --directories='["{dir1}", "{dir2}"]' \
-  --referencedFiles='["{file1}", "{file2}"]' \
-  --description="Use when {trigger description}" \
-  --createdBy="{source}"
+After writing KNOWLEDGE.md, write a sidecar JSON file for the host process to consume:
+
+**Filename**: `.create-result.json` (for new KBs) or `.refresh-result.json` (for refreshes)
+**Location**: Same directory as KNOWLEDGE.md (`.features/{slug}/`)
+
+**Required fields**:
+```json
+{
+  "referencedFiles": ["src/path/to/key-file.ts", "src/path/to/other.ts"],
+  "description": "Use when working on {feature area description}"
+}
 ```
+
+The host process reads this sidecar and updates `.features/index.json` — do NOT attempt to update the index directly.
