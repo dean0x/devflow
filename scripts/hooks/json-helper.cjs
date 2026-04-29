@@ -46,20 +46,7 @@ const args = process.argv.slice(3);
 
 // Domain modules — routed before the main switch to keep this file focused.
 const sidecarOps = require('./lib/sidecar-ops.cjs');
-
-/**
- * Resolve a file path argument to an absolute path.
- * Note: path.resolve() normalizes away '..' segments, so the includes check
- * only catches the rare case of literal '..' in a directory name after resolution.
- * Primary value is ensuring all file operations use absolute paths.
- */
-function safePath(filePath) {
-  const resolved = path.resolve(filePath);
-  if (resolved.includes('..')) {
-    throw new Error(`Refused path with traversal: ${filePath}`);
-  }
-  return resolved;
-}
+const { safePath } = require('./lib/safe-path.cjs');
 
 function readStdin() {
   try {

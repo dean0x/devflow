@@ -1,19 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
-
-/**
- * Resolve a file path argument to an absolute path.
- * Rejects any path that still contains '..' after resolution.
- */
-function safePath(filePath) {
-  const resolved = path.resolve(filePath);
-  if (resolved.includes('..')) {
-    throw new Error(`Refused path with traversal: ${filePath}`);
-  }
-  return resolved;
-}
+const { safePath } = require('./safe-path.cjs');
 
 /**
  * Handle sidecar-related operations.
