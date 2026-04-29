@@ -396,6 +396,63 @@ describe('checkAllStaleness', () => {
     expect(result['cli-commands']).toHaveProperty('stale');
     expect(result['cli-commands']).toHaveProperty('changedFiles');
   });
+
+  it('does not false-positive newer KBs when shared file changed between timestamps', () => {
+    const tmp = makeTmpFeatureWorktree();
+    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+
+    execSync('git init', { cwd: tmp, stdio: 'pipe' });
+    execSync('git config user.email "test@test.com"', { cwd: tmp, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: tmp, stdio: 'pipe' });
+
+    // Initial commit with shared.ts
+    const srcDir = path.join(tmp, 'src');
+    mkdirSync(srcDir, { recursive: true });
+    writeFileSync(path.join(srcDir, 'shared.ts'), 'export const v = 1;');
+    execSync('git add .', { cwd: tmp, stdio: 'pipe' });
+    execSync('git commit -m "initial"', { cwd: tmp, stdio: 'pipe' });
+
+    // KB-A: lastUpdated BEFORE the upcoming change → should be stale
+    const kbATimestamp = new Date(Date.now() - 10000).toISOString();
+
+    // Modify shared.ts and commit (the change happens "now")
+    writeFileSync(path.join(srcDir, 'shared.ts'), 'export const v = 2;');
+    execSync('git add .', { cwd: tmp, stdio: 'pipe' });
+    execSync('git commit -m "update shared.ts"', { cwd: tmp, stdio: 'pipe' });
+
+    // KB-B: lastUpdated AFTER the change → should NOT be stale
+    const kbBTimestamp = new Date(Date.now() + 10000).toISOString();
+
+    const featuresDir = path.join(tmp, '.features');
+    mkdirSync(featuresDir, { recursive: true });
+    writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
+      version: 1,
+      features: {
+        'kb-old': {
+          name: 'Old KB',
+          description: '',
+          directories: ['src/'],
+          referencedFiles: ['src/shared.ts'],
+          lastUpdated: kbATimestamp,
+          createdBy: 'test',
+        },
+        'kb-new': {
+          name: 'New KB',
+          description: '',
+          directories: ['src/'],
+          referencedFiles: ['src/shared.ts'],
+          lastUpdated: kbBTimestamp,
+          createdBy: 'test',
+        },
+      },
+    }, null, 2));
+
+    const result = checkAllStaleness(tmp);
+    expect(result['kb-old'].stale).toBe(true);
+    expect(result['kb-old'].changedFiles).toContain('src/shared.ts');
+    expect(result['kb-new'].stale).toBe(false);
+    expect(result['kb-new'].changedFiles).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

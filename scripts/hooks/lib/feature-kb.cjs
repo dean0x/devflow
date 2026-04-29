@@ -41,6 +41,30 @@ function parseGitChangedFiles(output) {
 }
 
 /**
+ * Parse git log output with dates into a map of file → latest change timestamp.
+ * Expects `--pretty=format:%aI` output: ISO date, blank line, file names, blank, repeat.
+ * Reverse chronological order means first occurrence = latest change.
+ * @param {string} output
+ * @returns {Map<string, number>}
+ */
+function parseGitLogWithDates(output) {
+  const fileLatestChange = new Map();
+  let currentDate = null;
+  for (const line of output.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
+      currentDate = new Date(trimmed).getTime();
+      continue;
+    }
+    if (currentDate !== null && !fileLatestChange.has(trimmed)) {
+      fileLatestChange.set(trimmed, currentDate);
+    }
+  }
+  return fileLatestChange;
+}
+
+/**
  * Validate that a slug is safe for use as a directory name.
  * Rejects path traversal attempts (e.g., '../etc'), absolute paths,
  * and characters unsafe for filesystem use.
@@ -169,13 +193,9 @@ function checkStaleness(worktreePath, slug) {
  * Check staleness for all KBs in the index.
  * Loads the index once, checks git-dir once, and runs a single git log call
  * to detect all changed files since the oldest lastUpdated timestamp.
- * Each entry's staleness is then determined by intersecting its referencedFiles
- * with the global changed-files set.
- *
- * NOTE: This uses the oldest timestamp as the --since cutoff, which may produce
- * false-positive staleness for entries with newer timestamps if files changed
- * between the oldest and their own timestamps. This is intentionally conservative
- * — false-positive staleness triggers a refresh that confirms the KB is current.
+ * Uses the oldest timestamp as the --after cutoff to minimize git calls,
+ * then compares each file's latest change date against each entry's own
+ * lastUpdated to avoid false-positive staleness.
  *
  * @param {string} worktreePath
  * @param {{ version: number; features: Record<string, unknown> } | null} [cachedIndex] - Optional pre-loaded index to avoid double reads
@@ -222,15 +242,15 @@ function checkAllStaleness(worktreePath, cachedIndex) {
     return results;
   }
 
-  // Single git log call for all files since oldest timestamp
-  let changedFilesGlobal;
+  // Single git log call for all files since oldest timestamp, with author dates
+  let fileLatestChange;
   try {
     const gitOutput = execFileSync(
       'git',
-      ['log', `--after=${new Date(oldestTimestamp).toISOString()}`, '--name-only', '--pretty=format:', '--', ...allFiles],
+      ['log', `--after=${new Date(oldestTimestamp).toISOString()}`, '--name-only', '--pretty=format:%aI', '--', ...allFiles],
       { cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
-    changedFilesGlobal = new Set(parseGitChangedFiles(gitOutput));
+    fileLatestChange = parseGitLogWithDates(gitOutput);
   } catch {
     // Git call failed — fall back to per-entry checks
     const results = {};
@@ -240,7 +260,7 @@ function checkAllStaleness(worktreePath, cachedIndex) {
     return results;
   }
 
-  // For each entry, intersect its referencedFiles with the global changed set
+  // For each entry, compare its files' latest change dates against its own lastUpdated
   const results = {};
   for (const slug of slugs) {
     const entry = index.features[slug];
@@ -249,7 +269,11 @@ function checkAllStaleness(worktreePath, cachedIndex) {
       results[slug] = NOT_STALE;
       continue;
     }
-    const changedForEntry = files.filter(f => changedFilesGlobal.has(f));
+    const entryTimestamp = entry.lastUpdated ? new Date(entry.lastUpdated).getTime() : 0;
+    const changedForEntry = files.filter(f => {
+      const changeTs = fileLatestChange.get(f);
+      return changeTs !== undefined && changeTs > entryTimestamp;
+    });
     results[slug] = { stale: changedForEntry.length > 0, changedFiles: changedForEntry };
   }
   return results;
