@@ -217,13 +217,13 @@ function checkAllStaleness(worktreePath, cachedIndex) {
   }
 
   // Collect all referenced files and find the oldest lastUpdated timestamp
-  const allFiles = [];
+  const allFilesSet = new Set();
   let oldestTimestamp = null;
   for (const slug of slugs) {
     const entry = index.features[slug];
     const files = entry.referencedFiles || [];
     for (const f of files) {
-      if (!allFiles.includes(f)) allFiles.push(f);
+      allFilesSet.add(f);
     }
     if (entry.lastUpdated) {
       const ts = new Date(entry.lastUpdated).getTime();
@@ -234,7 +234,7 @@ function checkAllStaleness(worktreePath, cachedIndex) {
   }
 
   // If no files or no timestamp, fall back to per-entry checks
-  if (allFiles.length === 0 || oldestTimestamp === null) {
+  if (allFilesSet.size === 0 || oldestTimestamp === null) {
     const results = {};
     for (const slug of slugs) {
       results[slug] = checkEntryFiles(worktreePath, index.features[slug]);
@@ -247,7 +247,7 @@ function checkAllStaleness(worktreePath, cachedIndex) {
   try {
     const gitOutput = execFileSync(
       'git',
-      ['log', `--after=${new Date(oldestTimestamp).toISOString()}`, '--name-only', '--pretty=format:%aI', '--', ...allFiles],
+      ['log', `--after=${new Date(oldestTimestamp).toISOString()}`, '--name-only', '--pretty=format:%aI', '--', ...allFilesSet],
       { cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
     fileLatestChange = parseGitLogWithDates(gitOutput);
