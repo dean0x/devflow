@@ -5,6 +5,7 @@ model: opus
 skills:
   - devflow:software-design
   - devflow:worktree-support
+  - devflow:apply-feature-kb
 ---
 
 # Evaluator Agent
@@ -21,6 +22,10 @@ You receive from orchestrator:
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
+- **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context for
+  acceptance verification. Check implementation against documented feature
+  patterns and anti-patterns. Follow `devflow:apply-feature-kb`.
+
 ## Responsibilities
 
 1. **Understand intent**: Read ORIGINAL_REQUEST and EXECUTION_PLAN to understand what was requested
@@ -35,7 +40,7 @@ You receive from orchestrator:
    | Wired | Connected to running app | Route registered, imported, reachable |
 
    Flag anything at "Exists" without reaching "Wired" as `incomplete`.
-5. **Check completeness**: Verify all plan steps implemented, all acceptance criteria met
+5. **Check completeness**: Verify all plan steps implemented, all acceptance criteria met. If FEATURE_KNOWLEDGE is provided, verify implementation follows documented patterns and avoids documented anti-patterns for the feature area
 6. **Check scope**: Identify out-of-scope additions not justified by design improvements
 7. **Report misalignments**: Document issues with sufficient detail for Coder to fix
 

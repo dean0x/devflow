@@ -70,7 +70,7 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 
 #### Phase 2: Orient + Load Knowledge
 
-**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
 Spawn Skimmer agent for codebase context:
@@ -89,17 +89,25 @@ Return codebase context for requirements analysis."
 While Skimmer runs, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on the planning task description, identify relevant KBs
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+
+Pass `FEATURE_KNOWLEDGE` alongside `KNOWLEDGE_CONTEXT` to Explorer and Designer agents.
 
 #### Phase 3: Explore Requirements (Parallel)
 
 **Produces:** EXPLORE_OUTPUTS
 **Requires:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context and `KNOWLEDGE_CONTEXT` (from Phase 2). Include instruction: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT".
+Spawn 4 Explore agents **in a single message**, each with Skimmer context, `KNOWLEDGE_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the KB doesn't cover and changes since it was last updated."
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -161,6 +169,7 @@ Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: {completeness|architecture|security|performance|consistency|dependencies}
 KNOWLEDGE_CONTEXT: {knowledge_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}
@@ -448,11 +457,12 @@ Display completion summary:
 │  └─ Phase 13: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
 │     └─ AskUserQuestion: Final plan approval
 │
-└─ Block 6: Output
-   └─ Phase 14: Output
-      ├─ Store design artifact (.docs/design/)
-      ├─ Create GitHub issue (optional)
-      └─ Report summary + next step
+├─ Block 6: Output
+│  └─ Phase 14: Output
+│     ├─ Store design artifact (.docs/design/)
+│     ├─ Create GitHub issue (optional)
+│     └─ Report summary + next step
+│
 ```
 
 ## Principles

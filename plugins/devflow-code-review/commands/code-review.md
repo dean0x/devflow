@@ -102,15 +102,23 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 ### Phase 1b: Load Knowledge Index
 
-**Produces:** KNOWLEDGE_CONTEXT
+**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 While file analysis runs (or just before spawning reviewers), load the knowledge index for the current worktree:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on changed files from Phase 1 analysis, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+
+Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `KNOWLEDGE_CONTEXT`.
 
 ### Phase 2: Run Reviews (Parallel)
 
@@ -149,7 +157,9 @@ PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
 KNOWLEDGE_CONTEXT: {knowledge_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand.
+Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 

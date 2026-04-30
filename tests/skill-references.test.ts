@@ -828,6 +828,7 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
       'knowledge-persistence',
       'review-methodology',
       'worktree-support',
+      'apply-feature-kb',  // consumption meta-skill, not a review focus
     ]);
 
     const reviewerContent = readFileSync(

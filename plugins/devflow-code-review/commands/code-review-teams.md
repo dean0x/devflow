@@ -95,15 +95,23 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 ### Phase 1b: Load Knowledge Index
 
-**Produces:** KNOWLEDGE_CONTEXT
+**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
 Load the knowledge index for the current worktree before spawning the review team:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on changed files from Phase 1 analysis, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+
+Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `KNOWLEDGE_CONTEXT`.
 
 ### Phase 2: Spawn Review Team
 
@@ -143,16 +151,18 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
     KNOWLEDGE_CONTEXT: {knowledge_context}
+    FEATURE_KNOWLEDGE: {feature_knowledge}
     1. Read your skill(s): `Read {SKILL_PATHS}`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
-    4. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
-    5. Apply the 6-step review process from devflow:review-methodology
-    6. Focus: {FOCUS}
-    7. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
-    8. Include file:line references for every finding
-    9. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/{REPORT_NAME}.md`
-    10. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "{SUMMARY}")
+    4. Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings. Skip if (none).
+    5. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
+    6. Apply the 6-step review process from devflow:review-methodology
+    7. Focus: {FOCUS}
+    8. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
+    9. Include file:line references for every finding
+    10. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/{REPORT_NAME}.md`
+    11. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "{SUMMARY}")
 
 **Core reviewers (always spawn):**
 

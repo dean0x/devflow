@@ -29,7 +29,7 @@ Orchestrate a single task through implementation by spawning specialized agent t
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, STALE_KB_SLUGS
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
@@ -60,6 +60,19 @@ Return the branch setup summary."
 5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
 6. Captured values override defaults from Git agent where present
 
+**Load Knowledge Context:**
+```bash
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+```
+Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
+
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on task description and file targets, identify relevant KBs
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+5. Collect slugs where staleness check returned stale → `STALE_KB_SLUGS`.
+
 ### Phase 2: Implement
 
 **Produces:** CODER_OUTPUT, FILES_CHANGED
@@ -89,7 +102,8 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {full plan from setup context}
 PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
-DOMAIN: {detected domain or 'fullstack'}"
+DOMAIN: {detected domain or 'fullstack'}
+FEATURE_KNOWLEDGE: {feature_knowledge}"
 ```
 
 ---
@@ -108,6 +122,7 @@ EXECUTION_PLAN: {phase 1 steps}
 PATTERNS: {patterns from plan document or empty}
 CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 HANDOFF_REQUIRED: true"
 ```
 
@@ -123,6 +138,7 @@ CREATE_PR: {true if last phase, false otherwise}
 DOMAIN: {phase N domain, e.g., 'frontend'}
 PRIOR_PHASE_SUMMARY: {summary from previous Coder}
 FILES_FROM_PRIOR_PHASE: {list of files created}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 HANDOFF_REQUIRED: {true if not last phase}"
 ```
 
@@ -142,7 +158,8 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 1 steps}
 PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: {subtask 1 domain}"
+DOMAIN: {subtask 1 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
 "TASK_ID: {task-id}-part2
@@ -151,7 +168,8 @@ BASE_BRANCH: {base branch}
 EXECUTION_PLAN: {subtask 2 steps}
 PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: {subtask 2 domain}"
+DOMAIN: {subtask 2 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODERS):
@@ -219,6 +237,7 @@ After Simplifier completes, spawn Scrutinizer as final quality gate:
 Agent(subagent_type="Scrutinizer"):
 "TASK_DESCRIPTION: {task description}
 FILES_CHANGED: {list of files from Coder output}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
@@ -391,7 +410,75 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
 
+Compute overlapping KBs:
+```bash
+OVERLAPPING_SLUGS=$(node ~/.devflow/scripts/hooks/lib/feature-kb.cjs find-overlapping "{worktree}" {files_changed...} 2>/dev/null)
+```
+Parse the JSON array output. Pass `OVERLAPPING_SLUGS` to Phase 11.
+
 Display completion summary with phase status, PR info, and next steps.
+
+### Phase 11: Feature KB Generation (Conditional)
+
+**Requires:** FILES_CHANGED, STALE_KB_SLUGS, OVERLAPPING_SLUGS, KNOWLEDGE_CONTEXT
+**Produces:** Updated `.features/index.json` (or skipped)
+
+If `.features/.disabled` exists, skip entirely.
+
+**New KB creation**: If FILES_CHANGED touch a feature area that does NOT have a matching KB in `.features/index.json`:
+
+**Slug derivation**: Derive the slug from the primary directory name using kebab-case. Examples: `src/cli/commands/` → `cli-commands`, `src/payments/stripe/` → `payments-stripe`, `scripts/hooks/` → `hooks`. Strip common prefixes like `src/` and `lib/`. The slug must match `^[a-z0-9][a-z0-9-]*$`.
+
+1. Identify the feature area slug and human-readable name from the implemented directories
+2. Spawn Agent(subagent_type="Knowledge"):
+   ```
+   "FEATURE_SLUG: {slug}
+   FEATURE_NAME: {name}
+   FILES_CHANGED: {files_changed list}
+   DIRECTORIES: {directory prefixes from FILES_CHANGED}
+   KNOWLEDGE_CONTEXT: {from Phase 1}
+
+   Load the devflow:feature-kb skill and follow its 4-phase process exactly.
+   Read the FILES_CHANGED to understand the implemented code.
+   Read .features/index.json to see existing KBs for cross-referencing."
+   ```
+3. Read sidecar (`.features/{slug}/.create-result.json`), then run:
+   ```bash
+   node ~/.devflow/scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
+     --slug="{slug}" --name="{name}" \
+     --directories='["{dir1}", "{dir2}"]' \
+     --referencedFiles='{referencedFiles_json_from_sidecar}' \
+     --description="{description_from_sidecar}" \
+     --createdBy="implement" 2>/dev/null
+   ```
+   Clean up: `rm -f .features/{slug}/.create-result.json`
+   If the sidecar file does not exist (agent failed to write it), use empty defaults:
+   `referencedFiles='[]'`, `description=""`.
+4. Report: "Created feature KB: {slug}"
+
+Skip if all touched areas already have matching KBs.
+
+**Refresh stale KBs**: Combine STALE_KB_SLUGS (from Phase 1) and OVERLAPPING_SLUGS (from Phase 10), deduplicate. For each slug, refresh:
+
+1. Read `.features/{slug}/KNOWLEDGE.md` and index entry
+2. Spawn Agent(subagent_type="Knowledge"):
+   ```
+   "FEATURE_SLUG: {slug}
+   FEATURE_NAME: {name from index}
+   DIRECTORIES: {directories from index}
+   EXISTING_KB: {content of .features/{slug}/KNOWLEDGE.md}
+   CHANGED_FILES: {FILES_CHANGED that overlap this KB}
+   KNOWLEDGE_CONTEXT: {from Phase 1}
+
+   Load the devflow:feature-kb skill. This is a REFRESH, not a new creation.
+   Read the CHANGED_FILES to understand what changed, then update the EXISTING_KB.
+   Maintain quality standards from the skill. Do NOT regenerate from scratch.
+   Write updated KB to .features/{slug}/KNOWLEDGE.md
+   Write .features/{slug}/.refresh-result.json with referencedFiles and description."
+   ```
+3. Read sidecar, update index (same CLI call as step 3 above), clean up sidecar.
+
+**Failure handling**: Non-blocking. If Knowledge agent crashes, log failure and report results normally.
 
 <!-- D8: "Record Decisions" block removed — knowledge-persistence skill no longer has Write
      capability; decision recording is handled by the background-learning extractor. -->
@@ -435,7 +522,10 @@ Display completion summary with phase status, PR info, and next steps.
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-└─ Phase 10: Report
+├─ Phase 10: Report
+│
+└─ Phase 11: Feature KB Generation (Conditional)
+   └─ Knowledge agent (if new/stale feature area)
 ```
 
 ## Principles

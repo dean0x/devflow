@@ -61,7 +61,7 @@ For multi-issue: present unified scope across all issues.
 
 #### Phase 2: Orient + Load Knowledge
 
-**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
 Spawn Skimmer agent for codebase context:
@@ -80,10 +80,18 @@ Return codebase context for requirements analysis."
 While Skimmer runs, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+
+**Load Feature Knowledge:**
+1. Read `.features/index.json` if it exists
+2. Based on the planning task description, identify relevant KBs
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+
+Pass `FEATURE_KNOWLEDGE` alongside `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates.
 
 #### Phase 3: Exploration Team
 
@@ -217,6 +225,7 @@ Each designer receives:
 - Exploration synthesis from Phase 4
 - Skimmer context from Phase 2
 - KNOWLEDGE_CONTEXT: knowledge index from Phase 2 (or `(none)`) — designers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand
+- FEATURE_KNOWLEDGE: feature area context from Phase 2 (or `(none)`) — designers follow `devflow:apply-feature-kb` for consumption
 - Multi-issue: all issue bodies
 
 #### Phase 6: Synthesize Gap Analysis
@@ -490,11 +499,12 @@ Display: artifact path, issue URL, gap analysis summary, design review summary, 
 │  ├─ Phase 12: Designer agent (mode: design-review)
 │  └─ Phase 13: GATE 2 - Confirm Plan + Design Review ⛔ MANDATORY
 │
-└─ Block 6: Output
-   └─ Phase 14: Output
-      ├─ Store design artifact (.docs/design/)
-      ├─ Create GitHub issue (optional)
-      └─ Report summary + next step
+├─ Block 6: Output
+│  └─ Phase 14: Output
+│     ├─ Store design artifact (.docs/design/)
+│     ├─ Create GitHub issue (optional)
+│     └─ Report summary + next step
+│
 ```
 
 ## Principles

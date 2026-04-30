@@ -34,6 +34,7 @@
 //   reconcile-manifest <cwd>             Session-start reconciler: sync manifest vs FS (D6, D13)
 //   merge-observation <log> <newObsJson> Dedup/reinforce with in-place merge (D14)
 //   knowledge-append <file> <type> <obs> Append ADR/PF entry to knowledge file
+//   read-sidecar <file> <field>          Read field from sidecar JSON (allowed fields only; returns [] on any error)
 
 'use strict';
 
@@ -43,19 +44,7 @@ const path = require('path');
 const op = process.argv[2];
 const args = process.argv.slice(3);
 
-/**
- * Resolve a file path argument to an absolute path.
- * Note: path.resolve() normalizes away '..' segments, so the includes check
- * only catches the rare case of literal '..' in a directory name after resolution.
- * Primary value is ensuring all file operations use absolute paths.
- */
-function safePath(filePath) {
-  const resolved = path.resolve(filePath);
-  if (resolved.includes('..')) {
-    throw new Error(`Refused path with traversal: ${filePath}`);
-  }
-  return resolved;
-}
+const { safePath } = require('./lib/safe-path.cjs');
 
 function readStdin() {
   try {
@@ -638,6 +627,14 @@ function parseArgs(argList) {
 
 if (require.main === module) {
 try {
+  // Route to domain modules first; fall through to the main switch if not handled.
+  if (op === 'read-sidecar') {
+    const sidecarOps = require('./lib/sidecar-ops.cjs');
+    if (sidecarOps.handle(op, args, process.cwd())) {
+      process.exit(0);
+    }
+  }
+
   switch (op) {
     case 'get-field': {
       const input = JSON.parse(readStdin());

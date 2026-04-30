@@ -6,20 +6,21 @@
 # invocation with Sonnet to detect patterns and update learning-log.jsonl.
 # On failure: logs error, does nothing (missing patterns are better than fake data).
 
-set -e
-
 CWD="$1"
 MODE="${2:---batch}"
 CLAUDE_BIN="${3:-claude}"
 
 # Source JSON parsing helpers (jq with node fallback)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/json-parse"
+source "$SCRIPT_DIR/json-parse" || { echo "background-learning: failed to source json-parse" >&2; exit 1; }
 
-source "$SCRIPT_DIR/log-paths"
+source "$SCRIPT_DIR/log-paths" || { echo "background-learning: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 LOCK_DIR="$CWD/.memory/.learning.lock"
 LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
+
+# shellcheck source=get-mtime
+source "$SCRIPT_DIR/get-mtime" || { echo "background-learning: failed to source get-mtime" >&2; exit 1; }
 RESPONSE_FILE="$CWD/.memory/.learning-response.tmp"
 
 # --- Logging ---
@@ -42,14 +43,6 @@ rotate_log() {
 }
 
 # --- Stale Lock Recovery ---
-
-get_mtime() {
-  if stat --version &>/dev/null 2>&1; then
-    stat -c %Y "$1"
-  else
-    stat -f %m "$1"
-  fi
-}
 
 # DESIGN: These timeouts are intentionally higher than the Node acquireMkdirLock defaults
 # (30 s / 60 s in json-helper.cjs) because this lock guards the entire Sonnet analysis
@@ -391,6 +384,7 @@ run_sonnet_analysis() {
   DEVFLOW_BG_UPDATER=1 DEVFLOW_BG_LEARNER=1 "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --dangerously-skip-permissions \
+    --allowedTools 'Read' \
     --output-format text \
     "$PROMPT" \
     > "$RESPONSE_FILE" 2>> "$LOG_FILE" &
