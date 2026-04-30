@@ -85,6 +85,13 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['agent-teams', 'git', 'worktree-support', 'apply-feature-kb'],
   },
   {
+    name: 'devflow-explore',
+    description: 'Codebase exploration with structured analysis and optional KB creation',
+    commands: ['/explore'],
+    agents: ['skimmer', 'synthesizer', 'knowledge'],
+    skills: ['agent-teams', 'worktree-support', 'apply-feature-kb', 'feature-kb'],
+  },
+  {
     name: 'devflow-self-review',
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],

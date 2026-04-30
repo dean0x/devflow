@@ -52,7 +52,7 @@ Create directory: `mkdir -p .docs/reviews/{branch_slug}/{timestamp}`
 After incremental detection, load the knowledge index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
@@ -60,7 +60,7 @@ This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT`
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
 2. Based on changed files from Phase 4 file analysis, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
-3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 4: File Analysis

@@ -13,7 +13,7 @@ export const SAMPLE_INDEX = {
       directories: ['src/cli/commands/', 'src/cli/utils/'],
       referencedFiles: ['src/cli/cli.ts', 'src/cli/plugins.ts'],
       lastUpdated: '2026-04-20T14:30:00Z',
-      createdBy: 'plan:orch',
+      createdBy: 'implement',
     },
   },
 };

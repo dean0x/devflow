@@ -75,7 +75,7 @@ Set `TARGET_DIR` to the selected review directory path.
 For each worktree, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
@@ -83,7 +83,7 @@ This produces a compact index of active ADR/PF entries from `decisions.md` and `
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant KBs
-3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` to every Resolver teammate in Phase 4.

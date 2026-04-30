@@ -25,13 +25,13 @@ Detect changed files and build context:
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
 5. Load knowledge index:
    ```bash
-   KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+   KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
    ```
    Pass `KNOWLEDGE_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-knowledge` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume knowledge — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
 6. Load feature knowledge:
    - Read `.features/index.json` if it exists
    - Based on FILES_CHANGED, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
-   - For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+   - For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
    - Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
    - Pass `FEATURE_KNOWLEDGE` to Scrutinizer
 

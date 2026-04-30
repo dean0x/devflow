@@ -80,7 +80,7 @@ Return codebase context for requirements analysis."
 While Skimmer runs, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
@@ -88,7 +88,7 @@ This produces a compact index of active ADR/PF entries. Pass Skimmer context and
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on the planning task description, identify relevant KBs
-3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` alongside `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates.
@@ -453,27 +453,6 @@ If the feature does not already have a GitHub issue, create via `gh issue create
 
 Display: artifact path, issue URL, gap analysis summary, design review summary, suggested next step (`/implement`).
 
-#### Phase 15: Feature KB Generation (Conditional)
-
-**Requires:** Phase 3 and Phase 8 exploration outputs
-
-If the exploration in earlier phases covered a feature area without an existing KB, spawn Knowledge agent to create one:
-
-```
-Agent(subagent_type="Knowledge"):
-"FEATURE_SLUG: {slug}
-FEATURE_NAME: {name}
-EXPLORATION_OUTPUTS: {combined exploration outputs from Phases 3+8}
-DIRECTORIES: {directory prefixes explored}
-KNOWLEDGE_CONTEXT: {from Phase 2}"
-```
-
-Skip if all explored areas already have matching KBs.
-
-If a stale KB was detected in Phase 2, also refresh it — spawn Knowledge agent with `EXISTING_KB` content + `CHANGED_FILES` from staleness check.
-
-**Failure handling**: Knowledge agent failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
-
 ---
 
 ## Architecture
@@ -526,9 +505,6 @@ If a stale KB was detected in Phase 2, also refresh it — spawn Knowledge agent
 │     ├─ Create GitHub issue (optional)
 │     └─ Report summary + next step
 │
-└─ Block 7: Feature KB (Conditional)
-   └─ Phase 15: Feature KB Generation
-      └─ Knowledge agent (if new/stale feature area)
 ```
 
 ## Principles

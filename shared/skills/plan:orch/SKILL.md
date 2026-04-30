@@ -25,7 +25,7 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 For GUIDED depth, the main session performs planning directly:
 
 1. **Discover** — If the planning question is open-ended, ask clarifying questions via AskUserQuestion and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
-2. **Load Knowledge** — Load `KNOWLEDGE_CONTEXT` via `node scripts/hooks/lib/knowledge-context.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
+2. **Load Knowledge** — Load `KNOWLEDGE_CONTEXT` via `node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
 3. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
 4. **Design** — Using Skimmer findings + loaded pattern/design skills + `KNOWLEDGE_CONTEXT` + `FEATURE_KNOWLEDGE`, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 5. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
@@ -63,7 +63,7 @@ If NEITHER condition is met → proceed with the full pipeline below.
 Before spawning any agents, load the knowledge index for the current worktree:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
@@ -76,7 +76,7 @@ This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT`
 2. Read `.features/index.json` to see available feature KBs.
 3. Based on the current task description, identify which KBs are relevant (LLM judgment — match task intent against each KB's `description` and `directories` fields).
 4. For each relevant KB:
-   a. Run `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}` to check staleness
+   a. Run `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null` to check staleness
    b. Read `.features/{slug}/KNOWLEDGE.md`
    c. If stale, prefix content with `[STALE — referenced files changed since last update. Verify against current code.]`
 5. Concatenate all relevant KB content as `FEATURE_KNOWLEDGE`:
@@ -253,47 +253,6 @@ If the plan is substantial (>10 implementation steps or HIGH/CRITICAL context ri
 
 Otherwise: plan stays in conversation context, ready for IMPLEMENT to consume directly.
 
-## Phase 12: Feature KB Generation (Conditional)
-
-If `.features/.disabled` exists, skip KB generation entirely — the KB feature is disabled.
-
-If Phases 4-5 explored a feature area that does NOT have a matching KB:
-
-1. Identify the feature area slug and name from the explored directories
-2. Spawn Agent(subagent_type="Knowledge"):
-   ```
-   "FEATURE_SLUG: {slug}
-   FEATURE_NAME: {name}
-   EXPLORATION_OUTPUTS: {combined Phase 4 + Phase 5 outputs}
-   DIRECTORIES: {directory prefixes explored}
-   KNOWLEDGE_CONTEXT: {from Phase 1}"
-   ```
-3. After the Knowledge agent completes, read the sidecar file (`.features/{slug}/.create-result.json`)
-   using the Read tool to get `referencedFiles` and `description`, then run:
-   ```bash
-   node scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
-     --slug="{slug}" --name="{name}" \
-     --directories='["{dir1}", "{dir2}"]' \
-     --referencedFiles='{referencedFiles_json_from_sidecar}' \
-     --description="{description_from_sidecar}" \
-     --createdBy="plan"
-   ```
-   Then clean up: `rm -f .features/{slug}/.create-result.json`
-   If the sidecar file does not exist (agent failed to write it), use empty defaults:
-   `referencedFiles='[]'`, `description=""`.
-4. Report: "Created feature KB: {slug}"
-
-Skip if all explored areas already have matching KBs.
-
-If a stale KB was detected in Phase 2, also refresh it here — spawn Knowledge agent with `EXISTING_KB` content + `CHANGED_FILES` from staleness check.
-
-**Failure handling**: Knowledge agent failure is **non-blocking**. If it crashes, log the failure and complete the plan workflow normally.
-
-**Produces:** `.features/{slug}/KNOWLEDGE.md`, updated `.features/index.json` (via step 3 sidecar read + CLI call)
-**Requires:** Phase 4-5 exploration outputs
-
----
-
 ## Output
 
 Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
@@ -323,6 +282,5 @@ Before presenting output, verify every phase was announced:
 - [ ] Phase 9: Design Review Lite → REVIEW_NOTES captured
 - [ ] Phase 10: Present → Output delivered to user
 - [ ] Phase 11: Persist → Artifact written (or skipped with stated reason)
-- [ ] Phase 12: Feature KB Generation → Knowledge agent spawned, sidecar read, index updated (or skipped if KB exists or feature disabled)
 
 If any phase is unchecked, execute it before proceeding.

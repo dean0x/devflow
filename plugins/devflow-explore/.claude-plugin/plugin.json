@@ -1,0 +1,29 @@
+{
+  "name": "devflow-explore",
+  "description": "Codebase exploration with structured analysis and optional KB creation",
+  "author": {
+    "name": "Dean0x"
+  },
+  "version": "1.8.3",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": [
+    "exploration",
+    "codebase",
+    "analysis",
+    "architecture",
+    "knowledge-base"
+  ],
+  "agents": [
+    "skimmer",
+    "synthesizer",
+    "knowledge"
+  ],
+  "skills": [
+    "agent-teams",
+    "worktree-support",
+    "apply-feature-kb",
+    "feature-kb"
+  ]
+}

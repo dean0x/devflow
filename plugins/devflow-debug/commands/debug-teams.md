@@ -30,7 +30,7 @@ Investigate bugs by spawning a team of agents, each pursuing a different hypothe
 Before hypothesizing, load the knowledge index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to investigator teammates** — knowledge context stays in the orchestrator; teammates examine code directly.
@@ -38,7 +38,7 @@ The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Ph
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on the bug description, identify relevant KBs
-3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Use `FEATURE_KNOWLEDGE` **locally only** for hypothesis generation — feature-specific gotchas and anti-patterns suggest root causes. **Do NOT pass to investigator teammates.**
 
 ### Phase 2: Context Gathering

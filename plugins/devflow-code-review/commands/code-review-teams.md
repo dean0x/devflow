@@ -100,7 +100,7 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 Load the knowledge index for the current worktree before spawning the review team:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
 This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
@@ -108,7 +108,7 @@ This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT`
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on changed files from Phase 1 analysis, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
-3. For each match: check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `KNOWLEDGE_CONTEXT`.

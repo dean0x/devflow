@@ -1,36 +1,29 @@
 ---
-name: explore:orch
-description: Agent orchestration for EXPLORE intent — codebase analysis, flow tracing, architecture mapping
-user-invocable: false
+description: Explore codebase with structured analysis and optional KB creation
 ---
 
-# Explore Orchestration
+# Explore Command
 
-Agent pipeline for EXPLORE intent in ambient GUIDED and ORCHESTRATED modes. Codebase analysis, flow tracing, dependency mapping, and architecture understanding.
+Explore a codebase area by spawning parallel agents for flow tracing, dependency mapping, and pattern analysis. Findings are synthesized into structured output with file:line references, with an optional feature KB created as a byproduct.
 
-## Iron Law
+## Usage
 
-> **EXPLORATION WITHOUT STRUCTURE IS JUST BROWSING**
->
-> Every exploration must produce file:line references. Vague summaries like "the auth
-> system is complex" are failures. Every claim must point to concrete code locations,
-> real call chains, and actual file paths. If you can't cite it, you don't know it.
+```
+/explore "how does the auth system work"
+/explore "trace the request lifecycle from API to database"
+/explore "what patterns does the payments module use"
+```
 
----
+## Input
 
-## GUIDED Behavior
+`$ARGUMENTS` contains whatever follows `/explore`:
+- Area description: "how does the auth system work"
+- Flow question: "trace the request lifecycle"
+- Empty: use conversation context
 
-For GUIDED depth, the main session performs exploration directly:
+## Phases
 
-1. **Load Knowledge** — Run `node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` for KNOWLEDGE_CONTEXT. Read `.features/index.json` if it exists. Based on the exploration question, identify relevant KBs and read them. Use both locally to frame exploration. Set `FEATURE_KNOWLEDGE = (none)` if none are relevant.
-2. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
-3. **Trace** — Using Skimmer findings + `FEATURE_KNOWLEDGE`, trace the flow or analyze the subsystem directly in main session. Follow call chains, read key files, map integration points.
-4. **Present** — Deliver structured findings using the Output format below. Use AskUserQuestion to offer drill-down into specific areas.
-5. **Suggest KB** — If `.features/.disabled` does NOT exist and the explored area has no matching KB in `.features/index.json`, ask the user if they want to create one. If yes, derive slug/name/directories from the explored area, spawn Knowledge agent with EXPLORATION_OUTPUTS (findings from step 3), read sidecar, update index with `--createdBy="explore"`. Same mechanism as Phase 6 below.
-
-## ORCHESTRATED Pipeline
-
-### Phase 1: Load Knowledge (Orchestrator-Local)
+### Phase 1: Load Knowledge Index (Orchestrator-Local)
 
 **Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 
@@ -40,13 +33,9 @@ Before exploring, load the knowledge index:
 KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `KNOWLEDGE_CONTEXT` locally when framing exploration — prior
-decisions and pitfalls suggest specific areas to investigate. Follow
-`devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass
-`KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the
-orchestrator, not in the investigation workers.
+The orchestrator uses `KNOWLEDGE_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the orchestrator, not in the investigation workers.
 
-Also load feature knowledge:
+**Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
 2. Identify relevant KBs (match task intent against KB descriptions and directories).
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
@@ -65,7 +54,7 @@ Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the 
 - Entry points and key abstractions
 - Related patterns and conventions
 
-### Phase 3: Explore
+### Phase 3: Explore (Parallel)
 
 **Produces:** EXPLORE_OUTPUT
 **Requires:** ORIENT_OUTPUT
@@ -87,7 +76,7 @@ Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined f
 
 - Merge overlapping discoveries from parallel explorers
 - Resolve any contradictions between explorer findings
-- Organize into the Output format below
+- Organize into structured output format
 
 ### Phase 5: Present
 
@@ -142,30 +131,38 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 
 **Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.
 
-## Worktree Support
+## Architecture
 
-If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+```
+/explore (orchestrator)
+│
+├─ Phase 1: Load Knowledge Index (Orchestrator-Local)
+│
+├─ Phase 2: Orient
+│  └─ Skimmer agent (codebase overview)
+│
+├─ Phase 3: Parallel exploration
+│  └─ 2-3 Explore agents (flow, dependency, pattern) in single message
+│
+├─ Phase 4: Synthesize
+│  └─ Synthesizer aggregates findings in exploration mode
+│
+├─ Phase 5: Present findings with drill-down offer
+│
+└─ Phase 6: Suggest KB creation (conditional)
+   └─ Knowledge agent (if user accepts and no existing KB)
+```
 
-## Output
+## Principles
 
-Structured exploration findings with concrete code references:
+1. **Structure over browsing** - Every claim must cite file:line references
+2. **Parallel execution** - All explorers run simultaneously for speed
+3. **Knowledge-informed** - Prior decisions and feature KBs guide where to look
+4. **User-driven depth** - Present findings, then offer drill-down into specific areas
 
-- Scope (what was explored and boundaries)
-- Architecture Map (modules, layers, key abstractions with file:line)
-- Flow Trace (call chain from entry to exit with file:line at each step)
-- Integration Points (module boundaries, shared types, external dependencies)
-- Patterns (recurring conventions, design decisions observed)
-- Key Insights (non-obvious findings, surprises, potential concerns)
+## Error Handling
 
-## Phase Completion Checklist
-
-Before presenting findings, verify every phase was announced:
-
-- [ ] Phase 1: Load Knowledge (Orchestrator-Local) → KNOWLEDGE_CONTEXT and FEATURE_KNOWLEDGE captured (orchestrator-local, not passed to workers)
-- [ ] Phase 2: Orient → ORIENT_OUTPUT captured
-- [ ] Phase 3: Explore → EXPLORE_OUTPUT captured
-- [ ] Phase 4: Synthesize → MERGED_FINDINGS captured
-- [ ] Phase 5: Present → Findings delivered with file:line references
-- [ ] Phase 6: Suggest KB Creation → KB_STATUS captured (created or skipped with reason)
-
-If any phase is unchecked, execute it before proceeding.
+- If Skimmer returns no relevant files: report "No files found matching exploration scope"
+- If all explorers error: report partial findings from any that succeeded, note gaps
+- If an explorer errors: continue with remaining results, note the gap
+- If KB creation fails: log failure, report exploration results normally

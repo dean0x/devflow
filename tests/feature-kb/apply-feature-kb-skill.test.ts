@@ -17,12 +17,23 @@ describe('feature-kb skill', () => {
   it('has quality self-checks', () => { expect(content).toContain('## Quality Self-Checks'); });
   it('has KB format template with required sections', () => {
     expect(content).toContain('## Overview');
-    expect(content).toContain('## Architecture');
-    expect(content).toContain('## Data Flow');
-    expect(content).toContain('## Key Patterns');
     expect(content).toContain('## Anti-Patterns');
     expect(content).toContain('## Gotchas');
     expect(content).toContain('## Key Files');
+    expect(content).toContain('## Related');
+  });
+  it('has category templates', () => {
+    expect(content).toContain('**Architecture:**');
+    expect(content).toContain('**Conventions:**');
+    expect(content).toContain('**Component Patterns:**');
+    expect(content).toContain('**Domain Knowledge:**');
+    expect(content).toContain('**Lessons Learned:**');
+  });
+  it('has code example rules', () => {
+    expect(content).toContain('Rules for Code Examples');
+  });
+  it('has worked example', () => {
+    expect(content).toContain('## Worked Example');
   });
 });
 

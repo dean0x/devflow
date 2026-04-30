@@ -40,12 +40,12 @@ Extract branch slug from the directory path.
 **Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** REVIEW_DIR
 
-Run `node scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+Run `node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant KBs
-3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug}`
+3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 3: Parse Issues

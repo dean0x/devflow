@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { isClaudeCliAvailable } from '../../utils/cli.js';
-import { runKbAgent } from '../../utils/kb-agent.js';
+import { runKbAgent, loadKnowledgeContext } from '../../utils/kb-agent.js';
 import { featureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
 
 export async function handleCreate(slug: string): Promise<void> {
@@ -35,6 +35,8 @@ export async function handleCreate(slug: string): Promise<void> {
   const s = p.spinner();
   s.start('Creating KB...');
 
+  const knowledgeContext = loadKnowledgeContext(worktreePath);
+
   const prompt = [
     `You are the Knowledge agent. Create a feature knowledge base for the following area:`,
     ``,
@@ -42,12 +44,13 @@ export async function handleCreate(slug: string): Promise<void> {
     `FEATURE_NAME: ${name as string}`,
     `DIRECTORIES: [${dirList}]`,
     `WORKTREE_PATH: ${worktreePath}`,
+    `KNOWLEDGE_CONTEXT: ${knowledgeContext}`,
     ``,
-    `Follow the devflow:feature-kb skill's 4-phase process:`,
-    `1. Scan the directories to identify key files and entry points`,
-    `2. Extract architecture, conventions, patterns, integration points`,
-    `3. Distill into actionable cross-cutting knowledge`,
-    `4. Write .features/${slug}/KNOWLEDGE.md with all required sections`,
+    `STEP 1: Load the devflow:feature-kb skill using the Skill tool (skill: "devflow:feature-kb").`,
+    `STEP 2: Read .features/index.json (if it exists) to see what other KBs exist for cross-referencing.`,
+    `STEP 3: Execute the skill's 4-phase process (Scan → Extract → Distill → Forge) exactly as specified.`,
+    `  - You have no pre-computed exploration outputs — perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).`,
+    `  - Use KNOWLEDGE_CONTEXT to cross-reference ADR/PF entries in the Related section.`,
     ``,
     `After writing KNOWLEDGE.md, write .features/${slug}/.create-result.json with:`,
     `{`,
