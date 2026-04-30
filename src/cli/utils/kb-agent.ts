@@ -1,13 +1,35 @@
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { promises as fs } from 'fs';
+import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
 import { readSidecar, type SidecarData } from './sidecar.js';
+import { getDevFlowDirectory } from './paths.js';
 
 const execFileAsync = promisify(execFile);
 
 /** Tools passed to `claude -p` when spawning the Knowledge agent. */
-const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write';
+const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write,Skill';
+
+/**
+ * Load the compact KNOWLEDGE_CONTEXT index (ADR/PF entries) for cross-referencing.
+ * Returns '(none)' when no knowledge files exist or the script is not installed.
+ */
+export function loadKnowledgeContext(worktreePath: string): string {
+  const scriptPath = path.join(
+    getDevFlowDirectory(), 'scripts', 'hooks', 'lib', 'knowledge-context.cjs',
+  );
+
+  if (!existsSync(scriptPath)) return '(none)';
+
+  try {
+    return execFileSync('node', [scriptPath, 'index', worktreePath], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    }).trim();
+  } catch {
+    return '(none)';
+  }
+}
 
 export interface RunKbAgentOptions {
   worktreePath: string;
@@ -31,6 +53,9 @@ export interface RunKbAgentResult {
  *
  * Using async execFile keeps the event loop free so the clack spinner can
  * animate while the agent runs.
+ *
+ * Uses `--dangerously-skip-permissions` because `claude -p` is non-interactive
+ * and cannot prompt for approval; tool access is restricted via `--allowedTools`.
  *
  * @throws When `claude` exits with a non-zero status (propagates execFile error).
  */
