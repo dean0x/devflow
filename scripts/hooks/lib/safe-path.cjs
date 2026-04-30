@@ -3,18 +3,20 @@
 const path = require('path');
 
 /**
- * Resolve a file path argument to an absolute path.
- * Note: path.resolve() normalizes away '..' segments, so the includes check
- * only catches the rare case of a literal '..' directory name surviving resolution.
- * Primary value is ensuring all file operations use absolute paths.
+ * Resolve a file path to an absolute path, optionally validating it
+ * falls within an allowed root directory.
  *
  * @param {string} filePath
+ * @param {string} [allowedRoot] — when provided, throws if resolved path escapes this root
  * @returns {string}
  */
-function safePath(filePath) {
+function safePath(filePath, allowedRoot) {
   const resolved = path.resolve(filePath);
-  if (resolved.includes('..')) {
-    throw new Error(`Refused path with traversal: ${filePath}`);
+  if (typeof allowedRoot === 'string') {
+    const root = path.resolve(allowedRoot);
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      throw new Error(`Refused path outside ${root}: ${filePath}`);
+    }
   }
   return resolved;
 }

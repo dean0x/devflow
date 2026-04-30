@@ -34,7 +34,7 @@
 //   reconcile-manifest <cwd>             Session-start reconciler: sync manifest vs FS (D6, D13)
 //   merge-observation <log> <newObsJson> Dedup/reinforce with in-place merge (D14)
 //   knowledge-append <file> <type> <obs> Append ADR/PF entry to knowledge file
-//   read-sidecar <file> <field>          Read array field from sidecar JSON file (returns [] on any error)
+//   read-sidecar <file> <field>          Read field from sidecar JSON (allowed fields only; returns [] on any error)
 
 'use strict';
 
@@ -44,8 +44,6 @@ const path = require('path');
 const op = process.argv[2];
 const args = process.argv.slice(3);
 
-// Domain modules — routed before the main switch to keep this file focused.
-const sidecarOps = require('./lib/sidecar-ops.cjs');
 const { safePath } = require('./lib/safe-path.cjs');
 
 function readStdin() {
@@ -630,8 +628,11 @@ function parseArgs(argList) {
 if (require.main === module) {
 try {
   // Route to domain modules first; fall through to the main switch if not handled.
-  if (sidecarOps.handle(op, args)) {
-    process.exit(0);
+  if (op === 'read-sidecar') {
+    const sidecarOps = require('./lib/sidecar-ops.cjs');
+    if (sidecarOps.handle(op, args, process.cwd())) {
+      process.exit(0);
+    }
   }
 
   switch (op) {

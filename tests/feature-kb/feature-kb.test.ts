@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll, afterEach } from 'vitest';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
-import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, rmdirSync } from 'fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, rmdirSync, realpathSync } from 'fs';
 import { execSync, execFileSync } from 'child_process';
 import {
   SAMPLE_INDEX,
@@ -192,7 +192,7 @@ describe('updateIndex', () => {
     const entry = index!.features['cli-commands'] as Record<string, unknown>;
     expect(entry.name).toBe('CLI Command System Updated');
     // createdBy should be preserved from original
-    expect(entry.createdBy).toBe('plan:orch');
+    expect(entry.createdBy).toBe('implement');
   });
 
   it('sets lastUpdated to a current ISO timestamp', () => {
@@ -617,10 +617,12 @@ const JSON_HELPER_CJS = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
 
 describe('json-helper read-sidecar', () => {
   it('returns parsed JSON array for valid sidecar with array field', () => {
-    const sidecar = path.join(os.tmpdir(), `test-sidecar-${Date.now()}.json`);
+    const realTmp = realpathSync(os.tmpdir());
+    const sidecar = path.join(realTmp, `test-sidecar-${Date.now()}.json`);
     writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'] }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'], { encoding: 'utf8' });
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+        { encoding: 'utf8', cwd: realTmp });
       expect(JSON.parse(output.trim())).toEqual(['src/a.ts', 'src/b.ts']);
     } finally {
       try { rmSync(sidecar); } catch { /* best-effort */ }
@@ -633,21 +635,38 @@ describe('json-helper read-sidecar', () => {
   });
 
   it('returns [] for malformed JSON', () => {
-    const sidecar = path.join(os.tmpdir(), `test-sidecar-bad-${Date.now()}.json`);
+    const realTmp = realpathSync(os.tmpdir());
+    const sidecar = path.join(realTmp, `test-sidecar-bad-${Date.now()}.json`);
     writeFileSync(sidecar, 'not-json');
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'], { encoding: 'utf8' });
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+        { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
       try { rmSync(sidecar); } catch { /* best-effort */ }
     }
   });
 
-  it('returns [] when field value is not an array', () => {
-    const sidecar = path.join(os.tmpdir(), `test-sidecar-noarray-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ referencedFiles: 'not-an-array' }));
+  it('returns string value as-is for string fields', () => {
+    const realTmp = realpathSync(os.tmpdir());
+    const sidecar = path.join(realTmp, `test-sidecar-string-${Date.now()}.json`);
+    writeFileSync(sidecar, JSON.stringify({ description: 'Use when working on auth' }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'], { encoding: 'utf8' });
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'description'],
+        { encoding: 'utf8', cwd: realTmp });
+      expect(output.trim()).toBe('Use when working on auth');
+    } finally {
+      try { rmSync(sidecar); } catch { /* best-effort */ }
+    }
+  });
+
+  it('returns [] when field value is not an array or string', () => {
+    const realTmp = realpathSync(os.tmpdir());
+    const sidecar = path.join(realTmp, `test-sidecar-noarray-${Date.now()}.json`);
+    writeFileSync(sidecar, JSON.stringify({ referencedFiles: 42 }));
+    try {
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+        { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
       try { rmSync(sidecar); } catch { /* best-effort */ }
@@ -657,6 +676,71 @@ describe('json-helper read-sidecar', () => {
   it('returns [] when args are missing', () => {
     const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar'], { encoding: 'utf8' });
     expect(output.trim()).toBe('[]');
+  });
+
+  it('returns [] for disallowed field name', () => {
+    const realTmp = realpathSync(os.tmpdir());
+    const sidecar = path.join(realTmp, `test-sidecar-disallowed-${Date.now()}.json`);
+    writeFileSync(sidecar, JSON.stringify({ secret: 'password123' }));
+    try {
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'secret'],
+        { encoding: 'utf8', cwd: realTmp });
+      expect(output.trim()).toBe('[]');
+    } finally {
+      try { rmSync(sidecar); } catch {}
+    }
+  });
+
+  it('returns [] when sidecar path is outside cwd', () => {
+    const realTmp = realpathSync(os.tmpdir());
+    const sidecar = path.join(realTmp, `test-sidecar-outside-${Date.now()}.json`);
+    writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['a.ts'] }));
+    const otherDir = path.join(realTmp, `test-other-${Date.now()}`);
+    mkdirSync(otherDir, { recursive: true });
+    try {
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+        { encoding: 'utf8', cwd: otherDir });
+      expect(output.trim()).toBe('[]');
+    } finally {
+      try { rmSync(sidecar); } catch {}
+      try { rmdirSync(otherDir); } catch {}
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// safePath unit tests
+// ---------------------------------------------------------------------------
+
+describe('safePath', () => {
+  const { safePath } = require(path.join(ROOT, 'scripts/hooks/lib/safe-path.cjs'));
+
+  it('resolves relative path to absolute', () => {
+    const result = safePath('foo/bar.json');
+    expect(path.isAbsolute(result)).toBe(true);
+  });
+
+  it('passes absolute path through', () => {
+    const realTmp = realpathSync(os.tmpdir());
+    expect(safePath(path.join(realTmp, 'test.json'))).toBe(path.join(realTmp, 'test.json'));
+  });
+
+  it('allows path inside allowedRoot', () => {
+    const realTmp = realpathSync(os.tmpdir());
+    const filePath = path.join(realTmp, 'sub', 'file.ts');
+    expect(safePath(filePath, realTmp)).toBe(filePath);
+  });
+
+  it('throws for path outside allowedRoot', () => {
+    expect(() => safePath('/etc/passwd', '/project')).toThrow('Refused path outside');
+  });
+
+  it('allows path with .. that resolves inside root', () => {
+    expect(safePath('/project/a/../b/file.ts', '/project')).toBe('/project/b/file.ts');
+  });
+
+  it('skips validation when allowedRoot is undefined', () => {
+    expect(safePath('/anywhere/file.json')).toBe('/anywhere/file.json');
   });
 });
 
