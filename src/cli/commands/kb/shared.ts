@@ -4,12 +4,9 @@
  */
 import * as path from 'path';
 import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
 import { getGitRoot } from '../../utils/git.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getDevFlowDirectory } from '../../utils/paths.js';
 
 const _require = createRequire(import.meta.url);
 
@@ -27,9 +24,8 @@ export interface FeatureKbModule {
   updateIndex: (worktreePath: string, entry: { slug: string; name: string; description?: string; directories: string[]; referencedFiles: string[]; createdBy?: string }, lockTimeoutMs?: number) => void;
 }
 
-// dist/cli/commands/kb/*.js → ../../../../ → project root (where scripts/ lives)
 export const featureKb: FeatureKbModule = _require(
-  path.join(__dirname, '..', '..', '..', '..', 'scripts', 'hooks', 'lib', 'feature-kb.cjs')
+  path.join(getDevFlowDirectory(), 'scripts', 'hooks', 'lib', 'feature-kb.cjs')
 );
 
 /**
