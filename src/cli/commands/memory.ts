@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { createMemoryDir, migrateMemoryFiles, discoverProjectGitRoots } from '../utils/post-install.js';
+import { discoverProjectGitRoots } from '../utils/post-install.js';
 import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 
@@ -316,8 +316,6 @@ export const memoryCommand = new Command('memory')
       }
       const updated = addMemoryHooks(settingsContent, devflowDir);
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      await createMemoryDir(false);
-      await migrateMemoryFiles(true);
       p.log.success('Working memory enabled — UserPromptSubmit/Stop/SessionStart/PreCompact hooks registered');
       p.log.info(color.dim('Session context will be automatically preserved across conversations'));
     }

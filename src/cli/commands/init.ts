@@ -16,8 +16,6 @@ import {
   discoverProjectGitRoots,
   updateGitignore,
   createDocsStructure,
-  createMemoryDir,
-  migrateMemoryFiles,
   type SecurityMode,
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
@@ -970,11 +968,6 @@ export const initCommand = new Command('init')
       }
     } catch { /* settings.json may not exist yet */ }
 
-    // Ensure .memory/ exists when memory is enabled (hooks are no-ops without it)
-    if (memoryEnabled) {
-      await createMemoryDir(verbose);
-      await migrateMemoryFiles(verbose);
-    }
 
     // Create .features/ directory with empty index (feature knowledge bases)
     // .features/ is committed to the project repo (not scope-dependent)
