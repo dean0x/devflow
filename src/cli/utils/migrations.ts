@@ -95,7 +95,7 @@ const MIGRATION_SHADOW_OVERRIDES: Migration<'global'> = {
 
 const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
   id: 'purge-legacy-knowledge-v2',
-  description: 'Remove pre-v2 low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)',
+  description: 'Remove pre-v2 low-signal decisions entries (ADR-002, PF-001, PF-003, PF-005)',
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
     const { purgeLegacyDecisionsEntries } = await import('./legacy-decisions-purge.js');
@@ -120,7 +120,7 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
  */
 const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
   id: 'purge-legacy-knowledge-v3',
-  description: 'Remove all pre-v2 seeded knowledge entries (entries lacking self-learning: source marker)',
+  description: 'Remove all pre-v2 seeded decisions entries (entries lacking self-learning: source marker)',
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
     const { purgeAllPreV2DecisionsEntries } = await import('./legacy-decisions-purge.js');

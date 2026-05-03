@@ -5,7 +5,7 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
 /**
  * @file legacy-decisions-purge.ts
  *
- * D34: Pure helper extracted from the --purge-legacy-knowledge handler in
+ * D34: Pure helper extracted from the legacy-decisions-purge handler in
  * learn.ts for two reasons:
  *
  * 1. **Reusable from registry**: The migration registry (migrations.ts) needs to
