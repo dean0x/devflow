@@ -23,7 +23,7 @@ interface Manifest {
 }
 
 function setup(tmpDir: string) {
-  fs.mkdirSync(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
   const manifestPath = path.join(tmpDir, '.memory', '.learning-manifest.json');
   const logPath = path.join(tmpDir, '.memory', 'learning-log.jsonl');
   return { manifestPath, logPath };
@@ -201,7 +201,7 @@ describe('reconcile-manifest — anchor handling (D6)', () => {
 
   it('ADR anchor missing from file → treated as deletion', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
     // File exists but doesn't have ADR-002
     fs.writeFileSync(decisionFile, '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n\n## ADR-001: first decision\n\n- **Status**: Accepted\n');
 
@@ -226,7 +226,7 @@ describe('reconcile-manifest — anchor handling (D6)', () => {
 
   it('ADR anchor present in file → no deletion', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
     fs.writeFileSync(decisionFile, '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n\n## ADR-001: the decision\n\n- **Status**: Accepted\n');
 
     writeManifest(manifestPath, [{
@@ -293,7 +293,7 @@ describe('reconcile-manifest — stale manifest entries', () => {
 // ---------------------------------------------------------------------------
 // Self-healing reconciler tests (Fix 2)
 // Validates that reconcile-manifest heals render-ready crash-window duplicates:
-// anchors present in knowledge files but missing from manifest + log shows status=ready
+// anchors present in decisions files but missing from manifest + log shows status=ready
 // ---------------------------------------------------------------------------
 
 describe('reconcile-manifest — self-heal (Fix 2)', () => {
@@ -317,7 +317,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile-heal-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
   });
 
   afterEach(() => {
@@ -326,7 +326,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   it('heal: anchor in file + ready log entry + missing manifest → status=created, manifest reconstructed', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
 
     // decisions.md has ADR-001 written (crash window: file written, log not updated yet)
     const adrContent = buildDecisionsFile([{
@@ -370,7 +370,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   it('heal: anchor in file, no matching log entry → no-op (user-curated entry)', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
 
     // decisions.md has ADR-001 but NO matching log entry (user manually added it)
     const adrContent = buildDecisionsFile([{
@@ -400,7 +400,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   it('heal: anchor heading does not match any ready log pattern → no-op', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
 
     const adrContent = buildDecisionsFile([{
       anchorId: 'ADR-001',
@@ -427,7 +427,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   it('heal: multiple log entries match the same anchor heading → no-op (D-D ambiguity guard)', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
 
     const heading = 'use result types everywhere';
     const adrContent = buildDecisionsFile([{
@@ -454,7 +454,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   it('heal: pitfalls.md scanned with PF- prefix', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const pitfallFile = path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md');
+    const pitfallFile = path.join(tmpDir, '.memory', 'decisions', 'pitfalls.md');
 
     const pfContent = buildPitfallsFile([{
       anchorId: 'PF-001',
@@ -488,8 +488,8 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   it('heal: multiple anchors healed in a single reconcile pass', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
-    const pitfallFile = path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
+    const pitfallFile = path.join(tmpDir, '.memory', 'decisions', 'pitfalls.md');
 
     // decisions.md has ADR-001 and ADR-002; pitfalls.md has PF-001
     const adrContent = buildDecisionsFile([
@@ -525,7 +525,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
 
   it('heal: registerUsageEntry called — usage file has entry for healed anchorId', () => {
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
 
     const adrContent = buildDecisionsFile([{
       anchorId: 'ADR-001',
@@ -545,7 +545,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
     runHelper(`reconcile-manifest "${tmpDir}"`);
 
     // Verify usage file was written with ADR-001 entry
-    const usagePath = path.join(tmpDir, '.memory', '.knowledge-usage.json');
+    const usagePath = path.join(tmpDir, '.memory', '.decisions-usage.json');
     expect(fs.existsSync(usagePath)).toBe(true);
     const usageData = JSON.parse(fs.readFileSync(usagePath, 'utf8'));
     expect(usageData.entries['ADR-001']).toBeDefined();
@@ -582,7 +582,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
     // current ready obs by normalizeForDedup must NOT be paired. Pre-v2 entries
     // are removed by the v3 migration; the heal path must not steal their anchor IDs.
     const { manifestPath, logPath } = setup(tmpDir);
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
 
     // Pre-v2 seeded ADR — has no `- **Source**: self-learning:` marker
     const preV2Content = buildDecisionsFile([{
@@ -614,7 +614,7 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
     expect(entries[0].status).toBe('ready');
   });
 
-  it('heal: manifest absent + knowledge file with anchor + matching ready obs → heal triggers, manifest created (A1)', () => {
+  it('heal: manifest absent + decisions file with anchor + matching ready obs → heal triggers, manifest created (A1)', () => {
     // Regression guard for the first-ever render-ready crash:
     // render-ready wrote decisions.md but crashed before writing the manifest.
     // reconcile-manifest must NOT short-circuit on the missing manifest — it must
@@ -622,9 +622,9 @@ describe('reconcile-manifest — self-heal (Fix 2)', () => {
     // newly reconstructed manifest.
     const logPath = path.join(tmpDir, '.memory', 'learning-log.jsonl');
     const manifestPath = path.join(tmpDir, '.memory', '.learning-manifest.json');
-    const decisionFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    const decisionFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
 
-    // Write the knowledge file (crash-window: file written, manifest never written)
+    // Write the decisions file (crash-window: file written, manifest never written)
     const adrContent = `<!-- TL;DR: 1 decision. -->\n# Decisions\n\n## ADR-001: use pipes for composition\n\n- **Status**: Accepted\n- **Source**: self-learning:obs_a1_001\n`;
     fs.writeFileSync(decisionFile, adrContent);
 

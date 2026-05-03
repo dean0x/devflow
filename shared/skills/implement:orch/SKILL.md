@@ -56,15 +56,15 @@ Return the branch setup summary."
 
 Capture `branch name` and `BASE_BRANCH` from Git agent output for use throughout the pipeline.
 
-## Phase 2: Load Knowledge
+## Phase 2: Load Decisions
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, STALE_KB_SLUGS
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_KB_SLUGS
 
-Load the knowledge index:
+Load the decisions index:
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
-Pass `KNOWLEDGE_CONTEXT` to Coder (Phase 4) and Scrutinizer (Phase 6).
+Pass `DECISIONS_CONTEXT` to Coder (Phase 4) and Scrutinizer (Phase 6).
 
 1. Check if `.features/index.json` exists. If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
 2. Read `.features/index.json`.
@@ -105,7 +105,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **CREATE_PR**: `false` (commit only, no push)
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
-- **KNOWLEDGE_CONTEXT**: From Phase 2 (or `(none)`)
+- **DECISIONS_CONTEXT**: From Phase 2 (or `(none)`)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -137,7 +137,7 @@ Run sequentially — each gate must pass before the next:
 
 1. `Agent(subagent_type="Validator")` (build + typecheck + lint + tests) — retry up to 2× on failure (Coder fixes between retries)
 2. `Agent(subagent_type="Simplifier")` — code clarity and maintainability pass on FILES_CHANGED
-3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED, with `KNOWLEDGE_CONTEXT` and `FEATURE_KNOWLEDGE` from Phase 2
+3. `Agent(subagent_type="Scrutinizer")` — 9-pillar quality evaluation on FILES_CHANGED, with `DECISIONS_CONTEXT` and `FEATURE_KNOWLEDGE` from Phase 2
 4. `Agent(subagent_type="Validator")` (re-validate after Simplifier/Scrutinizer changes)
 5. `Agent(subagent_type="Evaluator")` — verify implementation matches original request, with `FEATURE_KNOWLEDGE` from Phase 2 — retry up to 2× if misalignment found
 6. `Agent(subagent_type="Tester")` — scenario-based acceptance testing from user's perspective — retry up to 2× if QA fails
@@ -164,7 +164,7 @@ Report results:
 
 ## Phase 8: Feature KB Generation (Conditional)
 
-**Requires:** FILES_CHANGED, STALE_KB_SLUGS, OVERLAPPING_SLUGS, KNOWLEDGE_CONTEXT
+**Requires:** FILES_CHANGED, STALE_KB_SLUGS, OVERLAPPING_SLUGS, DECISIONS_CONTEXT
 **Produces:** Updated `.features/index.json` (or skipped)
 
 If `.features/.disabled` exists, skip entirely.
@@ -180,7 +180,7 @@ If `.features/.disabled` exists, skip entirely.
    FEATURE_NAME: {name}
    FILES_CHANGED: {files_changed list}
    DIRECTORIES: {directory prefixes from FILES_CHANGED}
-   KNOWLEDGE_CONTEXT: {from Phase 2}
+   DECISIONS_CONTEXT: {from Phase 2}
 
    Load the devflow:feature-kb skill and follow its 4-phase process exactly.
    Read the FILES_CHANGED to understand the implemented code.
@@ -212,7 +212,7 @@ Skip if all touched areas already have matching KBs.
    DIRECTORIES: {directories from index}
    EXISTING_KB: {content of .features/{slug}/KNOWLEDGE.md}
    CHANGED_FILES: {FILES_CHANGED that overlap this KB}
-   KNOWLEDGE_CONTEXT: {from Phase 2}
+   DECISIONS_CONTEXT: {from Phase 2}
 
    Load the devflow:feature-kb skill. This is a REFRESH, not a new creation.
    Read the CHANGED_FILES to understand what changed, then update the EXISTING_KB.
@@ -236,7 +236,7 @@ Skip if all touched areas already have matching KBs.
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
-- [ ] Phase 2: Load Knowledge → KNOWLEDGE_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
+- [ ] Phase 2: Load Decisions → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
 - [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured
 - [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
 - [ ] Phase 5: FILES_CHANGED Detection → FILES_CHANGED captured

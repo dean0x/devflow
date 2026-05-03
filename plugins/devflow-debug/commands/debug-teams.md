@@ -23,17 +23,17 @@ Investigate bugs by spawning a team of agents, each pursuing a different hypothe
 
 ## Phases
 
-### Phase 1: Load Knowledge Index (Orchestrator-Local)
+### Phase 1: Load Decisions Index (Orchestrator-Local)
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Before hypothesizing, load the knowledge index:
+Before hypothesizing, load the decisions index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to investigator teammates** — knowledge context stays in the orchestrator; teammates examine code directly.
+The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to investigator teammates** — decisions context stays in the orchestrator; teammates examine code directly.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -44,7 +44,7 @@ The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Ph
 ### Phase 2: Context Gathering
 
 **Produces:** HYPOTHESES, BUG_CONTEXT
-**Requires:** KNOWLEDGE_CONTEXT
+**Requires:** DECISIONS_CONTEXT
 
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
@@ -224,15 +224,12 @@ Lead produces final report:
 {HIGH/MEDIUM/LOW based on consensus strength}
 ```
 
-<!-- D8: "Record Pitfall" phase removed — knowledge-persistence skill no longer has Write
-     capability; pitfall recording is handled by the background-learning extractor. -->
-
 ## Architecture
 
 ```
 /debug (orchestrator)
 │
-├─ Phase 1: Load Knowledge Index (Orchestrator-Local)
+├─ Phase 1: Load Decisions Index (Orchestrator-Local)
 │
 ├─ Phase 2: Context gathering
 │  └─ Git agent (fetch issue, if #N provided)

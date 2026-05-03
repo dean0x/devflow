@@ -21,7 +21,7 @@ describe('knowledge agent', () => {
     expect(content).toContain('FEATURE_NAME');
     expect(content).toContain('EXPLORATION_OUTPUTS');
     expect(content).toContain('DIRECTORIES');
-    expect(content).toContain('KNOWLEDGE_CONTEXT');
+    expect(content).toContain('DECISIONS_CONTEXT');
   });
   it('constrains writes to .features/', () => {
     expect(content).toContain('.features/');

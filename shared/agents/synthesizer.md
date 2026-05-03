@@ -175,7 +175,6 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 1. Read all review reports from `${REVIEW_BASE_DIR}/*.md` (exclude `review-summary.md` and `resolution-summary.md`)
 2. Extract confidence percentages from each finding
 3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%)
-<!-- Confidence threshold also in: shared/agents/reviewer.md, plugins/devflow-code-review/commands/code-review.md -->
 4. Maintain ≥80% confidence threshold in final output
 5. Categorize issues into 3 buckets (from devflow:review-methodology)
 6. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)

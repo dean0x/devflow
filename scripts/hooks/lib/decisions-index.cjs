@@ -1,15 +1,15 @@
-// scripts/hooks/lib/knowledge-context.cjs
-// Deterministic project knowledge loader for orchestration surfaces.
+// scripts/hooks/lib/decisions-index.cjs
+// Deterministic project decisions loader for orchestration surfaces.
 //
 // DESIGN: Orchestration surfaces (resolve.md, plan.md, code-review.md, etc.)
-// instruct the orchestrator to strip Deprecated and Superseded knowledge entries
-// before passing KNOWLEDGE_CONTEXT to consumer agents.
+// instruct the orchestrator to strip Deprecated and Superseded decisions entries
+// before passing DECISIONS_CONTEXT to consumer agents.
 // Having this logic as a pure CJS module gives us:
 //   1. Deterministic filtering — not LLM-interpreted, always consistent.
 //   2. Real test coverage — tests import this module directly.
 //   3. CLI interface — orchestrators invoke as:
-//        node scripts/hooks/lib/knowledge-context.cjs index {worktree}
-//      and capture the output as KNOWLEDGE_CONTEXT (compact index format).
+//        node scripts/hooks/lib/decisions-index.cjs index {worktree}
+//      and capture the output as DECISIONS_CONTEXT (compact index format).
 //
 // This module is the single source of truth for the D-A filter algorithm
 // (strip ## ADR-NNN / ## PF-NNN sections marked Deprecated or Superseded).
@@ -28,7 +28,7 @@ const KNOWN_STATUSES = ['Active', 'Deprecated', 'Superseded'];
  * Return true when a markdown section is marked Deprecated or Superseded.
  * This is the single predicate backing the D-A filter algorithm described in
  * the DESIGN comment above — every call-site that needs to strip inactive
- * knowledge entries should use this function.
+ * decisions entries should use this function.
  *
  * @param {string} section - raw text of one ## ADR-NNN / ## PF-NNN section
  * @returns {boolean}
@@ -46,20 +46,20 @@ function isDeprecatedOrSuperseded(section) {
  * `- **Status**: Superseded`.
  *
  * Section boundary = next ## ADR/PF heading or end of string.
- * Non-knowledge content before the first section header (e.g., a file-level
+ * Non-decisions content before the first section header (e.g., a file-level
  * title) is preserved in sections[0] and always kept.
  *
  * @param {string} raw - raw content from decisions.md or pitfalls.md
  * @returns {string} filtered content (trimmed), or '' if nothing remains
  */
-function filterKnowledgeContext(raw) {
+function filterDecisionsContext(raw) {
   if (!raw.trim()) return '';
   // Split on ADR-NNN / PF-NNN section boundaries using a lookahead so each
   // section includes its own heading.
   const sections = raw.split(/(?=^## (?:ADR|PF)-\d+:)/m);
   const kept = sections.filter(section => {
-    const isKnowledgeSection = /^## (?:ADR|PF)-\d+:/m.test(section);
-    if (!isKnowledgeSection) return true; // keep preamble / non-knowledge content
+    const isDecisionsSection = /^## (?:ADR|PF)-\d+:/m.test(section);
+    if (!isDecisionsSection) return true; // keep preamble / non-decisions content
     return !isDeprecatedOrSuperseded(section);
   });
   return kept.join('').trim();
@@ -67,7 +67,7 @@ function filterKnowledgeContext(raw) {
 
 /**
  * Extract index entries from raw decisions.md / pitfalls.md content.
- * Applies the same D-A filter as filterKnowledgeContext before extracting.
+ * Applies the same D-A filter as filterDecisionsContext before extracting.
  *
  * @param {string} raw - raw content from decisions.md or pitfalls.md
  * @returns {IndexEntry[]} array of index entries (empty if none survive filter)
@@ -80,7 +80,7 @@ function extractIndexEntries(raw) {
 
   for (const section of sections) {
     const headingMatch = section.match(/^## ((?:ADR|PF)-\d+): (.+)/m);
-    if (!headingMatch) continue; // preamble or non-knowledge content
+    if (!headingMatch) continue; // preamble or non-decisions content
 
     if (isDeprecatedOrSuperseded(section)) continue;
 
@@ -128,7 +128,7 @@ function formatEntryLine(entry) {
 }
 
 /**
- * Load a compact index of project knowledge entries for a given worktree.
+ * Load a compact index of project decisions entries for a given worktree.
  *
  * Returns a compact index listing each ADR/PF entry with ID, truncated
  * title, status, and (for pitfalls) area. Includes a footer describing how to
@@ -140,14 +140,14 @@ function formatEntryLine(entry) {
  *   file paths for testing (relative paths resolved against worktreePath)
  * @returns {string} compact index string, or '(none)'
  */
-function loadKnowledgeIndex(worktreePath, opts = {}) {
+function loadDecisionsIndex(worktreePath, opts = {}) {
   const decisionsFile = opts.decisionsFile
     ? path.resolve(worktreePath, opts.decisionsFile)
-    : path.join(worktreePath, '.memory', 'knowledge', 'decisions.md');
+    : path.join(worktreePath, '.memory', 'decisions', 'decisions.md');
 
   const pitfallsFile = opts.pitfallsFile
     ? path.resolve(worktreePath, opts.pitfallsFile)
-    : path.join(worktreePath, '.memory', 'knowledge', 'pitfalls.md');
+    : path.join(worktreePath, '.memory', 'decisions', 'pitfalls.md');
 
   /** @type {IndexEntry[]} */
   let adrEntries = [];
@@ -217,7 +217,7 @@ function loadKnowledgeIndex(worktreePath, opts = {}) {
 // CLI interface
 //
 // Usage:
-//   node knowledge-context.cjs index <worktree>  → compact index
+//   node decisions-index.cjs index <worktree>  → compact index
 // ---------------------------------------------------------------------------
 
 if (require.main === module) {
@@ -225,23 +225,23 @@ if (require.main === module) {
 
   if (argv[0] !== 'index' || !argv[1]) {
     process.stderr.write(
-      'Usage: node knowledge-context.cjs index <worktree-path>\n'
+      'Usage: node decisions-index.cjs index <worktree-path>\n'
     );
     process.exit(1);
   }
 
   const worktreePath = path.resolve(argv[1]);
-  const result = loadKnowledgeIndex(worktreePath);
+  const result = loadDecisionsIndex(worktreePath);
   if (result !== '(none)') {
     const adrCount = (result.match(/^\s+ADR-\d+/gm) || []).length;
     const pfCount = (result.match(/^\s+PF-\d+/gm) || []).length;
     const entries = adrCount + pfCount;
     process.stderr.write(
-      `[knowledge-context] mode=index worktree=${worktreePath} entries=${entries}\n`
+      `[decisions-index] mode=index worktree=${worktreePath} entries=${entries}\n`
     );
   }
   process.stdout.write(result + '\n');
   process.exit(0);
 }
 
-module.exports = { filterKnowledgeContext, loadKnowledgeIndex, extractIndexEntries };
+module.exports = { filterDecisionsContext, loadDecisionsIndex, extractIndexEntries };

@@ -15,7 +15,7 @@ Run Simplifier and Scrutinizer sequentially on changed files for post-implementa
 
 ### Phase 0: Context Gathering
 
-**Produces:** FILES_CHANGED, TASK_DESCRIPTION, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
 Detect changed files and build context:
 
@@ -23,11 +23,11 @@ Detect changed files and build context:
 2. Else run `git diff --name-only HEAD` + `git diff --name-only --cached` to get staged + unstaged
 3. If no changes found, report "No changes to review" and exit
 4. Build TASK_DESCRIPTION from recent commit messages or branch name
-5. Load knowledge index:
+5. Load decisions index:
    ```bash
-   KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+   DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
    ```
-   Pass `KNOWLEDGE_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-knowledge` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume knowledge — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
+   Pass `DECISIONS_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume decisions — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
 6. Load feature knowledge:
    - Read `.features/index.json` if it exists
    - Based on FILES_CHANGED, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
@@ -35,7 +35,7 @@ Detect changed files and build context:
    - Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
    - Pass `FEATURE_KNOWLEDGE` to Scrutinizer
 
-**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), KNOWLEDGE_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional)
+**Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional)
 
 ### Phase 1: Simplifier (Code Refinement)
 
@@ -54,17 +54,17 @@ Simplify and refine the code for clarity and consistency while preserving functi
 ### Phase 2: Scrutinizer (9-Pillar Quality Gate)
 
 **Produces:** SCRUTINIZER_STATUS, SCRUTINIZER_CHANGES
-**Requires:** FILES_CHANGED, TASK_DESCRIPTION, KNOWLEDGE_CONTEXT
+**Requires:** FILES_CHANGED, TASK_DESCRIPTION, DECISIONS_CONTEXT
 
 Spawn Scrutinizer agent for quality evaluation and fixing:
 
 Agent(subagent_type="Scrutinizer", run_in_background=false):
 "TASK_DESCRIPTION: {task_description}
 FILES_CHANGED: {files_changed}
-KNOWLEDGE_CONTEXT: {knowledge_context}
+DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
-Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
+Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
 Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE. Skip if (none)."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED), changes_made (bool)
@@ -122,7 +122,7 @@ Display summary:
 │
 ├─ Phase 0: Context gathering
 │  ├─ Git diff for changed files
-│  └─ Load knowledge index (knowledge-context.cjs index)
+│  └─ Load decisions index (decisions-index.cjs index)
 │
 ├─ Phase 1: Simplifier
 │  └─ Code refinement (commits directly)

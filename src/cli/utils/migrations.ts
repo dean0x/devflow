@@ -95,13 +95,13 @@ const MIGRATION_SHADOW_OVERRIDES: Migration<'global'> = {
 
 const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
   id: 'purge-legacy-knowledge-v2',
-  description: 'Remove pre-v2 low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)',
+  description: 'Remove pre-v2 low-signal decisions entries (ADR-002, PF-001, PF-003, PF-005)',
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
-    const { purgeLegacyKnowledgeEntries } = await import('./legacy-knowledge-purge.js');
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir: ctx.memoryDir });
+    const { purgeLegacyDecisionsEntries } = await import('./legacy-decisions-purge.js');
+    const result = await purgeLegacyDecisionsEntries({ memoryDir: ctx.memoryDir });
     const infos = result.removed > 0
-      ? [`Purged ${result.removed} legacy knowledge entry(ies) in ${result.files.length} file(s)`]
+      ? [`Purged ${result.removed} legacy decisions entry(ies) in ${result.files.length} file(s)`]
       : [];
     return { infos, warnings: [] };
   },
@@ -115,18 +115,18 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
  * migration on upgraded projects.
  *
  * v2 and v3 run independently — both must complete for the migration to be
- * considered done. On fresh installs, both are no-ops (no knowledge files
+ * considered done. On fresh installs, both are no-ops (no decisions files
  * exist). On projects where only v2 ran, v3 cleans up the remaining 7 entries.
  */
 const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
   id: 'purge-legacy-knowledge-v3',
-  description: 'Remove all pre-v2 seeded knowledge entries (entries lacking self-learning: source marker)',
+  description: 'Remove all pre-v2 seeded decisions entries (entries lacking self-learning: source marker)',
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
-    const { purgeAllPreV2KnowledgeEntries } = await import('./legacy-knowledge-purge.js');
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir: ctx.memoryDir });
+    const { purgeAllPreV2DecisionsEntries } = await import('./legacy-decisions-purge.js');
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir: ctx.memoryDir });
     const infos = result.removed > 0
-      ? [`Purged ${result.removed} pre-v2 knowledge entry(ies) in ${result.files.length} file(s)`]
+      ? [`Purged ${result.removed} pre-v2 decisions entry(ies) in ${result.files.length} file(s)`]
       : [];
     return { infos, warnings: [] };
   },
@@ -332,7 +332,7 @@ async function runGlobalMigration(
  * D35: Per-project migrations run across all discovered projects with a
  * concurrency cap of 16 to avoid EMFILE on machines with 50–200 projects.
  * This matches the pattern used for .claudeignore multi-project install at
- * init.ts:962-974 — each project has its own `.memory/.knowledge.lock` so
+ * init.ts:962-974 — each project has its own `.memory/.decisions.lock` so
  * there is no cross-project contention. Promise.allSettled collects all
  * outcomes without short-circuiting on partial failures.
  *
@@ -400,9 +400,9 @@ async function runPerProjectMigration(
  * Run all unapplied migrations from MIGRATIONS.
  *
  * D32: Always-run-unapplied semantics (no fresh-vs-upgrade branch).
- * Fresh installs with no knowledge files are effectively no-ops — each migration
+ * Fresh installs with no decisions files are effectively no-ops — each migration
  * helper short-circuits when the data it targets doesn't exist (e.g.,
- * purgeLegacyKnowledgeEntries returns immediately when `.memory/knowledge/` is
+ * purgeLegacyDecisionsEntries returns immediately when `.memory/decisions/` is
  * absent; migrateShadowOverridesRegistry skips when no old-name directories exist).
  * Adding a fresh-vs-upgrade branch would require detecting "is this a fresh
  * install" reliably, which is harder than it appears (partial installs, reinstalls,

@@ -108,31 +108,31 @@ if [ -f "$CWD/.memory/.learning-manifest.json" ] && [ -f "$CWD/.memory/learning-
   node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
 fi
 
-# --- Section 1.5: Project Knowledge TL;DR ---
-KNOWLEDGE_DIR="$CWD/.memory/knowledge"
-# Heal older installs that have .memory/ but not .memory/knowledge/
-if [ -d "$CWD/.memory" ] && [ ! -d "$KNOWLEDGE_DIR" ]; then
-  mkdir -p "$KNOWLEDGE_DIR" 2>/dev/null || true
+# --- Section 1.5: Project Decisions TL;DR ---
+DECISIONS_DIR="$CWD/.memory/decisions"
+# Heal older installs that have .memory/ but not .memory/decisions/
+if [ -d "$CWD/.memory" ] && [ ! -d "$DECISIONS_DIR" ]; then
+  mkdir -p "$DECISIONS_DIR" 2>/dev/null || true
 fi
-if [ -d "$KNOWLEDGE_DIR" ]; then
-  KNOWLEDGE_TLDR=""
-  for kf in "$KNOWLEDGE_DIR"/decisions.md "$KNOWLEDGE_DIR"/pitfalls.md; do
+if [ -d "$DECISIONS_DIR" ]; then
+  DECISIONS_TLDR=""
+  for kf in "$DECISIONS_DIR"/decisions.md "$DECISIONS_DIR"/pitfalls.md; do
     if [ -f "$kf" ]; then
       TLDR_LINE=$(sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p' "$kf")
       if [ -n "$TLDR_LINE" ]; then
-        KNOWLEDGE_TLDR="${KNOWLEDGE_TLDR}${TLDR_LINE}\n"
+        DECISIONS_TLDR="${DECISIONS_TLDR}${TLDR_LINE}\n"
       fi
     fi
   done
-  if [ -n "$KNOWLEDGE_TLDR" ]; then
-    KNOWLEDGE_SECTION="--- PROJECT KNOWLEDGE (TL;DR) ---
-$(printf '%b' "$KNOWLEDGE_TLDR")"
+  if [ -n "$DECISIONS_TLDR" ]; then
+    DECISIONS_SECTION="--- PROJECT DECISIONS (TL;DR) ---
+$(printf '%b' "$DECISIONS_TLDR")"
     if [ -n "$CONTEXT" ]; then
       CONTEXT="${CONTEXT}
 
-${KNOWLEDGE_SECTION}"
+${DECISIONS_SECTION}"
     else
-      CONTEXT="$KNOWLEDGE_SECTION"
+      CONTEXT="$DECISIONS_SECTION"
     fi
   fi
 fi

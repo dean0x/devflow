@@ -25,9 +25,9 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 For GUIDED depth, the main session performs planning directly:
 
 1. **Discover** — If the planning question is open-ended, ask clarifying questions via AskUserQuestion and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
-2. **Load Knowledge** — Load `KNOWLEDGE_CONTEXT` via `node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
+2. **Load Decisions** — Load `DECISIONS_CONTEXT` via `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
 3. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
-4. **Design** — Using Skimmer findings + loaded pattern/design skills + `KNOWLEDGE_CONTEXT` + `FEATURE_KNOWLEDGE`, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
+4. **Design** — Using Skimmer findings + loaded pattern/design skills + `DECISIONS_CONTEXT` + `FEATURE_KNOWLEDGE`, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 5. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
 
 ## Worktree Support
@@ -56,17 +56,17 @@ If EITHER condition is true (and no override) → execute **Refinement Path** in
 
 If NEITHER condition is met → proceed with the full pipeline below.
 
-## Phase 1: Load Knowledge Index
+## Phase 1: Load Decisions Index
 
-**Produces:** KNOWLEDGE_CONTEXT
+**Produces:** DECISIONS_CONTEXT
 
-Before spawning any agents, load the knowledge index for the current worktree:
+Before spawning any agents, load the decisions index for the current worktree:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to Explorer and Designer agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 ## Phase 2: Load Feature Knowledge
 
@@ -87,7 +87,7 @@ This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT`
    --- Feature KB: {slug2} ---
    [content]
    ```
-6. Pass `FEATURE_KNOWLEDGE` to downstream agents alongside `KNOWLEDGE_CONTEXT`.
+6. Pass `FEATURE_KNOWLEDGE` to downstream agents alongside `DECISIONS_CONTEXT`.
 
 If no KBs exist or none are relevant, set `FEATURE_KNOWLEDGE = (none)`.
 
@@ -143,7 +143,7 @@ Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the 
 ## Phase 5: Explore
 
 **Produces:** EXPLORE_OUTPUT
-**Requires:** ORIENT_OUTPUT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Requires:** ORIENT_OUTPUT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
 Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **in a single message** (parallel execution):
 
@@ -151,14 +151,14 @@ Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **i
 - **Pattern explorer**: Find existing implementations of similar features to follow as templates
 - **Constraint explorer**: Identify constraints — test infrastructure, build system, CI requirements, deployment concerns
 
-Each Explore agent receives `KNOWLEDGE_CONTEXT` (from Phase 1), `FEATURE_KNOWLEDGE` (from Phase 2), and the instructions: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus exploration on areas the KB doesn't cover and changes since it was last updated."
+Each Explore agent receives `DECISIONS_CONTEXT` (from Phase 1), `FEATURE_KNOWLEDGE` (from Phase 2), and the instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus exploration on areas the KB doesn't cover and changes since it was last updated."
 
 Adjust explorer focus based on the specific planning question.
 
 ## Phase 6: Gap Analysis Lite
 
 **Produces:** GAP_OUTPUT
-**Requires:** EXPLORE_OUTPUT, ORIENT_OUTPUT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Requires:** EXPLORE_OUTPUT, ORIENT_OUTPUT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
 Spawn 2 `Agent(subagent_type="Designer")` agents **in a single message** (parallel execution):
 
@@ -166,26 +166,26 @@ Spawn 2 `Agent(subagent_type="Designer")` agents **in a single message** (parall
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: completeness
-KNOWLEDGE_CONTEXT: {knowledge_context}
+DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 5 outputs}
   Codebase context: {Phase 4 output}
 Identify missing requirements, undefined error states, vague acceptance criteria.
-Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT."
+Follow devflow:apply-decisions for DECISIONS_CONTEXT."
 
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: architecture
-KNOWLEDGE_CONTEXT: {knowledge_context}
+DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
   Planning question: {user's intent}
   Exploration findings: {Phase 5 outputs}
   Codebase context: {Phase 4 output}
 Identify pattern violations, missing integration points, layering issues.
-Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT."
+Follow devflow:apply-decisions for DECISIONS_CONTEXT."
 ```
 
 ## Phase 7: Synthesize
@@ -205,7 +205,7 @@ Combine gap findings with exploration context into blocking vs. should-address c
 ## Phase 8: Plan
 
 **Produces:** PLAN_OUTPUT
-**Requires:** ORIENT_OUTPUT, EXPLORE_OUTPUT, SYNTHESIS_OUTPUT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Requires:** ORIENT_OUTPUT, EXPLORE_OUTPUT, SYNTHESIS_OUTPUT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
 Spawn `Agent(subagent_type="Plan")` with all findings, including `FEATURE_KNOWLEDGE`:
 
@@ -271,7 +271,7 @@ Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
 
 Before presenting output, verify every phase was announced:
 
-- [ ] Phase 1: Load Knowledge Index → KNOWLEDGE_CONTEXT captured
+- [ ] Phase 1: Load Decisions Index → DECISIONS_CONTEXT captured
 - [ ] Phase 2: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.features/` absent)
 - [ ] Phase 3: Requirements Discovery → CONSTRAINED_PROBLEM captured (or skipped with stated reason)
 - [ ] Phase 4: Orient → ORIENT_OUTPUT captured

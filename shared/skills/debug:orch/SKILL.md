@@ -8,7 +8,7 @@ user-invocable: false
 
 Agent pipeline for DEBUG intent in ambient ORCHESTRATED mode. Competing hypothesis investigation, parallel evidence gathering, convergence validation, and optional fix.
 
-This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Excluded: knowledge persistence loading, GitHub issue fetching, pitfall recording.
+This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Excluded: decisions format loading, GitHub issue fetching, pitfall recording.
 
 ## Iron Law
 
@@ -24,29 +24,29 @@ This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Exclude
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
-## Phase 1: Load Knowledge Index (Orchestrator-Local)
+## Phase 1: Load Decisions Index (Orchestrator-Local)
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Before hypothesizing, load the knowledge index:
+Before hypothesizing, load the decisions index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 1) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the orchestrator, not in the investigation workers.
+The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 1) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
 2. Based on the bug description, identify relevant KBs
 3. Read matching KB files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`
 4. Use `FEATURE_KNOWLEDGE` **locally** for hypothesis generation — feature-specific gotchas and anti-patterns suggest root causes
-5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as KNOWLEDGE_CONTEXT)
+5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as DECISIONS_CONTEXT)
 
 ## Phase 2: Hypothesize
 
 **Produces:** HYPOTHESES
-**Requires:** KNOWLEDGE_CONTEXT
+**Requires:** DECISIONS_CONTEXT
 
 Analyze the bug description, error messages, and conversation context. Generate 3-5 hypotheses that are:
 
@@ -108,7 +108,7 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 Before reporting results, verify every phase was announced:
 
-- [ ] Phase 1: Load Knowledge Index → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
+- [ ] Phase 1: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
 - [ ] Phase 2: Hypothesize → HYPOTHESES captured (3-5 distinct)
 - [ ] Phase 3: Investigate → INVESTIGATION_RESULTS captured per hypothesis
 - [ ] Phase 4: Converge → CONVERGENCE_DECISION captured

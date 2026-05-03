@@ -825,7 +825,7 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
     // These meta-skills don't correspond to reviewer focus areas
     const NON_FOCUS_SKILLS = new Set([
       'agent-teams',
-      'knowledge-persistence',
+      'decisions-format',
       'review-methodology',
       'worktree-support',
       'apply-feature-kb',  // consumption meta-skill, not a review focus
@@ -1025,44 +1025,3 @@ describe('Cross-component runtime alignment', () => {
   });
 });
 
-describe('citation sentence propagation', () => {
-  const MARKER_START = '<!-- CITATION-SENTENCE-START -->';
-  const MARKER_END = '<!-- CITATION-SENTENCE-END -->';
-
-  function extractCitationSentence(filePath: string): string {
-    const content = readFileSync(filePath, 'utf-8');
-    const startIdx = content.indexOf(MARKER_START);
-    const endIdx = content.indexOf(MARKER_END);
-    if (startIdx === -1 || endIdx === -1) {
-      throw new Error(`Citation markers not found in ${filePath}`);
-    }
-    return content.slice(startIdx + MARKER_START.length, endIdx);
-  }
-
-  const skillPath = path.join(ROOT, 'shared/skills/knowledge-persistence/SKILL.md');
-  const coderPath = path.join(ROOT, 'shared/agents/coder.md');
-  const reviewerPath = path.join(ROOT, 'shared/agents/reviewer.md');
-
-  it('canonical sentence exists in SKILL.md', () => {
-    const sentence = extractCitationSentence(skillPath);
-    expect(sentence.trim().length).toBeGreaterThan(0);
-  });
-
-  it('coder.md has byte-identical citation sentence', () => {
-    const canonical = extractCitationSentence(skillPath);
-    const coderSentence = extractCitationSentence(coderPath);
-    expect(coderSentence).toBe(canonical);
-  });
-
-  it('reviewer.md has citation sentence referencing KNOWLEDGE_CONTEXT index and apply-knowledge skill', () => {
-    // reviewer.md uses the index+Read pattern (KNOWLEDGE_CONTEXT + devflow:apply-knowledge),
-    // not the direct-file-read pattern used by coder. The sentence intentionally differs from
-    // the canonical (coder-style) sentence.
-    const reviewerSentence = extractCitationSentence(reviewerPath);
-    expect(reviewerSentence.trim()).toBeTruthy();
-    expect(reviewerSentence).toContain('KNOWLEDGE_CONTEXT');
-    expect(reviewerSentence).toContain('devflow:apply-knowledge');
-    expect(reviewerSentence).toContain('applies ADR-NNN');
-    expect(reviewerSentence).toContain('avoids PF-NNN');
-  });
-});

@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { isClaudeCliAvailable } from '../../utils/cli.js';
-import { runKbAgent, loadKnowledgeContext } from '../../utils/kb-agent.js';
+import { runKbAgent, loadDecisionsContext } from '../../utils/kb-agent.js';
 import { getFeatureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
 
 export async function handleRefresh(slug?: string): Promise<void> {
@@ -40,7 +40,7 @@ export async function handleRefresh(slug?: string): Promise<void> {
 
   p.log.info(`Refreshing ${slugsToRefresh.length} KB${slugsToRefresh.length === 1 ? '' : 's'}: ${slugsToRefresh.join(', ')}`);
 
-  const knowledgeContext = loadKnowledgeContext(worktreePath);
+  const decisionsContext = loadDecisionsContext(worktreePath);
 
   for (const kbSlug of slugsToRefresh) {
     const s = p.spinner();
@@ -59,7 +59,7 @@ export async function handleRefresh(slug?: string): Promise<void> {
       `DIRECTORIES: ${JSON.stringify(kbDirectories)}`,
       `WORKTREE_PATH: ${worktreePath}`,
       `CHANGED_FILES: ${JSON.stringify(staleInfo.changedFiles)}`,
-      `KNOWLEDGE_CONTEXT: ${knowledgeContext}`,
+      `DECISIONS_CONTEXT: ${decisionsContext}`,
       ``,
       `STEP 1: Load the devflow:feature-kb skill using the Skill tool (skill: "devflow:feature-kb").`,
       `STEP 2: Read .features/${kbSlug}/KNOWLEDGE.md to understand the existing KB content and structure.`,
@@ -67,7 +67,7 @@ export async function handleRefresh(slug?: string): Promise<void> {
       `STEP 4: Update the KB following the skill's quality standards:`,
       `  - Maintain the correct category template structure`,
       `  - Ensure code examples follow the 3-part rule (description, inline comments, takeaways)`,
-      `  - Update cross-references in the Related section using KNOWLEDGE_CONTEXT`,
+      `  - Update cross-references in the Related section using DECISIONS_CONTEXT`,
       `  - Preserve any manually added content the user edited in`,
       `  - Do NOT regenerate from scratch — update only what changed`,
       `STEP 5: Write the updated KB to .features/${kbSlug}/KNOWLEDGE.md`,

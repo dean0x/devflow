@@ -1,6 +1,6 @@
 // tests/learning/review-command.test.ts
 // Tests for devflow learn --review CLI command.
-// Validates flagged observation detection, log mutation, and knowledge file Status updates.
+// Validates flagged observation detection, log mutation, and decisions file Status updates.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -9,7 +9,7 @@ import * as os from 'os';
 import {
   parseLearningLog,
   isLearningObservation,
-  updateKnowledgeStatus,
+  updateDecisionsStatus,
 } from '../../src/cli/commands/learn.js';
 import type { LearningObservation } from '../../src/cli/commands/learn.js';
 import { runHelper } from './helpers.js';
@@ -94,17 +94,17 @@ describe('isLearningObservation v2', () => {
   });
 });
 
-describe('updateKnowledgeStatus', () => {
+describe('updateDecisionsStatus', () => {
   let tmpDir: string;
-  let knowledgeDir: string;
+  let decisionsDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-cmd-test-'));
-    // Mirror the production layout (`.memory/knowledge/{file}.md`) so the lock
-    // directory computed by updateKnowledgeStatus lands inside tmpDir rather
+    // Mirror the production layout (`.memory/decisions/{file}.md`) so the lock
+    // directory computed by updateDecisionsStatus lands inside tmpDir rather
     // than the system temp root shared across tests.
-    knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
-    fs.mkdirSync(knowledgeDir, { recursive: true });
+    decisionsDir = path.join(tmpDir, '.memory', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -112,7 +112,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('updates Status field in decisions.md for a known anchor', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     fs.writeFileSync(decisionsPath, [
       '<!-- TL;DR: 1 decisions. Key: -->',
       '# Architectural Decisions',
@@ -128,7 +128,7 @@ describe('updateKnowledgeStatus', () => {
       '',
     ].join('\n'), 'utf-8');
 
-    const updated = await updateKnowledgeStatus(decisionsPath, 'ADR-001', 'Deprecated');
+    const updated = await updateDecisionsStatus(decisionsPath, 'ADR-001', 'Deprecated');
     expect(updated).toBe(true);
 
     const content = fs.readFileSync(decisionsPath, 'utf-8');
@@ -137,7 +137,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('updates Status field in pitfalls.md for a known anchor', async () => {
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
     fs.writeFileSync(pitfallsPath, [
       '<!-- TL;DR: 1 pitfalls. Key: -->',
       '# Known Pitfalls',
@@ -153,7 +153,7 @@ describe('updateKnowledgeStatus', () => {
       '',
     ].join('\n'), 'utf-8');
 
-    const updated = await updateKnowledgeStatus(pitfallsPath, 'PF-001', 'Deprecated');
+    const updated = await updateDecisionsStatus(pitfallsPath, 'PF-001', 'Deprecated');
     expect(updated).toBe(true);
 
     const content = fs.readFileSync(pitfallsPath, 'utf-8');
@@ -162,8 +162,8 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('returns false when file does not exist', async () => {
-    const result = await updateKnowledgeStatus(
-      path.join(knowledgeDir, 'nonexistent.md'),
+    const result = await updateDecisionsStatus(
+      path.join(decisionsDir, 'nonexistent.md'),
       'ADR-001',
       'Deprecated',
     );
@@ -171,7 +171,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('does not corrupt file when anchor not found', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const originalContent = [
       '<!-- TL;DR: 1 decisions. Key: -->',
       '# Architectural Decisions',
@@ -184,7 +184,7 @@ describe('updateKnowledgeStatus', () => {
     fs.writeFileSync(decisionsPath, originalContent, 'utf-8');
 
     // Wrong anchor
-    const updated = await updateKnowledgeStatus(decisionsPath, 'ADR-999', 'Deprecated');
+    const updated = await updateDecisionsStatus(decisionsPath, 'ADR-999', 'Deprecated');
     expect(updated).toBe(false);
 
     // File should be unchanged
@@ -193,7 +193,7 @@ describe('updateKnowledgeStatus', () => {
   });
 
   it('does not corrupt file when Status field is absent in section', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const originalContent = [
       '# Architectural Decisions',
       '',
@@ -205,7 +205,7 @@ describe('updateKnowledgeStatus', () => {
     ].join('\n');
     fs.writeFileSync(decisionsPath, originalContent, 'utf-8');
 
-    const updated = await updateKnowledgeStatus(decisionsPath, 'ADR-001', 'Deprecated');
+    const updated = await updateDecisionsStatus(decisionsPath, 'ADR-001', 'Deprecated');
     expect(updated).toBe(false);
   });
 });
@@ -281,24 +281,24 @@ describe('observation attention flags detection', () => {
   });
 });
 
-describe('knowledge capacity review (--review capacity mode)', () => {
+describe('decisions capacity review (--review capacity mode)', () => {
   // These tests verify the parsing and sorting logic, not the interactive flow
   // (p.multiselect is hard to test non-interactively).
 
   let tmpDir: string;
-  let knowledgeDir: string;
+  let decisionsDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-review-'));
-    knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
-    fs.mkdirSync(knowledgeDir, { recursive: true });
+    decisionsDir = path.join(tmpDir, '.memory', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('parseKnowledgeEntries extracts active entries from decisions.md', () => {
+  it('parseDecisionsEntries extracts active entries from decisions.md', () => {
     // This test validates the entry parsing logic that the --review capacity
     // mode uses internally. We test it via the count-active op which uses
     // the same countActiveHeadings function.
@@ -320,7 +320,7 @@ describe('knowledge capacity review (--review capacity mode)', () => {
       '',
     ].join('\n');
 
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     fs.writeFileSync(decisionsPath, content);
 
     // Use count-active to verify
@@ -346,7 +346,7 @@ describe('knowledge capacity review (--review capacity mode)', () => {
       '',
     ].join('\n');
 
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
     fs.writeFileSync(pitfallsPath, content);
 
     const result = JSON.parse(runHelper(`count-active "${pitfallsPath}" pitfall`));
@@ -371,7 +371,7 @@ describe('--dismiss-capacity notification', () => {
   it('writeFileAtomic persists notification dismissal', async () => {
     const notifPath = path.join(memoryDir, '.notifications.json');
     const data: Record<string, any> = {
-      'knowledge-capacity-decisions': {
+      'decisions-capacity-decisions': {
         active: true, threshold: 70, count: 72, ceiling: 100,
         dismissed_at_threshold: null, severity: 'warning',
       },
@@ -379,10 +379,10 @@ describe('--dismiss-capacity notification', () => {
     fs.writeFileSync(notifPath, JSON.stringify(data));
 
     // Simulate dismiss: set dismissed_at_threshold = threshold
-    data['knowledge-capacity-decisions'].dismissed_at_threshold = 70;
+    data['decisions-capacity-decisions'].dismissed_at_threshold = 70;
     fs.writeFileSync(notifPath, JSON.stringify(data, null, 2) + '\n');
 
     const read = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
-    expect(read['knowledge-capacity-decisions'].dismissed_at_threshold).toBe(70);
+    expect(read['decisions-capacity-decisions'].dismissed_at_threshold).toBe(70);
   });
 });

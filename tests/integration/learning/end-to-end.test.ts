@@ -229,7 +229,7 @@ CANNED_EOF
     // Create required Claude dirs
     fs.mkdirSync(path.join(tmpDir, '.claude', 'commands', 'self-learning'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.claude', 'skills'), { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
 
     // Invoke background-learning synchronously (it has sleep 3 but exits)
     let failed = false;
@@ -284,9 +284,9 @@ CANNED_EOF
       expect(['observing', 'ready', 'created']).toContain(obs.status);
     }
 
-    // Assert manifest was created or knowledge dirs exist
-    const knowledgeDir = path.join(memoryDir, 'knowledge');
-    expect(fs.existsSync(knowledgeDir)).toBe(true);
+    // Assert manifest was created or decisions dirs exist
+    const decisionsDir = path.join(memoryDir, 'decisions');
+    expect(fs.existsSync(decisionsDir)).toBe(true);
 
     // --- Test reconcile-manifest ---
     // First: manually write a manifest entry pointing to a non-existent artifact

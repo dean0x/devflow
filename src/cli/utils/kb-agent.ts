@@ -11,12 +11,12 @@ const execFileAsync = promisify(execFile);
 const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write,Skill';
 
 /**
- * Load the compact KNOWLEDGE_CONTEXT index (ADR/PF entries) for cross-referencing.
- * Returns '(none)' when no knowledge files exist or the script is not installed.
+ * Load the compact DECISIONS_CONTEXT index (ADR/PF entries) for cross-referencing.
+ * Returns '(none)' when no decisions files exist or the script is not installed.
  */
-export function loadKnowledgeContext(worktreePath: string): string {
+export function loadDecisionsContext(worktreePath: string): string {
   const scriptPath = path.join(
-    getDevFlowDirectory(), 'scripts', 'hooks', 'lib', 'knowledge-context.cjs',
+    getDevFlowDirectory(), 'scripts', 'hooks', 'lib', 'decisions-index.cjs',
   );
 
   if (!existsSync(scriptPath)) return '(none)';

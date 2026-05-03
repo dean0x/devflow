@@ -1,27 +1,16 @@
 ---
-name: knowledge-persistence
+name: decisions-format
 description: >-
-  Format specification for on-disk knowledge files (.memory/knowledge/decisions.md
-  and pitfalls.md). Used by commands that read knowledge for context. Writing is
+  Format specification for on-disk decisions files (.memory/decisions/decisions.md
+  and pitfalls.md). Used by commands that read decisions for context. Writing is
   performed exclusively by the background extractor.
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
-<!--
-@devflow-design-decision D9
-This skill is a format spec documenting the on-disk format and lock protocol.
-It is NOT invoked by commands. The only writer is scripts/hooks/background-learning
-via json-helper.cjs (render-ready → knowledge-append operation).
-Commands that previously used this skill to write knowledge (implement Phase 10,
-code-review Phase 5, debug Phase 6, resolve Phase 6) were removed in v2 because
-agent-summaries produced low-signal entries. Knowledge is now extracted from user
-transcripts by the background learning system.
--->
+# Decisions Format — Format Specification
 
-# Knowledge Persistence — Format Specification
-
-On-disk format for project knowledge files. This is the canonical reference for the
+On-disk format for project decisions files. This is the canonical reference for the
 entry format, capacity limit, lock protocol, and status field semantics.
 
 **Invocation note**: This skill is a format spec. Rendering is performed by the
@@ -32,16 +21,16 @@ background extractor at `scripts/hooks/background-learning` via
 
 > **SINGLE SOURCE OF FORMAT TRUTH**
 >
-> All knowledge entries follow this exact format. The background extractor
+> All decisions entries follow this exact format. The background extractor
 > writes entries atomically using the lock protocol below. Commands that read
-> knowledge for context do so without a lock (read-only is safe).
+> decisions for context do so without a lock (read-only is safe).
 
 ---
 
 ## File Locations
 
 ```
-.memory/knowledge/
+.memory/decisions/
 ├── decisions.md    # ADR entries (append-only)
 └── pitfalls.md     # PF entries (area-specific gotchas)
 ```
@@ -116,11 +105,11 @@ PF (`pitfalls.md`) entries accept:
 
 When writing, the background extractor uses mkdir-based locks:
 
-**`.memory/.knowledge.lock`** — guards `decisions.md` / `pitfalls.md` writes:
+**`.memory/.decisions.lock`** — guards `decisions.md` / `pitfalls.md` writes:
 - Timeout: 30 seconds (fail if lock not acquired)
 - Stale recovery: if lock directory is >60 seconds old, remove it and retry
 - Release lock after write completes (remove lock directory)
-- Used by: `json-helper.cjs render-ready`, `knowledge-append`, `learn.ts`
+- Used by: `json-helper.cjs render-ready`, `decisions-append`, `learn.ts`
 
 **`.memory/.learning.lock`** — guards `learning-log.jsonl` mutations:
 - Node callers (`json-helper.cjs reconcile-manifest`, `learn.ts`): 15–30 s timeout, 60 s stale
@@ -131,9 +120,7 @@ When writing, the background extractor uses mkdir-based locks:
 
 ## Citation Requirement
 
-<!-- CITATION-SENTENCE-START -->
-When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfall from `.memory/knowledge/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
-<!-- CITATION-SENTENCE-END -->
+When you apply a decision from `.memory/decisions/decisions.md` or avoid a pitfall from `.memory/decisions/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
 
 ---
 

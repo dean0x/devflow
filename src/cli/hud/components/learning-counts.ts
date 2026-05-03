@@ -2,8 +2,8 @@ import type { ComponentResult, GatherContext } from '../types.js';
 import { dim } from '../colors.js';
 
 /**
- * HUD component: learning knowledge counts.
- * Shows count of promoted (created) knowledge entries by type.
+ * HUD component: learning decisions counts.
+ * Shows count of promoted (created) decisions entries by type.
  * Shows attention indicator when entries need review (stale/soft-cap exceeded).
  * Returns null gracefully if no learning log exists or no promoted entries.
  */

@@ -23,24 +23,24 @@ Explore a codebase area by spawning parallel agents for flow tracing, dependency
 
 ## Phases
 
-### Phase 1: Load Knowledge Index (Orchestrator-Local)
+### Phase 1: Load Decisions Index (Orchestrator-Local)
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Before exploring, load the knowledge index:
+Before exploring, load the decisions index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `KNOWLEDGE_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the orchestrator, not in the investigation workers.
+The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
 2. Identify relevant KBs (match task intent against KB descriptions and directories).
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** for exploration framing — feature-specific patterns and integration points guide where to focus.
-5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as KNOWLEDGE_CONTEXT).
+5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as DECISIONS_CONTEXT).
 
 **Explore agent framing**: "The KB is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the KB doesn't cover and things that may have changed."
 
@@ -92,7 +92,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 
 ### Phase 6: Suggest KB Creation (Conditional)
 
-**Requires:** MERGED_FINDINGS, KNOWLEDGE_CONTEXT
+**Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
 **Produces:** KB_STATUS (created | skipped)
 
 1. If `.features/.disabled` exists → skip, set KB_STATUS = skipped
@@ -112,7 +112,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
       FEATURE_NAME: {name}
       DIRECTORIES: {directories}
       EXPLORATION_OUTPUTS: {MERGED_FINDINGS from Phase 4}
-      KNOWLEDGE_CONTEXT: {from Phase 1}
+      DECISIONS_CONTEXT: {from Phase 1}
       WORKTREE_PATH: {worktree path, if in a worktree}
       Load the devflow:feature-kb skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
       exploring from scratch. Read .features/index.json for cross-referencing."
@@ -136,7 +136,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 ```
 /explore (orchestrator)
 │
-├─ Phase 1: Load Knowledge Index (Orchestrator-Local)
+├─ Phase 1: Load Decisions Index (Orchestrator-Local)
 │
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase overview)

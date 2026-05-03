@@ -26,7 +26,7 @@ describe('getActiveNotification', () => {
   it('returns null when all notifications inactive', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
-      JSON.stringify({ 'knowledge-capacity-decisions': { active: false, threshold: 50, count: 50, ceiling: 100, severity: 'dim' } }),
+      JSON.stringify({ 'decisions-capacity-decisions': { active: false, threshold: 50, count: 50, ceiling: 100, severity: 'dim' } }),
     );
     expect(getActiveNotification(tmpDir)).toBeNull();
   });
@@ -35,7 +35,7 @@ describe('getActiveNotification', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
       JSON.stringify({
-        'knowledge-capacity-decisions': {
+        'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
           dismissed_at_threshold: null, severity: 'warning',
           created_at: '2026-01-01T00:00:00Z',
@@ -53,7 +53,7 @@ describe('getActiveNotification', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
       JSON.stringify({
-        'knowledge-capacity-decisions': {
+        'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
           dismissed_at_threshold: 70, severity: 'warning',
         },
@@ -66,7 +66,7 @@ describe('getActiveNotification', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
       JSON.stringify({
-        'knowledge-capacity-decisions': {
+        'decisions-capacity-decisions': {
           active: true, threshold: 80, count: 82, ceiling: 100,
           dismissed_at_threshold: 70, severity: 'warning',
         },
@@ -81,11 +81,11 @@ describe('getActiveNotification', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
       JSON.stringify({
-        'knowledge-capacity-decisions': {
+        'decisions-capacity-decisions': {
           active: true, threshold: 60, count: 62, ceiling: 100,
           dismissed_at_threshold: null, severity: 'dim',
         },
-        'knowledge-capacity-pitfalls': {
+        'decisions-capacity-pitfalls': {
           active: true, threshold: 90, count: 92, ceiling: 100,
           dismissed_at_threshold: null, severity: 'error',
         },
@@ -108,7 +108,7 @@ describe('getActiveNotification', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
       JSON.stringify({
-        'knowledge-capacity-decisions': {
+        'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
           dismissed_at_threshold: null, severity: 'purple',
           created_at: '2026-01-01T00:00:00Z',
@@ -124,7 +124,7 @@ describe('getActiveNotification', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
       JSON.stringify({
-        'knowledge-capacity-decisions': {
+        'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
           dismissed_at_threshold: null, severity: null,
           created_at: '2026-01-01T00:00:00Z',
@@ -181,8 +181,8 @@ describe('isNotificationMap adversarial inputs', () => {
 
   it('accepts map with multiple valid entries', () => {
     expect(isNotificationMap({
-      'knowledge-capacity-decisions': { active: true, count: 72, ceiling: 100, severity: 'warning' },
-      'knowledge-capacity-pitfalls': { active: false },
+      'decisions-capacity-decisions': { active: true, count: 72, ceiling: 100, severity: 'warning' },
+      'decisions-capacity-pitfalls': { active: false },
     })).toBe(true);
   });
 });

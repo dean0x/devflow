@@ -47,7 +47,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
     agents: [],
-    skills: ['apply-knowledge', 'apply-feature-kb', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
+    skills: ['apply-decisions', 'apply-feature-kb', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
     name: 'devflow-plan',
@@ -405,6 +405,12 @@ export const LEGACY_SKILL_NAMES: string[] = [
   // v2.x feature knowledge bases: new skills bare names for pre-namespace installs
   'feature-kb',
   'apply-feature-kb',
+  // v2.x knowledge→decisions rename: old namespaced skill names for cleanup
+  'devflow:apply-knowledge',
+  'devflow:knowledge-persistence',
+  // v2.x knowledge→decisions rename: current bare names for pre-namespace installs
+  'apply-decisions',
+  'decisions-format',
 ];
 
 /**

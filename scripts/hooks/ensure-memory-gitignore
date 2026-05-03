@@ -5,8 +5,8 @@
 
 _MEMORY_DIR="$1/.memory"
 
-# Create .memory/ and knowledge subdirectory if needed
-mkdir -p "$_MEMORY_DIR/knowledge" 2>/dev/null || return 1
+# Create .memory/ and decisions subdirectory if needed
+mkdir -p "$_MEMORY_DIR/decisions" 2>/dev/null || return 1
 
 # One-time .gitignore setup (marker prevents repeated checks)
 if [ ! -f "$_MEMORY_DIR/.gitignore-configured" ] && [ -e "$1/.git" ]; then

@@ -54,15 +54,15 @@ export function getActiveNotification(cwd: string): NotificationData | null {
 
   if (!worst) return null;
 
-  // Extract file type from key: "knowledge-capacity-decisions" → "decisions"
-  const fileType = worst.key.replace('knowledge-capacity-', '');
+  // Extract file type from key: "decisions-capacity-decisions" → "decisions"
+  const fileType = worst.key.replace('decisions-capacity-', '');
   const count = worst.entry.count ?? 0;
   const ceiling = worst.entry.ceiling ?? 100;
 
   return {
     id: worst.key,
     severity: isSeverity(worst.entry.severity) ? worst.entry.severity : 'dim',
-    text: `\u26A0 Knowledge: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
+    text: `\u26A0 Decisions: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
     count,
     ceiling,
   };

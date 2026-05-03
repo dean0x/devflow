@@ -145,6 +145,7 @@ describe('MIGRATIONS', () => {
     expect(v2Index).toBeGreaterThanOrEqual(0);
     expect(v3Index).toBeGreaterThan(v2Index);
   });
+
 });
 
 describe('runMigrations', () => {
@@ -205,7 +206,7 @@ describe('runMigrations', () => {
     // (shadow-overrides-v2-names) will try to read a non-existent skills dir,
     // which is a no-op.
     const projectRoot = path.join(tmpDir, 'project1');
-    await fs.mkdir(path.join(projectRoot, '.memory', 'knowledge'), { recursive: true });
+    await fs.mkdir(path.join(projectRoot, '.memory', 'decisions'), { recursive: true });
 
     const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
     const result = await runMigrations(ctx, [projectRoot]);
@@ -261,8 +262,8 @@ describe('runMigrations', () => {
     const fakeHome = path.join(tmpDir, 'home', '.devflow');
     const project1 = path.join(tmpDir, 'ok-project');
     const project2 = path.join(tmpDir, 'fail-project');
-    await fs.mkdir(path.join(project1, '.memory', 'knowledge'), { recursive: true });
-    await fs.mkdir(path.join(project2, '.memory', 'knowledge'), { recursive: true });
+    await fs.mkdir(path.join(project1, '.memory', 'decisions'), { recursive: true });
+    await fs.mkdir(path.join(project2, '.memory', 'decisions'), { recursive: true });
 
     // Create a custom per-project migration that always throws for project2
     const failingPerProjectMigration: Migration = {
@@ -325,7 +326,7 @@ describe('runMigrations', () => {
   it('is idempotent — second call with same state does nothing new', async () => {
     const fakeHome = path.join(tmpDir, 'home', '.devflow');
     const projectRoot = path.join(tmpDir, 'project-idem');
-    await fs.mkdir(path.join(projectRoot, '.memory', 'knowledge'), { recursive: true });
+    await fs.mkdir(path.join(projectRoot, '.memory', 'decisions'), { recursive: true });
 
     const ctx = { devflowDir: fakeHome, claudeDir: tmpDir };
 
@@ -350,7 +351,7 @@ describe('runMigrations', () => {
     const project1 = path.join(tmpDir, 'p1');
     const project2 = path.join(tmpDir, 'p2');
     for (const p of [project1, project2]) {
-      await fs.mkdir(path.join(p, '.memory', 'knowledge'), { recursive: true });
+      await fs.mkdir(path.join(p, '.memory', 'decisions'), { recursive: true });
       // Place a PROJECT-PATTERNS.md in each to verify per-project sweep
       await fs.writeFile(path.join(p, '.memory', 'PROJECT-PATTERNS.md'), '# stale', 'utf-8');
     }
@@ -379,9 +380,9 @@ describe('runMigrations', () => {
 
     // Create a project with a seeded entry (no self-learning: source)
     const projectRoot = path.join(tmpDir, 'project-v3-independent');
-    const knowledgeDir = path.join(projectRoot, '.memory', 'knowledge');
-    await fs.mkdir(knowledgeDir, { recursive: true });
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsDir = path.join(projectRoot, '.memory', 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-003: Seeded entry lacking self-learning marker

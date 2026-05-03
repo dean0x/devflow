@@ -3,9 +3,9 @@ import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
- * @file legacy-knowledge-purge.ts
+ * @file legacy-decisions-purge.ts
  *
- * D34: Pure helper extracted from the --purge-legacy-knowledge handler in
+ * D34: Pure helper extracted from the legacy-decisions-purge handler in
  * learn.ts for two reasons:
  *
  * 1. **Reusable from registry**: The migration registry (migrations.ts) needs to
@@ -17,8 +17,8 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  *    accepts its own memoryDir, enabling straightforward filesystem-level unit
  *    tests with temp directories and no environment coupling.
  *
- * The function acquires `.knowledge.lock` (same mkdir-based lock used by
- * json-helper.cjs render-ready and updateKnowledgeStatus in learn.ts) to
+ * The function acquires `.decisions.lock` (same mkdir-based lock used by
+ * json-helper.cjs render-ready and updateDecisionsStatus in learn.ts) to
  * serialize against concurrent writers.
  *
  * D39: Atomic writes delegate to `writeFileAtomicExclusive` in fs-atomic.ts,
@@ -34,13 +34,13 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  */
 const LEGACY_IDS = ['ADR-002', 'PF-001', 'PF-003', 'PF-005'];
 
-export interface PurgeLegacyKnowledgeResult {
+export interface PurgeLegacyDecisionsResult {
   removed: number;
   files: string[];
 }
 
 /** Typed pair of (file path, section-prefix). Prefix is 'ADR' for decisions.md, 'PF' for pitfalls.md. */
-type KnowledgeFilePair = readonly [string, 'ADR' | 'PF'];
+type DecisionsFilePair = readonly [string, 'ADR' | 'PF'];
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -94,7 +94,7 @@ const SELF_LEARNING_SOURCE_MARKER = '\n- **Source**: self-learning:';
 /**
  * Shared lock-and-loop helper used by both purge functions.
  *
- * Acquires the knowledge lock, then for each file in `filePrefixPairs`:
+ * Acquires the decisions lock, then for each file in `filePrefixPairs`:
  *   1. Reads the file (skips if absent).
  *   2. Calls `rewriteContent(content, prefix)` to get an updated string and a
  *      removed-section count.
@@ -108,24 +108,24 @@ const SELF_LEARNING_SOURCE_MARKER = '\n- **Source**: self-learning:';
  * @param filePrefixPairs  Files to process with their heading prefix
  * @param rewriteContent  Per-file transform: returns updated content + sections removed
  */
-async function withKnowledgeFiles(
+async function withDecisionsFiles(
   memoryDir: string,
-  filePrefixPairs: readonly KnowledgeFilePair[],
+  filePrefixPairs: readonly DecisionsFilePair[],
   rewriteContent: (content: string, prefix: 'ADR' | 'PF') => { updated: string; removedCount: number },
-): Promise<PurgeLegacyKnowledgeResult> {
-  const knowledgeDir = path.join(memoryDir, 'knowledge');
+): Promise<PurgeLegacyDecisionsResult> {
+  const decisionsDir = path.join(memoryDir, 'decisions');
 
-  // Bail early: nothing to do if knowledge directory doesn't exist
+  // Bail early: nothing to do if decisions directory doesn't exist
   try {
-    await fs.access(knowledgeDir);
+    await fs.access(decisionsDir);
   } catch {
     return { removed: 0, files: [] };
   }
 
-  const knowledgeLockDir = path.join(memoryDir, '.knowledge.lock');
-  const lockAcquired = await acquireMkdirLock(knowledgeLockDir);
+  const decisionsLockDir = path.join(memoryDir, '.decisions.lock');
+  const lockAcquired = await acquireMkdirLock(decisionsLockDir);
   if (!lockAcquired) {
-    throw new Error('Knowledge files are currently being written. Try again in a moment.');
+    throw new Error('Decisions files are currently being written. Try again in a moment.');
   }
 
   let removed = 0;
@@ -159,39 +159,39 @@ async function withKnowledgeFiles(
       }
     }
   } finally {
-    try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
+    try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
   }
 
   return { removed, files: modifiedFiles };
 }
 
 /**
- * Remove pre-v2 low-signal knowledge entries from decisions.md and pitfalls.md.
+ * Remove pre-v2 low-signal decisions entries from decisions.md and pitfalls.md.
  *
  * The entries targeted are:
  *   - ADR-002  (decisions.md)
  *   - PF-001, PF-003, PF-005  (pitfalls.md)
  *
- * Returns immediately if `.memory/knowledge/` does not exist.
+ * Returns immediately if `.memory/decisions/` does not exist.
  *
  * @param options.memoryDir - absolute path to the `.memory/` directory
  * @returns number of sections removed and list of files that were modified
  * @throws if lock acquisition times out
  */
-export async function purgeLegacyKnowledgeEntries(options: {
+export async function purgeLegacyDecisionsEntries(options: {
   memoryDir: string;
-}): Promise<PurgeLegacyKnowledgeResult> {
+}): Promise<PurgeLegacyDecisionsResult> {
   const { memoryDir } = options;
-  const knowledgeDir = path.join(memoryDir, 'knowledge');
-  const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-  const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+  const decisionsDir = path.join(memoryDir, 'decisions');
+  const decisionsPath = path.join(decisionsDir, 'decisions.md');
+  const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
-  const filePrefixPairs: readonly KnowledgeFilePair[] = [
+  const filePrefixPairs: readonly DecisionsFilePair[] = [
     [decisionsPath, 'ADR'],
     [pitfallsPath, 'PF'],
   ];
 
-  const result = await withKnowledgeFiles(memoryDir, filePrefixPairs, (content, prefix) => {
+  const result = await withDecisionsFiles(memoryDir, filePrefixPairs, (content, prefix) => {
     const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
     let updated = content;
     let removedCount = 0;
@@ -224,9 +224,9 @@ export async function purgeLegacyKnowledgeEntries(options: {
 }
 
 /**
- * Remove ALL pre-v2 seeded knowledge entries from decisions.md and pitfalls.md.
+ * Remove ALL pre-v2 seeded decisions entries from decisions.md and pitfalls.md.
  *
- * Unlike `purgeLegacyKnowledgeEntries` (which targets a fixed allow-list of 4
+ * Unlike `purgeLegacyDecisionsEntries` (which targets a fixed allow-list of 4
  * IDs), this function uses a format discriminator: any `## ADR-NNN:` or
  * `## PF-NNN:` section that does NOT contain the literal
  * `- **Source**: self-learning:` marker is considered pre-v2 seeded content
@@ -237,29 +237,29 @@ export async function purgeLegacyKnowledgeEntries(options: {
  * ALL seeded entries, fixing the gap where 7 of the original 10 seed entries
  * survived the v2 purge on upgraded projects.
  *
- * Returns immediately if `.memory/knowledge/` does not exist.
+ * Returns immediately if `.memory/decisions/` does not exist.
  *
  * Does NOT remove PROJECT-PATTERNS.md — that file is v2's responsibility and
- * has already been handled by `purgeLegacyKnowledgeEntries`.
+ * has already been handled by `purgeLegacyDecisionsEntries`.
  *
  * @param options.memoryDir - absolute path to the `.memory/` directory
  * @returns number of sections removed and list of files that were modified
  * @throws if lock acquisition times out
  */
-export async function purgeAllPreV2KnowledgeEntries(options: {
+export async function purgeAllPreV2DecisionsEntries(options: {
   memoryDir: string;
-}): Promise<PurgeLegacyKnowledgeResult> {
+}): Promise<PurgeLegacyDecisionsResult> {
   const { memoryDir } = options;
-  const knowledgeDir = path.join(memoryDir, 'knowledge');
-  const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-  const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+  const decisionsDir = path.join(memoryDir, 'decisions');
+  const decisionsPath = path.join(decisionsDir, 'decisions.md');
+  const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
-  const filePrefixPairs: readonly KnowledgeFilePair[] = [
+  const filePrefixPairs: readonly DecisionsFilePair[] = [
     [decisionsPath, 'ADR'],
     [pitfallsPath, 'PF'],
   ];
 
-  return withKnowledgeFiles(memoryDir, filePrefixPairs, (content) => {
+  return withDecisionsFiles(memoryDir, filePrefixPairs, (content) => {
     // Remove sections lacking the self-learning marker — those are pre-v2 seeded content.
     let removedCount = 0;
     const updated = content.replace(SECTION_REGEX, (section) => {

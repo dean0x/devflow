@@ -44,7 +44,7 @@ export interface LearningObservation {
   /** Set by merge-observation when an incoming observation's details diverge
    *  significantly from the existing entry (Levenshtein ratio < 0.6). See D14. */
   needsReview?: boolean;
-  /** D17: Set when knowledge file hits hard ceiling (100 entries) — repurposed from 50 soft cap */
+  /** D17: Set when decisions file hits hard ceiling (100 entries) — repurposed from 50 soft cap */
   softCapExceeded?: boolean;
   quality_ok?: boolean;
 }
@@ -323,7 +323,7 @@ async function readObservations(logPath: string): Promise<{ observations: Learni
  *
  * Used by CLI writers (`--review`, `--dismiss-capacity`) to serialize
  * against the background learning pipeline. `.learning.lock` guards log mutations;
- * `.knowledge.lock` guards decisions.md / pitfalls.md — the caller picks the path.
+ * `.decisions.lock` guards decisions.md / pitfalls.md — the caller picks the path.
  *
  * Stale detection: if the lock directory is older than `staleMs` we assume the
  * previous holder crashed and remove it. `json-helper.cjs` uses the same
@@ -375,24 +375,24 @@ async function writeObservations(logPath: string, observations: LearningObservat
 }
 
 /**
- * Update the Status: field for a decision or pitfall entry in a knowledge file.
+ * Update the Status: field for a decision or pitfall entry in a decisions file.
  * Locates the entry by anchor ID (from artifact_path fragment), sets Status to the given value.
  * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
  *
  * The lock path MUST match the render-ready writer in json-helper.cjs so CLI updates
  * serialize against the background learning pipeline.
  */
-export async function updateKnowledgeStatus(
+export async function updateDecisionsStatus(
   filePath: string,
   anchorId: string,
   newStatus: string,
 ): Promise<boolean> {
-  // Lock path MUST be `.memory/.knowledge.lock` (sibling of `knowledge/`) to match
-  // scripts/hooks/json-helper.cjs render-ready + knowledge-append writers.
-  // Knowledge files live at `.memory/knowledge/{decisions,pitfalls}.md` so we go up
+  // Lock path MUST be `.memory/.decisions.lock` (sibling of `decisions/`) to match
+  // scripts/hooks/json-helper.cjs render-ready + decisions-append writers.
+  // Decisions files live at `.memory/decisions/{decisions,pitfalls}.md` so we go up
   // one level from the file's parent directory.
   const memoryDir = path.dirname(path.dirname(filePath));
-  const lockPath = path.join(memoryDir, '.knowledge.lock');
+  const lockPath = path.join(memoryDir, '.decisions.lock');
 
   const acquired = await acquireMkdirLock(lockPath);
   if (!acquired) return false;
@@ -451,7 +451,7 @@ function formatStaleReason(obs: LearningObservation): string {
     reasons.push('may be stale');
   }
   if (obs.needsReview) reasons.push('artifact missing (deleted?)');
-  if (obs.softCapExceeded) reasons.push('knowledge file at capacity');
+  if (obs.softCapExceeded) reasons.push('decisions file at capacity');
   return reasons.join(', ') || 'flagged for review';
 }
 
@@ -479,7 +479,7 @@ export const learnCommand = new Command('learn')
   .option('--reset', 'Remove all self-learning artifacts, log, and transient state')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
-  .option('--dismiss-capacity', 'Dismiss the current capacity notification for a knowledge file')
+  .option('--dismiss-capacity', 'Dismiss the current capacity notification for a decisions file')
   .action(async (options: LearnOptions) => {
     const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity;
     if (!hasFlag) {
@@ -758,7 +758,7 @@ export const learnCommand = new Command('learn')
           '.learning-runs-today',
           '.learning-notified-at',
           '.notifications.json',
-          '.knowledge-usage.json',
+          '.decisions-usage.json',
           '.learning-manifest.json',
         ];
         let transientCount = 0;
@@ -808,9 +808,9 @@ export const learnCommand = new Command('learn')
           } catch { /* file may not exist */ }
         }
 
-        // Clean up knowledge-usage lock directory if stale
+        // Clean up decisions-usage lock directory if stale
         try {
-          await fs.rmdir(path.join(memoryDir, '.knowledge-usage.lock'));
+          await fs.rmdir(path.join(memoryDir, '.decisions-usage.lock'));
         } catch { /* doesn't exist or already cleaned */ }
 
         // Remove stale `enabled` field from learning.json (migration)
@@ -872,7 +872,7 @@ export const learnCommand = new Command('learn')
         message: 'Review mode:',
         options: [
           { value: 'observations', label: 'Review flagged observations', hint: 'stale, missing, at capacity' },
-          { value: 'capacity', label: 'Review knowledge capacity', hint: 'deprecate least-used entries' },
+          { value: 'capacity', label: 'Review decisions capacity', hint: 'deprecate least-used entries' },
           { value: 'cancel', label: 'Cancel' },
         ],
       });
@@ -895,8 +895,8 @@ export const learnCommand = new Command('learn')
         }
 
         // Acquire .learning.lock so we don't race with background-learning during the
-        // interactive loop. The internal updateKnowledgeStatus call still takes its own
-        // .knowledge.lock — different lock directories, no deadlock.
+        // interactive loop. The internal updateDecisionsStatus call still takes its own
+        // .decisions.lock — different lock directories, no deadlock.
         const memoryDirForReview = path.join(process.cwd(), '.memory');
         const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
         const lockAcquired = await acquireMkdirLock(learningLockDir);
@@ -933,7 +933,7 @@ export const learnCommand = new Command('learn')
 
             if (p.isCancel(action)) {
               // Persist any changes made so far before exiting so the user keeps
-              // partial progress (and log/knowledge stay consistent).
+              // partial progress (and log/decisions stay consistent).
               await writeObservations(logPath, updatedObservations);
               p.cancel('Review cancelled — partial progress saved.');
               return;
@@ -951,16 +951,16 @@ export const learnCommand = new Command('learn')
                 softCapExceeded: undefined,
               };
 
-              // Update Status: field in knowledge file for decisions/pitfalls
+              // Update Status: field in decisions file for decisions/pitfalls
               if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
                 const hashIdx = obs.artifact_path.indexOf('#');
                 if (hashIdx !== -1) {
-                  const knowledgePath = obs.artifact_path.slice(0, hashIdx);
+                  const decisionsPath = obs.artifact_path.slice(0, hashIdx);
                   const anchorId = obs.artifact_path.slice(hashIdx + 1);
-                  const absPath = path.isAbsolute(knowledgePath)
-                    ? knowledgePath
-                    : path.join(process.cwd(), knowledgePath);
-                  const updated = await updateKnowledgeStatus(absPath, anchorId, 'Deprecated');
+                  const absPath = path.isAbsolute(decisionsPath)
+                    ? decisionsPath
+                    : path.join(process.cwd(), decisionsPath);
+                  const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
                   if (updated) {
                     p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
                   } else {
@@ -970,7 +970,7 @@ export const learnCommand = new Command('learn')
               }
 
               // Persist log after each deprecation so Ctrl-C never leaves the log
-              // out of sync with the knowledge file updates.
+              // out of sync with the decisions file updates.
               await writeObservations(logPath, updatedObservations);
               p.log.success(`Marked '${obs.pattern}' as deprecated.`);
             } else if (action === 'keep') {
@@ -1001,11 +1001,11 @@ export const learnCommand = new Command('learn')
 
       if (mode === 'capacity') {
         const memoryDir = path.join(process.cwd(), '.memory');
-        const knowledgeDir = path.join(memoryDir, 'knowledge');
-        const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-        const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+        const decisionsDir = path.join(memoryDir, 'decisions');
+        const decisionsPath = path.join(decisionsDir, 'decisions.md');
+        const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
-        // D23: parse knowledge entries from both files
+        // D23: parse decisions entries from both files
         const allEntries: Array<{
           id: string;
           pattern: string;
@@ -1058,7 +1058,7 @@ export const learnCommand = new Command('learn')
         }
 
         if (allEntries.length === 0) {
-          p.log.info('No active knowledge entries found.');
+          p.log.info('No active decisions entries found.');
           return;
         }
 
@@ -1077,7 +1077,7 @@ export const learnCommand = new Command('learn')
         // Load usage data for sorting
         let usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {};
         try {
-          const raw = await fs.readFile(path.join(memoryDir, '.knowledge-usage.json'), 'utf-8');
+          const raw = await fs.readFile(path.join(memoryDir, '.decisions-usage.json'), 'utf-8');
           const parsed = JSON.parse(raw);
           // D-SEC2: Guard against non-object/null/array shapes before narrowing into typed record.
           if (
@@ -1118,9 +1118,9 @@ export const learnCommand = new Command('learn')
         // Take top 20
         const candidates = sorted.slice(0, 20);
 
-        p.intro(color.bgYellow(color.black(' Knowledge Capacity Review ')));
+        p.intro(color.bgYellow(color.black(' Decisions Capacity Review ')));
         p.log.info(
-          `${allEntries.length} active entries across knowledge files.\n` +
+          `${allEntries.length} active entries across decisions files.\n` +
           `${eligible.length} eligible for review (${allEntries.length - eligible.length} within 7-day protection).\n` +
           `Showing ${candidates.length} least-used entries.`,
         );
@@ -1155,7 +1155,7 @@ export const learnCommand = new Command('learn')
             const entry = candidates.find(e => e.id === entryId);
             if (!entry) continue;
 
-            const updated = await updateKnowledgeStatus(entry.filePath, entry.id, 'Deprecated');
+            const updated = await updateDecisionsStatus(entry.filePath, entry.id, 'Deprecated');
             if (updated) {
               deprecatedCount++;
               p.log.success(`Deprecated ${entry.id}: ${entry.pattern}`);
@@ -1181,8 +1181,8 @@ export const learnCommand = new Command('learn')
           const jsonHelperPath = path.join(devflowDir, 'scripts', 'hooks', 'json-helper.cjs');
 
           for (const [filePath, type, notifKey] of [
-            [decisionsPath, 'decision', 'knowledge-capacity-decisions'],
-            [pitfallsPath, 'pitfall', 'knowledge-capacity-pitfalls'],
+            [decisionsPath, 'decision', 'decisions-capacity-decisions'],
+            [pitfallsPath, 'pitfall', 'decisions-capacity-pitfalls'],
           ] as const) {
             try {
               // D23: Use count-active op via json-helper.cjs (single source of truth)
@@ -1248,7 +1248,7 @@ export const learnCommand = new Command('learn')
       for (const key of activeKeys) {
         const entry = notifications[key];
         entry.dismissed_at_threshold = entry.threshold;
-        const fileType = key.replace('knowledge-capacity-', '');
+        const fileType = key.replace('decisions-capacity-', '');
         p.log.success(`Dismissed capacity notification for ${fileType} (at threshold ${entry.threshold}).`);
       }
 

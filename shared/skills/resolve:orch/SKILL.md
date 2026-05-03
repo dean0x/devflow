@@ -32,15 +32,12 @@ If no unresolved review found: halt with "No unresolved review found. Run a revi
 
 Extract branch slug from the directory path.
 
-<!-- Phase 2 rather than Step 0d: ambient mode has no Phase 0 (no worktree
-     discovery, no pre-flight git check, no TARGET_DIR selection — those are
-     handled by Phase 1 here). Same content as resolve.md Step 0d. -->
-## Phase 2: Load Project Knowledge
+## Phase 2: Load Project Decisions
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** REVIEW_DIR
 
-Run `node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
@@ -76,7 +73,7 @@ Determine execution: batches with no shared files can run in parallel.
 ## Phase 5: Resolve (Parallel)
 
 **Produces:** RESOLUTION_RESULTS
-**Requires:** BATCHES, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_SLUG
+**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_SLUG
 
 Spawn `Agent(subagent_type="Resolver")` agents — one per batch, parallel where possible.
 
@@ -84,7 +81,7 @@ Each receives:
 - **ISSUES**: Array of issues in the batch
 - **BRANCH**: Branch slug
 - **BATCH_ID**: Identifier for this batch
-- **KNOWLEDGE_CONTEXT**: Knowledge index from Phase 2 (or `(none)`). Resolvers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand.
+- **DECISIONS_CONTEXT**: Decisions index from Phase 2 (or `(none)`). Resolvers follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand.
 - **FEATURE_KNOWLEDGE**: Feature area context from Phase 2 (or `(none)`). Follow `devflow:apply-feature-kb` for consumption algorithm.
 
 Resolvers follow a 3-tier risk approach:
@@ -108,14 +105,14 @@ Spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
 Write `resolution-summary.md` to the same timestamped review directory.
 
-The report includes a `## Knowledge Citations` section at the top (before Statistics) listing all unique `applies ADR-NNN` and `avoids PF-NNN` references extracted from Resolver Reasoning columns. Omit the section entirely if no citations were made.
+The report includes a `## Decisions Citations` section at the top (before Statistics) listing all unique `applies ADR-NNN` and `avoids PF-NNN` references extracted from Resolver Reasoning columns. Omit the section entirely if no citations were made.
 
 Report to user:
 - Issues resolved vs deferred vs false positives
 - Files modified
 - Commits created
 - Remaining issues (if any deferred)
-- Knowledge citations applied (if any)
+- Decisions citations applied (if any)
 
 ## Error Handling
 
@@ -129,7 +126,7 @@ Report to user:
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Target Review Directory → REVIEW_DIR captured
-- [ ] Phase 2: Load Project Knowledge → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
+- [ ] Phase 2: Load Project Decisions → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
 - [ ] Phase 3: Parse Issues → ISSUES captured (or stopped: no actionable issues)
 - [ ] Phase 4: Analyze & Batch → BATCHES captured
 - [ ] Phase 5: Resolve → RESOLUTION_RESULTS captured per batch

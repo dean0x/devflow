@@ -12,47 +12,47 @@ afterAll(() => cleanupTmpWorktrees())
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const require = createRequire(import.meta.url)
 
-const { filterKnowledgeContext, loadKnowledgeIndex } = require(
-  path.join(ROOT, 'scripts/hooks/lib/knowledge-context.cjs')
+const { filterDecisionsContext, loadDecisionsIndex } = require(
+  path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
 ) as {
-  filterKnowledgeContext: (raw: string) => string
-  loadKnowledgeIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string
+  filterDecisionsContext: (raw: string) => string
+  loadDecisionsIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string
 }
 
-const CJS_PATH = path.join(ROOT, 'scripts/hooks/lib/knowledge-context.cjs')
+const CJS_PATH = path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
 
 // -------------------------------------------------------------------------
-// loadKnowledgeIndex — formatting
+// loadDecisionsIndex — formatting
 // -------------------------------------------------------------------------
 
-describe('loadKnowledgeIndex — formatting', () => {
-  it('returns "(none)" when both knowledge files are absent', () => {
+describe('loadDecisionsIndex — formatting', () => {
+  it('returns "(none)" when both decisions files are absent', () => {
     const tmpDir = makeTmpWorktree()
-    expect(loadKnowledgeIndex(tmpDir)).toBe('(none)')
+    expect(loadDecisionsIndex(tmpDir)).toBe('(none)')
   })
 
   it('returns "(none)" when all entries are Deprecated/Superseded after filter', () => {
     const tmpDir = makeTmpWorktree(DEPRECATED_ADR, SUPERSEDED_PF)
-    expect(loadKnowledgeIndex(tmpDir)).toBe('(none)')
+    expect(loadDecisionsIndex(tmpDir)).toBe('(none)')
   })
 
   it('includes Decisions block when decisions.md has active entries', () => {
     const tmpDir = makeTmpWorktree(ACTIVE_ADR)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Decisions (1):')
     expect(result).toContain('ADR-001')
   })
 
   it('includes Pitfalls block when pitfalls.md has active entries', () => {
     const tmpDir = makeTmpWorktree(undefined, ACTIVE_PF)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Pitfalls (1):')
     expect(result).toContain('PF-004')
   })
 
   it('shows both Decisions and Pitfalls blocks when both files have active entries', () => {
     const tmpDir = makeTmpWorktree(ACTIVE_ADR, ACTIVE_PF)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Decisions (1):')
     expect(result).toContain('Pitfalls (1):')
   })
@@ -60,7 +60,7 @@ describe('loadKnowledgeIndex — formatting', () => {
   it('strips Deprecated entries from Decisions block', () => {
     const mixed = ACTIVE_ADR + '\n' + DEPRECATED_ADR
     const tmpDir = makeTmpWorktree(mixed)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Decisions (1):')
     expect(result).toContain('ADR-001')
     expect(result).not.toContain('ADR-002')
@@ -69,7 +69,7 @@ describe('loadKnowledgeIndex — formatting', () => {
   it('strips Superseded entries from Pitfalls block', () => {
     const mixed = ACTIVE_PF + '\n' + SUPERSEDED_PF
     const tmpDir = makeTmpWorktree(undefined, mixed)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Pitfalls (1):')
     expect(result).toContain('PF-004')
     expect(result).not.toContain('PF-005')
@@ -79,7 +79,7 @@ describe('loadKnowledgeIndex — formatting', () => {
     const longTitle = 'A'.repeat(70)
     const adr = `## ADR-003: ${longTitle}\n\n- **Status**: Active\n- **Decision**: Long title\n`
     const tmpDir = makeTmpWorktree(adr)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('ADR-003')
     // Title should be truncated to 60 chars with '…'
     const lines = result.split('\n')
@@ -95,7 +95,7 @@ describe('loadKnowledgeIndex — formatting', () => {
     const longArea = 'scripts/hooks/' + 'a'.repeat(80)
     const pf = `## PF-006: Some pitfall\n\n- **Status**: Active\n- **Area**: ${longArea}\n- **Description**: desc\n`
     const tmpDir = makeTmpWorktree(undefined, pf)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     const lines = result.split('\n')
     const pfLine = lines.find(l => l.includes('PF-006'))
     expect(pfLine).toBeDefined()
@@ -109,7 +109,7 @@ describe('loadKnowledgeIndex — formatting', () => {
   it('shows [unknown] for entries with no recognized status', () => {
     const adr = `## ADR-007: Unknown status entry\n\n- **Status**: Draft\n- **Decision**: Something\n`
     const tmpDir = makeTmpWorktree(adr)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('ADR-007')
     expect(result).toContain('[unknown]')
   })
@@ -117,7 +117,7 @@ describe('loadKnowledgeIndex — formatting', () => {
   it('omits — Area suffix when Area field is missing', () => {
     const pf = `## PF-008: No area field\n\n- **Status**: Active\n- **Description**: desc\n`
     const tmpDir = makeTmpWorktree(undefined, pf)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     const lines = result.split('\n')
     const pfLine = lines.find(l => l.includes('PF-008'))
     expect(pfLine).toBeDefined()
@@ -126,28 +126,28 @@ describe('loadKnowledgeIndex — formatting', () => {
 
   it('includes file path footer for decisions', () => {
     const tmpDir = makeTmpWorktree(ACTIVE_ADR)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('decisions.md')
     expect(result).toContain('ADR-NNN')
   })
 
   it('includes file path footer for pitfalls', () => {
     const tmpDir = makeTmpWorktree(undefined, ACTIVE_PF)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('pitfalls.md')
     expect(result).toContain('PF-NNN')
   })
 
   it('omits Decisions block when only pitfalls file is present', () => {
     const tmpDir = makeTmpWorktree(undefined, ACTIVE_PF)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).not.toContain('Decisions (')
     expect(result).toContain('Pitfalls (')
   })
 
   it('omits Pitfalls block when only decisions file is present', () => {
     const tmpDir = makeTmpWorktree(ACTIVE_ADR)
-    const result = loadKnowledgeIndex(tmpDir)
+    const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Decisions (')
     expect(result).not.toContain('Pitfalls (')
   })
@@ -198,7 +198,7 @@ describe('CLI dispatch — subcommand mode', () => {
     expect(stderr).toMatch(/[Uu]sage/)
   })
 
-  it('index subcommand on empty knowledge returns "(none)"', () => {
+  it('index subcommand on empty decisions returns "(none)"', () => {
     const tmpDir = makeTmpWorktree()
     const output = execSync(`node "${CJS_PATH}" index "${tmpDir}"`).toString()
     expect(output.trim()).toBe('(none)')
@@ -217,7 +217,7 @@ describe('Observability — stderr log on successful invocation', () => {
       `node "${CJS_PATH}" index "${tmpDir}" 2>&1 1>/dev/null`,
       { encoding: 'utf8', shell: true }
     )
-    expect(stderr).toContain('[knowledge-context]')
+    expect(stderr).toContain('[decisions-index]')
     expect(stderr).toContain('mode=index')
     expect(stderr).toContain('entries=2')
   })
@@ -229,6 +229,6 @@ describe('Observability — stderr log on successful invocation', () => {
       { encoding: 'utf8', shell: true }
     )
     // No log when (none)
-    expect(stderr).not.toContain('[knowledge-context]')
+    expect(stderr).not.toContain('[decisions-index]')
   })
 })

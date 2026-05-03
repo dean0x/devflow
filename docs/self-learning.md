@@ -1,6 +1,6 @@
 # Self-Learning
 
-Devflow detects patterns across sessions and automatically creates reusable artifacts — slash commands, skills, and project knowledge entries.
+Devflow detects patterns across sessions and automatically creates reusable artifacts — slash commands, skills, and project decisions entries.
 
 ## Observation Types
 
@@ -10,8 +10,8 @@ The system extracts **4 observation types** from session transcripts:
 |------|---------------|----------------|
 | **workflow** | USER_SIGNALS | `.claude/commands/self-learning/{slug}.md` |
 | **procedural** | USER_SIGNALS | `.claude/skills/{slug}/SKILL.md` |
-| **decision** | DIALOG_PAIRS | `.memory/knowledge/decisions.md` (ADR entry) |
-| **pitfall** | DIALOG_PAIRS | `.memory/knowledge/pitfalls.md` (PF entry) |
+| **decision** | DIALOG_PAIRS | `.memory/decisions/decisions.md` (ADR entry) |
+| **pitfall** | DIALOG_PAIRS | `.memory/decisions/pitfalls.md` (PF entry) |
 
 ## Architecture
 
@@ -54,8 +54,8 @@ Confidence is computed as `min(floor(count × 100 / required), 95) / 100`. For w
 
 - **workflow** → generates a slash command file with frontmatter and pattern body
 - **procedural** → generates a skill SKILL.md with Iron Law and step sections
-- **decision** → appends an ADR-NNN entry to `.memory/knowledge/decisions.md`
-- **pitfall** → appends a PF-NNN entry to `.memory/knowledge/pitfalls.md` (deduped by normalized Area+Issue prefix)
+- **decision** → appends an ADR-NNN entry to `.memory/decisions/decisions.md`
+- **pitfall** → appends a PF-NNN entry to `.memory/decisions/pitfalls.md` (deduped by normalized Area+Issue prefix)
 
 All rendered artifacts are recorded in `.memory/.learning-manifest.json`:
 
@@ -86,7 +86,7 @@ This creates a feedback loop: deleting a generated artifact reduces its observat
 
 #### Self-Heal: Crash-Window Recovery
 
-`render-ready` writes to the knowledge file first, then updates the log and manifest. If the process crashes in the window between file write and log update, the knowledge file contains the new ADR/PF entry but the log still shows `status: 'ready'` — a duplicate would be written on the next render-ready call.
+`render-ready` writes to the decisions file first, then updates the log and manifest. If the process crashes in the window between file write and log update, the decisions file contains the new ADR/PF entry but the log still shows `status: 'ready'` — a duplicate would be written on the next render-ready call.
 
 The reconciler detects and heals these orphans automatically:
 
@@ -98,14 +98,14 @@ The reconciler detects and heals these orphans automatically:
 
 The `healed` field is present in all three reconcile-manifest output shapes (main path and both early-return paths) and is backward-compatible — callers that discard the output are unaffected.
 
-## Knowledge Index + On-Demand Read Pattern
+## Decisions Index + On-Demand Read Pattern
 
-Knowledge consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
+Decisions consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
 
 ### Step 1: Load compact index at orchestrator
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node scripts/hooks/lib/knowledge-context.cjs index "{worktree}")
+DECISIONS_CONTEXT=$(node scripts/hooks/lib/decisions-index.cjs index "{worktree}")
 ```
 
 This produces a compact index listing each active entry's ID, truncated title, status, and area:
@@ -119,8 +119,8 @@ Pitfalls (3):
   PF-004  Background hook scripts become god scripts  [Active]  —  scripts/hooks/
   ...
 
-ADR-NNN entries live in /path/to/project/.memory/knowledge/decisions.md
-PF-NNN  entries live in /path/to/project/.memory/knowledge/pitfalls.md
+ADR-NNN entries live in /path/to/project/.memory/decisions/decisions.md
+PF-NNN  entries live in /path/to/project/.memory/decisions/pitfalls.md
 Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
 ```
 
@@ -128,10 +128,10 @@ Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` hea
 
 ### Step 2: Agent reads full body on demand
 
-Agents that receive `KNOWLEDGE_CONTEXT` follow the `devflow:apply-knowledge` skill algorithm:
+Agents that receive `DECISIONS_CONTEXT` follow the `devflow:apply-decisions` skill algorithm:
 
 1. Scan the index and identify plausibly-relevant entries for the current task
-2. Use `Read` on the knowledge file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading
+2. Use `Read` on the decisions file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading
 3. Read the full entry body
 4. Cite `applies ADR-NNN` / `avoids PF-NNN` inline — verbatim IDs only, no fabrication
 
@@ -158,7 +158,7 @@ npx devflow-kit learn --purge                   # Remove invalid/corrupted entri
 npx devflow-kit learn --review                  # Inspect observations needing attention (stale, capped, low-quality)
 ```
 
-Two one-time migrations run automatically on `devflow init` to remove pre-v2 seeded knowledge entries — no CLI flag needed. Migration state is tracked at `~/.devflow/migrations.json`.
+Two one-time migrations run automatically on `devflow init` to remove pre-v2 seeded decisions entries — no CLI flag needed. Migration state is tracked at `~/.devflow/migrations.json`.
 
 **v2 migration (`purge-legacy-knowledge-v2`)**: Removes 4 hardcoded low-signal IDs (ADR-002, PF-001, PF-003, PF-005) and the orphan `PROJECT-PATTERNS.md` file seeded by earlier devflow versions.
 
@@ -196,14 +196,14 @@ Use `devflow learn --configure` for interactive setup, or edit `.memory/learning
 | `.memory/.learning-session-count` | Session IDs pending batch |
 | `.memory/.learning-batch-ids` | Session IDs for current batch run |
 | `.memory/.learning-notified-at` | New artifact notification marker |
-| `.memory/knowledge/decisions.md` | ADR entries (append-only, written by render-ready) |
-| `.memory/knowledge/pitfalls.md` | PF entries (append-only, written by render-ready) |
+| `.memory/decisions/decisions.md` | ADR entries (append-only, written by render-ready) |
+| `.memory/decisions/pitfalls.md` | PF entries (append-only, written by render-ready) |
 | `~/.devflow/logs/{project-slug}/.learning-update.log` | Background agent log |
 
 ## Key Design Decisions
 
-- **D8**: Knowledge writers removed from commands — agent-summaries at command-end were low-signal. Knowledge now extracted directly from user transcripts.
-- **D9**: `knowledge-persistence` SKILL is a format specification only. The actual writer is `scripts/hooks/background-learning` via `json-helper.cjs render-ready`.
+- **D8**: Decisions writers removed from commands — agent-summaries at command-end were low-signal. Decisions now extracted directly from user transcripts.
+- **D9**: `decisions-format` SKILL is a format specification only. The actual writer is `scripts/hooks/background-learning` via `json-helper.cjs render-ready`.
 - **D13**: User edits to generated artifacts are ignored by the reconciler — your edits are authoritative.
 - **D15**: Soft cap + HUD attention counter instead of auto-pruning. Human judgment is required for deprecation.
 - **D16**: Staleness detection is file-reference-based (grep for `.ts`, `.js`, `.py` paths). Function-level checks are not performed.

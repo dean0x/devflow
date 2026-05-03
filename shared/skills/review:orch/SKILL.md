@@ -44,18 +44,18 @@ Check `.docs/reviews/{branch_slug}/.last-review-head`:
 Generate timestamp: `YYYY-MM-DD_HHMM`
 Create directory: `mkdir -p .docs/reviews/{branch_slug}/{timestamp}`
 
-## Phase 3: Load Knowledge Index
+## Phase 3: Load Decisions Index
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** REVIEW_DIR
 
-After incremental detection, load the knowledge index:
+After incremental detection, load the decisions index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
@@ -89,7 +89,7 @@ Detect conditional reviewers from file types:
 ## Phase 5: Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, REVIEWER_LIST
 
 Spawn all reviewers in a single message (parallel execution):
 
@@ -104,7 +104,7 @@ Each reviewer receives:
 - **Branch context**: branch → base_branch
 - **Output path**: `.docs/reviews/{branch_slug}/{timestamp}/{focus}.md`
 - **DIFF_COMMAND**: `git diff {DIFF_RANGE}` (incremental or full)
-- **KNOWLEDGE_CONTEXT**: compact index from Phase 3 (or `(none)` when absent) — follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand
+- **DECISIONS_CONTEXT**: compact index from Phase 3 (or `(none)` when absent) — follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand
 - **FEATURE_KNOWLEDGE**: feature area context from Phase 3 (or `(none)`) — follow `devflow:apply-feature-kb` for consumption algorithm
 
 ## Phase 6: Synthesis (Parallel)
@@ -141,7 +141,7 @@ Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured
 - [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
-- [ ] Phase 3: Load Knowledge Index → KNOWLEDGE_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
+- [ ] Phase 3: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
 - [ ] Phase 4: File Analysis → REVIEWER_LIST captured
 - [ ] Phase 5: Reviews → REVIEWER_OUTPUTS written to disk
 - [ ] Phase 6: Synthesis → review-summary.md written

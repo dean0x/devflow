@@ -1,4 +1,4 @@
-# Knowledge Persistence Examples
+# Decisions Format Examples
 
 ## Decision Entry Example
 
@@ -8,7 +8,7 @@
 - **Date**: 2026-03-03
 - **Status**: Accepted
 - **Context**: Multiple Claude Code sessions can run on the same project simultaneously (different terminals, SSH, etc.). Memory writes must serialize to prevent corruption.
-- **Decision**: Use `mkdir` as an atomic lock primitive. Lock directory at `.memory/.knowledge.lock`. 30-second timeout with 60-second stale recovery.
+- **Decision**: Use `mkdir` as an atomic lock primitive. Lock directory at `.memory/.decisions.lock`. 30-second timeout with 60-second stale recovery.
 - **Consequences**: Simple, cross-platform, no external dependencies. Cannot detect holder PID if lock is stale — relies on age-based recovery. Sufficient for low-contention writes.
 - **Source**: `/implement #99`
 ```
@@ -32,7 +32,7 @@ Decisions support status transitions:
 - `Superseded by ADR-NNN` — replaced by a newer decision
 - `Deprecated` — no longer relevant, kept for history
 
-Pitfalls have no status field — they remain until manually removed.
+Pitfalls support status: `Active` (default) → `Deprecated` (set by `devflow learn --review`).
 
 ## Deduplication Logic (Pitfalls Only)
 

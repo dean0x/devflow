@@ -59,9 +59,9 @@ For multi-issue: present unified scope across all issues.
 
 **MANDATORY**: Do not spawn any agents or teams until Gate 0 is confirmed.
 
-#### Phase 2: Orient + Load Knowledge
+#### Phase 2: Orient + Load Decisions
 
-**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** SKIMMER_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
 Spawn Skimmer agent for codebase context:
@@ -80,10 +80,10 @@ Return codebase context for requirements analysis."
 While Skimmer runs, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass Skimmer context and `DECISIONS_CONTEXT` to all subsequent agents and teammates — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -91,12 +91,12 @@ This produces a compact index of active ADR/PF entries. Pass Skimmer context and
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
-Pass `FEATURE_KNOWLEDGE` alongside `KNOWLEDGE_CONTEXT` to all subsequent agents and teammates.
+Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to all subsequent agents and teammates.
 
 #### Phase 3: Exploration Team
 
 **Produces:** EXPLORE_OUTPUTS
-**Requires:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Requires:** SKIMMER_CONTEXT, DECISIONS_CONTEXT
 
 Create an agent team for collaborative requirements exploration:
 
@@ -109,8 +109,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {knowledge_context}
-       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
+    2. DECISIONS_CONTEXT: {decisions_context}
+       Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Target users, their goals, pain points, user journeys,
        and success scenarios. What does the user need this to do?
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -120,8 +120,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {knowledge_context}
-       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
+    2. DECISIONS_CONTEXT: {decisions_context}
+       Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Comparable features in the codebase or domain, scope
        patterns, edge cases discovered from similar implementations.
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -131,8 +131,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {knowledge_context}
-       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
+    2. DECISIONS_CONTEXT: {decisions_context}
+       Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Dependencies, business rules, security constraints,
        performance constraints, and prior architectural decisions that constrain scope.
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -142,8 +142,8 @@ Spawn exploration teammates with self-contained prompts:
   Prompt: |
     You are exploring requirements for: {feature/issues}
     1. Skimmer context: {Phase 2 output}
-    2. KNOWLEDGE_CONTEXT: {knowledge_context}
-       Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
+    2. DECISIONS_CONTEXT: {decisions_context}
+       Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand. Skip if (none).
     3. Your deliverable: Error states, edge cases, validation needs, known pitfalls,
        and failure scenarios that must be handled.
     4. Report completion: SendMessage(type: "message", recipient: "team-lead",
@@ -199,7 +199,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 #### Phase 5: Gap Analysis (Parallel Subagents)
 
 **Produces:** GAP_OUTPUTS
-**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, DECISIONS_CONTEXT
 
 Gap analysis uses parallel subagents, not a team — designers work independently on different focus areas; debate between them has no value.
 
@@ -224,7 +224,7 @@ Each designer receives:
 - Focus: (their assigned focus)
 - Exploration synthesis from Phase 4
 - Skimmer context from Phase 2
-- KNOWLEDGE_CONTEXT: knowledge index from Phase 2 (or `(none)`) — designers follow `devflow:apply-knowledge` to Read full ADR/PF bodies on demand
+- DECISIONS_CONTEXT: decisions index from Phase 2 (or `(none)`) — designers follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand
 - FEATURE_KNOWLEDGE: feature area context from Phase 2 (or `(none)`) — designers follow `devflow:apply-feature-kb` for consumption
 - Multi-issue: all issue bodies
 
@@ -293,7 +293,7 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 #### Phase 10: Planning Team
 
 **Produces:** PLAN_OUTPUTS
-**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, KNOWLEDGE_CONTEXT
+**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, DECISIONS_CONTEXT
 
 Create an agent team for collaborative implementation planning:
 
@@ -462,9 +462,9 @@ Display: artifact path, issue URL, gap analysis summary, design review summary, 
 │
 ├─ Block 1: Requirements Discovery
 │  ├─ Phase 1: GATE 0 - Confirm Understanding ⛔ MANDATORY
-│  ├─ Phase 2: Orient + Load Knowledge
+│  ├─ Phase 2: Orient + Load Decisions
 │  │  ├─ Skimmer agent (codebase context)
-│  │  └─ Load knowledge index (knowledge-context.cjs index)
+│  │  └─ Load decisions index (decisions-index.cjs index)
 │  ├─ Phase 3: Exploration Team (4 teammates + debate)
 │  │  ├─ user-perspective-explorer
 │  │  ├─ similar-features-explorer

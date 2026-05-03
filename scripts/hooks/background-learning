@@ -253,7 +253,7 @@ cap_entries() {
 #
 # Rationale: post-reset state means no data loss risk, and the schema change
 # makes reconciling v1 and v2 entries complex for no benefit. Single-step
-# cutover is simpler to reason about and test. Existing knowledge files
+# cutover is simpler to reason about and test. Existing decisions files
 # (decisions.md, pitfalls.md) stay — they're compatible with the new format.
 #
 # See: V2 plan "Migration — greenfield" section, acceptance criterion D7.
@@ -284,7 +284,7 @@ build_sonnet_prompt() {
   EXISTING_OBS=$(node "$_JSON_HELPER" filter-observations "$LEARNING_LOG" confidence 30 2>> "$LOG_FILE" || echo "[]")
   [ -z "$EXISTING_OBS" ] && EXISTING_OBS="[]"
 
-  PROMPT="You are a pattern detection agent. Analyze the user's session messages to identify four distinct types of learnable patterns. Your output will be merged into a persistent learning log and used to materialize slash commands, skills, and project knowledge entries.
+  PROMPT="You are a pattern detection agent. Analyze the user's session messages to identify four distinct types of learnable patterns. Your output will be merged into a persistent learning log and used to materialize slash commands, skills, and project decisions entries.
 
 # === CONTEXT ===
 

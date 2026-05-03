@@ -104,7 +104,7 @@ fi
 log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
 
 # D29: Usage scanner runs after queue append — memory capture is mission-critical, scanning is supplementary
-SCANNER="$SCRIPT_DIR/knowledge-usage-scan.cjs"
+SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
 if [ -f "$SCANNER" ]; then
   printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
 fi

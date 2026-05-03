@@ -23,17 +23,17 @@ Explore a codebase area by spawning a team of agents for flow tracing, dependenc
 
 ## Phases
 
-### Phase 1: Load Knowledge Index (Orchestrator-Local)
+### Phase 1: Load Decisions Index (Orchestrator-Local)
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Before exploring, load the knowledge index:
+Before exploring, load the decisions index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `KNOWLEDGE_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to explorer teammates** — knowledge context stays in the orchestrator; teammates examine code directly.
+The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to explorer teammates** — decisions context stays in the orchestrator; teammates examine code directly.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
@@ -207,7 +207,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 
 ### Phase 10: Suggest KB Creation (Conditional)
 
-**Requires:** MERGED_FINDINGS, KNOWLEDGE_CONTEXT
+**Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
 **Produces:** KB_STATUS (created | skipped)
 
 1. If `.features/.disabled` exists → skip, set KB_STATUS = skipped
@@ -227,7 +227,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
       FEATURE_NAME: {name}
       DIRECTORIES: {directories}
       EXPLORATION_OUTPUTS: {MERGED_FINDINGS from Phase 8}
-      KNOWLEDGE_CONTEXT: {from Phase 1}
+      DECISIONS_CONTEXT: {from Phase 1}
       WORKTREE_PATH: {worktree path, if in a worktree}
       Load the devflow:feature-kb skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
       exploring from scratch. Read .features/index.json for cross-referencing."
@@ -251,7 +251,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 ```
 /explore (orchestrator)
 │
-├─ Phase 1: Load Knowledge Index (Orchestrator-Local)
+├─ Phase 1: Load Decisions Index (Orchestrator-Local)
 │
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (pre-team codebase overview)

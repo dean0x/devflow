@@ -68,9 +68,9 @@ If the user says "skip" or "just proceed" — skip remaining questions, present 
 
 **MANDATORY**: Do not spawn any agents until Gate 0 is confirmed.
 
-#### Phase 2: Orient + Load Knowledge
+#### Phase 2: Orient + Load Decisions
 
-**Produces:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** SKIMMER_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
 Spawn Skimmer agent for codebase context:
@@ -89,10 +89,10 @@ Return codebase context for requirements analysis."
 While Skimmer runs, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries. Pass Skimmer context and `KNOWLEDGE_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass Skimmer context and `DECISIONS_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -100,14 +100,14 @@ This produces a compact index of active ADR/PF entries. Pass Skimmer context and
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
-Pass `FEATURE_KNOWLEDGE` alongside `KNOWLEDGE_CONTEXT` to Explorer and Designer agents.
+Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explorer and Designer agents.
 
 #### Phase 3: Explore Requirements (Parallel)
 
 **Produces:** EXPLORE_OUTPUTS
-**Requires:** SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Requires:** SKIMMER_CONTEXT, DECISIONS_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context, `KNOWLEDGE_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-knowledge` for KNOWLEDGE_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the KB doesn't cover and changes since it was last updated."
+Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the KB doesn't cover and changes since it was last updated."
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|
@@ -138,7 +138,7 @@ Combine into: user needs, similar features, constraints, failure modes"
 #### Phase 5: Gap Analysis (Parallel)
 
 **Produces:** GAP_OUTPUTS
-**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, KNOWLEDGE_CONTEXT
+**Requires:** EXPLORATION_SYNTHESIS, SKIMMER_CONTEXT, DECISIONS_CONTEXT
 
 **Single-issue**: Spawn 4 Designer agents **in a single message**:
 
@@ -161,20 +161,20 @@ Each designer receives:
 - Focus: (their assigned focus from table)
 - Exploration synthesis from Phase 4
 - Skimmer context from Phase 2
-- `KNOWLEDGE_CONTEXT` (index from Phase 2)
+- `DECISIONS_CONTEXT` (index from Phase 2)
 - Multi-issue: all issue bodies
 
 ```
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
 Focus: {completeness|architecture|security|performance|consistency|dependencies}
-KNOWLEDGE_CONTEXT: {knowledge_context}
+DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
   Feature/Issues: {feature description or issue bodies}
   Exploration synthesis: {Phase 4 output}
   Codebase context: {Phase 2 output}
-Analyze only your assigned focus area. Follow devflow:apply-knowledge for KNOWLEDGE_CONTEXT.
+Analyze only your assigned focus area. Follow devflow:apply-decisions for DECISIONS_CONTEXT.
 Cite evidence from provided artifacts."
 ```
 
@@ -258,7 +258,7 @@ Combine into: patterns to follow, integration points, reusable code, edge cases"
 #### Phase 10: Plan Implementation (Parallel)
 
 **Produces:** PLAN_OUTPUTS
-**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, KNOWLEDGE_CONTEXT
+**Requires:** IMPL_EXPLORATION_SYNTHESIS, GAP_SYNTHESIS, DECISIONS_CONTEXT
 
 Spawn 3 Plan agents **in a single message**, each with implementation exploration synthesis:
 
@@ -410,9 +410,9 @@ Display completion summary:
 ├─ Block 1: Requirements Discovery
 │  ├─ Phase 1: GATE 0 - Requirements Discovery ⛔ MANDATORY
 │  │  └─ AskUserQuestion: Validate interpretation
-│  ├─ Phase 2: Orient + Load Knowledge
+│  ├─ Phase 2: Orient + Load Decisions
 │  │  ├─ Skimmer agent (codebase context)
-│  │  └─ Load knowledge index (knowledge-context.cjs index)
+│  │  └─ Load decisions index (decisions-index.cjs index)
 │  ├─ Phase 3: Explore Requirements (PARALLEL)
 │  │  ├─ Explore: User perspective
 │  │  ├─ Explore: Similar features
