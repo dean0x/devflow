@@ -22,7 +22,7 @@ Agent pipeline for EXPLORE intent in ambient GUIDED and ORCHESTRATED modes. Code
 
 For GUIDED depth, the main session performs exploration directly:
 
-1. **Load Knowledge** — Run `node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}"` for KNOWLEDGE_CONTEXT. Read `.features/index.json` if it exists. Based on the exploration question, identify relevant KBs and read them. Use both locally to frame exploration. Set `FEATURE_KNOWLEDGE = (none)` if none are relevant.
+1. **Load Knowledge** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.features/index.json` if it exists. Based on the exploration question, identify relevant KBs and read them. Use both locally to frame exploration. Set `FEATURE_KNOWLEDGE = (none)` if none are relevant.
 2. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
 3. **Trace** — Using Skimmer findings + `FEATURE_KNOWLEDGE`, trace the flow or analyze the subsystem directly in main session. Follow call chains, read key files, map integration points.
 4. **Present** — Deliver structured findings using the Output format below. Use AskUserQuestion to offer drill-down into specific areas.
@@ -30,20 +30,20 @@ For GUIDED depth, the main session performs exploration directly:
 
 ## ORCHESTRATED Pipeline
 
-### Phase 1: Load Knowledge (Orchestrator-Local)
+### Phase 1: Load Decisions (Orchestrator-Local)
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Before exploring, load the knowledge index:
+Before exploring, load the decisions index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `KNOWLEDGE_CONTEXT` locally when framing exploration — prior
+The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior
 decisions and pitfalls suggest specific areas to investigate. Follow
-`devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass
-`KNOWLEDGE_CONTEXT` to Explore sub-agents** — knowledge context stays in the
+`devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass
+`DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the
 orchestrator, not in the investigation workers.
 
 Also load feature knowledge:
@@ -51,7 +51,7 @@ Also load feature knowledge:
 2. Identify relevant KBs (match task intent against KB descriptions and directories).
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** for exploration framing — feature-specific patterns and integration points guide where to focus.
-5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as KNOWLEDGE_CONTEXT).
+5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as DECISIONS_CONTEXT).
 
 **Explore agent framing**: "The KB is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the KB doesn't cover and things that may have changed."
 
@@ -103,7 +103,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 
 ### Phase 6: Suggest KB Creation (Conditional)
 
-**Requires:** MERGED_FINDINGS, KNOWLEDGE_CONTEXT
+**Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
 **Produces:** KB_STATUS (created | skipped)
 
 1. If `.features/.disabled` exists → skip, set KB_STATUS = skipped
@@ -123,7 +123,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
       FEATURE_NAME: {name}
       DIRECTORIES: {directories}
       EXPLORATION_OUTPUTS: {MERGED_FINDINGS from Phase 4}
-      KNOWLEDGE_CONTEXT: {from Phase 1}
+      DECISIONS_CONTEXT: {from Phase 1}
       WORKTREE_PATH: {worktree path, if in a worktree}
       Load the devflow:feature-kb skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
       exploring from scratch. Read .features/index.json for cross-referencing."
@@ -161,7 +161,7 @@ Structured exploration findings with concrete code references:
 
 Before presenting findings, verify every phase was announced:
 
-- [ ] Phase 1: Load Knowledge (Orchestrator-Local) → KNOWLEDGE_CONTEXT and FEATURE_KNOWLEDGE captured (orchestrator-local, not passed to workers)
+- [ ] Phase 1: Load Knowledge (Orchestrator-Local) → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (orchestrator-local, not passed to workers)
 - [ ] Phase 2: Orient → ORIENT_OUTPUT captured
 - [ ] Phase 3: Explore → EXPLORE_OUTPUT captured
 - [ ] Phase 4: Synthesize → MERGED_FINDINGS captured

@@ -4,7 +4,7 @@ description: Process review issues - validate, assess risk, fix low-risk issues,
 
 <!--
 @devflow-design-decision D8
-Phase 6 previously recorded pitfalls retrospectively after reading knowledge-persistence SKILL.
+Phase 6 previously recorded pitfalls retrospectively after reading decisions-format SKILL.
 Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
 from user transcripts by scripts/hooks/background-learning.
 -->
@@ -75,17 +75,17 @@ For each worktree:
 
 Set `TARGET_DIR` to the selected review directory path.
 
-#### Step 0d: Load Project Knowledge
+#### Step 0d: Load Project Decisions
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
 For each worktree, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -146,7 +146,7 @@ Create execution plan:
 ### Phase 4: Resolve (Parallel where possible)
 
 **Produces:** RESOLUTION_RESULTS
-**Requires:** BATCHES, KNOWLEDGE_CONTEXT, BRANCH_INFO
+**Requires:** BATCHES, DECISIONS_CONTEXT, BRANCH_INFO
 
 Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
 
@@ -156,9 +156,9 @@ Agent(subagent_type="Resolver"):
 BRANCH: {branch-slug}
 BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-KNOWLEDGE_CONTEXT: {knowledge_context}
+DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-knowledge to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE."
+Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-decisions to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE."
 ```
 
 > Resolvers follow a 3-tier risk approach:
@@ -256,7 +256,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel]
 │  ├─ Step 0c: Target latest review directory per worktree
-│  └─ Step 0d: Load project knowledge → KNOWLEDGE_CONTEXT
+│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT
 │
 ├─ Phase 1: Parse issues from TARGET_DIR
 │  └─ Extract ALL issues (including Suggestions, exclude summaries)

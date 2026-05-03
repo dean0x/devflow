@@ -4,7 +4,7 @@ description: Comprehensive branch review using specialized sub-agents for PR rea
 
 <!--
 @devflow-design-decision D8
-Phase 5 previously recorded pitfalls retrospectively after reading knowledge-persistence SKILL.
+Phase 5 previously recorded pitfalls retrospectively after reading decisions-format SKILL.
 Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
 from user transcripts by scripts/hooks/background-learning.
 -->
@@ -100,17 +100,17 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 **Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, ui-design, go, java, python, rust) require their optional skill plugin to be installed. Before spawning a conditional Reviewer for these focuses, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that review** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
-### Phase 1b: Load Knowledge Index
+### Phase 1b: Load Decisions Index
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-While file analysis runs (or just before spawning reviewers), load the knowledge index for the current worktree:
+While file analysis runs (or just before spawning reviewers), load the decisions index for the current worktree:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -118,12 +118,12 @@ This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT`
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
-Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `KNOWLEDGE_CONTEXT`.
+Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
 
 ### Phase 2: Run Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, REVIEWER_LIST
 
 Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add more based on changed file types:
 
@@ -156,9 +156,9 @@ Follow 6-step process from devflow:review-methodology.
 PR: #{pr_number}, Base: {base_branch}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
-KNOWLEDGE_CONTEXT: {knowledge_context}
+DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-Follow devflow:apply-knowledge to scan the index and Read full ADR/PF bodies on demand.
+Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```

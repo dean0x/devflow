@@ -59,7 +59,7 @@ devflow/
 │       ├── json-parse               # Shell wrapper: jq with node fallback
 │       └── lib/                      # Node.js helper modules
 │           ├── feature-kb.cjs        # Feature KB index operations (CRUD, staleness)
-│           ├── knowledge-context.cjs  # Knowledge context index builder
+│           ├── decisions-index.cjs    # Decisions index builder
 │           ├── staleness.cjs          # Code reference staleness checker
 │           └── transcript-filter.cjs  # Transcript channel extractor
 └── src/
@@ -187,7 +187,7 @@ Hooks auto-create `.memory/` on first run — no manual setup needed per project
 
 ## Project Knowledge
 
-Knowledge files in `.memory/knowledge/` capture decisions and pitfalls that agents can't rediscover at runtime:
+Knowledge files in `.memory/decisions/` capture decisions and pitfalls that agents can't rediscover at runtime:
 
 | File | Format | Source | Purpose |
 |------|--------|--------|---------|

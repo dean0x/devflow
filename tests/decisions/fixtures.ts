@@ -1,5 +1,5 @@
-// Shared test fixtures for knowledge-context module tests.
-// Both index-generator.test.ts and knowledge-citation.test.ts import from here
+// Shared test fixtures for decisions-index module tests.
+// Both index-generator.test.ts and decisions-citation.test.ts import from here
 // to avoid drift between fixture definitions.
 
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs'
@@ -60,20 +60,20 @@ export const SUPERSEDED_PF = `## PF-005: Superseded pitfall
 const createdTmpDirs: string[] = []
 
 /**
- * Create a temporary worktree directory with optional knowledge files.
+ * Create a temporary worktree directory with optional decisions files.
  * Returns the absolute path to the tmpdir root.
  * Directories are tracked — call `cleanupTmpWorktrees()` in afterAll.
  */
 export function makeTmpWorktree(decisions?: string, pitfalls?: string): string {
-  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'knowledge-index-test-'))
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'decisions-index-test-'))
   createdTmpDirs.push(tmpDir)
-  const knowledgeDir = path.join(tmpDir, '.memory', 'knowledge')
-  mkdirSync(knowledgeDir, { recursive: true })
+  const decisionsDir = path.join(tmpDir, '.memory', 'decisions')
+  mkdirSync(decisionsDir, { recursive: true })
   if (decisions !== undefined) {
-    writeFileSync(path.join(knowledgeDir, 'decisions.md'), decisions, 'utf8')
+    writeFileSync(path.join(decisionsDir, 'decisions.md'), decisions, 'utf8')
   }
   if (pitfalls !== undefined) {
-    writeFileSync(path.join(knowledgeDir, 'pitfalls.md'), pitfalls, 'utf8')
+    writeFileSync(path.join(decisionsDir, 'pitfalls.md'), pitfalls, 'utf8')
   }
   return tmpDir
 }

@@ -11,7 +11,7 @@
 // is controlled by the Claude Code session, not by end users. Path traversal
 // analysis (CWE-23) flags the worktreePath→fs I/O flow as a risk, but this is
 // inherent to a tool whose sole purpose is to manage files in a git worktree.
-// The same pattern exists in scripts/hooks/lib/knowledge-context.cjs (accepted).
+// The same pattern exists in scripts/hooks/lib/decisions-index.cjs (accepted).
 // For command execution, we use execFileSync with array args (not shell strings)
 // to prevent injection attacks from index content.
 //
@@ -302,7 +302,7 @@ function tryBreakStaleLock(lockPath, staleMs) {
 }
 
 /**
- * Acquire a mkdir-based lock. Follows the same pattern as .memory/.knowledge.lock.
+ * Acquire a mkdir-based lock. Follows the same pattern as .memory/.decisions.lock.
  * Returns true when the lock is acquired within timeoutMs, false otherwise.
  *
  * @param {string} lockPath

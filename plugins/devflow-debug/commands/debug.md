@@ -4,7 +4,7 @@ description: Debug issues using competing hypothesis investigation with parallel
 
 <!--
 @devflow-design-decision D8
-Phase 6 previously recorded pitfalls retrospectively after reading knowledge-persistence SKILL.
+Phase 6 previously recorded pitfalls retrospectively after reading decisions-format SKILL.
 Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
 from user transcripts by scripts/hooks/background-learning. Phase 1 (Load Project Knowledge)
 is retained — it reads existing knowledge for context, which is still valid.
@@ -31,17 +31,17 @@ Investigate bugs by spawning parallel agents, each pursuing a different hypothes
 
 ## Phases
 
-### Phase 1: Load Knowledge Index (Orchestrator-Local)
+### Phase 1: Load Decisions Index (Orchestrator-Local)
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Before hypothesizing, load the knowledge index:
+Before hypothesizing, load the decisions index:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-knowledge` to Read full entry bodies on demand. **Do NOT pass `KNOWLEDGE_CONTEXT` to Explore investigators** — knowledge context stays in the orchestrator; investigators examine code directly.
+The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore investigators** — decisions context stays in the orchestrator; investigators examine code directly.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -52,7 +52,7 @@ The orchestrator uses `KNOWLEDGE_CONTEXT` locally when generating hypotheses (Ph
 ### Phase 2: Context Gathering
 
 **Produces:** HYPOTHESES, BUG_CONTEXT
-**Requires:** KNOWLEDGE_CONTEXT
+**Requires:** DECISIONS_CONTEXT
 
 If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 
@@ -171,7 +171,7 @@ Produce the final report:
 ```
 /debug (orchestrator)
 │
-├─ Phase 1: Load Knowledge Index (Orchestrator-Local)
+├─ Phase 1: Load Decisions Index (Orchestrator-Local)
 │
 ├─ Phase 2: Context gathering
 │  └─ Git agent (fetch issue, if #N provided)

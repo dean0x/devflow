@@ -29,15 +29,15 @@ function makeReadyDecision(id: string, pattern: string, details?: string): LogEn
 describe('render-ready — decision type', () => {
   let tmpDir: string;
   let logFile: string;
-  let knowledgeFile: string;
+  let decisionsFile: string;
   let manifestFile: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-dec-test-'));
     logFile = path.join(tmpDir, 'learning-log.jsonl');
-    knowledgeFile = path.join(tmpDir, '.memory', 'knowledge', 'decisions.md');
+    decisionsFile = path.join(tmpDir, '.memory', 'decisions', 'decisions.md');
     manifestFile = path.join(tmpDir, '.memory', '.learning-manifest.json');
-    fs.mkdirSync(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
   });
 
   afterEach(() => {
@@ -54,8 +54,8 @@ describe('render-ready — decision type', () => {
     expect(result.skipped).toBe(0);
     expect(result.rendered[0]).toContain('decisions.md#ADR-001');
 
-    expect(fs.existsSync(knowledgeFile)).toBe(true);
-    const content = fs.readFileSync(knowledgeFile, 'utf8');
+    expect(fs.existsSync(decisionsFile)).toBe(true);
+    const content = fs.readFileSync(decisionsFile, 'utf8');
     expect(content).toContain('## ADR-001:');
     expect(content).toContain('prefer async over sync for I/O');
     expect(content).toContain('**Status**: Accepted');
@@ -74,7 +74,7 @@ describe('render-ready — decision type', () => {
     const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
 
     expect(result.rendered).toHaveLength(1);
-    const content = fs.readFileSync(knowledgeFile, 'utf8');
+    const content = fs.readFileSync(decisionsFile, 'utf8');
     expect(content).toContain('## ADR-001:');
     expect(content).toContain('## ADR-002:');
     expect(content).toContain('use Result types not throws');
@@ -85,7 +85,7 @@ describe('render-ready — decision type', () => {
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
     runHelper(`render-ready "${logFile}" "${tmpDir}"`);
 
-    const content = fs.readFileSync(knowledgeFile, 'utf8');
+    const content = fs.readFileSync(decisionsFile, 'utf8');
     expect(content).toMatch(/<!-- TL;DR: 1 decisions\. Key: ADR-001 -->/);
   });
 
@@ -122,7 +122,7 @@ describe('render-ready — decision type', () => {
 
     expect(result.rendered).toHaveLength(0);
     expect(result.skipped).toBe(1);
-    expect(fs.existsSync(knowledgeFile)).toBe(false);
+    expect(fs.existsSync(decisionsFile)).toBe(false);
   });
 
   it('skips observations with status !== ready', () => {
@@ -141,13 +141,13 @@ describe('render-ready — decision type', () => {
       const n = i.toString().padStart(3, '0');
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
     }
-    fs.writeFileSync(knowledgeFile, header + entries);
+    fs.writeFileSync(decisionsFile, header + entries);
 
     const obs = makeReadyDecision('obs_at50', 'entry at soft start');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
 
     const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
-    // At 50, we're at KNOWLEDGE_SOFT_START — entry still succeeds (hard ceiling is 100)
+    // At 50, we're at DECISIONS_SOFT_START — entry still succeeds (hard ceiling is 100)
     expect(result.rendered).toHaveLength(1);
     expect(result.skipped).toBe(0);
 
@@ -167,7 +167,7 @@ describe('render-ready — decision type', () => {
       const n = i.toString().padStart(3, '0');
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
     }
-    fs.writeFileSync(knowledgeFile, header + entries);
+    fs.writeFileSync(decisionsFile, header + entries);
 
     const obs = makeReadyDecision('obs_ceiling', 'should be ceiling-blocked');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');

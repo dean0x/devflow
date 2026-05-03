@@ -68,17 +68,17 @@ For each worktree:
 
 Set `TARGET_DIR` to the selected review directory path.
 
-#### Step 0d: Load Project Knowledge
+#### Step 0d: Load Project Decisions
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
 For each worktree, run:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `KNOWLEDGE_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-knowledge` to Read full entry bodies on demand — no fan-out of the full corpus.
+This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -139,7 +139,7 @@ Create execution plan:
 ### Phase 4: Resolve (Agent Teams with cross-validation)
 
 **Produces:** RESOLUTION_RESULTS
-**Requires:** BATCHES, KNOWLEDGE_CONTEXT, BRANCH_INFO
+**Requires:** BATCHES, DECISIONS_CONTEXT, BRANCH_INFO
 
 **With Agent Teams:**
 
@@ -156,10 +156,10 @@ Each resolver teammate receives the following instructions (only the issue list 
 
     You are resolving review issues on branch {branch} (PR #{pr_number}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    KNOWLEDGE_CONTEXT: {knowledge_context}
+    DECISIONS_CONTEXT: {decisions_context}
     FEATURE_KNOWLEDGE: {feature_knowledge}
     1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
-       Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
+       Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
        Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature patterns inform whether a fix follows area conventions. Skip if (none).
     2. Your issues to resolve:
        {BATCH_ISSUES}
@@ -230,7 +230,7 @@ Aggregate from all Resolvers:
 
 Extract all knowledge citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Knowledge Citations` section in Phase 8.
 
-<!-- D8: "Record Pitfalls" phase removed — knowledge-persistence skill no longer has Write
+<!-- D8: "Record Pitfalls" phase removed — decisions-format skill no longer has Write
      capability; pitfall recording is handled by the background-learning extractor. -->
 
 ### Phase 6: Simplify
@@ -308,7 +308,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 │  ├─ Step 0a: git worktree list → filter resolvable
 │  ├─ Step 0b: Git agent (validate-branch) per worktree [parallel]
 │  ├─ Step 0c: Target latest review directory per worktree
-│  └─ Step 0d: Load project knowledge → KNOWLEDGE_CONTEXT
+│  └─ Step 0d: Load project decisions → DECISIONS_CONTEXT
 │
 ├─ Phase 1: Parse issues from TARGET_DIR
 │  └─ Extract ALL issues (including Suggestions, exclude summaries)

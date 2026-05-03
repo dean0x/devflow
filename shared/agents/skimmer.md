@@ -66,7 +66,7 @@ Use this instead of Read for code files.
 
 ### Step 5: Project Knowledge
 
-If `.memory/knowledge/decisions.md` exists, Read its `<!-- TL;DR: ... -->` first-line comment and include active decision count in orientation under "### Active Decisions". Only the TL;DR is read here — this is intentional for token efficiency.
+If `.memory/decisions/decisions.md` exists, Read its `<!-- TL;DR: ... -->` first-line comment and include active decision count in orientation under "### Active Decisions". Only the TL;DR is read here — this is intentional for token efficiency.
 
 ### Step 6: Generate Summary
 
@@ -119,7 +119,7 @@ Produce the orientation summary in the output format below.
 {Existing patterns to follow}
 
 ### Active Decisions
-{Count and key decisions from `.memory/knowledge/decisions.md` TL;DR, or "None found" if file missing}
+{Count and key decisions from `.memory/decisions/decisions.md` TL;DR, or "None found" if file missing}
 
 ### Suggested Approach
 {Brief recommendation based on codebase structure}

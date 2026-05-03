@@ -552,20 +552,20 @@ describe('session-start-memory hook integration', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hook-test-'));
-    await fs.mkdir(path.join(tmpDir, '.memory', 'knowledge'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
   });
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('injects PROJECT KNOWLEDGE TL;DR from knowledge files', async () => {
+  it('injects PROJECT DECISIONS TL;DR from decisions files', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'),
+      path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
       '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
     );
     await fs.writeFile(
-      path.join(tmpDir, '.memory', 'knowledge', 'pitfalls.md'),
+      path.join(tmpDir, '.memory', 'decisions', 'pitfalls.md'),
       '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->\n# Known Pitfalls',
     );
 
@@ -573,14 +573,14 @@ describe('session-start-memory hook integration', () => {
     const json = JSON.parse(output);
     const ctx = json.hookSpecificOutput.additionalContext;
 
-    expect(ctx).toContain('PROJECT KNOWLEDGE (TL;DR)');
+    expect(ctx).toContain('PROJECT DECISIONS (TL;DR)');
     expect(ctx).toContain('2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder');
     expect(ctx).toContain('1 pitfall. Key: PF-001 Synthesizer glob');
   });
 
-  it('produces no leading newlines when only knowledge files exist (no working memory)', async () => {
+  it('produces no leading newlines when only decisions files exist (no working memory)', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.memory', 'knowledge', 'decisions.md'),
+      path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
     );
 
@@ -592,14 +592,14 @@ describe('session-start-memory hook integration', () => {
     expect(ctx).toMatch(/^---/);
   });
 
-  it('does not include PROJECT KNOWLEDGE section when no knowledge files exist', async () => {
-    // Empty tmpDir with just the directories — no knowledge files
+  it('does not include PROJECT DECISIONS section when no decisions files exist', async () => {
+    // Empty tmpDir with just the directories — no decisions files
     const output = await runHook(tmpDir);
-    // May still have ambient output depending on user settings, but should not have knowledge
+    // May still have ambient output depending on user settings, but should not have decisions
     if (output.trim()) {
       const json = JSON.parse(output);
       const ctx = json.hookSpecificOutput.additionalContext;
-      expect(ctx).not.toContain('PROJECT KNOWLEDGE');
+      expect(ctx).not.toContain('PROJECT DECISIONS');
     }
     // If no output at all, that's also correct
   });

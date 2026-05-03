@@ -454,8 +454,8 @@ describe('formatLearningStatus', () => {
 
   it('counts decision and pitfall promoted entries', () => {
     const observations: LearningObservation[] = [
-      { id: 'obs_1', type: 'decision', pattern: 'use Result types', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/knowledge/decisions.md#adr-001' },
-      { id: 'obs_2', type: 'pitfall', pattern: 'avoid mutating state', confidence: 0.90, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/knowledge/pitfalls.md#pf-001' },
+      { id: 'obs_1', type: 'decision', pattern: 'use Result types', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/decisions/decisions.md#adr-001' },
+      { id: 'obs_2', type: 'pitfall', pattern: 'avoid mutating state', confidence: 0.90, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/decisions/pitfalls.md#pf-001' },
       { id: 'obs_3', type: 'workflow', pattern: 'w1', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
     ];
     const result = formatLearningStatus(observations, 'current');

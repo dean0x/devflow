@@ -93,17 +93,17 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 **Skill availability check**: Language/ecosystem reviews (typescript, react, accessibility, ui-design, go, java, python, rust) require their optional skill plugin to be installed. Before adding a conditional perspective, use Read to check if `~/.claude/skills/devflow:{focus}/SKILL.md` exists. If Read returns an error (file not found), **skip that perspective** — the language plugin isn't installed. Non-language reviews (database, dependencies, documentation) use skills bundled with this plugin and are always available.
 
-### Phase 1b: Load Knowledge Index
+### Phase 1b: Load Decisions Index
 
-**Produces:** KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
-Load the knowledge index for the current worktree before spawning the review team:
+Load the decisions index for the current worktree before spawning the review team:
 
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-knowledge` to Read full entry bodies on demand.
+This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
@@ -111,12 +111,12 @@ This produces a compact index of active ADR/PF entries. Pass `KNOWLEDGE_CONTEXT`
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
-Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `KNOWLEDGE_CONTEXT`.
+Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `DECISIONS_CONTEXT`.
 
 ### Phase 2: Spawn Review Team
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, KNOWLEDGE_CONTEXT, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, REVIEWER_LIST
 
 **Per worktree**, create an agent team for adversarial review. Always include 4 core perspectives; conditionally add more based on Phase 1 analysis.
 
@@ -150,11 +150,11 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
 
     You are reviewing PR #{pr_number} on branch {branch} (base: {base_branch}).
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
-    KNOWLEDGE_CONTEXT: {knowledge_context}
+    DECISIONS_CONTEXT: {decisions_context}
     FEATURE_KNOWLEDGE: {feature_knowledge}
     1. Read your skill(s): `Read {SKILL_PATHS}`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
-    3. Follow devflow:apply-knowledge to scan KNOWLEDGE_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
+    3. Follow devflow:apply-decisions to scan DECISIONS_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
     4. Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings. Skip if (none).
     5. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     6. Apply the 6-step review process from devflow:review-methodology
@@ -276,7 +276,7 @@ Check for existing inline comments at same file:line before creating new ones."
 Per worktree, after successful completion:
 1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
 
-<!-- D8: "Record Pitfalls" phase removed — knowledge-persistence skill no longer has Write
+<!-- D8: "Record Pitfalls" phase removed — decisions-format skill no longer has Write
      capability; pitfall recording is handled by the background-learning extractor. -->
 
 ### Phase 5: Cleanup and Report

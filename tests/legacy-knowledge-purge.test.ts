@@ -7,34 +7,34 @@ import { purgeLegacyKnowledgeEntries, purgeAllPreV2KnowledgeEntries } from '../s
 describe('purgeLegacyKnowledgeEntries', () => {
   let tmpDir: string;
   let memoryDir: string;
-  let knowledgeDir: string;
+  let decisionsDir: string;
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-test-'));
     memoryDir = path.join(tmpDir, '.memory');
-    knowledgeDir = path.join(memoryDir, 'knowledge');
-    await fs.mkdir(knowledgeDir, { recursive: true });
+    decisionsDir = path.join(memoryDir, 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
   });
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns no-op result when .memory/knowledge/ does not exist', async () => {
+  it('returns no-op result when .memory/decisions/ does not exist', async () => {
     const emptyMemory = path.join(tmpDir, 'no-memory');
     const result = await purgeLegacyKnowledgeEntries({ memoryDir: emptyMemory });
     expect(result.removed).toBe(0);
     expect(result.files).toEqual([]);
   });
 
-  it('returns no-op result when knowledge/ exists but both files are absent', async () => {
+  it('returns no-op result when decisions/ exists but both files are absent', async () => {
     const result = await purgeLegacyKnowledgeEntries({ memoryDir });
     expect(result.removed).toBe(0);
     expect(result.files).toEqual([]);
   });
 
   it('removes ADR-002 section from decisions.md, keeps ADR-001', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const content = `<!-- TL;DR: 2 decisions. Key: -->
 
 ## ADR-001: Good decision
@@ -62,7 +62,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
   });
 
   it('removes PF-001, PF-003, PF-005 from pitfalls.md, keeps PF-002, PF-004, PF-006', async () => {
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
     const content = `<!-- TL;DR: 6 pitfalls. Key: -->
 
 ## PF-001: Legacy pitfall 1
@@ -114,7 +114,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
   });
 
   it('updates TL;DR count correctly after removals', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const content = `<!-- TL;DR: 3 decisions. Key: -->
 
 ## ADR-001: Keep this
@@ -154,8 +154,8 @@ describe('purgeLegacyKnowledgeEntries', () => {
     expect(result.files).toEqual([]);
   });
 
-  it('acquires and releases .knowledge.lock during operation', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+  it('acquires and releases .decisions.lock during operation', async () => {
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-002: Legacy
@@ -166,12 +166,12 @@ describe('purgeLegacyKnowledgeEntries', () => {
     await purgeLegacyKnowledgeEntries({ memoryDir });
 
     // Lock directory must be released after the call
-    const lockDir = path.join(memoryDir, '.knowledge.lock');
+    const lockDir = path.join(memoryDir, '.decisions.lock');
     await expect(fs.access(lockDir)).rejects.toThrow();
   });
 
   it('second concurrent caller serializes behind first (mutual exclusion)', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-002: Legacy
@@ -191,12 +191,12 @@ describe('purgeLegacyKnowledgeEntries', () => {
     expect(totalRemoved).toBe(1);
 
     // Lock must be released after both complete
-    const lockDir = path.join(memoryDir, '.knowledge.lock');
+    const lockDir = path.join(memoryDir, '.decisions.lock');
     await expect(fs.access(lockDir)).rejects.toThrow();
   });
 
   it('does not modify files when no legacy entries are present', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const originalContent = `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-001: Keep this
@@ -216,8 +216,8 @@ describe('purgeLegacyKnowledgeEntries', () => {
   });
 
   it('handles both files in a single call', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
+    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
@@ -242,7 +242,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
 
   it('does not follow a symlink placed at the .tmp path (TOCTOU hardening)', async () => {
     // Arrange: create a decisions.md with a legacy entry to trigger an atomic write
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-002: Legacy
@@ -272,20 +272,20 @@ describe('purgeLegacyKnowledgeEntries', () => {
 describe('purgeAllPreV2KnowledgeEntries', () => {
   let tmpDir: string;
   let memoryDir: string;
-  let knowledgeDir: string;
+  let decisionsDir: string;
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-v3-test-'));
     memoryDir = path.join(tmpDir, '.memory');
-    knowledgeDir = path.join(memoryDir, 'knowledge');
-    await fs.mkdir(knowledgeDir, { recursive: true });
+    decisionsDir = path.join(memoryDir, 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
   });
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns no-op result when .memory/knowledge/ does not exist', async () => {
+  it('returns no-op result when .memory/decisions/ does not exist', async () => {
     const emptyMemory = path.join(tmpDir, 'no-memory');
     const result = await purgeAllPreV2KnowledgeEntries({ memoryDir: emptyMemory });
     expect(result.removed).toBe(0);
@@ -293,7 +293,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
   });
 
   it('removes a section with a /code-review (seed) source marker', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const content = `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-001: Code review seeded decision
@@ -313,7 +313,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
   });
 
   it('removes a section with a /implement (seed) source marker', async () => {
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
     const content = `<!-- TL;DR: 1 pitfalls. Key: -->
 
 ## PF-002: Implement seeded pitfall
@@ -333,7 +333,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
   });
 
   it('preserves a section with a self-learning: source marker', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const content = `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-005: Self-learning decision
@@ -354,7 +354,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
   });
 
   it('removes seeded entries and keeps self-learning entries in a mixed file', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     const content = `<!-- TL;DR: 3 decisions. Key: -->
 
 ## ADR-001: Seeded entry to remove
@@ -390,7 +390,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
   });
 
   it('recounts TL;DR after multi-section purge', async () => {
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
     const content = `<!-- TL;DR: 4 pitfalls. Key: -->
 
 ## PF-001: Seeded pitfall 1
@@ -426,8 +426,8 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
     expect(updated).not.toContain('PF-003');
   });
 
-  it('acquires and releases .knowledge.lock during operation', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+  it('acquires and releases .decisions.lock during operation', async () => {
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-010: Seeded
@@ -439,12 +439,12 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
     await purgeAllPreV2KnowledgeEntries({ memoryDir });
 
     // Lock directory must be released after the call
-    const lockDir = path.join(memoryDir, '.knowledge.lock');
+    const lockDir = path.join(memoryDir, '.decisions.lock');
     await expect(fs.access(lockDir)).rejects.toThrow();
   });
 
   it('second concurrent caller serializes behind first (mutual exclusion)', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-010: Seeded
@@ -465,13 +465,13 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
     expect(totalRemoved).toBe(1);
 
     // Lock must be released after both complete
-    const lockDir = path.join(memoryDir, '.knowledge.lock');
+    const lockDir = path.join(memoryDir, '.decisions.lock');
     await expect(fs.access(lockDir)).rejects.toThrow();
   });
 
   it('does not follow a symlink placed at the .tmp path (TOCTOU hardening)', async () => {
     // Arrange: create a decisions.md with a seeded entry to trigger atomic write
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
     await fs.writeFile(decisionsPath, `<!-- TL;DR: 1 decisions. Key: -->
 
 ## ADR-020: Seeded TOCTOU test
@@ -510,8 +510,8 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
   });
 
   it('is a no-op when both files have only self-learning entries', async () => {
-    const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-    const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
+    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
     const decisionsContent = `<!-- TL;DR: 1 decisions. Key: -->
 

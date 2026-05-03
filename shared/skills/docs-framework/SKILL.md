@@ -47,7 +47,7 @@ All generated documentation lives under `.docs/` in the project root:
 .memory/
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
 ├── backup.json                         # Pre-compact git state snapshot
-└── knowledge/
+└── decisions/
     ├── decisions.md                    # Architectural decisions (ADR-NNN format)
     └── pitfalls.md                     # Known pitfalls (PF-NNN format)
 ```
@@ -114,8 +114,8 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Resolver | `.docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Creates new in timestamped dir |
 | Code-review cmd | `.docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Knowledge (decisions) | `.memory/knowledge/decisions.md` | Append-only (ADR-NNN sequential IDs) |
-| Knowledge (pitfalls) | `.memory/knowledge/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
+| Knowledge (decisions) | `.memory/decisions/decisions.md` | Append-only (ADR-NNN sequential IDs) |
+| Knowledge (pitfalls) | `.memory/decisions/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
 | Designer (via /plan) | `.docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 
 ### Agents That Don't Persist

@@ -29,7 +29,7 @@ Orchestrate a single task through implementation by spawning specialized agent t
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, KNOWLEDGE_CONTEXT, FEATURE_KNOWLEDGE, STALE_KB_SLUGS
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_KB_SLUGS
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
@@ -60,9 +60,9 @@ Return the branch setup summary."
 5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
 6. Captured values override defaults from Git agent where present
 
-**Load Knowledge Context:**
+**Load Decisions Context:**
 ```bash
-KNOWLEDGE_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/knowledge-context.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
 
@@ -420,7 +420,7 @@ Display completion summary with phase status, PR info, and next steps.
 
 ### Phase 11: Feature KB Generation (Conditional)
 
-**Requires:** FILES_CHANGED, STALE_KB_SLUGS, OVERLAPPING_SLUGS, KNOWLEDGE_CONTEXT
+**Requires:** FILES_CHANGED, STALE_KB_SLUGS, OVERLAPPING_SLUGS, DECISIONS_CONTEXT
 **Produces:** Updated `.features/index.json` (or skipped)
 
 If `.features/.disabled` exists, skip entirely.
@@ -436,7 +436,7 @@ If `.features/.disabled` exists, skip entirely.
    FEATURE_NAME: {name}
    FILES_CHANGED: {files_changed list}
    DIRECTORIES: {directory prefixes from FILES_CHANGED}
-   KNOWLEDGE_CONTEXT: {from Phase 1}
+   DECISIONS_CONTEXT: {from Phase 1}
 
    Load the devflow:feature-kb skill and follow its 4-phase process exactly.
    Read the FILES_CHANGED to understand the implemented code.
@@ -468,7 +468,7 @@ Skip if all touched areas already have matching KBs.
    DIRECTORIES: {directories from index}
    EXISTING_KB: {content of .features/{slug}/KNOWLEDGE.md}
    CHANGED_FILES: {FILES_CHANGED that overlap this KB}
-   KNOWLEDGE_CONTEXT: {from Phase 1}
+   DECISIONS_CONTEXT: {from Phase 1}
 
    Load the devflow:feature-kb skill. This is a REFRESH, not a new creation.
    Read the CHANGED_FILES to understand what changed, then update the EXISTING_KB.
@@ -480,7 +480,7 @@ Skip if all touched areas already have matching KBs.
 
 **Failure handling**: Non-blocking. If Knowledge agent crashes, log failure and report results normally.
 
-<!-- D8: "Record Decisions" block removed — knowledge-persistence skill no longer has Write
+<!-- D8: "Record Decisions" block removed — decisions-format skill no longer has Write
      capability; decision recording is handled by the background-learning extractor. -->
 
 ## Architecture

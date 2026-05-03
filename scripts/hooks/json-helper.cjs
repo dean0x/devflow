@@ -33,7 +33,7 @@
 //   render-ready <log> <baseDir>          Render ready observations to files (D5)
 //   reconcile-manifest <cwd>             Session-start reconciler: sync manifest vs FS (D6, D13)
 //   merge-observation <log> <newObsJson> Dedup/reinforce with in-place merge (D14)
-//   knowledge-append <file> <type> <obs> Append ADR/PF entry to knowledge file
+//   decisions-append <file> <type> <obs> Append ADR/PF entry to decisions file
 //   read-sidecar <file> <field>          Read field from sidecar JSON (allowed fields only; returns [] on any error)
 
 'use strict';
@@ -94,10 +94,10 @@ const THRESHOLDS = {
 };
 
 // D17: softCapExceeded repurposed to hard ceiling (100), not removed.
-// Threshold shifts from 50→100; most call sites unchanged.
-const KNOWLEDGE_SOFT_START = 50;
-const KNOWLEDGE_HARD_CEILING = 100;
-const KNOWLEDGE_THRESHOLDS = [50, 60, 70, 80, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100];
+// Threshold shifts from 50→100; most call sites unchanged. Constants renamed to DECISIONS_*.
+const DECISIONS_SOFT_START = 50;
+const DECISIONS_HARD_CEILING = 100;
+const DECISIONS_THRESHOLDS = [50, 60, 70, 80, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100];
 
 function learningLog(msg) {
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -151,11 +151,11 @@ function writeFileAtomic(file, content) {
 }
 
 /**
- * Return the initial header content for a new knowledge file.
+ * Return the initial header content for a new decisions file.
  * @param {'decision'|'pitfall'} type
  * @returns {string}
  */
-function initKnowledgeContent(type) {
+function initDecisionsContent(type) {
   return type === 'decision'
     ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
     : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
@@ -167,7 +167,7 @@ function initKnowledgeContent(type) {
  * @param {string} prefix - 'ADR' or 'PF'
  * @returns {{ nextN: string, anchorId: string }}
  */
-function nextKnowledgeId(matches, prefix) {
+function nextDecisionsId(matches, prefix) {
   let maxN = 0;
   for (const m of matches) {
     const n = parseInt(m[1], 10);
@@ -178,7 +178,7 @@ function nextKnowledgeId(matches, prefix) {
 }
 
 /**
- * Extract the content of a single ADR-NNN / PF-NNN section from a knowledge file.
+ * Extract the content of a single ADR-NNN / PF-NNN section from a decisions file.
  * Returns the text from the matching `## <anchorId>` heading through the next `## ADR-`
  * or `## PF-` heading (exclusive), or to end-of-file.  Returns null when the anchor is
  * not present.  The anchorId is sanitised before use to eliminate ReDoS surface.
@@ -190,7 +190,7 @@ function nextKnowledgeId(matches, prefix) {
  * @param {string} anchorId  - e.g. 'ADR-001' or 'PF-007'
  * @returns {string|null}
  */
-function sliceKnowledgeSection(content, anchorId) {
+function sliceDecisionsSection(content, anchorId) {
   const safe = anchorId.replace(/[^A-Z0-9-]/gi, '');
   const sectionRe = new RegExp(`(##\\s+${safe}[\\s\\S]*?)(?=\\n##\\s+(?:ADR|PF)-|\\s*$)`);
   const m = content.match(sectionRe);
@@ -209,7 +209,7 @@ function emptyReconcileResult() {
 }
 
 /**
- * D18: Count only non-deprecated headings in a knowledge file.
+ * D18: Count only non-deprecated headings in a decisions file.
  * Scans ## ADR-NNN: or ## PF-NNN: headings, then checks the next Status
  * line — if `Deprecated` or `Superseded`, the entry is excluded from the count.
  * @param {string} content - File content
@@ -267,8 +267,8 @@ function findUnmanagedAnchors(memoryDir, managedAnchors, logMap) {
   // prefix values are hardcoded: 'ADR' for decisions, 'PF' for pitfalls.
   const result = [];
   const files = [
-    { file: path.join(memoryDir, 'knowledge', 'decisions.md'), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
-    { file: path.join(memoryDir, 'knowledge', 'pitfalls.md'),  type: 'pitfall',  re: /^## (PF-\d+):\s*([^\n]+)/gm },
+    { file: path.join(memoryDir, 'decisions', 'decisions.md'), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
+    { file: path.join(memoryDir, 'decisions', 'pitfalls.md'),  type: 'pitfall',  re: /^## (PF-\d+):\s*([^\n]+)/gm },
   ];
   for (const { file, type, re } of files) {
     if (!fs.existsSync(file)) continue;
@@ -292,12 +292,12 @@ function findUnmanagedAnchors(memoryDir, managedAnchors, logMap) {
 }
 
 /**
- * Read .knowledge-usage.json from .memory dir. Returns {version, entries} or empty default.
+ * Read .decisions-usage.json from .memory dir. Returns {version, entries} or empty default.
  * @param {string} memoryDir
  * @returns {{version: number, entries: Object}}
  */
 function readUsageFile(memoryDir) {
-  const filePath = path.join(memoryDir, '.knowledge-usage.json');
+  const filePath = path.join(memoryDir, '.decisions-usage.json');
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const data = JSON.parse(raw);
@@ -307,12 +307,12 @@ function readUsageFile(memoryDir) {
 }
 
 /**
- * Write .knowledge-usage.json atomically.
+ * Write .decisions-usage.json atomically.
  * @param {string} memoryDir
  * @param {{version: number, entries: Object}} data
  */
 function writeUsageFile(memoryDir, data) {
-  writeFileAtomic(path.join(memoryDir, '.knowledge-usage.json'), JSON.stringify(data, null, 2) + '\n');
+  writeFileAtomic(path.join(memoryDir, '.decisions-usage.json'), JSON.stringify(data, null, 2) + '\n');
 }
 
 /**
@@ -348,11 +348,11 @@ function writeNotifications(memoryDir, data) {
  */
 function crossedThresholds(prev, next) {
   if (next <= prev) return [];
-  return KNOWLEDGE_THRESHOLDS.filter(t => t > prev && t <= next);
+  return DECISIONS_THRESHOLDS.filter(t => t > prev && t <= next);
 }
 
 /**
- * D26: Build the updated TL;DR comment for a knowledge file after appending a new entry.
+ * D26: Build the updated TL;DR comment for a decisions file after appending a new entry.
  * Scans existingContent for active (non-deprecated/superseded) headings, appends the new
  * anchorId, takes the last 5, and returns the replacement comment string.
  *
@@ -385,7 +385,7 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
 }
 
 /**
- * D21/D22/D24/D28: Update .notifications.json after a knowledge entry is appended.
+ * D21/D22/D24/D28: Update .notifications.json after a decisions entry is appended.
  * Handles first-run seed, threshold crossing, severity escalation, and re-fire on dismiss.
  *
  * @param {string} memoryDir
@@ -400,7 +400,7 @@ function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount
   // D21: first-run seed — if no notification existed and count >= soft start,
   // pretend we started from 0 so all crossed thresholds fire on first pass.
   let effectivePrevCount = previousCount;
-  if (!existingNotif && newCount >= KNOWLEDGE_SOFT_START) {
+  if (!existingNotif && newCount >= DECISIONS_SOFT_START) {
     effectivePrevCount = 0;
   }
 
@@ -417,7 +417,7 @@ function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount
     active: true,
     threshold: highestCrossed,
     count: newCount,
-    ceiling: KNOWLEDGE_HARD_CEILING,
+    ceiling: DECISIONS_HARD_CEILING,
     dismissed_at_threshold: (existingNotif && existingNotif.dismissed_at_threshold) || null,
     severity,
     created_at: (existingNotif && existingNotif.created_at) || new Date().toISOString(),
@@ -432,7 +432,7 @@ function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount
 }
 
 /**
- * D20: Register an entry in .knowledge-usage.json with initial cite count.
+ * D20: Register an entry in .decisions-usage.json with initial cite count.
  * @param {string} memoryDir
  * @param {string} anchorId - e.g. 'ADR-001' or 'PF-003'
  */
@@ -449,22 +449,22 @@ function registerUsageEntry(memoryDir, anchorId) {
 }
 
 /**
- * Acquire .knowledge-usage.lock with a 2-second timeout.
- * Separate from .knowledge.lock to avoid blocking knowledge writes.
+ * Acquire .decisions-usage.lock with a 2-second timeout.
+ * Separate from .decisions.lock to avoid blocking decisions writes.
  * @param {string} memoryDir
  * @returns {boolean}
  */
-function acquireKnowledgeUsageLock(memoryDir) {
-  const lockDir = path.join(memoryDir, '.knowledge-usage.lock');
+function acquireDecisionsUsageLock(memoryDir) {
+  const lockDir = path.join(memoryDir, '.decisions-usage.lock');
   return acquireMkdirLock(lockDir, 2000, 5000);
 }
 
 /**
- * Release .knowledge-usage.lock.
+ * Release .decisions-usage.lock.
  * @param {string} memoryDir
  */
-function releaseKnowledgeUsageLock(memoryDir) {
-  const lockDir = path.join(memoryDir, '.knowledge-usage.lock');
+function releaseDecisionsUsageLock(memoryDir) {
+  const lockDir = path.join(memoryDir, '.decisions-usage.lock');
   releaseLock(lockDir);
 }
 
@@ -492,10 +492,10 @@ function mergeEvidence(oldEvidence, newEvidence) {
 /**
  * Acquire a mkdir-based lock. Returns true on success, false on timeout.
  * DESIGN: Shared locking utility used by render-ready, reconcile-manifest, merge-observation,
- * and knowledge-append. Callers pass their own timeoutMs/staleMs to suit their workload:
- *   - .knowledge.lock writes (render-ready, knowledge-append): 30 000 ms / 60 000 ms stale
+ * and decisions-append. Callers pass their own timeoutMs/staleMs to suit their workload:
+ *   - .decisions.lock writes (render-ready, decisions-append): 30 000 ms / 60 000 ms stale
  *   - .learning.lock (reconcile-manifest): 15 000 ms / 60 000 ms stale
- *   - .knowledge-usage.lock (acquireKnowledgeUsageLock): 2 000 ms / 5 000 ms stale
+ *   - .decisions-usage.lock (acquireDecisionsUsageLock): 2 000 ms / 5 000 ms stale
  * The bash acquire_lock in background-learning uses different defaults (90 s wait / 300 s stale)
  * because it guards the entire Sonnet analysis pipeline (up to 180 s watchdog timeout), not
  * just file I/O. Those higher values are intentional — see background-learning:68-81.
@@ -1154,7 +1154,7 @@ try {
 
       const rendered = [];
       let skipped = 0;
-      const knowledgeLockDir = path.join(baseDir, '.memory', '.knowledge.lock');
+      const decisionsLockDir = path.join(baseDir, '.memory', '.decisions.lock');
 
       for (const obs of entries) {
         if (obs.status !== 'ready') continue;
@@ -1260,27 +1260,27 @@ try {
             learningLog(`Rendered procedural: ${artPath}`);
 
           } else if (obs.type === 'decision' || obs.type === 'pitfall') {
-            // --- Decision / Pitfall: append to knowledge file ---
+            // --- Decision / Pitfall: append to decisions file ---
             const isDecision = obs.type === 'decision';
-            const knowledgeDir = path.join(baseDir, '.memory', 'knowledge');
-            const knowledgeFile = path.join(knowledgeDir, isDecision ? 'decisions.md' : 'pitfalls.md');
+            const decisionsDir = path.join(baseDir, '.memory', 'decisions');
+            const decisionsFile = path.join(decisionsDir, isDecision ? 'decisions.md' : 'pitfalls.md');
             const entryPrefix = isDecision ? 'ADR' : 'PF';
             const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
 
-            // Acquire knowledge lock (D — lock protocol from knowledge-persistence SKILL.md)
-            if (!acquireMkdirLock(knowledgeLockDir, 30000, 60000)) {
-              learningLog(`Timeout acquiring knowledge lock for ${obs.id} — skipping`);
+            // Acquire decisions lock (D — lock protocol from decisions-format SKILL.md)
+            if (!acquireMkdirLock(decisionsLockDir, 30000, 60000)) {
+              learningLog(`Timeout acquiring decisions lock for ${obs.id} — skipping`);
               skipped++;
               continue;
             }
             try {
-              fs.mkdirSync(knowledgeDir, { recursive: true });
+              fs.mkdirSync(decisionsDir, { recursive: true });
 
-              const existingContent = fs.existsSync(knowledgeFile)
-                ? fs.readFileSync(knowledgeFile, 'utf8')
-                : initKnowledgeContent(obs.type);
+              const existingContent = fs.existsSync(decisionsFile)
+                ? fs.readFileSync(decisionsFile, 'utf8')
+                : initDecisionsContent(obs.type);
 
-              // existingMatches needed for nextKnowledgeId (uses Math.max on match groups)
+              // existingMatches needed for nextDecisionsId (uses Math.max on match groups)
               const existingMatches = [...existingContent.matchAll(headingRe)];
 
               // D18: count only active (non-deprecated/superseded) headings for capacity check
@@ -1289,9 +1289,9 @@ try {
               const memoryDir = path.join(baseDir, '.memory');
               const notifKey = isDecision ? 'knowledge-capacity-decisions' : 'knowledge-capacity-pitfalls';
 
-              // D17: hard ceiling at KNOWLEDGE_HARD_CEILING (100); softCapExceeded repurposed
+              // D17: hard ceiling at DECISIONS_HARD_CEILING (100); softCapExceeded repurposed
               // from old 50-entry soft cap — now signals the hard ceiling was hit.
-              if (previousCount >= KNOWLEDGE_HARD_CEILING) {
+              if (previousCount >= DECISIONS_HARD_CEILING) {
                 // D15: set softCapExceeded — surfaces to HUD and `devflow learn --review`
                 // so the user can decide which entry to deprecate before a new one lands.
                 obs.softCapExceeded = true;
@@ -1299,15 +1299,15 @@ try {
                 const notifications = readNotifications(memoryDir);
                 notifications[notifKey] = {
                   active: true,
-                  threshold: KNOWLEDGE_HARD_CEILING,
+                  threshold: DECISIONS_HARD_CEILING,
                   count: previousCount,
-                  ceiling: KNOWLEDGE_HARD_CEILING,
+                  ceiling: DECISIONS_HARD_CEILING,
                   dismissed_at_threshold: null,
                   severity: 'error',
                   created_at: new Date().toISOString(),
                 };
                 writeNotifications(memoryDir, notifications);
-                learningLog(`Knowledge file at hard ceiling (${previousCount}/${KNOWLEDGE_HARD_CEILING}), skipping ${obs.id}`);
+                learningLog(`Decisions file at hard ceiling (${previousCount}/${DECISIONS_HARD_CEILING}), skipping ${obs.id}`);
                 skipped++;
                 continue; // lock still held; released in finally
               }
@@ -1337,7 +1337,7 @@ try {
                 }
               }
 
-              const { anchorId } = nextKnowledgeId(existingMatches, entryPrefix);
+              const { anchorId } = nextDecisionsId(existingMatches, entryPrefix);
 
               let entry;
               const detailsStr = obs.details || '';
@@ -1383,7 +1383,7 @@ try {
               const newCount = previousCount + 1;
 
               const updatedContent = buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newCount);
-              writeFileAtomic(knowledgeFile, updatedContent);
+              writeFileAtomic(decisionsFile, updatedContent);
 
               // D20: register in usage tracking so cite counts start at 0
               registerUsageEntry(memoryDir, anchorId);
@@ -1392,12 +1392,12 @@ try {
               updateCapacityNotification(memoryDir, notifKey, previousCount, newCount);
 
               obs.status = 'created';
-              obs.artifact_path = `${knowledgeFile}#${anchorId}`;
+              obs.artifact_path = `${decisionsFile}#${anchorId}`;
 
               manifestMap.set(obs.id, {
                 observationId: obs.id,
                 type: obs.type,
-                path: knowledgeFile,
+                path: decisionsFile,
                 contentHash: contentHash(entry),
                 renderedAt: new Date().toISOString(),
                 anchorId,
@@ -1405,7 +1405,7 @@ try {
               rendered.push(obs.artifact_path);
               learningLog(`Rendered ${obs.type}: ${obs.artifact_path}`);
             } finally {
-              releaseLock(knowledgeLockDir);
+              releaseLock(decisionsLockDir);
             }
           }
         } catch (renderErr) {
@@ -1496,7 +1496,7 @@ try {
             continue;
           }
 
-          // File exists — check anchor for knowledge entries
+          // File exists — check anchor for decisions entries
           if (entry.anchorId) {
             const content = fs.readFileSync(filePath, 'utf8');
             const anchorPattern = new RegExp(`##\\s+${entry.anchorId}\\b`);
@@ -1509,8 +1509,8 @@ try {
               counters.deletions++;
               continue;
             }
-            // A2: use shared sliceKnowledgeSection — eliminates duplicated inline regex.
-            const sectionContent = sliceKnowledgeSection(content, entry.anchorId) ?? content;
+            // A2: use shared sliceDecisionsSection — eliminates duplicated inline regex.
+            const sectionContent = sliceDecisionsSection(content, entry.anchorId) ?? content;
             const currentHash = contentHash(sectionContent);
             if (currentHash !== entry.contentHash) {
               // D13: silently update hash only, no confidence penalty
@@ -1535,9 +1535,9 @@ try {
         }
 
         // C1: healUnmanagedAnchors — recover from render-ready crash-window duplicates.
-        // If render-ready wrote the knowledge file but crashed before updating the log
+        // If render-ready wrote the decisions file but crashed before updating the log
         // and manifest, the anchor exists in the file but the log still shows status=ready
-        // and the manifest has no entry.  We detect this by scanning knowledge files for
+        // and the manifest has no entry.  We detect this by scanning decisions files for
         // anchors not tracked in the manifest, then matching them against ready log
         // observations with a matching normalised pattern.
         // DESIGN: D-D — skip silently when zero or multiple log entries match (ambiguity guard).
@@ -1555,8 +1555,8 @@ try {
           const obs = candidates[0];
           obs.status = 'created';
           obs.artifact_path = `${u.path}#${u.anchorId}`;
-          // A2: use shared sliceKnowledgeSection; A3: use fileContent already read by findUnmanagedAnchors.
-          const section = sliceKnowledgeSection(u.fileContent, u.anchorId);
+          // A2: use shared sliceDecisionsSection; A3: use fileContent already read by findUnmanagedAnchors.
+          const section = sliceDecisionsSection(u.fileContent, u.anchorId);
           keptEntries.push({
             observationId: obs.id, type: u.type, path: u.path,
             contentHash: contentHash(section ?? u.headingText),
@@ -1699,18 +1699,18 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // knowledge-append <file> <type> <obsJson>
-    // Standalone op for appending to knowledge files (decisions.md or pitfalls.md).
-    // Acquires the shared `.memory/.knowledge.lock` to serialize against render-ready
-    // and any CLI updateKnowledgeStatus callers. Lock path derivation matches the
-    // render-ready handler: sibling of the `knowledge/` directory.
+    // decisions-append <file> <type> <obsJson>
+    // Standalone op for appending to decisions files (decisions.md or pitfalls.md).
+    // Acquires the shared `.memory/.decisions.lock` to serialize against render-ready
+    // and any CLI updateDecisionsStatus callers. Lock path derivation matches the
+    // render-ready handler: sibling of the `decisions/` directory.
     // -------------------------------------------------------------------------
-    case 'knowledge-append': {
-      const knowledgeFile = safePath(args[0]);
+    case 'decisions-append': {
+      const decisionsFile = safePath(args[0]);
       const entryType = args[1]; // 'decision' or 'pitfall'
       let obs;
       try { obs = JSON.parse(args[2]); } catch {
-        process.stderr.write('knowledge-append: invalid JSON for observation\n');
+        process.stderr.write('decisions-append: invalid JSON for observation\n');
         process.exit(1);
       }
 
@@ -1719,36 +1719,36 @@ try {
       const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
       const artDate = new Date().toISOString().slice(0, 10);
 
-      const knowledgeDir = path.dirname(knowledgeFile);
-      const memoryDir = path.dirname(knowledgeDir);
-      const knowledgeLockDir = path.join(memoryDir, '.knowledge.lock');
+      const decisionsDir = path.dirname(decisionsFile);
+      const memoryDir = path.dirname(decisionsDir);
+      const decisionsLockDir = path.join(memoryDir, '.decisions.lock');
 
-      fs.mkdirSync(knowledgeDir, { recursive: true });
+      fs.mkdirSync(decisionsDir, { recursive: true });
 
-      if (!acquireMkdirLock(knowledgeLockDir, 30000, 60000)) {
-        process.stderr.write(`knowledge-append: timeout acquiring lock at ${knowledgeLockDir}\n`);
+      if (!acquireMkdirLock(decisionsLockDir, 30000, 60000)) {
+        process.stderr.write(`decisions-append: timeout acquiring lock at ${decisionsLockDir}\n`);
         process.exit(1);
       }
 
       try {
-        const existingContent = fs.existsSync(knowledgeFile)
-          ? fs.readFileSync(knowledgeFile, 'utf8')
-          : initKnowledgeContent(entryType);
+        const existingContent = fs.existsSync(decisionsFile)
+          ? fs.readFileSync(decisionsFile, 'utf8')
+          : initDecisionsContent(entryType);
 
-        // existingMatches needed for nextKnowledgeId (uses Math.max on match groups)
+        // existingMatches needed for nextDecisionsId (uses Math.max on match groups)
         const existingMatches = [...existingContent.matchAll(headingRe)];
 
-        // D18: count only active headings (latent bug fix — knowledge-append never had capacity check)
+        // D18: count only active headings (latent bug fix — decisions-append never had capacity check)
         const previousCount = countActiveHeadings(existingContent, entryType);
 
         // D17: hard ceiling enforcement — same threshold as render-ready
-        if (previousCount >= KNOWLEDGE_HARD_CEILING) {
-          process.stderr.write(`knowledge-append: hard ceiling reached (${previousCount}/${KNOWLEDGE_HARD_CEILING})\n`);
+        if (previousCount >= DECISIONS_HARD_CEILING) {
+          process.stderr.write(`decisions-append: hard ceiling reached (${previousCount}/${DECISIONS_HARD_CEILING})\n`);
           console.log(JSON.stringify({ error: 'hard_ceiling', count: previousCount }));
           break; // exits switch, lock released in finally
         }
 
-        const { anchorId } = nextKnowledgeId(existingMatches, entryPrefix);
+        const { anchorId } = nextDecisionsId(existingMatches, entryPrefix);
 
         const detailsStr = obs.details || '';
         let entry;
@@ -1773,7 +1773,7 @@ try {
         const newActiveCount = countActiveHeadings(newContent, entryType);
 
         const updatedContent = buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newActiveCount);
-        writeFileAtomic(knowledgeFile, updatedContent);
+        writeFileAtomic(decisionsFile, updatedContent);
 
         // D20: register in usage tracking so cite counts start at 0
         registerUsageEntry(memoryDir, anchorId);
@@ -1782,9 +1782,9 @@ try {
         const notifKey = isDecision ? 'knowledge-capacity-decisions' : 'knowledge-capacity-pitfalls';
         updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount);
 
-        console.log(JSON.stringify({ anchorId, file: knowledgeFile }));
+        console.log(JSON.stringify({ anchorId, file: decisionsFile }));
       } finally {
-        releaseLock(knowledgeLockDir);
+        releaseLock(decisionsLockDir);
       }
       break;
     }
@@ -1826,13 +1826,13 @@ if (typeof module !== 'undefined' && module.exports) {
     writeNotifications,
     crossedThresholds,
     registerUsageEntry,
-    acquireKnowledgeUsageLock,
-    releaseKnowledgeUsageLock,
-    KNOWLEDGE_SOFT_START,
-    KNOWLEDGE_HARD_CEILING,
-    KNOWLEDGE_THRESHOLDS,
+    acquireDecisionsUsageLock,
+    releaseDecisionsUsageLock,
+    DECISIONS_SOFT_START,
+    DECISIONS_HARD_CEILING,
+    DECISIONS_THRESHOLDS,
     writeFileAtomic,
-    initKnowledgeContent,
-    nextKnowledgeId,
+    initDecisionsContent,
+    nextDecisionsId,
   };
 }

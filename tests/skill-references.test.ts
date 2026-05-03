@@ -825,7 +825,7 @@ describe('Completeness: reviewer.md Focus Areas vs code-review plugin', () => {
     // These meta-skills don't correspond to reviewer focus areas
     const NON_FOCUS_SKILLS = new Set([
       'agent-teams',
-      'knowledge-persistence',
+      'decisions-format',
       'review-methodology',
       'worktree-support',
       'apply-feature-kb',  // consumption meta-skill, not a review focus
@@ -1039,7 +1039,7 @@ describe('citation sentence propagation', () => {
     return content.slice(startIdx + MARKER_START.length, endIdx);
   }
 
-  const skillPath = path.join(ROOT, 'shared/skills/knowledge-persistence/SKILL.md');
+  const skillPath = path.join(ROOT, 'shared/skills/decisions-format/SKILL.md');
   const coderPath = path.join(ROOT, 'shared/agents/coder.md');
   const reviewerPath = path.join(ROOT, 'shared/agents/reviewer.md');
 
@@ -1054,14 +1054,14 @@ describe('citation sentence propagation', () => {
     expect(coderSentence).toBe(canonical);
   });
 
-  it('reviewer.md has citation sentence referencing KNOWLEDGE_CONTEXT index and apply-knowledge skill', () => {
-    // reviewer.md uses the index+Read pattern (KNOWLEDGE_CONTEXT + devflow:apply-knowledge),
+  it('reviewer.md has citation sentence referencing DECISIONS_CONTEXT index and apply-decisions skill', () => {
+    // reviewer.md uses the index+Read pattern (DECISIONS_CONTEXT + devflow:apply-decisions),
     // not the direct-file-read pattern used by coder. The sentence intentionally differs from
     // the canonical (coder-style) sentence.
     const reviewerSentence = extractCitationSentence(reviewerPath);
     expect(reviewerSentence.trim()).toBeTruthy();
-    expect(reviewerSentence).toContain('KNOWLEDGE_CONTEXT');
-    expect(reviewerSentence).toContain('devflow:apply-knowledge');
+    expect(reviewerSentence).toContain('DECISIONS_CONTEXT');
+    expect(reviewerSentence).toContain('devflow:apply-decisions');
     expect(reviewerSentence).toContain('applies ADR-NNN');
     expect(reviewerSentence).toContain('avoids PF-NNN');
   });

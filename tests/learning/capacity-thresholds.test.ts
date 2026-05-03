@@ -180,12 +180,12 @@ describe('registerUsageEntry', () => {
 describe('render-ready capacity integration', () => {
   let tmpDir: string;
   let logFile: string;
-  let knowledgeDir: string;
+  let decisionsDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-integ-'));
-    knowledgeDir = path.join(tmpDir, '.memory', 'knowledge');
-    fs.mkdirSync(knowledgeDir, { recursive: true });
+    decisionsDir = path.join(tmpDir, '.memory', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
     logFile = path.join(tmpDir, 'learning-log.jsonl');
   });
 
@@ -210,7 +210,7 @@ describe('render-ready capacity integration', () => {
       const n = i.toString().padStart(3, '0');
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
     }
-    fs.writeFileSync(path.join(knowledgeDir, 'decisions.md'), header + entries);
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
     const obs = makeReadyDecision('obs_at49', 'crossing 50');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
 
@@ -231,7 +231,7 @@ describe('render-ready capacity integration', () => {
       const n = i.toString().padStart(3, '0');
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
     }
-    fs.writeFileSync(path.join(knowledgeDir, 'decisions.md'), header + entries);
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
     const obs = makeReadyDecision('obs_at99', 'the 100th entry');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
 
@@ -246,7 +246,7 @@ describe('render-ready capacity integration', () => {
       const n = i.toString().padStart(3, '0');
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
     }
-    fs.writeFileSync(path.join(knowledgeDir, 'decisions.md'), header + entries);
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
     const obs = makeReadyDecision('obs_past100', 'should be blocked');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
 
@@ -266,7 +266,7 @@ describe('render-ready capacity integration', () => {
       const status = i <= 5 ? 'Deprecated' : 'Accepted';
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: ${status}\n- **Source**: test\n`;
     }
-    fs.writeFileSync(path.join(knowledgeDir, 'decisions.md'), header + entries);
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
     const obs = makeReadyDecision('obs_deprecated_gap', 'should succeed because deprecated entries free slots');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
 
@@ -283,7 +283,7 @@ describe('render-ready capacity integration', () => {
       const n = i.toString().padStart(3, '0');
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
     }
-    fs.writeFileSync(path.join(knowledgeDir, 'decisions.md'), header + entries);
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
     // No .notifications.json exists (first-run)
 
     const obs = makeReadyDecision('obs_seed', 'triggering seed');
@@ -309,7 +309,7 @@ describe('render-ready capacity integration', () => {
       const status = i <= 2 ? 'Deprecated' : 'Accepted';
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: ${status}\n- **Source**: test\n`;
     }
-    fs.writeFileSync(path.join(knowledgeDir, 'decisions.md'), header + entries);
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
 
     const obs = makeReadyDecision('obs_tldr', 'new entry');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
@@ -317,7 +317,7 @@ describe('render-ready capacity integration', () => {
     const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
     expect(result.rendered).toHaveLength(1);
 
-    const content = fs.readFileSync(path.join(knowledgeDir, 'decisions.md'), 'utf8');
+    const content = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
     // 3 active + 1 new = 4 active (2 deprecated don't count)
     expect(content).toMatch(/<!-- TL;DR: 4 decisions\./);
   });

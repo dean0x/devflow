@@ -212,7 +212,7 @@ describe('optional plugin flag', () => {
     expect(ambient!.skills).toContain('pipeline:orch');
     // Ambient must declare resolve dependencies
     expect(ambient!.skills).toContain('patterns');
-    // knowledge-persistence removed per D9 — format-spec only, not plugin-distributed
+    // decisions-format removed per D9 — format-spec only, not plugin-distributed
     // Ambient must declare all needed agents
     expect(ambient!.agents).toContain('git');
     expect(ambient!.agents).toContain('synthesizer');

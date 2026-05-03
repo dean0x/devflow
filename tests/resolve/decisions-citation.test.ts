@@ -1,23 +1,23 @@
-// tests/resolve/knowledge-citation.test.ts
-// Tests for Fix 1: /resolve reads and cites project knowledge.
+// tests/resolve/decisions-citation.test.ts
+// Tests for Fix 1: /resolve reads and cites project decisions.
 //
 // Strategy: The filter + loader logic lives in the production module
-// scripts/hooks/lib/knowledge-context.cjs; these tests import it directly
+// scripts/hooks/lib/decisions-index.cjs; these tests import it directly
 // for real coverage. The markdown structural tests verify that the instruction
 // to invoke the module (or follow its algorithm) is present on every surface.
 //
 // Test groups:
-//   1. Unit tests: filterKnowledgeContext (D-A filter) — imported from production module
-//   2. Unit tests: filterKnowledgeContext — imported from production module
-//   3. Structural tests: resolve.md — Step 0d presence + KNOWLEDGE_CONTEXT in Phase 4
-//      (knowledge-context.cjs index invocation covered by tests/knowledge/command-adoption.test.ts)
+//   1. Unit tests: filterDecisionsContext (D-A filter) — imported from production module
+//   2. Unit tests: filterDecisionsContext — imported from production module
+//   3. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
+//      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
 //   4. Structural tests: resolve-teams.md — parity with base
-//      (knowledge-context.cjs index invocation covered by tests/knowledge/command-adoption.test.ts)
+//      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
 //   5. Structural tests: resolve:orch SKILL.md — Phase 1.5 parity
-//      (knowledge-context.cjs index invocation covered by tests/knowledge/command-adoption.test.ts)
-//   6. Structural tests: resolver.md — Input Context + Apply Knowledge
-//      (ADR/PF citation format + hallucination guard covered by tests/knowledge/apply-knowledge-skill.test.ts)
-//   7. Cross-cutting: all four surfaces reference KNOWLEDGE_CONTEXT
+//      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
+//   6. Structural tests: resolver.md — Input Context + Apply Decisions
+//      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
+//   7. Cross-cutting: all four surfaces reference DECISIONS_CONTEXT
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
@@ -25,59 +25,59 @@ import { createRequire } from 'module';
 import {
   ACTIVE_ADR, ACTIVE_PF, DEPRECATED_ADR, DEPRECATED_PF,
   SUPERSEDED_ADR,
-} from '../knowledge/fixtures';
-import { loadFile, extractSection } from '../knowledge/helpers';
+} from '../decisions/fixtures';
+import { loadFile, extractSection } from '../decisions/helpers';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
 // Import the production module — this is the real implementation, not a test copy.
-const { filterKnowledgeContext } = require(
-  path.join(ROOT, 'scripts/hooks/lib/knowledge-context.cjs')
+const { filterDecisionsContext } = require(
+  path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
 ) as {
-  filterKnowledgeContext: (raw: string) => string;
+  filterDecisionsContext: (raw: string) => string;
 };
 
 // ---------------------------------------------------------------------------
-// Unit tests: filterKnowledgeContext (D-A filter) — production module
+// Unit tests: filterDecisionsContext (D-A filter) — production module
 // ---------------------------------------------------------------------------
 
-describe('filterKnowledgeContext — Deprecated/Superseded filtering (D-A)', () => {
+describe('filterDecisionsContext — Deprecated/Superseded filtering (D-A)', () => {
   it('returns empty string when input is empty', () => {
-    expect(filterKnowledgeContext('')).toBe('');
+    expect(filterDecisionsContext('')).toBe('');
   });
 
   it('preserves Active ADR sections unchanged', () => {
-    const output = filterKnowledgeContext(ACTIVE_ADR);
+    const output = filterDecisionsContext(ACTIVE_ADR);
     expect(output).toContain('ADR-001');
     expect(output).toContain('Always return Result<T,E>');
   });
 
   it('removes Deprecated ADR sections', () => {
-    const output = filterKnowledgeContext(DEPRECATED_ADR);
+    const output = filterDecisionsContext(DEPRECATED_ADR);
     expect(output).not.toContain('ADR-002');
     expect(output).not.toContain('Do the old thing');
   });
 
   it('removes Superseded ADR sections', () => {
-    const output = filterKnowledgeContext(SUPERSEDED_ADR);
+    const output = filterDecisionsContext(SUPERSEDED_ADR);
     expect(output).not.toContain('ADR-003');
   });
 
   it('removes Deprecated PF sections', () => {
-    const output = filterKnowledgeContext(DEPRECATED_PF);
+    const output = filterDecisionsContext(DEPRECATED_PF);
     expect(output).not.toContain('PF-001');
   });
 
   it('keeps Active PF sections', () => {
-    const output = filterKnowledgeContext(ACTIVE_PF);
+    const output = filterDecisionsContext(ACTIVE_PF);
     expect(output).toContain('PF-004');
     expect(output).toContain('Watch out for growing scripts');
   });
 
   it('preserves Active sections when mixed with Deprecated sections', () => {
     const input = [ACTIVE_ADR, DEPRECATED_ADR, ACTIVE_PF].join('\n');
-    const output = filterKnowledgeContext(input);
+    const output = filterDecisionsContext(input);
     expect(output).toContain('ADR-001');
     expect(output).toContain('Always return Result<T,E>');
     expect(output).not.toContain('ADR-002');
@@ -87,7 +87,7 @@ describe('filterKnowledgeContext — Deprecated/Superseded filtering (D-A)', () 
   });
 
   it('returns empty string when all sections are removed (orchestrator emits "(none)")', () => {
-    const output = filterKnowledgeContext(DEPRECATED_ADR);
+    const output = filterDecisionsContext(DEPRECATED_ADR);
     // Empty string signals orchestrator to emit "(none)"
     expect(output).toBe('');
   });
@@ -100,13 +100,13 @@ describe('filterKnowledgeContext — Deprecated/Superseded filtering (D-A)', () 
 describe('resolve.md — base command', () => {
   const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
 
-  it('contains Step 0d: Load Project Knowledge after Phase 0c', () => {
-    expect(content).toMatch(/Step 0d.*Load Project Knowledge/i);
+  it('contains Step 0d: Load Project Decisions after Phase 0c', () => {
+    expect(content).toMatch(/Step 0d.*Load Project Decisions/i);
   });
 
-  it('Step 0d instructs passing KNOWLEDGE_CONTEXT to Phase 4 Resolvers', () => {
+  it('Step 0d instructs passing DECISIONS_CONTEXT to Phase 4 Resolvers', () => {
     const step0dSection = extractSection(content, 'Step 0d', '\n### Phase 1');
-    expect(step0dSection).toContain('KNOWLEDGE_CONTEXT');
+    expect(step0dSection).toContain('DECISIONS_CONTEXT');
   });
 
   it('Step 0d emits (none) when both files are absent or empty', () => {
@@ -114,9 +114,9 @@ describe('resolve.md — base command', () => {
     expect(step0dSection).toContain('(none)');
   });
 
-  it('Phase 4 Resolver spawn block includes KNOWLEDGE_CONTEXT variable', () => {
+  it('Phase 4 Resolver spawn block includes DECISIONS_CONTEXT variable', () => {
     const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
-    expect(phase4Section).toContain('KNOWLEDGE_CONTEXT');
+    expect(phase4Section).toContain('DECISIONS_CONTEXT');
   });
 
   it('Phase 5 or Phase 8 mentions Knowledge Citations in resolution-summary.md (D-B)', () => {
@@ -139,13 +139,13 @@ describe('resolve.md — base command', () => {
 describe('resolve-teams.md — teams variant parity', () => {
   const content = loadFile('plugins/devflow-resolve/commands/resolve-teams.md');
 
-  it('contains Step 0d: Load Project Knowledge', () => {
-    expect(content).toMatch(/Step 0d.*Load Project Knowledge/i);
+  it('contains Step 0d: Load Project Decisions', () => {
+    expect(content).toMatch(/Step 0d.*Load Project Decisions/i);
   });
 
-  it('Phase 4 Resolver teammate prompt includes KNOWLEDGE_CONTEXT variable', () => {
+  it('Phase 4 Resolver teammate prompt includes DECISIONS_CONTEXT variable', () => {
     const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
-    expect(phase4Section).toContain('KNOWLEDGE_CONTEXT');
+    expect(phase4Section).toContain('DECISIONS_CONTEXT');
   });
 
   it('mentions Knowledge Citations for resolution-summary.md (D-B)', () => {
@@ -160,13 +160,13 @@ describe('resolve-teams.md — teams variant parity', () => {
 describe('resolve:orch SKILL.md — ambient mode parity', () => {
   const content = loadFile('shared/skills/resolve:orch/SKILL.md');
 
-  it('contains Phase 2: Load Project Knowledge between Phase 1 and Phase 3', () => {
-    expect(content).toMatch(/Phase 2.*Load Project Knowledge/i);
+  it('contains Phase 2: Load Project Decisions between Phase 1 and Phase 3', () => {
+    expect(content).toMatch(/Phase 2.*Load Project Decisions/i);
   });
 
-  it('Phase 5 spawn block includes KNOWLEDGE_CONTEXT', () => {
+  it('Phase 5 spawn block includes DECISIONS_CONTEXT', () => {
     const phase5Section = extractSection(content, '## Phase 5', '## Phase 6');
-    expect(phase5Section).toContain('KNOWLEDGE_CONTEXT');
+    expect(phase5Section).toContain('DECISIONS_CONTEXT');
   });
 
   it('Phase 7 (Report) mentions Knowledge Citations (D-B)', () => {
@@ -179,30 +179,30 @@ describe('resolve:orch SKILL.md — ambient mode parity', () => {
 // Structural tests: shared/agents/resolver.md
 // ---------------------------------------------------------------------------
 
-describe('resolver.md — Input Context and Apply Knowledge section', () => {
+describe('resolver.md — Input Context and Apply Decisions section', () => {
   const content = loadFile('shared/agents/resolver.md');
 
-  it('declares KNOWLEDGE_CONTEXT in Input Context section', () => {
+  it('declares DECISIONS_CONTEXT in Input Context section', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
-    expect(inputContextSection).toContain('KNOWLEDGE_CONTEXT');
+    expect(inputContextSection).toContain('DECISIONS_CONTEXT');
   });
 
-  it('contains Apply Knowledge section', () => {
-    expect(content).toMatch(/## Apply Knowledge|### Apply Knowledge/);
+  it('contains Apply Decisions section', () => {
+    expect(content).toMatch(/## Apply Decisions|### Apply Decisions/);
   });
 
-  it('Apply Knowledge section describes citing inline in Reasoning column', () => {
-    const applyStart = content.search(/## Apply Knowledge|### Apply Knowledge/);
-    if (applyStart === -1) throw new Error('Apply Knowledge section not found in resolver.md');
+  it('Apply Decisions section describes citing inline in Reasoning column', () => {
+    const applyStart = content.search(/## Apply Decisions|### Apply Decisions/);
+    if (applyStart === -1) throw new Error('Apply Decisions section not found in resolver.md');
     const applyAnchor = content.slice(applyStart, applyStart + 30);
     const applySection = extractSection(content, applyAnchor.split('\n')[0], '\n## ');
     expect(applySection).toMatch(/[Rr]easoning/);
   });
 
-  it('KNOWLEDGE_CONTEXT is marked optional in Input Context', () => {
+  it('DECISIONS_CONTEXT is marked optional in Input Context', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
-    const knowledgeIdx = inputContextSection.indexOf('KNOWLEDGE_CONTEXT');
-    if (knowledgeIdx === -1) throw new Error('KNOWLEDGE_CONTEXT not found in Input Context section');
+    const knowledgeIdx = inputContextSection.indexOf('DECISIONS_CONTEXT');
+    if (knowledgeIdx === -1) throw new Error('DECISIONS_CONTEXT not found in Input Context section');
     const surroundingText = inputContextSection.slice(
       Math.max(0, knowledgeIdx - 20),
       Math.min(inputContextSection.length, knowledgeIdx + 120)
@@ -212,27 +212,27 @@ describe('resolver.md — Input Context and Apply Knowledge section', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cross-cutting: all four surfaces reference KNOWLEDGE_CONTEXT
+// Cross-cutting: all four surfaces reference DECISIONS_CONTEXT
 // ---------------------------------------------------------------------------
 
-describe('cross-cutting — KNOWLEDGE_CONTEXT on all four surfaces', () => {
-  it('resolve.md contains KNOWLEDGE_CONTEXT', () => {
+describe('cross-cutting — DECISIONS_CONTEXT on all four surfaces', () => {
+  it('resolve.md contains DECISIONS_CONTEXT', () => {
     const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
-    expect(content).toContain('KNOWLEDGE_CONTEXT');
+    expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('resolve-teams.md contains KNOWLEDGE_CONTEXT', () => {
+  it('resolve-teams.md contains DECISIONS_CONTEXT', () => {
     const content = loadFile('plugins/devflow-resolve/commands/resolve-teams.md');
-    expect(content).toContain('KNOWLEDGE_CONTEXT');
+    expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('resolve:orch SKILL.md contains KNOWLEDGE_CONTEXT', () => {
+  it('resolve:orch SKILL.md contains DECISIONS_CONTEXT', () => {
     const content = loadFile('shared/skills/resolve:orch/SKILL.md');
-    expect(content).toContain('KNOWLEDGE_CONTEXT');
+    expect(content).toContain('DECISIONS_CONTEXT');
   });
 
-  it('resolver.md contains KNOWLEDGE_CONTEXT', () => {
+  it('resolver.md contains DECISIONS_CONTEXT', () => {
     const content = loadFile('shared/agents/resolver.md');
-    expect(content).toContain('KNOWLEDGE_CONTEXT');
+    expect(content).toContain('DECISIONS_CONTEXT');
   });
 });

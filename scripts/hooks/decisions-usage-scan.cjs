@@ -47,8 +47,8 @@ while ((match = pattern.exec(input)) !== null) {
 if (matches.size === 0) process.exit(0);
 
 // Read usage file
-const usagePath = path.join(memoryDir, '.knowledge-usage.json');
-const lockDir = path.join(memoryDir, '.knowledge-usage.lock');
+const usagePath = path.join(memoryDir, '.decisions-usage.json');
+const lockDir = path.join(memoryDir, '.decisions-usage.lock');
 
 // Yield the current thread for the given number of milliseconds without spinning.
 // Atomics.wait on a freshly allocated SharedArrayBuffer never resolves (value never

@@ -12,7 +12,7 @@ skills:
   - devflow:boundary-validation
   - devflow:worktree-support
   - devflow:apply-feature-kb
-  - devflow:apply-knowledge
+  - devflow:apply-decisions
 ---
 
 # Coder Agent
@@ -32,8 +32,8 @@ You receive from orchestrator:
 **Domain hint** (optional):
 - **DOMAIN**: `backend` | `frontend` | `tests` | `fullstack` - Load/apply relevant domain skills
 - **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context — patterns, architecture, anti-patterns, gotchas
-- **KNOWLEDGE_CONTEXT** (optional): Compact index of active ADR/PF entries.
-  When provided, use `devflow:apply-knowledge` to Read full bodies on demand.
+- **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries.
+  When provided, use `devflow:apply-decisions` to Read full bodies on demand.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
@@ -50,11 +50,11 @@ You receive from orchestrator:
    - Cross-reference changed files against EXECUTION_PLAN to identify what's relevant to your task
    - Read those relevant files to understand interfaces, types, naming conventions, error handling, and testing patterns established by prior work
    - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
-   - If `KNOWLEDGE_CONTEXT` is provided, follow `devflow:apply-knowledge` to scan the index and Read full bodies on demand. Otherwise, if `.memory/knowledge/decisions.md` exists, read it directly. Apply prior architectural decisions relevant to this task.
-   - If `KNOWLEDGE_CONTEXT` is `(none)` or absent: if `.memory/knowledge/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
+   - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` to scan the index and Read full bodies on demand. Otherwise, if `.memory/decisions/decisions.md` exists, read it directly. Apply prior architectural decisions relevant to this task.
+   - If `DECISIONS_CONTEXT` is `(none)` or absent: if `.memory/decisions/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
 <!-- D25: Citation instruction placed inline in agents — no frontmatter injection -->
 <!-- CITATION-SENTENCE-START -->
-When you apply a decision from `.memory/knowledge/decisions.md` or avoid a pitfall from `.memory/knowledge/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
+When you apply a decision from `.memory/decisions/decisions.md` or avoid a pitfall from `.memory/decisions/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
 <!-- CITATION-SENTENCE-END -->
    - If `.docs/handoff.md` exists, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 

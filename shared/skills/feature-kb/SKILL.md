@@ -168,7 +168,7 @@ Bad: `"Integration stuff"`
 
 Knowledge files must not exist in isolation. The **Related** section must link to:
 - Other KBs that cover related topics
-- ADR/PF entries from KNOWLEDGE_CONTEXT (if provided)
+- ADR/PF entries from DECISIONS_CONTEXT (if provided)
 - Key source files referenced in the knowledge
 
 References should be bidirectional — when creating a new KB that relates to an existing one, note the connection.

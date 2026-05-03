@@ -17,8 +17,8 @@ import { writeFileAtomicExclusive } from './fs-atomic.js';
  *    accepts its own memoryDir, enabling straightforward filesystem-level unit
  *    tests with temp directories and no environment coupling.
  *
- * The function acquires `.knowledge.lock` (same mkdir-based lock used by
- * json-helper.cjs render-ready and updateKnowledgeStatus in learn.ts) to
+ * The function acquires `.decisions.lock` (same mkdir-based lock used by
+ * json-helper.cjs render-ready and updateDecisionsStatus in learn.ts) to
  * serialize against concurrent writers.
  *
  * D39: Atomic writes delegate to `writeFileAtomicExclusive` in fs-atomic.ts,
@@ -94,7 +94,7 @@ const SELF_LEARNING_SOURCE_MARKER = '\n- **Source**: self-learning:';
 /**
  * Shared lock-and-loop helper used by both purge functions.
  *
- * Acquires the knowledge lock, then for each file in `filePrefixPairs`:
+ * Acquires the decisions lock, then for each file in `filePrefixPairs`:
  *   1. Reads the file (skips if absent).
  *   2. Calls `rewriteContent(content, prefix)` to get an updated string and a
  *      removed-section count.
@@ -113,19 +113,19 @@ async function withKnowledgeFiles(
   filePrefixPairs: readonly KnowledgeFilePair[],
   rewriteContent: (content: string, prefix: 'ADR' | 'PF') => { updated: string; removedCount: number },
 ): Promise<PurgeLegacyKnowledgeResult> {
-  const knowledgeDir = path.join(memoryDir, 'knowledge');
+  const decisionsDir = path.join(memoryDir, 'decisions');
 
-  // Bail early: nothing to do if knowledge directory doesn't exist
+  // Bail early: nothing to do if decisions directory doesn't exist
   try {
-    await fs.access(knowledgeDir);
+    await fs.access(decisionsDir);
   } catch {
     return { removed: 0, files: [] };
   }
 
-  const knowledgeLockDir = path.join(memoryDir, '.knowledge.lock');
-  const lockAcquired = await acquireMkdirLock(knowledgeLockDir);
+  const decisionsLockDir = path.join(memoryDir, '.decisions.lock');
+  const lockAcquired = await acquireMkdirLock(decisionsLockDir);
   if (!lockAcquired) {
-    throw new Error('Knowledge files are currently being written. Try again in a moment.');
+    throw new Error('Decisions files are currently being written. Try again in a moment.');
   }
 
   let removed = 0;
@@ -159,7 +159,7 @@ async function withKnowledgeFiles(
       }
     }
   } finally {
-    try { await fs.rmdir(knowledgeLockDir); } catch { /* already cleaned */ }
+    try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
   }
 
   return { removed, files: modifiedFiles };
@@ -172,7 +172,7 @@ async function withKnowledgeFiles(
  *   - ADR-002  (decisions.md)
  *   - PF-001, PF-003, PF-005  (pitfalls.md)
  *
- * Returns immediately if `.memory/knowledge/` does not exist.
+ * Returns immediately if `.memory/decisions/` does not exist.
  *
  * @param options.memoryDir - absolute path to the `.memory/` directory
  * @returns number of sections removed and list of files that were modified
@@ -182,9 +182,9 @@ export async function purgeLegacyKnowledgeEntries(options: {
   memoryDir: string;
 }): Promise<PurgeLegacyKnowledgeResult> {
   const { memoryDir } = options;
-  const knowledgeDir = path.join(memoryDir, 'knowledge');
-  const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-  const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+  const decisionsDir = path.join(memoryDir, 'decisions');
+  const decisionsPath = path.join(decisionsDir, 'decisions.md');
+  const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
   const filePrefixPairs: readonly KnowledgeFilePair[] = [
     [decisionsPath, 'ADR'],
@@ -237,7 +237,7 @@ export async function purgeLegacyKnowledgeEntries(options: {
  * ALL seeded entries, fixing the gap where 7 of the original 10 seed entries
  * survived the v2 purge on upgraded projects.
  *
- * Returns immediately if `.memory/knowledge/` does not exist.
+ * Returns immediately if `.memory/decisions/` does not exist.
  *
  * Does NOT remove PROJECT-PATTERNS.md — that file is v2's responsibility and
  * has already been handled by `purgeLegacyKnowledgeEntries`.
@@ -250,9 +250,9 @@ export async function purgeAllPreV2KnowledgeEntries(options: {
   memoryDir: string;
 }): Promise<PurgeLegacyKnowledgeResult> {
   const { memoryDir } = options;
-  const knowledgeDir = path.join(memoryDir, 'knowledge');
-  const decisionsPath = path.join(knowledgeDir, 'decisions.md');
-  const pitfallsPath = path.join(knowledgeDir, 'pitfalls.md');
+  const decisionsDir = path.join(memoryDir, 'decisions');
+  const decisionsPath = path.join(decisionsDir, 'decisions.md');
+  const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
   const filePrefixPairs: readonly KnowledgeFilePair[] = [
     [decisionsPath, 'ADR'],

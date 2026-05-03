@@ -62,7 +62,7 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   return {
     id: worst.key,
     severity: isSeverity(worst.entry.severity) ? worst.entry.severity : 'dim',
-    text: `\u26A0 Knowledge: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
+    text: `\u26A0 Decisions: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
     count,
     ceiling,
   };
