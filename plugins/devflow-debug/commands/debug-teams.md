@@ -224,9 +224,6 @@ Lead produces final report:
 {HIGH/MEDIUM/LOW based on consensus strength}
 ```
 
-<!-- D8: "Record Pitfall" phase removed — decisions-format skill no longer has Write
-     capability; pitfall recording is handled by the background-learning extractor. -->
-
 ## Architecture
 
 ```

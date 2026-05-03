@@ -2,13 +2,6 @@
 description: Comprehensive branch review using specialized sub-agents for PR readiness
 ---
 
-<!--
-@devflow-design-decision D8
-Phase 5 previously recorded pitfalls retrospectively after reading decisions-format SKILL.
-Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
-from user transcripts by scripts/hooks/background-learning.
--->
-
 # Code Review Command
 
 Run a comprehensive code review of the current branch by spawning parallel review agents, then synthesizing results into PR comments. Supports incremental reviews, timestamped report directories, and multi-worktree auto-discovery.
@@ -178,7 +171,6 @@ Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Read reviews from {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/
-<!-- Confidence threshold also in: shared/agents/reviewer.md, shared/agents/synthesizer.md -->
 Create inline PR comments for findings with ≥80% confidence only.
 Lower-confidence suggestions (60-79%) go in the summary comment, not as inline comments.
 Deduplicate findings across reviewers, consolidate skipped into summary.

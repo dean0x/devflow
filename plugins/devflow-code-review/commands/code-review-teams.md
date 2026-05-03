@@ -276,9 +276,6 @@ Check for existing inline comments at same file:line before creating new ones."
 Per worktree, after successful completion:
 1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
 
-<!-- D8: "Record Pitfalls" phase removed — decisions-format skill no longer has Write
-     capability; pitfall recording is handled by the background-learning extractor. -->
-
 ### Phase 5: Cleanup and Report
 
 **Requires:** REVIEW_SUMMARY

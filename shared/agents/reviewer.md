@@ -52,13 +52,10 @@ The orchestrator provides:
 
 Follow the `devflow:apply-decisions` skill to scan the `DECISIONS_CONTEXT` index, Read full ADR/PF bodies on demand, and cite `applies ADR-NNN` / `avoids PF-NNN` inline in findings. Skip when `DECISIONS_CONTEXT` is empty or `(none)`.
 
-<!-- CITATION-SENTENCE-START -->
 When you apply a decision or avoid a pitfall identified via the DECISIONS_CONTEXT index (after reading its full body per the `devflow:apply-decisions` skill), cite the entry ID inline: `applies ADR-NNN` or `avoids PF-NNN`.
-<!-- CITATION-SENTENCE-END -->
 
 ## Responsibilities
 
-<!-- Dynamic loading used here because the focus set is unbounded (security, performance, architecture, etc.) — preloading all focus skills in frontmatter would load unused skills on every spawn. -->
 1. **Load focus skill**: Before any analysis, invoke the Skill tool: `Skill(skill="devflow:{FOCUS}")` (substituting your assigned focus area). If the Skill invocation fails, proceed with the review using your built-in knowledge — the focus skill provides additional detection patterns but is not required for a useful review.
 2. **Apply Decisions** - Follow `devflow:apply-decisions` (see section above) to scan the index and cite relevant entries in findings.
 3. **Identify changed lines** - Get diff against base branch (main/master/develop/integration/trunk)
@@ -82,7 +79,6 @@ Assess how certain you are that each finding is a real issue (not a false positi
 | 60-79% | Medium | Plausible issue, but depends on context you may not fully see |
 | < 60% | Low | Possible concern, but likely a matter of style or interpretation |
 
-<!-- Confidence threshold also in: shared/agents/synthesizer.md, plugins/devflow-code-review/commands/code-review.md -->
 **Threshold**: Only report findings with ≥80% confidence in Blocking, Should-Fix, and Pre-existing sections. Findings with 60-79% confidence go to the Suggestions section. Findings < 60% are dropped entirely.
 
 ## Consolidation Rules

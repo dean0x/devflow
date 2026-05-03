@@ -230,9 +230,6 @@ Aggregate from all Resolvers:
 
 Extract all knowledge citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Knowledge Citations` section in Phase 8.
 
-<!-- D8: "Record Pitfalls" phase removed — decisions-format skill no longer has Write
-     capability; pitfall recording is handled by the background-learning extractor. -->
-
 ### Phase 6: Simplify
 
 **Produces:** SIMPLIFICATION_RESULT

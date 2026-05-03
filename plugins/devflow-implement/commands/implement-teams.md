@@ -480,9 +480,6 @@ Skip if all touched areas already have matching KBs.
 
 **Failure handling**: Non-blocking. If Knowledge agent crashes, log failure and report results normally.
 
-<!-- D8: "Record Decisions" block removed — decisions-format skill no longer has Write
-     capability; decision recording is handled by the background-learning extractor. -->
-
 ## Architecture
 
 ```

@@ -2,13 +2,6 @@
 description: Process review issues - validate, assess risk, fix low-risk issues, defer high-risk to tech debt
 ---
 
-<!--
-@devflow-design-decision D8
-Phase 6 previously recorded pitfalls retrospectively after reading decisions-format SKILL.
-Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
-from user transcripts by scripts/hooks/background-learning.
--->
-
 # Resolve Command
 
 Process issues from code review reports: validate them (false positive check), assess risk for FIX vs TECH_DEBT decision, and implement fixes for low-risk issues. Defaults to the latest timestamped review directory. Supports multi-worktree auto-discovery.

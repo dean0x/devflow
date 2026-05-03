@@ -32,9 +32,6 @@ If no unresolved review found: halt with "No unresolved review found. Run a revi
 
 Extract branch slug from the directory path.
 
-<!-- Phase 2 rather than Step 0d: ambient mode has no Phase 0 (no worktree
-     discovery, no pre-flight git check, no TARGET_DIR selection — those are
-     handled by Phase 1 here). Same content as resolve.md Step 0d. -->
 ## Phase 2: Load Project Decisions
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE

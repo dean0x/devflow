@@ -2,13 +2,6 @@
 description: Execute a single task through implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
 ---
 
-<!--
-@devflow-design-decision D8
-Phase 10 previously recorded decisions retrospectively after reading decisions-format SKILL.
-Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
-from user transcripts by scripts/hooks/background-learning.
--->
-
 # Implement Command
 
 Orchestrate a single task through implementation by spawning specialized agents. The orchestrator only spawns agents and passes context - all work is done by agents.

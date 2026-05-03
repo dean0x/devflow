@@ -8,17 +8,6 @@ user-invocable: false
 allowed-tools: Read, Grep, Glob
 ---
 
-<!--
-@devflow-design-decision D9
-This skill is a format spec documenting the on-disk format and lock protocol.
-It is NOT invoked by commands. The only writer is scripts/hooks/background-learning
-via json-helper.cjs (render-ready → decisions-append operation).
-Commands that previously used this skill to write decisions (implement Phase 10,
-code-review Phase 5, debug Phase 6, resolve Phase 6) were removed in v2 because
-agent-summaries produced low-signal entries. Decisions are now extracted from user
-transcripts by the background learning system.
--->
-
 # Decisions Format — Format Specification
 
 On-disk format for project decisions files. This is the canonical reference for the
@@ -131,9 +120,7 @@ When writing, the background extractor uses mkdir-based locks:
 
 ## Citation Requirement
 
-<!-- CITATION-SENTENCE-START -->
 When you apply a decision from `.memory/decisions/decisions.md` or avoid a pitfall from `.memory/decisions/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
-<!-- CITATION-SENTENCE-END -->
 
 ---
 

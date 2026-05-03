@@ -52,13 +52,9 @@ You receive from orchestrator:
    - If PRIOR_PHASE_SUMMARY is provided, use it to validate your understanding — actual code is authoritative, summaries are supplementary
    - If `DECISIONS_CONTEXT` is provided, follow `devflow:apply-decisions` to scan the index and Read full bodies on demand. Otherwise, if `.memory/decisions/decisions.md` exists, read it directly. Apply prior architectural decisions relevant to this task.
    - If `DECISIONS_CONTEXT` is `(none)` or absent: if `.memory/decisions/pitfalls.md` exists, scan for pitfalls in files you're about to modify.
-<!-- D25: Citation instruction placed inline in agents — no frontmatter injection -->
-<!-- CITATION-SENTENCE-START -->
 When you apply a decision from `.memory/decisions/decisions.md` or avoid a pitfall from `.memory/decisions/pitfalls.md`, cite the entry ID in your final summary (e.g., 'applying ADR-003' or 'per PF-002') so usage can be tracked for capacity reviews.
-<!-- CITATION-SENTENCE-END -->
    - If `.docs/handoff.md` exists, read it for prior phase context. Cross-reference against actual code — code is authoritative, handoff is supplementary.
 
-<!-- Dynamic loading used here because the domain set is unbounded (TypeScript/Go/Java/Python/Rust/React/etc.) — preloading all variants in frontmatter would load unused skills on every spawn. -->
 2. **Load domain skills**: Before any analysis, invoke the Skill tool for each domain skill matching DOMAIN hint. If a Skill invocation fails, skip that skill and continue — domain skills are optional enhancements, not required for task completion.
    - `backend` (TypeScript): `Skill(skill="devflow:typescript")`, `Skill(skill="devflow:boundary-validation")`
    - `backend` (Go): `Skill(skill="devflow:go")`
