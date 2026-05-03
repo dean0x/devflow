@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { purgeLegacyKnowledgeEntries, purgeAllPreV2KnowledgeEntries } from '../src/cli/utils/legacy-knowledge-purge.js';
+import { purgeLegacyDecisionsEntries, purgeAllPreV2DecisionsEntries } from '../src/cli/utils/legacy-decisions-purge.js';
 
-describe('purgeLegacyKnowledgeEntries', () => {
+describe('purgeLegacyDecisionsEntries', () => {
   let tmpDir: string;
   let memoryDir: string;
   let decisionsDir: string;
@@ -22,13 +22,13 @@ describe('purgeLegacyKnowledgeEntries', () => {
 
   it('returns no-op result when .memory/decisions/ does not exist', async () => {
     const emptyMemory = path.join(tmpDir, 'no-memory');
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir: emptyMemory });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir: emptyMemory });
     expect(result.removed).toBe(0);
     expect(result.files).toEqual([]);
   });
 
   it('returns no-op result when decisions/ exists but both files are absent', async () => {
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir });
     expect(result.removed).toBe(0);
     expect(result.files).toEqual([]);
   });
@@ -49,7 +49,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
 `;
     await fs.writeFile(decisionsPath, content, 'utf-8');
 
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(1);
     expect(result.files).toContain(decisionsPath);
@@ -97,7 +97,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
 `;
     await fs.writeFile(pitfallsPath, content, 'utf-8');
 
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(3);
     expect(result.files).toContain(pitfallsPath);
@@ -131,7 +131,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
 `;
     await fs.writeFile(decisionsPath, content, 'utf-8');
 
-    await purgeLegacyKnowledgeEntries({ memoryDir });
+    await purgeLegacyDecisionsEntries({ memoryDir });
 
     const updated = await fs.readFile(decisionsPath, 'utf-8');
     expect(updated).toContain('<!-- TL;DR: 2 decisions. Key: -->');
@@ -141,7 +141,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
     const projectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
     await fs.writeFile(projectPatternsPath, '# Old patterns', 'utf-8');
 
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(1);
     expect(result.files).toContain(projectPatternsPath);
@@ -149,7 +149,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
   });
 
   it('does not fail when PROJECT-PATTERNS.md is absent', async () => {
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir });
     expect(result.removed).toBe(0);
     expect(result.files).toEqual([]);
   });
@@ -163,7 +163,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
 - **Status**: accepted
 `, 'utf-8');
 
-    await purgeLegacyKnowledgeEntries({ memoryDir });
+    await purgeLegacyDecisionsEntries({ memoryDir });
 
     // Lock directory must be released after the call
     const lockDir = path.join(memoryDir, '.decisions.lock');
@@ -182,8 +182,8 @@ describe('purgeLegacyKnowledgeEntries', () => {
     // Start two concurrent callers — only one can hold the lock at a time.
     // Both should eventually succeed; the second will poll behind the first.
     const [r1, r2] = await Promise.all([
-      purgeLegacyKnowledgeEntries({ memoryDir }),
-      purgeLegacyKnowledgeEntries({ memoryDir }),
+      purgeLegacyDecisionsEntries({ memoryDir }),
+      purgeLegacyDecisionsEntries({ memoryDir }),
     ]);
 
     // Between the two runs, exactly one removal happens (second is a no-op on already-clean file)
@@ -206,7 +206,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
 `;
     await fs.writeFile(decisionsPath, originalContent, 'utf-8');
 
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(0);
     // decisions.md was not listed as modified
@@ -233,7 +233,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
 - **Status**: active
 `, 'utf-8');
 
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(2);
     expect(result.files).toContain(decisionsPath);
@@ -257,7 +257,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
     await fs.symlink(sentinelPath, tmpPath);
 
     // Act: the purge should complete successfully (unlinks stale tmp and retries)
-    await purgeLegacyKnowledgeEntries({ memoryDir });
+    await purgeLegacyDecisionsEntries({ memoryDir });
 
     // Assert: the sentinel file was NOT overwritten — the symlink was not followed
     const sentinelContent = await fs.readFile(sentinelPath, 'utf-8');
@@ -269,7 +269,7 @@ describe('purgeLegacyKnowledgeEntries', () => {
   });
 });
 
-describe('purgeAllPreV2KnowledgeEntries', () => {
+describe('purgeAllPreV2DecisionsEntries', () => {
   let tmpDir: string;
   let memoryDir: string;
   let decisionsDir: string;
@@ -287,7 +287,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
 
   it('returns no-op result when .memory/decisions/ does not exist', async () => {
     const emptyMemory = path.join(tmpDir, 'no-memory');
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir: emptyMemory });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir: emptyMemory });
     expect(result.removed).toBe(0);
     expect(result.files).toEqual([]);
   });
@@ -304,7 +304,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
 `;
     await fs.writeFile(decisionsPath, content, 'utf-8');
 
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(1);
     expect(result.files).toContain(decisionsPath);
@@ -324,7 +324,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
 `;
     await fs.writeFile(pitfallsPath, content, 'utf-8');
 
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(1);
     expect(result.files).toContain(pitfallsPath);
@@ -344,7 +344,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
 `;
     await fs.writeFile(decisionsPath, content, 'utf-8');
 
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(0);
     expect(result.files).not.toContain(decisionsPath);
@@ -377,7 +377,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
 `;
     await fs.writeFile(decisionsPath, content, 'utf-8');
 
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(2);
     expect(result.files).toContain(decisionsPath);
@@ -415,7 +415,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
 `;
     await fs.writeFile(pitfallsPath, content, 'utf-8');
 
-    await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     const updated = await fs.readFile(pitfallsPath, 'utf-8');
     // 2 seeded removed, 2 self-learning remain
@@ -436,7 +436,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
 - **Source**: /code-review (seed)
 `, 'utf-8');
 
-    await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     // Lock directory must be released after the call
     const lockDir = path.join(memoryDir, '.decisions.lock');
@@ -456,8 +456,8 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
     // Start two concurrent callers — only one can hold the lock at a time.
     // Both should eventually succeed; the second will poll behind the first.
     const [r1, r2] = await Promise.all([
-      purgeAllPreV2KnowledgeEntries({ memoryDir }),
-      purgeAllPreV2KnowledgeEntries({ memoryDir }),
+      purgeAllPreV2DecisionsEntries({ memoryDir }),
+      purgeAllPreV2DecisionsEntries({ memoryDir }),
     ]);
 
     // Between the two runs, exactly one removal happens (second is a no-op on already-clean file)
@@ -487,7 +487,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
     await fs.symlink(sentinelPath, tmpPath);
 
     // Act: the purge should complete successfully
-    await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     // Assert: the sentinel file was NOT overwritten
     const sentinelContent = await fs.readFile(sentinelPath, 'utf-8');
@@ -502,7 +502,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
     const projectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
     await fs.writeFile(projectPatternsPath, '# Old patterns', 'utf-8');
 
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     // v3 should not touch PROJECT-PATTERNS.md — it is v2's responsibility
     await expect(fs.access(projectPatternsPath)).resolves.toBeUndefined();
@@ -530,7 +530,7 @@ describe('purgeAllPreV2KnowledgeEntries', () => {
     await fs.writeFile(decisionsPath, decisionsContent, 'utf-8');
     await fs.writeFile(pitfallsPath, pitfallsContent, 'utf-8');
 
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir });
 
     expect(result.removed).toBe(0);
     expect(result.files).toEqual([]);

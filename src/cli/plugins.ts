@@ -408,8 +408,9 @@ export const LEGACY_SKILL_NAMES: string[] = [
   // v2.x knowledge→decisions rename: old namespaced skill names for cleanup
   'devflow:apply-knowledge',
   'devflow:knowledge-persistence',
-  // v2.x knowledge→decisions rename: current bare name for pre-namespace installs
+  // v2.x knowledge→decisions rename: current bare names for pre-namespace installs
   'apply-decisions',
+  'decisions-format',
 ];
 
 /**
