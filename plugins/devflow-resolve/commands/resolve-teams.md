@@ -228,7 +228,7 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-Extract all knowledge citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Knowledge Citations` section in Phase 8.
+Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Decisions Citations` section in Phase 8.
 
 ### Phase 6: Simplify
 
@@ -372,7 +372,7 @@ Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
 **Review**: {TARGET_DIR}
 **Command**: /resolve
 
-## Knowledge Citations
+## Decisions Citations
 
 - applies ADR-{NNN} — {batch-id}, {issue-id}
 - avoids PF-{NNN} — {batch-id}, {issue-id}

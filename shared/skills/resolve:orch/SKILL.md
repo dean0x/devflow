@@ -105,7 +105,7 @@ Spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
 Write `resolution-summary.md` to the same timestamped review directory.
 
-The report includes a `## Knowledge Citations` section at the top (before Statistics) listing all unique `applies ADR-NNN` and `avoids PF-NNN` references extracted from Resolver Reasoning columns. Omit the section entirely if no citations were made.
+The report includes a `## Decisions Citations` section at the top (before Statistics) listing all unique `applies ADR-NNN` and `avoids PF-NNN` references extracted from Resolver Reasoning columns. Omit the section entirely if no citations were made.
 
 Report to user:
 - Issues resolved vs deferred vs false positives

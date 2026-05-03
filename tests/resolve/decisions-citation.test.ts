@@ -119,8 +119,8 @@ describe('resolve.md — base command', () => {
     expect(phase4Section).toContain('DECISIONS_CONTEXT');
   });
 
-  it('Phase 5 or Phase 8 mentions Knowledge Citations in resolution-summary.md (D-B)', () => {
-    expect(content).toContain('Knowledge Citations');
+  it('Phase 5 or Phase 8 mentions Decisions Citations in resolution-summary.md (D-B)', () => {
+    expect(content).toContain('Decisions Citations');
   });
 
   it('Step 0d is nested inside the per-worktree Phase 0 section (multi-worktree constraint)', () => {
@@ -148,8 +148,8 @@ describe('resolve-teams.md — teams variant parity', () => {
     expect(phase4Section).toContain('DECISIONS_CONTEXT');
   });
 
-  it('mentions Knowledge Citations for resolution-summary.md (D-B)', () => {
-    expect(content).toContain('Knowledge Citations');
+  it('mentions Decisions Citations for resolution-summary.md (D-B)', () => {
+    expect(content).toContain('Decisions Citations');
   });
 });
 
@@ -169,9 +169,9 @@ describe('resolve:orch SKILL.md — ambient mode parity', () => {
     expect(phase5Section).toContain('DECISIONS_CONTEXT');
   });
 
-  it('Phase 7 (Report) mentions Knowledge Citations (D-B)', () => {
+  it('Phase 7 (Report) mentions Decisions Citations (D-B)', () => {
     const phase7Section = extractSection(content, '## Phase 7', '## Error Handling');
-    expect(phase7Section).toContain('Knowledge Citations');
+    expect(phase7Section).toContain('Decisions Citations');
   });
 });
 
@@ -201,11 +201,11 @@ describe('resolver.md — Input Context and Apply Decisions section', () => {
 
   it('DECISIONS_CONTEXT is marked optional in Input Context', () => {
     const inputContextSection = extractSection(content, '## Input Context', '\n## ');
-    const knowledgeIdx = inputContextSection.indexOf('DECISIONS_CONTEXT');
-    if (knowledgeIdx === -1) throw new Error('DECISIONS_CONTEXT not found in Input Context section');
+    const decisionsIdx = inputContextSection.indexOf('DECISIONS_CONTEXT');
+    if (decisionsIdx === -1) throw new Error('DECISIONS_CONTEXT not found in Input Context section');
     const surroundingText = inputContextSection.slice(
-      Math.max(0, knowledgeIdx - 20),
-      Math.min(inputContextSection.length, knowledgeIdx + 120)
+      Math.max(0, decisionsIdx - 20),
+      Math.min(inputContextSection.length, decisionsIdx + 120)
     );
     expect(surroundingText).toMatch(/optional|if provided|when provided|non-empty/i);
   });
