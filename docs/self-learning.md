@@ -98,9 +98,9 @@ The reconciler detects and heals these orphans automatically:
 
 The `healed` field is present in all three reconcile-manifest output shapes (main path and both early-return paths) and is backward-compatible — callers that discard the output are unaffected.
 
-## Knowledge Index + On-Demand Read Pattern
+## Decisions Index + On-Demand Read Pattern
 
-Knowledge consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
+Decisions consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
 
 ### Step 1: Load compact index at orchestrator
 
@@ -202,7 +202,7 @@ Use `devflow learn --configure` for interactive setup, or edit `.memory/learning
 
 ## Key Design Decisions
 
-- **D8**: Knowledge writers removed from commands — agent-summaries at command-end were low-signal. Knowledge now extracted directly from user transcripts.
+- **D8**: Decisions writers removed from commands — agent-summaries at command-end were low-signal. Decisions now extracted directly from user transcripts.
 - **D9**: `decisions-format` SKILL is a format specification only. The actual writer is `scripts/hooks/background-learning` via `json-helper.cjs render-ready`.
 - **D13**: User edits to generated artifacts are ignored by the reconciler — your edits are authoritative.
 - **D15**: Soft cap + HUD attention counter instead of auto-pruning. Human judgment is required for deprecation.

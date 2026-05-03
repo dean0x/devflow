@@ -32,7 +32,7 @@ Decisions support status transitions:
 - `Superseded by ADR-NNN` — replaced by a newer decision
 - `Deprecated` — no longer relevant, kept for history
 
-Pitfalls have no status field — they remain until manually removed.
+Pitfalls support status: `Active` (default) → `Deprecated` (set by `devflow learn --review`).
 
 ## Deduplication Logic (Pitfalls Only)
 

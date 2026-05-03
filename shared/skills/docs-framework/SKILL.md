@@ -114,8 +114,8 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Resolver | `.docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Creates new in timestamped dir |
 | Code-review cmd | `.docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Knowledge (decisions) | `.memory/decisions/decisions.md` | Append-only (ADR-NNN sequential IDs) |
-| Knowledge (pitfalls) | `.memory/decisions/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
+| Decisions | `.memory/decisions/decisions.md` | Append-only (ADR-NNN sequential IDs) |
+| Pitfalls | `.memory/decisions/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
 | Designer (via /plan) | `.docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 
 ### Agents That Don't Persist
@@ -145,7 +145,7 @@ When creating or modifying persisting agents:
 This framework is used by:
 - **Review agents**: Creates review reports
 - **Working Memory hooks**: Auto-maintains `.memory/WORKING-MEMORY.md`
-- **Command flows**: `/implement` appends ADRs to `decisions.md`; `/code-review`, `/debug`, `/resolve` append PFs to `pitfalls.md`
+- **Background extractor**: background-learning via json-helper.cjs render-ready appends ADRs/PFs to `decisions.md` / `pitfalls.md`
 
 All persisting agents should load this skill to ensure consistent documentation.
 
