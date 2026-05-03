@@ -2,7 +2,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { isClaudeCliAvailable } from '../../utils/cli.js';
 import { runKbAgent, loadKnowledgeContext } from '../../utils/kb-agent.js';
-import { featureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
+import { getFeatureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
 
 export async function handleRefresh(slug?: string): Promise<void> {
   p.intro(color.cyan(slug ? `Refresh KB: ${slug}` : 'Refresh Stale KBs'));
@@ -18,15 +18,15 @@ export async function handleRefresh(slug?: string): Promise<void> {
 
   // Determine which slugs to refresh
   // Load index once and reuse across staleness check + listKBs to avoid double reads
-  const index = featureKb.loadIndex(worktreePath);
-  const kbs = featureKb.listKBs(worktreePath, index);
+  const index = getFeatureKb().loadIndex(worktreePath);
+  const kbs = getFeatureKb().listKBs(worktreePath, index);
 
   let slugsToRefresh: string[];
   let stalenessMap: Record<string, { stale: boolean; changedFiles: string[] }> | undefined;
   if (slug) {
     slugsToRefresh = [slug];
   } else {
-    stalenessMap = featureKb.checkAllStaleness(worktreePath, index);
+    stalenessMap = getFeatureKb().checkAllStaleness(worktreePath, index);
     slugsToRefresh = Object.entries(stalenessMap)
       .filter(([, info]) => info.stale)
       .map(([s]) => s);
@@ -46,7 +46,7 @@ export async function handleRefresh(slug?: string): Promise<void> {
     const s = p.spinner();
     s.start(`Refreshing ${kbSlug}...`);
 
-    const staleInfo = stalenessMap?.[kbSlug] ?? featureKb.checkStaleness(worktreePath, kbSlug);
+    const staleInfo = stalenessMap?.[kbSlug] ?? getFeatureKb().checkStaleness(worktreePath, kbSlug);
     const kbEntry = kbs.find((k: { slug: string }) => k.slug === kbSlug);
     const featureName = kbEntry?.name ?? kbSlug;
     const kbDirectories = kbEntry?.directories ?? [];
@@ -81,7 +81,7 @@ export async function handleRefresh(slug?: string): Promise<void> {
     try {
       const { sidecar } = await runKbAgent({ worktreePath, slug: kbSlug, prompt, sidecarName: '.refresh-result.json' });
 
-      featureKb.updateIndex(worktreePath, {
+      getFeatureKb().updateIndex(worktreePath, {
         slug: kbSlug,
         name: featureName,
         directories: kbDirectories,

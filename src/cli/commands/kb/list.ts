@@ -1,15 +1,15 @@
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { featureKb, getWorktreePath } from './shared.js';
+import { getFeatureKb, getWorktreePath } from './shared.js';
 
 export async function handleList(): Promise<void> {
   p.intro(color.cyan('Feature Knowledge Bases'));
 
   const worktreePath = await getWorktreePath();
   // Load index once and pass to both functions to avoid double file reads
-  const index = featureKb.loadIndex(worktreePath);
-  const kbs = featureKb.listKBs(worktreePath, index);
-  const staleness = featureKb.checkAllStaleness(worktreePath, index);
+  const index = getFeatureKb().loadIndex(worktreePath);
+  const kbs = getFeatureKb().listKBs(worktreePath, index);
+  const staleness = getFeatureKb().checkAllStaleness(worktreePath, index);
 
   if (kbs.length === 0) {
     p.log.info(

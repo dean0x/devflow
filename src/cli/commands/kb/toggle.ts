@@ -5,7 +5,7 @@ import color from 'picocolors';
 import type { HookMatcher, Settings } from '../../utils/hooks.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../utils/paths.js';
 import { readManifest, writeManifest } from '../../utils/manifest.js';
-import { featureKb, getWorktreePath } from './shared.js';
+import { getFeatureKb, getWorktreePath } from './shared.js';
 
 const KB_HOOK_MARKER = 'session-end-kb-refresh';
 
@@ -183,7 +183,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     } catch { /* not disabled */ }
 
     // Count KBs
-    const kbs = featureKb.listKBs(worktreePath);
+    const kbs = getFeatureKb().listKBs(worktreePath);
 
     const enabled = hookPresent && !disabled;
     p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);

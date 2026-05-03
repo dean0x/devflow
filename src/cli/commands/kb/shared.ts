@@ -24,16 +24,23 @@ export interface FeatureKbModule {
   updateIndex: (worktreePath: string, entry: { slug: string; name: string; description?: string; directories: string[]; referencedFiles: string[]; createdBy?: string }, lockTimeoutMs?: number) => void;
 }
 
-export const featureKb: FeatureKbModule = _require(
-  path.join(getDevFlowDirectory(), 'scripts', 'hooks', 'lib', 'feature-kb.cjs')
-);
+let _featureKb: FeatureKbModule | undefined;
+
+export function getFeatureKb(): FeatureKbModule {
+  if (!_featureKb) {
+    _featureKb = _require(
+      path.join(getDevFlowDirectory(), 'scripts', 'hooks', 'lib', 'feature-kb.cjs'),
+    );
+  }
+  return _featureKb!;
+}
 
 /**
  * Validate a KB slug and exit with an error message if invalid.
  */
 export function exitOnInvalidSlug(slug: string): void {
   try {
-    featureKb.validateSlug(slug);
+    getFeatureKb().validateSlug(slug);
   } catch (err) {
     p.log.error(err instanceof Error ? err.message : String(err));
     process.exit(1);

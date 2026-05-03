@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { featureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
+import { getFeatureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
 
 export async function handleRemove(slug: string): Promise<void> {
   exitOnInvalidSlug(slug);
@@ -18,7 +18,7 @@ export async function handleRemove(slug: string): Promise<void> {
   const worktreePath = await getWorktreePath();
 
   try {
-    featureKb.removeEntry(worktreePath, slug);
+    getFeatureKb().removeEntry(worktreePath, slug);
     p.log.success(`KB '${slug}' removed`);
   } catch (err) {
     p.log.error(`Failed to remove KB: ${err instanceof Error ? err.message : String(err)}`);

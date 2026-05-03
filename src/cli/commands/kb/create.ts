@@ -2,7 +2,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { isClaudeCliAvailable } from '../../utils/cli.js';
 import { runKbAgent, loadKnowledgeContext } from '../../utils/kb-agent.js';
-import { featureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
+import { getFeatureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
 
 export async function handleCreate(slug: string): Promise<void> {
   exitOnInvalidSlug(slug);
@@ -64,7 +64,7 @@ export async function handleCreate(slug: string): Promise<void> {
   try {
     const { sidecar } = await runKbAgent({ worktreePath, slug, prompt, sidecarName: '.create-result.json' });
 
-    featureKb.updateIndex(worktreePath, {
+    getFeatureKb().updateIndex(worktreePath, {
       slug,
       name: name as string,
       directories,
