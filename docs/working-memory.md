@@ -36,7 +36,7 @@ devflow memory --status                # Check current state
 ├── .learning-session-count   # Session IDs pending batch (one per line)
 ├── .learning-batch-ids       # Session IDs for current batch run
 ├── .learning-notified-at     # New artifact notification marker (epoch timestamp)
-└── knowledge/
+└── decisions/
     ├── decisions.md           # Architectural decisions (ADR-NNN, append-only)
     └── pitfalls.md            # Known pitfalls (PF-NNN, area-specific gotchas)
 ```
