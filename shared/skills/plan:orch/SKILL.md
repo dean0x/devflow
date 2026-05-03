@@ -25,7 +25,7 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 For GUIDED depth, the main session performs planning directly:
 
 1. **Discover** — If the planning question is open-ended, ask clarifying questions via AskUserQuestion and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
-2. **Load Knowledge** — Load `DECISIONS_CONTEXT` via `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
+2. **Load Decisions** — Load `DECISIONS_CONTEXT` via `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
 3. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
 4. **Design** — Using Skimmer findings + loaded pattern/design skills + `DECISIONS_CONTEXT` + `FEATURE_KNOWLEDGE`, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 5. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.

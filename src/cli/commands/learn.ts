@@ -933,7 +933,7 @@ export const learnCommand = new Command('learn')
 
             if (p.isCancel(action)) {
               // Persist any changes made so far before exiting so the user keeps
-              // partial progress (and log/knowledge stay consistent).
+              // partial progress (and log/decisions stay consistent).
               await writeObservations(logPath, updatedObservations);
               p.cancel('Review cancelled — partial progress saved.');
               return;
@@ -1181,8 +1181,8 @@ export const learnCommand = new Command('learn')
           const jsonHelperPath = path.join(devflowDir, 'scripts', 'hooks', 'json-helper.cjs');
 
           for (const [filePath, type, notifKey] of [
-            [decisionsPath, 'decision', 'knowledge-capacity-decisions'],
-            [pitfallsPath, 'pitfall', 'knowledge-capacity-pitfalls'],
+            [decisionsPath, 'decision', 'decisions-capacity-decisions'],
+            [pitfallsPath, 'pitfall', 'decisions-capacity-pitfalls'],
           ] as const) {
             try {
               // D23: Use count-active op via json-helper.cjs (single source of truth)
@@ -1248,7 +1248,7 @@ export const learnCommand = new Command('learn')
       for (const key of activeKeys) {
         const entry = notifications[key];
         entry.dismissed_at_threshold = entry.threshold;
-        const fileType = key.replace('knowledge-capacity-', '');
+        const fileType = key.replace('decisions-capacity-', '');
         p.log.success(`Dismissed capacity notification for ${fileType} (at threshold ${entry.threshold}).`);
       }
 

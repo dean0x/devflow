@@ -22,7 +22,7 @@ Agent pipeline for EXPLORE intent in ambient GUIDED and ORCHESTRATED modes. Code
 
 For GUIDED depth, the main session performs exploration directly:
 
-1. **Load Knowledge** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.features/index.json` if it exists. Based on the exploration question, identify relevant KBs and read them. Use both locally to frame exploration. Set `FEATURE_KNOWLEDGE = (none)` if none are relevant.
+1. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.features/index.json` if it exists. Based on the exploration question, identify relevant KBs and read them. Use both locally to frame exploration. Set `FEATURE_KNOWLEDGE = (none)` if none are relevant.
 2. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
 3. **Trace** — Using Skimmer findings + `FEATURE_KNOWLEDGE`, trace the flow or analyze the subsystem directly in main session. Follow call chains, read key files, map integration points.
 4. **Present** — Deliver structured findings using the Output format below. Use AskUserQuestion to offer drill-down into specific areas.
@@ -161,7 +161,7 @@ Structured exploration findings with concrete code references:
 
 Before presenting findings, verify every phase was announced:
 
-- [ ] Phase 1: Load Knowledge (Orchestrator-Local) → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (orchestrator-local, not passed to workers)
+- [ ] Phase 1: Load Decisions (Orchestrator-Local) → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (orchestrator-local, not passed to workers)
 - [ ] Phase 2: Orient → ORIENT_OUTPUT captured
 - [ ] Phase 3: Explore → EXPLORE_OUTPUT captured
 - [ ] Phase 4: Synthesize → MERGED_FINDINGS captured

@@ -108,7 +108,7 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 Before reporting results, verify every phase was announced:
 
-- [ ] Phase 1: Load Knowledge Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
+- [ ] Phase 1: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
 - [ ] Phase 2: Hypothesize → HYPOTHESES captured (3-5 distinct)
 - [ ] Phase 3: Investigate → INVESTIGATION_RESULTS captured per hypothesis
 - [ ] Phase 4: Converge → CONVERGENCE_DECISION captured
