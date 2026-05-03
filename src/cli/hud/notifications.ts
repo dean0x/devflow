@@ -54,8 +54,8 @@ export function getActiveNotification(cwd: string): NotificationData | null {
 
   if (!worst) return null;
 
-  // Extract file type from key: "knowledge-capacity-decisions" → "decisions"
-  const fileType = worst.key.replace('knowledge-capacity-', '');
+  // Extract file type from key: "decisions-capacity-decisions" → "decisions"
+  const fileType = worst.key.replace('decisions-capacity-', '');
   const count = worst.entry.count ?? 0;
   const ceiling = worst.entry.ceiling ?? 100;
 

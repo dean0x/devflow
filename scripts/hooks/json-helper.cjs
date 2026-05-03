@@ -389,7 +389,7 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
  * Handles first-run seed, threshold crossing, severity escalation, and re-fire on dismiss.
  *
  * @param {string} memoryDir
- * @param {string} notifKey - e.g. 'knowledge-capacity-decisions'
+ * @param {string} notifKey - e.g. 'decisions-capacity-decisions'
  * @param {number} previousCount - Active count before the append
  * @param {number} newCount - Active count after the append
  */
@@ -1287,7 +1287,7 @@ try {
               const previousCount = countActiveHeadings(existingContent, obs.type);
 
               const memoryDir = path.join(baseDir, '.memory');
-              const notifKey = isDecision ? 'knowledge-capacity-decisions' : 'knowledge-capacity-pitfalls';
+              const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
 
               // D17: hard ceiling at DECISIONS_HARD_CEILING (100); softCapExceeded repurposed
               // from old 50-entry soft cap — now signals the hard ceiling was hit.
@@ -1779,7 +1779,7 @@ try {
         registerUsageEntry(memoryDir, anchorId);
 
         // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
-        const notifKey = isDecision ? 'knowledge-capacity-decisions' : 'knowledge-capacity-pitfalls';
+        const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
         updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount);
 
         console.log(JSON.stringify({ anchorId, file: decisionsFile }));

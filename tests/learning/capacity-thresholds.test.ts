@@ -140,7 +140,7 @@ describe('notifications read/write', () => {
   });
 
   it('round-trips notification data', () => {
-    const data = { 'knowledge-capacity-decisions': { active: true, threshold: 50, count: 50, ceiling: 100 } };
+    const data = { 'decisions-capacity-decisions': { active: true, threshold: 50, count: 50, ceiling: 100 } };
     helpers.writeNotifications(memoryDir, data);
     expect(helpers.readNotifications(memoryDir)).toEqual(data);
   });
@@ -220,8 +220,8 @@ describe('render-ready capacity integration', () => {
     const notifPath = path.join(tmpDir, '.memory', '.notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
-    expect(notif['knowledge-capacity-decisions'].active).toBe(true);
-    expect(notif['knowledge-capacity-decisions'].threshold).toBe(50);
+    expect(notif['decisions-capacity-decisions'].active).toBe(true);
+    expect(notif['decisions-capacity-decisions'].threshold).toBe(50);
   });
 
   it('appending at 99→100 succeeds (ceiling not yet hit)', () => {
@@ -296,9 +296,9 @@ describe('render-ready capacity integration', () => {
     const notifPath = path.join(tmpDir, '.memory', '.notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
-    expect(notif['knowledge-capacity-decisions'].active).toBe(true);
+    expect(notif['decisions-capacity-decisions'].active).toBe(true);
     // After seed, previous_count = 0 so all thresholds up to 61 fire
-    expect(notif['knowledge-capacity-decisions'].threshold).toBe(60);
+    expect(notif['decisions-capacity-decisions'].threshold).toBe(60);
   });
 
   it('TL;DR shows active-only count (D26)', () => {

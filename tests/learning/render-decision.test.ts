@@ -155,8 +155,8 @@ describe('render-ready — decision type', () => {
     const notifPath = path.join(tmpDir, '.memory', '.notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
-    expect(notif['knowledge-capacity-decisions']).toBeDefined();
-    expect(notif['knowledge-capacity-decisions'].active).toBe(true);
+    expect(notif['decisions-capacity-decisions']).toBeDefined();
+    expect(notif['decisions-capacity-decisions'].active).toBe(true);
   });
 
   it('sets softCapExceeded at hard ceiling (100 entries)', () => {

@@ -371,7 +371,7 @@ describe('--dismiss-capacity notification', () => {
   it('writeFileAtomic persists notification dismissal', async () => {
     const notifPath = path.join(memoryDir, '.notifications.json');
     const data: Record<string, any> = {
-      'knowledge-capacity-decisions': {
+      'decisions-capacity-decisions': {
         active: true, threshold: 70, count: 72, ceiling: 100,
         dismissed_at_threshold: null, severity: 'warning',
       },
@@ -379,10 +379,10 @@ describe('--dismiss-capacity notification', () => {
     fs.writeFileSync(notifPath, JSON.stringify(data));
 
     // Simulate dismiss: set dismissed_at_threshold = threshold
-    data['knowledge-capacity-decisions'].dismissed_at_threshold = 70;
+    data['decisions-capacity-decisions'].dismissed_at_threshold = 70;
     fs.writeFileSync(notifPath, JSON.stringify(data, null, 2) + '\n');
 
     const read = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
-    expect(read['knowledge-capacity-decisions'].dismissed_at_threshold).toBe(70);
+    expect(read['decisions-capacity-decisions'].dismissed_at_threshold).toBe(70);
   });
 });
