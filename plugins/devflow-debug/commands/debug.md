@@ -5,9 +5,9 @@ description: Debug issues using competing hypothesis investigation with parallel
 <!--
 @devflow-design-decision D8
 Phase 6 previously recorded pitfalls retrospectively after reading decisions-format SKILL.
-Removed in v2 because agent-summaries produced low-signal entries. Knowledge is now extracted
-from user transcripts by scripts/hooks/background-learning. Phase 1 (Load Project Knowledge)
-is retained — it reads existing knowledge for context, which is still valid.
+Removed in v2 because agent-summaries produced low-signal entries. Decisions are now extracted
+from user transcripts by scripts/hooks/background-learning. Phase 1 (Load Project Decisions)
+is retained — it reads existing decisions for context, which is still valid.
 -->
 
 # Debug Command
