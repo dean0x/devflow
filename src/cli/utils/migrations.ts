@@ -98,10 +98,10 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
   description: 'Remove pre-v2 low-signal knowledge entries (ADR-002, PF-001, PF-003, PF-005)',
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
-    const { purgeLegacyKnowledgeEntries } = await import('./legacy-knowledge-purge.js');
-    const result = await purgeLegacyKnowledgeEntries({ memoryDir: ctx.memoryDir });
+    const { purgeLegacyDecisionsEntries } = await import('./legacy-decisions-purge.js');
+    const result = await purgeLegacyDecisionsEntries({ memoryDir: ctx.memoryDir });
     const infos = result.removed > 0
-      ? [`Purged ${result.removed} legacy knowledge entry(ies) in ${result.files.length} file(s)`]
+      ? [`Purged ${result.removed} legacy decisions entry(ies) in ${result.files.length} file(s)`]
       : [];
     return { infos, warnings: [] };
   },
@@ -123,92 +123,12 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
   description: 'Remove all pre-v2 seeded knowledge entries (entries lacking self-learning: source marker)',
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
-    const { purgeAllPreV2KnowledgeEntries } = await import('./legacy-knowledge-purge.js');
-    const result = await purgeAllPreV2KnowledgeEntries({ memoryDir: ctx.memoryDir });
+    const { purgeAllPreV2DecisionsEntries } = await import('./legacy-decisions-purge.js');
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir: ctx.memoryDir });
     const infos = result.removed > 0
-      ? [`Purged ${result.removed} pre-v2 knowledge entry(ies) in ${result.files.length} file(s)`]
+      ? [`Purged ${result.removed} pre-v2 decisions entry(ies) in ${result.files.length} file(s)`]
       : [];
     return { infos, warnings: [] };
-  },
-};
-
-const MIGRATION_RENAME_KNOWLEDGE_TO_DECISIONS: Migration<'per-project'> = {
-  id: 'rename-knowledge-to-decisions',
-  description: 'Rename .memory/knowledge/ to .memory/decisions/ and update manifest/log paths',
-  scope: 'per-project',
-  run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
-    const infos: string[] = [];
-    const warnings: string[] = [];
-    const memoryDir = ctx.memoryDir;
-
-    const oldDir = path.join(memoryDir, 'knowledge');
-    const newDir = path.join(memoryDir, 'decisions');
-
-    let oldDirExists = false;
-    try {
-      await fs.stat(oldDir);
-      oldDirExists = true;
-    } catch { /* does not exist */ }
-
-    if (!oldDirExists) {
-      let newDirExists = false;
-      try {
-        await fs.stat(newDir);
-        newDirExists = true;
-      } catch { /* does not exist */ }
-      if (!newDirExists) return { infos, warnings };
-    }
-
-    if (oldDirExists) {
-      let newDirExists = false;
-      try {
-        await fs.stat(newDir);
-        newDirExists = true;
-      } catch { /* does not exist */ }
-
-      if (!newDirExists) {
-        await fs.rename(oldDir, newDir);
-        infos.push('Renamed .memory/knowledge/ to .memory/decisions/');
-      } else {
-        warnings.push('.memory/decisions/ already exists — skipping directory rename');
-      }
-    }
-
-    const lockRenames: [string, string][] = [
-      ['.knowledge.lock', '.decisions.lock'],
-      ['.knowledge-usage.json', '.decisions-usage.json'],
-      ['.knowledge-usage.lock', '.decisions-usage.lock'],
-    ];
-    for (const [oldName, newName] of lockRenames) {
-      const oldPath = path.join(memoryDir, oldName);
-      const newPath = path.join(memoryDir, newName);
-      try {
-        await fs.stat(oldPath);
-        await fs.rename(oldPath, newPath);
-      } catch { /* does not exist — skip */ }
-    }
-
-    const manifestPath = path.join(memoryDir, '.learning-manifest.json');
-    try {
-      const raw = await fs.readFile(manifestPath, 'utf-8');
-      const updated = raw.replace(/\.memory\/knowledge\//g, '.memory/decisions/');
-      if (updated !== raw) {
-        await writeFileAtomicExclusive(manifestPath, updated);
-        infos.push('Updated manifest paths from .memory/knowledge/ to .memory/decisions/');
-      }
-    } catch { /* file does not exist — skip */ }
-
-    const logPath = path.join(memoryDir, 'learning-log.jsonl');
-    try {
-      const raw = await fs.readFile(logPath, 'utf-8');
-      const updated = raw.replace(/\.memory\/knowledge\//g, '.memory/decisions/');
-      if (updated !== raw) {
-        await writeFileAtomicExclusive(logPath, updated);
-        infos.push('Updated learning log artifact paths from .memory/knowledge/ to .memory/decisions/');
-      }
-    } catch { /* file does not exist — skip */ }
-
-    return { infos, warnings };
   },
 };
 
@@ -232,7 +152,6 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
-  MIGRATION_RENAME_KNOWLEDGE_TO_DECISIONS,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
@@ -483,7 +402,7 @@ async function runPerProjectMigration(
  * D32: Always-run-unapplied semantics (no fresh-vs-upgrade branch).
  * Fresh installs with no decisions files are effectively no-ops — each migration
  * helper short-circuits when the data it targets doesn't exist (e.g.,
- * purgeLegacyKnowledgeEntries returns immediately when `.memory/decisions/` is
+ * purgeLegacyDecisionsEntries returns immediately when `.memory/decisions/` is
  * absent; migrateShadowOverridesRegistry skips when no old-name directories exist).
  * Adding a fresh-vs-upgrade branch would require detecting "is this a fresh
  * install" reliably, which is harder than it appears (partial installs, reinstalls,

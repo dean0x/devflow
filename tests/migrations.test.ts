@@ -146,20 +146,6 @@ describe('MIGRATIONS', () => {
     expect(v3Index).toBeGreaterThan(v2Index);
   });
 
-  it('contains rename-knowledge-to-decisions with per-project scope', () => {
-    const m = MIGRATIONS.find(m => m.id === 'rename-knowledge-to-decisions');
-    expect(m).toBeDefined();
-    expect(m?.scope).toBe('per-project');
-    expect(m?.description).toBeTruthy();
-    expect(typeof m?.run).toBe('function');
-  });
-
-  it('rename-knowledge-to-decisions is after purge-legacy-knowledge-v3 in the MIGRATIONS array', () => {
-    const v3Index = MIGRATIONS.findIndex(m => m.id === 'purge-legacy-knowledge-v3');
-    const renameIndex = MIGRATIONS.findIndex(m => m.id === 'rename-knowledge-to-decisions');
-    expect(v3Index).toBeGreaterThanOrEqual(0);
-    expect(renameIndex).toBeGreaterThan(v3Index);
-  });
 });
 
 describe('runMigrations', () => {
