@@ -17,9 +17,9 @@ export async function handleRefresh(slug?: string): Promise<void> {
   const worktreePath = await getWorktreePath();
 
   // Determine which slugs to refresh
-  // Load index once and reuse across staleness check + listKBs to avoid double reads
+  // Load index once and reuse across staleness check + listEntries to avoid double reads
   const index = getFeatureKnowledge().loadIndex(worktreePath);
-  const kbs = getFeatureKnowledge().listKBs(worktreePath, index);
+  const kbs = getFeatureKnowledge().listEntries(worktreePath, index);
 
   let slugsToRefresh: string[];
   let stalenessMap: Record<string, { stale: boolean; changedFiles: string[] }> | undefined;

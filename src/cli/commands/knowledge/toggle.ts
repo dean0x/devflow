@@ -183,7 +183,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     } catch { /* not disabled */ }
 
     // Count knowledge bases
-    const kbs = getFeatureKnowledge().listKBs(worktreePath);
+    const kbs = getFeatureKnowledge().listEntries(worktreePath);
 
     const enabled = hookPresent && !disabled;
     p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);

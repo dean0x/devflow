@@ -15,7 +15,7 @@ export type KnowledgeEntry = { slug: string; name: string; directories: string[]
 
 export interface FeatureKnowledgeModule {
   loadIndex: (worktreePath: string) => KnowledgeIndex;
-  listKBs: (worktreePath: string, cachedIndex?: KnowledgeIndex) => KnowledgeEntry[];
+  listEntries: (worktreePath: string, cachedIndex?: KnowledgeIndex) => KnowledgeEntry[];
   checkAllStaleness: (worktreePath: string, cachedIndex?: KnowledgeIndex) => Record<string, { stale: boolean; changedFiles: string[] }>;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];

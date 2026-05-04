@@ -8,7 +8,7 @@ export async function handleCheck(): Promise<void> {
   const worktreePath = await getWorktreePath();
   // Load index once and pass to both functions to avoid double file reads
   const index = getFeatureKnowledge().loadIndex(worktreePath);
-  const kbs = getFeatureKnowledge().listKBs(worktreePath, index);
+  const kbs = getFeatureKnowledge().listEntries(worktreePath, index);
   const staleness = getFeatureKnowledge().checkAllStaleness(worktreePath, index);
 
   if (kbs.length === 0) {
