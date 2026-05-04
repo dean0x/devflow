@@ -1,6 +1,7 @@
 ---
 name: apply-decisions
 description: Canonical algorithm for consuming DECISIONS_CONTEXT index — scan index, identify relevant entries, Read full bodies on demand, cite verbatim IDs inline.
+user-invocable: false
 allowed-tools: Read
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: feature-kb
 description: Structures codebase exploration into a feature knowledge base
-trigger: agent-loaded
+user-invocable: false
 allowed-tools:
   - Read
   - Grep

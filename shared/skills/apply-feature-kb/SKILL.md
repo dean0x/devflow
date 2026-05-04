@@ -1,6 +1,7 @@
 ---
 name: apply-feature-kb
 description: Consumption algorithm for FEATURE_KNOWLEDGE variable — pre-computed feature context
+user-invocable: false
 allowed-tools: Read
 ---
 
