@@ -31,7 +31,7 @@ Detect changed files and build context:
 6. Load feature knowledge:
    - Read `.features/index.json` if it exists
    - Based on FILES_CHANGED, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
-   - For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+   - For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
    - Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
    - Pass `FEATURE_KNOWLEDGE` to Scrutinizer
 
@@ -65,7 +65,7 @@ DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate against 9-pillar framework. Fix P0/P1 issues. Return structured report.
 Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
-Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE. Skip if (none)."
+Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE. Skip if (none)."
 
 **Wait for completion.** Extract: STATUS (PASS|FIXED|BLOCKED), changes_made (bool)
 

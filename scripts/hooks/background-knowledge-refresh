@@ -1,8 +1,8 @@
 #!/bin/bash
-# Background KB Refresh
-# Called by session-end-kb-refresh as a detached background process.
-# Reads stale KB slugs from feature-kb.cjs, then spawns a fresh claude -p
-# invocation with Sonnet to refresh up to 3 stale KBs.
+# Background Knowledge Refresh
+# Called by session-end-knowledge-refresh as a detached background process.
+# Reads stale knowledge base slugs from feature-knowledge.cjs, then spawns a fresh claude -p
+# invocation with Sonnet to refresh up to 3 stale knowledge bases.
 # On failure: logs error, does nothing (missing updates are better than corrupt data).
 
 CWD="$1"
@@ -10,9 +10,9 @@ CLAUDE_BIN="${2:-claude}"
 PRE_SLUGS="$3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/log-paths" || { echo "background-kb-refresh: failed to source log-paths" >&2; exit 1; }
-LOG_FILE="$(devflow_log_dir "$CWD")/.kb-refresh.log"
-LOCK_DIR="$CWD/.features/.kb-refresh.lock"
+source "$SCRIPT_DIR/log-paths" || { echo "background-knowledge-refresh: failed to source log-paths" >&2; exit 1; }
+LOG_FILE="$(devflow_log_dir "$CWD")/.knowledge-refresh.log"
+LOCK_DIR="$CWD/.features/.knowledge-refresh.lock"
 
 # --- Logging ---
 log() {
@@ -31,7 +31,7 @@ rotate_log() {
 # --- Cross-platform mtime ---
 # Source the get-mtime helper for portable stat usage.
 # shellcheck source=get-mtime
-source "$SCRIPT_DIR/get-mtime" || { echo "background-kb-refresh: failed to source get-mtime" >&2; exit 1; }
+source "$SCRIPT_DIR/get-mtime" || { echo "background-knowledge-refresh: failed to source get-mtime" >&2; exit 1; }
 
 # --- Cleanup trap ---
 cleanup() { rmdir "$LOCK_DIR" 2>/dev/null || true; }
@@ -72,7 +72,7 @@ acquire_lock() {
 # Wait for parent session to flush any in-progress work
 sleep 3
 
-log "Starting KB refresh"
+log "Starting knowledge refresh"
 rotate_log
 
 # Acquire lock
@@ -82,18 +82,18 @@ if ! acquire_lock; then
   exit 0
 fi
 
-# Record refresh timestamp (so next session-end-kb-refresh respects throttle)
-date +%s > "$CWD/.features/.kb-last-refresh"
+# Record refresh timestamp (so next session-end-knowledge-refresh respects throttle)
+date +%s > "$CWD/.features/.knowledge-last-refresh"
 
 # Get stale slugs: use pre-computed list from session-end if available, else compute
 if [ -n "$PRE_SLUGS" ]; then
   STALE_SLUGS=$(printf '%s' "$PRE_SLUGS" | head -3)
 else
-  STALE_SLUGS=$(node "$SCRIPT_DIR/lib/feature-kb.cjs" stale-slugs "$CWD" 2>/dev/null | head -3)
+  STALE_SLUGS=$(node "$SCRIPT_DIR/lib/feature-knowledge.cjs" stale-slugs "$CWD" 2>/dev/null | head -3)
 fi
 
 if [ -z "$STALE_SLUGS" ]; then
-  log "No stale KBs found — done"
+  log "No stale knowledge bases found — done"
   exit 0
 fi
 
@@ -116,7 +116,7 @@ for SLUG in $STALE_SLUGS; do
   rm -f "$SIDECAR"
 
   # Get structured metadata (tab-separated: name, dirs, changed)
-  CONTEXT_LINE=$(node "$SCRIPT_DIR/lib/feature-kb.cjs" refresh-context "$CWD" "$SLUG" 2>/dev/null || true)
+  CONTEXT_LINE=$(node "$SCRIPT_DIR/lib/feature-knowledge.cjs" refresh-context "$CWD" "$SLUG" 2>/dev/null || true)
   if [ -z "$CONTEXT_LINE" ]; then
     log "Failed to get refresh-context for $SLUG — skipping"
     continue
@@ -133,7 +133,7 @@ WORKTREE_PATH: $CWD
 CHANGED_FILES: $CHANGED
 DECISIONS_CONTEXT: $DECISIONS_CONTEXT
 
-STEP 1: Load the devflow:feature-kb skill using the Skill tool (skill: \"devflow:feature-kb\").
+STEP 1: Load the devflow:feature-knowledge skill using the Skill tool (skill: \"devflow:feature-knowledge\").
 STEP 2: Read .features/$SLUG/KNOWLEDGE.md to understand the existing KB content and structure.
 STEP 3: Read the CHANGED_FILES to understand what changed in the codebase.
 STEP 4: Update the KB following the skill's quality standards:
@@ -150,7 +150,7 @@ STEP 6: Write .features/$SLUG/.refresh-result.json with:
 }"
 
   # Spawn claude -p with 180s watchdog (POSIX-compatible, no GNU timeout)
-  DEVFLOW_BG_KB_REFRESH=1 "$CLAUDE_BIN" -p \
+  DEVFLOW_BG_KNOWLEDGE_REFRESH=1 "$CLAUDE_BIN" -p \
     --model sonnet \
     --dangerously-skip-permissions \
     --allowedTools 'Read,Grep,Glob,Write,Skill' \
@@ -177,12 +177,12 @@ STEP 6: Write .features/$SLUG/.refresh-result.json with:
   if [ -f "$SIDECAR" ]; then
     REF_FILES=$(node "$SCRIPT_DIR/json-helper.cjs" read-sidecar "$SIDECAR" referencedFiles 2>/dev/null || echo "[]")
     DESCRIPTION=$(node "$SCRIPT_DIR/json-helper.cjs" read-sidecar "$SIDECAR" description 2>/dev/null || echo "")
-    node "$SCRIPT_DIR/lib/feature-kb.cjs" update-index "$CWD" \
+    node "$SCRIPT_DIR/lib/feature-knowledge.cjs" update-index "$CWD" \
       --slug="$SLUG" --name="$NAME" \
       --directories="$DIRS" \
       --referencedFiles="$REF_FILES" \
       --description="$DESCRIPTION" \
-      --createdBy="devflow-kb" >> "$LOG_FILE" 2>&1 || log "Failed to update index for $SLUG"
+      --createdBy="devflow-knowledge" >> "$LOG_FILE" 2>&1 || log "Failed to update index for $SLUG"
     rm -f "$SIDECAR"
   else
     log "No sidecar file for $SLUG — skipping index update"
@@ -192,5 +192,5 @@ STEP 6: Write .features/$SLUG/.refresh-result.json with:
   touch "$LOCK_DIR"
 done
 
-log "Done. Refreshed $COUNT KB(s)."
+log "Done. Refreshed $COUNT knowledge base(s)."
 exit 0

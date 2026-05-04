@@ -1,9 +1,9 @@
-// scripts/hooks/lib/feature-kb.cjs
+// scripts/hooks/lib/feature-knowledge.cjs
 // Runtime module for per-feature knowledge base management.
 //
-// DESIGN: Feature KBs live under .features/{slug}/KNOWLEDGE.md with a central
+// DESIGN: Feature knowledge bases live under .features/{slug}/KNOWLEDGE.md with a central
 // index at .features/index.json (keyed by slug). This module is the single
-// source of truth for all KB operations — loading, staleness detection, index
+// source of truth for all knowledge base operations — loading, staleness detection, index
 // mutation, and listing. A mkdir-based lock guards concurrent index writes.
 //
 // ARCHITECTURE EXCEPTION: This is a developer-facing CLI tool invoked exclusively
@@ -16,11 +16,11 @@
 // to prevent injection attacks from index content.
 //
 // CLI interface (see if-require.main block at bottom):
-//   node feature-kb.cjs list <worktree>
-//   node feature-kb.cjs stale <worktree> [slug]
-//   node feature-kb.cjs update-index <worktree> --slug=X --name=Y ...
-//   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
-//   node feature-kb.cjs remove <worktree> <slug>
+//   node feature-knowledge.cjs list <worktree>
+//   node feature-knowledge.cjs stale <worktree> [slug]
+//   node feature-knowledge.cjs update-index <worktree> --slug=X --name=Y ...
+//   node feature-knowledge.cjs find-overlapping <worktree> <file1> [file2...]
+//   node feature-knowledge.cjs remove <worktree> <slug>
 
 'use strict';
 
@@ -355,11 +355,11 @@ function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
   validateSlug(entry.slug);
   const featuresDir = path.join(worktreePath, '.features');
   fs.mkdirSync(featuresDir, { recursive: true });
-  const lockPath = path.join(featuresDir, '.kb.lock');
+  const lockPath = path.join(featuresDir, '.knowledge.lock');
   const indexPath = path.join(featuresDir, 'index.json');
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
-    throw new Error('Failed to acquire .features/.kb.lock within timeout');
+    throw new Error('Failed to acquire .features/.knowledge.lock within timeout');
   }
 
   try {
@@ -420,11 +420,11 @@ function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
   validateSlug(slug);
   const featuresDir = path.join(worktreePath, '.features');
   if (!fs.existsSync(featuresDir)) return;
-  const lockPath = path.join(featuresDir, '.kb.lock');
+  const lockPath = path.join(featuresDir, '.knowledge.lock');
   const indexPath = path.join(featuresDir, 'index.json');
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
-    throw new Error('Failed to acquire .features/.kb.lock within timeout');
+    throw new Error('Failed to acquire .features/.knowledge.lock within timeout');
   }
 
   try {
@@ -467,13 +467,13 @@ function listKBs(worktreePath, cachedIndex) {
 // CLI interface
 //
 // Usage:
-//   node feature-kb.cjs list <worktree>
-//   node feature-kb.cjs stale <worktree> [slug]
-//   node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' [--description=Y] [--createdBy=Z]
-//   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
-//   node feature-kb.cjs remove <worktree> <slug>
-//   node feature-kb.cjs stale-slugs <worktree>
-//   node feature-kb.cjs refresh-context <worktree> <slug>
+//   node feature-knowledge.cjs list <worktree>
+//   node feature-knowledge.cjs stale <worktree> [slug]
+//   node feature-knowledge.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' [--description=Y] [--createdBy=Z]
+//   node feature-knowledge.cjs find-overlapping <worktree> <file1> [file2...]
+//   node feature-knowledge.cjs remove <worktree> <slug>
+//   node feature-knowledge.cjs stale-slugs <worktree>
+//   node feature-knowledge.cjs refresh-context <worktree> <slug>
 // ---------------------------------------------------------------------------
 
 if (require.main === module) {
@@ -496,13 +496,13 @@ if (require.main === module) {
 
   const USAGE = [
     'Usage:',
-    '  node feature-kb.cjs list <worktree>',
-    '  node feature-kb.cjs stale <worktree> [slug]',
-    '  node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' [--description=Y] [--createdBy=Z]',
-    '  node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]',
-    '  node feature-kb.cjs remove <worktree> <slug>',
-    '  node feature-kb.cjs stale-slugs <worktree>',
-    '  node feature-kb.cjs refresh-context <worktree> <slug>',
+    '  node feature-knowledge.cjs list <worktree>',
+    '  node feature-knowledge.cjs stale <worktree> [slug]',
+    '  node feature-knowledge.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' [--description=Y] [--createdBy=Z]',
+    '  node feature-knowledge.cjs find-overlapping <worktree> <file1> [file2...]',
+    '  node feature-knowledge.cjs remove <worktree> <slug>',
+    '  node feature-knowledge.cjs stale-slugs <worktree>',
+    '  node feature-knowledge.cjs refresh-context <worktree> <slug>',
   ].join('\n');
 
   /**
@@ -529,7 +529,7 @@ if (require.main === module) {
     list() {
       const worktreePath = requireWorktree(argv);
       const entries = listKBs(worktreePath);
-      process.stderr.write(`[feature-kb] mode=list worktree=${worktreePath} count=${entries.length}\n`);
+      process.stderr.write(`[feature-knowledge] mode=list worktree=${worktreePath} count=${entries.length}\n`);
       process.stdout.write(JSON.stringify(entries, null, 2) + '\n');
       process.exit(0);
     },
@@ -539,11 +539,11 @@ if (require.main === module) {
       const slug = argv[2];
       if (slug) {
         const result = checkStaleness(worktreePath, slug);
-        process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} slug=${slug} stale=${result.stale}\n`);
+        process.stderr.write(`[feature-knowledge] mode=stale worktree=${worktreePath} slug=${slug} stale=${result.stale}\n`);
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       } else {
         const result = checkAllStaleness(worktreePath);
-        process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} all=true\n`);
+        process.stderr.write(`[feature-knowledge] mode=stale worktree=${worktreePath} all=true\n`);
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       }
       process.exit(0);
@@ -573,7 +573,7 @@ if (require.main === module) {
         referencedFiles,
         createdBy: kv.createdBy,
       });
-      process.stderr.write(`[feature-kb] mode=update-index worktree=${worktreePath} slug=${kv.slug}\n`);
+      process.stderr.write(`[feature-knowledge] mode=update-index worktree=${worktreePath} slug=${kv.slug}\n`);
       process.stdout.write(JSON.stringify({ ok: true, slug: kv.slug }) + '\n');
       process.exit(0);
     },
@@ -582,7 +582,7 @@ if (require.main === module) {
       const worktreePath = requireWorktree(argv);
       const changedFiles = argv.slice(2);
       const overlapping = findOverlapping(worktreePath, changedFiles);
-      process.stderr.write(`[feature-kb] mode=find-overlapping worktree=${worktreePath} overlappingCount=${overlapping.length}\n`);
+      process.stderr.write(`[feature-knowledge] mode=find-overlapping worktree=${worktreePath} overlappingCount=${overlapping.length}\n`);
       process.stdout.write(JSON.stringify(overlapping, null, 2) + '\n');
       process.exit(0);
     },
@@ -595,7 +595,7 @@ if (require.main === module) {
         process.exit(1);
       }
       removeEntry(worktreePath, slug);
-      process.stderr.write(`[feature-kb] mode=remove worktree=${worktreePath} slug=${slug}\n`);
+      process.stderr.write(`[feature-knowledge] mode=remove worktree=${worktreePath} slug=${slug}\n`);
       process.stdout.write(JSON.stringify({ ok: true, slug }) + '\n');
       process.exit(0);
     },

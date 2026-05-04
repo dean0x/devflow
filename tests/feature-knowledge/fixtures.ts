@@ -1,4 +1,4 @@
-// Shared test fixtures for feature-kb module tests.
+// Shared test fixtures for feature-knowledge module tests.
 
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import * as path from 'path';
@@ -65,7 +65,7 @@ export function makeTmpFeatureWorktree(
   indexContent?: object,
   kbs?: Record<string, string>,
 ): string {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), 'feature-kb-test-'));
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'feature-knowledge-test-'));
   createdTmpDirs.push(tmp);
 
   const featuresDir = path.join(tmp, '.features');

@@ -7,9 +7,9 @@ import { makeTmpFeatureWorktree, cleanupTmpFeatureWorktrees, SAMPLE_INDEX } from
 afterAll(() => cleanupTmpFeatureWorktrees());
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
-const CJS_PATH = path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs');
+const CJS_PATH = path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs');
 
-describe('feature-kb.cjs CLI', () => {
+describe('feature-knowledge.cjs CLI', () => {
   it('list shows entries', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     const result = execSync(`node ${CJS_PATH} list ${tmp}`, { encoding: 'utf8' });

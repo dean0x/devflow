@@ -1,31 +1,31 @@
 import { describe, it, expect } from 'vitest';
-import { addKbHook, removeKbHook, hasKbHook } from '../src/cli/commands/kb.js';
+import { addKnowledgeHook, removeKnowledgeHook, hasKnowledgeHook } from '../src/cli/commands/knowledge/index.js';
 
 const DEVFLOW_DIR = '/home/user/.devflow';
 
-describe('addKbHook', () => {
+describe('addKnowledgeHook', () => {
   it('adds hook to empty settings', () => {
-    const result = addKbHook('{}', DEVFLOW_DIR);
+    const result = addKnowledgeHook('{}', DEVFLOW_DIR);
     const parsed = JSON.parse(result);
     expect(parsed.hooks?.SessionEnd).toHaveLength(1);
-    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-kb-refresh');
+    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-knowledge-refresh');
   });
 
   it('adds hook with correct run-hook path', () => {
-    const result = addKbHook('{}', '/custom/.devflow');
+    const result = addKnowledgeHook('{}', '/custom/.devflow');
     const parsed = JSON.parse(result);
-    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toContain('/custom/.devflow/scripts/hooks/run-hook session-end-kb-refresh');
+    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toContain('/custom/.devflow/scripts/hooks/run-hook session-end-knowledge-refresh');
   });
 
   it('is idempotent — does not add duplicate', () => {
-    const first = addKbHook('{}', DEVFLOW_DIR);
-    const second = addKbHook(first, DEVFLOW_DIR);
+    const first = addKnowledgeHook('{}', DEVFLOW_DIR);
+    const second = addKnowledgeHook(first, DEVFLOW_DIR);
     const parsed = JSON.parse(second);
-    const kbHooks = parsed.hooks.SessionEnd.filter(
+    const knowledgeHooks = parsed.hooks.SessionEnd.filter(
       (m: { hooks: Array<{ command: string }> }) =>
-        m.hooks.some((h) => h.command.includes('session-end-kb-refresh'))
+        m.hooks.some((h) => h.command.includes('session-end-knowledge-refresh'))
     );
-    expect(kbHooks).toHaveLength(1);
+    expect(knowledgeHooks).toHaveLength(1);
   });
 
   it('adds alongside existing SessionEnd hooks', () => {
@@ -36,31 +36,31 @@ describe('addKbHook', () => {
         ],
       },
     });
-    const result = addKbHook(input, DEVFLOW_DIR);
+    const result = addKnowledgeHook(input, DEVFLOW_DIR);
     const parsed = JSON.parse(result);
     expect(parsed.hooks.SessionEnd).toHaveLength(2);
   });
 
   it('preserves other settings', () => {
     const input = JSON.stringify({ theme: 'dark', model: 'claude-sonnet' });
-    const result = addKbHook(input, DEVFLOW_DIR);
+    const result = addKnowledgeHook(input, DEVFLOW_DIR);
     const parsed = JSON.parse(result);
     expect(parsed.theme).toBe('dark');
     expect(parsed.model).toBe('claude-sonnet');
   });
 
   it('hook entry has correct timeout', () => {
-    const result = addKbHook('{}', DEVFLOW_DIR);
+    const result = addKnowledgeHook('{}', DEVFLOW_DIR);
     const parsed = JSON.parse(result);
     expect(parsed.hooks.SessionEnd[0].hooks[0].timeout).toBe(10);
     expect(parsed.hooks.SessionEnd[0].hooks[0].type).toBe('command');
   });
 });
 
-describe('removeKbHook', () => {
-  it('removes KB hook from SessionEnd', () => {
-    const withHook = addKbHook('{}', DEVFLOW_DIR);
-    const result = removeKbHook(withHook);
+describe('removeKnowledgeHook', () => {
+  it('removes knowledge hook from SessionEnd', () => {
+    const withHook = addKnowledgeHook('{}', DEVFLOW_DIR);
+    const result = removeKnowledgeHook(withHook);
     const parsed = JSON.parse(result);
     expect(parsed.hooks).toBeUndefined();
   });
@@ -70,26 +70,26 @@ describe('removeKbHook', () => {
       hooks: {
         SessionEnd: [
           { hooks: [{ type: 'command', command: '/path/to/other-hook', timeout: 10 }] },
-          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-knowledge-refresh', timeout: 10 }] },
         ],
       },
     });
-    const result = removeKbHook(input);
+    const result = removeKnowledgeHook(input);
     const parsed = JSON.parse(result);
     expect(parsed.hooks.SessionEnd).toHaveLength(1);
     expect(parsed.hooks.SessionEnd[0].hooks[0].command).toContain('other-hook');
   });
 
   it('cleans empty hooks object when last hook removed', () => {
-    const withHook = addKbHook('{}', DEVFLOW_DIR);
-    const result = removeKbHook(withHook);
+    const withHook = addKnowledgeHook('{}', DEVFLOW_DIR);
+    const result = removeKnowledgeHook(withHook);
     const parsed = JSON.parse(result);
     expect(parsed.hooks).toBeUndefined();
   });
 
   it('is idempotent — removing absent hook returns same JSON', () => {
     const input = JSON.stringify({ theme: 'dark' });
-    const result = removeKbHook(input);
+    const result = removeKnowledgeHook(input);
     expect(JSON.parse(result)).toEqual(JSON.parse(input));
   });
 
@@ -97,24 +97,24 @@ describe('removeKbHook', () => {
     const input = JSON.stringify({
       hooks: {
         UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/path/preamble', timeout: 5 }] }],
-        SessionEnd: [{ hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] }],
+        SessionEnd: [{ hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-knowledge-refresh', timeout: 10 }] }],
       },
     });
-    const result = removeKbHook(input);
+    const result = removeKnowledgeHook(input);
     const parsed = JSON.parse(result);
     expect(parsed.hooks.UserPromptSubmit).toHaveLength(1);
     expect(parsed.hooks.SessionEnd).toBeUndefined();
   });
 });
 
-describe('hasKbHook', () => {
+describe('hasKnowledgeHook', () => {
   it('returns true when hook present on SessionEnd', () => {
-    const withHook = addKbHook('{}', DEVFLOW_DIR);
-    expect(hasKbHook(withHook)).toBe(true);
+    const withHook = addKnowledgeHook('{}', DEVFLOW_DIR);
+    expect(hasKnowledgeHook(withHook)).toBe(true);
   });
 
   it('returns false when hook absent', () => {
-    expect(hasKbHook('{}')).toBe(false);
+    expect(hasKnowledgeHook('{}')).toBe(false);
   });
 
   it('returns false when only other SessionEnd hooks exist', () => {
@@ -125,16 +125,16 @@ describe('hasKbHook', () => {
         ],
       },
     });
-    expect(hasKbHook(input)).toBe(false);
+    expect(hasKnowledgeHook(input)).toBe(false);
   });
 
   it('accepts parsed Settings object', () => {
-    const withHook = addKbHook('{}', DEVFLOW_DIR);
+    const withHook = addKnowledgeHook('{}', DEVFLOW_DIR);
     const parsed = JSON.parse(withHook);
-    expect(hasKbHook(parsed)).toBe(true);
+    expect(hasKnowledgeHook(parsed)).toBe(true);
   });
 
   it('returns false for empty hooks object', () => {
-    expect(hasKbHook(JSON.stringify({ hooks: {} }))).toBe(false);
+    expect(hasKnowledgeHook(JSON.stringify({ hooks: {} }))).toBe(false);
   });
 });

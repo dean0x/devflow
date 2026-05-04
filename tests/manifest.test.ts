@@ -77,7 +77,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, kb: false, flags: [] },
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, flags: [] },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -100,7 +100,7 @@ describe('readManifest', () => {
     expect(result).not.toBeNull();
     expect(result!.features.hud).toBe(false);
     expect(result!.features.learn).toBe(false);
-    expect(result!.features.kb).toBe(false);
+    expect(result!.features.knowledge).toBe(false);
     expect(result!.features.flags).toEqual([]);
   });
 
@@ -116,7 +116,24 @@ describe('readManifest', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(oldData), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.features.kb).toBe(false);
+    expect(result!.features.knowledge).toBe(false);
+  });
+
+  it('should read features.kb as features.knowledge for backward compat', async () => {
+    // Write a manifest with old features.kb field (pre-rename)
+    const oldData = {
+      version: '2.0.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: true, kb: true, flags: [] },
+      installedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(oldData), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    // Old features.kb should be read as features.knowledge
+    expect(result!.features.knowledge).toBe(true);
   });
 });
 
@@ -136,7 +153,7 @@ describe('writeManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, kb: false, flags: [] },
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, flags: [] },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -150,7 +167,7 @@ describe('writeManifest', () => {
       version: '1.0.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: false, memory: false, learn: false, hud: false, kb: false, flags: [] },
+      features: { teams: false, ambient: false, memory: false, learn: false, hud: false, knowledge: false, flags: [] },
       installedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
@@ -169,7 +186,7 @@ describe('writeManifest', () => {
       version: '1.4.0',
       plugins: [],
       scope: 'local',
-      features: { teams: false, ambient: false, memory: false, learn: false, hud: false, kb: false, flags: [] },
+      features: { teams: false, ambient: false, memory: false, learn: false, hud: false, knowledge: false, flags: [] },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -313,7 +330,7 @@ describe('resolvePluginList', () => {
     version: '1.0.0',
     plugins: ['devflow-core-skills', 'devflow-implement'],
     scope: 'user',
-    features: { teams: false, ambient: true, memory: true, learn: false, hud: false, kb: false, flags: [] },
+    features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, flags: [] },
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };

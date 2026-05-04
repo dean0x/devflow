@@ -26,7 +26,7 @@ const {
   removeEntry,
   listKBs,
   validateSlug,
-} = require(path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs')) as {
+} = require(path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs')) as {
   loadIndex: (worktreePath: string) => { version: number; features: Record<string, unknown> } | null;
   loadKBContent: (worktreePath: string, slug: string) => string | null;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
@@ -216,7 +216,7 @@ describe('updateIndex', () => {
   // T1: Lock failure
   it('throws when lock cannot be acquired within timeout', () => {
     const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
-    const lockPath = path.join(tmp, '.features', '.kb.lock');
+    const lockPath = path.join(tmp, '.features', '.knowledge.lock');
     // Pre-create lock directory to simulate a held lock
     mkdirSync(lockPath);
 
@@ -502,7 +502,7 @@ describe('validateSlug', () => {
 // CLI: stale-slugs subcommand
 // ---------------------------------------------------------------------------
 
-const FEATURE_KB_CJS = path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs');
+const FEATURE_KB_CJS = path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs');
 
 describe('CLI stale-slugs', () => {
   it('outputs nothing for non-stale index (non-git repo)', () => {

@@ -55,7 +55,7 @@
     "worktree-support",
     "gap-analysis",
     "design-review",
-    "feature-kb",
-    "apply-feature-kb"
+    "feature-knowledge",
+    "apply-feature-knowledge"
   ]
 }

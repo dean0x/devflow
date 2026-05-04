@@ -83,7 +83,7 @@ This produces a compact index of active ADR/PF entries from `decisions.md` and `
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant KBs
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` to every Resolver teammate in Phase 4.
@@ -160,7 +160,7 @@ Each resolver teammate receives the following instructions (only the issue list 
     FEATURE_KNOWLEDGE: {feature_knowledge}
     1. Read your skill: `Read ~/.claude/skills/devflow:patterns/SKILL.md`
        Follow devflow:apply-decisions to scan DECISIONS_CONTEXT and Read full ADR/PF bodies on demand. Skip if (none).
-       Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature patterns inform whether a fix follows area conventions. Skip if (none).
+       Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature patterns inform whether a fix follows area conventions. Skip if (none).
     2. Your issues to resolve:
        {BATCH_ISSUES}
     3. For each issue:

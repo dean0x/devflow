@@ -60,7 +60,7 @@ This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT`
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
 2. Based on changed files from Phase 4 file analysis, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 4: File Analysis
@@ -105,7 +105,7 @@ Each reviewer receives:
 - **Output path**: `.docs/reviews/{branch_slug}/{timestamp}/{focus}.md`
 - **DIFF_COMMAND**: `git diff {DIFF_RANGE}` (incremental or full)
 - **DECISIONS_CONTEXT**: compact index from Phase 3 (or `(none)` when absent) — follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand
-- **FEATURE_KNOWLEDGE**: feature area context from Phase 3 (or `(none)`) — follow `devflow:apply-feature-kb` for consumption algorithm
+- **FEATURE_KNOWLEDGE**: feature area context from Phase 3 (or `(none)`) — follow `devflow:apply-feature-knowledge` for consumption algorithm
 
 ## Phase 6: Synthesis (Parallel)
 

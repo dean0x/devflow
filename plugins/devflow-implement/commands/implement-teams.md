@@ -69,7 +69,7 @@ Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on task description and file targets, identify relevant KBs
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 5. Collect slugs where staleness check returned stale → `STALE_KB_SLUGS`.
 
@@ -412,7 +412,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 
 Compute overlapping KBs:
 ```bash
-OVERLAPPING_SLUGS=$(node ~/.devflow/scripts/hooks/lib/feature-kb.cjs find-overlapping "{worktree}" {files_changed...} 2>/dev/null)
+OVERLAPPING_SLUGS=$(node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs find-overlapping "{worktree}" {files_changed...} 2>/dev/null)
 ```
 Parse the JSON array output. Pass `OVERLAPPING_SLUGS` to Phase 11.
 
@@ -438,13 +438,13 @@ If `.features/.disabled` exists, skip entirely.
    DIRECTORIES: {directory prefixes from FILES_CHANGED}
    DECISIONS_CONTEXT: {from Phase 1}
 
-   Load the devflow:feature-kb skill and follow its 4-phase process exactly.
+   Load the devflow:feature-knowledge skill and follow its 4-phase process exactly.
    Read the FILES_CHANGED to understand the implemented code.
    Read .features/index.json to see existing KBs for cross-referencing."
    ```
 3. Read sidecar (`.features/{slug}/.create-result.json`), then run:
    ```bash
-   node ~/.devflow/scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
+   node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
      --slug="{slug}" --name="{name}" \
      --directories='["{dir1}", "{dir2}"]' \
      --referencedFiles='{referencedFiles_json_from_sidecar}' \
@@ -470,7 +470,7 @@ Skip if all touched areas already have matching KBs.
    CHANGED_FILES: {FILES_CHANGED that overlap this KB}
    DECISIONS_CONTEXT: {from Phase 1}
 
-   Load the devflow:feature-kb skill. This is a REFRESH, not a new creation.
+   Load the devflow:feature-knowledge skill. This is a REFRESH, not a new creation.
    Read the CHANGED_FILES to understand what changed, then update the EXISTING_KB.
    Maintain quality standards from the skill. Do NOT regenerate from scratch.
    Write updated KB to .features/{slug}/KNOWLEDGE.md
