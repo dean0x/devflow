@@ -4,8 +4,8 @@ import * as path from 'path';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
-describe('feature-kb skill', () => {
-  const content = readFileSync(path.join(ROOT, 'shared/skills/feature-kb/SKILL.md'), 'utf8');
+describe('feature-knowledge skill', () => {
+  const content = readFileSync(path.join(ROOT, 'shared/skills/feature-knowledge/SKILL.md'), 'utf8');
 
   it('has iron law', () => { expect(content).toContain('## Iron Law'); });
   it('has 4-phase process', () => {
@@ -37,8 +37,8 @@ describe('feature-kb skill', () => {
   });
 });
 
-describe('apply-feature-kb skill', () => {
-  const content = readFileSync(path.join(ROOT, 'shared/skills/apply-feature-kb/SKILL.md'), 'utf8');
+describe('apply-feature-knowledge skill', () => {
+  const content = readFileSync(path.join(ROOT, 'shared/skills/apply-feature-knowledge/SKILL.md'), 'utf8');
 
   it('has iron law', () => { expect(content).toContain('## Iron Law'); });
   it('has 3-step algorithm', () => {

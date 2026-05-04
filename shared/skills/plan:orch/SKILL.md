@@ -76,7 +76,7 @@ This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT`
 2. Read `.features/index.json` to see available feature KBs.
 3. Based on the current task description, identify which KBs are relevant (LLM judgment — match task intent against each KB's `description` and `directories` fields).
 4. For each relevant KB:
-   a. Run `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null` to check staleness
+   a. Run `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null` to check staleness
    b. Read `.features/{slug}/KNOWLEDGE.md`
    c. If stale, prefix content with `[STALE — referenced files changed since last update. Verify against current code.]`
 5. Concatenate all relevant KB content as `FEATURE_KNOWLEDGE`:

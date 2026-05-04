@@ -20,8 +20,8 @@ const HOOK_SCRIPTS = [
   'preamble',
   'json-parse',
   'get-mtime',
-  'session-end-kb-refresh',
-  'background-kb-refresh',
+  'session-end-knowledge-refresh',
+  'background-knowledge-refresh',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1509,22 +1509,22 @@ describe('get-mtime behavioral', () => {
   });
 });
 
-describe('session-end-kb-refresh guard clauses', () => {
-  const KB_HOOK = path.join(HOOKS_DIR, 'session-end-kb-refresh');
+describe('session-end-knowledge-refresh guard clauses', () => {
+  const KB_HOOK = path.join(HOOKS_DIR, 'session-end-knowledge-refresh');
 
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-kb-hook-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-knowledge-hook-test-'));
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('exits cleanly when DEVFLOW_BG_KB_REFRESH=1', () => {
+  it('exits cleanly when DEVFLOW_BG_KNOWLEDGE_REFRESH=1', () => {
     expect(() => {
-      execSync(`DEVFLOW_BG_KB_REFRESH=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
+      execSync(`DEVFLOW_BG_KNOWLEDGE_REFRESH=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
     }).not.toThrow();
   });
 
@@ -1535,7 +1535,7 @@ describe('session-end-kb-refresh guard clauses', () => {
   });
 
   it('exits cleanly when no .features/index.json exists', () => {
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-001' });
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-001' });
     expect(() => {
       execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
@@ -1547,25 +1547,25 @@ describe('session-end-kb-refresh guard clauses', () => {
     fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
     fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
 
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-002' });
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-002' });
     expect(() => {
       execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
   });
 
-  it('exits cleanly when .kb-last-refresh is recent (throttled)', () => {
+  it('exits cleanly when .knowledge-last-refresh is recent (throttled)', () => {
     const featuresDir = path.join(tmpDir, '.features');
     fs.mkdirSync(featuresDir, { recursive: true });
     fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
-    fs.writeFileSync(path.join(featuresDir, '.kb-last-refresh'), String(Math.floor(Date.now() / 1000)));
+    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), String(Math.floor(Date.now() / 1000)));
 
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-003' });
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-003' });
     expect(() => {
       execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
   });
 
-  it('exits cleanly when no stale KBs are found', () => {
+  it('exits cleanly when no stale knowledge bases are found', () => {
     // Non-git tmpDir → checkAllStaleness returns stale:false
     const featuresDir = path.join(tmpDir, '.features');
     fs.mkdirSync(featuresDir, { recursive: true });
@@ -1580,7 +1580,7 @@ describe('session-end-kb-refresh guard clauses', () => {
       },
     }));
 
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-kb-004' });
+    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-004' });
     expect(() => {
       execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();

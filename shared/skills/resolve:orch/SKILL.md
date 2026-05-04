@@ -42,7 +42,7 @@ Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` t
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant KBs
-3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`
+3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 3: Parse Issues
@@ -82,7 +82,7 @@ Each receives:
 - **BRANCH**: Branch slug
 - **BATCH_ID**: Identifier for this batch
 - **DECISIONS_CONTEXT**: Decisions index from Phase 2 (or `(none)`). Resolvers follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand.
-- **FEATURE_KNOWLEDGE**: Feature area context from Phase 2 (or `(none)`). Follow `devflow:apply-feature-kb` for consumption algorithm.
+- **FEATURE_KNOWLEDGE**: Feature area context from Phase 2 (or `(none)`). Follow `devflow:apply-feature-knowledge` for consumption algorithm.
 
 Resolvers follow a 3-tier risk approach:
 - **Standard fixes**: Applied directly

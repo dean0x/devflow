@@ -18,23 +18,23 @@ const require = createRequire(import.meta.url);
 
 const {
   loadIndex,
-  loadKBContent,
+  loadKnowledgeContent,
   checkStaleness,
   checkAllStaleness,
   updateIndex,
   findOverlapping,
   removeEntry,
-  listKBs,
+  listEntries,
   validateSlug,
-} = require(path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs')) as {
+} = require(path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs')) as {
   loadIndex: (worktreePath: string) => { version: number; features: Record<string, unknown> } | null;
-  loadKBContent: (worktreePath: string, slug: string) => string | null;
+  loadKnowledgeContent: (worktreePath: string, slug: string) => string | null;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   checkAllStaleness: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Record<string, { stale: boolean; changedFiles: string[] }>;
   updateIndex: (worktreePath: string, entry: Record<string, unknown>, lockTimeoutMs?: number) => void;
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string, lockTimeoutMs?: number) => void;
-  listKBs: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Array<{ slug: string } & Record<string, unknown>>;
+  listEntries: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Array<{ slug: string } & Record<string, unknown>>;
   validateSlug: (slug: string) => void;
 };
 
@@ -65,20 +65,20 @@ describe('loadIndex', () => {
 });
 
 // ---------------------------------------------------------------------------
-// loadKBContent
+// loadKnowledgeContent
 // ---------------------------------------------------------------------------
 
-describe('loadKBContent', () => {
+describe('loadKnowledgeContent', () => {
   it('returns content string when KNOWLEDGE.md exists', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': SAMPLE_KB_CONTENT });
-    const content = loadKBContent(tmp, 'cli-commands');
+    const content = loadKnowledgeContent(tmp, 'cli-commands');
     expect(content).not.toBeNull();
     expect(content).toContain('# CLI Command System');
   });
 
-  it('returns null for missing KB', () => {
+  it('returns null for missing knowledge base', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    expect(loadKBContent(tmp, 'cli-commands')).toBeNull();
+    expect(loadKnowledgeContent(tmp, 'cli-commands')).toBeNull();
   });
 });
 
@@ -216,7 +216,7 @@ describe('updateIndex', () => {
   // T1: Lock failure
   it('throws when lock cannot be acquired within timeout', () => {
     const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
-    const lockPath = path.join(tmp, '.features', '.kb.lock');
+    const lockPath = path.join(tmp, '.features', '.knowledge.lock');
     // Pre-create lock directory to simulate a held lock
     mkdirSync(lockPath);
 
@@ -361,13 +361,13 @@ describe('findOverlapping', () => {
 });
 
 // ---------------------------------------------------------------------------
-// listKBs
+// listEntries
 // ---------------------------------------------------------------------------
 
-describe('listKBs', () => {
+describe('listEntries', () => {
   it('returns all entries with their slugs', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    const entries = listKBs(tmp);
+    const entries = listEntries(tmp);
     expect(entries).toHaveLength(1);
     expect(entries[0].slug).toBe('cli-commands');
     expect(entries[0].name).toBe('CLI Command System');
@@ -375,7 +375,7 @@ describe('listKBs', () => {
 
   it('returns empty array for missing index', () => {
     const tmp = makeTmpFeatureWorktree();
-    expect(listKBs(tmp)).toEqual([]);
+    expect(listEntries(tmp)).toEqual([]);
   });
 });
 
@@ -502,7 +502,7 @@ describe('validateSlug', () => {
 // CLI: stale-slugs subcommand
 // ---------------------------------------------------------------------------
 
-const FEATURE_KB_CJS = path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs');
+const FEATURE_KB_CJS = path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs');
 
 describe('CLI stale-slugs', () => {
   it('outputs nothing for non-stale index (non-git repo)', () => {
@@ -748,7 +748,7 @@ describe('safePath', () => {
 // readSidecar helper (TypeScript)
 // ---------------------------------------------------------------------------
 
-import { readSidecar } from '../../src/cli/commands/kb.js';
+import { readSidecar } from '../../src/cli/commands/knowledge/index.js';
 
 describe('readSidecar', () => {
   const tmpFiles: string[] = [];

@@ -15,7 +15,7 @@ export interface ManifestData {
     memory: boolean;
     learn: boolean;
     hud: boolean;
-    kb: boolean;
+    knowledge: boolean;
     flags: string[];
   };
   installedAt: string;
@@ -46,6 +46,11 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       return null;
     }
     // Normalize optional fields with defaults (backwards-compatible with old manifests)
+    // BACKWARD COMPAT: features.kb was renamed to features.knowledge; fall back to old field.
+    const legacyKb = (features as Record<string, unknown>).kb;
+    const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
+      : typeof legacyKb === 'boolean' ? legacyKb
+      : false;
     return {
       version: data.version as string,
       plugins: data.plugins as string[],
@@ -56,7 +61,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,
         learn: typeof features.learn === 'boolean' ? features.learn : false,
-        kb: typeof features.kb === 'boolean' ? features.kb : false,
+        knowledge,
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
       },
       installedAt: data.installedAt as string,

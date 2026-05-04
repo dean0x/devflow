@@ -38,7 +38,7 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Ph
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on the bug description, identify relevant KBs
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Use `FEATURE_KNOWLEDGE` **locally only** for hypothesis generation — feature-specific gotchas and anti-patterns suggest root causes. **Do NOT pass to Explore investigators.**
 
 ### Phase 2: Context Gathering

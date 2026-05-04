@@ -3,8 +3,8 @@ name: Knowledge
 description: Structures codebase exploration into a feature knowledge base
 model: sonnet
 skills:
-  - devflow:feature-kb
-  - devflow:apply-feature-kb
+  - devflow:feature-knowledge
+  - devflow:apply-feature-knowledge
   - devflow:apply-decisions
   - devflow:worktree-support
 tools:
@@ -31,7 +31,7 @@ tools:
 
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory
 2. **Orient on feature area**: Read EXPLORATION_OUTPUTS to understand the feature's architecture, patterns, and boundaries
-3. **Follow the feature-kb skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-kb`
+3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`
 4. **Cross-reference decisions**: If DECISIONS_CONTEXT is provided, reference relevant ADR/PF entries in the KB's "Related" section
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on CHANGED_FILES while preserving any manually added content (user edits). Don't regenerate from scratch.
 6. **Write KNOWLEDGE.md**: Write to `.features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)

@@ -8,7 +8,7 @@ describe('knowledge agent', () => {
   const content = readFileSync(path.join(ROOT, 'shared/agents/knowledge.md'), 'utf8');
 
   it('has correct model', () => { expect(content).toContain('model: sonnet'); });
-  it('has feature-kb skill', () => { expect(content).toContain('devflow:feature-kb'); });
+  it('has feature-knowledge skill', () => { expect(content).toContain('devflow:feature-knowledge'); });
   it('has worktree-support skill', () => { expect(content).toContain('devflow:worktree-support'); });
   it('has required tools', () => {
     expect(content).toContain('Read');

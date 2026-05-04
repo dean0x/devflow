@@ -47,56 +47,56 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
     agents: [],
-    skills: ['apply-decisions', 'apply-feature-kb', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
   },
   {
     name: 'devflow-plan',
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
     agents: ['git', 'skimmer', 'synthesizer', 'designer', 'knowledge'],
-    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-kb', 'apply-feature-kb'],
+    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
   },
   {
     name: 'devflow-implement',
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
     agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
-    skills: ['agent-teams', 'patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-kb'],
+    skills: ['agent-teams', 'patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-knowledge'],
   },
   {
     name: 'devflow-code-review',
     description: 'Comprehensive code review with parallel specialized agents',
     commands: ['/code-review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['agent-teams', 'architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-kb'],
+    skills: ['agent-teams', 'architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
   },
   {
     name: 'devflow-resolve',
     description: 'Process and fix code review issues with risk assessment',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['agent-teams', 'patterns', 'security', 'worktree-support', 'apply-feature-kb'],
+    skills: ['agent-teams', 'patterns', 'security', 'worktree-support', 'apply-feature-knowledge'],
   },
   {
     name: 'devflow-debug',
     description: 'Debugging workflows with competing hypothesis investigation using agent teams',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
-    skills: ['agent-teams', 'git', 'worktree-support', 'apply-feature-kb'],
+    skills: ['agent-teams', 'git', 'worktree-support', 'apply-feature-knowledge'],
   },
   {
     name: 'devflow-explore',
     description: 'Codebase exploration with structured analysis and optional KB creation',
     commands: ['/explore'],
     agents: ['skimmer', 'synthesizer', 'knowledge'],
-    skills: ['agent-teams', 'worktree-support', 'apply-feature-kb', 'feature-kb'],
+    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
   },
   {
     name: 'devflow-self-review',
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
-    skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-feature-kb'],
+    skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-feature-knowledge'],
   },
   {
     name: 'devflow-ambient',
@@ -128,8 +128,8 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'worktree-support',
       'gap-analysis',
       'design-review',
-      'feature-kb',
-      'apply-feature-kb',
+      'feature-knowledge',
+      'apply-feature-knowledge',
     ],
   },
   {
@@ -402,7 +402,13 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'design-review',
   // v2.x knowledge index pattern: new shared skill bare name for pre-namespace installs
   'apply-knowledge',
-  // v2.x feature knowledge bases: new skills bare names for pre-namespace installs
+  // v2.x feature knowledge bases: bare names for pre-namespace installs (current names)
+  'feature-knowledge',
+  'apply-feature-knowledge',
+  // v2.x kb→knowledge rename: old namespaced skill names for cleanup
+  'devflow:feature-kb',
+  'devflow:apply-feature-kb',
+  // v2.x kb→knowledge rename: old bare names for pre-namespace installs
   'feature-kb',
   'apply-feature-kb',
   // v2.x knowledge→decisions rename: old namespaced skill names for cleanup

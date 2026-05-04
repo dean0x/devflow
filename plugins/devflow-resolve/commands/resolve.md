@@ -83,7 +83,7 @@ This produces a compact index of active ADR/PF entries from `decisions.md` and `
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant KBs
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` to every Resolver agent in Phase 4.
@@ -151,7 +151,7 @@ BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-decisions to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE."
+Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-decisions to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 
 > Resolvers follow a 3-tier risk approach:

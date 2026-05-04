@@ -108,7 +108,7 @@ This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT`
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
 2. Based on changed files from Phase 1 analysis, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `DECISIONS_CONTEXT`.
@@ -155,7 +155,7 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
     1. Read your skill(s): `Read {SKILL_PATHS}`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Follow devflow:apply-decisions to scan DECISIONS_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
-    4. Follow devflow:apply-feature-kb for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings. Skip if (none).
+    4. Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings. Skip if (none).
     5. Get the diff: `git -C {WORKTREE_PATH} diff {DIFF_RANGE}`
     6. Apply the 6-step review process from devflow:review-methodology
     7. Focus: {FOCUS}

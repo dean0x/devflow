@@ -132,6 +132,53 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
   },
 };
 
+const MIGRATION_RENAME_KB_TO_KNOWLEDGE: Migration<'per-project'> = {
+  id: 'rename-kb-to-knowledge',
+  description: 'Rename .features/.kb.lock, .kb-last-refresh, .kb-refresh.lock to knowledge equivalents; update .gitignore entries',
+  scope: 'per-project',
+  run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
+    const infos: string[] = [];
+    const warnings: string[] = [];
+
+    const featuresDir = path.join(ctx.projectRoot, '.features');
+    const renames: Array<[string, string]> = [
+      ['.kb.lock', '.knowledge.lock'],
+      ['.kb-last-refresh', '.knowledge-last-refresh'],
+      ['.kb-refresh.lock', '.knowledge-refresh.lock'],
+    ];
+
+    for (const [oldName, newName] of renames) {
+      const oldPath = path.join(featuresDir, oldName);
+      const newPath = path.join(featuresDir, newName);
+      try {
+        await fs.access(oldPath);
+        await fs.rename(oldPath, newPath);
+        infos.push(`Renamed .features/${oldName} → .features/${newName}`);
+      } catch {
+        // File doesn't exist — nothing to do
+      }
+    }
+
+    // Update .gitignore entries
+    const gitignorePath = path.join(ctx.projectRoot, '.gitignore');
+    try {
+      const content = await fs.readFile(gitignorePath, 'utf-8');
+      const updated = content
+        .replace(/\.features\/\.kb\.lock/g, '.features/.knowledge.lock')
+        .replace(/\.features\/\.kb-last-refresh/g, '.features/.knowledge-last-refresh')
+        .replace(/\.features\/\.kb-refresh\.lock/g, '.features/.knowledge-refresh.lock');
+      if (updated !== content) {
+        await fs.writeFile(gitignorePath, updated, 'utf-8');
+        infos.push('Updated .gitignore: kb → knowledge entries');
+      }
+    } catch {
+      // .gitignore may not exist — non-fatal
+    }
+
+    return { infos, warnings };
+  },
+};
+
 /**
  * Migration ID suffix conventions:
  *
@@ -152,6 +199,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
+  MIGRATION_RENAME_KB_TO_KNOWLEDGE,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

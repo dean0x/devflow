@@ -8,7 +8,7 @@ import { getDevFlowDirectory } from './paths.js';
 const execFileAsync = promisify(execFile);
 
 /** Tools passed to `claude -p` when spawning the Knowledge agent. */
-const KB_AGENT_TOOLS = 'Read,Grep,Glob,Write,Skill';
+const KNOWLEDGE_AGENT_TOOLS = 'Read,Grep,Glob,Write,Skill';
 
 /**
  * Load the compact DECISIONS_CONTEXT index (ADR/PF entries) for cross-referencing.
@@ -31,7 +31,7 @@ export function loadDecisionsContext(worktreePath: string): string {
   }
 }
 
-export interface RunKbAgentOptions {
+export interface RunKnowledgeAgentOptions {
   worktreePath: string;
   slug: string;
   /** Prompt to pass to the Knowledge agent. */
@@ -40,7 +40,7 @@ export interface RunKbAgentOptions {
   sidecarName: string;
 }
 
-export interface RunKbAgentResult {
+export interface RunKnowledgeAgentResult {
   sidecar: SidecarData;
 }
 
@@ -59,7 +59,7 @@ export interface RunKbAgentResult {
  *
  * @throws When `claude` exits with a non-zero status (propagates execFile error).
  */
-export async function runKbAgent(opts: RunKbAgentOptions): Promise<RunKbAgentResult> {
+export async function runKnowledgeAgent(opts: RunKnowledgeAgentOptions): Promise<RunKnowledgeAgentResult> {
   const { worktreePath, slug, prompt, sidecarName } = opts;
   const sidecarPath = path.join(worktreePath, '.features', slug, sidecarName);
 
@@ -70,7 +70,7 @@ export async function runKbAgent(opts: RunKbAgentOptions): Promise<RunKbAgentRes
   await execFileAsync('claude', [
     '-p', prompt,
     '--model', 'sonnet',
-    '--allowedTools', KB_AGENT_TOOLS,
+    '--allowedTools', KNOWLEDGE_AGENT_TOOLS,
     '--dangerously-skip-permissions',
   ], {
     cwd: worktreePath,

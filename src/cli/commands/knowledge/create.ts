@@ -1,12 +1,12 @@
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { isClaudeCliAvailable } from '../../utils/cli.js';
-import { runKbAgent, loadDecisionsContext } from '../../utils/kb-agent.js';
-import { getFeatureKb, exitOnInvalidSlug, getWorktreePath } from './shared.js';
+import { runKnowledgeAgent, loadDecisionsContext } from '../../utils/knowledge-agent.js';
+import { getFeatureKnowledge, exitOnInvalidSlug, getWorktreePath } from './shared.js';
 
 export async function handleCreate(slug: string): Promise<void> {
   exitOnInvalidSlug(slug);
-  p.intro(color.cyan(`Create Feature KB: ${slug}`));
+  p.intro(color.cyan(`Create Feature Knowledge Base: ${slug}`));
 
   if (!isClaudeCliAvailable()) {
     p.log.error('claude CLI not found on PATH. Install Claude Code first.');
@@ -33,7 +33,7 @@ export async function handleCreate(slug: string): Promise<void> {
   const dirList = directories.map((d) => `"${d}"`).join(', ');
 
   const s = p.spinner();
-  s.start('Creating KB...');
+  s.start('Creating knowledge base...');
 
   const decisionsContext = loadDecisionsContext(worktreePath);
 
@@ -46,8 +46,8 @@ export async function handleCreate(slug: string): Promise<void> {
     `WORKTREE_PATH: ${worktreePath}`,
     `DECISIONS_CONTEXT: ${decisionsContext}`,
     ``,
-    `STEP 1: Load the devflow:feature-kb skill using the Skill tool (skill: "devflow:feature-kb").`,
-    `STEP 2: Read .features/index.json (if it exists) to see what other KBs exist for cross-referencing.`,
+    `STEP 1: Load the devflow:feature-knowledge skill using the Skill tool (skill: "devflow:feature-knowledge").`,
+    `STEP 2: Read .features/index.json (if it exists) to see what other knowledge bases exist for cross-referencing.`,
     `STEP 3: Execute the skill's 4-phase process (Scan → Extract → Distill → Forge) exactly as specified.`,
     `  - You have no pre-computed exploration outputs — perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).`,
     `  - Use DECISIONS_CONTEXT to cross-reference ADR/PF entries in the Related section.`,
@@ -62,24 +62,24 @@ export async function handleCreate(slug: string): Promise<void> {
   ].join('\n');
 
   try {
-    const { sidecar } = await runKbAgent({ worktreePath, slug, prompt, sidecarName: '.create-result.json' });
+    const { sidecar } = await runKnowledgeAgent({ worktreePath, slug, prompt, sidecarName: '.create-result.json' });
 
-    getFeatureKb().updateIndex(worktreePath, {
+    getFeatureKnowledge().updateIndex(worktreePath, {
       slug,
       name: name as string,
       directories,
       referencedFiles: sidecar.referencedFiles ?? [],
       description: sidecar.description,
-      createdBy: 'devflow-kb',
+      createdBy: 'devflow-knowledge',
     });
 
-    s.stop('KB created successfully');
-    p.log.success(`KB written to .features/${slug}/KNOWLEDGE.md`);
+    s.stop('Knowledge base created successfully');
+    p.log.success(`Knowledge base written to .features/${slug}/KNOWLEDGE.md`);
   } catch (err) {
-    s.stop('KB creation failed');
+    s.stop('Knowledge base creation failed');
     p.log.error(`claude exited with error: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
-  p.outro(`Run ${color.cyan(`devflow kb list`)} to see all KBs`);
+  p.outro(`Run ${color.cyan(`devflow knowledge list`)} to see all knowledge bases`);
 }

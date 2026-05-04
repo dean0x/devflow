@@ -25,7 +25,7 @@ import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addLearningHook, removeLearningHook } from './learn.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
-import { addKbHook, removeKbHook } from './kb.js';
+import { addKnowledgeHook, removeKnowledgeHook } from './knowledge/index.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 import { getDefaultFlags, applyFlags, stripFlags, FLAG_REGISTRY } from '../utils/flags.js';
@@ -128,7 +128,7 @@ interface InitOptions {
   memory?: boolean;
   learn?: boolean;
   hud?: boolean;
-  kb?: boolean;
+  knowledge?: boolean;
   hudOnly?: boolean;
   recommended?: boolean;
   advanced?: boolean;
@@ -149,8 +149,8 @@ export const initCommand = new Command('init')
   .option('--no-learn', 'Disable self-learning')
   .option('--hud', 'Enable HUD (git info, context usage, session stats)')
   .option('--no-hud', 'Disable HUD status line')
-  .option('--kb', 'Enable feature knowledge bases')
-  .option('--no-kb', 'Disable feature knowledge bases')
+  .option('--knowledge', 'Enable feature knowledge bases')
+  .option('--no-knowledge', 'Disable feature knowledge bases')
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
   .option('--advanced', 'Show all configuration prompts')
@@ -260,7 +260,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, kb: false, flags: [] },
+          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, knowledge: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -370,7 +370,7 @@ export const initCommand = new Command('init')
     let memoryEnabled = true;
     let learnEnabled = true;
     let hudEnabled = true;
-    let kbEnabled = true;
+    let knowledgeEnabled = true;
     let enabledFlags = getDefaultFlags();
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
@@ -398,7 +398,7 @@ export const initCommand = new Command('init')
       if (options.memory !== undefined) memoryEnabled = options.memory;
       if (options.learn !== undefined) learnEnabled = options.learn;
       if (options.hud !== undefined) hudEnabled = options.hud;
-      if (options.kb !== undefined) kbEnabled = options.kb;
+      if (options.knowledge !== undefined) knowledgeEnabled = options.knowledge;
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
       if (profilePath && safeDeleteAvailable) {
@@ -431,7 +431,7 @@ export const initCommand = new Command('init')
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
         `Self-learning:   ${learnEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
-        `Feature KBs:     ${kbEnabled ? 'enabled' : 'disabled'}`,
+        `Feature KBs:     ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Agent Teams:     ${teamsEnabled ? 'enabled' : 'disabled'}`,
         `Claude Code flags: ${defaultFlagCount} enabled`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
@@ -559,8 +559,8 @@ export const initCommand = new Command('init')
         hudEnabled = hudChoice;
       }
 
-      if (options.kb !== undefined) {
-        kbEnabled = options.kb;
+      if (options.knowledge !== undefined) {
+        knowledgeEnabled = options.knowledge;
       } else {
         p.note(
           'Per-feature knowledge bases capture cross-cutting patterns,\n' +
@@ -568,15 +568,15 @@ export const initCommand = new Command('init')
           'Consumes a background agent session on staleness detection.',
           'Feature Knowledge Bases',
         );
-        const kbChoice = await p.confirm({
+        const knowledgeChoice = await p.confirm({
           message: 'Enable feature knowledge bases? (Recommended)',
           initialValue: true,
         });
-        if (p.isCancel(kbChoice)) {
+        if (p.isCancel(knowledgeChoice)) {
           p.cancel('Installation cancelled.');
           process.exit(0);
         }
-        kbEnabled = kbChoice;
+        knowledgeEnabled = knowledgeChoice;
       }
 
       // Claude Code flags multiselect (advanced only)
@@ -950,9 +950,9 @@ export const initCommand = new Command('init')
         ? addHudStatusLine(content, devflowDir)
         : removeHudStatusLine(content);
 
-      // KB hook — remove-then-add for upgrade safety
-      const cleanedForKb = removeKbHook(content);
-      content = kbEnabled ? addKbHook(cleanedForKb, devflowDir) : cleanedForKb;
+      // Knowledge hook — remove-then-add for upgrade safety
+      const cleanedForKnowledge = removeKnowledgeHook(content);
+      content = knowledgeEnabled ? addKnowledgeHook(cleanedForKnowledge, devflowDir) : cleanedForKnowledge;
 
       // Claude Code flags — strip all managed keys, then re-apply selected flags
       content = stripFlags(content);
@@ -971,7 +971,7 @@ export const initCommand = new Command('init')
 
     // Create .features/ directory with empty index (feature knowledge bases)
     // .features/ is committed to the project repo (not scope-dependent)
-    if (gitRoot && kbEnabled) {
+    if (gitRoot && knowledgeEnabled) {
       const featuresDir = path.join(gitRoot, '.features');
       await fs.mkdir(featuresDir, { recursive: true });
       const featuresIndexPath = path.join(featuresDir, 'index.json');
@@ -985,10 +985,10 @@ export const initCommand = new Command('init')
       }
     }
 
-    // Manage .disabled sentinel based on kbEnabled state
+    // Manage .disabled sentinel based on knowledgeEnabled state
     if (gitRoot) {
       const disabledPath = path.join(gitRoot, '.features', '.disabled');
-      if (kbEnabled) {
+      if (knowledgeEnabled) {
         try { await fs.unlink(disabledPath); } catch { /* doesn't exist */ }
       } else {
         await fs.mkdir(path.join(gitRoot, '.features'), { recursive: true });
@@ -1117,7 +1117,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, kb: kbEnabled, flags: enabledFlags },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, flags: enabledFlags },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

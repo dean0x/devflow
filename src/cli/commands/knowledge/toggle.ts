@@ -5,16 +5,16 @@ import color from 'picocolors';
 import type { HookMatcher, Settings } from '../../utils/hooks.js';
 import { getClaudeDirectory, getDevFlowDirectory } from '../../utils/paths.js';
 import { readManifest, writeManifest } from '../../utils/manifest.js';
-import { getFeatureKb, getWorktreePath } from './shared.js';
+import { getFeatureKnowledge, getWorktreePath } from './shared.js';
 
-const KB_HOOK_MARKER = 'session-end-kb-refresh';
+const KNOWLEDGE_HOOK_MARKER = 'session-end-knowledge-refresh';
 
 /**
- * Add the KB SessionEnd hook to settings JSON.
+ * Add the knowledge base SessionEnd hook to settings JSON.
  * Idempotent — returns unchanged JSON if hook already exists.
  */
-export function addKbHook(settingsJson: string, devflowDir: string): string {
-  if (hasKbHook(settingsJson)) {
+export function addKnowledgeHook(settingsJson: string, devflowDir: string): string {
+  if (hasKnowledgeHook(settingsJson)) {
     return settingsJson;
   }
 
@@ -24,7 +24,7 @@ export function addKbHook(settingsJson: string, devflowDir: string): string {
     settings.hooks = {};
   }
 
-  const hookCommand = `${path.join(devflowDir, 'scripts', 'hooks', 'run-hook')} session-end-kb-refresh`;
+  const hookCommand = `${path.join(devflowDir, 'scripts', 'hooks', 'run-hook')} session-end-knowledge-refresh`;
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -46,18 +46,18 @@ export function addKbHook(settingsJson: string, devflowDir: string): string {
 }
 
 /**
- * Remove the KB hook from settings JSON.
+ * Remove the knowledge base hook from settings JSON.
  * Idempotent — returns unchanged JSON if hook not present.
  * Preserves other hooks. Cleans empty arrays/objects.
  */
-export function removeKbHook(settingsJson: string): string {
+export function removeKnowledgeHook(settingsJson: string): string {
   const settings: Settings = JSON.parse(settingsJson);
   let changed = false;
 
   const matchers = settings.hooks?.SessionEnd;
   if (matchers) {
     const filtered = matchers.filter(
-      (m) => !m.hooks.some((h) => h.command.includes(KB_HOOK_MARKER)),
+      (m) => !m.hooks.some((h) => h.command.includes(KNOWLEDGE_HOOK_MARKER)),
     );
     if (filtered.length < matchers.length) changed = true;
     if (filtered.length === 0) {
@@ -79,17 +79,17 @@ export function removeKbHook(settingsJson: string): string {
 }
 
 /**
- * Check if the KB hook is registered in settings JSON or parsed Settings object.
+ * Check if the knowledge base hook is registered in settings JSON or parsed Settings object.
  */
-export function hasKbHook(input: string | Settings): boolean {
+export function hasKnowledgeHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
   return settings.hooks?.SessionEnd?.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(KB_HOOK_MARKER)),
+    matcher.hooks.some((h) => h.command.includes(KNOWLEDGE_HOOK_MARKER)),
   ) ?? false;
 }
 
 /**
- * Handle the enable/disable/status toggle actions for `devflow kb`.
+ * Handle the enable/disable/status toggle actions for `devflow knowledge`.
  */
 export async function handleToggle(options: { enable?: boolean; disable?: boolean; status?: boolean }): Promise<void> {
   if (!options.enable && !options.disable && !options.status) return;
@@ -118,7 +118,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Add SessionEnd hook
     try {
       const content = await fs.readFile(settingsPath, 'utf-8');
-      const updated = addKbHook(content, devflowDir);
+      const updated = addKnowledgeHook(content, devflowDir);
       if (updated !== content) {
         await fs.writeFile(settingsPath, updated, 'utf-8');
       }
@@ -127,13 +127,13 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Update manifest
     const manifest = await readManifest(devflowDir);
     if (manifest) {
-      manifest.features.kb = true;
+      manifest.features.knowledge = true;
       manifest.updatedAt = new Date().toISOString();
       await writeManifest(devflowDir, manifest);
     }
 
     p.log.success('Feature knowledge bases enabled');
-    p.outro(`SessionEnd hook installed. Run ${color.cyan('devflow kb create <slug>')} to create a KB.`);
+    p.outro(`SessionEnd hook installed. Run ${color.cyan('devflow knowledge create <slug>')} to create a knowledge base.`);
 
   } else if (options.disable) {
     p.intro(color.cyan('Disable Feature Knowledge Bases'));
@@ -146,7 +146,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Remove SessionEnd hook
     try {
       const content = await fs.readFile(settingsPath, 'utf-8');
-      const updated = removeKbHook(content);
+      const updated = removeKnowledgeHook(content);
       if (updated !== content) {
         await fs.writeFile(settingsPath, updated, 'utf-8');
       }
@@ -155,24 +155,24 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Update manifest
     const manifest = await readManifest(devflowDir);
     if (manifest) {
-      manifest.features.kb = false;
+      manifest.features.knowledge = false;
       manifest.updatedAt = new Date().toISOString();
       await writeManifest(devflowDir, manifest);
     }
 
     p.log.success('Feature knowledge bases disabled');
-    p.log.info('Existing KBs preserved. Manual commands (create/refresh) still work.');
+    p.log.info('Existing knowledge bases preserved. Manual commands (create/refresh) still work.');
     p.outro('');
 
   } else {
     // options.status
-    p.intro(color.cyan('Feature KB Status'));
+    p.intro(color.cyan('Feature Knowledge Status'));
 
     // Check hook
     let hookPresent = false;
     try {
       const content = await fs.readFile(settingsPath, 'utf-8');
-      hookPresent = hasKbHook(content);
+      hookPresent = hasKnowledgeHook(content);
     } catch { /* settings.json may not exist */ }
 
     // Check sentinel
@@ -182,13 +182,13 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
       disabled = true;
     } catch { /* not disabled */ }
 
-    // Count KBs
-    const kbs = getFeatureKb().listKBs(worktreePath);
+    // Count knowledge bases
+    const kbs = getFeatureKnowledge().listEntries(worktreePath);
 
     const enabled = hookPresent && !disabled;
     p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);
     p.log.info(`Hook:   ${hookPresent ? color.green('installed') : color.dim('not installed')}`);
-    p.log.info(`KBs:    ${kbs.length}`);
+    p.log.info(`Knowledge bases: ${kbs.length}`);
     if (disabled) {
       p.log.info(`Sentinel: ${color.yellow('.features/.disabled present')}`);
     }

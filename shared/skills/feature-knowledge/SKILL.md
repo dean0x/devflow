@@ -1,5 +1,5 @@
 ---
-name: feature-kb
+name: feature-knowledge
 description: Structures codebase exploration into a feature knowledge base
 user-invocable: false
 allowed-tools:

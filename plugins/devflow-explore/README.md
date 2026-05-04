@@ -49,8 +49,8 @@ The teams variant adds cross-validation between explorers:
 ### Skills
 - `agent-teams` - Team coordination patterns
 - `worktree-support` - Git worktree path resolution
-- `apply-feature-kb` - Feature knowledge base consumption
-- `feature-kb` - Feature knowledge base creation
+- `apply-feature-knowledge` - Feature knowledge base consumption
+- `feature-knowledge` - Feature knowledge base creation
 
 ## Output
 
