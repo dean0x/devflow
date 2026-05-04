@@ -748,7 +748,7 @@ describe('safePath', () => {
 // readSidecar helper (TypeScript)
 // ---------------------------------------------------------------------------
 
-import { readSidecar } from '../../src/cli/commands/kb.js';
+import { readSidecar } from '../../src/cli/commands/knowledge/index.js';
 
 describe('readSidecar', () => {
   const tmpFiles: string[] = [];
