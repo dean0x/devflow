@@ -17,6 +17,7 @@ export type { SidecarData } from '../../utils/sidecar.js';
 export { readSidecar } from '../../utils/sidecar.js';
 
 export const knowledgeCommand = new Command('knowledge')
+  .alias('kb')
   .description('Manage per-feature knowledge bases')
   .option('--enable', 'Enable per-feature knowledge bases')
   .option('--disable', 'Disable per-feature knowledge bases')
