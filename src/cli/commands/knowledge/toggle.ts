@@ -88,7 +88,7 @@ export function hasKnowledgeHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
   return settings.hooks?.SessionEnd?.some((matcher) =>
     matcher.hooks.some(
-      (h) => h.command.includes(KNOWLEDGE_HOOK_MARKER) || h.command.includes(LEGACY_KB_HOOK_MARKER),
+      (h) => h.command.includes(KNOWLEDGE_HOOK_MARKER),
     ),
   ) ?? false;
 }
@@ -120,10 +120,11 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Remove .disabled sentinel
     try { await fs.unlink(path.join(featuresDir, '.disabled')); } catch { /* doesn't exist */ }
 
-    // Add SessionEnd hook
+    // Add SessionEnd hook (remove-then-add to clean legacy kb hook if present)
     try {
       const content = await fs.readFile(settingsPath, 'utf-8');
-      const updated = addKnowledgeHook(content, devflowDir);
+      const cleaned = removeKnowledgeHook(content);
+      const updated = addKnowledgeHook(cleaned, devflowDir);
       if (updated !== content) {
         await fs.writeFile(settingsPath, updated, 'utf-8');
       }

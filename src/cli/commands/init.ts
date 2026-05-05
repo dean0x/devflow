@@ -129,8 +129,6 @@ interface InitOptions {
   learn?: boolean;
   hud?: boolean;
   knowledge?: boolean;
-  /** @deprecated Use `knowledge` instead. Kept for backward compatibility. */
-  kb?: boolean;
   hudOnly?: boolean;
   recommended?: boolean;
   advanced?: boolean;
@@ -153,18 +151,10 @@ export const initCommand = new Command('init')
   .option('--no-hud', 'Disable HUD status line')
   .option('--knowledge', 'Enable feature knowledge bases')
   .option('--no-knowledge', 'Disable feature knowledge bases')
-  .option('--kb', '(deprecated; use --knowledge)')
-  .option('--no-kb', '(deprecated; use --no-knowledge)')
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
   .option('--advanced', 'Show all configuration prompts')
   .action(async (options: InitOptions) => {
-    // Backward-compat: --kb / --no-kb were renamed to --knowledge / --no-knowledge.
-    // If the caller used the old flag and the new one was not also specified, honour it.
-    if (options.knowledge === undefined && options.kb !== undefined) {
-      options.knowledge = options.kb;
-    }
-
     // Get package version
     const packageJsonPath = path.resolve(__dirname, '../../package.json');
     let version = '';
@@ -918,27 +908,18 @@ export const initCommand = new Command('init')
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
     }
 
-    // Clean up legacy hook scripts (e.g., ambient-prompt → preamble)
-    const LEGACY_HOOK_SCRIPTS = [
+    // Clean up legacy hook scripts and lib files (paths relative to hooksDir)
+    const LEGACY_HOOK_FILES = [
       'ambient-prompt',
-      // kb → knowledge rename: old script names replaced by session-end-knowledge-refresh / background-knowledge-refresh
+      // kb → knowledge rename: hook scripts replaced by session-end-knowledge-refresh / background-knowledge-refresh
       'session-end-kb-refresh',
       'background-kb-refresh',
-    ];
-    const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
-    for (const legacy of LEGACY_HOOK_SCRIPTS) {
-      const legacyPath = path.join(hooksDir, legacy);
-      try { await fs.rm(legacyPath); } catch { /* doesn't exist */ }
-    }
-
-    // Clean up legacy lib files from previous installations
-    const LEGACY_LIB_FILES = [
       // kb → knowledge rename: CJS module replaced by feature-knowledge.cjs
       'lib/feature-kb.cjs',
     ];
-    const libBaseDir = path.join(devflowDir, 'scripts', 'hooks');
-    for (const legacy of LEGACY_LIB_FILES) {
-      const legacyPath = path.join(libBaseDir, legacy);
+    const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
+    for (const legacy of LEGACY_HOOK_FILES) {
+      const legacyPath = path.join(hooksDir, legacy);
       try { await fs.rm(legacyPath); } catch { /* doesn't exist */ }
     }
 

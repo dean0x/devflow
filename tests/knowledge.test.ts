@@ -166,25 +166,4 @@ describe('hasKnowledgeHook', () => {
     expect(hasKnowledgeHook(JSON.stringify({ hooks: {} }))).toBe(false);
   });
 
-  it('returns true for legacy session-end-kb-refresh hook (upgrade detection)', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] },
-        ],
-      },
-    });
-    expect(hasKnowledgeHook(input)).toBe(true);
-  });
-
-  it('returns true for legacy hook as parsed Settings object', () => {
-    const input = {
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] },
-        ],
-      },
-    };
-    expect(hasKnowledgeHook(input)).toBe(true);
-  });
 });

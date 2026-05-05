@@ -45,13 +45,13 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     ) {
       return null;
     }
-    // Normalize optional fields with defaults (backwards-compatible with old manifests)
-    // BACKWARD COMPAT: features.kb was renamed to features.knowledge; fall back to old field.
-    const legacyKb = features.kb;
+    // Self-heal: rename features.kb → features.knowledge on disk
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
-      : typeof legacyKb === 'boolean' ? legacyKb
+      : typeof features.kb === 'boolean' ? features.kb as boolean
       : false;
-    return {
+    const needsHeal = features.kb !== undefined;
+
+    const manifest: ManifestData = {
       version: data.version as string,
       plugins: data.plugins as string[],
       scope: data.scope as 'user' | 'local',
@@ -67,6 +67,12 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,
     };
+
+    if (needsHeal) {
+      await writeManifest(devflowDir, manifest);
+    }
+
+    return manifest;
   } catch {
     return null;
   }

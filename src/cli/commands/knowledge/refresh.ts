@@ -4,10 +4,10 @@ import { isClaudeCliAvailable } from '../../utils/cli.js';
 import { runKnowledgeAgent, loadDecisionsContext } from '../../utils/knowledge-agent.js';
 import { getFeatureKnowledge, exitOnInvalidSlug, getWorktreePath } from './shared.js';
 
-export async function handleRefresh(slug?: string): Promise<void> {
-  p.intro(color.cyan(slug ? `Refresh Knowledge Base: ${slug}` : 'Refresh Stale Knowledge Bases'));
+export async function handleRefresh(targetSlug?: string): Promise<void> {
+  p.intro(color.cyan(targetSlug ? `Refresh Knowledge Base: ${targetSlug}` : 'Refresh Stale Knowledge Bases'));
 
-  if (slug) exitOnInvalidSlug(slug);
+  if (targetSlug) exitOnInvalidSlug(targetSlug);
 
   if (!isClaudeCliAvailable()) {
     p.log.error('claude CLI not found on PATH. Install Claude Code first.');
@@ -23,8 +23,8 @@ export async function handleRefresh(slug?: string): Promise<void> {
 
   let slugsToRefresh: string[];
   let stalenessMap: Record<string, { stale: boolean; changedFiles: string[] }> | undefined;
-  if (slug) {
-    slugsToRefresh = [slug];
+  if (targetSlug) {
+    slugsToRefresh = [targetSlug];
   } else {
     stalenessMap = getFeatureKnowledge().checkAllStaleness(worktreePath, index);
     slugsToRefresh = Object.entries(stalenessMap)

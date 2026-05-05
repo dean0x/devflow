@@ -119,8 +119,7 @@ describe('readManifest', () => {
     expect(result!.features.knowledge).toBe(false);
   });
 
-  it('should read features.kb as features.knowledge for backward compat', async () => {
-    // Write a manifest with old features.kb field (pre-rename)
+  it('heals features.kb to features.knowledge on disk', async () => {
     const oldData = {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
@@ -132,8 +131,12 @@ describe('readManifest', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(oldData), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
-    // Old features.kb should be read as features.knowledge
     expect(result!.features.knowledge).toBe(true);
+
+    // Verify the file was healed on disk
+    const healed = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8'));
+    expect(healed.features.knowledge).toBe(true);
+    expect(healed.features.kb).toBeUndefined();
   });
 });
 
