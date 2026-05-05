@@ -15,7 +15,7 @@ describe('feature-knowledge skill', () => {
     expect(content).toContain('### Phase 4: Forge');
   });
   it('has quality self-checks', () => { expect(content).toContain('## Quality Self-Checks'); });
-  it('has KB format template with required sections', () => {
+  it('has feature knowledge format template with required sections', () => {
     expect(content).toContain('## Overview');
     expect(content).toContain('## Anti-Patterns');
     expect(content).toContain('## Gotchas');
@@ -42,7 +42,7 @@ describe('apply-feature-knowledge skill', () => {
 
   it('has iron law', () => { expect(content).toContain('## Iron Law'); });
   it('has 3-step algorithm', () => {
-    expect(content).toContain('### Step 1: Read the KB');
+    expect(content).toContain('### Step 1: Read the Feature Knowledge');
     expect(content).toContain('### Step 2: Apply to Current Task');
     expect(content).toContain('### Step 3: Supplement as Needed');
   });

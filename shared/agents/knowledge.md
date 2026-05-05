@@ -23,8 +23,8 @@ tools:
 - **DIRECTORIES** (required): Directory prefixes defining the feature area scope
 - **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skimmer + Explore agents. When provided (e.g., from plan:orch), synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract) using the tools available.
 - **DECISIONS_CONTEXT** (optional): Compact ADR/PF index for cross-referencing in the Related section. When `(none)`, skip citing decisions in the Related section.
-- **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing a stale KB
-- **CHANGED_FILES** (optional): Files that changed since last KB update (for refresh)
+- **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing stale feature knowledge
+- **CHANGED_FILES** (optional): Files that changed since last feature knowledge update (for refresh)
 - **WORKTREE_PATH** (optional): Worktree root for path resolution
 
 ## Responsibilities
@@ -32,7 +32,7 @@ tools:
 1. **Resolve worktree path**: Use `devflow:worktree-support` to determine the working directory
 2. **Orient on feature area**: Read EXPLORATION_OUTPUTS to understand the feature's architecture, patterns, and boundaries
 3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`
-4. **Cross-reference decisions**: If DECISIONS_CONTEXT is provided, reference relevant ADR/PF entries in the KB's "Related" section
+4. **Cross-reference decisions**: If DECISIONS_CONTEXT is provided, reference relevant ADR/PF entries in the feature knowledge's "Related" section
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on CHANGED_FILES while preserving any manually added content (user edits). Don't regenerate from scratch.
 6. **Write KNOWLEDGE.md**: Write to `.features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
 7. **Write sidecar**: Write sidecar JSON file (`.create-result.json` or `.refresh-result.json`) with `referencedFiles` and `description` so the host process can update the index
@@ -53,6 +53,6 @@ CROSS_REFERENCES: [ADR/PF entries referenced, if any]
 ## Boundaries
 
 - **Only writes to `.features/` directory** — never modify source code
-- **Never delete existing KBs** — only create new or refresh existing
-- **500-line cap** — if KB exceeds 500 lines, split into focused sub-KBs (each gets own index entry)
+- **Never delete existing feature knowledge** — only create new or refresh existing
+- **500-line cap** — if the knowledge base exceeds 500 lines, split into focused sub-knowledge bases (each gets own index entry)
 - **No push, no external API calls** — local filesystem operations only

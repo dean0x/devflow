@@ -96,9 +96,9 @@ This produces a compact index of active ADR/PF entries. Pass Skimmer context and
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
-2. Based on the planning task description, identify relevant KBs
+2. Based on the planning task description, identify relevant feature knowledge
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
-4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explorer and Designer agents.
 
@@ -107,7 +107,7 @@ Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explorer and Designer 
 **Produces:** EXPLORE_OUTPUTS
 **Requires:** SKIMMER_CONTEXT, DECISIONS_CONTEXT
 
-Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the KB doesn't cover and changes since it was last updated."
+Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECISIONS_CONTEXT` (from Phase 2), and `FEATURE_KNOWLEDGE` (from Phase 2). Include instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — VALIDATE, EXTEND, and CORRECT it, don't repeat it. Focus on areas the feature knowledge doesn't cover and changes since it was last updated."
 
 | Focus | Thoroughness | Find |
 |-------|-------------|------|

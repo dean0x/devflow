@@ -30,9 +30,9 @@ Detect changed files and build context:
    Pass `DECISIONS_CONTEXT` to Scrutinizer — the compact index lists active ADR/PF entries; Scrutinizer uses `devflow:apply-decisions` to Read full entry bodies on demand. Known pitfalls help identify reintroduced issues, prior decisions help validate architectural consistency. (Simplifier does not consume decisions — it operates at code-shape level and Scrutinizer runs after to catch any architectural drift.)
 6. Load feature knowledge:
    - Read `.features/index.json` if it exists
-   - Based on FILES_CHANGED, identify relevant KBs (match file paths against KB `directories` and `referencedFiles`)
+   - Based on FILES_CHANGED, identify relevant feature knowledge (match file paths against feature knowledge `directories` and `referencedFiles`)
    - For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
-   - Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+   - Set `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none are relevant)
    - Pass `FEATURE_KNOWLEDGE` to Scrutinizer
 
 **Extract:** FILES_CHANGED (list), TASK_DESCRIPTION (string), DECISIONS_CONTEXT (string, optional), FEATURE_KNOWLEDGE (string, optional)

@@ -82,9 +82,9 @@ This produces a compact index of active ADR/PF entries from `decisions.md` and `
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists
-2. Based on file paths from review report issue entries, identify relevant KBs
+2. Based on file paths from review report issue entries, identify relevant feature knowledge
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
-4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant)
+4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` to every Resolver agent in Phase 4.
 

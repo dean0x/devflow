@@ -41,7 +41,7 @@ Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` t
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
-2. Based on file paths from review report issue entries, identify relevant KBs
+2. Based on file paths from review report issue entries, identify relevant feature knowledge entries
 3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 

@@ -51,7 +51,7 @@ describe('feature-knowledge.cjs CLI', () => {
   });
 
   it('remove deletes entry and directory', () => {
-    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': '# Test KB' });
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': '# Test Feature Knowledge' });
     execSync(`node ${CJS_PATH} remove ${tmp} cli-commands`, { encoding: 'utf8' });
     const index = JSON.parse(readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8'));
     expect(index.features['cli-commands']).toBeUndefined();
