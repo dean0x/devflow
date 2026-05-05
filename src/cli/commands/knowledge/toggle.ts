@@ -8,6 +8,7 @@ import { readManifest, writeManifest } from '../../utils/manifest.js';
 import { getFeatureKnowledge, getWorktreePath } from './shared.js';
 
 const KNOWLEDGE_HOOK_MARKER = 'session-end-knowledge-refresh';
+const LEGACY_KB_HOOK_MARKER = 'session-end-kb-refresh';
 
 /**
  * Add the knowledge base SessionEnd hook to settings JSON.
@@ -57,7 +58,9 @@ export function removeKnowledgeHook(settingsJson: string): string {
   const matchers = settings.hooks?.SessionEnd;
   if (matchers) {
     const filtered = matchers.filter(
-      (m) => !m.hooks.some((h) => h.command.includes(KNOWLEDGE_HOOK_MARKER)),
+      (m) => !m.hooks.some(
+        (h) => h.command.includes(KNOWLEDGE_HOOK_MARKER) || h.command.includes(LEGACY_KB_HOOK_MARKER),
+      ),
     );
     if (filtered.length < matchers.length) changed = true;
     if (filtered.length === 0) {
@@ -84,7 +87,9 @@ export function removeKnowledgeHook(settingsJson: string): string {
 export function hasKnowledgeHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
   return settings.hooks?.SessionEnd?.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(KNOWLEDGE_HOOK_MARKER)),
+    matcher.hooks.some(
+      (h) => h.command.includes(KNOWLEDGE_HOOK_MARKER) || h.command.includes(LEGACY_KB_HOOK_MARKER),
+    ),
   ) ?? false;
 }
 

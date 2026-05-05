@@ -93,6 +93,34 @@ describe('removeKnowledgeHook', () => {
     expect(JSON.parse(result)).toEqual(JSON.parse(input));
   });
 
+  it('removes legacy session-end-kb-refresh hook (upgrade path)', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] },
+        ],
+      },
+    });
+    const result = removeKnowledgeHook(input);
+    const parsed = JSON.parse(result);
+    expect(parsed.hooks).toBeUndefined();
+  });
+
+  it('removes legacy session-end-kb-refresh while preserving other SessionEnd hooks', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/to/other-hook', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] },
+        ],
+      },
+    });
+    const result = removeKnowledgeHook(input);
+    const parsed = JSON.parse(result);
+    expect(parsed.hooks.SessionEnd).toHaveLength(1);
+    expect(parsed.hooks.SessionEnd[0].hooks[0].command).toContain('other-hook');
+  });
+
   it('preserves other hook event types', () => {
     const input = JSON.stringify({
       hooks: {
@@ -136,5 +164,27 @@ describe('hasKnowledgeHook', () => {
 
   it('returns false for empty hooks object', () => {
     expect(hasKnowledgeHook(JSON.stringify({ hooks: {} }))).toBe(false);
+  });
+
+  it('returns true for legacy session-end-kb-refresh hook (upgrade detection)', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] },
+        ],
+      },
+    });
+    expect(hasKnowledgeHook(input)).toBe(true);
+  });
+
+  it('returns true for legacy hook as parsed Settings object', () => {
+    const input = {
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/devflow/scripts/hooks/run-hook session-end-kb-refresh', timeout: 10 }] },
+        ],
+      },
+    };
+    expect(hasKnowledgeHook(input)).toBe(true);
   });
 });
