@@ -21,7 +21,7 @@ Plugin marketplace with 18 plugins (9 core + 9 optional language/ecosystem), eac
 | `devflow-code-review` | Comprehensive code review | Optional |
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
-| `devflow-explore` | Codebase exploration with KB creation | Optional |
+| `devflow-explore` | Codebase exploration with knowledge base creation | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
 | `devflow-ambient` | Ambient mode — three-tier intent classification (QUICK/GUIDED/ORCHESTRATED) | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
@@ -150,7 +150,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - `/implement` — Git + Coder + Validator + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
 - `/code-review` — 7-11 Reviewer agents + Git + Synthesizer; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/resolve` — N Resolver agents + Git; loads compact decisions index (`decisions-index.cjs index`) per worktree and passes it as `DECISIONS_CONTEXT` to each Resolver; Resolvers use `devflow:apply-decisions` to Read full bodies on demand; aggregates cited ADR-NNN/PF-NNN IDs into a `## Decisions Citations` section at the top of `resolution-summary.md`
-- `/explore` — Skimmer + Explore + Synthesizer + Knowledge (optional KB creation)
+- `/explore` — Skimmer + Explore + Synthesizer + Knowledge (optional knowledge base creation)
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/audit-claude` — CLAUDE.md audit (optional plugin)

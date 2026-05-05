@@ -1,6 +1,6 @@
 # devflow-explore
 
-Codebase exploration plugin for Claude Code. Explores code areas with parallel agents for flow tracing, dependency mapping, and pattern analysis, with optional feature KB creation.
+Codebase exploration plugin for Claude Code. Explores code areas with parallel agents for flow tracing, dependency mapping, and pattern analysis, with optional feature knowledge base creation.
 
 ## Installation
 
@@ -32,7 +32,7 @@ Requires Agent Teams feature (for teams variant):
 2. **Explore** - 2-3 parallel agents trace flows, dependencies, and patterns
 3. **Synthesize** - Findings merged and contradictions resolved
 4. **Present** - Structured findings with file:line references and drill-down offer
-5. **KB Creation** - Optionally create a feature KB to capture discovered patterns
+5. **Knowledge Base Creation** - Optionally create a feature knowledge base to capture discovered patterns
 
 ### Teams Variant
 
@@ -67,7 +67,7 @@ Produces structured exploration findings including:
 - Tracing request or data flows end-to-end
 - Mapping module dependencies and integration points
 - Discovering patterns and conventions in a subsystem
-- Building feature KBs for areas you've explored
+- Building feature knowledge bases for areas you've explored
 
 ## Related Plugins
 

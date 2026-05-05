@@ -42,7 +42,7 @@ devflow/
 │   ├── build-hud.js                  # Copies dist/hud/ → scripts/hud/
 │   ├── hud.sh                        # Thin wrapper: exec node hud/index.js
 │   ├── hud/                          # GENERATED — compiled HUD module (gitignored)
-│   └── hooks/                        # Working Memory + ambient + learning + KB hooks
+│   └── hooks/                        # Working Memory + ambient + learning + knowledge base hooks
 │       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
@@ -154,7 +154,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
-- `hooks` - Working Memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) + Learning SessionEnd hook + KB SessionEnd hook
+- `hooks` - Working Memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) + Learning SessionEnd hook + knowledge base SessionEnd hook
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration

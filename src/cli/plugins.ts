@@ -86,7 +86,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-explore',
-    description: 'Codebase exploration with structured analysis and optional KB creation',
+    description: 'Codebase exploration with structured analysis and optional knowledge base creation',
     commands: ['/explore'],
     agents: ['skimmer', 'synthesizer', 'knowledge'],
     skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],

@@ -47,7 +47,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     }
     // Normalize optional fields with defaults (backwards-compatible with old manifests)
     // BACKWARD COMPAT: features.kb was renamed to features.knowledge; fall back to old field.
-    const legacyKb = (features as Record<string, unknown>).kb;
+    const legacyKb = features.kb;
     const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
       : typeof legacyKb === 'boolean' ? legacyKb
       : false;
