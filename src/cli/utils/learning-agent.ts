@@ -30,8 +30,6 @@ export interface LearningAgentOpts {
   userSignals: string[];
   /** Model name (e.g. 'sonnet'). */
   model: string;
-  /** Enables debug logging. */
-  debug: boolean;
   /** Path to the learning-log.jsonl file. */
   logFile: string;
   /** Path to json-helper.cjs. */
@@ -81,7 +79,7 @@ export async function runLearningAgent(opts: LearningAgentOpts): Promise<string>
     // Validate JSON.
     _validateObservationsJson(stripped);
 
-    await fs.writeFile(responseFile, stripped, 'utf-8');
+    await fs.writeFile(responseFile, stripped, { encoding: 'utf-8', mode: 0o600 });
     return responseFile;
   } catch (err) {
     // Clean up temp file on error.

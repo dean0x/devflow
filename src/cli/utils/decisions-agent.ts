@@ -76,8 +76,6 @@ export interface DecisionsAgentOpts {
   dialogPairs: Array<{ prior: string; user: string }>;
   /** Model name (e.g. 'sonnet'). */
   model: string;
-  /** Enables debug logging. */
-  debug: boolean;
   /** Path to the decisions-log.jsonl file. */
   logFile: string;
   /** Path to json-helper.cjs. */
@@ -131,7 +129,7 @@ export async function runDecisionsAgent(opts: DecisionsAgentOpts): Promise<strin
     const normalized = _normalizeObservations(observations);
 
     const responseJson = JSON.stringify({ observations: normalized });
-    await fs.writeFile(responseFile, responseJson, 'utf-8');
+    await fs.writeFile(responseFile, responseJson, { encoding: 'utf-8', mode: 0o600 });
     return responseFile;
   } catch (err) {
     // Clean up temp file on error.
@@ -245,8 +243,27 @@ interface NormalizedObservation {
 }
 
 /**
+ * Type guard for RawObservation — validates all required fields are present
+ * and have the expected types. Used to filter LLM output before serialization.
+ */
+function isRawObservation(value: unknown): value is RawObservation {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v['id'] === 'string' &&
+    typeof v['type'] === 'string' &&
+    typeof v['pattern'] === 'string' &&
+    Array.isArray(v['evidence']) &&
+    typeof v['quality_ok'] === 'boolean'
+  );
+}
+
+/**
  * Extract the observations array from Claude's structured output envelope.
  * Claude wraps structured output in: {"structured_output": {...actual response...}}
+ *
+ * Individual elements are validated via isRawObservation() — malformed elements
+ * are logged and dropped rather than propagating garbage into serialization.
  *
  * @throws When the envelope cannot be parsed.
  */
@@ -270,7 +287,17 @@ export function _extractStructuredOutput(stdout: string): RawObservation[] {
     throw new Error(`Decisions agent response missing "observations" array`);
   }
 
-  return (inner as { observations: RawObservation[] }).observations;
+  const rawArray = (inner as Record<string, unknown[]>)['observations'];
+  const valid: RawObservation[] = [];
+  for (const item of rawArray) {
+    if (isRawObservation(item)) {
+      valid.push(item);
+    } else {
+      // Warn on malformed elements rather than silently producing garbage output.
+      process.stderr.write(`[decisions-agent] Dropping malformed observation (missing required fields): ${JSON.stringify(item).slice(0, 200)}\n`);
+    }
+  }
+  return valid;
 }
 
 /**

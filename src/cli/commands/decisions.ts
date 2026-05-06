@@ -145,7 +145,11 @@ export const decisionsCommand = new Command('decisions')
   .option('--run-background', 'Run decisions agent in background mode')
   .option('--cwd <path>', 'Working directory for background mode')
   .action(async (options: DecisionsOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity || options.runBackground;
+    const knownFlags: (keyof DecisionsOptions)[] = [
+      'enable', 'disable', 'status', 'list', 'configure',
+      'clear', 'reset', 'purge', 'review', 'dismissCapacity', 'runBackground',
+    ];
+    const hasFlag = knownFlags.some((f) => options[f]);
     if (!hasFlag) {
       p.intro(color.bgCyan(color.black(' Decisions Learning ')));
       p.note(
@@ -173,6 +177,16 @@ export const decisionsCommand = new Command('decisions')
       const jsonHelperPath = path.join(scriptDir, 'json-helper.cjs');
       const stalenessModulePath = path.join(scriptDir, 'lib', 'staleness.cjs');
       const memoryDir = path.join(cwd, '.memory');
+
+      // Validate that the resolved cwd is a devflow-enabled project directory.
+      // This guards against passing an arbitrary path via --cwd from the CLI.
+      try {
+        await fs.access(memoryDir);
+      } catch {
+        process.stderr.write(`[decisions] --cwd path does not contain a .memory directory: ${cwd}\n`);
+        process.exit(1);
+      }
+
       const lockDir = path.join(memoryDir, '.decisions.lock');
       const logFile = path.join(memoryDir, 'decisions-log.jsonl');
       const batchIdsFile = path.join(memoryDir, '.decisions-batch-ids');
@@ -206,7 +220,6 @@ export const decisionsCommand = new Command('decisions')
           cwd,
           dialogPairs,
           model: config.model,
-          debug: config.debug,
           logFile,
           jsonHelperPath,
         });
@@ -406,7 +419,7 @@ export const decisionsCommand = new Command('decisions')
       const config = {
         max_daily_runs: Number(maxRuns),
         throttle_minutes: Number(throttle),
-        model: model as string,
+        model,
         debug: debugMode,
         batch_size: 1,
       };
@@ -503,10 +516,10 @@ export const decisionsCommand = new Command('decisions')
           } catch { /* may not exist */ }
         }
 
-        // Remove decisions sentinel directory if present.
+        // Remove decisions sentinel directory if present (may contain .disabled or other files).
         try {
-          await fs.rmdir(path.join(memoryDir, 'decisions'));
-        } catch { /* may not exist or may not be empty */ }
+          await fs.rm(path.join(memoryDir, 'decisions'), { recursive: true, force: true });
+        } catch { /* best effort */ }
 
         p.log.success(`Reset complete — removed ${removed} file(s).`);
       } finally {
@@ -625,8 +638,6 @@ export const decisionsCommand = new Command('decisions')
           }
           // 'skip' — no change
         }
-
-        await writeObservations(logPath, updatedObservations);
       } finally {
         if (lockAcquired) {
           try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
