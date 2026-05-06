@@ -7,8 +7,8 @@ import {
 } from '../src/cli/utils/flags.js';
 
 describe('FLAG_REGISTRY', () => {
-  it('contains at least 5 flags', () => {
-    expect(FLAG_REGISTRY.length).toBeGreaterThanOrEqual(5);
+  it('contains at least 14 flags', () => {
+    expect(FLAG_REGISTRY.length).toBeGreaterThanOrEqual(14);
   });
 
   it('has unique IDs', () => {
@@ -38,6 +38,17 @@ describe('FLAG_REGISTRY', () => {
       }
     }
   });
+
+  it('has unique target keys (no duplicate env var or setting keys)', () => {
+    const envKeys = FLAG_REGISTRY
+      .filter(f => f.target.type === 'env')
+      .map(f => f.target.key);
+    const settingKeys = FLAG_REGISTRY
+      .filter(f => f.target.type === 'setting')
+      .map(f => f.target.key);
+    expect(new Set(envKeys).size).toBe(envKeys.length);
+    expect(new Set(settingKeys).size).toBe(settingKeys.length);
+  });
 });
 
 describe('getDefaultFlags', () => {
@@ -51,8 +62,44 @@ describe('getDefaultFlags', () => {
     expect(getDefaultFlags()).toContain('tool-search');
   });
 
+  it('includes prompt-caching-1h by default', () => {
+    expect(getDefaultFlags()).toContain('prompt-caching-1h');
+  });
+
+  it('includes show-turn-duration by default', () => {
+    expect(getDefaultFlags()).toContain('show-turn-duration');
+  });
+
   it('does not include brief by default', () => {
     expect(getDefaultFlags()).not.toContain('brief');
+  });
+
+  it('does not include tui by default', () => {
+    expect(getDefaultFlags()).not.toContain('tui');
+  });
+
+  it('does not include thinking-summaries by default', () => {
+    expect(getDefaultFlags()).not.toContain('thinking-summaries');
+  });
+
+  it('does not include subprocess-env-scrub by default', () => {
+    expect(getDefaultFlags()).not.toContain('subprocess-env-scrub');
+  });
+
+  it('does not include disable-nonessential-traffic by default', () => {
+    expect(getDefaultFlags()).not.toContain('disable-nonessential-traffic');
+  });
+
+  it('does not include forked-subagents by default', () => {
+    expect(getDefaultFlags()).not.toContain('forked-subagents');
+  });
+
+  it('does not include disable-compact by default', () => {
+    expect(getDefaultFlags()).not.toContain('disable-compact');
+  });
+
+  it('does not include disable-autoupdater by default', () => {
+    expect(getDefaultFlags()).not.toContain('disable-autoupdater');
   });
 });
 
@@ -67,6 +114,64 @@ describe('applyFlags', () => {
     const input = JSON.stringify({ hooks: {} }, null, 2);
     const result = JSON.parse(applyFlags(input, ['clear-context-on-plan']));
     expect(result.showClearContextOnPlanAccept).toBe(true);
+  });
+
+  it('applies string-value setting (tui → "fullscreen")', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    const result = JSON.parse(applyFlags(input, ['tui']));
+    expect(result.tui).toBe('fullscreen');
+  });
+
+  it('applies new env flag subprocess-env-scrub', () => {
+    const input = JSON.stringify({}, null, 2);
+    const result = JSON.parse(applyFlags(input, ['subprocess-env-scrub']));
+    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+  });
+
+  it('applies new env flag forked-subagents', () => {
+    const input = JSON.stringify({}, null, 2);
+    const result = JSON.parse(applyFlags(input, ['forked-subagents']));
+    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBe('1');
+  });
+
+  it('applies new env flag disable-compact', () => {
+    const input = JSON.stringify({}, null, 2);
+    const result = JSON.parse(applyFlags(input, ['disable-compact']));
+    expect(result.env.DISABLE_COMPACT).toBe('true');
+  });
+
+  it('applies new env flag disable-autoupdater', () => {
+    const input = JSON.stringify({}, null, 2);
+    const result = JSON.parse(applyFlags(input, ['disable-autoupdater']));
+    expect(result.env.DISABLE_AUTOUPDATER).toBe('true');
+  });
+
+  it('applies new setting flag thinking-summaries', () => {
+    const input = JSON.stringify({}, null, 2);
+    const result = JSON.parse(applyFlags(input, ['thinking-summaries']));
+    expect(result.showThinkingSummaries).toBe(true);
+  });
+
+  it('applies all 14 flags at once', () => {
+    const allIds = FLAG_REGISTRY.map(f => f.id);
+    const input = JSON.stringify({}, null, 2);
+    const result = JSON.parse(applyFlags(input, allIds));
+    // env flags
+    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
+    expect(result.env.ENABLE_LSP_TOOL).toBe('true');
+    expect(result.env.ENABLE_PROMPT_CACHING_1H).toBe('true');
+    expect(result.env.CLAUDE_CODE_BRIEF).toBe('true');
+    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+    expect(result.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('true');
+    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBe('1');
+    expect(result.env.DISABLE_COMPACT).toBe('true');
+    expect(result.env.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBe('true');
+    expect(result.env.DISABLE_AUTOUPDATER).toBe('true');
+    // setting flags
+    expect(result.showTurnDuration).toBe(true);
+    expect(result.showClearContextOnPlanAccept).toBe(true);
+    expect(result.tui).toBe('fullscreen');
+    expect(result.showThinkingSummaries).toBe(true);
   });
 
   it('applies multiple flags at once', () => {
@@ -134,6 +239,16 @@ describe('stripFlags', () => {
     expect(result.hooks).toEqual({});
   });
 
+  it('removes string-valued setting (tui) when stripped', () => {
+    const input = JSON.stringify({
+      tui: 'fullscreen',
+      hooks: {},
+    }, null, 2);
+    const result = JSON.parse(stripFlags(input));
+    expect(result.tui).toBeUndefined();
+    expect(result.hooks).toEqual({});
+  });
+
   it('removes empty env object after stripping', () => {
     const input = JSON.stringify({
       hooks: {},
@@ -173,6 +288,64 @@ describe('stripFlags', () => {
     expect(result.env.ENABLE_TOOL_SEARCH).toBeUndefined();
     expect(result.env.ENABLE_LSP_TOOL).toBeUndefined();
     expect(result.showClearContextOnPlanAccept).toBeUndefined();
+    expect(result.env.CUSTOM).toBe('value');
+    expect(result.hooks).toEqual({ Stop: [] });
+  });
+
+  it('roundtrip with mixed new flags including string-valued settings', () => {
+    const base = JSON.stringify({
+      hooks: { Stop: [] },
+      env: { CUSTOM: 'value' },
+    }, null, 2);
+
+    const withFlags = applyFlags(base, [
+      'prompt-caching-1h',
+      'show-turn-duration',
+      'tui',
+      'thinking-summaries',
+      'subprocess-env-scrub',
+      'forked-subagents',
+    ]);
+    const stripped = stripFlags(withFlags);
+    const result = JSON.parse(stripped);
+
+    expect(result.env.ENABLE_PROMPT_CACHING_1H).toBeUndefined();
+    expect(result.showTurnDuration).toBeUndefined();
+    expect(result.tui).toBeUndefined();
+    expect(result.showThinkingSummaries).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBeUndefined();
+    expect(result.env.CUSTOM).toBe('value');
+    expect(result.hooks).toEqual({ Stop: [] });
+  });
+
+  it('roundtrip with all 14 flags', () => {
+    const allIds = FLAG_REGISTRY.map(f => f.id);
+    const base = JSON.stringify({
+      hooks: { Stop: [] },
+      env: { CUSTOM: 'value' },
+    }, null, 2);
+
+    const withFlags = applyFlags(base, allIds);
+    const stripped = stripFlags(withFlags);
+    const result = JSON.parse(stripped);
+
+    // All flag-managed keys removed
+    expect(result.env?.ENABLE_TOOL_SEARCH).toBeUndefined();
+    expect(result.env?.ENABLE_LSP_TOOL).toBeUndefined();
+    expect(result.env?.ENABLE_PROMPT_CACHING_1H).toBeUndefined();
+    expect(result.showTurnDuration).toBeUndefined();
+    expect(result.showClearContextOnPlanAccept).toBeUndefined();
+    expect(result.env?.CLAUDE_CODE_BRIEF).toBeUndefined();
+    expect(result.tui).toBeUndefined();
+    expect(result.showThinkingSummaries).toBeUndefined();
+    expect(result.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    expect(result.env?.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBeUndefined();
+    expect(result.env?.CLAUDE_CODE_FORK_SUBAGENT).toBeUndefined();
+    expect(result.env?.DISABLE_COMPACT).toBeUndefined();
+    expect(result.env?.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBeUndefined();
+    expect(result.env?.DISABLE_AUTOUPDATER).toBeUndefined();
+    // Non-flag keys preserved
     expect(result.env.CUSTOM).toBe('value');
     expect(result.hooks).toEqual({ Stop: [] });
   });
