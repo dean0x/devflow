@@ -15,6 +15,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
+import { loadExistingObservations } from './background-runner.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -54,7 +55,7 @@ export async function runLearningAgent(opts: LearningAgentOpts): Promise<string>
   const { cwd, userSignals, model, logFile, jsonHelperPath } = opts;
 
   // Load existing observations for deduplication context.
-  const existingObs = await _loadExistingObservations(jsonHelperPath, logFile, ['workflow', 'procedural']);
+  const existingObs = await loadExistingObservations(jsonHelperPath, logFile, ['workflow', 'procedural']);
 
   // Build the prompt.
   const prompt = _buildLearningPrompt(userSignals, existingObs);
@@ -162,63 +163,6 @@ Output ONLY the JSON object. No markdown fences, no explanation.
 If no patterns detected, return {"observations": []}.
 
 Do NOT emit artifact content, rendered markdown, YAML frontmatter, or templates. Rendering is a separate step handled by the render layer. Your only job is to produce structured observation metadata.`;
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Load existing observations from the log file, filtered by types.
- * Falls back to running json-helper.cjs filter-observations if available,
- * otherwise reads and filters the log manually.
- */
-async function _loadExistingObservations(
-  jsonHelperPath: string,
-  logFile: string,
-  types: string[],
-): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync('node', [jsonHelperPath, 'filter-observations', logFile, 'confidence', '30'], {
-      timeout: 10_000,
-    });
-    const parsed: unknown = JSON.parse(stdout.trim() || '[]');
-    if (!Array.isArray(parsed)) return '[]';
-    const filtered = parsed.filter(
-      (entry): entry is Record<string, unknown> =>
-        typeof entry === 'object' && entry !== null &&
-        types.includes(String((entry as Record<string, unknown>)['type'])),
-    );
-    return JSON.stringify(filtered);
-  } catch {
-    // Fall back to manual log read.
-    return _loadObservationsFromLog(logFile, types);
-  }
-}
-
-async function _loadObservationsFromLog(logFile: string, types: string[]): Promise<string> {
-  try {
-    const content = await fs.readFile(logFile, 'utf-8');
-    const lines = content.split('\n').filter(Boolean);
-    const observations: unknown[] = [];
-    for (const line of lines) {
-      try {
-        const entry: unknown = JSON.parse(line);
-        if (
-          typeof entry === 'object' && entry !== null &&
-          types.includes(String((entry as Record<string, unknown>)['type'])) &&
-          (entry as Record<string, unknown>)['status'] === 'observing'
-        ) {
-          observations.push(entry);
-        }
-      } catch {
-        // Skip malformed lines.
-      }
-    }
-    return JSON.stringify(observations);
-  } catch {
-    return '[]';
-  }
 }
 
 /**

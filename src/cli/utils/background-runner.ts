@@ -324,14 +324,6 @@ export function capEntries(logFile: string, max = 100): void {
 }
 
 /**
- * Rotate (cap) a log file to at most `maxLines` lines.
- * Alias for `capEntries` — provided for callers that prefer the `rotateLog` name.
- */
-export function rotateLog(logFile: string, maxLines = 100): void {
-  capEntries(logFile, maxLines);
-}
-
-/**
  * Run the staleness checker against the learning log.
  *
  * Delegates to `lib/staleness.cjs <logFile> <cwd>` if the module exists.
@@ -355,6 +347,66 @@ export async function checkStaleness(
     console.warn(
       `[background-runner] staleness check failed: ${(err as Error).message}`,
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Observation loading (shared by learning-agent.ts and decisions-agent.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Load existing observations from a log file, filtered by type, for deduplication context.
+ * Tries json-helper.cjs filter-observations first; falls back to direct log read.
+ *
+ * @param jsonHelperPath - Path to json-helper.cjs.
+ * @param logFile - Path to the JSONL log file.
+ * @param types - Observation types to include (e.g. ['workflow', 'procedural']).
+ * @returns JSON string of filtered observations.
+ */
+export async function loadExistingObservations(
+  jsonHelperPath: string,
+  logFile: string,
+  types: string[],
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('node', [jsonHelperPath, 'filter-observations', logFile, 'confidence', '30'], {
+      timeout: 10_000,
+    });
+    const parsed: unknown = JSON.parse(stdout.trim() || '[]');
+    if (!Array.isArray(parsed)) return '[]';
+    const filtered = parsed.filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === 'object' && entry !== null &&
+        types.includes(String((entry as Record<string, unknown>)['type'])),
+    );
+    return JSON.stringify(filtered);
+  } catch {
+    return _loadObservationsFromLog(logFile, types);
+  }
+}
+
+async function _loadObservationsFromLog(logFile: string, types: string[]): Promise<string> {
+  try {
+    const content = fs.readFileSync(logFile, 'utf-8');
+    const lines = content.split('\n').filter(Boolean);
+    const observations: unknown[] = [];
+    for (const line of lines) {
+      try {
+        const entry: unknown = JSON.parse(line);
+        if (
+          typeof entry === 'object' && entry !== null &&
+          types.includes(String((entry as Record<string, unknown>)['type'])) &&
+          (entry as Record<string, unknown>)['status'] === 'observing'
+        ) {
+          observations.push(entry);
+        }
+      } catch {
+        // Skip malformed lines.
+      }
+    }
+    return JSON.stringify(observations);
+  } catch {
+    return '[]';
   }
 }
 

@@ -22,9 +22,10 @@ import {
 import { runDecisionsAgent } from '../utils/decisions-agent.js';
 import { loadDecisionsConfig } from '../utils/decisions-config.js';
 import {
-  parseLearningLog,
-  loadAndCountObservations,
   isLearningObservation,
+  readObservations,
+  warnIfInvalid,
+  writeObservations,
   type LearningObservation,
 } from './learn.js';
 
@@ -110,41 +111,6 @@ export function hasDecisionsHook(input: string | Settings): boolean {
   return settings.hooks?.SessionEnd?.some((matcher) =>
     matcher.hooks.some((h) => h.command.includes(DECISIONS_HOOK_MARKER)),
   ) ?? false;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Read and parse observations from the decisions log file.
- * Returns empty results if the file does not exist.
- */
-async function readDecisionsObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
-  try {
-    const logContent = await fs.readFile(logPath, 'utf-8');
-    return loadAndCountObservations(logContent);
-  } catch {
-    return { observations: [], invalidCount: 0 };
-  }
-}
-
-/**
- * Warn the user if invalid entries were found in the decisions log.
- */
-function warnIfInvalid(invalidCount: number): void {
-  if (invalidCount > 0) {
-    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow decisions --purge' to clean.`);
-  }
-}
-
-/**
- * Write observations back to the log file atomically.
- */
-async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
-  const lines = observations.map(o => JSON.stringify(o));
-  const content = lines.join('\n') + (lines.length ? '\n' : '');
-  await writeFileAtomicExclusive(logPath, content);
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +257,7 @@ export const decisionsCommand = new Command('decisions')
     // --- --status ---
     if (options.status) {
       const hookEnabled = hasDecisionsHook(settingsContent);
-      const { observations, invalidCount } = await readDecisionsObservations(logPath);
+      const { observations, invalidCount } = await readObservations(logPath);
 
       const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
       const decisions = observations.filter(o => o.type === 'decision');
@@ -314,7 +280,7 @@ export const decisionsCommand = new Command('decisions')
         }
       }
       p.log.info(lines.join('\n'));
-      warnIfInvalid(invalidCount);
+      warnIfInvalid(invalidCount, 'devflow decisions --purge');
 
       // Show daily run count
       const capsFile = path.join(memoryDir, '.decisions-runs-today');
@@ -344,7 +310,7 @@ export const decisionsCommand = new Command('decisions')
         return;
       }
 
-      const { observations, invalidCount } = await readDecisionsObservations(logPath);
+      const { observations, invalidCount } = await readObservations(logPath);
       const filtered = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
 
       if (filtered.length === 0) {
@@ -367,7 +333,7 @@ export const decisionsCommand = new Command('decisions')
           `[${typeIcon}] ${color.cyan(obs.pattern)} (${conf}% | ${obs.observations}x | ${statusIcon})`,
         );
       }
-      warnIfInvalid(invalidCount);
+      warnIfInvalid(invalidCount, 'devflow decisions --purge');
       p.outro(color.dim(`${filtered.length} observation(s) total`));
       return;
     }
@@ -579,8 +545,8 @@ export const decisionsCommand = new Command('decisions')
 
     // --- --review ---
     if (options.review) {
-      const { observations, invalidCount } = await readDecisionsObservations(logPath);
-      warnIfInvalid(invalidCount);
+      const { observations, invalidCount } = await readObservations(logPath);
+      warnIfInvalid(invalidCount, 'devflow decisions --purge');
 
       const flagged = observations.filter(
         (o) => (o.type === 'decision' || o.type === 'pitfall') && (o.mayBeStale || o.needsReview || o.softCapExceeded),

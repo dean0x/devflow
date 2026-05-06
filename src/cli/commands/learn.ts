@@ -315,10 +315,10 @@ export function loadLearningConfig(globalJson: string | null, projectJson: strin
 }
 
 /**
- * Read and parse observations from the learning log file.
+ * Read and parse observations from a log file.
  * Returns empty results if the file does not exist.
  */
-async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
+export async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
   try {
     const logContent = await fs.readFile(logPath, 'utf-8');
     return loadAndCountObservations(logContent);
@@ -362,22 +362,23 @@ async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, staleMs = 6
 }
 
 /**
- * Warn the user if invalid entries were found in the learning log.
+ * Warn the user if invalid entries were found in a log file.
+ * Pass `command` to customize the purge command shown in the warning.
  */
-function warnIfInvalid(invalidCount: number): void {
+export function warnIfInvalid(invalidCount: number, command = 'devflow learn --purge'): void {
   if (invalidCount > 0) {
-    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
+    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run '${command}' to clean.`);
   }
 }
 
 /**
- * Write observations back to the log file atomically.
+ * Write observations back to a log file atomically.
  * Each observation is serialized as a JSON line. Uses a `.tmp` sibling + rename so
  * concurrent readers (e.g. background-learning during a race) never observe a
  * half-written file. Delegates to `writeFileAtomicExclusive` in fs-atomic.ts
  * (D34/D39: canonical TS atomic-write helper).
  */
-async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
+export async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
   const lines = observations.map(o => JSON.stringify(o));
   const content = lines.join('\n') + (lines.length ? '\n' : '');
   await writeFileAtomicExclusive(logPath, content);
