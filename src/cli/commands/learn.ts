@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
@@ -9,6 +9,18 @@ import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
+import {
+  acquireBackgroundLock,
+  releaseBackgroundLock,
+  registerLockCleanup,
+  checkDailyCap,
+  incrementDailyCap,
+  extractBatchMessages,
+  applyTemporalDecay,
+  capEntries,
+  checkStaleness,
+} from '../utils/background-runner.js';
+import { runLearningAgent } from '../utils/learning-agent.js';
 
 // Re-export the consolidated alias for callers that previously imported it from this module.
 export type { NotificationFileEntry };
@@ -268,9 +280,6 @@ export function formatLearningStatus(observations: LearningObservation[], hookSt
  * Apply a single JSON config layer onto a LearningConfig, returning a new object.
  * Skips fields with wrong types; swallows parse errors.
  */
-// SYNC: Config loading duplicated in scripts/hooks/background-learning load_config()
-// Synced fields: max_daily_runs, throttle_minutes, model, debug
-// Note: batch_size is loaded here and in session-end-learning, but not in background-learning
 export function applyConfigLayer(config: LearningConfig, json: string): LearningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
@@ -466,6 +475,8 @@ interface LearnOptions {
   purge?: boolean;
   review?: boolean;
   dismissCapacity?: boolean;
+  runBackground?: boolean;
+  cwd?: string;
 }
 
 export const learnCommand = new Command('learn')
@@ -480,8 +491,10 @@ export const learnCommand = new Command('learn')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
   .option('--dismiss-capacity', 'Dismiss the current capacity notification for a decisions file')
+  .option('--run-background', 'Run learning agent in background mode')
+  .option('--cwd <path>', 'Working directory for background mode')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity;
+    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity || options.runBackground;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -498,6 +511,82 @@ export const learnCommand = new Command('learn')
         'Usage',
       );
       p.outro(color.dim('Detects repeated workflows and creates slash commands automatically'));
+      return;
+    }
+
+    // --- --run-background ---
+    if (options.runBackground) {
+      const cwd = options.cwd ?? process.cwd();
+      const devflowDir = getDevFlowDirectory();
+      const scriptDir = path.join(devflowDir, 'scripts', 'hooks');
+      const jsonHelperPath = path.join(scriptDir, 'json-helper.cjs');
+      const stalenessModulePath = path.join(scriptDir, 'lib', 'staleness.cjs');
+      const memoryDir = path.join(cwd, '.memory');
+      const lockDir = path.join(memoryDir, '.learning.lock');
+      const logFile = path.join(memoryDir, 'learning-log.jsonl');
+      const batchIdsFile = path.join(memoryDir, '.learning-batch-ids');
+      const capsFile = path.join(memoryDir, '.learning-runs-today');
+
+      // Run idempotent split migration to ensure log files exist and are properly split.
+      const splitMigrationPath = path.join(scriptDir, 'lib', 'split-migration.cjs');
+      try {
+        execFileSync('node', [splitMigrationPath, cwd], { stdio: 'pipe' });
+      } catch {
+        // Non-fatal — migration may already have run or file may not exist yet.
+      }
+
+      await acquireBackgroundLock(lockDir);
+      const cleanupLock = registerLockCleanup(lockDir);
+
+      try {
+        // Load config to get daily cap and model.
+        const globalJson = (() => {
+          try {
+            return readFileSync(path.join(devflowDir, 'learning.json'), 'utf-8');
+          } catch { return null; }
+        })();
+        const projectJson = (() => {
+          try {
+            return readFileSync(path.join(memoryDir, 'learning.json'), 'utf-8');
+          } catch { return null; }
+        })();
+        const config = loadLearningConfig(globalJson, projectJson);
+
+        if (!checkDailyCap(capsFile, config.max_daily_runs)) {
+          // Over daily cap — exit silently.
+          return;
+        }
+
+        const { userSignals } = await extractBatchMessages(batchIdsFile, cwd);
+
+        await applyTemporalDecay(jsonHelperPath, logFile);
+        capEntries(logFile, 100);
+
+        const responseFile = await runLearningAgent({
+          cwd,
+          userSignals,
+          model: config.model,
+          debug: config.debug,
+          logFile,
+          jsonHelperPath,
+        });
+
+        // Merge observations into learning log (workflow + procedural only).
+        execFileSync('node', [jsonHelperPath, 'process-observations', responseFile, logFile, '--types', 'workflow,procedural'], {
+          stdio: 'pipe',
+        });
+
+        // Render ready observations to artifacts.
+        execFileSync('node', [jsonHelperPath, 'render-ready', logFile, cwd], {
+          stdio: 'pipe',
+        });
+
+        await checkStaleness(stalenessModulePath, logFile, cwd);
+        incrementDailyCap(capsFile);
+      } finally {
+        cleanupLock();
+        releaseBackgroundLock(lockDir);
+      }
       return;
     }
 
