@@ -944,6 +944,8 @@ export const initCommand = new Command('init')
       'background-kb-refresh',
       // kb → knowledge rename: CJS module replaced by feature-knowledge.cjs
       'lib/feature-kb.cjs',
+      // decisions agent decoupling: background-learning replaced by TypeScript CLI (devflow learn --run-background)
+      'background-learning',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
