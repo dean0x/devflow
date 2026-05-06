@@ -6,7 +6,7 @@ import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, rmdirSync, 
 import { execSync, execFileSync } from 'child_process';
 import {
   SAMPLE_INDEX,
-  SAMPLE_KB_CONTENT,
+  SAMPLE_FEATURE_KNOWLEDGE_CONTENT,
   makeTmpFeatureWorktree,
   cleanupTmpFeatureWorktrees,
 } from './fixtures';
@@ -18,23 +18,23 @@ const require = createRequire(import.meta.url);
 
 const {
   loadIndex,
-  loadKBContent,
+  loadKnowledgeContent,
   checkStaleness,
   checkAllStaleness,
   updateIndex,
   findOverlapping,
   removeEntry,
-  listKBs,
+  listEntries,
   validateSlug,
-} = require(path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs')) as {
+} = require(path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs')) as {
   loadIndex: (worktreePath: string) => { version: number; features: Record<string, unknown> } | null;
-  loadKBContent: (worktreePath: string, slug: string) => string | null;
+  loadKnowledgeContent: (worktreePath: string, slug: string) => string | null;
   checkStaleness: (worktreePath: string, slug: string) => { stale: boolean; changedFiles: string[] };
   checkAllStaleness: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Record<string, { stale: boolean; changedFiles: string[] }>;
   updateIndex: (worktreePath: string, entry: Record<string, unknown>, lockTimeoutMs?: number) => void;
   findOverlapping: (worktreePath: string, changedFiles: string[]) => string[];
   removeEntry: (worktreePath: string, slug: string, lockTimeoutMs?: number) => void;
-  listKBs: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Array<{ slug: string } & Record<string, unknown>>;
+  listEntries: (worktreePath: string, cachedIndex?: { version: number; features: Record<string, unknown> } | null) => Array<{ slug: string } & Record<string, unknown>>;
   validateSlug: (slug: string) => void;
 };
 
@@ -65,20 +65,20 @@ describe('loadIndex', () => {
 });
 
 // ---------------------------------------------------------------------------
-// loadKBContent
+// loadKnowledgeContent
 // ---------------------------------------------------------------------------
 
-describe('loadKBContent', () => {
+describe('loadKnowledgeContent', () => {
   it('returns content string when KNOWLEDGE.md exists', () => {
-    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': SAMPLE_KB_CONTENT });
-    const content = loadKBContent(tmp, 'cli-commands');
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': SAMPLE_FEATURE_KNOWLEDGE_CONTENT });
+    const content = loadKnowledgeContent(tmp, 'cli-commands');
     expect(content).not.toBeNull();
     expect(content).toContain('# CLI Command System');
   });
 
-  it('returns null for missing KB', () => {
+  it('returns null for missing knowledge base', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    expect(loadKBContent(tmp, 'cli-commands')).toBeNull();
+    expect(loadKnowledgeContent(tmp, 'cli-commands')).toBeNull();
   });
 });
 
@@ -109,7 +109,7 @@ describe('checkStaleness', () => {
 
 // T2: Positive staleness detection in a real git repo
 describe('checkStaleness (positive — git repo)', () => {
-  it('detects stale KB when referenced file changed after lastUpdated', () => {
+  it('detects stale feature knowledge when referenced file changed after lastUpdated', () => {
     const tmp = makeTmpFeatureWorktree();
     // Remove auto-created .features dir — we'll set it up after git init
     rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
@@ -129,7 +129,7 @@ describe('checkStaleness (positive — git repo)', () => {
     // Set lastUpdated to just before now
     const lastUpdated = new Date(Date.now() - 5000).toISOString();
 
-    // Create the index with a KB that references src/cli/cli.ts
+    // Create the index with a feature knowledge entry that references src/cli/cli.ts
     const featuresDir = path.join(tmp, '.features');
     mkdirSync(featuresDir, { recursive: true });
     const index = {
@@ -216,7 +216,7 @@ describe('updateIndex', () => {
   // T1: Lock failure
   it('throws when lock cannot be acquired within timeout', () => {
     const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
-    const lockPath = path.join(tmp, '.features', '.kb.lock');
+    const lockPath = path.join(tmp, '.features', '.knowledge.lock');
     // Pre-create lock directory to simulate a held lock
     mkdirSync(lockPath);
 
@@ -260,16 +260,16 @@ describe('updateIndex', () => {
 
 describe('removeEntry', () => {
   it('removes entry from index and deletes its directory', () => {
-    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': SAMPLE_KB_CONTENT });
-    const kbDir = path.join(tmp, '.features', 'cli-commands');
-    expect(existsSync(kbDir)).toBe(true);
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': SAMPLE_FEATURE_KNOWLEDGE_CONTENT });
+    const knowledgeDir = path.join(tmp, '.features', 'cli-commands');
+    expect(existsSync(knowledgeDir)).toBe(true);
 
     removeEntry(tmp, 'cli-commands');
 
     const index = loadIndex(tmp);
     expect(index).not.toBeNull();
     expect(index!.features['cli-commands']).toBeUndefined();
-    expect(existsSync(kbDir)).toBe(false);
+    expect(existsSync(knowledgeDir)).toBe(false);
   });
 
   it('is a no-op for a non-existent slug', () => {
@@ -306,7 +306,7 @@ describe('removeEntry', () => {
 // ---------------------------------------------------------------------------
 
 describe('findOverlapping', () => {
-  it('identifies KBs whose referencedFiles overlap with changed files', () => {
+  it('identifies feature knowledge whose referencedFiles overlap with changed files', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     const overlapping = findOverlapping(tmp, ['src/cli/cli.ts', 'some/other/file.ts']);
     expect(overlapping).toContain('cli-commands');
@@ -361,13 +361,13 @@ describe('findOverlapping', () => {
 });
 
 // ---------------------------------------------------------------------------
-// listKBs
+// listEntries
 // ---------------------------------------------------------------------------
 
-describe('listKBs', () => {
+describe('listEntries', () => {
   it('returns all entries with their slugs', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    const entries = listKBs(tmp);
+    const entries = listEntries(tmp);
     expect(entries).toHaveLength(1);
     expect(entries[0].slug).toBe('cli-commands');
     expect(entries[0].name).toBe('CLI Command System');
@@ -375,7 +375,7 @@ describe('listKBs', () => {
 
   it('returns empty array for missing index', () => {
     const tmp = makeTmpFeatureWorktree();
-    expect(listKBs(tmp)).toEqual([]);
+    expect(listEntries(tmp)).toEqual([]);
   });
 });
 
@@ -397,7 +397,7 @@ describe('checkAllStaleness', () => {
     expect(result['cli-commands']).toHaveProperty('changedFiles');
   });
 
-  it('does not false-positive newer KBs when shared file changed between timestamps', () => {
+  it('does not false-positive newer feature knowledge when shared file changed between timestamps', () => {
     const tmp = makeTmpFeatureWorktree();
     rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
 
@@ -412,46 +412,46 @@ describe('checkAllStaleness', () => {
     execSync('git add .', { cwd: tmp, stdio: 'pipe' });
     execSync('git commit -m "initial"', { cwd: tmp, stdio: 'pipe' });
 
-    // KB-A: lastUpdated BEFORE the upcoming change → should be stale
-    const kbATimestamp = new Date(Date.now() - 10000).toISOString();
+    // knowledge-A: lastUpdated BEFORE the upcoming change → should be stale
+    const knowledgeATimestamp = new Date(Date.now() - 10000).toISOString();
 
     // Modify shared.ts and commit (the change happens "now")
     writeFileSync(path.join(srcDir, 'shared.ts'), 'export const v = 2;');
     execSync('git add .', { cwd: tmp, stdio: 'pipe' });
     execSync('git commit -m "update shared.ts"', { cwd: tmp, stdio: 'pipe' });
 
-    // KB-B: lastUpdated AFTER the change → should NOT be stale
-    const kbBTimestamp = new Date(Date.now() + 10000).toISOString();
+    // knowledge-B: lastUpdated AFTER the change → should NOT be stale
+    const knowledgeBTimestamp = new Date(Date.now() + 10000).toISOString();
 
     const featuresDir = path.join(tmp, '.features');
     mkdirSync(featuresDir, { recursive: true });
     writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
       version: 1,
       features: {
-        'kb-old': {
-          name: 'Old KB',
+        'knowledge-old': {
+          name: 'Old Feature Knowledge',
           description: '',
           directories: ['src/'],
           referencedFiles: ['src/shared.ts'],
-          lastUpdated: kbATimestamp,
+          lastUpdated: knowledgeATimestamp,
           createdBy: 'test',
         },
-        'kb-new': {
-          name: 'New KB',
+        'knowledge-new': {
+          name: 'New Feature Knowledge',
           description: '',
           directories: ['src/'],
           referencedFiles: ['src/shared.ts'],
-          lastUpdated: kbBTimestamp,
+          lastUpdated: knowledgeBTimestamp,
           createdBy: 'test',
         },
       },
     }, null, 2));
 
     const result = checkAllStaleness(tmp);
-    expect(result['kb-old'].stale).toBe(true);
-    expect(result['kb-old'].changedFiles).toContain('src/shared.ts');
-    expect(result['kb-new'].stale).toBe(false);
-    expect(result['kb-new'].changedFiles).toEqual([]);
+    expect(result['knowledge-old'].stale).toBe(true);
+    expect(result['knowledge-old'].changedFiles).toContain('src/shared.ts');
+    expect(result['knowledge-new'].stale).toBe(false);
+    expect(result['knowledge-new'].changedFiles).toEqual([]);
   });
 });
 
@@ -502,13 +502,13 @@ describe('validateSlug', () => {
 // CLI: stale-slugs subcommand
 // ---------------------------------------------------------------------------
 
-const FEATURE_KB_CJS = path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs');
+const FEATURE_KNOWLEDGE_CJS = path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs');
 
 describe('CLI stale-slugs', () => {
   it('outputs nothing for non-stale index (non-git repo)', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     // Non-git repo → checkAllStaleness returns stale: false for everything
-    const output = execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
+    const output = execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
     expect(output.trim()).toBe('');
   });
 
@@ -549,13 +549,13 @@ describe('CLI stale-slugs', () => {
     execSync('git add .', { cwd: tmp, stdio: 'pipe' });
     execSync('git commit -m "update cli.ts"', { cwd: tmp, stdio: 'pipe' });
 
-    const output = execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
+    const output = execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
     expect(output.trim().split('\n')).toContain('stale-feature');
   });
 
   it('exits non-zero and prints usage when worktree argument is missing', () => {
     expect(() =>
-      execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs'], { encoding: 'utf8', stdio: 'pipe' })
+      execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'stale-slugs'], { encoding: 'utf8', stdio: 'pipe' })
     ).toThrow(expect.objectContaining({ status: 1 }));
   });
 });
@@ -565,9 +565,9 @@ describe('CLI stale-slugs', () => {
 // ---------------------------------------------------------------------------
 
 describe('CLI refresh-context', () => {
-  it('outputs tab-separated metadata for an existing KB entry', () => {
+  it('outputs tab-separated metadata for an existing feature knowledge entry', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
-    const output = execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, 'cli-commands'], { encoding: 'utf8' });
+    const output = execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'refresh-context', tmp, 'cli-commands'], { encoding: 'utf8' });
     const parts = output.trim().split('\t');
     expect(parts).toHaveLength(3);
     expect(parts[0]).toBe('CLI Command System');           // name
@@ -578,21 +578,21 @@ describe('CLI refresh-context', () => {
   it('exits non-zero when slug is missing', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     expect(() =>
-      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp], { encoding: 'utf8', stdio: 'pipe' })
+      execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'refresh-context', tmp], { encoding: 'utf8', stdio: 'pipe' })
     ).toThrow(expect.objectContaining({ status: 1 }));
   });
 
   it('exits non-zero when slug is not found in index', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     expect(() =>
-      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, 'nonexistent'], { encoding: 'utf8', stdio: 'pipe' })
+      execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'refresh-context', tmp, 'nonexistent'], { encoding: 'utf8', stdio: 'pipe' })
     ).toThrow(expect.objectContaining({ status: 1 }));
   });
 
   it('exits non-zero for invalid slug (path traversal)', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     expect(() =>
-      execFileSync('node', [FEATURE_KB_CJS, 'refresh-context', tmp, '../etc'], { encoding: 'utf8', stdio: 'pipe' })
+      execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'refresh-context', tmp, '../etc'], { encoding: 'utf8', stdio: 'pipe' })
     ).toThrow(expect.objectContaining({ status: 1 }));
   });
 });
@@ -604,7 +604,7 @@ describe('CLI refresh-context', () => {
 describe('CLI stale-slugs (empty index)', () => {
   it('outputs nothing for empty index', () => {
     const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
-    const output = execFileSync('node', [FEATURE_KB_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
+    const output = execFileSync('node', [FEATURE_KNOWLEDGE_CJS, 'stale-slugs', tmp], { encoding: 'utf8' });
     expect(output.trim()).toBe('');
   });
 });
@@ -748,7 +748,7 @@ describe('safePath', () => {
 // readSidecar helper (TypeScript)
 // ---------------------------------------------------------------------------
 
-import { readSidecar } from '../../src/cli/commands/kb.js';
+import { readSidecar } from '../../src/cli/commands/knowledge/index.js';
 
 describe('readSidecar', () => {
   const tmpFiles: string[] = [];

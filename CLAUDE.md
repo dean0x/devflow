@@ -21,7 +21,7 @@ Plugin marketplace with 18 plugins (9 core + 9 optional language/ecosystem), eac
 | `devflow-code-review` | Comprehensive code review | Optional |
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
-| `devflow-explore` | Codebase exploration with KB creation | Optional |
+| `devflow-explore` | Codebase exploration with knowledge base creation | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
 | `devflow-ambient` | Ambient mode — three-tier intent classification (QUICK/GUIDED/ORCHESTRATED) | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
@@ -47,7 +47,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Claude Code Flags**: Typed registry (`src/cli/utils/flags.ts`) for managing Claude Code feature flags (env vars and top-level settings). Pure functions `applyFlags`/`stripFlags`/`getDefaultFlags` follow the `applyTeamsConfig`/`stripTeamsConfig` pattern. Initial flags: `tool-search`, `lsp`, `clear-context-on-plan` (default ON), `brief`, `disable-1m-context` (default OFF). Manageable via `devflow flags --enable/--disable/--status/--list`. Stored in manifest `features.flags: string[]`.
 
-**Feature Knowledge Bases**: Per-feature `.features/` directory containing KNOWLEDGE.md files that capture area-specific patterns, conventions, architecture, and gotchas. KBs are created as side-effects of implementation (implement:orch Phase 8), loaded automatically across all workflows via `FEATURE_KNOWLEDGE` variable (companion to `DECISIONS_CONTEXT`), and use staleness detection via git log against `referencedFiles`. Index at `.features/index.json` (object keyed by slug). Managed via `devflow kb list|create|check|refresh|remove`. Knowledge agent (sonnet) structures exploration outputs into KNOWLEDGE.md. `apply-feature-kb` skill provides consumption algorithm for agents. `.features/.kb.lock` is gitignored (transient lock directory for concurrent index writes, added automatically by `devflow init`). `devflow kb list` — List all feature KBs with staleness status. `devflow kb create <slug>` — Create a new KB via claude -p exploration. `devflow kb check` — Check all KBs for staleness. `devflow kb refresh [slug]` — Refresh stale KB(s). `devflow kb remove <slug>` — Remove a KB and its index entry. Note: debug:orch keeps FEATURE_KNOWLEDGE orchestrator-local (investigation workers examine code without pre-loaded context). Toggleable via `devflow kb --enable/--disable/--status` or `devflow init --kb/--no-kb`. SessionEnd hook auto-refreshes stale KBs (throttled to once per 2 hours, max 3 per run). `.features/.disabled` sentinel gates Phase 8 generation and refresh hook.
+**Feature Knowledge Bases**: Per-feature `.features/` directory containing KNOWLEDGE.md files that capture area-specific patterns, conventions, architecture, and gotchas. Knowledge bases are created as side-effects of implementation (implement:orch Phase 8), loaded automatically across all workflows via `FEATURE_KNOWLEDGE` variable (companion to `DECISIONS_CONTEXT`), and use staleness detection via git log against `referencedFiles`. Index at `.features/index.json` (object keyed by slug). Managed via `devflow knowledge list|create|check|refresh|remove`. Knowledge agent (sonnet) structures exploration outputs into KNOWLEDGE.md. `apply-feature-knowledge` skill provides consumption algorithm for agents. `.features/.knowledge.lock` is gitignored (transient lock directory for concurrent index writes, added automatically by `devflow init`). `devflow knowledge list` — List all feature knowledge bases with staleness status. `devflow knowledge create <slug>` — Create a new knowledge base via claude -p exploration. `devflow knowledge check` — Check all knowledge bases for staleness. `devflow knowledge refresh [slug]` — Refresh stale knowledge base(s). `devflow knowledge remove <slug>` — Remove a knowledge base and its index entry. Note: debug:orch keeps FEATURE_KNOWLEDGE orchestrator-local (investigation workers examine code without pre-loaded context). Toggleable via `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`. SessionEnd hook auto-refreshes stale knowledge bases (throttled to once per 2 hours, max 3 per run). `.features/.disabled` sentinel gates Phase 8 generation and refresh hook.
 
 **Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learn ON, HUD ON, teams OFF, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list.
 
@@ -62,8 +62,8 @@ devflow/
 ├── plugins/devflow-*/      # 18 plugins (9 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, stop-update-learning [deprecated], background-learning, get-mtime, session-end-kb-refresh, background-kb-refresh)
-├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, flags, kb)
+│   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, stop-update-learning [deprecated], background-learning, get-mtime, session-end-knowledge-refresh, background-knowledge-refresh)
+├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, flags, knowledge)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
 ├── .features/              # Per-feature knowledge bases (committed to git)
@@ -150,7 +150,7 @@ Working memory files live in a dedicated `.memory/` directory:
 - `/implement` — Git + Coder + Validator + Simplifier + Scrutinizer + Evaluator + Tester → PR (accepts plan documents, issues, or task descriptions)
 - `/code-review` — 7-11 Reviewer agents + Git + Synthesizer; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/resolve` — N Resolver agents + Git; loads compact decisions index (`decisions-index.cjs index`) per worktree and passes it as `DECISIONS_CONTEXT` to each Resolver; Resolvers use `devflow:apply-decisions` to Read full bodies on demand; aggregates cited ADR-NNN/PF-NNN IDs into a `## Decisions Citations` section at the top of `resolution-summary.md`
-- `/explore` — Skimmer + Explore + Synthesizer + Knowledge (optional KB creation)
+- `/explore` — Skimmer + Explore + Synthesizer + Knowledge (optional knowledge base creation)
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/audit-claude` — CLAUDE.md audit (optional plugin)

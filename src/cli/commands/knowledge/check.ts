@@ -1,18 +1,18 @@
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getFeatureKb, getWorktreePath } from './shared.js';
+import { getFeatureKnowledge, getWorktreePath } from './shared.js';
 
 export async function handleCheck(): Promise<void> {
-  p.intro(color.cyan('KB Staleness Check'));
+  p.intro(color.cyan('Knowledge Base Staleness Check'));
 
   const worktreePath = await getWorktreePath();
   // Load index once and pass to both functions to avoid double file reads
-  const index = getFeatureKb().loadIndex(worktreePath);
-  const kbs = getFeatureKb().listKBs(worktreePath, index);
-  const staleness = getFeatureKb().checkAllStaleness(worktreePath, index);
+  const index = getFeatureKnowledge().loadIndex(worktreePath);
+  const kbs = getFeatureKnowledge().listEntries(worktreePath, index);
+  const staleness = getFeatureKnowledge().checkAllStaleness(worktreePath, index);
 
   if (kbs.length === 0) {
-    p.log.info('No feature KBs found.');
+    p.log.info('No feature knowledge bases found.');
     p.outro('');
     return;
   }
@@ -37,8 +37,8 @@ export async function handleCheck(): Promise<void> {
   }
 
   if (staleCount > 0) {
-    p.outro(`${staleCount} KB${staleCount === 1 ? '' : 's'} need refresh. Run: ${color.cyan('devflow kb refresh')}`);
+    p.outro(`${staleCount} knowledge base${staleCount === 1 ? '' : 's'} need refresh. Run: ${color.cyan('devflow knowledge refresh')}`);
   } else {
-    p.outro('All KBs are current');
+    p.outro('All knowledge bases are current');
   }
 }

@@ -1,5 +1,5 @@
 ---
-name: feature-kb
+name: feature-knowledge
 description: Structures codebase exploration into a feature knowledge base
 user-invocable: false
 allowed-tools:
@@ -16,7 +16,7 @@ allowed-tools:
 > **Capture the institutional knowledge that lives in developers' heads — the things
 > obvious to them but invisible to newcomers.**
 >
-> A KB exists to save the NEXT agent from rediscovering patterns that span multiple files,
+> A feature knowledge entry exists to save the NEXT agent from rediscovering patterns that span multiple files,
 > modules, or layers. If it's obvious from a single file read, don't capture it.
 
 ---
@@ -118,7 +118,7 @@ updated: {ISO date}
 [Most important files with one-line descriptions]
 
 ## Related
-[Links to ADR/PF entries, other KBs, key source files]
+[Links to ADR/PF entries, other feature knowledge entries, key source files]
 ```
 
 ### Category Templates
@@ -156,7 +156,7 @@ Use the matching template as your main sections. Anti-Patterns, Gotchas, Key Fil
 
 ### Description Field Rules
 
-The `description` field is how this KB gets discovered. It must:
+The `description` field is how this feature knowledge entry gets discovered. It must:
 - Start with "Use when"
 - Name specific scenarios where this knowledge applies
 - Include keywords a developer would search for
@@ -167,11 +167,11 @@ Bad: `"Integration stuff"`
 ### Cross-References
 
 Knowledge files must not exist in isolation. The **Related** section must link to:
-- Other KBs that cover related topics
+- Other feature knowledge entries that cover related topics
 - ADR/PF entries from DECISIONS_CONTEXT (if provided)
 - Key source files referenced in the knowledge
 
-References should be bidirectional — when creating a new KB that relates to an existing one, note the connection.
+References should be bidirectional — when creating a new feature knowledge entry that relates to an existing one, note the connection.
 
 ---
 
@@ -195,9 +195,9 @@ Never include bare code snippets without context.
 - **Bare examples**: Code without explanation of what it shows and why it matters
 - **Low-value examples**: Code that restates generic language features. If it doesn't show something unique to THIS project, cut it.
 - **Everything-bagel files**: Covering too many topics in one file — stay focused
-- **Obvious things**: If reading one file makes it clear, it doesn't need a KB
+- **Obvious things**: If reading one file makes it clear, it doesn't need a feature knowledge entry
 - **Testing knowledge**: Don't include test patterns unless explicitly requested
-- **Isolated knowledge islands**: Every KB must reference related files and source code
+- **Isolated knowledge islands**: Every feature knowledge entry must reference related files and source code
 
 | Red Flag | What It Indicates |
 |----------|-------------------|
@@ -232,7 +232,7 @@ Run through this before writing. If any check fails, go back and fix it.
 - [ ] 5-10 referenced files selected for staleness tracking
 
 **Connections:**
-- [ ] Cross-references to related KBs and ADR/PF entries in Related section
+- [ ] Cross-references to related feature knowledge entries and ADR/PF entries in Related section
 - [ ] No isolated knowledge islands — file connects to the broader knowledge network
 - [ ] Key source files listed in Key Files section
 
@@ -242,7 +242,7 @@ Run through this before writing. If any check fails, go back and fix it.
 
 After writing KNOWLEDGE.md, write a sidecar JSON for the host process:
 
-**Filename**: `.create-result.json` (new KBs) or `.refresh-result.json` (refreshes)
+**Filename**: `.create-result.json` (new feature knowledge entries) or `.refresh-result.json` (refreshes)
 **Location**: Same directory as KNOWLEDGE.md (`.features/{slug}/`)
 
 ```json
@@ -258,7 +258,7 @@ The host process reads this sidecar and updates `.features/index.json` — do NO
 
 ## Worked Example
 
-This is what a complete, well-structured KB looks like. Use it as a reference for quality and format.
+This is what a complete, well-structured feature knowledge entry looks like. Use it as a reference for quality and format.
 
 ````markdown
 ---

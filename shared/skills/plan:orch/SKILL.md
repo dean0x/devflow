@@ -25,7 +25,7 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 For GUIDED depth, the main session performs planning directly:
 
 1. **Discover** — If the planning question is open-ended, ask clarifying questions via AskUserQuestion and present 2-3 approaches with tradeoffs before orienting. Skip if the user's prompt is already specific. If the user says "skip" or "just proceed": skip remaining questions, present inferred scope for confirmation.
-2. **Load Decisions** — Load `DECISIONS_CONTEXT` via `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant KBs, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no KBs exist or none are relevant.
+2. **Load Decisions** — Load `DECISIONS_CONTEXT` via `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"`. Read `.features/index.json` if it exists; based on the task, identify relevant feature knowledge entries, read them, and use as context for direct planning. Set `FEATURE_KNOWLEDGE = (none)` if no feature knowledge exists or none are relevant.
 3. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground design decisions in real file structures and patterns.
 4. **Design** — Using Skimmer findings + loaded pattern/design skills + `DECISIONS_CONTEXT` + `FEATURE_KNOWLEDGE`, design the approach directly in main session. Apply `devflow:design-review` skill inline to check the plan for anti-patterns before presenting.
 5. **Present** — Deliver structured plan using the Output format below. Use AskUserQuestion for ambiguous design choices.
@@ -73,23 +73,23 @@ This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT`
 **Produces:** FEATURE_KNOWLEDGE
 
 1. Check if `.features/index.json` exists (Read tool). If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
-2. Read `.features/index.json` to see available feature KBs.
-3. Based on the current task description, identify which KBs are relevant (LLM judgment — match task intent against each KB's `description` and `directories` fields).
-4. For each relevant KB:
-   a. Run `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null` to check staleness
+2. Read `.features/index.json` to see available feature knowledge entries.
+3. Based on the current task description, identify which feature knowledge entries are relevant (LLM judgment — match task intent against each entry's `description` and `directories` fields).
+4. For each relevant feature knowledge entry:
+   a. Run `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null` to check staleness
    b. Read `.features/{slug}/KNOWLEDGE.md`
    c. If stale, prefix content with `[STALE — referenced files changed since last update. Verify against current code.]`
-5. Concatenate all relevant KB content as `FEATURE_KNOWLEDGE`:
+5. Concatenate all relevant feature knowledge content as `FEATURE_KNOWLEDGE`:
    ```
-   --- Feature KB: {slug1} ---
+   --- Feature knowledge: {slug1} ---
    [content]
 
-   --- Feature KB: {slug2} ---
+   --- Feature knowledge: {slug2} ---
    [content]
    ```
 6. Pass `FEATURE_KNOWLEDGE` to downstream agents alongside `DECISIONS_CONTEXT`.
 
-If no KBs exist or none are relevant, set `FEATURE_KNOWLEDGE = (none)`.
+If no feature knowledge exists or none are relevant, set `FEATURE_KNOWLEDGE = (none)`.
 
 ## Phase 3: Requirements Discovery
 
@@ -151,7 +151,7 @@ Based on Skimmer findings, spawn 2-3 `Agent(subagent_type="Explore")` agents **i
 - **Pattern explorer**: Find existing implementations of similar features to follow as templates
 - **Constraint explorer**: Identify constraints — test infrastructure, build system, CI requirements, deployment concerns
 
-Each Explore agent receives `DECISIONS_CONTEXT` (from Phase 1), `FEATURE_KNOWLEDGE` (from Phase 2), and the instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus exploration on areas the KB doesn't cover and changes since it was last updated."
+Each Explore agent receives `DECISIONS_CONTEXT` (from Phase 1), `FEATURE_KNOWLEDGE` (from Phase 2), and the instructions: "follow `devflow:apply-decisions` for DECISIONS_CONTEXT" and "The FEATURE_KNOWLEDGE is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus exploration on areas the feature knowledge doesn't cover and changes since it was last updated."
 
 Adjust explorer focus based on the specific planning question.
 

@@ -1,10 +1,10 @@
 ---
-description: Explore codebase with structured analysis and optional KB creation
+description: Explore codebase with structured analysis and optional feature knowledge creation
 ---
 
 # Explore Command
 
-Explore a codebase area by spawning parallel agents for flow tracing, dependency mapping, and pattern analysis. Findings are synthesized into structured output with file:line references, with an optional feature KB created as a byproduct.
+Explore a codebase area by spawning parallel agents for flow tracing, dependency mapping, and pattern analysis. Findings are synthesized into structured output with file:line references, with optional feature knowledge created as a byproduct.
 
 ## Usage
 
@@ -37,12 +37,12 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — p
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
-2. Identify relevant KBs (match task intent against KB descriptions and directories).
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
+2. Identify relevant feature knowledge (match task intent against each feature knowledge entry's descriptions and directories).
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** for exploration framing — feature-specific patterns and integration points guide where to focus.
 5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as DECISIONS_CONTEXT).
 
-**Explore agent framing**: "The KB is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the KB doesn't cover and things that may have changed."
+**Explore agent framing**: "The existing feature knowledge is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas it doesn't cover and things that may have changed."
 
 ### Phase 2: Orient
 
@@ -90,17 +90,17 @@ Main session reviews synthesis for:
 
 Present findings to user. Use AskUserQuestion to offer focused follow-up exploration.
 
-### Phase 6: Suggest KB Creation (Conditional)
+### Phase 6: Suggest Feature Knowledge Creation (Conditional)
 
 **Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
-**Produces:** KB_STATUS (created | skipped)
+**Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
-1. If `.features/.disabled` exists → skip, set KB_STATUS = skipped
+1. If `.features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
 2. Read `.features/index.json` (if it exists)
-3. Based on the explored area (user's question + MERGED_FINDINGS scope), check if a matching KB
-   already exists (match against each KB's `directories` and `description`). If covered → skip
-4. Use AskUserQuestion: "No feature KB exists for {explored area}. Create one to capture these patterns?"
-5. If user declines → set KB_STATUS = skipped
+3. Based on the explored area (user's question + MERGED_FINDINGS scope), check if matching feature knowledge
+   already exists (match against each feature knowledge entry's `directories` and `description`). If covered → skip
+4. Use AskUserQuestion: "No feature knowledge exists for {explored area}. Create one to capture these patterns?"
+5. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
 6. If user accepts:
    a. Derive FEATURE_SLUG from explored area (kebab-case from primary directory, strip src/lib
       prefixes, must match `^[a-z0-9][a-z0-9-]*$`)
@@ -114,20 +114,20 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
       EXPLORATION_OUTPUTS: {MERGED_FINDINGS from Phase 4}
       DECISIONS_CONTEXT: {from Phase 1}
       WORKTREE_PATH: {worktree path, if in a worktree}
-      Load the devflow:feature-kb skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
+      Load the devflow:feature-knowledge skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
       exploring from scratch. Read .features/index.json for cross-referencing."
       ```
    e. Read sidecar (`.features/{slug}/.create-result.json`), then run:
       ```bash
-      node ~/.devflow/scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
+      node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
         --slug="{slug}" --name="{name}" --directories='[...]' \
         --referencedFiles='{from_sidecar}' --description="{from_sidecar}" \
         --createdBy="explore" 2>/dev/null
       ```
       Clean up: `rm -f .features/{slug}/.create-result.json`
       If sidecar missing (agent failed), use empty defaults: `referencedFiles='[]'`, `description=""`.
-   f. Report: "Created feature KB: {slug}"
-   g. Set KB_STATUS = created
+   f. Report: "Created feature knowledge: {slug}"
+   g. Set FEATURE_KNOWLEDGE_STATUS = created
 
 **Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.
 
@@ -149,15 +149,15 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 │
 ├─ Phase 5: Present findings with drill-down offer
 │
-└─ Phase 6: Suggest KB creation (conditional)
-   └─ Knowledge agent (if user accepts and no existing KB)
+└─ Phase 6: Suggest feature knowledge creation (conditional)
+   └─ Knowledge agent (if user accepts and no existing feature knowledge)
 ```
 
 ## Principles
 
 1. **Structure over browsing** - Every claim must cite file:line references
 2. **Parallel execution** - All explorers run simultaneously for speed
-3. **Knowledge-informed** - Prior decisions and feature KBs guide where to look
+3. **Knowledge-informed** - Prior decisions and feature knowledge guide where to look
 4. **User-driven depth** - Present findings, then offer drill-down into specific areas
 
 ## Error Handling
@@ -165,4 +165,4 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 - If Skimmer returns no relevant files: report "No files found matching exploration scope"
 - If all explorers error: report partial findings from any that succeeded, note gaps
 - If an explorer errors: continue with remaining results, note the gap
-- If KB creation fails: log failure, report exploration results normally
+- If feature knowledge creation fails: log failure, report exploration results normally

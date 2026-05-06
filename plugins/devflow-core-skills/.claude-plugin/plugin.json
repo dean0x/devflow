@@ -19,7 +19,7 @@
   "agents": [],
   "skills": [
     "apply-decisions",
-    "apply-feature-kb",
+    "apply-feature-knowledge",
     "software-design",
     "docs-framework",
     "git",

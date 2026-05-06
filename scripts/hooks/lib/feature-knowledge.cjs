@@ -1,9 +1,9 @@
-// scripts/hooks/lib/feature-kb.cjs
+// scripts/hooks/lib/feature-knowledge.cjs
 // Runtime module for per-feature knowledge base management.
 //
-// DESIGN: Feature KBs live under .features/{slug}/KNOWLEDGE.md with a central
+// DESIGN: Feature knowledge bases live under .features/{slug}/KNOWLEDGE.md with a central
 // index at .features/index.json (keyed by slug). This module is the single
-// source of truth for all KB operations — loading, staleness detection, index
+// source of truth for all knowledge base operations — loading, staleness detection, index
 // mutation, and listing. A mkdir-based lock guards concurrent index writes.
 //
 // ARCHITECTURE EXCEPTION: This is a developer-facing CLI tool invoked exclusively
@@ -16,11 +16,11 @@
 // to prevent injection attacks from index content.
 //
 // CLI interface (see if-require.main block at bottom):
-//   node feature-kb.cjs list <worktree>
-//   node feature-kb.cjs stale <worktree> [slug]
-//   node feature-kb.cjs update-index <worktree> --slug=X --name=Y ...
-//   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
-//   node feature-kb.cjs remove <worktree> <slug>
+//   node feature-knowledge.cjs list <worktree>
+//   node feature-knowledge.cjs stale <worktree> [slug]
+//   node feature-knowledge.cjs update-index <worktree> --slug=X --name=Y ...
+//   node feature-knowledge.cjs find-overlapping <worktree> <file1> [file2...]
+//   node feature-knowledge.cjs remove <worktree> <slug>
 
 'use strict';
 
@@ -28,7 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-/** Sentinel returned whenever a KB is confirmed non-stale or a fallback is needed. */
+/** Sentinel returned whenever a knowledge entry is confirmed non-stale or a fallback is needed. */
 const NOT_STALE = Object.freeze({ stale: false, changedFiles: [] });
 
 /**
@@ -121,14 +121,14 @@ function loadIndex(worktreePath) {
 }
 
 /**
- * Load KB content for a given slug.
+ * Load knowledge base content for a given slug.
  * Returns null when the KNOWLEDGE.md file is absent.
  *
  * @param {string} worktreePath
  * @param {string} slug
  * @returns {string | null}
  */
-function loadKBContent(worktreePath, slug) {
+function loadKnowledgeContent(worktreePath, slug) {
   validateSlug(slug);
   const kbPath = path.join(worktreePath, '.features', slug, 'KNOWLEDGE.md');
   try {
@@ -167,7 +167,7 @@ function checkEntryFiles(worktreePath, entry) {
 }
 
 /**
- * Check if a KB is stale by comparing lastUpdated against git log of referencedFiles.
+ * Check if a knowledge entry is stale by comparing lastUpdated against git log of referencedFiles.
  * Returns { stale: false } for non-git repos or when the entry is not found.
  *
  * @param {string} worktreePath
@@ -190,7 +190,7 @@ function checkStaleness(worktreePath, slug) {
 }
 
 /**
- * Check staleness for all KBs in the index.
+ * Check staleness for all knowledge entries in the index.
  * Loads the index once, checks git-dir once, and runs a single git log call
  * to detect all changed files since the oldest lastUpdated timestamp.
  * Uses the oldest timestamp as the --after cutoff to minimize git calls,
@@ -355,11 +355,11 @@ function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
   validateSlug(entry.slug);
   const featuresDir = path.join(worktreePath, '.features');
   fs.mkdirSync(featuresDir, { recursive: true });
-  const lockPath = path.join(featuresDir, '.kb.lock');
+  const lockPath = path.join(featuresDir, '.knowledge.lock');
   const indexPath = path.join(featuresDir, 'index.json');
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
-    throw new Error('Failed to acquire .features/.kb.lock within timeout');
+    throw new Error('Failed to acquire .features/.knowledge.lock within timeout');
   }
 
   try {
@@ -385,7 +385,7 @@ function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
 }
 
 /**
- * Find KBs whose referencedFiles overlap with the given changed file list.
+ * Find knowledge entries whose referencedFiles overlap with the given changed file list.
  * Uses directory-boundary matching to avoid false positives (e.g., `src/foo`
  * matching `src/foobar`). Returns the list of slugs with overlapping files.
  *
@@ -409,7 +409,7 @@ function findOverlapping(worktreePath, changedFiles) {
 }
 
 /**
- * Remove a KB entry from index.json and delete its directory.
+ * Remove a knowledge entry from index.json and delete its directory.
  * No-op if the slug does not exist in the index or if .features/ is absent.
  *
  * @param {string} worktreePath
@@ -420,11 +420,11 @@ function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
   validateSlug(slug);
   const featuresDir = path.join(worktreePath, '.features');
   if (!fs.existsSync(featuresDir)) return;
-  const lockPath = path.join(featuresDir, '.kb.lock');
+  const lockPath = path.join(featuresDir, '.knowledge.lock');
   const indexPath = path.join(featuresDir, 'index.json');
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
-    throw new Error('Failed to acquire .features/.kb.lock within timeout');
+    throw new Error('Failed to acquire .features/.knowledge.lock within timeout');
   }
 
   try {
@@ -448,16 +448,13 @@ function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
 }
 
 /**
- * List all KBs with their metadata (slug + FeatureEntry fields).
+ * List all knowledge entries with their metadata (slug + FeatureEntry fields).
  *
  * @param {string} worktreePath
+ * @param {{ version: number; features: Record<string, unknown> } | null} [cachedIndex] - Optional pre-loaded index to avoid double reads
  * @returns {Array<{ slug: string } & FeatureEntry>}
  */
-/**
- * @param {string} worktreePath
- * @param {{ version: number; features: Record<string, unknown> } | null} [cachedIndex] - Optional pre-loaded index to avoid double reads
- */
-function listKBs(worktreePath, cachedIndex) {
+function listEntries(worktreePath, cachedIndex) {
   const index = cachedIndex !== undefined ? cachedIndex : loadIndex(worktreePath);
   if (!index) return [];
   return Object.entries(index.features).map(([slug, entry]) => ({ slug, ...entry }));
@@ -467,13 +464,13 @@ function listKBs(worktreePath, cachedIndex) {
 // CLI interface
 //
 // Usage:
-//   node feature-kb.cjs list <worktree>
-//   node feature-kb.cjs stale <worktree> [slug]
-//   node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' [--description=Y] [--createdBy=Z]
-//   node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]
-//   node feature-kb.cjs remove <worktree> <slug>
-//   node feature-kb.cjs stale-slugs <worktree>
-//   node feature-kb.cjs refresh-context <worktree> <slug>
+//   node feature-knowledge.cjs list <worktree>
+//   node feature-knowledge.cjs stale <worktree> [slug]
+//   node feature-knowledge.cjs update-index <worktree> --slug=X --name=Y --directories='[...]' --referencedFiles='[...]' [--description=Y] [--createdBy=Z]
+//   node feature-knowledge.cjs find-overlapping <worktree> <file1> [file2...]
+//   node feature-knowledge.cjs remove <worktree> <slug>
+//   node feature-knowledge.cjs stale-slugs <worktree>
+//   node feature-knowledge.cjs refresh-context <worktree> <slug>
 // ---------------------------------------------------------------------------
 
 if (require.main === module) {
@@ -496,13 +493,13 @@ if (require.main === module) {
 
   const USAGE = [
     'Usage:',
-    '  node feature-kb.cjs list <worktree>',
-    '  node feature-kb.cjs stale <worktree> [slug]',
-    '  node feature-kb.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' [--description=Y] [--createdBy=Z]',
-    '  node feature-kb.cjs find-overlapping <worktree> <file1> [file2...]',
-    '  node feature-kb.cjs remove <worktree> <slug>',
-    '  node feature-kb.cjs stale-slugs <worktree>',
-    '  node feature-kb.cjs refresh-context <worktree> <slug>',
+    '  node feature-knowledge.cjs list <worktree>',
+    '  node feature-knowledge.cjs stale <worktree> [slug]',
+    '  node feature-knowledge.cjs update-index <worktree> --slug=X --name=Y --directories=\'[...]\' --referencedFiles=\'[...]\' [--description=Y] [--createdBy=Z]',
+    '  node feature-knowledge.cjs find-overlapping <worktree> <file1> [file2...]',
+    '  node feature-knowledge.cjs remove <worktree> <slug>',
+    '  node feature-knowledge.cjs stale-slugs <worktree>',
+    '  node feature-knowledge.cjs refresh-context <worktree> <slug>',
   ].join('\n');
 
   /**
@@ -528,8 +525,8 @@ if (require.main === module) {
   const dispatch = {
     list() {
       const worktreePath = requireWorktree(argv);
-      const entries = listKBs(worktreePath);
-      process.stderr.write(`[feature-kb] mode=list worktree=${worktreePath} count=${entries.length}\n`);
+      const entries = listEntries(worktreePath);
+      process.stderr.write(`[feature-knowledge] mode=list worktree=${worktreePath} count=${entries.length}\n`);
       process.stdout.write(JSON.stringify(entries, null, 2) + '\n');
       process.exit(0);
     },
@@ -539,11 +536,11 @@ if (require.main === module) {
       const slug = argv[2];
       if (slug) {
         const result = checkStaleness(worktreePath, slug);
-        process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} slug=${slug} stale=${result.stale}\n`);
+        process.stderr.write(`[feature-knowledge] mode=stale worktree=${worktreePath} slug=${slug} stale=${result.stale}\n`);
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       } else {
         const result = checkAllStaleness(worktreePath);
-        process.stderr.write(`[feature-kb] mode=stale worktree=${worktreePath} all=true\n`);
+        process.stderr.write(`[feature-knowledge] mode=stale worktree=${worktreePath} all=true\n`);
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       }
       process.exit(0);
@@ -573,7 +570,7 @@ if (require.main === module) {
         referencedFiles,
         createdBy: kv.createdBy,
       });
-      process.stderr.write(`[feature-kb] mode=update-index worktree=${worktreePath} slug=${kv.slug}\n`);
+      process.stderr.write(`[feature-knowledge] mode=update-index worktree=${worktreePath} slug=${kv.slug}\n`);
       process.stdout.write(JSON.stringify({ ok: true, slug: kv.slug }) + '\n');
       process.exit(0);
     },
@@ -582,7 +579,7 @@ if (require.main === module) {
       const worktreePath = requireWorktree(argv);
       const changedFiles = argv.slice(2);
       const overlapping = findOverlapping(worktreePath, changedFiles);
-      process.stderr.write(`[feature-kb] mode=find-overlapping worktree=${worktreePath} overlappingCount=${overlapping.length}\n`);
+      process.stderr.write(`[feature-knowledge] mode=find-overlapping worktree=${worktreePath} overlappingCount=${overlapping.length}\n`);
       process.stdout.write(JSON.stringify(overlapping, null, 2) + '\n');
       process.exit(0);
     },
@@ -595,7 +592,7 @@ if (require.main === module) {
         process.exit(1);
       }
       removeEntry(worktreePath, slug);
-      process.stderr.write(`[feature-kb] mode=remove worktree=${worktreePath} slug=${slug}\n`);
+      process.stderr.write(`[feature-knowledge] mode=remove worktree=${worktreePath} slug=${slug}\n`);
       process.stdout.write(JSON.stringify({ ok: true, slug }) + '\n');
       process.exit(0);
     },
@@ -621,7 +618,7 @@ if (require.main === module) {
       validateSlug(slug);
       const index = loadIndex(worktreePath);
       if (!index || !index.features[slug]) {
-        process.stderr.write(`Error: KB '${slug}' not found in index\n`);
+        process.stderr.write(`Error: knowledge entry '${slug}' not found in index\n`);
         process.exit(1);
       }
       const entry = index.features[slug];
@@ -649,6 +646,6 @@ if (require.main === module) {
   handler();
 }
 
-module.exports = { loadIndex, loadKBContent, checkStaleness, checkAllStaleness, updateIndex, findOverlapping, removeEntry, listKBs, validateSlug };
+module.exports = { loadIndex, loadKnowledgeContent, checkStaleness, checkAllStaleness, updateIndex, findOverlapping, removeEntry, listEntries, validateSlug };
 // Note: loadIndex is already exported above, enabling callers to read the index once
-// and pass it to listKBs/checkAllStaleness via their optional cachedIndex parameter.
+// and pass it to listEntries/checkAllStaleness via their optional cachedIndex parameter.

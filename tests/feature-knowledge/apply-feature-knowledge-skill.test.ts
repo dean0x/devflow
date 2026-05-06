@@ -4,8 +4,8 @@ import * as path from 'path';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 
-describe('feature-kb skill', () => {
-  const content = readFileSync(path.join(ROOT, 'shared/skills/feature-kb/SKILL.md'), 'utf8');
+describe('feature-knowledge skill', () => {
+  const content = readFileSync(path.join(ROOT, 'shared/skills/feature-knowledge/SKILL.md'), 'utf8');
 
   it('has iron law', () => { expect(content).toContain('## Iron Law'); });
   it('has 4-phase process', () => {
@@ -15,7 +15,7 @@ describe('feature-kb skill', () => {
     expect(content).toContain('### Phase 4: Forge');
   });
   it('has quality self-checks', () => { expect(content).toContain('## Quality Self-Checks'); });
-  it('has KB format template with required sections', () => {
+  it('has feature knowledge format template with required sections', () => {
     expect(content).toContain('## Overview');
     expect(content).toContain('## Anti-Patterns');
     expect(content).toContain('## Gotchas');
@@ -37,12 +37,12 @@ describe('feature-kb skill', () => {
   });
 });
 
-describe('apply-feature-kb skill', () => {
-  const content = readFileSync(path.join(ROOT, 'shared/skills/apply-feature-kb/SKILL.md'), 'utf8');
+describe('apply-feature-knowledge skill', () => {
+  const content = readFileSync(path.join(ROOT, 'shared/skills/apply-feature-knowledge/SKILL.md'), 'utf8');
 
   it('has iron law', () => { expect(content).toContain('## Iron Law'); });
   it('has 3-step algorithm', () => {
-    expect(content).toContain('### Step 1: Read the KB');
+    expect(content).toContain('### Step 1: Read the Feature Knowledge');
     expect(content).toContain('### Step 2: Apply to Current Task');
     expect(content).toContain('### Step 3: Supplement as Needed');
   });

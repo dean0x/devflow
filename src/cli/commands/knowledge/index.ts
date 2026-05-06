@@ -1,61 +1,61 @@
 /**
- * devflow kb — per-feature knowledge base management.
+ * devflow knowledge — per-feature knowledge base management.
  * Thin router that delegates each subcommand to its own module.
  */
 import { Command } from 'commander';
 
-import { handleToggle, addKbHook, removeKbHook, hasKbHook } from './toggle.js';
+import { handleToggle, addKnowledgeHook, removeKnowledgeHook, hasKnowledgeHook } from './toggle.js';
 import { handleList } from './list.js';
 import { handleCheck } from './check.js';
 import { handleCreate } from './create.js';
 import { handleRefresh } from './refresh.js';
 import { handleRemove } from './remove.js';
 
-// Re-export hook utilities and sidecar helpers for callers that import from kb.js
-export { addKbHook, removeKbHook, hasKbHook };
+// Re-export hook utilities and sidecar helpers for callers that import from knowledge/index.js
+export { addKnowledgeHook, removeKnowledgeHook, hasKnowledgeHook };
 export type { SidecarData } from '../../utils/sidecar.js';
 export { readSidecar } from '../../utils/sidecar.js';
 
-export const kbCommand = new Command('kb')
+export const knowledgeCommand = new Command('knowledge')
   .description('Manage per-feature knowledge bases')
   .option('--enable', 'Enable per-feature knowledge bases')
   .option('--disable', 'Disable per-feature knowledge bases')
-  .option('--status', 'Show KB feature status')
+  .option('--status', 'Show knowledge base feature status')
   .action(async (options: { enable?: boolean; disable?: boolean; status?: boolean }) => {
     await handleToggle(options);
   });
 
-kbCommand
+knowledgeCommand
   .command('list')
-  .description('List all feature KBs with staleness status')
+  .description('List all feature knowledge bases with staleness status')
   .action(async () => {
     await handleList();
   });
 
-kbCommand
+knowledgeCommand
   .command('check')
-  .description('Check all KBs for staleness')
+  .description('Check all knowledge bases for staleness')
   .action(async () => {
     await handleCheck();
   });
 
-kbCommand
+knowledgeCommand
   .command('create <slug>')
-  .description('Create a new KB via claude -p exploration')
+  .description('Create a new knowledge base via claude -p exploration')
   .action(async (slug: string) => {
     await handleCreate(slug);
   });
 
-kbCommand
+knowledgeCommand
   .command('refresh [slug]')
-  .description('Refresh stale KB(s). Omit slug to refresh all stale KBs.')
+  .description('Refresh stale knowledge base(s). Omit slug to refresh all stale knowledge bases.')
   .action(async (slug?: string) => {
     await handleRefresh(slug);
   });
 
-kbCommand
+knowledgeCommand
   .command('remove <slug>')
-  .description('Remove a KB and its index entry')
+  .description('Remove a knowledge base and its index entry')
   .action(async (slug: string) => {
     await handleRemove(slug);
   });

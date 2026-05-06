@@ -5,7 +5,7 @@ model: opus
 skills:
   - devflow:software-design
   - devflow:worktree-support
-  - devflow:apply-feature-kb
+  - devflow:apply-feature-knowledge
 ---
 
 # Evaluator Agent
@@ -24,7 +24,7 @@ You receive from orchestrator:
 
 - **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context for
   acceptance verification. Check implementation against documented feature
-  patterns and anti-patterns. Follow `devflow:apply-feature-kb`.
+  patterns and anti-patterns. Follow `devflow:apply-feature-knowledge`.
 
 ## Responsibilities
 

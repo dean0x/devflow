@@ -1,4 +1,4 @@
-// Shared test fixtures for feature-kb module tests.
+// Shared test fixtures for feature-knowledge module tests.
 
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import * as path from 'path';
@@ -18,7 +18,7 @@ export const SAMPLE_INDEX = {
   },
 };
 
-export const SAMPLE_KB_CONTENT = `---
+export const SAMPLE_FEATURE_KNOWLEDGE_CONTENT = `---
 feature: cli-commands
 name: CLI Command System
 directories:
@@ -57,15 +57,15 @@ Each command is a separate file in src/cli/commands/ exporting a Command instanc
 const createdTmpDirs: string[] = [];
 
 /**
- * Create a temporary worktree directory with optional .features/ index and KB files.
+ * Create a temporary worktree directory with optional .features/ index and feature knowledge files.
  * Returns the absolute path to the tmpdir root.
  * Directories are tracked — call `cleanupTmpFeatureWorktrees()` in afterAll.
  */
 export function makeTmpFeatureWorktree(
   indexContent?: object,
-  kbs?: Record<string, string>,
+  featureKnowledge?: Record<string, string>,
 ): string {
-  const tmp = mkdtempSync(path.join(os.tmpdir(), 'feature-kb-test-'));
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'feature-knowledge-test-'));
   createdTmpDirs.push(tmp);
 
   const featuresDir = path.join(tmp, '.features');
@@ -75,11 +75,11 @@ export function makeTmpFeatureWorktree(
     writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify(indexContent, null, 2));
   }
 
-  if (kbs) {
-    for (const [slug, content] of Object.entries(kbs)) {
-      const kbDir = path.join(featuresDir, slug);
-      mkdirSync(kbDir, { recursive: true });
-      writeFileSync(path.join(kbDir, 'KNOWLEDGE.md'), content);
+  if (featureKnowledge) {
+    for (const [slug, content] of Object.entries(featureKnowledge)) {
+      const knowledgeDir = path.join(featuresDir, slug);
+      mkdirSync(knowledgeDir, { recursive: true });
+      writeFileSync(path.join(knowledgeDir, 'KNOWLEDGE.md'), content);
     }
   }
 

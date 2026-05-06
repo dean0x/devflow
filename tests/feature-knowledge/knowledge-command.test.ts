@@ -7,9 +7,9 @@ import { makeTmpFeatureWorktree, cleanupTmpFeatureWorktrees, SAMPLE_INDEX } from
 afterAll(() => cleanupTmpFeatureWorktrees());
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
-const CJS_PATH = path.join(ROOT, 'scripts/hooks/lib/feature-kb.cjs');
+const CJS_PATH = path.join(ROOT, 'scripts/hooks/lib/feature-knowledge.cjs');
 
-describe('feature-kb.cjs CLI', () => {
+describe('feature-knowledge.cjs CLI', () => {
   it('list shows entries', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX);
     const result = execSync(`node ${CJS_PATH} list ${tmp}`, { encoding: 'utf8' });
@@ -51,7 +51,7 @@ describe('feature-kb.cjs CLI', () => {
   });
 
   it('remove deletes entry and directory', () => {
-    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': '# Test KB' });
+    const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': '# Test Feature Knowledge' });
     execSync(`node ${CJS_PATH} remove ${tmp} cli-commands`, { encoding: 'utf8' });
     const index = JSON.parse(readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8'));
     expect(index.features['cli-commands']).toBeUndefined();

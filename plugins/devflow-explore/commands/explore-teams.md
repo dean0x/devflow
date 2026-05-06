@@ -1,5 +1,5 @@
 ---
-description: Explore codebase with cross-validating agent team and optional KB creation
+description: Explore codebase with cross-validating agent team and optional feature knowledge creation
 ---
 
 # Explore Command
@@ -37,11 +37,11 @@ The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — p
 
 **Load Feature Knowledge:**
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
-2. Based on the exploration question, identify relevant KBs
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-kb.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+2. Based on the exploration question, identify relevant feature knowledge
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Use `FEATURE_KNOWLEDGE` **locally only** for exploration framing — feature-specific patterns and integration points guide where to focus. **Do NOT pass to explorer teammates.**
 
-**Explore agent framing**: "The KB is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the KB doesn't cover and things that may have changed."
+**Explore agent framing**: "The existing feature knowledge is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas it doesn't cover and things that may have changed."
 
 ### Phase 2: Orient
 
@@ -205,17 +205,17 @@ Main session reviews synthesis for:
 
 Present findings to user. Use AskUserQuestion to offer focused follow-up exploration.
 
-### Phase 10: Suggest KB Creation (Conditional)
+### Phase 10: Suggest Feature Knowledge Creation (Conditional)
 
 **Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
-**Produces:** KB_STATUS (created | skipped)
+**Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
-1. If `.features/.disabled` exists → skip, set KB_STATUS = skipped
+1. If `.features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
 2. Read `.features/index.json` (if it exists)
-3. Based on the explored area (user's question + MERGED_FINDINGS scope), check if a matching KB
-   already exists (match against each KB's `directories` and `description`). If covered → skip
-4. Use AskUserQuestion: "No feature KB exists for {explored area}. Create one to capture these patterns?"
-5. If user declines → set KB_STATUS = skipped
+3. Based on the explored area (user's question + MERGED_FINDINGS scope), check if matching feature knowledge
+   already exists (match against each feature knowledge entry's `directories` and `description`). If covered → skip
+4. Use AskUserQuestion: "No feature knowledge exists for {explored area}. Create one to capture these patterns?"
+5. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
 6. If user accepts:
    a. Derive FEATURE_SLUG from explored area (kebab-case from primary directory, strip src/lib
       prefixes, must match `^[a-z0-9][a-z0-9-]*$`)
@@ -229,20 +229,20 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
       EXPLORATION_OUTPUTS: {MERGED_FINDINGS from Phase 8}
       DECISIONS_CONTEXT: {from Phase 1}
       WORKTREE_PATH: {worktree path, if in a worktree}
-      Load the devflow:feature-kb skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
+      Load the devflow:feature-knowledge skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
       exploring from scratch. Read .features/index.json for cross-referencing."
       ```
    e. Read sidecar (`.features/{slug}/.create-result.json`), then run:
       ```bash
-      node ~/.devflow/scripts/hooks/lib/feature-kb.cjs update-index "{worktree}" \
+      node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
         --slug="{slug}" --name="{name}" --directories='[...]' \
         --referencedFiles='{from_sidecar}' --description="{from_sidecar}" \
         --createdBy="explore" 2>/dev/null
       ```
       Clean up: `rm -f .features/{slug}/.create-result.json`
       If sidecar missing (agent failed), use empty defaults: `referencedFiles='[]'`, `description=""`.
-   f. Report: "Created feature KB: {slug}"
-   g. Set KB_STATUS = created
+   f. Report: "Created feature knowledge: {slug}"
+   g. Set FEATURE_KNOWLEDGE_STATUS = created
 
 **Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.
 
@@ -276,8 +276,8 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 │
 ├─ Phase 9: Present findings with drill-down offer
 │
-└─ Phase 10: Suggest KB creation (conditional)
-   └─ Knowledge agent (if user accepts and no existing KB)
+└─ Phase 10: Suggest feature knowledge creation (conditional)
+   └─ Knowledge agent (if user accepts and no existing feature knowledge)
 ```
 
 ## Principles
@@ -294,4 +294,4 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 - If fewer than 3 exploration areas warrant teammates: proceed with 2, note limited scope
 - If all findings are unvalidated: report with explicit caveat about validation status
 - If a teammate errors: continue with remaining teammates, note the gap
-- If KB creation fails: log failure, report exploration results normally
+- If feature knowledge creation fails: log failure, report exploration results normally

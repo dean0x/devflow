@@ -1,6 +1,6 @@
 {
   "name": "devflow-explore",
-  "description": "Codebase exploration with structured analysis and optional KB creation",
+  "description": "Codebase exploration with structured analysis and optional knowledge base creation",
   "author": {
     "name": "Dean0x"
   },
@@ -23,7 +23,7 @@
   "skills": [
     "agent-teams",
     "worktree-support",
-    "apply-feature-kb",
-    "feature-kb"
+    "apply-feature-knowledge",
+    "feature-knowledge"
   ]
 }

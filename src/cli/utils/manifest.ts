@@ -15,7 +15,7 @@ export interface ManifestData {
     memory: boolean;
     learn: boolean;
     hud: boolean;
-    kb: boolean;
+    knowledge: boolean;
     flags: string[];
   };
   installedAt: string;
@@ -45,8 +45,13 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     ) {
       return null;
     }
-    // Normalize optional fields with defaults (backwards-compatible with old manifests)
-    return {
+    // Self-heal: rename features.kb → features.knowledge on disk
+    const knowledge = typeof features.knowledge === 'boolean' ? features.knowledge
+      : typeof features.kb === 'boolean' ? features.kb as boolean
+      : false;
+    const needsHeal = features.kb !== undefined;
+
+    const manifest: ManifestData = {
       version: data.version as string,
       plugins: data.plugins as string[],
       scope: data.scope as 'user' | 'local',
@@ -56,12 +61,18 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,
         learn: typeof features.learn === 'boolean' ? features.learn : false,
-        kb: typeof features.kb === 'boolean' ? features.kb : false,
+        knowledge,
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,
     };
+
+    if (needsHeal) {
+      await writeManifest(devflowDir, manifest);
+    }
+
+    return manifest;
   } catch {
     return null;
   }
