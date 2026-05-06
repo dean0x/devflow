@@ -104,8 +104,17 @@ fi
 # DESIGN: D6 — reconciler runs at session-start to amortize filesystem checks
 # across session boundaries rather than on every tool call.
 # Silently ignores errors — a failed reconcile is non-fatal.
+
+# Run split migration (idempotent — skips if already done via sentinel)
+node "$SCRIPT_DIR/lib/split-migration.cjs" "$CWD" 2>/dev/null || true
+
 if [ -f "$CWD/.memory/.learning-manifest.json" ] && [ -f "$CWD/.memory/learning-log.jsonl" ]; then
   node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
+fi
+
+# Reconcile decisions manifest (uses split log + manifest)
+if [ -f "$CWD/.memory/decisions-log.jsonl" ]; then
+  node "$_JSON_HELPER" reconcile-manifest "$CWD" "$CWD/.memory/decisions-log.jsonl" "$CWD/.memory/.decisions-manifest.json" 2>/dev/null || true
 fi
 
 # --- Section 1.5: Project Decisions TL;DR ---
