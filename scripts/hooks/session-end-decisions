@@ -1,0 +1,124 @@
+#!/bin/bash
+# session-end-decisions — trigger decisions agent on SessionEnd
+# Spawns `devflow decisions --run-background` when a qualifying session ends.
+#
+# Flow:
+#   1. Guard clauses (skip if background process)
+#   2. Parse CWD and session ID from hook JSON
+#   3. Check disabled sentinel (.memory/decisions/.disabled)
+#   4. Find transcript and verify session depth (min 3 user turns)
+#   5. Daily cap check
+#   6. Write session ID to .decisions-batch-ids and spawn devflow decisions --run-background
+#
+# Unlike session-end-learning, no batch accumulation is needed (batch_size=1).
+# No artifact reinforcement (D8: only learning system reinforces loaded artifacts).
+set -e
+
+# --- Guard clauses ---
+[ "${DEVFLOW_BG_LEARNER:-}" = "1" ] && exit 0
+[ "${DEVFLOW_BG_UPDATER:-}" = "1" ] && exit 0
+
+# Source json-parse library (must be available before reading stdin JSON)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=json-parse
+source "$SCRIPT_DIR/json-parse" || { echo "session-end-decisions: failed to source json-parse" >&2; exit 1; }
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+# Read hook input from stdin (Claude passes JSON with cwd, session_id, etc.)
+INPUT=$(cat)
+
+CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
+[ -z "$CWD" ] && exit 0
+
+MEMORY_DIR="$CWD/.memory"
+[ ! -d "$MEMORY_DIR" ] && exit 0
+
+# Check disabled sentinel
+[ -f "$MEMORY_DIR/decisions/.disabled" ] && exit 0
+
+# Resolve devflow binary
+DEVFLOW_BIN=$(command -v devflow 2>/dev/null || true)
+[ -z "$DEVFLOW_BIN" ] && exit 0
+
+# Log path (shared helper — consistent slug across devflow hooks)
+source "$SCRIPT_DIR/log-paths" || { echo "session-end-decisions: failed to source log-paths" >&2; exit 1; }
+LOG_FILE="$(devflow_log_dir "$CWD")/.decisions-update.log"
+
+log() {
+  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] session-end-decisions: $1" >> "$LOG_FILE"
+}
+
+log "SessionEnd hook triggered"
+
+# --- Find transcript ---
+ENCODED_CWD=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
+PROJECTS_DIR="$HOME/.claude/projects/-${ENCODED_CWD}"
+
+if [ ! -d "$PROJECTS_DIR" ]; then
+  log "No projects dir: $PROJECTS_DIR"
+  exit 0
+fi
+
+SESSION_ID=$(printf '%s' "$INPUT" | json_field "session_id" "")
+if [ -n "$SESSION_ID" ] && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
+  TRANSCRIPT="$PROJECTS_DIR/${SESSION_ID}.jsonl"
+else
+  TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
+  if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
+    log "No transcript found"
+    exit 0
+  fi
+  SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+fi
+log "Session: $SESSION_ID"
+
+# --- Session depth check (min 3 user turns) ---
+USER_TURNS=$(grep -c '"type":"user"' "$TRANSCRIPT" 2>/dev/null || echo "0")
+if [ "$USER_TURNS" -lt 3 ]; then
+  log "Shallow session ($USER_TURNS turns), skipping"
+  exit 0
+fi
+log "Session depth: $USER_TURNS turns"
+
+# --- Daily cap check (default 3 runs/day, tab-separated DATE\tCOUNT) ---
+DECISIONS_CONFIG="$MEMORY_DIR/decisions.json"
+MAX_DAILY=3
+if [ -f "$DECISIONS_CONFIG" ]; then
+  MAX_DAILY=$(json_field "max_daily_runs" "3" < "$DECISIONS_CONFIG")
+fi
+
+RUNS_FILE="$MEMORY_DIR/.decisions-runs-today"
+TODAY=$(date '+%Y-%m-%d')
+RUNS_TODAY=0
+if [ -f "$RUNS_FILE" ]; then
+  RUNS_DATE=$(cut -f1 "$RUNS_FILE")
+  if [ "$RUNS_DATE" = "$TODAY" ]; then
+    RUNS_TODAY=$(cut -f2 "$RUNS_FILE")
+  fi
+fi
+
+if [ "$RUNS_TODAY" -ge "$MAX_DAILY" ]; then
+  log "Daily cap reached ($RUNS_TODAY >= $MAX_DAILY), skipping"
+  exit 0
+fi
+
+# --- Validate session ID format ---
+if ! echo "$SESSION_ID" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+  log "Invalid session ID: $SESSION_ID"
+  exit 0
+fi
+
+# --- Write session ID to batch file (batch_size=1; CLI reads from .decisions-batch-ids) ---
+echo "$SESSION_ID" > "$MEMORY_DIR/.decisions-batch-ids"
+
+# Update daily run count (tab-separated: "DATE\tCOUNT")
+printf '%s\t%d\n' "$TODAY" "$((RUNS_TODAY + 1))" > "$RUNS_FILE"
+
+log "Triggering decisions analysis"
+
+# Spawn background decisions agent via CLI
+DEVFLOW_BG_LEARNER=1 nohup "$DEVFLOW_BIN" decisions --run-background --cwd "$CWD" \
+  >> "$LOG_FILE" 2>&1 &
+disown
+
+exit 0

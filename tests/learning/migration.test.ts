@@ -2,7 +2,7 @@
 // Tests for D7 Greenfield migration — v1 learning-log detection and rename.
 //
 // DESIGN: D7 — On first v2 run in a project where a v1 learning-log exists
-// (detected by absence of quality_ok field on all entries), background-learning
+// (detected by absence of quality_ok field on all entries), the learning pipeline
 // moves it to .learning-log.v1.jsonl.bak and starts fresh. No dual-writer period.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -11,9 +11,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 
-// The migration logic in background-learning is a bash function. We test it
-// by running an isolated inline bash script that mirrors the function exactly,
-// so tests are hermetic and do not require full background-learning setup.
+// The migration logic is tested via an isolated inline bash script that mirrors
+// the function exactly, so tests are hermetic and self-contained.
 
 const MIGRATION_SCRIPT = `
 migrate_v1_log() {

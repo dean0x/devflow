@@ -42,11 +42,11 @@ else
   BATCH_SIZE=3
 fi
 
-# Resolve claude binary
-CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
-[ -z "$CLAUDE_BIN" ] && exit 0
+# Resolve devflow binary
+DEVFLOW_BIN=$(command -v devflow 2>/dev/null || true)
+[ -z "$DEVFLOW_BIN" ] && exit 0
 
-# Log path (shared helper — consistent slug with background-learning)
+# Log path (shared helper — consistent slug with devflow learn --run-background)
 source "$SCRIPT_DIR/log-paths" || { echo "session-end-learning: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.learning-update.log"
 
@@ -231,8 +231,8 @@ run_batch_check() {
 
   log "Triggering batch learning (${CURRENT_COUNT} sessions)"
 
-  # Spawn background learner
-  DEVFLOW_BG_LEARNER=1 nohup bash "$SCRIPT_DIR/background-learning" "$CWD" "--batch" "$CLAUDE_BIN" \
+  # Spawn background learner via CLI (replaces background-learning bash script)
+  DEVFLOW_BG_LEARNER=1 nohup "$DEVFLOW_BIN" learn --run-background --cwd "$CWD" \
     >> "$LOG_FILE" 2>&1 &
   disown
 }
