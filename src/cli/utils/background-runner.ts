@@ -113,13 +113,18 @@ export function registerLockCleanup(
     process.exit(1);
   };
 
-  process.on('SIGTERM', handler);
-  process.on('SIGINT', handler);
+  const signalHandler = () => {
+    handler();
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', signalHandler);
+  process.on('SIGINT', signalHandler);
   process.on('uncaughtException', uncaughtHandler);
 
   return () => {
-    process.off('SIGTERM', handler);
-    process.off('SIGINT', handler);
+    process.off('SIGTERM', signalHandler);
+    process.off('SIGINT', signalHandler);
     process.off('uncaughtException', uncaughtHandler);
   };
 }
@@ -237,7 +242,16 @@ export async function extractBatchMessages(
     filterModulePath ??
     path.join(home, '.devflow', 'scripts', 'hooks', 'lib', 'transcript-filter.cjs');
 
-  const batchContent = fs.readFileSync(batchIdsFile, 'utf-8');
+  // Load transcript-filter.cjs in-process to avoid per-session child process overhead.
+  // The module is pure data transformation (no I/O) and safe to require() directly.
+  const { extractChannels } = require(filterModule) as {
+    extractChannels: (content: string) => {
+      userSignals: string[];
+      dialogPairs: Array<{ prior: string; user: string }>;
+    };
+  };
+
+  const batchContent = await fs.promises.readFile(batchIdsFile, 'utf-8');
   const sessionIds = batchContent
     .split('\n')
     .map((s) => s.trim())
@@ -248,23 +262,16 @@ export async function extractBatchMessages(
 
   for (const sid of sessionIds) {
     const transcriptPath = path.join(projectsDir, `${sid}.jsonl`);
-    if (!fs.existsSync(transcriptPath)) {
+    let transcriptContent: string;
+    try {
+      transcriptContent = await fs.promises.readFile(transcriptPath, 'utf-8');
+    } catch {
+      // Transcript not present — skip this session.
       continue;
     }
 
     try {
-      const script = `
-        const fs = require('fs');
-        const { extractChannels } = require(${JSON.stringify(filterModule)});
-        const content = fs.readFileSync(${JSON.stringify(transcriptPath)}, 'utf8');
-        const result = extractChannels(content);
-        console.log(JSON.stringify(result));
-      `;
-      const { stdout } = await execFileAsync('node', ['-e', script]);
-      const result = JSON.parse(stdout.trim()) as {
-        userSignals: string[];
-        dialogPairs: Array<{ prior: string; user: string }>;
-      };
+      const result = extractChannels(transcriptContent);
       allUserSignals.push(...result.userSignals);
       allDialogPairs.push(...result.dialogPairs);
     } catch {
@@ -387,7 +394,7 @@ export async function loadExistingObservations(
 
 async function _loadObservationsFromLog(logFile: string, types: string[]): Promise<string> {
   try {
-    const content = fs.readFileSync(logFile, 'utf-8');
+    const content = await fs.promises.readFile(logFile, 'utf-8');
     const lines = content.split('\n').filter(Boolean);
     const observations: unknown[] = [];
     for (const line of lines) {
