@@ -38,7 +38,7 @@ describe('getActiveNotification', () => {
     expect(result).not.toBeNull();
     expect(result!.severity).toBe('warning');
     expect(result!.text).toContain('decisions at 72/100');
-    expect(result!.text).toContain('devflow learn --review');
+    expect(result!.text).toContain('devflow decisions --review');
   });
 
   it('falls back to .notifications.json when .decisions-notifications.json does not exist', () => {
