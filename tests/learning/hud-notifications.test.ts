@@ -19,21 +19,13 @@ describe('getActiveNotification', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns null when no notifications file', () => {
+  it('returns null when neither notifications file exists', () => {
     expect(getActiveNotification(tmpDir)).toBeNull();
   });
 
-  it('returns null when all notifications inactive', () => {
+  it('reads from .decisions-notifications.json (primary, post-migration)', () => {
     fs.writeFileSync(
-      path.join(memoryDir, '.notifications.json'),
-      JSON.stringify({ 'decisions-capacity-decisions': { active: false, threshold: 50, count: 50, ceiling: 100, severity: 'dim' } }),
-    );
-    expect(getActiveNotification(tmpDir)).toBeNull();
-  });
-
-  it('returns active notification with correct text', () => {
-    fs.writeFileSync(
-      path.join(memoryDir, '.notifications.json'),
+      path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({
         'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
@@ -49,9 +41,42 @@ describe('getActiveNotification', () => {
     expect(result!.text).toContain('devflow learn --review');
   });
 
-  it('returns null when notification is dismissed at current threshold', () => {
+  it('falls back to .notifications.json when .decisions-notifications.json does not exist', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.notifications.json'),
+      JSON.stringify({
+        'decisions-capacity-decisions': {
+          active: true, threshold: 70, count: 72, ceiling: 100,
+          dismissed_at_threshold: null, severity: 'warning',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      }),
+    );
+    const result = getActiveNotification(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.severity).toBe('warning');
+    expect(result!.text).toContain('decisions at 72/100');
+  });
+
+  it('returns null when all notifications inactive (in .decisions-notifications.json)', () => {
+    fs.writeFileSync(
+      path.join(memoryDir, '.decisions-notifications.json'),
+      JSON.stringify({ 'decisions-capacity-decisions': { active: false, threshold: 50, count: 50, ceiling: 100, severity: 'dim' } }),
+    );
+    expect(getActiveNotification(tmpDir)).toBeNull();
+  });
+
+  it('returns null when all notifications inactive (in .notifications.json fallback)', () => {
+    fs.writeFileSync(
+      path.join(memoryDir, '.notifications.json'),
+      JSON.stringify({ 'decisions-capacity-decisions': { active: false, threshold: 50, count: 50, ceiling: 100, severity: 'dim' } }),
+    );
+    expect(getActiveNotification(tmpDir)).toBeNull();
+  });
+
+  it('returns null when notification is dismissed at current threshold', () => {
+    fs.writeFileSync(
+      path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({
         'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
@@ -64,7 +89,7 @@ describe('getActiveNotification', () => {
 
   it('returns notification when dismissed at lower threshold but new threshold crossed', () => {
     fs.writeFileSync(
-      path.join(memoryDir, '.notifications.json'),
+      path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({
         'decisions-capacity-decisions': {
           active: true, threshold: 80, count: 82, ceiling: 100,
@@ -79,7 +104,7 @@ describe('getActiveNotification', () => {
 
   it('picks worst severity when multiple files have notifications (D27)', () => {
     fs.writeFileSync(
-      path.join(memoryDir, '.notifications.json'),
+      path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({
         'decisions-capacity-decisions': {
           active: true, threshold: 60, count: 62, ceiling: 100,
@@ -97,7 +122,12 @@ describe('getActiveNotification', () => {
     expect(result!.text).toContain('pitfalls at 92/100');
   });
 
-  it('handles malformed JSON gracefully', () => {
+  it('handles malformed JSON gracefully in .decisions-notifications.json', () => {
+    fs.writeFileSync(path.join(memoryDir, '.decisions-notifications.json'), '{bad');
+    expect(getActiveNotification(tmpDir)).toBeNull();
+  });
+
+  it('handles malformed JSON gracefully in .notifications.json fallback', () => {
     fs.writeFileSync(path.join(memoryDir, '.notifications.json'), '{bad');
     expect(getActiveNotification(tmpDir)).toBeNull();
   });
@@ -106,7 +136,7 @@ describe('getActiveNotification', () => {
     // Verify that a notification with a non-standard severity string still returns
     // a result — isSeverity('purple') → false, so the guard falls back to 'dim'.
     fs.writeFileSync(
-      path.join(memoryDir, '.notifications.json'),
+      path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({
         'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
@@ -122,7 +152,7 @@ describe('getActiveNotification', () => {
 
   it('isSeverity fallback: null severity falls back to dim', () => {
     fs.writeFileSync(
-      path.join(memoryDir, '.notifications.json'),
+      path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({
         'decisions-capacity-decisions': {
           active: true, threshold: 70, count: 72, ceiling: 100,
@@ -134,6 +164,61 @@ describe('getActiveNotification', () => {
     const result = getActiveNotification(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.severity).toBe('dim');
+  });
+
+  it('merges entries from both files, primary (.decisions-notifications.json) wins on key collision', () => {
+    // Both files have the same key; primary should win
+    fs.writeFileSync(
+      path.join(memoryDir, '.notifications.json'),
+      JSON.stringify({
+        'decisions-capacity-decisions': {
+          active: true, threshold: 60, count: 62, ceiling: 100,
+          dismissed_at_threshold: null, severity: 'dim',
+        },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(memoryDir, '.decisions-notifications.json'),
+      JSON.stringify({
+        'decisions-capacity-decisions': {
+          active: true, threshold: 70, count: 75, ceiling: 100,
+          dismissed_at_threshold: null, severity: 'warning',
+        },
+      }),
+    );
+    const result = getActiveNotification(tmpDir);
+    expect(result).not.toBeNull();
+    // Primary value should win: count=75, severity=warning
+    expect(result!.count).toBe(75);
+    expect(result!.severity).toBe('warning');
+  });
+
+  it('merges entries from both files when keys are different — picks worst across both', () => {
+    // .notifications.json has a dim workflow notification
+    fs.writeFileSync(
+      path.join(memoryDir, '.notifications.json'),
+      JSON.stringify({
+        'decisions-capacity-decisions': {
+          active: true, threshold: 60, count: 62, ceiling: 100,
+          dismissed_at_threshold: null, severity: 'dim',
+        },
+      }),
+    );
+    // .decisions-notifications.json has an error pitfall notification
+    fs.writeFileSync(
+      path.join(memoryDir, '.decisions-notifications.json'),
+      JSON.stringify({
+        'decisions-capacity-pitfalls': {
+          active: true, threshold: 90, count: 92, ceiling: 100,
+          dismissed_at_threshold: null, severity: 'error',
+        },
+      }),
+    );
+    const result = getActiveNotification(tmpDir);
+    expect(result).not.toBeNull();
+    // Error severity from pitfalls should win
+    expect(result!.severity).toBe('error');
+    expect(result!.text).toContain('pitfalls at 92/100');
   });
 });
 

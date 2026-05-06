@@ -1,6 +1,7 @@
 /**
- * D24/D27: Reads .notifications.json, picks the worst active+undismissed
- * per-file notification. Returns NotificationData or null.
+ * D24/D27: Reads .decisions-notifications.json (primary) and .notifications.json (fallback for
+ * pre-migration compatibility), picks the worst active+undismissed notification.
+ * Returns NotificationData or null.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -16,16 +17,11 @@ function isSeverity(v: unknown): v is Severity {
   return typeof v === 'string' && (SEVERITY_VALUES as readonly string[]).includes(v);
 }
 
-/**
- * D27: Get the worst active+undismissed notification across per-file entries.
- * Returns null when no active notifications exist.
- */
-export function getActiveNotification(cwd: string): NotificationData | null {
-  const notifPath = path.join(cwd, '.memory', '.notifications.json');
-
+/** Try to read and parse a notifications JSON file. Returns the map or null on any failure. */
+function readNotifFile(filePath: string): Record<string, NotificationEntry> | null {
   let raw: string;
   try {
-    raw = fs.readFileSync(notifPath, 'utf-8');
+    raw = fs.readFileSync(filePath, 'utf-8');
   } catch {
     return null;
   }
@@ -38,10 +34,37 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   }
 
   if (!isNotificationMap(parsed)) return null;
+  return parsed as Record<string, NotificationEntry>;
+}
+
+/**
+ * D27: Get the worst active+undismissed notification across per-file entries.
+ * Reads from .decisions-notifications.json (primary, written by `devflow decisions`) and
+ * .notifications.json (fallback for projects that have not yet run the split migration).
+ * Returns null when no active notifications exist.
+ */
+export function getActiveNotification(cwd: string): NotificationData | null {
+  const memoryDir = path.join(cwd, '.memory');
+
+  // Primary: post-split-migration file written by devflow decisions
+  const decisionsNotifPath = path.join(memoryDir, '.decisions-notifications.json');
+  // Fallback: pre-migration name (also written by devflow learn for workflow/procedural capacity)
+  const legacyNotifPath = path.join(memoryDir, '.notifications.json');
+
+  // Merge entries from both files; entries from the primary file take precedence on key collision
+  const legacyMap = readNotifFile(legacyNotifPath);
+  const decisionsMap = readNotifFile(decisionsNotifPath);
+
+  if (!legacyMap && !decisionsMap) return null;
+
+  const merged: Record<string, NotificationEntry> = {
+    ...(legacyMap ?? {}),
+    ...(decisionsMap ?? {}),
+  };
 
   let worst: { key: string; entry: NotificationEntry; severity: number } | null = null;
 
-  for (const [key, entry] of Object.entries(parsed)) {
+  for (const [key, entry] of Object.entries(merged)) {
     if (!entry || !entry.active) continue;
     // Skip dismissed (dismissed_at_threshold matches or exceeds current threshold)
     if (entry.dismissed_at_threshold != null && entry.dismissed_at_threshold >= (entry.threshold ?? 0)) continue;
@@ -62,7 +85,7 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   return {
     id: worst.key,
     severity: isSeverity(worst.entry.severity) ? worst.entry.severity : 'dim',
-    text: `\u26A0 Decisions: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
+    text: `⚠ Decisions: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
     count,
     ceiling,
   };
