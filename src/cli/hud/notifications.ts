@@ -48,7 +48,9 @@ export function getActiveNotification(cwd: string): NotificationData | null {
 
   // Primary: post-split-migration file written by devflow decisions
   const decisionsNotifPath = path.join(memoryDir, '.decisions-notifications.json');
-  // Fallback: pre-migration name (also written by devflow learn for workflow/procedural capacity)
+  // Fallback: pre-split-migration name — kept for backward compat with projects that
+  // have not yet run a session since the split migration (devflow learn now writes
+  // .learning-notifications.json, but old sessions may have left .notifications.json).
   const legacyNotifPath = path.join(memoryDir, '.notifications.json');
 
   // Merge entries from both files; entries from the primary file take precedence on key collision
@@ -82,10 +84,16 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   const count = worst.entry.count ?? 0;
   const ceiling = worst.entry.ceiling ?? 100;
 
+  // Keys like "decisions-capacity-decisions" / "decisions-capacity-pitfalls" are owned
+  // by the decisions pipeline; keys like "workflow-capacity-*" are owned by the learning pipeline.
+  const reviewCommand = worst.key.startsWith('decisions-capacity-')
+    ? 'devflow decisions --review'
+    : 'devflow learn --review';
+
   return {
     id: worst.key,
     severity: isSeverity(worst.entry.severity) ? worst.entry.severity : 'dim',
-    text: `⚠ Decisions: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
+    text: `⚠ Decisions: ${fileType} at ${count}/${ceiling} — run ${reviewCommand}`,
     count,
     ceiling,
   };

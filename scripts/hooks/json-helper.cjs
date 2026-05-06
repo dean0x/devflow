@@ -1837,8 +1837,10 @@ try {
         registerUsageEntry(memoryDir, anchorId);
 
         // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
+        // Write to .decisions-notifications.json — decisions-append owns the decisions/pitfalls pipeline.
         const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
-        updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount);
+        const decisionsNotifPath = path.join(memoryDir, '.decisions-notifications.json');
+        updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount, decisionsNotifPath);
 
         console.log(JSON.stringify({ anchorId, file: decisionsFile }));
       } finally {

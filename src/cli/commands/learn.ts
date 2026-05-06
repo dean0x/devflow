@@ -521,6 +521,16 @@ export const learnCommand = new Command('learn')
       const jsonHelperPath = path.join(scriptDir, 'json-helper.cjs');
       const stalenessModulePath = path.join(scriptDir, 'lib', 'staleness.cjs');
       const memoryDir = path.join(cwd, '.memory');
+
+      // Validate that the resolved cwd is a devflow-enabled project directory.
+      // This guards against passing an arbitrary path via --cwd from the CLI.
+      try {
+        await fs.access(memoryDir);
+      } catch {
+        process.stderr.write(`[learn] --cwd path does not contain a .memory directory: ${cwd}\n`);
+        process.exit(1);
+      }
+
       const lockDir = path.join(memoryDir, '.learning.lock');
       const logFile = path.join(memoryDir, 'learning-log.jsonl');
       const batchIdsFile = path.join(memoryDir, '.learning-batch-ids');
@@ -563,7 +573,6 @@ export const learnCommand = new Command('learn')
           cwd,
           userSignals,
           model: config.model,
-          debug: config.debug,
           logFile,
           jsonHelperPath,
         });
@@ -574,9 +583,11 @@ export const learnCommand = new Command('learn')
         });
 
         // Render ready observations to artifacts.
-        execFileSync('node', [jsonHelperPath, 'render-ready', logFile, cwd], {
-          stdio: 'pipe',
-        });
+        const learningNotifPath = path.join(memoryDir, '.learning-notifications.json');
+        execFileSync('node', [
+          jsonHelperPath, 'render-ready', logFile, cwd,
+          '--notifications-path', learningNotifPath,
+        ], { stdio: 'pipe' });
 
         await checkStaleness(stalenessModulePath, logFile, cwd);
         // Daily cap is incremented by the calling hook (session-end-learning)
@@ -845,6 +856,7 @@ export const learnCommand = new Command('learn')
           '.learning-runs-today',
           '.learning-notified-at',
           '.learning-notifications.json',
+          '.notifications.json', // legacy pre-split-migration name — clean up on reset
           '.decisions-usage.json',
           '.learning-manifest.json',
         ];
