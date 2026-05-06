@@ -287,7 +287,7 @@ export function _extractStructuredOutput(stdout: string): RawObservation[] {
     throw new Error(`Decisions agent response missing "observations" array`);
   }
 
-  const rawArray = (inner as Record<string, unknown[]>)['observations'];
+  const rawArray = (inner as Record<string, unknown>)['observations'] as unknown[];
   const valid: RawObservation[] = [];
   for (const item of rawArray) {
     if (isRawObservation(item)) {
@@ -309,11 +309,14 @@ export function _extractStructuredOutput(stdout: string): RawObservation[] {
  */
 export function _normalizeObservations(observations: RawObservation[]): NormalizedObservation[] {
   return observations.map(obs => {
-    const details = obs.type === 'decision'
-      ? _serializeDecision(obs)
-      : obs.type === 'pitfall'
-        ? _serializePitfall(obs)
-        : '';
+    let details: string;
+    if (obs.type === 'decision') {
+      details = _serializeDecision(obs);
+    } else if (obs.type === 'pitfall') {
+      details = _serializePitfall(obs);
+    } else {
+      details = '';
+    }
 
     return {
       id: obs.id,

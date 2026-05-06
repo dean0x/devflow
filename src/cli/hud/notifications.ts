@@ -84,11 +84,10 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   const count = worst.entry.count ?? 0;
   const ceiling = worst.entry.ceiling ?? 100;
 
-  // Keys like "decisions-capacity-decisions" / "decisions-capacity-pitfalls" are owned
-  // by the decisions pipeline; keys like "workflow-capacity-*" are owned by the learning pipeline.
-  const reviewCommand = worst.key.startsWith('decisions-capacity-')
-    ? 'devflow decisions --review'
-    : 'devflow learn --review';
+  // All keys in these files use the "decisions-capacity-*" prefix (written by decisions pipeline
+  // and legacy learning pipeline pre-split-migration). The HUD does not read
+  // .learning-notifications.json, which is managed separately by the learning pipeline.
+  const reviewCommand = 'devflow decisions --review';
 
   return {
     id: worst.key,
