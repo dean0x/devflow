@@ -1,7 +1,8 @@
 /**
  * @file notifications-shape.ts
  *
- * Shared type definitions and runtime guard for `.memory/.notifications.json`.
+ * Shared type definitions and runtime guard for `.memory/.learning-notifications.json`
+ * and `.memory/.decisions-notifications.json`.
  *
  * Consolidated from two divergent definitions:
  *   - `src/cli/commands/learn.ts`      (STRONGER — validated entries are objects)
@@ -18,7 +19,7 @@
  */
 
 /**
- * Shape of a single entry in `.memory/.notifications.json`.
+ * Shape of a single entry in a notifications JSON file.
  * Mirrors the structure written by `json-helper.cjs` (write-path).
  */
 export interface NotificationEntry {
@@ -39,7 +40,7 @@ export interface NotificationEntry {
 export type NotificationFileEntry = NotificationEntry;
 
 /**
- * Runtime guard for `.notifications.json` parse results (STRONGER definition).
+ * Runtime guard for notifications JSON parse results (STRONGER definition).
  *
  * Returns true only when:
  *   - `v` is a non-null, non-array object (the top-level map), AND

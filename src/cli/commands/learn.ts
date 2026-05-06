@@ -844,7 +844,7 @@ export const learnCommand = new Command('learn')
           '.learning-batch-ids',
           '.learning-runs-today',
           '.learning-notified-at',
-          '.notifications.json',
+          '.learning-notifications.json',
           '.decisions-usage.json',
           '.learning-manifest.json',
         ];
@@ -1255,7 +1255,7 @@ export const learnCommand = new Command('learn')
           let notifications: Record<string, NotificationFileEntry> = {};
           try {
             const raw = JSON.parse(
-              await fs.readFile(path.join(memoryDir, '.notifications.json'), 'utf-8'),
+              await fs.readFile(path.join(memoryDir, '.learning-notifications.json'), 'utf-8'),
             );
             if (isNotificationMap(raw)) {
               notifications = raw;
@@ -1290,7 +1290,7 @@ export const learnCommand = new Command('learn')
             } catch { /* count-active failed — skip notification update */ }
           }
 
-          await writeFileAtomicExclusive(path.join(memoryDir, '.notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
+          await writeFileAtomicExclusive(path.join(memoryDir, '.learning-notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
 
           p.log.success(`Deprecated ${deprecatedCount} entry(ies).`);
         } finally {
@@ -1307,7 +1307,7 @@ export const learnCommand = new Command('learn')
     // --- --dismiss-capacity ---
     if (options.dismissCapacity) {
       const memoryDir = path.join(process.cwd(), '.memory');
-      const notifPath = path.join(memoryDir, '.notifications.json');
+      const notifPath = path.join(memoryDir, '.learning-notifications.json');
 
       let notifications: Record<string, NotificationFileEntry>;
       try {
