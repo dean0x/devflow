@@ -7,7 +7,7 @@ import {
 } from '../src/cli/utils/flags.js';
 
 describe('FLAG_REGISTRY', () => {
-  it('contains at least 14 flags', () => {
+  it('contains a reasonable number of flags', () => {
     expect(FLAG_REGISTRY.length).toBeGreaterThanOrEqual(14);
   });
 
@@ -78,26 +78,17 @@ describe('applyFlags', () => {
     expect(result.tui).toBe('fullscreen');
   });
 
-  it('applies all 14 flags at once', () => {
+  it('applies all registered flags at once', () => {
     const allIds = FLAG_REGISTRY.map(f => f.id);
     const input = JSON.stringify({}, null, 2);
     const result = JSON.parse(applyFlags(input, allIds));
-    // env flags
-    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
-    expect(result.env.ENABLE_LSP_TOOL).toBe('true');
-    expect(result.env.ENABLE_PROMPT_CACHING_1H).toBe('true');
-    expect(result.env.CLAUDE_CODE_BRIEF).toBe('true');
-    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
-    expect(result.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('true');
-    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBe('1');
-    expect(result.env.DISABLE_COMPACT).toBe('true');
-    expect(result.env.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBe('true');
-    expect(result.env.DISABLE_AUTOUPDATER).toBe('true');
-    // setting flags
-    expect(result.showTurnDuration).toBe(true);
-    expect(result.showClearContextOnPlanAccept).toBe(true);
-    expect(result.tui).toBe('fullscreen');
-    expect(result.showThinkingSummaries).toBe(true);
+    for (const flag of FLAG_REGISTRY) {
+      if (flag.target.type === 'env') {
+        expect(result.env[flag.target.key]).toBe(flag.target.value);
+      } else {
+        expect(result[flag.target.key]).toBe(flag.target.value);
+      }
+    }
   });
 
   it('applies multiple flags at once', () => {
@@ -131,6 +122,10 @@ describe('applyFlags', () => {
     const input = JSON.stringify({ hooks: {} }, null, 2);
     const result = applyFlags(input, []);
     expect(JSON.parse(result)).toEqual({ hooks: {} });
+  });
+
+  it('throws on malformed JSON input', () => {
+    expect(() => applyFlags('not-json', ['tool-search'])).toThrow(SyntaxError);
   });
 });
 
@@ -189,6 +184,12 @@ describe('stripFlags', () => {
     expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
   });
 
+  it('strips flag-managed env keys regardless of their value', () => {
+    const input = JSON.stringify({ env: { ENABLE_TOOL_SEARCH: 'false' } }, null, 2);
+    const result = JSON.parse(stripFlags(input));
+    expect(result.env).toBeUndefined();
+  });
+
   it('handles missing env object gracefully', () => {
     const input = JSON.stringify({ hooks: {} }, null, 2);
     const result = JSON.parse(stripFlags(input));
@@ -239,7 +240,7 @@ describe('stripFlags', () => {
     expect(result.hooks).toEqual({ Stop: [] });
   });
 
-  it('roundtrip with all 14 flags', () => {
+  it('roundtrip with all registered flags', () => {
     const allIds = FLAG_REGISTRY.map(f => f.id);
     const base = JSON.stringify({
       hooks: { Stop: [] },
