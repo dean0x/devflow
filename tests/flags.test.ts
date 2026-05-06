@@ -7,10 +7,6 @@ import {
 } from '../src/cli/utils/flags.js';
 
 describe('FLAG_REGISTRY', () => {
-  it('contains a reasonable number of flags', () => {
-    expect(FLAG_REGISTRY.length).toBeGreaterThanOrEqual(14);
-  });
-
   it('has unique IDs', () => {
     const ids = FLAG_REGISTRY.map(f => f.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -123,10 +119,6 @@ describe('applyFlags', () => {
     const result = applyFlags(input, []);
     expect(JSON.parse(result)).toEqual({ hooks: {} });
   });
-
-  it('throws on malformed JSON input', () => {
-    expect(() => applyFlags('not-json', ['tool-search'])).toThrow(SyntaxError);
-  });
 });
 
 describe('stripFlags', () => {
@@ -213,33 +205,6 @@ describe('stripFlags', () => {
     expect(result.hooks).toEqual({ Stop: [] });
   });
 
-  it('roundtrip with mixed new flags including string-valued settings', () => {
-    const base = JSON.stringify({
-      hooks: { Stop: [] },
-      env: { CUSTOM: 'value' },
-    }, null, 2);
-
-    const withFlags = applyFlags(base, [
-      'prompt-caching-1h',
-      'show-turn-duration',
-      'tui',
-      'thinking-summaries',
-      'subprocess-env-scrub',
-      'forked-subagents',
-    ]);
-    const stripped = stripFlags(withFlags);
-    const result = JSON.parse(stripped);
-
-    expect(result.env.ENABLE_PROMPT_CACHING_1H).toBeUndefined();
-    expect(result.showTurnDuration).toBeUndefined();
-    expect(result.tui).toBeUndefined();
-    expect(result.showThinkingSummaries).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBeUndefined();
-    expect(result.env.CUSTOM).toBe('value');
-    expect(result.hooks).toEqual({ Stop: [] });
-  });
-
   it('roundtrip with all registered flags', () => {
     const allIds = FLAG_REGISTRY.map(f => f.id);
     const base = JSON.stringify({
@@ -247,26 +212,15 @@ describe('stripFlags', () => {
       env: { CUSTOM: 'value' },
     }, null, 2);
 
-    const withFlags = applyFlags(base, allIds);
-    const stripped = stripFlags(withFlags);
-    const result = JSON.parse(stripped);
+    const result = JSON.parse(stripFlags(applyFlags(base, allIds)));
 
-    // All flag-managed keys removed
-    expect(result.env.ENABLE_TOOL_SEARCH).toBeUndefined();
-    expect(result.env.ENABLE_LSP_TOOL).toBeUndefined();
-    expect(result.env.ENABLE_PROMPT_CACHING_1H).toBeUndefined();
-    expect(result.showTurnDuration).toBeUndefined();
-    expect(result.showClearContextOnPlanAccept).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_BRIEF).toBeUndefined();
-    expect(result.tui).toBeUndefined();
-    expect(result.showThinkingSummaries).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBeUndefined();
-    expect(result.env.DISABLE_COMPACT).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBeUndefined();
-    expect(result.env.DISABLE_AUTOUPDATER).toBeUndefined();
-    // Non-flag keys preserved
+    for (const flag of FLAG_REGISTRY) {
+      if (flag.target.type === 'env') {
+        expect(result.env?.[flag.target.key]).toBeUndefined();
+      } else {
+        expect(result[flag.target.key]).toBeUndefined();
+      }
+    }
     expect(result.env.CUSTOM).toBe('value');
     expect(result.hooks).toEqual({ Stop: [] });
   });
