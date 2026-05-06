@@ -89,8 +89,8 @@ const INITIAL_CONFIDENCE = 0.33; // seed value for first observation (higher tha
 const THRESHOLDS = {
   workflow:   { required: 3, spread: 3 * 86400, promote: 0.60 },
   procedural: { required: 4, spread: 5 * 86400, promote: 0.70 },
-  decision:   { required: 2, spread: 0,          promote: 0.65 },
-  pitfall:    { required: 2, spread: 0,          promote: 0.65 },
+  decision:   { required: 1, spread: 0,          promote: 0.65 },
+  pitfall:    { required: 1, spread: 0,          promote: 0.65 },
 };
 
 // D17: softCapExceeded repurposed to hard ceiling (100), not removed.
@@ -909,6 +909,16 @@ try {
     case 'process-observations': {
       const responseFile = safePath(args[0]);
       const logFile = safePath(args[1]);
+
+      // Optional --types workflow,procedural (or --types decision,pitfall) filter.
+      // When present, only observations whose type is in the allowed set are processed.
+      // When absent, all types are processed (backward compatible).
+      let typeFilter = null;
+      const typesArgIdx = args.indexOf('--types');
+      if (typesArgIdx !== -1 && args[typesArgIdx + 1]) {
+        typeFilter = new Set(args[typesArgIdx + 1].split(',').map(t => t.trim()).filter(Boolean));
+      }
+
       const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
       const observations = response.observations || [];
 
@@ -932,6 +942,12 @@ try {
         }
         if (!VALID_TYPES.has(obs.type)) {
           learningLog(`Skipping observation ${i}: invalid type '${obs.type}'`);
+          skipped++;
+          continue;
+        }
+        // Type filter: skip observations not in the allowed set (when filter is active)
+        if (typeFilter !== null && !typeFilter.has(obs.type)) {
+          learningLog(`Skipping observation ${i}: type '${obs.type}' not in filter [${[...typeFilter].join(',')}]`);
           skipped++;
           continue;
         }
@@ -1124,10 +1140,12 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // render-ready <log> <baseDir>
+    // render-ready <log> <baseDir> [--manifest-path <path>] [--notifications-path <path>]
     // DESIGN: D5 — deterministic rendering replaces LLM-generated artifact content.
     // The model provides structured metadata (pattern, details, evidence, type);
     // rendering is a pure template application. This separates detection from materialization.
+    // Optional args allow callers to override default manifest and notifications paths
+    // (used by type-specific pipelines that maintain separate log/manifest files).
     // -------------------------------------------------------------------------
     case 'render-ready': {
       const logFile = safePath(args[0]);
@@ -1137,9 +1155,22 @@ try {
         break;
       }
 
+      // Parse optional path overrides (args[2..] may contain --manifest-path and --notifications-path)
+      let manifestPathOverride = null;
+      let notifPathOverride = null;
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === '--manifest-path' && args[i + 1]) {
+          manifestPathOverride = safePath(args[i + 1]);
+          i++;
+        } else if (args[i] === '--notifications-path' && args[i + 1]) {
+          notifPathOverride = safePath(args[i + 1]);
+          i++;
+        }
+      }
+
       const entries = parseJsonl(logFile);
       const logMap = new Map(entries.map(e => [e.id, e]));
-      const manifestPath = path.join(baseDir, '.memory', '.learning-manifest.json');
+      const manifestPath = manifestPathOverride || path.join(baseDir, '.memory', '.learning-manifest.json');
       const artDate = new Date().toISOString().slice(0, 10);
 
       // Load or init manifest (schemaVersion 1)
@@ -1286,7 +1317,7 @@ try {
               // D18: count only active (non-deprecated/superseded) headings for capacity check
               const previousCount = countActiveHeadings(existingContent, obs.type);
 
-              const memoryDir = path.join(baseDir, '.memory');
+              const memoryDir = notifPathOverride || path.join(baseDir, '.memory');
               const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
 
               // D17: hard ceiling at DECISIONS_HARD_CEILING (100); softCapExceeded repurposed
@@ -1425,16 +1456,18 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // reconcile-manifest <cwd>
+    // reconcile-manifest <cwd> [logFile] [manifestPath]
     // DESIGN: D6 — reconciler runs at session-start (not PostToolUse) to avoid
     // write-time overhead. This amortizes the filesystem check over session boundaries.
     // DESIGN: D13 — edits to artifact content are silently ignored (hash update only,
     // no confidence penalty). Users should be free to improve their own artifacts.
+    // Optional positional args [logFile] and [manifestPath] allow callers to use
+    // type-specific log/manifest files instead of the default shared paths.
     // -------------------------------------------------------------------------
     case 'reconcile-manifest': {
       const cwd = safePath(args[0]);
-      const manifestPath = path.join(cwd, '.memory', '.learning-manifest.json');
-      const logFile = path.join(cwd, '.memory', 'learning-log.jsonl');
+      const logFile = args[1] ? safePath(args[1]) : path.join(cwd, '.memory', 'learning-log.jsonl');
+      const manifestPath = args[2] ? safePath(args[2]) : path.join(cwd, '.memory', '.learning-manifest.json');
       const lockDir = path.join(cwd, '.memory', '.learning.lock');
 
       // A1: require only the log file (not the manifest) before proceeding.
