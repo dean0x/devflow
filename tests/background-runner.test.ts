@@ -9,7 +9,6 @@ import {
   checkDailyCap,
   incrementDailyCap,
   capEntries,
-  rotateLog,
   encodeCwdForClaude,
 } from '../src/cli/utils/background-runner.js';
 
@@ -339,7 +338,7 @@ describe('capEntries', () => {
   });
 });
 
-describe('rotateLog', () => {
+describe('capEntries (alias test)', () => {
   let tmpDir: string;
   let logFile: string;
 
@@ -352,9 +351,9 @@ describe('rotateLog', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('is an alias for capEntries — caps to maxLines', () => {
+  it('caps to maxLines when called with explicit max', () => {
     writeFile(logFile, makeJsonl(200));
-    rotateLog(logFile, 100);
+    capEntries(logFile, 100);
     const lines = fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean);
     expect(lines).toHaveLength(100);
   });

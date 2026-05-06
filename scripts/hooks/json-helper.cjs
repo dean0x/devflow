@@ -321,7 +321,24 @@ function writeUsageFile(memoryDir, data) {
  * @returns {Object}
  */
 function readNotifications(memoryDir) {
-  const filePath = path.join(memoryDir, '.notifications.json');
+  return readNotificationsFromPath(path.join(memoryDir, '.notifications.json'));
+}
+
+/**
+ * Write .notifications.json atomically.
+ * @param {string} memoryDir
+ * @param {Object} data
+ */
+function writeNotifications(memoryDir, data) {
+  writeNotificationsToPath(path.join(memoryDir, '.notifications.json'), data);
+}
+
+/**
+ * Read a notifications file by its full path.
+ * @param {string} filePath
+ * @returns {Object}
+ */
+function readNotificationsFromPath(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const data = JSON.parse(raw);
@@ -331,12 +348,12 @@ function readNotifications(memoryDir) {
 }
 
 /**
- * Write .notifications.json atomically.
- * @param {string} memoryDir
+ * Write a notifications file atomically by its full path.
+ * @param {string} filePath
  * @param {Object} data
  */
-function writeNotifications(memoryDir, data) {
-  writeFileAtomic(path.join(memoryDir, '.notifications.json'), JSON.stringify(data, null, 2) + '\n');
+function writeNotificationsToPath(filePath, data) {
+  writeFileAtomic(filePath, JSON.stringify(data, null, 2) + '\n');
 }
 
 /**
@@ -388,13 +405,17 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
  * D21/D22/D24/D28: Update .notifications.json after a decisions entry is appended.
  * Handles first-run seed, threshold crossing, severity escalation, and re-fire on dismiss.
  *
- * @param {string} memoryDir
+ * @param {string} memoryDir - Path to .memory directory
  * @param {string} notifKey - e.g. 'decisions-capacity-decisions'
  * @param {number} previousCount - Active count before the append
  * @param {number} newCount - Active count after the append
+ * @param {string} [notifFilePath] - Optional full path to notifications file. When provided,
+ *   reads/writes to this path directly instead of memoryDir/.notifications.json. Used by
+ *   render-ready with --notifications-path to write to .decisions-notifications.json.
  */
-function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount) {
-  const notifications = readNotifications(memoryDir);
+function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, notifFilePath) {
+  const effectiveNotifPath = notifFilePath || path.join(memoryDir, '.notifications.json');
+  const notifications = readNotificationsFromPath(effectiveNotifPath);
   const existingNotif = notifications[notifKey];
 
   // D21: first-run seed — if no notification existed and count >= soft start,
@@ -428,7 +449,7 @@ function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount
     notifications[notifKey].dismissed_at_threshold = null;
   }
 
-  writeNotifications(memoryDir, notifications);
+  writeNotificationsToPath(effectiveNotifPath, notifications);
 }
 
 /**
@@ -1317,7 +1338,7 @@ try {
               // D18: count only active (non-deprecated/superseded) headings for capacity check
               const previousCount = countActiveHeadings(existingContent, obs.type);
 
-              const memoryDir = notifPathOverride || path.join(baseDir, '.memory');
+              const memoryDir = path.join(baseDir, '.memory');
               const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
 
               // D17: hard ceiling at DECISIONS_HARD_CEILING (100); softCapExceeded repurposed
@@ -1327,7 +1348,8 @@ try {
                 // so the user can decide which entry to deprecate before a new one lands.
                 obs.softCapExceeded = true;
                 // Write error-level notification for hard ceiling
-                const notifications = readNotifications(memoryDir);
+                const notifFilePath = notifPathOverride || path.join(memoryDir, '.notifications.json');
+                const notifications = readNotificationsFromPath(notifFilePath);
                 notifications[notifKey] = {
                   active: true,
                   threshold: DECISIONS_HARD_CEILING,
@@ -1337,7 +1359,7 @@ try {
                   severity: 'error',
                   created_at: new Date().toISOString(),
                 };
-                writeNotifications(memoryDir, notifications);
+                writeNotificationsToPath(notifFilePath, notifications);
                 learningLog(`Decisions file at hard ceiling (${previousCount}/${DECISIONS_HARD_CEILING}), skipping ${obs.id}`);
                 skipped++;
                 continue; // lock still held; released in finally
@@ -1420,7 +1442,8 @@ try {
               registerUsageEntry(memoryDir, anchorId);
 
               // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
-              updateCapacityNotification(memoryDir, notifKey, previousCount, newCount);
+              const renderNotifPath = notifPathOverride || undefined;
+              updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, renderNotifPath);
 
               obs.status = 'created';
               obs.artifact_path = `${decisionsFile}#${anchorId}`;
@@ -1532,7 +1555,9 @@ try {
           // File exists — check anchor for decisions entries
           if (entry.anchorId) {
             const content = fs.readFileSync(filePath, 'utf8');
-            const anchorPattern = new RegExp(`##\\s+${entry.anchorId}\\b`);
+            // Sanitise anchorId before embedding in regex to eliminate ReDoS surface.
+            const safeAnchorId = entry.anchorId.replace(/[^A-Z0-9-]/gi, '');
+            const anchorPattern = new RegExp(`##\\s+${safeAnchorId}\\b`);
             if (!anchorPattern.test(content)) {
               // Anchor missing — treat as deletion (D13 exception: anchor loss = deletion)
               obs.confidence = Math.round(obs.confidence * 0.3 * 100) / 100;

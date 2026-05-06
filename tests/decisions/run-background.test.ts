@@ -18,8 +18,6 @@ vi.mock('../../src/cli/utils/background-runner.js', () => ({
   acquireBackgroundLock: vi.fn(async () => undefined),
   releaseBackgroundLock: vi.fn(() => undefined),
   registerLockCleanup: vi.fn(() => vi.fn()),
-  checkDailyCap: vi.fn(() => true),
-  incrementDailyCap: vi.fn(() => undefined),
   extractBatchMessages: vi.fn(async () => ({
     userSignals: [],
     dialogPairs: [{ prior: 'assistant response', user: 'user message' }],
@@ -97,7 +95,6 @@ describe('decisions --run-background pipeline', () => {
     vi.clearAllMocks();
 
     // Re-configure mocks after clearAllMocks resets call counts but keeps implementations.
-    vi.mocked(backgroundRunner.checkDailyCap).mockReturnValue(true);
     vi.mocked(backgroundRunner.registerLockCleanup).mockReturnValue(vi.fn());
     vi.mocked(backgroundRunner.extractBatchMessages).mockResolvedValue({
       userSignals: [],
@@ -123,30 +120,6 @@ describe('decisions --run-background pipeline', () => {
     await runBackground(tmpDir);
 
     expect(callOrder.indexOf('acquireLock')).toBeLessThan(callOrder.indexOf('extractBatch'));
-  });
-
-  it('checks daily cap after acquiring lock', async () => {
-    const callOrder: string[] = [];
-    vi.mocked(backgroundRunner.acquireBackgroundLock).mockImplementation(async () => {
-      callOrder.push('acquireLock');
-    });
-    vi.mocked(backgroundRunner.checkDailyCap).mockImplementation(() => {
-      callOrder.push('checkCap');
-      return true;
-    });
-
-    await runBackground(tmpDir);
-
-    expect(callOrder.indexOf('acquireLock')).toBeLessThan(callOrder.indexOf('checkCap'));
-  });
-
-  it('exits early and releases lock when daily cap exceeded', async () => {
-    vi.mocked(backgroundRunner.checkDailyCap).mockReturnValue(false);
-
-    await runBackground(tmpDir);
-
-    expect(decisionsAgent.runDecisionsAgent).not.toHaveBeenCalled();
-    expect(backgroundRunner.releaseBackgroundLock).toHaveBeenCalled();
   });
 
   it('calls runDecisionsAgent with dialog pairs from extractBatchMessages', async () => {
@@ -199,12 +172,6 @@ describe('decisions --run-background pipeline', () => {
     expect(renderReadyCall!.args[notifIdx + 1]).toContain('.decisions-notifications.json');
   });
 
-  it('increments daily cap on success', async () => {
-    await runBackground(tmpDir);
-
-    expect(backgroundRunner.incrementDailyCap).toHaveBeenCalledOnce();
-  });
-
   it('releases lock even when agent throws', async () => {
     vi.mocked(decisionsAgent.runDecisionsAgent).mockRejectedValue(new Error('agent failed'));
 
@@ -244,22 +211,6 @@ describe('decisions --run-background pipeline', () => {
     expect(callOrder.indexOf('decay')).toBeLessThan(callOrder.indexOf('agent'));
   });
 
-  it('does not call process-observations when cap exceeded', async () => {
-    vi.mocked(backgroundRunner.checkDailyCap).mockReturnValue(false);
-
-    await runBackground(tmpDir);
-
-    const processObsCall = _execFileSyncCalls.find(c =>
-      c.cmd === 'node' && c.args.includes('process-observations'),
-    );
-    expect(processObsCall).toBeUndefined();
-  });
-
-  it('does not increment cap when cap is exceeded', async () => {
-    vi.mocked(backgroundRunner.checkDailyCap).mockReturnValue(false);
-
-    await runBackground(tmpDir);
-
-    expect(backgroundRunner.incrementDailyCap).not.toHaveBeenCalled();
-  });
+  // Daily cap checking and incrementing is handled by the session-end-decisions hook,
+  // not by the CLI --run-background path. Tests for cap logic live in shell-hooks tests.
 });

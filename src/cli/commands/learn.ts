@@ -13,8 +13,6 @@ import {
   acquireBackgroundLock,
   releaseBackgroundLock,
   registerLockCleanup,
-  checkDailyCap,
-  incrementDailyCap,
   extractBatchMessages,
   applyTemporalDecay,
   capEntries,
@@ -526,7 +524,6 @@ export const learnCommand = new Command('learn')
       const lockDir = path.join(memoryDir, '.learning.lock');
       const logFile = path.join(memoryDir, 'learning-log.jsonl');
       const batchIdsFile = path.join(memoryDir, '.learning-batch-ids');
-      const capsFile = path.join(memoryDir, '.learning-runs-today');
 
       // Run idempotent split migration to ensure log files exist and are properly split.
       const splitMigrationPath = path.join(scriptDir, 'lib', 'split-migration.cjs');
@@ -553,10 +550,9 @@ export const learnCommand = new Command('learn')
         })();
         const config = loadLearningConfig(globalJson, projectJson);
 
-        if (!checkDailyCap(capsFile, config.max_daily_runs)) {
-          // Over daily cap — exit silently.
-          return;
-        }
+        // Daily cap is checked and incremented by the calling hook
+        // (session-end-learning) before spawning this background process.
+        // No cap check needed here — the hook already gates the invocation.
 
         const { userSignals } = await extractBatchMessages(batchIdsFile, cwd);
 
@@ -583,7 +579,8 @@ export const learnCommand = new Command('learn')
         });
 
         await checkStaleness(stalenessModulePath, logFile, cwd);
-        incrementDailyCap(capsFile);
+        // Daily cap is incremented by the calling hook (session-end-learning)
+        // before spawning this background process. Do not increment again here.
       } finally {
         cleanupLock();
         releaseBackgroundLock(lockDir);

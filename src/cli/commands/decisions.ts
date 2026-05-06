@@ -12,8 +12,6 @@ import {
   acquireBackgroundLock,
   releaseBackgroundLock,
   registerLockCleanup,
-  checkDailyCap,
-  incrementDailyCap,
   extractBatchMessages,
   applyTemporalDecay,
   capEntries,
@@ -50,7 +48,7 @@ export function addDecisionsHook(settingsJson: string, devflowDir: string): stri
     settings.hooks = {};
   }
 
-  const hookCommand = `bash "${path.join(devflowDir, 'scripts', 'hooks', 'run-hook')}" session-end-decisions`;
+  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-end-decisions';
 
   const newEntry: HookMatcher = {
     hooks: [
@@ -178,7 +176,6 @@ export const decisionsCommand = new Command('decisions')
       const lockDir = path.join(memoryDir, '.decisions.lock');
       const logFile = path.join(memoryDir, 'decisions-log.jsonl');
       const batchIdsFile = path.join(memoryDir, '.decisions-batch-ids');
-      const capsFile = path.join(memoryDir, '.decisions-runs-today');
       const manifestPath = path.join(memoryDir, '.decisions-manifest.json');
       const notificationsPath = path.join(memoryDir, '.decisions-notifications.json');
 
@@ -196,10 +193,9 @@ export const decisionsCommand = new Command('decisions')
       try {
         const config = loadDecisionsConfig(cwd);
 
-        if (!checkDailyCap(capsFile, config.max_daily_runs)) {
-          // Over daily cap — exit silently.
-          return;
-        }
+        // Daily cap is checked and incremented by the calling hook
+        // (session-end-decisions) before spawning this background process.
+        // No cap check needed here — the hook already gates the invocation.
 
         const { dialogPairs } = await extractBatchMessages(batchIdsFile, cwd);
 
@@ -228,7 +224,8 @@ export const decisionsCommand = new Command('decisions')
         ], { stdio: 'pipe' });
 
         await checkStaleness(stalenessModulePath, logFile, cwd);
-        incrementDailyCap(capsFile);
+        // Daily cap is incremented by the calling hook (session-end-decisions)
+        // before spawning this background process. Do not increment again here.
       } finally {
         cleanupLock();
         releaseBackgroundLock(lockDir);
