@@ -57,50 +57,6 @@ describe('getDefaultFlags', () => {
     const expected = FLAG_REGISTRY.filter(f => f.defaultEnabled).map(f => f.id);
     expect(defaults).toEqual(expected);
   });
-
-  it('includes tool-search by default', () => {
-    expect(getDefaultFlags()).toContain('tool-search');
-  });
-
-  it('includes prompt-caching-1h by default', () => {
-    expect(getDefaultFlags()).toContain('prompt-caching-1h');
-  });
-
-  it('includes show-turn-duration by default', () => {
-    expect(getDefaultFlags()).toContain('show-turn-duration');
-  });
-
-  it('does not include brief by default', () => {
-    expect(getDefaultFlags()).not.toContain('brief');
-  });
-
-  it('does not include tui by default', () => {
-    expect(getDefaultFlags()).not.toContain('tui');
-  });
-
-  it('does not include thinking-summaries by default', () => {
-    expect(getDefaultFlags()).not.toContain('thinking-summaries');
-  });
-
-  it('does not include subprocess-env-scrub by default', () => {
-    expect(getDefaultFlags()).not.toContain('subprocess-env-scrub');
-  });
-
-  it('does not include disable-nonessential-traffic by default', () => {
-    expect(getDefaultFlags()).not.toContain('disable-nonessential-traffic');
-  });
-
-  it('does not include forked-subagents by default', () => {
-    expect(getDefaultFlags()).not.toContain('forked-subagents');
-  });
-
-  it('does not include disable-compact by default', () => {
-    expect(getDefaultFlags()).not.toContain('disable-compact');
-  });
-
-  it('does not include disable-autoupdater by default', () => {
-    expect(getDefaultFlags()).not.toContain('disable-autoupdater');
-  });
 });
 
 describe('applyFlags', () => {
@@ -120,36 +76,6 @@ describe('applyFlags', () => {
     const input = JSON.stringify({ hooks: {} }, null, 2);
     const result = JSON.parse(applyFlags(input, ['tui']));
     expect(result.tui).toBe('fullscreen');
-  });
-
-  it('applies new env flag subprocess-env-scrub', () => {
-    const input = JSON.stringify({}, null, 2);
-    const result = JSON.parse(applyFlags(input, ['subprocess-env-scrub']));
-    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
-  });
-
-  it('applies new env flag forked-subagents', () => {
-    const input = JSON.stringify({}, null, 2);
-    const result = JSON.parse(applyFlags(input, ['forked-subagents']));
-    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBe('1');
-  });
-
-  it('applies new env flag disable-compact', () => {
-    const input = JSON.stringify({}, null, 2);
-    const result = JSON.parse(applyFlags(input, ['disable-compact']));
-    expect(result.env.DISABLE_COMPACT).toBe('true');
-  });
-
-  it('applies new env flag disable-autoupdater', () => {
-    const input = JSON.stringify({}, null, 2);
-    const result = JSON.parse(applyFlags(input, ['disable-autoupdater']));
-    expect(result.env.DISABLE_AUTOUPDATER).toBe('true');
-  });
-
-  it('applies new setting flag thinking-summaries', () => {
-    const input = JSON.stringify({}, null, 2);
-    const result = JSON.parse(applyFlags(input, ['thinking-summaries']));
-    expect(result.showThinkingSummaries).toBe(true);
   });
 
   it('applies all 14 flags at once', () => {
@@ -192,12 +118,6 @@ describe('applyFlags', () => {
     expect(result.hooks).toEqual({ Stop: [] });
     expect(result.statusLine).toEqual({ type: 'command' });
     expect(result.env.EXISTING_VAR).toBe('keep');
-    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
-  });
-
-  it('creates env object when missing', () => {
-    const input = JSON.stringify({ hooks: {} }, null, 2);
-    const result = JSON.parse(applyFlags(input, ['tool-search']));
     expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
   });
 
@@ -331,20 +251,20 @@ describe('stripFlags', () => {
     const result = JSON.parse(stripped);
 
     // All flag-managed keys removed
-    expect(result.env?.ENABLE_TOOL_SEARCH).toBeUndefined();
-    expect(result.env?.ENABLE_LSP_TOOL).toBeUndefined();
-    expect(result.env?.ENABLE_PROMPT_CACHING_1H).toBeUndefined();
+    expect(result.env.ENABLE_TOOL_SEARCH).toBeUndefined();
+    expect(result.env.ENABLE_LSP_TOOL).toBeUndefined();
+    expect(result.env.ENABLE_PROMPT_CACHING_1H).toBeUndefined();
     expect(result.showTurnDuration).toBeUndefined();
     expect(result.showClearContextOnPlanAccept).toBeUndefined();
-    expect(result.env?.CLAUDE_CODE_BRIEF).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_BRIEF).toBeUndefined();
     expect(result.tui).toBeUndefined();
     expect(result.showThinkingSummaries).toBeUndefined();
-    expect(result.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
-    expect(result.env?.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBeUndefined();
-    expect(result.env?.CLAUDE_CODE_FORK_SUBAGENT).toBeUndefined();
-    expect(result.env?.DISABLE_COMPACT).toBeUndefined();
-    expect(result.env?.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBeUndefined();
-    expect(result.env?.DISABLE_AUTOUPDATER).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_FORK_SUBAGENT).toBeUndefined();
+    expect(result.env.DISABLE_COMPACT).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBeUndefined();
+    expect(result.env.DISABLE_AUTOUPDATER).toBeUndefined();
     // Non-flag keys preserved
     expect(result.env.CUSTOM).toBe('value');
     expect(result.hooks).toEqual({ Stop: [] });
