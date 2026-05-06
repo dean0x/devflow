@@ -11,7 +11,7 @@ export interface ClaudeCodeFlag {
   description: string;
   target:
     | { type: 'env'; key: string; value: string }
-    | { type: 'setting'; key: string; value: unknown };
+    | { type: 'setting'; key: string; value: boolean | string };
   defaultEnabled: boolean;
 }
 
@@ -95,6 +95,8 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     target: { type: 'env', key: 'CLAUDE_CODE_FORK_SUBAGENT', value: '1' },
     defaultEnabled: false,
   },
+  // NOTE: DISABLE_COMPACT and DISABLE_AUTOUPDATER intentionally omit the CLAUDE_CODE_ prefix —
+  // these names are defined by upstream Claude Code and must match exactly.
   {
     id: 'disable-compact',
     label: 'Disable auto-compaction',
