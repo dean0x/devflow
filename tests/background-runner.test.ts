@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -171,10 +171,12 @@ describe('registerLockCleanup', () => {
 describe('checkDailyCap', () => {
   let tmpDir: string;
   let capsFile: string;
+  let today: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
     capsFile = path.join(tmpDir, '.runs-today');
+    today = new Date().toISOString().slice(0, 10);
   });
 
   afterEach(() => {
@@ -186,19 +188,16 @@ describe('checkDailyCap', () => {
   });
 
   it('returns true when count is below the daily limit', () => {
-    const today = new Date().toISOString().slice(0, 10);
     writeFile(capsFile, `${today}\t2\n`);
     expect(checkDailyCap(capsFile, 3)).toBe(true);
   });
 
   it('returns false when count equals the daily limit', () => {
-    const today = new Date().toISOString().slice(0, 10);
     writeFile(capsFile, `${today}\t3\n`);
     expect(checkDailyCap(capsFile, 3)).toBe(false);
   });
 
   it('returns false when count exceeds the daily limit', () => {
-    const today = new Date().toISOString().slice(0, 10);
     writeFile(capsFile, `${today}\t10\n`);
     expect(checkDailyCap(capsFile, 3)).toBe(false);
   });
@@ -216,10 +215,12 @@ describe('checkDailyCap', () => {
 describe('incrementDailyCap', () => {
   let tmpDir: string;
   let capsFile: string;
+  let today: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
     capsFile = path.join(tmpDir, '.runs-today');
+    today = new Date().toISOString().slice(0, 10);
   });
 
   afterEach(() => {
@@ -230,13 +231,11 @@ describe('incrementDailyCap', () => {
     incrementDailyCap(capsFile);
     const content = fs.readFileSync(capsFile, 'utf-8').trim();
     const [date, count] = content.split('\t');
-    const today = new Date().toISOString().slice(0, 10);
     expect(date).toBe(today);
     expect(count).toBe('1');
   });
 
   it('increments the count when date matches today', () => {
-    const today = new Date().toISOString().slice(0, 10);
     writeFile(capsFile, `${today}\t2\n`);
     incrementDailyCap(capsFile);
     const content = fs.readFileSync(capsFile, 'utf-8').trim();
@@ -250,7 +249,6 @@ describe('incrementDailyCap', () => {
     incrementDailyCap(capsFile);
     const content = fs.readFileSync(capsFile, 'utf-8').trim();
     const [date, count] = content.split('\t');
-    const today = new Date().toISOString().slice(0, 10);
     expect(date).toBe(today);
     expect(count).toBe('1');
   });
@@ -343,6 +341,8 @@ describe('capEntries', () => {
 // loadExistingObservations
 // ---------------------------------------------------------------------------
 
+const NO_HELPER = '/nonexistent/json-helper.cjs';
+
 describe('loadExistingObservations', () => {
   let tmpDir: string;
   let logFile: string;
@@ -394,7 +394,7 @@ if (args[0] === 'filter-observations') {
     ].join('\n') + '\n';
     writeFile(logFile, lines);
 
-    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    const result = await loadExistingObservations(NO_HELPER, logFile, ['workflow']);
     const parsed = JSON.parse(result) as Array<{ type: string }>;
     expect(parsed).toHaveLength(1);
     expect(parsed[0].type).toBe('workflow');
@@ -408,7 +408,7 @@ if (args[0] === 'filter-observations') {
     ].join('\n') + '\n';
     writeFile(logFile, lines);
 
-    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    const result = await loadExistingObservations(NO_HELPER, logFile, ['workflow']);
     const parsed = JSON.parse(result) as Array<{ pattern: string }>;
     expect(parsed).toHaveLength(1);
     expect(parsed[0].pattern).toBe('w1');
@@ -417,12 +417,12 @@ if (args[0] === 'filter-observations') {
   it('returns "[]" for empty log file', async () => {
     writeFile(logFile, '');
 
-    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    const result = await loadExistingObservations(NO_HELPER, logFile, ['workflow']);
     expect(result).toBe('[]');
   });
 
   it('returns "[]" for missing log file', async () => {
-    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', path.join(tmpDir, 'missing.jsonl'), ['workflow']);
+    const result = await loadExistingObservations(NO_HELPER, path.join(tmpDir, 'missing.jsonl'), ['workflow']);
     expect(result).toBe('[]');
   });
 
@@ -434,7 +434,7 @@ if (args[0] === 'filter-observations') {
     ].join('\n') + '\n';
     writeFile(logFile, lines);
 
-    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['decision']);
+    const result = await loadExistingObservations(NO_HELPER, logFile, ['decision']);
     const parsed = JSON.parse(result) as Array<{ type: string }>;
     expect(parsed).toHaveLength(1);
     expect(parsed[0].type).toBe('decision');
@@ -448,7 +448,7 @@ if (args[0] === 'filter-observations') {
     ].join('\n') + '\n';
     writeFile(logFile, lines);
 
-    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    const result = await loadExistingObservations(NO_HELPER, logFile, ['workflow']);
     const parsed = JSON.parse(result) as Array<{ pattern: string }>;
     expect(parsed).toHaveLength(2);
     expect(parsed[0].pattern).toBe('w1');
@@ -457,10 +457,7 @@ if (args[0] === 'filter-observations') {
 
   it('falls back when json-helper returns non-JSON output', async () => {
     const helperPath = createMockJsonHelper(tmpDir, 'this is garbage output');
-    const lines = [
-      JSON.stringify({ type: 'workflow', pattern: 'w1', status: 'observing' }),
-    ].join('\n') + '\n';
-    writeFile(logFile, lines);
+    writeFile(logFile, JSON.stringify({ type: 'workflow', pattern: 'w1', status: 'observing' }) + '\n');
 
     const result = await loadExistingObservations(helperPath, logFile, ['workflow']);
     const parsed = JSON.parse(result) as Array<{ pattern: string }>;

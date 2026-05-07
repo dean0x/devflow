@@ -48,16 +48,20 @@ module.exports.extractChannels = function extractChannels(content) {
 // extractBatchMessages
 // ---------------------------------------------------------------------------
 
+const TEST_CWD = '/test/project';
+
 describe('extractBatchMessages', () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let filterModulePath: string;
+  let batchFile: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
     originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
     filterModulePath = createMockFilterModule(tmpDir);
+    batchFile = path.join(tmpDir, 'batch-ids');
   });
 
   afterEach(() => {
@@ -69,93 +73,74 @@ describe('extractBatchMessages', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function setupTranscript(cwd: string, sessionId: string, lines: object[]): void {
-    const encoded = encodeCwdForClaude(cwd);
+  function setupTranscript(sessionId: string, lines: object[]): void {
+    const encoded = encodeCwdForClaude(TEST_CWD);
     const projectsDir = path.join(tmpDir, '.claude', 'projects', encoded);
     const content = lines.map((l) => JSON.stringify(l)).join('\n') + '\n';
     writeFile(path.join(projectsDir, `${sessionId}.jsonl`), content);
   }
 
   it('extracts signals from a single valid session', async () => {
-    const cwd = '/test/project';
-    setupTranscript(cwd, 'sess-1', [
+    setupTranscript('sess-1', [
       { type: 'signal', text: 'hello' },
       { type: 'signal', text: 'world' },
     ]);
-
-    const batchFile = path.join(tmpDir, 'batch-ids');
     writeFile(batchFile, 'sess-1\n');
 
-    const result = await extractBatchMessages(batchFile, cwd, filterModulePath);
+    const result = await extractBatchMessages(batchFile, TEST_CWD, filterModulePath);
     expect(result.userSignals).toEqual(['hello', 'world']);
     expect(result.dialogPairs).toEqual([]);
   });
 
   it('merges results from multiple sessions', async () => {
-    const cwd = '/test/project';
-    setupTranscript(cwd, 'sess-1', [{ type: 'signal', text: 'from-1' }]);
-    setupTranscript(cwd, 'sess-2', [
+    setupTranscript('sess-1', [{ type: 'signal', text: 'from-1' }]);
+    setupTranscript('sess-2', [
       { type: 'signal', text: 'from-2' },
       { type: 'pair', prior: 'p', user: 'u' },
     ]);
-
-    const batchFile = path.join(tmpDir, 'batch-ids');
     writeFile(batchFile, 'sess-1\nsess-2\n');
 
-    const result = await extractBatchMessages(batchFile, cwd, filterModulePath);
+    const result = await extractBatchMessages(batchFile, TEST_CWD, filterModulePath);
     expect(result.userSignals).toEqual(['from-1', 'from-2']);
     expect(result.dialogPairs).toEqual([{ prior: 'p', user: 'u' }]);
   });
 
   it('skips missing transcripts silently and returns empty', async () => {
-    const cwd = '/test/project';
-    const batchFile = path.join(tmpDir, 'batch-ids');
     writeFile(batchFile, 'nonexistent-session\n');
 
-    const result = await extractBatchMessages(batchFile, cwd, filterModulePath);
+    const result = await extractBatchMessages(batchFile, TEST_CWD, filterModulePath);
     expect(result.userSignals).toEqual([]);
     expect(result.dialogPairs).toEqual([]);
   });
 
   it('returns empty arrays for empty batch IDs file', async () => {
-    const cwd = '/test/project';
-    const batchFile = path.join(tmpDir, 'batch-ids');
     writeFile(batchFile, '\n\n');
 
-    const result = await extractBatchMessages(batchFile, cwd, filterModulePath);
+    const result = await extractBatchMessages(batchFile, TEST_CWD, filterModulePath);
     expect(result.userSignals).toEqual([]);
     expect(result.dialogPairs).toEqual([]);
   });
 
   it('throws when batch IDs file is missing', async () => {
-    const cwd = '/test/project';
-    const batchFile = path.join(tmpDir, 'no-such-file');
-
     await expect(
-      extractBatchMessages(batchFile, cwd, filterModulePath),
+      extractBatchMessages(path.join(tmpDir, 'no-such-file'), TEST_CWD, filterModulePath),
     ).rejects.toThrow();
   });
 
   it('returns only valid session data when mixed with missing transcripts', async () => {
-    const cwd = '/test/project';
-    setupTranscript(cwd, 'valid-sess', [{ type: 'signal', text: 'ok' }]);
-
-    const batchFile = path.join(tmpDir, 'batch-ids');
+    setupTranscript('valid-sess', [{ type: 'signal', text: 'ok' }]);
     writeFile(batchFile, 'missing-sess\nvalid-sess\nalso-missing\n');
 
-    const result = await extractBatchMessages(batchFile, cwd, filterModulePath);
+    const result = await extractBatchMessages(batchFile, TEST_CWD, filterModulePath);
     expect(result.userSignals).toEqual(['ok']);
     expect(result.dialogPairs).toEqual([]);
   });
 
   it('handles empty lines and trailing whitespace in batch IDs file', async () => {
-    const cwd = '/test/project';
-    setupTranscript(cwd, 'sess-a', [{ type: 'signal', text: 'a' }]);
-
-    const batchFile = path.join(tmpDir, 'batch-ids');
+    setupTranscript('sess-a', [{ type: 'signal', text: 'a' }]);
     writeFile(batchFile, '\n  sess-a  \n\n  \n');
 
-    const result = await extractBatchMessages(batchFile, cwd, filterModulePath);
+    const result = await extractBatchMessages(batchFile, TEST_CWD, filterModulePath);
     expect(result.userSignals).toEqual(['a']);
   });
 });
