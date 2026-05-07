@@ -35,7 +35,6 @@ describe('applyDecisionsConfigLayer', () => {
     throttle_minutes: 5,
     model: 'sonnet',
     debug: false,
-    batch_size: 1,
   };
 
   it('overrides individual numeric fields', () => {
@@ -55,11 +54,6 @@ describe('applyDecisionsConfigLayer', () => {
   it('overrides debug boolean field', () => {
     const result = applyDecisionsConfigLayer(base, JSON.stringify({ debug: true }));
     expect(result.debug).toBe(true);
-  });
-
-  it('overrides batch_size numeric field', () => {
-    const result = applyDecisionsConfigLayer(base, JSON.stringify({ batch_size: 5 }));
-    expect(result.batch_size).toBe(5);
   });
 
   it('ignores non-numeric max_daily_runs', () => {
@@ -138,7 +132,6 @@ describe('loadDecisionsConfig', () => {
     expect(config.throttle_minutes).toBe(5);
     expect(config.model).toBe('sonnet');
     expect(config.debug).toBe(false);
-    expect(config.batch_size).toBe(1);
   });
 
   it('global config overrides defaults', () => {
@@ -208,16 +201,4 @@ describe('loadDecisionsConfig', () => {
     expect(config.max_daily_runs).toBe(3); // default
   });
 
-  it('batch_size defaults to 1 (not 3 like learning)', () => {
-    const config = loadDecisionsConfig(projectCwd);
-    expect(config.batch_size).toBe(1);
-  });
-
-  it('batch_size can be overridden via project config', () => {
-    writeJson(path.join(projectCwd, '.memory'), 'decisions.json', {
-      batch_size: 3,
-    });
-    const config = loadDecisionsConfig(projectCwd);
-    expect(config.batch_size).toBe(3);
-  });
 });

@@ -10,6 +10,7 @@ import {
   incrementDailyCap,
   capEntries,
   encodeCwdForClaude,
+  loadExistingObservations,
 } from '../src/cli/utils/background-runner.js';
 
 // ---------------------------------------------------------------------------
@@ -338,23 +339,132 @@ describe('capEntries', () => {
   });
 });
 
-describe('capEntries (alias test)', () => {
+// ---------------------------------------------------------------------------
+// loadExistingObservations
+// ---------------------------------------------------------------------------
+
+describe('loadExistingObservations', () => {
   let tmpDir: string;
   let logFile: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    logFile = path.join(tmpDir, 'test.jsonl');
+    logFile = path.join(tmpDir, 'observations.jsonl');
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('caps to maxLines when called with explicit max', () => {
-    writeFile(logFile, makeJsonl(200));
-    capEntries(logFile, 100);
-    const lines = fs.readFileSync(logFile, 'utf-8').split('\n').filter(Boolean);
-    expect(lines).toHaveLength(100);
+  function createMockJsonHelper(tmpDir: string, output: string): string {
+    const helperPath = path.join(tmpDir, 'mock-json-helper.cjs');
+    fs.writeFileSync(
+      helperPath,
+      `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === 'filter-observations') {
+  process.stdout.write(${JSON.stringify(output)});
+} else {
+  process.exit(1);
+}
+`,
+      { mode: 0o755 },
+    );
+    return helperPath;
+  }
+
+  it('uses primary json-helper path and filters by type', async () => {
+    const entries = [
+      { type: 'workflow', pattern: 'w1', status: 'observing' },
+      { type: 'procedural', pattern: 'p1', status: 'observing' },
+      { type: 'decision', pattern: 'd1', status: 'observing' },
+    ];
+    const helperPath = createMockJsonHelper(tmpDir, JSON.stringify(entries));
+
+    const result = await loadExistingObservations(helperPath, logFile, ['workflow']);
+    const parsed = JSON.parse(result) as Array<{ type: string }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].type).toBe('workflow');
+  });
+
+  it('falls back to direct JSONL parsing when json-helper path does not exist', async () => {
+    const lines = [
+      JSON.stringify({ type: 'workflow', pattern: 'w1', status: 'observing' }),
+      JSON.stringify({ type: 'procedural', pattern: 'p1', status: 'observing' }),
+    ].join('\n') + '\n';
+    writeFile(logFile, lines);
+
+    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    const parsed = JSON.parse(result) as Array<{ type: string }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].type).toBe('workflow');
+  });
+
+  it('fallback excludes entries with non-observing status', async () => {
+    const lines = [
+      JSON.stringify({ type: 'workflow', pattern: 'w1', status: 'observing' }),
+      JSON.stringify({ type: 'workflow', pattern: 'w2', status: 'created' }),
+      JSON.stringify({ type: 'workflow', pattern: 'w3', status: 'ready' }),
+    ].join('\n') + '\n';
+    writeFile(logFile, lines);
+
+    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    const parsed = JSON.parse(result) as Array<{ pattern: string }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].pattern).toBe('w1');
+  });
+
+  it('returns "[]" for empty log file', async () => {
+    writeFile(logFile, '');
+
+    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    expect(result).toBe('[]');
+  });
+
+  it('returns "[]" for missing log file', async () => {
+    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', path.join(tmpDir, 'missing.jsonl'), ['workflow']);
+    expect(result).toBe('[]');
+  });
+
+  it('type filter correctly excludes non-matching types', async () => {
+    const lines = [
+      JSON.stringify({ type: 'workflow', pattern: 'w1', status: 'observing' }),
+      JSON.stringify({ type: 'procedural', pattern: 'p1', status: 'observing' }),
+      JSON.stringify({ type: 'decision', pattern: 'd1', status: 'observing' }),
+    ].join('\n') + '\n';
+    writeFile(logFile, lines);
+
+    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['decision']);
+    const parsed = JSON.parse(result) as Array<{ type: string }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].type).toBe('decision');
+  });
+
+  it('silently skips malformed JSONL lines in fallback path', async () => {
+    const lines = [
+      JSON.stringify({ type: 'workflow', pattern: 'w1', status: 'observing' }),
+      'this is not valid json {{{',
+      JSON.stringify({ type: 'workflow', pattern: 'w2', status: 'observing' }),
+    ].join('\n') + '\n';
+    writeFile(logFile, lines);
+
+    const result = await loadExistingObservations('/nonexistent/json-helper.cjs', logFile, ['workflow']);
+    const parsed = JSON.parse(result) as Array<{ pattern: string }>;
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].pattern).toBe('w1');
+    expect(parsed[1].pattern).toBe('w2');
+  });
+
+  it('falls back when json-helper returns non-JSON output', async () => {
+    const helperPath = createMockJsonHelper(tmpDir, 'this is garbage output');
+    const lines = [
+      JSON.stringify({ type: 'workflow', pattern: 'w1', status: 'observing' }),
+    ].join('\n') + '\n';
+    writeFile(logFile, lines);
+
+    const result = await loadExistingObservations(helperPath, logFile, ['workflow']);
+    const parsed = JSON.parse(result) as Array<{ pattern: string }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].pattern).toBe('w1');
   });
 });

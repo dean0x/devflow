@@ -6,7 +6,7 @@ import { getDevFlowDirectory } from './paths.js';
  * Merged decisions agent configuration from global and project-level config files.
  *
  * Mirrors the shape of LearningConfig in learn.ts — decisions agent is a sibling
- * pipeline with the same runtime knobs (model, throttle, daily cap, debug, batch).
+ * pipeline with the same runtime knobs (model, throttle, daily cap, debug).
  */
 export interface DecisionsConfig {
   /** Maximum number of background runs per day. Default: 3 */
@@ -17,21 +17,13 @@ export interface DecisionsConfig {
   model: string;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
-  /** Observations processed per run. Default: 1 */
-  batch_size: number;
 }
 
-/**
- * Default decisions agent config values.
- *
- * batch_size defaults to 1 (decisions/pitfalls are high-signal, low-volume).
- */
 const DEFAULTS: DecisionsConfig = {
   max_daily_runs: 3,
   throttle_minutes: 5,
   model: 'sonnet',
   debug: false,
-  batch_size: 1,
 };
 
 /**
@@ -57,10 +49,6 @@ export function applyDecisionsConfigLayer(
         typeof raw.model === 'string' ? raw.model : config.model,
       debug:
         typeof raw.debug === 'boolean' ? raw.debug : config.debug,
-      batch_size:
-        typeof raw.batch_size === 'number'
-          ? raw.batch_size
-          : config.batch_size,
     };
   } catch {
     return { ...config };

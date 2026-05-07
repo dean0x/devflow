@@ -105,8 +105,8 @@ fi
 # across session boundaries rather than on every tool call.
 # Silently ignores errors — a failed reconcile is non-fatal.
 
-# Run split migration (idempotent — skips if already done via sentinel)
-node "$SCRIPT_DIR/lib/split-migration.cjs" "$CWD" 2>/dev/null || true
+# Run split migration (bash guard skips node spawn after first run)
+[ -f "$CWD/.memory/.migration-split-done" ] || node "$SCRIPT_DIR/lib/split-migration.cjs" "$CWD" 2>/dev/null || true
 
 if [ -f "$CWD/.memory/.learning-manifest.json" ] && [ -f "$CWD/.memory/learning-log.jsonl" ]; then
   node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true

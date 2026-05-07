@@ -421,7 +421,6 @@ export const decisionsCommand = new Command('decisions')
         throttle_minutes: Number(throttle),
         model,
         debug: debugMode,
-        batch_size: 1,
       };
 
       const configJson = JSON.stringify(config, null, 2) + '\n';

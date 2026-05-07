@@ -40,7 +40,6 @@ vi.mock('../../src/cli/utils/decisions-config.js', () => ({
     throttle_minutes: 5,
     model: 'sonnet',
     debug: false,
-    batch_size: 1,
   })),
 }));
 
