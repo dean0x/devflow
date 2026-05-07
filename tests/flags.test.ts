@@ -7,10 +7,6 @@ import {
 } from '../src/cli/utils/flags.js';
 
 describe('FLAG_REGISTRY', () => {
-  it('contains at least 5 flags', () => {
-    expect(FLAG_REGISTRY.length).toBeGreaterThanOrEqual(5);
-  });
-
   it('has unique IDs', () => {
     const ids = FLAG_REGISTRY.map(f => f.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -38,6 +34,17 @@ describe('FLAG_REGISTRY', () => {
       }
     }
   });
+
+  it('has unique target keys (no duplicate env var or setting keys)', () => {
+    const envKeys = FLAG_REGISTRY
+      .filter(f => f.target.type === 'env')
+      .map(f => f.target.key);
+    const settingKeys = FLAG_REGISTRY
+      .filter(f => f.target.type === 'setting')
+      .map(f => f.target.key);
+    expect(new Set(envKeys).size).toBe(envKeys.length);
+    expect(new Set(settingKeys).size).toBe(settingKeys.length);
+  });
 });
 
 describe('getDefaultFlags', () => {
@@ -45,14 +52,6 @@ describe('getDefaultFlags', () => {
     const defaults = getDefaultFlags();
     const expected = FLAG_REGISTRY.filter(f => f.defaultEnabled).map(f => f.id);
     expect(defaults).toEqual(expected);
-  });
-
-  it('includes tool-search by default', () => {
-    expect(getDefaultFlags()).toContain('tool-search');
-  });
-
-  it('does not include brief by default', () => {
-    expect(getDefaultFlags()).not.toContain('brief');
   });
 });
 
@@ -67,6 +66,25 @@ describe('applyFlags', () => {
     const input = JSON.stringify({ hooks: {} }, null, 2);
     const result = JSON.parse(applyFlags(input, ['clear-context-on-plan']));
     expect(result.showClearContextOnPlanAccept).toBe(true);
+  });
+
+  it('applies string-value setting (tui → "fullscreen")', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    const result = JSON.parse(applyFlags(input, ['tui']));
+    expect(result.tui).toBe('fullscreen');
+  });
+
+  it('applies all registered flags at once', () => {
+    const allIds = FLAG_REGISTRY.map(f => f.id);
+    const input = JSON.stringify({}, null, 2);
+    const result = JSON.parse(applyFlags(input, allIds));
+    for (const flag of FLAG_REGISTRY) {
+      if (flag.target.type === 'env') {
+        expect(result.env[flag.target.key]).toBe(flag.target.value);
+      } else {
+        expect(result[flag.target.key]).toBe(flag.target.value);
+      }
+    }
   });
 
   it('applies multiple flags at once', () => {
@@ -87,12 +105,6 @@ describe('applyFlags', () => {
     expect(result.hooks).toEqual({ Stop: [] });
     expect(result.statusLine).toEqual({ type: 'command' });
     expect(result.env.EXISTING_VAR).toBe('keep');
-    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
-  });
-
-  it('creates env object when missing', () => {
-    const input = JSON.stringify({ hooks: {} }, null, 2);
-    const result = JSON.parse(applyFlags(input, ['tool-search']));
     expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
   });
 
@@ -134,6 +146,16 @@ describe('stripFlags', () => {
     expect(result.hooks).toEqual({});
   });
 
+  it('removes string-valued setting (tui) when stripped', () => {
+    const input = JSON.stringify({
+      tui: 'fullscreen',
+      hooks: {},
+    }, null, 2);
+    const result = JSON.parse(stripFlags(input));
+    expect(result.tui).toBeUndefined();
+    expect(result.hooks).toEqual({});
+  });
+
   it('removes empty env object after stripping', () => {
     const input = JSON.stringify({
       hooks: {},
@@ -152,6 +174,12 @@ describe('stripFlags', () => {
     }, null, 2);
     const result = JSON.parse(stripFlags(input));
     expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
+  });
+
+  it('strips flag-managed env keys regardless of their value', () => {
+    const input = JSON.stringify({ env: { ENABLE_TOOL_SEARCH: 'false' } }, null, 2);
+    const result = JSON.parse(stripFlags(input));
+    expect(result.env).toBeUndefined();
   });
 
   it('handles missing env object gracefully', () => {
@@ -173,6 +201,26 @@ describe('stripFlags', () => {
     expect(result.env.ENABLE_TOOL_SEARCH).toBeUndefined();
     expect(result.env.ENABLE_LSP_TOOL).toBeUndefined();
     expect(result.showClearContextOnPlanAccept).toBeUndefined();
+    expect(result.env.CUSTOM).toBe('value');
+    expect(result.hooks).toEqual({ Stop: [] });
+  });
+
+  it('roundtrip with all registered flags', () => {
+    const allIds = FLAG_REGISTRY.map(f => f.id);
+    const base = JSON.stringify({
+      hooks: { Stop: [] },
+      env: { CUSTOM: 'value' },
+    }, null, 2);
+
+    const result = JSON.parse(stripFlags(applyFlags(base, allIds)));
+
+    for (const flag of FLAG_REGISTRY) {
+      if (flag.target.type === 'env') {
+        expect(result.env?.[flag.target.key]).toBeUndefined();
+      } else {
+        expect(result[flag.target.key]).toBeUndefined();
+      }
+    }
     expect(result.env.CUSTOM).toBe('value');
     expect(result.hooks).toEqual({ Stop: [] });
   });

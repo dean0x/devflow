@@ -11,11 +11,12 @@ export interface ClaudeCodeFlag {
   description: string;
   target:
     | { type: 'env'; key: string; value: string }
-    | { type: 'setting'; key: string; value: unknown };
+    | { type: 'setting'; key: string; value: boolean | string };
   defaultEnabled: boolean;
 }
 
 export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
+  // === Default ON ===
   {
     id: 'tool-search',
     label: 'Deferred tool loading',
@@ -31,12 +32,27 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     defaultEnabled: true,
   },
   {
+    id: 'prompt-caching-1h',
+    label: 'Extended prompt cache TTL',
+    description: 'Extend prompt cache TTL from 5min to 1h',
+    target: { type: 'env', key: 'ENABLE_PROMPT_CACHING_1H', value: 'true' },
+    defaultEnabled: true,
+  },
+  {
+    id: 'show-turn-duration',
+    label: 'Show turn duration',
+    description: 'Display timing info after each turn',
+    target: { type: 'setting', key: 'showTurnDuration', value: true },
+    defaultEnabled: true,
+  },
+  {
     id: 'clear-context-on-plan',
     label: 'Clear context on plan accept',
     description: 'Clear context window when accepting a plan',
     target: { type: 'setting', key: 'showClearContextOnPlanAccept', value: true },
     defaultEnabled: true,
   },
+  // === Default OFF ===
   {
     id: 'brief',
     label: 'Brief output mode',
@@ -45,10 +61,61 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     defaultEnabled: false,
   },
   {
+    id: 'tui',
+    label: 'Fullscreen TUI mode',
+    description: 'Flicker-free fullscreen rendering',
+    target: { type: 'setting', key: 'tui', value: 'fullscreen' },
+    defaultEnabled: false,
+  },
+  {
+    id: 'thinking-summaries',
+    label: 'Thinking summaries',
+    description: 'Show thinking summaries during reasoning',
+    target: { type: 'setting', key: 'showThinkingSummaries', value: true },
+    defaultEnabled: false,
+  },
+  {
+    id: 'subprocess-env-scrub',
+    label: 'Subprocess env scrub',
+    description: 'Strip cloud credentials from subprocesses',
+    target: { type: 'env', key: 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB', value: '1' },
+    defaultEnabled: false,
+  },
+  {
+    id: 'disable-nonessential-traffic',
+    label: 'Disable non-essential traffic',
+    description: 'Suppress usage metrics telemetry',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', value: 'true' },
+    defaultEnabled: false,
+  },
+  {
+    id: 'forked-subagents',
+    label: 'Forked subagents',
+    description: 'Better subagent perf on external builds',
+    target: { type: 'env', key: 'CLAUDE_CODE_FORK_SUBAGENT', value: '1' },
+    defaultEnabled: false,
+  },
+  // NOTE: DISABLE_COMPACT and DISABLE_AUTOUPDATER intentionally omit the CLAUDE_CODE_ prefix —
+  // these names are defined by upstream Claude Code and must match exactly.
+  {
+    id: 'disable-compact',
+    label: 'Disable auto-compaction',
+    description: 'Disable automatic context compaction',
+    target: { type: 'env', key: 'DISABLE_COMPACT', value: 'true' },
+    defaultEnabled: false,
+  },
+  {
     id: 'disable-1m-context',
     label: 'Disable 1M context window',
     description: 'Use standard context window instead of extended 1M',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_1M_CONTEXT', value: 'true' },
+    defaultEnabled: false,
+  },
+  {
+    id: 'disable-autoupdater',
+    label: 'Disable auto-updater',
+    description: 'Prevent automatic update checks',
+    target: { type: 'env', key: 'DISABLE_AUTOUPDATER', value: 'true' },
     defaultEnabled: false,
   },
 ];
