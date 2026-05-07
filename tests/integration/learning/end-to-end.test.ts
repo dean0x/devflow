@@ -5,16 +5,15 @@
 //   1. Creates a tmpdir project with .memory/ and .claude/ structure
 //   2. Plants 3 synthetic session JSONL files in the Claude project directory
 //   3. Creates a claude shim that echoes canned observations (bypasses LLM)
-//   4. Invokes background-learning shell script directly
+//   4. Invokes `devflow learn --run-background` via the compiled CLI
 //   5. Asserts all 4 observation types present in log
 //   6. Asserts rendered artifacts exist (command file, skill dir, decisions.md, pitfalls.md)
 //   7. Deletes one artifact, runs reconcile-manifest
 //   8. Asserts corresponding observation is deprecated
 //
-// Note: background-learning has a `sleep 3` in the main path.
-// We override DEVFLOW_SKIP_SLEEP=1 via env OR run with a patched invocation.
-// Since we cannot easily patch the sleep, we accept the ~3s overhead for integration tests.
-// Total test timeout: 60s (background-learning with real dependencies).
+// Note: background-learning (deleted in Sub-Phase 3F) is replaced by `devflow learn --run-background`.
+// The CLI is invoked via `node dist/cli.js` to ensure the compiled TypeScript is tested.
+// Total test timeout: 60s.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
@@ -24,7 +23,7 @@ import { execSync, execFileSync } from 'child_process';
 
 // Root of the devflow repo
 const REPO_ROOT = path.resolve(path.join(path.dirname(new URL(import.meta.url).pathname), '../../..'));
-const BACKGROUND_LEARNING = path.join(REPO_ROOT, 'scripts/hooks/background-learning');
+const CLI_ENTRY = path.join(REPO_ROOT, 'dist', 'cli.js');
 const JSON_HELPER = path.join(REPO_ROOT, 'scripts/hooks/json-helper.cjs');
 
 // Claude Code transcript format: each line is a JSON object
@@ -43,12 +42,12 @@ function makeAssistantLine(content: string): string {
   });
 }
 
-// Encode a filesystem path to Claude project slug (same as background-learning)
+// Encode a filesystem path to Claude project slug (same as session-end-learning)
 function encodePathToSlug(p: string): string {
   return p.replace(/^\//, '').replace(/\//g, '-');
 }
 
-describe('background-learning end-to-end pipeline', () => {
+describe('devflow learn --run-background end-to-end pipeline', () => {
   let tmpDir: string;
   let memoryDir: string;
   let claudeProjectsDir: string;
@@ -195,23 +194,17 @@ CANNED_EOF
     const shimPath = path.join(shimDir, 'claude');
     fs.writeFileSync(shimPath, shimScript, { mode: 0o755 });
 
-    // --- Invoke background-learning ---
+    // --- Invoke devflow learn --run-background ---
     // We need to:
-    // 1. Pass tmpDir as CWD
+    // 1. Pass tmpDir via --cwd flag
     // 2. Override PATH so our shim is found as 'claude'
-    // 3. Set up devflow log dir
-    // 4. Bypass the `sleep 3` at start — we patch by setting DEVFLOW_SKIP_SLEEP=1 in env
-    //    (background-learning reads this if we add support, OR we bypass via a different trick)
-    //
-    // Since background-learning doesn't have a DEVFLOW_SKIP_SLEEP check, we use timeout.
-    // The sleep 3 is unavoidable in the shell script. We accept this.
-    // We override DEVFLOW_BG_LEARNER so any recursive claude invocations are skipped.
+    // 3. HOME is already set via vi.stubEnv so log paths resolve correctly
 
     const env = {
       ...process.env,
       PATH: `${shimDir}:${process.env.PATH}`,
       // HOME is already set via vi.stubEnv in beforeEach; process.env.HOME
-      // reflects the fake home so background-learning's $HOME also points there.
+      // reflects the fake home so log paths also point there.
     };
 
     // Override the daily cap file to start fresh
@@ -231,17 +224,17 @@ CANNED_EOF
     fs.mkdirSync(path.join(tmpDir, '.claude', 'skills'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
 
-    // Invoke background-learning synchronously (it has sleep 3 but exits)
+    // Invoke devflow learn --run-background synchronously
     let failed = false;
     let errorOutput = '';
     try {
-      execFileSync('bash', [BACKGROUND_LEARNING, tmpDir, '--batch', 'claude'], {
+      execFileSync('node', [CLI_ENTRY, 'learn', '--run-background', '--cwd', tmpDir], {
         env,
         timeout: 30000, // 30s max
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (e) {
-      // background-learning may exit 0 or 1; we check the log and artifacts instead
+      // CLI may exit 0 or 1; we check the log and artifacts instead
       const err = e as { stderr?: Buffer; stdout?: Buffer };
       errorOutput = (err.stderr?.toString() || '') + (err.stdout?.toString() || '');
       failed = true; // note but don't throw yet
@@ -250,11 +243,11 @@ CANNED_EOF
     // Check learning log
     const logPath = path.join(memoryDir, 'learning-log.jsonl');
     if (!fs.existsSync(logPath)) {
-      // If background-learning failed before writing, check why
+      // If CLI failed before writing, check why
       const devflowLogDir = path.join(os.homedir(), '.devflow', 'logs', encodePathToSlug(tmpDir));
       const logFile = path.join(devflowLogDir, '.learning-update.log');
       const logContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : 'no log file';
-      throw new Error(`Learning log not created. Script failed: ${failed}. Error: ${errorOutput}\nScript log: ${logContent}`);
+      throw new Error(`Learning log not created. CLI failed: ${failed}. Error: ${errorOutput}\nCLI log: ${logContent}`);
     }
 
     const logContent = fs.readFileSync(logPath, 'utf-8');
@@ -340,7 +333,7 @@ CANNED_EOF
   }, 60000); // 60s timeout for integration test
 
   it('gracefully handles missing batch IDs file', () => {
-    // No .learning-batch-ids file — background-learning should exit cleanly
+    // No .learning-batch-ids file — devflow learn --run-background should exit cleanly
     const env = {
       ...process.env,
       PATH: `${shimDir}:${process.env.PATH}`,
@@ -348,7 +341,7 @@ CANNED_EOF
 
     let exitCode = 0;
     try {
-      execFileSync('bash', [BACKGROUND_LEARNING, tmpDir, '--batch', 'claude'], {
+      execFileSync('node', [CLI_ENTRY, 'learn', '--run-background', '--cwd', tmpDir], {
         env,
         timeout: 15000,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -358,7 +351,7 @@ CANNED_EOF
       exitCode = err.status ?? 1;
     }
 
-    // Background-learning should exit 0 (graceful — no batch file means nothing to do)
+    // CLI should exit 0 (graceful — no batch file means nothing to do)
     expect(exitCode).toBe(0);
     // No learning log should be created
     expect(fs.existsSync(path.join(memoryDir, 'learning-log.jsonl'))).toBe(false);

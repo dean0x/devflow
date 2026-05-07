@@ -12,6 +12,9 @@ import {
   discoverProjectGitRoots,
   migrateShadowOverrides,
   runMigrationsWithFallback,
+  addDecisionsHook,
+  removeDecisionsHook,
+  hasDecisionsHook,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
@@ -908,5 +911,36 @@ describe('runMigrationsWithFallback (D32/D35/D37 init seam)', () => {
 
     const [ctx] = runner.mock.calls[0];
     expect(ctx.devflowDir).toBe(devflowDir);
+  });
+});
+
+describe('decisions hook re-exports from init.ts', () => {
+  // Verify that decisions hook functions are correctly re-exported from init.ts,
+  // which is required for the init command to manage the decisions hook.
+
+  it('addDecisionsHook adds the session-end-decisions hook', () => {
+    const result = addDecisionsHook('{}', '/home/user/.devflow');
+    expect(hasDecisionsHook(result)).toBe(true);
+  });
+
+  it('removeDecisionsHook removes the session-end-decisions hook', () => {
+    const withHook = addDecisionsHook('{}', '/home/user/.devflow');
+    const result = removeDecisionsHook(withHook);
+    expect(hasDecisionsHook(result)).toBe(false);
+  });
+
+  it('addDecisionsHook is idempotent', () => {
+    const first = addDecisionsHook('{}', '/home/user/.devflow');
+    const second = addDecisionsHook(first, '/home/user/.devflow');
+    expect(second).toBe(first);
+  });
+
+  it('hasDecisionsHook returns false for empty settings', () => {
+    expect(hasDecisionsHook('{}')).toBe(false);
+  });
+
+  it('hasDecisionsHook returns true after hook is added', () => {
+    const withHook = addDecisionsHook('{}', '/home/user/.devflow');
+    expect(hasDecisionsHook(withHook)).toBe(true);
   });
 });

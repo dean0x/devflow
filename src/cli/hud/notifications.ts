@@ -1,6 +1,6 @@
 /**
- * D24/D27: Reads .notifications.json, picks the worst active+undismissed
- * per-file notification. Returns NotificationData or null.
+ * Reads .decisions-notifications.json, picks the worst active+undismissed notification.
+ * Returns NotificationData or null.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -17,15 +17,15 @@ function isSeverity(v: unknown): v is Severity {
 }
 
 /**
- * D27: Get the worst active+undismissed notification across per-file entries.
- * Returns null when no active notifications exist.
+ * Get the worst active+undismissed notification from .decisions-notifications.json.
+ * Returns null when no active notifications exist or the file is missing/malformed.
  */
 export function getActiveNotification(cwd: string): NotificationData | null {
-  const notifPath = path.join(cwd, '.memory', '.notifications.json');
+  const decisionsNotifPath = path.join(cwd, '.memory', '.decisions-notifications.json');
 
   let raw: string;
   try {
-    raw = fs.readFileSync(notifPath, 'utf-8');
+    raw = fs.readFileSync(decisionsNotifPath, 'utf-8');
   } catch {
     return null;
   }
@@ -38,10 +38,11 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   }
 
   if (!isNotificationMap(parsed)) return null;
+  const notifMap = parsed as Record<string, NotificationEntry>;
 
   let worst: { key: string; entry: NotificationEntry; severity: number } | null = null;
 
-  for (const [key, entry] of Object.entries(parsed)) {
+  for (const [key, entry] of Object.entries(notifMap)) {
     if (!entry || !entry.active) continue;
     // Skip dismissed (dismissed_at_threshold matches or exceeds current threshold)
     if (entry.dismissed_at_threshold != null && entry.dismissed_at_threshold >= (entry.threshold ?? 0)) continue;
@@ -59,10 +60,12 @@ export function getActiveNotification(cwd: string): NotificationData | null {
   const count = worst.entry.count ?? 0;
   const ceiling = worst.entry.ceiling ?? 100;
 
+  const reviewCommand = 'devflow decisions --review';
+
   return {
     id: worst.key,
     severity: isSeverity(worst.entry.severity) ? worst.entry.severity : 'dim',
-    text: `\u26A0 Decisions: ${fileType} at ${count}/${ceiling} — run devflow learn --review`,
+    text: `⚠ Decisions: ${fileType} at ${count}/${ceiling} — run ${reviewCommand}`,
     count,
     ceiling,
   };

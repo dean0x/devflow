@@ -20,8 +20,8 @@ function calculateConfidence(count: number, type: string): number {
   const thresholds: Record<string, { required: number }> = {
     workflow:   { required: 3 },
     procedural: { required: 4 },
-    decision:   { required: 2 },
-    pitfall:    { required: 2 },
+    decision:   { required: 1 },
+    pitfall:    { required: 1 },
   };
   const req = (thresholds[type] || thresholds.procedural).required;
   return Math.min(Math.floor(count * 100 / req), 95) / 100;
@@ -33,13 +33,13 @@ describe('calculateConfidence — per-type thresholds (D3)', () => {
     expect(conf).toBe(0.95);
   });
 
-  it('decision: count=2 (= required) → 0.95 (capped)', () => {
-    const conf = calculateConfidence(2, 'decision');
+  it('decision: count=1 (= required=1) → 0.95 (capped)', () => {
+    const conf = calculateConfidence(1, 'decision');
     expect(conf).toBe(0.95);
   });
 
-  it('pitfall: count=2 (= required) → 0.95 (capped)', () => {
-    const conf = calculateConfidence(2, 'pitfall');
+  it('pitfall: count=1 (= required=1) → 0.95 (capped)', () => {
+    const conf = calculateConfidence(1, 'pitfall');
     expect(conf).toBe(0.95);
   });
 
@@ -198,7 +198,7 @@ describe('process-observations — per-type promotion (D3, D4)', () => {
       id: 'obs_dec001',
       type: 'decision',
       pattern: 'use X over Y because Z',
-      confidence: 0.50,
+      confidence: 0.95,
       observations: 1,
       first_seen: twoHoursAgo,
       last_seen: twoHoursAgo,
@@ -224,7 +224,7 @@ describe('process-observations — per-type promotion (D3, D4)', () => {
     runHelper(`process-observations "${responseFile}" "${logFile}"`);
 
     const updated = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-    // Decision: spread=0 so no spread requirement, count=2 = required=2
+    // Decision: required=1, spread=0 — count=2 >= required=1, quality_ok=true → promotes
     expect(updated.status).toBe('ready');
   });
 

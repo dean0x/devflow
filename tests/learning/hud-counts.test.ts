@@ -274,3 +274,125 @@ describe('getLearningCounts HUD component output', () => {
     expect(result!.needReview).toBe(0);
   });
 });
+
+describe('getLearningCounts dual-log merging', () => {
+  let tmpDir: string;
+  let memoryDir: string;
+  let learningLogPath: string;
+  let decisionsLogPath: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-counts-dual-test-'));
+    memoryDir = path.join(tmpDir, '.memory');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    learningLogPath = path.join(memoryDir, 'learning-log.jsonl');
+    decisionsLogPath = path.join(memoryDir, 'decisions-log.jsonl');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('merges counts from both log files', () => {
+    // learning-log.jsonl: workflow + procedural entries
+    const learningLines = [
+      makeEntry('workflow', 'created'),
+      makeEntry('workflow', 'created'),
+      makeEntry('procedural', 'created'),
+    ];
+    fs.writeFileSync(learningLogPath, learningLines.join('\n') + '\n', 'utf-8');
+
+    // decisions-log.jsonl: decision + pitfall entries
+    const decisionsLines = [
+      makeEntry('decision', 'created'),
+      makeEntry('decision', 'created'),
+      makeEntry('decision', 'created'),
+      makeEntry('pitfall', 'created'),
+      makeEntry('pitfall', 'created'),
+    ];
+    fs.writeFileSync(decisionsLogPath, decisionsLines.join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.workflows).toBe(2);
+    expect(result!.procedural).toBe(1);
+    expect(result!.decisions).toBe(3);
+    expect(result!.pitfalls).toBe(2);
+    expect(result!.needReview).toBe(0);
+  });
+
+  it('returns gracefully when decisions-log.jsonl does not exist — returns 0 for decision/pitfall types', () => {
+    // Only learning-log.jsonl exists
+    const learningLines = [
+      makeEntry('workflow', 'created'),
+      makeEntry('procedural', 'created'),
+    ];
+    fs.writeFileSync(learningLogPath, learningLines.join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.workflows).toBe(1);
+    expect(result!.procedural).toBe(1);
+    expect(result!.decisions).toBe(0);
+    expect(result!.pitfalls).toBe(0);
+  });
+
+  it('returns gracefully when learning-log.jsonl does not exist but decisions-log.jsonl does', () => {
+    // Only decisions-log.jsonl exists (post-migration project with no workflow/procedural yet)
+    const decisionsLines = [
+      makeEntry('decision', 'created'),
+      makeEntry('pitfall', 'created'),
+    ];
+    fs.writeFileSync(decisionsLogPath, decisionsLines.join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.workflows).toBe(0);
+    expect(result!.procedural).toBe(0);
+    expect(result!.decisions).toBe(1);
+    expect(result!.pitfalls).toBe(1);
+  });
+
+  it('returns null when neither log file exists', () => {
+    const result = getLearningCounts(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('merges needReview attention flags from both logs', () => {
+    const learningLines = [
+      makeEntry('workflow', 'created', { mayBeStale: true }),
+      makeEntry('procedural', 'created'),
+    ];
+    fs.writeFileSync(learningLogPath, learningLines.join('\n') + '\n', 'utf-8');
+
+    const decisionsLines = [
+      makeEntry('decision', 'created', { softCapExceeded: true }),
+      makeEntry('pitfall', 'created', { needsReview: true }),
+    ];
+    fs.writeFileSync(decisionsLogPath, decisionsLines.join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    // 3 entries with attention flags across both logs
+    expect(result!.needReview).toBe(3);
+  });
+
+  it('returns null when both log files are empty', () => {
+    fs.writeFileSync(learningLogPath, '', 'utf-8');
+    fs.writeFileSync(decisionsLogPath, '', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).toBeNull();
+  });
+
+  it('returns counts when one log is empty and the other has valid entries', () => {
+    fs.writeFileSync(learningLogPath, '', 'utf-8');
+    const decisionsLines = [makeEntry('decision', 'created')];
+    fs.writeFileSync(decisionsLogPath, decisionsLines.join('\n') + '\n', 'utf-8');
+
+    const result = getLearningCounts(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.decisions).toBe(1);
+    expect(result!.workflows).toBe(0);
+  });
+});

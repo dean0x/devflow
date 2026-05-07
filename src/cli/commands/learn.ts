@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
@@ -9,6 +9,16 @@ import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
+import {
+  acquireBackgroundLock,
+  releaseBackgroundLock,
+  registerLockCleanup,
+  extractBatchMessages,
+  applyTemporalDecay,
+  capEntries,
+  checkStaleness,
+} from '../utils/background-runner.js';
+import { runLearningAgent } from '../utils/learning-agent.js';
 
 // Re-export the consolidated alias for callers that previously imported it from this module.
 export type { NotificationFileEntry };
@@ -268,9 +278,6 @@ export function formatLearningStatus(observations: LearningObservation[], hookSt
  * Apply a single JSON config layer onto a LearningConfig, returning a new object.
  * Skips fields with wrong types; swallows parse errors.
  */
-// SYNC: Config loading duplicated in scripts/hooks/background-learning load_config()
-// Synced fields: max_daily_runs, throttle_minutes, model, debug
-// Note: batch_size is loaded here and in session-end-learning, but not in background-learning
 export function applyConfigLayer(config: LearningConfig, json: string): LearningConfig {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
@@ -306,10 +313,10 @@ export function loadLearningConfig(globalJson: string | null, projectJson: strin
 }
 
 /**
- * Read and parse observations from the learning log file.
+ * Read and parse observations from a log file.
  * Returns empty results if the file does not exist.
  */
-async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
+export async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
   try {
     const logContent = await fs.readFile(logPath, 'utf-8');
     return loadAndCountObservations(logContent);
@@ -353,22 +360,23 @@ async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, staleMs = 6
 }
 
 /**
- * Warn the user if invalid entries were found in the learning log.
+ * Warn the user if invalid entries were found in a log file.
+ * Pass `command` to customize the purge command shown in the warning.
  */
-function warnIfInvalid(invalidCount: number): void {
+export function warnIfInvalid(invalidCount: number, command = 'devflow learn --purge'): void {
   if (invalidCount > 0) {
-    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run 'devflow learn --purge' to clean.`);
+    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run '${command}' to clean.`);
   }
 }
 
 /**
- * Write observations back to the log file atomically.
+ * Write observations back to a log file atomically.
  * Each observation is serialized as a JSON line. Uses a `.tmp` sibling + rename so
  * concurrent readers (e.g. background-learning during a race) never observe a
  * half-written file. Delegates to `writeFileAtomicExclusive` in fs-atomic.ts
  * (D34/D39: canonical TS atomic-write helper).
  */
-async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
+export async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
   const lines = observations.map(o => JSON.stringify(o));
   const content = lines.join('\n') + (lines.length ? '\n' : '');
   await writeFileAtomicExclusive(logPath, content);
@@ -466,6 +474,8 @@ interface LearnOptions {
   purge?: boolean;
   review?: boolean;
   dismissCapacity?: boolean;
+  runBackground?: boolean;
+  cwd?: string;
 }
 
 export const learnCommand = new Command('learn')
@@ -480,8 +490,10 @@ export const learnCommand = new Command('learn')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
   .option('--dismiss-capacity', 'Dismiss the current capacity notification for a decisions file')
+  .option('--run-background', 'Run learning agent in background mode')
+  .option('--cwd <path>', 'Working directory for background mode')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity;
+    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity || options.runBackground;
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -498,6 +510,84 @@ export const learnCommand = new Command('learn')
         'Usage',
       );
       p.outro(color.dim('Detects repeated workflows and creates slash commands automatically'));
+      return;
+    }
+
+    // --- --run-background ---
+    if (options.runBackground) {
+      const cwd = options.cwd ?? process.cwd();
+      const devflowDir = getDevFlowDirectory();
+      const scriptDir = path.join(devflowDir, 'scripts', 'hooks');
+      const jsonHelperPath = path.join(scriptDir, 'json-helper.cjs');
+      const stalenessModulePath = path.join(scriptDir, 'lib', 'staleness.cjs');
+      const memoryDir = path.join(cwd, '.memory');
+
+      // Validate that the resolved cwd is a devflow-enabled project directory.
+      // This guards against passing an arbitrary path via --cwd from the CLI.
+      try {
+        await fs.access(memoryDir);
+      } catch {
+        process.stderr.write(`[learn] --cwd path does not contain a .memory directory: ${cwd}\n`);
+        process.exit(1);
+      }
+
+      const lockDir = path.join(memoryDir, '.learning.lock');
+      const logFile = path.join(memoryDir, 'learning-log.jsonl');
+      const batchIdsFile = path.join(memoryDir, '.learning-batch-ids');
+
+      await acquireBackgroundLock(lockDir);
+      const cleanupLock = registerLockCleanup(lockDir);
+
+      try {
+        // Load config to get daily cap and model.
+        const globalJson = (() => {
+          try {
+            return readFileSync(path.join(devflowDir, 'learning.json'), 'utf-8');
+          } catch { return null; }
+        })();
+        const projectJson = (() => {
+          try {
+            return readFileSync(path.join(memoryDir, 'learning.json'), 'utf-8');
+          } catch { return null; }
+        })();
+        const config = loadLearningConfig(globalJson, projectJson);
+
+        // Daily cap is checked and incremented by the calling hook
+        // (session-end-learning) before spawning this background process.
+        // No cap check needed here — the hook already gates the invocation.
+
+        const { userSignals } = await extractBatchMessages(batchIdsFile, cwd);
+
+        await applyTemporalDecay(jsonHelperPath, logFile);
+        capEntries(logFile, 100);
+
+        const responseFile = await runLearningAgent({
+          cwd,
+          userSignals,
+          model: config.model,
+          logFile,
+          jsonHelperPath,
+        });
+
+        // Merge observations into learning log (workflow + procedural only).
+        execFileSync('node', [jsonHelperPath, 'process-observations', responseFile, logFile, '--types', 'workflow,procedural'], {
+          stdio: 'pipe',
+        });
+
+        // Render ready observations to artifacts.
+        const learningNotifPath = path.join(memoryDir, '.learning-notifications.json');
+        execFileSync('node', [
+          jsonHelperPath, 'render-ready', logFile, cwd,
+          '--notifications-path', learningNotifPath,
+        ], { stdio: 'pipe' });
+
+        await checkStaleness(stalenessModulePath, logFile, cwd);
+        // Daily cap is incremented by the calling hook (session-end-learning)
+        // before spawning this background process. Do not increment again here.
+      } finally {
+        cleanupLock();
+        releaseBackgroundLock(lockDir);
+      }
       return;
     }
 
@@ -757,7 +847,7 @@ export const learnCommand = new Command('learn')
           '.learning-batch-ids',
           '.learning-runs-today',
           '.learning-notified-at',
-          '.notifications.json',
+          '.learning-notifications.json',
           '.decisions-usage.json',
           '.learning-manifest.json',
         ];
@@ -1168,7 +1258,7 @@ export const learnCommand = new Command('learn')
           let notifications: Record<string, NotificationFileEntry> = {};
           try {
             const raw = JSON.parse(
-              await fs.readFile(path.join(memoryDir, '.notifications.json'), 'utf-8'),
+              await fs.readFile(path.join(memoryDir, '.learning-notifications.json'), 'utf-8'),
             );
             if (isNotificationMap(raw)) {
               notifications = raw;
@@ -1203,7 +1293,7 @@ export const learnCommand = new Command('learn')
             } catch { /* count-active failed — skip notification update */ }
           }
 
-          await writeFileAtomicExclusive(path.join(memoryDir, '.notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
+          await writeFileAtomicExclusive(path.join(memoryDir, '.learning-notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
 
           p.log.success(`Deprecated ${deprecatedCount} entry(ies).`);
         } finally {
@@ -1220,7 +1310,7 @@ export const learnCommand = new Command('learn')
     // --- --dismiss-capacity ---
     if (options.dismissCapacity) {
       const memoryDir = path.join(process.cwd(), '.memory');
-      const notifPath = path.join(memoryDir, '.notifications.json');
+      const notifPath = path.join(memoryDir, '.learning-notifications.json');
 
       let notifications: Record<string, NotificationFileEntry>;
       try {

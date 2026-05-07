@@ -9,8 +9,8 @@ const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
-  'background-learning',
   'session-end-learning',
+  'session-end-decisions',
   'stop-update-learning',
   'background-memory-update',
   'stop-update-memory',
@@ -39,7 +39,7 @@ describe('shell hook syntax checks', () => {
   }
 });
 
-describe('background-learning pure functions', () => {
+describe('learning hook pure functions', () => {
   it('check_daily_cap respects counter file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
     const counterFile = path.join(tmpDir, '.learning-runs-today');

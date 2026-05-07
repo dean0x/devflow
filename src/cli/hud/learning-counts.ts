@@ -39,27 +39,16 @@ function isRawObservation(val: unknown): val is RawObservation {
 }
 
 /**
- * Read .memory/learning-log.jsonl and return counts by type + attention flags.
- * Returns null if the log does not exist or cannot be parsed (graceful fallback).
- * Only counts entries with status === 'created'.
+ * Parse a JSONL file and accumulate valid observations into counts.
+ * Returns true if at least one valid observation was parsed; false if file was missing or empty.
  */
-export function getLearningCounts(cwd: string): LearningCountsData | null {
-  const logPath = path.join(cwd, '.memory', 'learning-log.jsonl');
-
+function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
   let content: string;
   try {
     content = fs.readFileSync(logPath, 'utf-8');
   } catch {
-    return null;
+    return false;
   }
-
-  const counts: LearningCountsData = {
-    workflows: 0,
-    procedural: 0,
-    decisions: 0,
-    pitfalls: 0,
-    needReview: 0,
-  };
 
   let parsedAny = false;
 
@@ -106,7 +95,33 @@ export function getLearningCounts(cwd: string): LearningCountsData | null {
     }
   }
 
-  if (!parsedAny) return null;
+  return parsedAny;
+}
+
+/**
+ * Read .memory/learning-log.jsonl and .memory/decisions-log.jsonl, merge counts by type + attention flags.
+ * Returns null if neither log exists or neither can be parsed (graceful fallback).
+ * Only counts entries with status === 'created'.
+ *
+ * learning-log.jsonl: workflow + procedural observations (written by `devflow learn`)
+ * decisions-log.jsonl: decision + pitfall observations (written by `devflow decisions`)
+ */
+export function getLearningCounts(cwd: string): LearningCountsData | null {
+  const memoryDir = path.join(cwd, '.memory');
+
+  const counts: LearningCountsData = {
+    workflows: 0,
+    procedural: 0,
+    decisions: 0,
+    pitfalls: 0,
+    needReview: 0,
+  };
+
+  const learningParsed = parseLogInto(path.join(memoryDir, 'learning-log.jsonl'), counts);
+  const decisionsParsed = parseLogInto(path.join(memoryDir, 'decisions-log.jsonl'), counts);
+
+  // Return null only if neither file yielded any valid observations
+  if (!learningParsed && !decisionsParsed) return null;
 
   return counts;
 }

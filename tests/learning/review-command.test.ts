@@ -369,7 +369,7 @@ describe('--dismiss-capacity notification', () => {
   });
 
   it('writeFileAtomic persists notification dismissal', async () => {
-    const notifPath = path.join(memoryDir, '.notifications.json');
+    const notifPath = path.join(memoryDir, '.decisions-notifications.json');
     const data: Record<string, any> = {
       'decisions-capacity-decisions': {
         active: true, threshold: 70, count: 72, ceiling: 100,

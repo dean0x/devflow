@@ -24,6 +24,7 @@ import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstal
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 import { addLearningHook, removeLearningHook } from './learn.js';
+import { addDecisionsHook, removeDecisionsHook } from './decisions.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { addKnowledgeHook, removeKnowledgeHook } from './knowledge/index.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
@@ -36,6 +37,7 @@ export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, s
 export { addAmbientHook, removeAmbientHook, removeLegacyAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addLearningHook, removeLearningHook, hasLearningHook } from './learn.js';
+export { addDecisionsHook, removeDecisionsHook, hasDecisionsHook } from './decisions.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 // Re-export migrateShadowOverrides under its original name for backward compatibility
 export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
@@ -129,6 +131,7 @@ interface InitOptions {
   learn?: boolean;
   hud?: boolean;
   knowledge?: boolean;
+  decisions?: boolean;
   hudOnly?: boolean;
   recommended?: boolean;
   advanced?: boolean;
@@ -151,6 +154,8 @@ export const initCommand = new Command('init')
   .option('--no-hud', 'Disable HUD status line')
   .option('--knowledge', 'Enable feature knowledge bases')
   .option('--no-knowledge', 'Disable feature knowledge bases')
+  .option('--decisions', 'Enable decision/pitfall tracking')
+  .option('--no-decisions', 'Disable decision/pitfall tracking')
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
   .option('--advanced', 'Show all configuration prompts')
@@ -260,7 +265,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, knowledge: false, flags: [] },
+          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, knowledge: false, decisions: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -371,6 +376,7 @@ export const initCommand = new Command('init')
     let learnEnabled = true;
     let hudEnabled = true;
     let knowledgeEnabled = true;
+    let decisionsEnabled = true;
     let enabledFlags = getDefaultFlags();
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
@@ -399,6 +405,7 @@ export const initCommand = new Command('init')
       if (options.learn !== undefined) learnEnabled = options.learn;
       if (options.hud !== undefined) hudEnabled = options.hud;
       if (options.knowledge !== undefined) knowledgeEnabled = options.knowledge;
+      if (options.decisions !== undefined) decisionsEnabled = options.decisions;
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
       if (profilePath && safeDeleteAvailable) {
@@ -430,6 +437,7 @@ export const initCommand = new Command('init')
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
         `Self-learning:   ${learnEnabled ? 'enabled' : 'disabled'}`,
+        `Decisions:       ${decisionsEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Agent Teams:     ${teamsEnabled ? 'enabled' : 'disabled'}`,
@@ -577,6 +585,26 @@ export const initCommand = new Command('init')
           process.exit(0);
         }
         knowledgeEnabled = knowledgeChoice;
+      }
+
+      if (options.decisions !== undefined) {
+        decisionsEnabled = options.decisions;
+      } else {
+        p.note(
+          'Detects architectural decisions and pitfalls from your session\n' +
+          'dialogs. Runs a background agent on session stop that consumes\n' +
+          'additional tokens.',
+          'Decision/Pitfall Tracking',
+        );
+        const decisionsChoice = await p.confirm({
+          message: 'Enable decision/pitfall tracking? (Recommended)',
+          initialValue: true,
+        });
+        if (p.isCancel(decisionsChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        decisionsEnabled = decisionsChoice;
       }
 
       // Claude Code flags multiselect (advanced only)
@@ -916,6 +944,8 @@ export const initCommand = new Command('init')
       'background-kb-refresh',
       // kb → knowledge rename: CJS module replaced by feature-knowledge.cjs
       'lib/feature-kb.cjs',
+      // decisions agent decoupling: background-learning replaced by TypeScript CLI (devflow learn --run-background)
+      'background-learning',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
@@ -961,6 +991,10 @@ export const initCommand = new Command('init')
       const cleanedForKnowledge = removeKnowledgeHook(content);
       content = knowledgeEnabled ? addKnowledgeHook(cleanedForKnowledge, devflowDir) : cleanedForKnowledge;
 
+      // Decisions hook — remove-then-add for upgrade safety
+      const cleanedForDecisions = removeDecisionsHook(content);
+      content = decisionsEnabled ? addDecisionsHook(cleanedForDecisions, devflowDir) : cleanedForDecisions;
+
       // Claude Code flags — strip all managed keys, then re-apply selected flags
       content = stripFlags(content);
       content = applyFlags(content, enabledFlags);
@@ -1000,6 +1034,18 @@ export const initCommand = new Command('init')
       } else {
         await fs.mkdir(path.join(gitRoot, '.features'), { recursive: true });
         await fs.writeFile(disabledPath, '', 'utf-8');
+      }
+    }
+
+    // Manage .disabled sentinel for decisions based on decisionsEnabled state
+    if (gitRoot) {
+      const decisionsSentinelDir = path.join(gitRoot, '.memory', 'decisions');
+      const decisionsSentinel = path.join(decisionsSentinelDir, '.disabled');
+      if (decisionsEnabled) {
+        try { await fs.unlink(decisionsSentinel); } catch { /* doesn't exist */ }
+      } else {
+        await fs.mkdir(decisionsSentinelDir, { recursive: true });
+        await fs.writeFile(decisionsSentinel, '', 'utf-8');
       }
     }
 
@@ -1124,7 +1170,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, flags: enabledFlags },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, flags: enabledFlags },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

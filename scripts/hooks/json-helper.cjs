@@ -89,8 +89,8 @@ const INITIAL_CONFIDENCE = 0.33; // seed value for first observation (higher tha
 const THRESHOLDS = {
   workflow:   { required: 3, spread: 3 * 86400, promote: 0.60 },
   procedural: { required: 4, spread: 5 * 86400, promote: 0.70 },
-  decision:   { required: 2, spread: 0,          promote: 0.65 },
-  pitfall:    { required: 2, spread: 0,          promote: 0.65 },
+  decision:   { required: 1, spread: 0,          promote: 0.65 },
+  pitfall:    { required: 1, spread: 0,          promote: 0.65 },
 };
 
 // D17: softCapExceeded repurposed to hard ceiling (100), not removed.
@@ -316,12 +316,29 @@ function writeUsageFile(memoryDir, data) {
 }
 
 /**
- * Read .notifications.json from .memory dir.
+ * Read .decisions-notifications.json from .memory dir.
  * @param {string} memoryDir
  * @returns {Object}
  */
 function readNotifications(memoryDir) {
-  const filePath = path.join(memoryDir, '.notifications.json');
+  return readNotificationsFromPath(path.join(memoryDir, '.decisions-notifications.json'));
+}
+
+/**
+ * Write .decisions-notifications.json atomically.
+ * @param {string} memoryDir
+ * @param {Object} data
+ */
+function writeNotifications(memoryDir, data) {
+  writeNotificationsToPath(path.join(memoryDir, '.decisions-notifications.json'), data);
+}
+
+/**
+ * Read a notifications file by its full path.
+ * @param {string} filePath
+ * @returns {Object}
+ */
+function readNotificationsFromPath(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const data = JSON.parse(raw);
@@ -331,12 +348,12 @@ function readNotifications(memoryDir) {
 }
 
 /**
- * Write .notifications.json atomically.
- * @param {string} memoryDir
+ * Write a notifications file atomically by its full path.
+ * @param {string} filePath
  * @param {Object} data
  */
-function writeNotifications(memoryDir, data) {
-  writeFileAtomic(path.join(memoryDir, '.notifications.json'), JSON.stringify(data, null, 2) + '\n');
+function writeNotificationsToPath(filePath, data) {
+  writeFileAtomic(filePath, JSON.stringify(data, null, 2) + '\n');
 }
 
 /**
@@ -385,16 +402,18 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
 }
 
 /**
- * D21/D22/D24/D28: Update .notifications.json after a decisions entry is appended.
+ * D21/D22/D24/D28: Update notifications file after a decisions entry is appended.
  * Handles first-run seed, threshold crossing, severity escalation, and re-fire on dismiss.
  *
- * @param {string} memoryDir
+ * @param {string} memoryDir - Path to .memory directory
  * @param {string} notifKey - e.g. 'decisions-capacity-decisions'
  * @param {number} previousCount - Active count before the append
  * @param {number} newCount - Active count after the append
+ * @param {string} [notifFilePath] - Optional full path to notifications file.
  */
-function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount) {
-  const notifications = readNotifications(memoryDir);
+function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, notifFilePath) {
+  const effectiveNotifPath = notifFilePath || path.join(memoryDir, '.decisions-notifications.json');
+  const notifications = readNotificationsFromPath(effectiveNotifPath);
   const existingNotif = notifications[notifKey];
 
   // D21: first-run seed — if no notification existed and count >= soft start,
@@ -428,7 +447,7 @@ function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount
     notifications[notifKey].dismissed_at_threshold = null;
   }
 
-  writeNotifications(memoryDir, notifications);
+  writeNotificationsToPath(effectiveNotifPath, notifications);
 }
 
 /**
@@ -909,6 +928,16 @@ try {
     case 'process-observations': {
       const responseFile = safePath(args[0]);
       const logFile = safePath(args[1]);
+
+      // Optional --types workflow,procedural (or --types decision,pitfall) filter.
+      // When present, only observations whose type is in the allowed set are processed.
+      // When absent, all types are processed.
+      let typeFilter = null;
+      const typesArgIdx = args.indexOf('--types');
+      if (typesArgIdx !== -1 && args[typesArgIdx + 1]) {
+        typeFilter = new Set(args[typesArgIdx + 1].split(',').map(t => t.trim()).filter(Boolean));
+      }
+
       const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
       const observations = response.observations || [];
 
@@ -932,6 +961,12 @@ try {
         }
         if (!VALID_TYPES.has(obs.type)) {
           learningLog(`Skipping observation ${i}: invalid type '${obs.type}'`);
+          skipped++;
+          continue;
+        }
+        // Type filter: skip observations not in the allowed set (when filter is active)
+        if (typeFilter !== null && !typeFilter.has(obs.type)) {
+          learningLog(`Skipping observation ${i}: type '${obs.type}' not in filter [${[...typeFilter].join(',')}]`);
           skipped++;
           continue;
         }
@@ -1124,10 +1159,14 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // render-ready <log> <baseDir>
+    // render-ready <log> <baseDir> [--manifest-path <path>] [--notifications-path <path>]
     // DESIGN: D5 — deterministic rendering replaces LLM-generated artifact content.
     // The model provides structured metadata (pattern, details, evidence, type);
     // rendering is a pure template application. This separates detection from materialization.
+    // Optional args allow callers to override default manifest and notifications paths
+    // (used by type-specific pipelines that maintain separate log/manifest files).
+    // Defaults: --notifications-path → .decisions-notifications.json,
+    //           --manifest-path → .learning-manifest.json.
     // -------------------------------------------------------------------------
     case 'render-ready': {
       const logFile = safePath(args[0]);
@@ -1137,9 +1176,22 @@ try {
         break;
       }
 
+      // Parse optional path overrides (args[2..] may contain --manifest-path and --notifications-path)
+      let manifestPathOverride = null;
+      let notifPathOverride = null;
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === '--manifest-path' && args[i + 1]) {
+          manifestPathOverride = safePath(args[i + 1]);
+          i++;
+        } else if (args[i] === '--notifications-path' && args[i + 1]) {
+          notifPathOverride = safePath(args[i + 1]);
+          i++;
+        }
+      }
+
       const entries = parseJsonl(logFile);
       const logMap = new Map(entries.map(e => [e.id, e]));
-      const manifestPath = path.join(baseDir, '.memory', '.learning-manifest.json');
+      const manifestPath = manifestPathOverride || path.join(baseDir, '.memory', '.learning-manifest.json');
       const artDate = new Date().toISOString().slice(0, 10);
 
       // Load or init manifest (schemaVersion 1)
@@ -1296,7 +1348,8 @@ try {
                 // so the user can decide which entry to deprecate before a new one lands.
                 obs.softCapExceeded = true;
                 // Write error-level notification for hard ceiling
-                const notifications = readNotifications(memoryDir);
+                const notifFilePath = notifPathOverride || path.join(memoryDir, '.decisions-notifications.json');
+                const notifications = readNotificationsFromPath(notifFilePath);
                 notifications[notifKey] = {
                   active: true,
                   threshold: DECISIONS_HARD_CEILING,
@@ -1306,7 +1359,7 @@ try {
                   severity: 'error',
                   created_at: new Date().toISOString(),
                 };
-                writeNotifications(memoryDir, notifications);
+                writeNotificationsToPath(notifFilePath, notifications);
                 learningLog(`Decisions file at hard ceiling (${previousCount}/${DECISIONS_HARD_CEILING}), skipping ${obs.id}`);
                 skipped++;
                 continue; // lock still held; released in finally
@@ -1389,7 +1442,8 @@ try {
               registerUsageEntry(memoryDir, anchorId);
 
               // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
-              updateCapacityNotification(memoryDir, notifKey, previousCount, newCount);
+              const renderNotifPath = notifPathOverride || undefined;
+              updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, renderNotifPath);
 
               obs.status = 'created';
               obs.artifact_path = `${decisionsFile}#${anchorId}`;
@@ -1425,16 +1479,18 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // reconcile-manifest <cwd>
+    // reconcile-manifest <cwd> [logFile] [manifestPath]
     // DESIGN: D6 — reconciler runs at session-start (not PostToolUse) to avoid
     // write-time overhead. This amortizes the filesystem check over session boundaries.
     // DESIGN: D13 — edits to artifact content are silently ignored (hash update only,
     // no confidence penalty). Users should be free to improve their own artifacts.
+    // Optional positional args [logFile] and [manifestPath] allow callers to use
+    // type-specific log/manifest files instead of the default shared paths.
     // -------------------------------------------------------------------------
     case 'reconcile-manifest': {
       const cwd = safePath(args[0]);
-      const manifestPath = path.join(cwd, '.memory', '.learning-manifest.json');
-      const logFile = path.join(cwd, '.memory', 'learning-log.jsonl');
+      const logFile = args[1] ? safePath(args[1]) : path.join(cwd, '.memory', 'learning-log.jsonl');
+      const manifestPath = args[2] ? safePath(args[2]) : path.join(cwd, '.memory', '.learning-manifest.json');
       const lockDir = path.join(cwd, '.memory', '.learning.lock');
 
       // A1: require only the log file (not the manifest) before proceeding.
@@ -1499,7 +1555,9 @@ try {
           // File exists — check anchor for decisions entries
           if (entry.anchorId) {
             const content = fs.readFileSync(filePath, 'utf8');
-            const anchorPattern = new RegExp(`##\\s+${entry.anchorId}\\b`);
+            // Sanitise anchorId before embedding in regex to eliminate ReDoS surface.
+            const safeAnchorId = entry.anchorId.replace(/[^A-Z0-9-]/gi, '');
+            const anchorPattern = new RegExp(`##\\s+${safeAnchorId}\\b`);
             if (!anchorPattern.test(content)) {
               // Anchor missing — treat as deletion (D13 exception: anchor loss = deletion)
               obs.confidence = Math.round(obs.confidence * 0.3 * 100) / 100;
@@ -1779,8 +1837,10 @@ try {
         registerUsageEntry(memoryDir, anchorId);
 
         // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
+        // Write to .decisions-notifications.json — decisions-append owns the decisions/pitfalls pipeline.
         const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
-        updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount);
+        const decisionsNotifPath = path.join(memoryDir, '.decisions-notifications.json');
+        updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount, decisionsNotifPath);
 
         console.log(JSON.stringify({ anchorId, file: decisionsFile }));
       } finally {

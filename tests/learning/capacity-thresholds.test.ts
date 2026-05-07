@@ -217,7 +217,7 @@ describe('render-ready capacity integration', () => {
     const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
     expect(result.rendered).toHaveLength(1);
 
-    const notifPath = path.join(tmpDir, '.memory', '.notifications.json');
+    const notifPath = path.join(tmpDir, '.memory', '.decisions-notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
     expect(notif['decisions-capacity-decisions'].active).toBe(true);
@@ -276,7 +276,7 @@ describe('render-ready capacity integration', () => {
   });
 
   it('first-run seed fires notification immediately (D21)', () => {
-    // Simulate a project that already has 60 entries but no .notifications.json
+    // Simulate a project that already has 60 entries but no .decisions-notifications.json
     const header = '<!-- TL;DR: 60 decisions. Key: ADR-060 -->\n# Architectural Decisions\n\nAppend-only.\n';
     let entries = '';
     for (let i = 1; i <= 60; i++) {
@@ -284,7 +284,7 @@ describe('render-ready capacity integration', () => {
       entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
     }
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
-    // No .notifications.json exists (first-run)
+    // No .decisions-notifications.json exists (first-run)
 
     const obs = makeReadyDecision('obs_seed', 'triggering seed');
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
@@ -293,7 +293,7 @@ describe('render-ready capacity integration', () => {
     expect(result.rendered).toHaveLength(1);
 
     // Notification should fire for the highest crossed threshold
-    const notifPath = path.join(tmpDir, '.memory', '.notifications.json');
+    const notifPath = path.join(tmpDir, '.memory', '.decisions-notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
     expect(notif['decisions-capacity-decisions'].active).toBe(true);

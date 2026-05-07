@@ -1,8 +1,8 @@
 // tests/learning/staleness.test.ts
-// Tests for staleness pass in background-learning (D16).
+// Tests for staleness pass in the learning pipeline (D16).
 // Imports the real checkStaleEntries from scripts/hooks/lib/staleness.cjs — the
-// single implementation shared with background-learning — so tests exercise the
-// actual algorithm rather than a TypeScript reimplementation.
+// shared implementation used by devflow learn --run-background — so tests exercise
+// the actual algorithm rather than a TypeScript reimplementation.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
