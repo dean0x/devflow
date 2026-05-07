@@ -138,7 +138,6 @@ Working memory files live in a dedicated `.memory/` directory:
 ├── .decisions-runs-today     # Daily run counter for decisions agent (date + count)
 ├── .decisions-batch-ids      # Session IDs for current decisions batch run
 ├── .decisions.lock           # Lock directory for decisions background agent (transient)
-├── .migration-split-done     # Sentinel: log split migration completed
 ├── .pending-turns.jsonl      # Queue of captured user/assistant turns (JSONL, ephemeral)
 ├── .pending-turns.processing  # Atomic handoff during background processing (transient)
 └── decisions/

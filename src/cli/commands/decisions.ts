@@ -193,14 +193,6 @@ export const decisionsCommand = new Command('decisions')
       const manifestPath = path.join(memoryDir, '.decisions-manifest.json');
       const notificationsPath = path.join(memoryDir, '.decisions-notifications.json');
 
-      // Run idempotent split migration.
-      const splitMigrationPath = path.join(scriptDir, 'lib', 'split-migration.cjs');
-      try {
-        execFileSync('node', [splitMigrationPath, cwd], { stdio: 'pipe' });
-      } catch {
-        // Non-fatal — migration may already have run or file may not exist yet.
-      }
-
       await acquireBackgroundLock(lockDir);
       const cleanupLock = registerLockCleanup(lockDir);
 

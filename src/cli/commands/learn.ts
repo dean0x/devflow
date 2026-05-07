@@ -535,14 +535,6 @@ export const learnCommand = new Command('learn')
       const logFile = path.join(memoryDir, 'learning-log.jsonl');
       const batchIdsFile = path.join(memoryDir, '.learning-batch-ids');
 
-      // Run idempotent split migration to ensure log files exist and are properly split.
-      const splitMigrationPath = path.join(scriptDir, 'lib', 'split-migration.cjs');
-      try {
-        execFileSync('node', [splitMigrationPath, cwd], { stdio: 'pipe' });
-      } catch {
-        // Non-fatal — migration may already have run or file may not exist yet.
-      }
-
       await acquireBackgroundLock(lockDir);
       const cleanupLock = registerLockCleanup(lockDir);
 
@@ -856,7 +848,6 @@ export const learnCommand = new Command('learn')
           '.learning-runs-today',
           '.learning-notified-at',
           '.learning-notifications.json',
-          '.notifications.json', // legacy pre-split-migration name — clean up on reset
           '.decisions-usage.json',
           '.learning-manifest.json',
         ];

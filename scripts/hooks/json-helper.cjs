@@ -316,21 +316,21 @@ function writeUsageFile(memoryDir, data) {
 }
 
 /**
- * Read .notifications.json from .memory dir.
+ * Read .decisions-notifications.json from .memory dir.
  * @param {string} memoryDir
  * @returns {Object}
  */
 function readNotifications(memoryDir) {
-  return readNotificationsFromPath(path.join(memoryDir, '.notifications.json'));
+  return readNotificationsFromPath(path.join(memoryDir, '.decisions-notifications.json'));
 }
 
 /**
- * Write .notifications.json atomically.
+ * Write .decisions-notifications.json atomically.
  * @param {string} memoryDir
  * @param {Object} data
  */
 function writeNotifications(memoryDir, data) {
-  writeNotificationsToPath(path.join(memoryDir, '.notifications.json'), data);
+  writeNotificationsToPath(path.join(memoryDir, '.decisions-notifications.json'), data);
 }
 
 /**
@@ -402,19 +402,17 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
 }
 
 /**
- * D21/D22/D24/D28: Update .notifications.json after a decisions entry is appended.
+ * D21/D22/D24/D28: Update notifications file after a decisions entry is appended.
  * Handles first-run seed, threshold crossing, severity escalation, and re-fire on dismiss.
  *
  * @param {string} memoryDir - Path to .memory directory
  * @param {string} notifKey - e.g. 'decisions-capacity-decisions'
  * @param {number} previousCount - Active count before the append
  * @param {number} newCount - Active count after the append
- * @param {string} [notifFilePath] - Optional full path to notifications file. When provided,
- *   reads/writes to this path directly instead of memoryDir/.notifications.json. Used by
- *   render-ready with --notifications-path to write to .decisions-notifications.json.
+ * @param {string} [notifFilePath] - Optional full path to notifications file.
  */
 function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, notifFilePath) {
-  const effectiveNotifPath = notifFilePath || path.join(memoryDir, '.notifications.json');
+  const effectiveNotifPath = notifFilePath || path.join(memoryDir, '.decisions-notifications.json');
   const notifications = readNotificationsFromPath(effectiveNotifPath);
   const existingNotif = notifications[notifKey];
 
@@ -933,7 +931,7 @@ try {
 
       // Optional --types workflow,procedural (or --types decision,pitfall) filter.
       // When present, only observations whose type is in the allowed set are processed.
-      // When absent, all types are processed (backward compatible).
+      // When absent, all types are processed.
       let typeFilter = null;
       const typesArgIdx = args.indexOf('--types');
       if (typesArgIdx !== -1 && args[typesArgIdx + 1]) {
@@ -1167,6 +1165,8 @@ try {
     // rendering is a pure template application. This separates detection from materialization.
     // Optional args allow callers to override default manifest and notifications paths
     // (used by type-specific pipelines that maintain separate log/manifest files).
+    // Defaults: --notifications-path → .decisions-notifications.json,
+    //           --manifest-path → .learning-manifest.json.
     // -------------------------------------------------------------------------
     case 'render-ready': {
       const logFile = safePath(args[0]);
@@ -1348,7 +1348,7 @@ try {
                 // so the user can decide which entry to deprecate before a new one lands.
                 obs.softCapExceeded = true;
                 // Write error-level notification for hard ceiling
-                const notifFilePath = notifPathOverride || path.join(memoryDir, '.notifications.json');
+                const notifFilePath = notifPathOverride || path.join(memoryDir, '.decisions-notifications.json');
                 const notifications = readNotificationsFromPath(notifFilePath);
                 notifications[notifKey] = {
                   active: true,

@@ -152,7 +152,7 @@ describe('render-ready — decision type', () => {
     expect(result.skipped).toBe(0);
 
     // Notification should have fired
-    const notifPath = path.join(tmpDir, '.memory', '.notifications.json');
+    const notifPath = path.join(tmpDir, '.memory', '.decisions-notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
     expect(notif['decisions-capacity-decisions']).toBeDefined();
