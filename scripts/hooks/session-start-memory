@@ -109,7 +109,7 @@ if [ -f "$CWD/.memory/.learning-manifest.json" ] && [ -f "$CWD/.memory/learning-
   node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
 fi
 
-# Reconcile decisions manifest (uses split log + manifest)
+# Reconcile decisions manifest
 if [ -f "$CWD/.memory/decisions-log.jsonl" ]; then
   node "$_JSON_HELPER" reconcile-manifest "$CWD" "$CWD/.memory/decisions-log.jsonl" "$CWD/.memory/.decisions-manifest.json" 2>/dev/null || true
 fi

@@ -19,11 +19,11 @@ describe('getActiveNotification', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns null when neither notifications file exists', () => {
+  it('returns null when notifications file does not exist', () => {
     expect(getActiveNotification(tmpDir)).toBeNull();
   });
 
-  it('reads from .decisions-notifications.json (primary, post-migration)', () => {
+  it('reads from .decisions-notifications.json', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({
@@ -77,7 +77,7 @@ describe('getActiveNotification', () => {
     expect(result!.severity).toBe('warning');
   });
 
-  it('picks worst severity when multiple files have notifications (D27)', () => {
+  it('picks worst severity when multiple entries have notifications (D27)', () => {
     fs.writeFileSync(
       path.join(memoryDir, '.decisions-notifications.json'),
       JSON.stringify({

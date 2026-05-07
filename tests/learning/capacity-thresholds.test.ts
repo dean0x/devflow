@@ -276,7 +276,7 @@ describe('render-ready capacity integration', () => {
   });
 
   it('first-run seed fires notification immediately (D21)', () => {
-    // Simulate a project that already has 60 entries but no .notifications.json
+    // Simulate a project that already has 60 entries but no .decisions-notifications.json
     const header = '<!-- TL;DR: 60 decisions. Key: ADR-060 -->\n# Architectural Decisions\n\nAppend-only.\n';
     let entries = '';
     for (let i = 1; i <= 60; i++) {
