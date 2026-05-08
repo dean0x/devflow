@@ -23,7 +23,7 @@ Explore a codebase area by spawning parallel agents for flow tracing, dependency
 
 ## Phases
 
-### Phase 1: Load Decisions Index (Orchestrator-Local)
+### Phase 1: Load Decisions (Orchestrator-Local)
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
@@ -35,14 +35,14 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 
 The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 
-**Load Feature Knowledge:**
+Also load feature knowledge:
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
-2. Identify relevant feature knowledge (match task intent against each feature knowledge entry's descriptions and directories).
+2. Identify relevant feature knowledge entries (match task intent against each entry's descriptions and directories).
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** for exploration framing — feature-specific patterns and integration points guide where to focus.
 5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as DECISIONS_CONTEXT).
 
-**Explore agent framing**: "The existing feature knowledge is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas it doesn't cover and things that may have changed."
+**Explore agent framing**: "The feature knowledge is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the feature knowledge doesn't cover and things that may have changed."
 
 ### Phase 2: Orient
 
@@ -54,7 +54,7 @@ Spawn `Agent(subagent_type="Skimmer")` to get codebase overview relevant to the 
 - Entry points and key abstractions
 - Related patterns and conventions
 
-### Phase 3: Explore (Parallel)
+### Phase 3: Explore
 
 **Produces:** EXPLORE_OUTPUT
 **Requires:** ORIENT_OUTPUT
@@ -76,7 +76,7 @@ Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with combined f
 
 - Merge overlapping discoveries from parallel explorers
 - Resolve any contradictions between explorer findings
-- Organize into structured output format
+- Organize into the Output format below
 
 ### Phase 5: Present
 
@@ -98,7 +98,7 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 1. If `.features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
 2. Read `.features/index.json` (if it exists)
 3. Based on the explored area (user's question + MERGED_FINDINGS scope), check if matching feature knowledge
-   already exists (match against each feature knowledge entry's `directories` and `description`). If covered → skip
+   already exists (match against each entry's `directories` and `description`). If covered → skip
 4. Use AskUserQuestion: "No feature knowledge exists for {explored area}. Create one to capture these patterns?"
 5. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
 6. If user accepts:
@@ -131,12 +131,27 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 
 **Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.
 
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
+## Output
+
+Structured exploration findings with concrete code references:
+
+- Scope (what was explored and boundaries)
+- Architecture Map (modules, layers, key abstractions with file:line)
+- Flow Trace (call chain from entry to exit with file:line at each step)
+- Integration Points (module boundaries, shared types, external dependencies)
+- Patterns (recurring conventions, design decisions observed)
+- Key Insights (non-obvious findings, surprises, potential concerns)
+
 ## Architecture
 
 ```
 /explore (orchestrator)
 │
-├─ Phase 1: Load Decisions Index (Orchestrator-Local)
+├─ Phase 1: Load Decisions (Orchestrator-Local)
 │
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (codebase overview)
