@@ -302,3 +302,40 @@ describe('merge-observation — pitfall matching by Area + Issue', () => {
     expect(entries[0].observations).toBe(2);
   });
 });
+
+describe('merge-observation — immediate type promotion on new entry (D3, D4)', () => {
+  let tmpDir: string;
+  let logFile: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-imm-test-'));
+    logFile = path.join(tmpDir, 'learning-log.jsonl');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('decision promotes on first merge (new entry path)', () => {
+    // Log with unrelated entry — forces new-entry path
+    fs.writeFileSync(logFile, JSON.stringify(baseLogEntry('obs_m001')) + '\n');
+
+    const newObs = JSON.stringify({
+      id: 'obs_dec_merge001',
+      type: 'decision',
+      pattern: 'brand new decision pattern',
+      evidence: ['clear evidence'],
+      details: 'context: X; decision: do Y; rationale: Z',
+      quality_ok: true,
+    });
+
+    const result = JSON.parse(runHelper(`merge-observation "${logFile}" '${newObs}'`));
+    expect(result.merged).toBe(false); // new entry, not merged
+
+    const entries = readLog(logFile);
+    const newEntry = entries.find(e => e['id'] === 'obs_dec_merge001');
+    expect(newEntry).toBeDefined();
+    expect(newEntry!['status']).toBe('ready');
+    expect(newEntry!['confidence']).toBe(0.95);
+  });
+});
