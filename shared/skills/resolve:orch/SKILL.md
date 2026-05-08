@@ -92,20 +92,22 @@ Resolvers follow a 3-tier risk approach:
 ## Phase 6: Collect & Simplify
 
 **Produces:** SIMPLIFICATION_RESULTS
-**Requires:** RESOLUTION_RESULTS
+**Requires:** RESOLUTION_RESULTS, REVIEW_DIR
 
 Aggregate results from all Resolver agents:
 - Count: fixed, false positives, deferred
 
-Spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
+Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references.
+
+**Immediately write `resolution-summary.md`** to `{REVIEW_DIR}` using the Write tool. Do this now — before spawning the Simplifier — while the aggregated results are fresh in context. Include a `## Decisions Citations` section at the top (before Statistics) if any citations were made. This ensures the resolution record is persisted even if later steps trigger context compaction.
+
+Then spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
 ## Phase 7: Report
 
-**Requires:** RESOLUTION_RESULTS, SIMPLIFICATION_RESULTS, REVIEW_DIR
+**Requires:** REVIEW_DIR
 
-Write `resolution-summary.md` to the same timestamped review directory.
-
-The report includes a `## Decisions Citations` section at the top (before Statistics) listing all unique `applies ADR-NNN` and `avoids PF-NNN` references extracted from Resolver Reasoning columns. Omit the section entirely if no citations were made.
+The resolution summary was already written to `{REVIEW_DIR}/resolution-summary.md` in Phase 6.
 
 Report to user:
 - Issues resolved vs deferred vs false positives
