@@ -36,6 +36,10 @@ All generated documentation lives under `.docs/` in the project root:
 │       └── review-summary.md
 ├── design/                             # Design artifacts from /plan
 │   └── {issue}-{topic-slug}.{timestamp}.md  # Design document
+├── research/{topic-slug}/              # Research artifacts per topic
+│   └── {YYYY-MM-DD_HHMM}/             # Timestamped research directory
+│       ├── {type}.md                  # Researcher outputs (codebase.md, external.md, etc.)
+│       └── research-summary.md        # Synthesizer output
 ├── status/                             # Development logs
 │   ├── {timestamp}.md
 │   ├── compact/{timestamp}.md

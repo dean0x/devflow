@@ -488,7 +488,7 @@ describe('parseStreamEvent', () => {
 
 describe('skill invocation helpers', () => {
   it('detects skill invocations', () => {
-    expect(hasSkillInvocations(textResult('', ['devflow:patterns', 'devflow:research']))).toBe(true);
+    expect(hasSkillInvocations(textResult('', ['devflow:patterns', 'devflow:test-driven-development']))).toBe(true);
   });
 
   it('returns false when no skills', () => {

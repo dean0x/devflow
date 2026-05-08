@@ -12,7 +12,7 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 18 plugins (9 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 20 plugins (9 core + 11 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
@@ -22,6 +22,8 @@ Plugin marketplace with 18 plugins (9 core + 9 optional language/ecosystem), eac
 | `devflow-resolve` | Review issue resolution | Optional |
 | `devflow-debug` | Competing hypothesis debugging | Optional |
 | `devflow-explore` | Codebase exploration with knowledge base creation | Optional |
+| `devflow-research` | Multi-type research with trust-aware synthesis | Optional |
+| `devflow-release` | Adaptive project release with learned configuration | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
 | `devflow-ambient` | Ambient mode — three-tier intent classification (QUICK/GUIDED/ORCHESTRATED) | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
@@ -69,8 +71,8 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 ```
 devflow/
 ├── shared/skills/          # 44 skills (single source of truth)
-├── shared/agents/          # 13 shared agents (single source of truth)
-├── plugins/devflow-*/      # 18 plugins (9 core + 9 optional language/ecosystem)
+├── shared/agents/          # 14 shared agents (single source of truth)
+├── plugins/devflow-*/      # 20 plugins (9 core + 11 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, session-end-decisions, get-mtime, session-end-knowledge-refresh, background-knowledge-refresh)
@@ -78,6 +80,10 @@ devflow/
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
 ├── .features/              # Per-feature knowledge bases (committed to git)
+├── .release/               # Release configuration (lazy-init)
+│   ├── RELEASE-FLOW.md     # Learned release process config
+│   ├── .gitignore          # Excludes .progress.json, .lock/
+│   └── .progress.json      # Mid-release checkpoint (transient)
 └── .memory/                # Working memory files — per-project
 ```
 
@@ -115,7 +121,11 @@ All generated docs live under `.docs/` in the project root:
 │       ├── {focus}.md                 # Reviewer reports (security.md, etc.)
 │       ├── review-summary.md          # Synthesizer output
 │       └── resolution-summary.md      # Written by /resolve
-└── design/                            # Design artifacts from /plan
+├── design/                            # Design artifacts from /plan
+└── research/{topic-slug}/             # Research artifacts per topic
+    └── {YYYY-MM-DD_HHMM}/            # Timestamped research directory
+        ├── {type}.md                  # Researcher outputs (codebase.md, external.md, etc.)
+        └── research-summary.md        # Synthesizer output
 ```
 
 Working memory files live in a dedicated `.memory/` directory:
@@ -172,13 +182,15 @@ Working memory files live in a dedicated `.memory/` directory:
 - `/explore` — Skimmer + Explore + Synthesizer + Knowledge (optional knowledge base creation)
 - `/debug` — Agent Teams competing hypotheses
 - `/self-review` — Simplifier then Scrutinizer (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
+- `/research` — Researcher agents + Skimmer + Synthesizer + Knowledge; multi-type research with trust-aware synthesis
+- `/release` — Git agent + Validator + Synthesizer; adaptive release with learned configuration
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
-**Shared agents** (13): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge
+**Shared agents** (14): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher
 
 **Plugin-specific agents** (1): claude-md-auditor
 
-**Orchestration skills** (7): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
+**Orchestration skills** (9): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch, research:orch, release:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
 **Agent Teams**: 6 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/explore`, `/debug`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
 

@@ -12,6 +12,8 @@ Classify each prompt by **intent** and **depth** before responding.
 - **RESOLVE**: "resolve", "fix review issues", "address feedback", "fix findings"
 - **DEBUG**: "fix", "bug", "broken", "failing", "error", "why does"
 - **PIPELINE**: "end to end", "implement and review", "build and review", "full pipeline"
+- **RESEARCH**: "research", "investigate", "look into", "compare options", "evaluate", "analyze options"
+- **RELEASE**: "release", "publish", "version bump", "cut a release", "prepare release", "deploy", "ship it"
 
 ## Depth Criteria
 
