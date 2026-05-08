@@ -502,6 +502,27 @@ function calculateConfidence(count, type) {
   return Math.min(Math.floor(count * 100 / req), 95) / 100;
 }
 
+/**
+ * D3+D4: Attempt immediate promotion for a newly-created entry whose type has
+ * required=1 and spread=0 (decision/pitfall). If confidence >= threshold AND
+ * quality_ok, sets entry.status = 'ready' in place.
+ *
+ * Only call this immediately after constructing the entry object, before writing
+ * to the log. Does NOT guard against 'created' status — the entry is brand-new.
+ *
+ * @param {object} entry - The newly-constructed log entry (mutated in place).
+ */
+function tryImmediatePromotion(entry) {
+  const th = THRESHOLDS[entry.type] || THRESHOLDS.procedural;
+  if (entry.confidence >= th.promote && entry.quality_ok === true) {
+    const firstSeenMs = new Date(entry.first_seen).getTime();
+    const spread = (Date.now() - firstSeenMs) / 1000;
+    if (!isNaN(firstSeenMs) && spread >= th.spread) {
+      entry.status = 'ready';
+    }
+  }
+}
+
 function mergeEvidence(oldEvidence, newEvidence) {
   const flat = [...(oldEvidence || []), ...(newEvidence || [])];
   const unique = [...new Set(flat)];
@@ -1030,14 +1051,7 @@ try {
           // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first observation
           // if quality_ok=true. Check immediately after creation.
           if (isImmediateType) {
-            const th = THRESHOLDS[newEntry.type] || THRESHOLDS.procedural;
-            if (newEntry.confidence >= th.promote && newEntry.quality_ok === true) {
-              const firstSeenMs = new Date(newEntry.first_seen).getTime();
-              const spread = (Date.now() - firstSeenMs) / 1000;
-              if (!isNaN(firstSeenMs) && spread >= th.spread) {
-                newEntry.status = 'ready';
-              }
-            }
+            tryImmediatePromotion(newEntry);
           }
 
           learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${newEntry.confidence} quality_ok=${qualityOk}`);
@@ -1767,14 +1781,7 @@ try {
         // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first merge
         // if quality_ok=true. Check immediately after creation.
         if (isImmediateType) {
-          const th = THRESHOLDS[entry.type] || THRESHOLDS.procedural;
-          if (entry.confidence >= th.promote && entry.quality_ok === true) {
-            const firstSeenMs = new Date(entry.first_seen).getTime();
-            const spread = (Date.now() - firstSeenMs) / 1000;
-            if (!isNaN(firstSeenMs) && spread >= th.spread) {
-              entry.status = 'ready';
-            }
-          }
+          tryImmediatePromotion(entry);
         }
 
         logMap.set(newId, entry);
