@@ -112,16 +112,16 @@ describe('process-observations — per-type promotion (D3, D4)', () => {
   });
 
   it('promotes: quality_ok=true + count >= required + spread satisfied', () => {
-    // workflow: required=3, spread=3 days, promote=0.60
-    const fourDaysAgo = new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString();
+    // workflow: required=3, spread=7 days, promote=0.60
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
     const existingObs = {
       id: 'obs_abc002',
       type: 'workflow',
       pattern: 'deploy workflow',
       confidence: 0.65,
       observations: 2, // will become 3 = required
-      first_seen: fourDaysAgo,
-      last_seen: fourDaysAgo,
+      first_seen: eightDaysAgo,
+      last_seen: eightDaysAgo,
       status: 'observing',
       evidence: ['evidence a', 'evidence b'],
       details: 'step 1, step 2',
@@ -150,7 +150,7 @@ describe('process-observations — per-type promotion (D3, D4)', () => {
   });
 
   it('does NOT promote: quality_ok=true but spread not satisfied', () => {
-    // workflow: required spread = 3 days; first_seen is only 1 day ago
+    // workflow: required spread = 7 days; first_seen is only 1 day ago
     const oneDayAgo = new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString();
     const existingObs = {
       id: 'obs_abc003',
@@ -182,7 +182,7 @@ describe('process-observations — per-type promotion (D3, D4)', () => {
     runHelper(`process-observations "${responseFile}" "${logFile}"`);
 
     const updated = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-    // Spread requirement (3 days) not met — stays observing
+    // Spread requirement (7 days) not met — stays observing
     expect(updated.status).toBe('observing');
   });
 

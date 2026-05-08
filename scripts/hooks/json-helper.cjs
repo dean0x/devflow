@@ -87,8 +87,8 @@ const INITIAL_CONFIDENCE = 0.33; // seed value for first observation (higher tha
  * only count (rationale quality is enforced by quality_ok, not frequency).
  */
 const THRESHOLDS = {
-  workflow:   { required: 3, spread: 3 * 86400, promote: 0.60 },
-  procedural: { required: 4, spread: 5 * 86400, promote: 0.70 },
+  workflow:   { required: 3, spread: 7 * 86400, promote: 0.60 },
+  procedural: { required: 4, spread: 14 * 86400, promote: 0.70 },
   decision:   { required: 1, spread: 0,          promote: 0.65 },
   pitfall:    { required: 1, spread: 0,          promote: 0.65 },
 };
