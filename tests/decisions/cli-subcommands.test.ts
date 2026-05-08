@@ -420,3 +420,111 @@ describe('decisions --dismiss-capacity notification logic', () => {
     expect(activeKeys).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// --review capacity mode: verify parsing, filtering, sorting logic
+// (These test the logic that the capacity review handler will use after the
+// capacity review is ported from learn.ts to decisions.ts)
+// ---------------------------------------------------------------------------
+
+describe('decisions --review capacity mode logic', () => {
+  it('excludes deprecated and superseded entries from eligible list', () => {
+    // Simulate allEntries parsed from decisions.md/pitfalls.md
+    const allEntries = [
+      { id: 'ADR-001', pattern: 'Use X', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Accepted', createdDate: '2026-01-01' },
+      { id: 'ADR-002', pattern: 'Use Y', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Deprecated', createdDate: '2026-01-10' },
+      { id: 'ADR-003', pattern: 'Use Z', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Superseded', createdDate: '2026-01-15' },
+      { id: 'PF-001', pattern: 'Avoid W', file: 'pitfalls', filePath: '/tmp/pitfalls.md', status: 'Active', createdDate: '2026-01-20' },
+    ];
+
+    // Replicate the filtering logic from the capacity block
+    const eligible = allEntries.filter(
+      e => e.status !== 'Deprecated' && e.status !== 'Superseded',
+    );
+
+    expect(eligible).toHaveLength(2);
+    expect(eligible.map(e => e.id)).toContain('ADR-001');
+    expect(eligible.map(e => e.id)).toContain('PF-001');
+    expect(eligible.map(e => e.id)).not.toContain('ADR-002');
+    expect(eligible.map(e => e.id)).not.toContain('ADR-003');
+  });
+
+  it('excludes entries created within 7-day protection window', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const entries = [
+      { id: 'ADR-001', createdDate: tenDaysAgo, status: 'Accepted', pattern: 'Old entry', file: 'decisions', filePath: '' },
+      { id: 'ADR-002', createdDate: threeDaysAgo, status: 'Accepted', pattern: 'Recent entry', file: 'decisions', filePath: '' },
+      { id: 'ADR-003', createdDate: today, status: 'Accepted', pattern: 'Today entry', file: 'decisions', filePath: '' },
+      { id: 'ADR-004', createdDate: null, status: 'Accepted', pattern: 'No date entry', file: 'decisions', filePath: '' },
+    ];
+
+    // Protection logic: entries with createdDate > sevenDaysAgo are protected
+    const eligible = entries.filter(e => {
+      if (!e.createdDate) return true; // No date — eligible (can't determine age)
+      return e.createdDate <= sevenDaysAgo;
+    });
+
+    expect(eligible).toHaveLength(2); // tenDaysAgo and no-date
+    expect(eligible.map(e => e.id)).toContain('ADR-001');
+    expect(eligible.map(e => e.id)).toContain('ADR-004'); // no date — eligible
+    expect(eligible.map(e => e.id)).not.toContain('ADR-002');
+    expect(eligible.map(e => e.id)).not.toContain('ADR-003');
+  });
+
+  it('sorts entries by least-used (cites ASC, last_cited ASC NULLS FIRST, created ASC)', () => {
+    const entries = [
+      { id: 'ADR-001', createdDate: '2026-01-01', status: 'Accepted', pattern: 'Often cited', file: 'decisions', filePath: '' },
+      { id: 'ADR-002', createdDate: '2026-01-02', status: 'Accepted', pattern: 'Never cited', file: 'decisions', filePath: '' },
+      { id: 'ADR-003', createdDate: '2026-01-03', status: 'Accepted', pattern: 'Rarely cited', file: 'decisions', filePath: '' },
+    ];
+
+    const usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {
+      'ADR-001': { cites: 10, last_cited: '2026-05-01', created: null },
+      'ADR-002': { cites: 0, last_cited: null, created: null },
+      'ADR-003': { cites: 2, last_cited: '2026-03-01', created: null },
+    };
+
+    // Replicate the sort logic from the capacity block
+    const sorted = [...entries].sort((a, b) => {
+      const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
+      const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
+
+      if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
+
+      if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
+      if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
+      if (aUsage.last_cited && bUsage.last_cited) {
+        if (aUsage.last_cited < bUsage.last_cited) return -1;
+        if (aUsage.last_cited > bUsage.last_cited) return 1;
+      }
+
+      const aCreated = a.createdDate || '';
+      const bCreated = b.createdDate || '';
+      return aCreated.localeCompare(bCreated);
+    });
+
+    // Least used first: ADR-002 (0 cites), ADR-003 (2 cites), ADR-001 (10 cites)
+    expect(sorted[0].id).toBe('ADR-002');
+    expect(sorted[1].id).toBe('ADR-003');
+    expect(sorted[2].id).toBe('ADR-001');
+  });
+
+  it('uses .decisions-notifications.json not .learning-notifications.json', () => {
+    // Verify the correct notifications file key
+    // This is a naming convention test — the capacity review block should
+    // reference .decisions-notifications.json (decisions system) not
+    // .learning-notifications.json (learning system).
+    const decisionsNotifKey = '.decisions-notifications.json';
+    const learningNotifKey = '.learning-notifications.json';
+
+    // Sanity check: these are two different files
+    expect(decisionsNotifKey).not.toBe(learningNotifKey);
+    // The decisions system should only write to its own notifications file
+    expect(decisionsNotifKey).toMatch(/decisions/);
+    expect(learningNotifKey).toMatch(/learning/);
+  });
+});

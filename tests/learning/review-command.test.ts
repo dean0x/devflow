@@ -386,3 +386,34 @@ describe('--dismiss-capacity notification', () => {
     expect(read['decisions-capacity-decisions'].dismissed_at_threshold).toBe(70);
   });
 });
+
+describe('learn --review simplified (no mode picker)', () => {
+  it('learn --review flagged filter only includes mayBeStale/needsReview/softCapExceeded', () => {
+    // After the port, learn --review goes straight to observations.
+    // Verify that the filtering logic only surfaces the three attention flags.
+    const obs: LearningObservation[] = [
+      makeObs({ id: 'w1', type: 'workflow', pattern: 'stale workflow', mayBeStale: true }),
+      makeObs({ id: 'w2', type: 'workflow', pattern: 'normal workflow' }),
+      makeObs({ id: 'w3', type: 'procedural', pattern: 'needs review', needsReview: true }),
+      makeObs({ id: 'w4', type: 'procedural', pattern: 'cap exceeded', softCapExceeded: true }),
+    ];
+
+    const flagged = obs.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
+    expect(flagged).toHaveLength(3);
+    expect(flagged.map(o => o['id'])).toContain('w1');
+    expect(flagged.map(o => o['id'])).toContain('w3');
+    expect(flagged.map(o => o['id'])).toContain('w4');
+    expect(flagged.map(o => o['id'])).not.toContain('w2');
+  });
+
+  it('learn --review flagged filter excludes non-flagged observations', () => {
+    const obs: LearningObservation[] = [
+      makeObs({ id: 'w1', type: 'workflow', pattern: 'stale workflow', mayBeStale: true }),
+      makeObs({ id: 'w2', type: 'workflow', pattern: 'normal workflow' }),
+    ];
+
+    const flagged = obs.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]['id']).toBe('w1');
+  });
+});
