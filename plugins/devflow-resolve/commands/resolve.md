@@ -145,7 +145,7 @@ Create execution plan:
 ### Phase 4: Resolve (Parallel where possible)
 
 **Produces:** RESOLUTION_RESULTS
-**Requires:** BATCHES, DECISIONS_CONTEXT, BRANCH_INFO
+**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, BRANCH_INFO
 
 Spawn Resolver agents based on dependency analysis. For independent batches, spawn **in a single message**:
 

@@ -122,7 +122,7 @@ Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
 ### Phase 2: Run Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, REVIEWER_LIST
 
 Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add more based on changed file types:
 

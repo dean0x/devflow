@@ -77,7 +77,7 @@ Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
 ### Phase 2: Implement
 
 **Produces:** CODER_OUTPUT, FILES_CHANGED
-**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
+**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE
 
 Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
 

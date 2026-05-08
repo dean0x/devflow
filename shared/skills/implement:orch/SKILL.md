@@ -94,7 +94,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 ## Phase 4: Coder Execution
 
 **Produces:** CODER_COMMITS, PRE_CODER_SHA
-**Requires:** EXECUTION_PLAN, FEATURE_BRANCH
+**Requires:** EXECUTION_PLAN, FEATURE_BRANCH, PR_DESCRIPTION_GUIDANCE
 
 Record git SHA before first Coder: `git rev-parse HEAD`
 
