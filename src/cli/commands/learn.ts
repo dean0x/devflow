@@ -24,15 +24,6 @@ import { runLearningAgent } from '../utils/learning-agent.js';
 export type { NotificationFileEntry };
 
 /**
- * D-SEC2: Runtime guard for the `count-active` JSON result from json-helper.cjs.
- * Accepts any object that carries a numeric `count` field (extra fields are ignored).
- */
-function isCountActiveResult(v: unknown): v is { count: number } {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) &&
-    typeof (v as Record<string, unknown>).count === 'number';
-}
-
-/**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
  * v2 extends type to include 'decision' and 'pitfall', and adds attention flags.
  */
@@ -957,353 +948,124 @@ export const learnCommand = new Command('learn')
     }
 
     // --- --review ---
+    // Capacity review has moved to `devflow decisions --review` (capacity mode).
+    // This handler surfaces only workflow/procedural observations flagged for
+    // attention (stale, missing artifacts, soft cap exceeded).
     if (options.review) {
-      const mode = await p.select({
-        message: 'Review mode:',
-        options: [
-          { value: 'observations', label: 'Review flagged observations', hint: 'stale, missing, at capacity' },
-          { value: 'capacity', label: 'Review decisions capacity', hint: 'deprecate least-used entries' },
-          { value: 'cancel', label: 'Cancel' },
-        ],
-      });
+      const { observations, invalidCount } = await readObservations(logPath);
+      warnIfInvalid(invalidCount);
 
-      if (p.isCancel(mode) || mode === 'cancel') {
+      const flagged = observations.filter(
+        (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
+      );
+
+      if (flagged.length === 0) {
+        p.log.info('No observations flagged for review. All clear.');
         return;
       }
 
-      if (mode === 'observations') {
-        const { observations, invalidCount } = await readObservations(logPath);
-        warnIfInvalid(invalidCount);
+      // Acquire .learning.lock so we don't race with background-learning during the
+      // interactive loop. The internal updateDecisionsStatus call still takes its own
+      // .decisions.lock — different lock directories, no deadlock.
+      const memoryDirForReview = path.join(process.cwd(), '.memory');
+      const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
+      const lockAcquired = await acquireMkdirLock(learningLockDir);
+      if (!lockAcquired) {
+        p.log.error('Learning system is currently running. Try again in a moment.');
+        return;
+      }
 
-        const flagged = observations.filter(
-          (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
-        );
+      p.intro(color.bgYellow(color.black(' Learning Review ')));
+      p.log.info(`${flagged.length} observation(s) flagged for review.`);
 
-        if (flagged.length === 0) {
-          p.log.info('No observations flagged for review. All clear.');
-          return;
-        }
+      const updatedObservations = [...observations];
 
-        // Acquire .learning.lock so we don't race with background-learning during the
-        // interactive loop. The internal updateDecisionsStatus call still takes its own
-        // .decisions.lock — different lock directories, no deadlock.
-        const memoryDirForReview = path.join(process.cwd(), '.memory');
-        const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
-        const lockAcquired = await acquireMkdirLock(learningLockDir);
-        if (!lockAcquired) {
-          p.log.error('Learning system is currently running. Try again in a moment.');
-          return;
-        }
+      try {
+        for (const obs of flagged) {
+          const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
+          const reason = formatStaleReason(obs);
 
-        p.intro(color.bgYellow(color.black(' Learning Review ')));
-        p.log.info(`${flagged.length} observation(s) flagged for review.`);
+          p.log.info(
+            `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
+            `  Reason: ${color.yellow(reason)}\n` +
+            (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
+            `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
+          );
 
-        const updatedObservations = [...observations];
+          const action = await p.select({
+            message: 'Action:',
+            options: [
+              { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
+              { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
+              { value: 'skip', label: 'Skip', hint: 'No change' },
+            ],
+          });
 
-        try {
-          for (const obs of flagged) {
-            const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
-            const reason = formatStaleReason(obs);
+          if (p.isCancel(action)) {
+            // Persist any changes made so far before exiting so the user keeps
+            // partial progress (and log/decisions stay consistent).
+            await writeObservations(logPath, updatedObservations);
+            p.cancel('Review cancelled — partial progress saved.');
+            return;
+          }
 
-            p.log.info(
-              `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
-              `  Reason: ${color.yellow(reason)}\n` +
-              (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
-              `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
-            );
+          const idx = updatedObservations.findIndex(o => o.id === obs.id);
+          if (idx === -1) continue;
 
-            const action = await p.select({
-              message: 'Action:',
-              options: [
-                { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
-                { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
-                { value: 'skip', label: 'Skip', hint: 'No change' },
-              ],
-            });
+          if (action === 'deprecate') {
+            updatedObservations[idx] = {
+              ...updatedObservations[idx],
+              status: 'deprecated',
+              mayBeStale: undefined,
+              needsReview: undefined,
+              softCapExceeded: undefined,
+            };
 
-            if (p.isCancel(action)) {
-              // Persist any changes made so far before exiting so the user keeps
-              // partial progress (and log/decisions stay consistent).
-              await writeObservations(logPath, updatedObservations);
-              p.cancel('Review cancelled — partial progress saved.');
-              return;
-            }
-
-            const idx = updatedObservations.findIndex(o => o.id === obs.id);
-            if (idx === -1) continue;
-
-            if (action === 'deprecate') {
-              updatedObservations[idx] = {
-                ...updatedObservations[idx],
-                status: 'deprecated',
-                mayBeStale: undefined,
-                needsReview: undefined,
-                softCapExceeded: undefined,
-              };
-
-              // Update Status: field in decisions file for decisions/pitfalls
-              if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
-                const hashIdx = obs.artifact_path.indexOf('#');
-                if (hashIdx !== -1) {
-                  const decisionsPath = obs.artifact_path.slice(0, hashIdx);
-                  const anchorId = obs.artifact_path.slice(hashIdx + 1);
-                  const absPath = path.isAbsolute(decisionsPath)
-                    ? decisionsPath
-                    : path.join(process.cwd(), decisionsPath);
-                  const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
-                  if (updated) {
-                    p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
-                  } else {
-                    p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
-                  }
+            // Update Status: field in decisions file for decisions/pitfalls
+            if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
+              const hashIdx = obs.artifact_path.indexOf('#');
+              if (hashIdx !== -1) {
+                const decisionsPath = obs.artifact_path.slice(0, hashIdx);
+                const anchorId = obs.artifact_path.slice(hashIdx + 1);
+                const absPath = path.isAbsolute(decisionsPath)
+                  ? decisionsPath
+                  : path.join(process.cwd(), decisionsPath);
+                const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
+                if (updated) {
+                  p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+                } else {
+                  p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
                 }
               }
-
-              // Persist log after each deprecation so Ctrl-C never leaves the log
-              // out of sync with the decisions file updates.
-              await writeObservations(logPath, updatedObservations);
-              p.log.success(`Marked '${obs.pattern}' as deprecated.`);
-            } else if (action === 'keep') {
-              updatedObservations[idx] = {
-                ...updatedObservations[idx],
-                mayBeStale: undefined,
-                needsReview: undefined,
-                softCapExceeded: undefined,
-              };
-              // Keep writes are flag-clears only; still persist immediately for
-              // consistent on-disk state if the loop is interrupted.
-              await writeObservations(logPath, updatedObservations);
-              p.log.success(`Cleared review flags for '${obs.pattern}'.`);
             }
-            // 'skip' — no change
-          }
 
-          // Final write is a no-op if every branch already persisted, but cheap
-          // and keeps the success path explicit.
-          await writeObservations(logPath, updatedObservations);
-        } finally {
-          try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
+            // Persist log after each deprecation so Ctrl-C never leaves the log
+            // out of sync with the decisions file updates.
+            await writeObservations(logPath, updatedObservations);
+            p.log.success(`Marked '${obs.pattern}' as deprecated.`);
+          } else if (action === 'keep') {
+            updatedObservations[idx] = {
+              ...updatedObservations[idx],
+              mayBeStale: undefined,
+              needsReview: undefined,
+              softCapExceeded: undefined,
+            };
+            // Keep writes are flag-clears only; still persist immediately for
+            // consistent on-disk state if the loop is interrupted.
+            await writeObservations(logPath, updatedObservations);
+            p.log.success(`Cleared review flags for '${obs.pattern}'.`);
+          }
+          // 'skip' — no change
         }
 
-        p.outro(color.green('Review complete.'));
-        return;
+        // Final write is a no-op if every branch already persisted, but cheap
+        // and keeps the success path explicit.
+        await writeObservations(logPath, updatedObservations);
+      } finally {
+        try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
       }
 
-      if (mode === 'capacity') {
-        const memoryDir = path.join(process.cwd(), '.memory');
-        const decisionsDir = path.join(memoryDir, 'decisions');
-        const decisionsPath = path.join(decisionsDir, 'decisions.md');
-        const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
-
-        // D23: parse decisions entries from both files
-        const allEntries: Array<{
-          id: string;
-          pattern: string;
-          file: string;
-          filePath: string;
-          status: string;
-          createdDate: string | null;
-        }> = [];
-
-        for (const [filePath, type] of [[decisionsPath, 'decision'], [pitfallsPath, 'pitfall']] as const) {
-          let content: string;
-          try {
-            content = await fs.readFile(filePath, 'utf-8');
-          } catch {
-            continue; // File doesn't exist
-          }
-
-          const prefix = type === 'decision' ? 'ADR' : 'PF';
-          const headingRe = new RegExp(`^## (${prefix}-\\d+):\\s*(.+)$`, 'gm');
-          let match;
-          while ((match = headingRe.exec(content)) !== null) {
-            const entryId = match[1];
-            const pattern = match[2].trim();
-
-            // Extract Status from section
-            const sectionStart = match.index;
-            const nextHeading = content.indexOf('\n## ', sectionStart + 1);
-            const section = nextHeading !== -1
-              ? content.slice(sectionStart, nextHeading)
-              : content.slice(sectionStart);
-            const statusMatch = section.match(/- \*\*Status\*\*:\s*(\w+)/);
-            const status = statusMatch ? statusMatch[1] : 'Unknown';
-
-            // Skip deprecated/superseded entries
-            if (status === 'Deprecated' || status === 'Superseded') continue;
-
-            // Extract Date for protection check
-            const dateMatch = section.match(/- \*\*Date\*\*:\s*(\d{4}-\d{2}-\d{2})/);
-            const createdDate = dateMatch ? dateMatch[1] : null;
-
-            allEntries.push({
-              id: entryId,
-              pattern,
-              file: type === 'decision' ? 'decisions' : 'pitfalls',
-              filePath,
-              status,
-              createdDate,
-            });
-          }
-        }
-
-        if (allEntries.length === 0) {
-          p.log.info('No active decisions entries found.');
-          return;
-        }
-
-        // D23: Filter out entries created within 7 days (protected)
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        const eligible = allEntries.filter(e => {
-          if (!e.createdDate) return true; // No date — eligible
-          return e.createdDate <= sevenDaysAgo;
-        });
-
-        if (eligible.length === 0) {
-          p.log.info('All active entries are within the 7-day protection window.');
-          return;
-        }
-
-        // Load usage data for sorting
-        let usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {};
-        try {
-          const raw = await fs.readFile(path.join(memoryDir, '.decisions-usage.json'), 'utf-8');
-          const parsed = JSON.parse(raw);
-          // D-SEC2: Guard against non-object/null/array shapes before narrowing into typed record.
-          if (
-            parsed !== null &&
-            typeof parsed === 'object' &&
-            !Array.isArray(parsed) &&
-            parsed.version === 1 &&
-            parsed.entries !== null &&
-            typeof parsed.entries === 'object' &&
-            !Array.isArray(parsed.entries)
-          ) {
-            usageData = parsed.entries as typeof usageData;
-          }
-        } catch { /* no usage data — all cites=0 */ }
-
-        // D23: Sort by least used: (cites ASC, last_cited ASC NULLS FIRST, created ASC)
-        const sorted = [...eligible].sort((a, b) => {
-          const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
-          const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
-
-          // cites ASC
-          if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
-
-          // last_cited ASC NULLS FIRST
-          if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
-          if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
-          if (aUsage.last_cited && bUsage.last_cited) {
-            if (aUsage.last_cited < bUsage.last_cited) return -1;
-            if (aUsage.last_cited > bUsage.last_cited) return 1;
-          }
-
-          // created ASC
-          const aCreated = a.createdDate || '';
-          const bCreated = b.createdDate || '';
-          return aCreated.localeCompare(bCreated);
-        });
-
-        // Take top 20
-        const candidates = sorted.slice(0, 20);
-
-        p.intro(color.bgYellow(color.black(' Decisions Capacity Review ')));
-        p.log.info(
-          `${allEntries.length} active entries across decisions files.\n` +
-          `${eligible.length} eligible for review (${allEntries.length - eligible.length} within 7-day protection).\n` +
-          `Showing ${candidates.length} least-used entries.`,
-        );
-
-        // D23: p.multiselect with unchecked default
-        const selected = await p.multiselect({
-          message: 'Select entries to deprecate:',
-          options: candidates.map(e => ({
-            value: e.id,
-            label: `[${e.file}] ${e.id}: ${e.pattern}`,
-            hint: `${usageData[e.id]?.cites ?? 0} cites, ${e.status}`,
-          })),
-          required: false,
-        });
-
-        if (p.isCancel(selected) || !Array.isArray(selected) || selected.length === 0) {
-          p.log.info('No entries selected. Capacity review cancelled.');
-          return;
-        }
-
-        // Batch deprecation
-        const learningLockDir = path.join(memoryDir, '.learning.lock');
-        const lockAcquired = await acquireMkdirLock(learningLockDir);
-        if (!lockAcquired) {
-          p.log.error('Learning system is currently running. Try again in a moment.');
-          return;
-        }
-
-        try {
-          let deprecatedCount = 0;
-          for (const entryId of selected as string[]) {
-            const entry = candidates.find(e => e.id === entryId);
-            if (!entry) continue;
-
-            const updated = await updateDecisionsStatus(entry.filePath, entry.id, 'Deprecated');
-            if (updated) {
-              deprecatedCount++;
-              p.log.success(`Deprecated ${entry.id}: ${entry.pattern}`);
-            } else {
-              p.log.warn(`Could not update ${entry.id} — update manually`);
-            }
-          }
-
-          // D28: Check if counts dropped below soft start, clear notifications if so
-          let notifications: Record<string, NotificationFileEntry> = {};
-          try {
-            const raw = JSON.parse(
-              await fs.readFile(path.join(memoryDir, '.learning-notifications.json'), 'utf-8'),
-            );
-            if (isNotificationMap(raw)) {
-              notifications = raw;
-            } else {
-              p.log.warn('Notifications file has unexpected shape — treating as empty.');
-            }
-          } catch { /* no notifications file — nothing to clear */ }
-
-          const devflowDir = getDevFlowDirectory();
-          const jsonHelperPath = path.join(devflowDir, 'scripts', 'hooks', 'json-helper.cjs');
-
-          for (const [filePath, type, notifKey] of [
-            [decisionsPath, 'decision', 'decisions-capacity-decisions'],
-            [pitfallsPath, 'pitfall', 'decisions-capacity-pitfalls'],
-          ] as const) {
-            try {
-              // D23: Use count-active op via json-helper.cjs (single source of truth)
-              // D-SEC3: execFileSync with argv array — no shell interpolation of cwd-derived paths.
-              const raw = JSON.parse(
-                execFileSync('node', [jsonHelperPath, 'count-active', filePath, type], {
-                  encoding: 'utf8',
-                  stdio: ['pipe', 'pipe', 'pipe'],
-                }).trim(),
-              );
-              const activeCount = isCountActiveResult(raw) ? raw.count : 0;
-
-              // D28: if count dropped below soft start, clear notification
-              if (activeCount < 50 && notifications[notifKey]) {
-                notifications[notifKey].active = false;
-                notifications[notifKey].dismissed_at_threshold = null;
-              }
-            } catch { /* count-active failed — skip notification update */ }
-          }
-
-          await writeFileAtomicExclusive(path.join(memoryDir, '.learning-notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
-
-          p.log.success(`Deprecated ${deprecatedCount} entry(ies).`);
-        } finally {
-          try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
-        }
-
-        p.outro(color.green('Capacity review complete.'));
-        return;
-      }
-
+      p.outro(color.green('Review complete.'));
       return;
     }
 
