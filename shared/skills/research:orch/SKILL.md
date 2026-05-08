@@ -26,7 +26,7 @@ For GUIDED depth, the main session performs research directly:
 1. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Follow `devflow:apply-decisions` to Read full entry bodies on demand.
 2. **Infer research types** — From the user's prompt, infer 1-2 research types. Use the Research Types table below to determine the skill name for each type, then load it directly via Skill tool.
 3. **Check tool availability** — If WebSearch/WebFetch are not available, restrict to `codebase` type only. Inform user that external research is not available in this session.
-4. **Spawn 1-2 Researcher agents** with OUTPUT_PATH to `.docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/`.
+4. **Spawn 1-2 Researcher agents** with OUTPUT_PATH to `.docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/` and DECISIONS_CONTEXT from step 1.
 5. **Present findings** with trust annotations (trusted/untrusted/mixed per finding).
 
 ---
@@ -43,14 +43,14 @@ Load the decisions index before research:
 DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-Use `DECISIONS_CONTEXT` locally — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Researcher agents** — they get their own copy in the agent prompt.
+Use `DECISIONS_CONTEXT` locally to frame research — prior decisions and pitfalls suggest areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Researcher agent in Phase 4 so they can cite relevant decisions in findings.
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
 2. Identify relevant feature knowledge entries (match research question against each entry's descriptions and directories).
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** — feature-specific patterns guide what the codebase researcher should look for.
-5. **Do NOT pass to Researcher agents** (same asymmetric pattern as DECISIONS_CONTEXT).
+5. Pass `FEATURE_KNOWLEDGE` to each Researcher agent in Phase 4.
 
 ### Phase 2: Requirements
 

@@ -51,8 +51,6 @@ Read `.release/RELEASE-FLOW.md`:
 - If exists → parse as structured config, set CONFIG_STATE = learned, skip to Phase 4
 - If missing → set CONFIG_STATE = fresh, continue to Phase 2
 
----
-
 ### Phase 2: Detect Release Process (First Run Only)
 
 **Produces:** RELEASE_SIGNALS
@@ -82,8 +80,6 @@ Tiered codebase scan to detect the project's release process:
 **Cap**: Maximum 20 files read across all tiers.
 
 Collect RELEASE_SIGNALS: detected project type, version strategy, tag format, CI tooling, changelog format, publish targets.
-
----
 
 ### Phase 3: Build Config (First Run Only)
 
@@ -141,8 +137,6 @@ For any gaps that cannot be inferred from RELEASE_SIGNALS: use AskUserQuestion t
    .lock/
    ```
 
----
-
 ### Phase 4: Pre-release Checks
 
 **Produces:** PRE_RELEASE_RESULT, VERSION
@@ -171,8 +165,6 @@ Spawn `Agent(subagent_type="Validator")` for build + test:
 
 **Dry-run mode** (`--dry-run` flag): report what would happen and halt after this phase. Do not create any commits, tags, or releases.
 
----
-
 ### Phase 5: Build Release Plan
 
 **Produces:** RELEASE_PLAN
@@ -189,8 +181,6 @@ For monorepo: respect dependency ordering. Use AskUserQuestion to present packag
 "Ready to release {VERSION}. Plan: {steps summary}. Proceed?"
 
 If user declines → halt gracefully with message.
-
----
 
 ### Phase 6: Execute Release
 
@@ -240,8 +230,6 @@ Create annotated tag and GitHub release."
 
 **Cleanup**: Delete `.release/.progress.json` on successful completion.
 
----
-
 ### Phase 7: Suggest Improvements
 
 **Requires:** RELEASE_RESULT
@@ -259,7 +247,7 @@ This phase is fire-and-forget: no persistent storage, no blocking.
 
 ## Worktree Support
 
-Same pattern as implement:orch. If `WORKTREE_PATH` is provided, pass it through to all spawned agents.
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
 ---
 

@@ -12,7 +12,7 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 20 plugins (9 core + 11 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 20 plugins (11 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
@@ -70,9 +70,9 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 ```
 devflow/
-├── shared/skills/          # 44 skills (single source of truth)
+├── shared/skills/          # 49 skills (single source of truth)
 ├── shared/agents/          # 14 shared agents (single source of truth)
-├── plugins/devflow-*/      # 20 plugins (9 core + 11 optional language/ecosystem)
+├── plugins/devflow-*/      # 20 plugins (11 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, session-end-decisions, get-mtime, session-end-knowledge-refresh, background-knowledge-refresh)
@@ -170,7 +170,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `shared/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
-**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
 
 ## Agent & Command Roster
 
@@ -192,7 +192,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Orchestration skills** (9): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch, research:orch, release:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
 
-**Agent Teams**: 6 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/explore`, `/debug`, `/resolve`). One-team-per-session constraint — must TeamDelete before creating next team.
+**Agent Teams**: 8 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/explore`, `/debug`, `/resolve`, `/research`, `/release`). One-team-per-session constraint — must TeamDelete before creating next team.
 
 ## Key Conventions
 

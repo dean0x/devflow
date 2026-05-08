@@ -29,6 +29,7 @@ plugins/*/agents/scrutinizer.md
 plugins/*/agents/validator.md
 plugins/*/agents/designer.md
 plugins/*/agents/knowledge.md
+plugins/*/agents/researcher.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

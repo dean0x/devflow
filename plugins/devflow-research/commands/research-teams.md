@@ -34,13 +34,13 @@ Before researching, load the decisions index:
 DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
 ```
 
-The orchestrator uses `DECISIONS_CONTEXT` locally. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to researcher teammates** — decisions context stays in the orchestrator.
+Use `DECISIONS_CONTEXT` locally when framing research. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to researcher teammates via their prompts in Phase 4 so they can cite relevant decisions in findings.
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
 2. Identify relevant feature knowledge entries.
 3. For each match: check staleness, read `.features/{slug}/KNOWLEDGE.md`.
-4. Use `FEATURE_KNOWLEDGE` **locally only**. **Do NOT pass to researcher teammates.**
+4. Use `FEATURE_KNOWLEDGE` **locally** for research framing. Include in researcher teammate prompts in Phase 4.
 
 ### Phase 2: Requirements
 
