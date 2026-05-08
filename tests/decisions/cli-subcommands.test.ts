@@ -76,7 +76,14 @@ import {
   parseLearningLog,
   loadAndCountObservations,
   type LearningObservation,
-} from '../../src/cli/commands/learn.js';
+} from '../../src/cli/utils/observations.js';
+import {
+  filterEligibleEntries,
+  sortByLeastUsed,
+  clearCapacityNotifications,
+  toDecisionsStatus,
+  type DecisionsEntry,
+} from '../../src/cli/commands/decisions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -418,5 +425,161 @@ describe('decisions --dismiss-capacity notification logic', () => {
       .map(([k]) => k);
 
     expect(activeKeys).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --review capacity mode: verify parsing, filtering, sorting logic
+// (These test the logic that the capacity review handler will use after the
+// capacity review is ported from learn.ts to decisions.ts)
+// ---------------------------------------------------------------------------
+
+describe('decisions --review capacity mode logic', () => {
+  it('excludes deprecated and superseded entries from eligible list', () => {
+    // NOTE: This status filter is intentionally inline — it mirrors the `continue`
+    // skip inside the capacity review parser (decisions.ts ~line 804), which excludes
+    // Deprecated/Superseded entries before they are pushed to `allEntries`. This is a
+    // distinct pre-filter step from filterEligibleEntries, which applies the 7-day
+    // protection window. Extracting a one-liner !== check into a named function adds
+    // no clarity benefit here.
+    const allEntries: DecisionsEntry[] = [
+      { id: 'ADR-001', pattern: 'Use X', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Accepted', createdDate: '2026-01-01' },
+      { id: 'ADR-002', pattern: 'Use Y', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Deprecated', createdDate: '2026-01-10' },
+      { id: 'ADR-003', pattern: 'Use Z', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Superseded', createdDate: '2026-01-15' },
+      { id: 'PF-001', pattern: 'Avoid W', file: 'pitfalls', filePath: '/tmp/pitfalls.md', status: 'Active', createdDate: '2026-01-20' },
+    ];
+
+    // Replicate the parser-level status filter (decisions.ts capacity block)
+    const eligible = allEntries.filter(
+      e => e.status !== 'Deprecated' && e.status !== 'Superseded',
+    );
+
+    expect(eligible).toHaveLength(2);
+    expect(eligible.map(e => e.id)).toContain('ADR-001');
+    expect(eligible.map(e => e.id)).toContain('PF-001');
+    expect(eligible.map(e => e.id)).not.toContain('ADR-002');
+    expect(eligible.map(e => e.id)).not.toContain('ADR-003');
+  });
+
+  it('excludes entries created within 7-day protection window', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const entries: DecisionsEntry[] = [
+      { id: 'ADR-001', createdDate: tenDaysAgo, status: 'Accepted', pattern: 'Old entry', file: 'decisions', filePath: '' },
+      { id: 'ADR-002', createdDate: threeDaysAgo, status: 'Accepted', pattern: 'Recent entry', file: 'decisions', filePath: '' },
+      { id: 'ADR-003', createdDate: today, status: 'Accepted', pattern: 'Today entry', file: 'decisions', filePath: '' },
+      { id: 'ADR-004', createdDate: null, status: 'Accepted', pattern: 'No date entry', file: 'decisions', filePath: '' },
+    ];
+
+    const eligible = filterEligibleEntries(entries);
+
+    expect(eligible).toHaveLength(2); // tenDaysAgo and no-date
+    expect(eligible.map(e => e.id)).toContain('ADR-001');
+    expect(eligible.map(e => e.id)).toContain('ADR-004'); // no date — eligible
+    expect(eligible.map(e => e.id)).not.toContain('ADR-002');
+    expect(eligible.map(e => e.id)).not.toContain('ADR-003');
+  });
+
+  it('sorts entries by least-used (cites ASC, last_cited ASC NULLS FIRST, created ASC)', () => {
+    const entries: DecisionsEntry[] = [
+      { id: 'ADR-001', createdDate: '2026-01-01', status: 'Accepted', pattern: 'Often cited', file: 'decisions', filePath: '' },
+      { id: 'ADR-002', createdDate: '2026-01-02', status: 'Accepted', pattern: 'Never cited', file: 'decisions', filePath: '' },
+      { id: 'ADR-003', createdDate: '2026-01-03', status: 'Accepted', pattern: 'Rarely cited', file: 'decisions', filePath: '' },
+    ];
+
+    const usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {
+      'ADR-001': { cites: 10, last_cited: '2026-05-01', created: null },
+      'ADR-002': { cites: 0, last_cited: null, created: null },
+      'ADR-003': { cites: 2, last_cited: '2026-03-01', created: null },
+    };
+
+    const sorted = sortByLeastUsed(entries, usageData);
+
+    // Least used first: ADR-002 (0 cites), ADR-003 (2 cites), ADR-001 (10 cites)
+    expect(sorted[0].id).toBe('ADR-002');
+    expect(sorted[1].id).toBe('ADR-003');
+    expect(sorted[2].id).toBe('ADR-001');
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// toDecisionsStatus normalizer
+// ---------------------------------------------------------------------------
+
+describe('toDecisionsStatus normalizer', () => {
+  it('passes through each valid status unchanged', () => {
+    expect(toDecisionsStatus('Accepted')).toBe('Accepted');
+    expect(toDecisionsStatus('Active')).toBe('Active');
+    expect(toDecisionsStatus('Deprecated')).toBe('Deprecated');
+    expect(toDecisionsStatus('Superseded')).toBe('Superseded');
+    expect(toDecisionsStatus('Unknown')).toBe('Unknown');
+  });
+
+  it('maps unrecognized strings to Unknown', () => {
+    expect(toDecisionsStatus('accepted')).toBe('Unknown'); // wrong case
+    expect(toDecisionsStatus('ACTIVE')).toBe('Unknown');
+    expect(toDecisionsStatus('')).toBe('Unknown');
+    expect(toDecisionsStatus('draft')).toBe('Unknown');
+    expect(toDecisionsStatus('archived')).toBe('Unknown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capacity review notification clearing logic (D28)
+// ---------------------------------------------------------------------------
+
+describe('capacity review notification clearing (D28)', () => {
+  it('clears active notification when active count drops below 50', () => {
+    // Simulate the post-deprecation notification update in --review capacity mode.
+    // When count-active returns < 50 for a file, the notification should be deactivated.
+    const notifications = {
+      'decisions-capacity-decisions': { active: true, dismissed_at_threshold: null },
+      'decisions-capacity-pitfalls': { active: true, dismissed_at_threshold: null },
+    };
+
+    // Simulate count-active returning 45 for decisions (below threshold) and 60 for pitfalls (above)
+    const counts: Record<string, number> = {
+      'decisions-capacity-decisions': 45,
+      'decisions-capacity-pitfalls': 60,
+    };
+
+    clearCapacityNotifications(notifications, counts);
+
+    // decisions notification cleared (count 45 < 50)
+    expect(notifications['decisions-capacity-decisions'].active).toBe(false);
+    expect(notifications['decisions-capacity-decisions'].dismissed_at_threshold).toBeNull();
+
+    // pitfalls notification NOT cleared (count 60 >= 50)
+    expect(notifications['decisions-capacity-pitfalls'].active).toBe(true);
+  });
+
+  it('does not clear notifications when active count stays at or above 50', () => {
+    const notifications = {
+      'decisions-capacity-decisions': { active: true, dismissed_at_threshold: null },
+    };
+
+    const counts: Record<string, number> = {
+      'decisions-capacity-decisions': 55, // still above threshold
+    };
+
+    clearCapacityNotifications(notifications, counts);
+
+    expect(notifications['decisions-capacity-decisions'].active).toBe(true);
+  });
+
+  it('skips notification update when notifications key is absent', () => {
+    // If the key does not exist in the notifications map, the update should be a no-op
+    const notifications = {};
+    const counts: Record<string, number> = {
+      'decisions-capacity-decisions': 30,
+    };
+
+    clearCapacityNotifications(notifications, counts);
+
+    // Key was absent, nothing was added or mutated
+    expect(Object.keys(notifications)).toHaveLength(0);
   });
 });

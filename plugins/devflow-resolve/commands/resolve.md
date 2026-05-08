@@ -172,7 +172,9 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Decisions Citations` section in Phase 8.
+Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches.
+
+**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 8 — while the aggregated results are fresh in context. Use the template from the Output Artifact section below. This ensures the resolution record is persisted even if later phases (Simplify, Tech Debt) trigger context compaction.
 
 ### Phase 6: Simplify
 
@@ -209,9 +211,9 @@ Note: Deferred issues from resolution are already in resolution-summary.md"
 
 ### Phase 8: Report
 
-**Requires:** AGGREGATED_RESULTS, KNOWLEDGE_CITATIONS, TARGET_DIR
+**Requires:** TARGET_DIR
 
-**Write the resolution summary** to `{TARGET_DIR}/resolution-summary.md` using Write tool, then display:
+The resolution summary was already written to `{TARGET_DIR}/resolution-summary.md` in Phase 5. Display results to the user:
 
 ```
 ## Resolution Summary
@@ -305,7 +307,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Output Artifact
 
-Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
+Written in Phase 5 (Collect Results) to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary

@@ -6,13 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
 import { runHelper } from './helpers.js';
-
-function nodeEval(code: string): unknown {
-  const result = execSync(`node -e "${code.replace(/"/g, '\\"')}"`, { encoding: 'utf8' });
-  return JSON.parse(result.trim());
-}
 
 // Direct calculation via inline node to test calculateConfidence
 function calculateConfidence(count: number, type: string): number {
@@ -246,5 +240,107 @@ describe('process-observations — per-type promotion (D3, D4)', () => {
     const created = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
     expect(created.quality_ok).toBe(true);
     expect(created.type).toBe('pitfall');
+  });
+
+  it('decision promotes on first observation (quality_ok=true)', () => {
+    // Empty log — brand new entry
+    const response = {
+      observations: [{
+        id: 'obs_new_dec001',
+        type: 'decision',
+        pattern: 'use X over Y',
+        evidence: ['user said so'],
+        details: 'context: X; decision: X over Y; rationale: performance',
+        quality_ok: true,
+      }],
+    };
+    fs.writeFileSync(responseFile, JSON.stringify(response));
+    // No existing log file — new entry path
+
+    runHelper(`process-observations "${responseFile}" "${logFile}"`);
+
+    const created = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+    expect(created.status).toBe('ready');
+    expect(created.confidence).toBe(0.95);
+  });
+
+  it('pitfall promotes on first observation (quality_ok=true)', () => {
+    const response = {
+      observations: [{
+        id: 'obs_new_pit001',
+        type: 'pitfall',
+        pattern: 'avoid X in Y',
+        evidence: ['evidence line'],
+        details: 'area: cli; issue: X; impact: breaks Y; resolution: avoid X',
+        quality_ok: true,
+      }],
+    };
+    fs.writeFileSync(responseFile, JSON.stringify(response));
+
+    runHelper(`process-observations "${responseFile}" "${logFile}"`);
+
+    const created = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+    expect(created.status).toBe('ready');
+    expect(created.confidence).toBe(0.95);
+  });
+
+  it('decision stays observing when quality_ok=false', () => {
+    const response = {
+      observations: [{
+        id: 'obs_new_dec002',
+        type: 'decision',
+        pattern: 'use Y instead of Z',
+        evidence: ['evidence'],
+        details: 'context: Y; decision: Y; rationale: simplicity',
+        quality_ok: false,
+      }],
+    };
+    fs.writeFileSync(responseFile, JSON.stringify(response));
+
+    runHelper(`process-observations "${responseFile}" "${logFile}"`);
+
+    const created = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+    expect(created.status).toBe('observing');
+    expect(created.confidence).toBe(0.95);
+  });
+
+  it('workflow unaffected — stays observing at confidence=0.33 after first observation', () => {
+    const response = {
+      observations: [{
+        id: 'obs_new_wf001',
+        type: 'workflow',
+        pattern: 'run tests then deploy',
+        evidence: ['evidence'],
+        details: 'step 1; step 2',
+        quality_ok: true,
+      }],
+    };
+    fs.writeFileSync(responseFile, JSON.stringify(response));
+
+    runHelper(`process-observations "${responseFile}" "${logFile}"`);
+
+    const created = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+    expect(created.status).toBe('observing');
+    expect(created.confidence).toBe(0.33);
+  });
+
+  it('procedural unaffected — preserves INITIAL_CONFIDENCE at 0.33', () => {
+    const response = {
+      observations: [{
+        id: 'obs_new_proc001',
+        type: 'procedural',
+        pattern: 'always check return value',
+        evidence: ['evidence'],
+        details: 'procedure details',
+        quality_ok: true,
+      }],
+    };
+    fs.writeFileSync(responseFile, JSON.stringify(response));
+
+    runHelper(`process-observations "${responseFile}" "${logFile}"`);
+
+    const created = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+    expect(created.status).toBe('observing');
+    expect(created.confidence).toBe(0.33);
   });
 });

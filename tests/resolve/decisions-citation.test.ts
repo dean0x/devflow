@@ -169,9 +169,9 @@ describe('resolve:orch SKILL.md — ambient mode parity', () => {
     expect(phase5Section).toContain('DECISIONS_CONTEXT');
   });
 
-  it('Phase 7 (Report) mentions Decisions Citations (D-B)', () => {
-    const phase7Section = extractSection(content, '## Phase 7', '## Error Handling');
-    expect(phase7Section).toContain('Decisions Citations');
+  it('Phase 6 (Collect & Simplify) mentions Decisions Citations (D-B)', () => {
+    const phase6Section = extractSection(content, '## Phase 6', '## Phase 7');
+    expect(phase6Section).toContain('Decisions Citations');
   });
 });
 

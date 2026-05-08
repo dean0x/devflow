@@ -502,6 +502,35 @@ function calculateConfidence(count, type) {
   return Math.min(Math.floor(count * 100 / req), 95) / 100;
 }
 
+/**
+ * D3+D4: Attempt promotion for an entry whose type has required=1 and spread=0
+ * (decision/pitfall). If confidence >= threshold AND quality_ok, sets
+ * entry.status = 'ready' in place.
+ *
+ * @param {object} entry - The log entry (mutated in place).
+ * @param {object} [opts]
+ * @param {boolean} [opts.guardCreated=false] - When true, skip promotion if
+ *   entry.status === 'created' (already materialized). Use for existing entries.
+ *   Omit (false) for brand-new entries that cannot yet be 'created'.
+ * @param {boolean} [opts.firstSeenFallback=false] - When true, fall back to
+ *   epoch-0 when first_seen is absent (existing entries may lack the field).
+ *   Omit (false) for brand-new entries that always have first_seen set.
+ */
+function tryImmediatePromotion(entry, opts = {}) {
+  const { guardCreated = false, firstSeenFallback = false } = opts;
+  if (guardCreated && entry.status === 'created') return;
+  const th = THRESHOLDS[entry.type] || THRESHOLDS.procedural;
+  if (entry.confidence >= th.promote && entry.quality_ok === true) {
+    const firstSeenMs = firstSeenFallback
+      ? (entry.first_seen ? new Date(entry.first_seen).getTime() : 0)
+      : new Date(entry.first_seen).getTime();
+    const spread = (Date.now() - firstSeenMs) / 1000;
+    if (!isNaN(firstSeenMs) && spread >= th.spread) {
+      entry.status = 'ready';
+    }
+  }
+}
+
 function mergeEvidence(oldEvidence, newEvidence) {
   const flat = [...(oldEvidence || []), ...(newEvidence || [])];
   const unique = [...new Set(flat)];
@@ -997,25 +1026,19 @@ try {
           // threshold AND quality_ok. quality_ok gates materialization; without it
           // we keep accumulating observations (so the count still grows) but the
           // downstream render-ready will skip the entry. See render-ready (line ~838).
-          if (existing.status !== 'created') {
-            const th = THRESHOLDS[existing.type] || THRESHOLDS.procedural;
-            if (existing.confidence >= th.promote && existing.quality_ok === true) {
-              const firstSeenMs = existing.first_seen ? new Date(existing.first_seen).getTime() : 0;
-              const spread = (Date.now() - firstSeenMs) / 1000;
-              if (!isNaN(firstSeenMs) && spread >= th.spread) {
-                existing.status = 'ready';
-              }
-            }
-          }
+          // guardCreated: skip already-materialized entries; firstSeenFallback: tolerate
+          // legacy entries that may lack first_seen.
+          tryImmediatePromotion(existing, { guardCreated: true, firstSeenFallback: true });
 
           learningLog(`Updated ${obs.id}: confidence ${existing.confidence}, status ${existing.status}`);
           updated++;
         } else {
+          const isImmediateType = obs.type === 'decision' || obs.type === 'pitfall';
           const newEntry = {
             id: obs.id,
             type: obs.type,
             pattern: obs.pattern,
-            confidence: INITIAL_CONFIDENCE,
+            confidence: isImmediateType ? calculateConfidence(1, obs.type) : INITIAL_CONFIDENCE,
             observations: 1,
             first_seen: nowIso,
             last_seen: nowIso,
@@ -1025,7 +1048,14 @@ try {
             quality_ok: qualityOk,
           };
           logMap.set(obs.id, newEntry);
-          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${INITIAL_CONFIDENCE} quality_ok=${qualityOk}`);
+
+          // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first observation
+          // if quality_ok=true. Check immediately after creation.
+          if (isImmediateType) {
+            tryImmediatePromotion(newEntry);
+          }
+
+          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${newEntry.confidence} quality_ok=${qualityOk}`);
           created++;
         }
       }
@@ -1734,11 +1764,12 @@ try {
           newId = newId + '_b';
           learningLog(`merge-observation: ID collision resolved: ${newObs.id} -> ${newId}`);
         }
+        const isImmediateType = newObs.type === 'decision' || newObs.type === 'pitfall';
         const entry = {
           id: newId,
           type: newObs.type,
           pattern: newObs.pattern,
-          confidence: INITIAL_CONFIDENCE,
+          confidence: isImmediateType ? calculateConfidence(1, newObs.type) : INITIAL_CONFIDENCE,
           observations: 1,
           first_seen: nowIso,
           last_seen: nowIso,
@@ -1747,8 +1778,15 @@ try {
           details: newObs.details || '',
           quality_ok: newObs.quality_ok === true,
         };
+
+        // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first merge
+        // if quality_ok=true. Check immediately after creation.
+        if (isImmediateType) {
+          tryImmediatePromotion(entry);
+        }
+
         logMap.set(newId, entry);
-        learningLog(`merge-observation: new entry ${newId}`);
+        learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
       }
 
       writeJsonlAtomic(logFile, Array.from(logMap.values()));

@@ -19,45 +19,21 @@ import {
   checkStaleness,
 } from '../utils/background-runner.js';
 import { runLearningAgent } from '../utils/learning-agent.js';
+import { acquireMkdirLock } from '../utils/mkdir-lock.js';
+import {
+  type LearningObservation,
+  loadAndCountObservations,
+  formatStaleReason,
+} from '../utils/observations.js';
+import {
+  readObservations,
+  writeObservations,
+  updateDecisionsStatus,
+  warnIfInvalid,
+} from '../utils/observation-io.js';
 
 // Re-export the consolidated alias for callers that previously imported it from this module.
 export type { NotificationFileEntry };
-
-/**
- * D-SEC2: Runtime guard for the `count-active` JSON result from json-helper.cjs.
- * Accepts any object that carries a numeric `count` field (extra fields are ignored).
- */
-function isCountActiveResult(v: unknown): v is { count: number } {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) &&
-    typeof (v as Record<string, unknown>).count === 'number';
-}
-
-/**
- * Learning observation stored in learning-log.jsonl (one JSON object per line).
- * v2 extends type to include 'decision' and 'pitfall', and adds attention flags.
- */
-export interface LearningObservation {
-  id: string;
-  type: 'workflow' | 'procedural' | 'decision' | 'pitfall';
-  pattern: string;
-  confidence: number;
-  observations: number;
-  first_seen: string;
-  last_seen: string;
-  status: 'observing' | 'ready' | 'created' | 'deprecated';
-  evidence: string[];
-  details: string;
-  artifact_path?: string;
-  /** Set by staleness checker (D16) when code refs in artifact file are missing */
-  mayBeStale?: boolean;
-  staleReason?: string;
-  /** Set by merge-observation when an incoming observation's details diverge
-   *  significantly from the existing entry (Levenshtein ratio < 0.6). See D14. */
-  needsReview?: boolean;
-  /** D17: Set when decisions file hits hard ceiling (100 entries) — repurposed from 50 soft cap */
-  softCapExceeded?: boolean;
-  quality_ok?: boolean;
-}
 
 /**
  * Merged learning configuration from global and project-level config files.
@@ -69,25 +45,6 @@ export interface LearningConfig {
   debug: boolean;
   /** Number of observations processed per learning run. Default 3, adaptive 5 at 15+ observations. */
   batch_size: number;
-}
-
-/**
- * Type guard for validating raw JSON as a LearningObservation.
- * Accepts all 4 types (v2: decision + pitfall added) and all statuses including deprecated.
- */
-export function isLearningObservation(obj: unknown): obj is LearningObservation {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const o = obj as Record<string, unknown>;
-  return typeof o.id === 'string' && o.id.length > 0
-    && (o.type === 'workflow' || o.type === 'procedural' || o.type === 'decision' || o.type === 'pitfall')
-    && typeof o.pattern === 'string' && o.pattern.length > 0
-    && typeof o.confidence === 'number'
-    && typeof o.observations === 'number'
-    && typeof o.first_seen === 'string'
-    && typeof o.last_seen === 'string'
-    && (o.status === 'observing' || o.status === 'ready' || o.status === 'created' || o.status === 'deprecated')
-    && Array.isArray(o.evidence)
-    && typeof o.details === 'string';
 }
 
 const LEARNING_HOOK_MARKER = 'session-end-learning';
@@ -196,47 +153,6 @@ export function hasLearningHook(input: string | Settings): 'current' | 'legacy' 
 }
 
 /**
- * Parse a JSONL learning log into typed observations.
- * Skips empty and malformed lines.
- */
-export function parseLearningLog(logContent: string): LearningObservation[] {
-  if (!logContent.trim()) {
-    return [];
-  }
-
-  const observations: LearningObservation[] = [];
-
-  for (const line of logContent.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (isLearningObservation(parsed)) {
-        observations.push(parsed);
-      }
-    } catch {
-      // Skip malformed lines
-    }
-  }
-
-  return observations;
-}
-
-/**
- * Parse a JSONL log and return valid observations plus the count of invalid entries.
- * Centralises the raw-line-count + parse pattern used by --status, --list, and --purge.
- */
-export function loadAndCountObservations(logContent: string): {
-  observations: LearningObservation[];
-  invalidCount: number;
-} {
-  const rawLines = logContent.split('\n').filter(l => l.trim()).length;
-  const observations = parseLearningLog(logContent);
-  return { observations, invalidCount: rawLines - observations.length };
-}
-
-/**
  * Format a human-readable status summary for learning state.
  * hookState: 'current' (SessionEnd), 'legacy' (old Stop hook), or false (disabled).
  */
@@ -312,157 +228,6 @@ export function loadLearningConfig(globalJson: string | null, projectJson: strin
   return config;
 }
 
-/**
- * Read and parse observations from a log file.
- * Returns empty results if the file does not exist.
- */
-export async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
-  try {
-    const logContent = await fs.readFile(logPath, 'utf-8');
-    return loadAndCountObservations(logContent);
-  } catch {
-    return { observations: [], invalidCount: 0 };
-  }
-}
-
-/**
- * Acquire a mkdir-based lock directory.
- *
- * Used by CLI writers (`--review`, `--dismiss-capacity`) to serialize
- * against the background learning pipeline. `.learning.lock` guards log mutations;
- * `.decisions.lock` guards decisions.md / pitfalls.md — the caller picks the path.
- *
- * Stale detection: if the lock directory is older than `staleMs` we assume the
- * previous holder crashed and remove it. `json-helper.cjs` uses the same
- * 60 s threshold; `background-learning` intentionally uses 300 s (guards the
- * full Sonnet pipeline, not just file I/O — see DESIGN comment in that script).
- *
- * @returns true when the lock was acquired, false on timeout.
- */
-async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, staleMs = 60_000): Promise<boolean> {
-  const start = Date.now();
-  while (true) {
-    try {
-      await fs.mkdir(lockDir);
-      return true;
-    } catch {
-      try {
-        const stat = await fs.stat(lockDir);
-        if (Date.now() - stat.mtimeMs > staleMs) {
-          try { await fs.rmdir(lockDir); } catch { /* race condition OK */ }
-          continue;
-        }
-      } catch { /* lock vanished between EEXIST and stat */ }
-      if (Date.now() - start >= timeoutMs) return false;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-}
-
-/**
- * Warn the user if invalid entries were found in a log file.
- * Pass `command` to customize the purge command shown in the warning.
- */
-export function warnIfInvalid(invalidCount: number, command = 'devflow learn --purge'): void {
-  if (invalidCount > 0) {
-    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run '${command}' to clean.`);
-  }
-}
-
-/**
- * Write observations back to a log file atomically.
- * Each observation is serialized as a JSON line. Uses a `.tmp` sibling + rename so
- * concurrent readers (e.g. background-learning during a race) never observe a
- * half-written file. Delegates to `writeFileAtomicExclusive` in fs-atomic.ts
- * (D34/D39: canonical TS atomic-write helper).
- */
-export async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
-  const lines = observations.map(o => JSON.stringify(o));
-  const content = lines.join('\n') + (lines.length ? '\n' : '');
-  await writeFileAtomicExclusive(logPath, content);
-}
-
-/**
- * Update the Status: field for a decision or pitfall entry in a decisions file.
- * Locates the entry by anchor ID (from artifact_path fragment), sets Status to the given value.
- * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
- *
- * The lock path MUST match the render-ready writer in json-helper.cjs so CLI updates
- * serialize against the background learning pipeline.
- */
-export async function updateDecisionsStatus(
-  filePath: string,
-  anchorId: string,
-  newStatus: string,
-): Promise<boolean> {
-  // Lock path MUST be `.memory/.decisions.lock` (sibling of `decisions/`) to match
-  // scripts/hooks/json-helper.cjs render-ready + decisions-append writers.
-  // Decisions files live at `.memory/decisions/{decisions,pitfalls}.md` so we go up
-  // one level from the file's parent directory.
-  const memoryDir = path.dirname(path.dirname(filePath));
-  const lockPath = path.join(memoryDir, '.decisions.lock');
-
-  const acquired = await acquireMkdirLock(lockPath);
-  if (!acquired) return false;
-
-  try {
-    let content: string;
-    try {
-      content = await fs.readFile(filePath, 'utf-8');
-    } catch {
-      return false; // File doesn't exist
-    }
-
-    // Find the anchor heading and update Status: field
-    const anchorPattern = new RegExp(`(##[^#][^\n]*${escapeRegExp(anchorId)}[^\n]*\n(?:(?!^##)[^\n]*\n)*?)(- \\*\\*Status\\*\\*: )[^\n]+`, 'm');
-    const updated = content.replace(anchorPattern, `$1$2${newStatus}`);
-
-    if (updated === content) {
-      // Try a simpler replacement: find the Status line after the anchor heading
-      const lines = content.split('\n');
-      let inSection = false;
-      let changed = false;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes(anchorId)) {
-          inSection = true;
-        } else if (inSection && lines[i].startsWith('## ')) {
-          break; // Past the section
-        } else if (inSection && lines[i].match(/^- \*\*Status\*\*: /)) {
-          lines[i] = `- **Status**: ${newStatus}`;
-          changed = true;
-          break;
-        }
-      }
-      if (!changed) return false;
-      await writeFileAtomicExclusive(filePath, lines.join('\n'));
-    } else {
-      await writeFileAtomicExclusive(filePath, updated);
-    }
-    return true;
-  } finally {
-    try { await fs.rmdir(lockPath); } catch { /* already cleaned */ }
-  }
-}
-
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Format a stale reason string for display.
- */
-function formatStaleReason(obs: LearningObservation): string {
-  const reasons: string[] = [];
-  if (obs.mayBeStale && obs.staleReason) {
-    reasons.push(`stale: ${obs.staleReason}`);
-  } else if (obs.mayBeStale) {
-    reasons.push('may be stale');
-  }
-  if (obs.needsReview) reasons.push('artifact missing (deleted?)');
-  if (obs.softCapExceeded) reasons.push('decisions file at capacity');
-  return reasons.join(', ') || 'flagged for review';
-}
-
 interface LearnOptions {
   enable?: boolean;
   disable?: boolean;
@@ -493,7 +258,11 @@ export const learnCommand = new Command('learn')
   .option('--run-background', 'Run learning agent in background mode')
   .option('--cwd <path>', 'Working directory for background mode')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity || options.runBackground;
+    const knownFlags: (keyof LearnOptions)[] = [
+      'enable', 'disable', 'status', 'list', 'configure',
+      'clear', 'reset', 'purge', 'review', 'dismissCapacity', 'runBackground',
+    ];
+    const hasFlag = knownFlags.some((f) => options[f]);
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -957,353 +726,124 @@ export const learnCommand = new Command('learn')
     }
 
     // --- --review ---
+    // Capacity review has moved to `devflow decisions --review` (capacity mode).
+    // This handler surfaces only workflow/procedural observations flagged for
+    // attention (stale, missing artifacts, soft cap exceeded).
     if (options.review) {
-      const mode = await p.select({
-        message: 'Review mode:',
-        options: [
-          { value: 'observations', label: 'Review flagged observations', hint: 'stale, missing, at capacity' },
-          { value: 'capacity', label: 'Review decisions capacity', hint: 'deprecate least-used entries' },
-          { value: 'cancel', label: 'Cancel' },
-        ],
-      });
+      const { observations, invalidCount } = await readObservations(logPath);
+      warnIfInvalid(invalidCount);
 
-      if (p.isCancel(mode) || mode === 'cancel') {
+      const flagged = observations.filter(
+        (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
+      );
+
+      if (flagged.length === 0) {
+        p.log.info('No observations flagged for review. All clear.');
         return;
       }
 
-      if (mode === 'observations') {
-        const { observations, invalidCount } = await readObservations(logPath);
-        warnIfInvalid(invalidCount);
+      // Acquire .learning.lock so we don't race with background-learning during the
+      // interactive loop. The internal updateDecisionsStatus call still takes its own
+      // .decisions.lock — different lock directories, no deadlock.
+      const memoryDir = path.join(process.cwd(), '.memory');
+      const learningLockDir = path.join(memoryDir, '.learning.lock');
+      const lockAcquired = await acquireMkdirLock(learningLockDir);
+      if (!lockAcquired) {
+        p.log.error('Learning system is currently running. Try again in a moment.');
+        return;
+      }
 
-        const flagged = observations.filter(
-          (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
-        );
+      p.intro(color.bgYellow(color.black(' Learning Review ')));
+      p.log.info(`${flagged.length} observation(s) flagged for review.`);
 
-        if (flagged.length === 0) {
-          p.log.info('No observations flagged for review. All clear.');
-          return;
-        }
+      const updatedObservations = [...observations];
 
-        // Acquire .learning.lock so we don't race with background-learning during the
-        // interactive loop. The internal updateDecisionsStatus call still takes its own
-        // .decisions.lock — different lock directories, no deadlock.
-        const memoryDirForReview = path.join(process.cwd(), '.memory');
-        const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
-        const lockAcquired = await acquireMkdirLock(learningLockDir);
-        if (!lockAcquired) {
-          p.log.error('Learning system is currently running. Try again in a moment.');
-          return;
-        }
+      try {
+        for (const obs of flagged) {
+          const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
+          const reason = formatStaleReason(obs);
 
-        p.intro(color.bgYellow(color.black(' Learning Review ')));
-        p.log.info(`${flagged.length} observation(s) flagged for review.`);
+          p.log.info(
+            `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
+            `  Reason: ${color.yellow(reason)}\n` +
+            (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
+            `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
+          );
 
-        const updatedObservations = [...observations];
+          const action = await p.select({
+            message: 'Action:',
+            options: [
+              { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
+              { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
+              { value: 'skip', label: 'Skip', hint: 'No change' },
+            ],
+          });
 
-        try {
-          for (const obs of flagged) {
-            const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
-            const reason = formatStaleReason(obs);
+          if (p.isCancel(action)) {
+            // Persist any changes made so far before exiting so the user keeps
+            // partial progress (and log/decisions stay consistent).
+            await writeObservations(logPath, updatedObservations);
+            p.cancel('Review cancelled — partial progress saved.');
+            return;
+          }
 
-            p.log.info(
-              `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
-              `  Reason: ${color.yellow(reason)}\n` +
-              (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
-              `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
-            );
+          const idx = updatedObservations.findIndex(o => o.id === obs.id);
+          if (idx === -1) continue;
 
-            const action = await p.select({
-              message: 'Action:',
-              options: [
-                { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
-                { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
-                { value: 'skip', label: 'Skip', hint: 'No change' },
-              ],
-            });
+          if (action === 'deprecate') {
+            updatedObservations[idx] = {
+              ...updatedObservations[idx],
+              status: 'deprecated',
+              mayBeStale: undefined,
+              needsReview: undefined,
+              softCapExceeded: undefined,
+            };
 
-            if (p.isCancel(action)) {
-              // Persist any changes made so far before exiting so the user keeps
-              // partial progress (and log/decisions stay consistent).
-              await writeObservations(logPath, updatedObservations);
-              p.cancel('Review cancelled — partial progress saved.');
-              return;
-            }
-
-            const idx = updatedObservations.findIndex(o => o.id === obs.id);
-            if (idx === -1) continue;
-
-            if (action === 'deprecate') {
-              updatedObservations[idx] = {
-                ...updatedObservations[idx],
-                status: 'deprecated',
-                mayBeStale: undefined,
-                needsReview: undefined,
-                softCapExceeded: undefined,
-              };
-
-              // Update Status: field in decisions file for decisions/pitfalls
-              if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
-                const hashIdx = obs.artifact_path.indexOf('#');
-                if (hashIdx !== -1) {
-                  const decisionsPath = obs.artifact_path.slice(0, hashIdx);
-                  const anchorId = obs.artifact_path.slice(hashIdx + 1);
-                  const absPath = path.isAbsolute(decisionsPath)
-                    ? decisionsPath
-                    : path.join(process.cwd(), decisionsPath);
-                  const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
-                  if (updated) {
-                    p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
-                  } else {
-                    p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
-                  }
+            // Update Status: field in decisions file for decisions/pitfalls
+            if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
+              const hashIdx = obs.artifact_path.indexOf('#');
+              if (hashIdx !== -1) {
+                const decisionsPath = obs.artifact_path.slice(0, hashIdx);
+                const anchorId = obs.artifact_path.slice(hashIdx + 1);
+                const absPath = path.isAbsolute(decisionsPath)
+                  ? decisionsPath
+                  : path.join(process.cwd(), decisionsPath);
+                const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
+                if (updated) {
+                  p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+                } else {
+                  p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
                 }
               }
-
-              // Persist log after each deprecation so Ctrl-C never leaves the log
-              // out of sync with the decisions file updates.
-              await writeObservations(logPath, updatedObservations);
-              p.log.success(`Marked '${obs.pattern}' as deprecated.`);
-            } else if (action === 'keep') {
-              updatedObservations[idx] = {
-                ...updatedObservations[idx],
-                mayBeStale: undefined,
-                needsReview: undefined,
-                softCapExceeded: undefined,
-              };
-              // Keep writes are flag-clears only; still persist immediately for
-              // consistent on-disk state if the loop is interrupted.
-              await writeObservations(logPath, updatedObservations);
-              p.log.success(`Cleared review flags for '${obs.pattern}'.`);
             }
-            // 'skip' — no change
-          }
 
-          // Final write is a no-op if every branch already persisted, but cheap
-          // and keeps the success path explicit.
-          await writeObservations(logPath, updatedObservations);
-        } finally {
-          try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
+            // Persist log after each deprecation so Ctrl-C never leaves the log
+            // out of sync with the decisions file updates.
+            await writeObservations(logPath, updatedObservations);
+            p.log.success(`Marked '${obs.pattern}' as deprecated.`);
+          } else if (action === 'keep') {
+            updatedObservations[idx] = {
+              ...updatedObservations[idx],
+              mayBeStale: undefined,
+              needsReview: undefined,
+              softCapExceeded: undefined,
+            };
+            // Keep writes are flag-clears only; still persist immediately for
+            // consistent on-disk state if the loop is interrupted.
+            await writeObservations(logPath, updatedObservations);
+            p.log.success(`Cleared review flags for '${obs.pattern}'.`);
+          }
+          // 'skip' — no change
         }
 
-        p.outro(color.green('Review complete.'));
-        return;
+        // Final write is a no-op if every branch already persisted, but cheap
+        // and keeps the success path explicit.
+        await writeObservations(logPath, updatedObservations);
+      } finally {
+        try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
       }
 
-      if (mode === 'capacity') {
-        const memoryDir = path.join(process.cwd(), '.memory');
-        const decisionsDir = path.join(memoryDir, 'decisions');
-        const decisionsPath = path.join(decisionsDir, 'decisions.md');
-        const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
-
-        // D23: parse decisions entries from both files
-        const allEntries: Array<{
-          id: string;
-          pattern: string;
-          file: string;
-          filePath: string;
-          status: string;
-          createdDate: string | null;
-        }> = [];
-
-        for (const [filePath, type] of [[decisionsPath, 'decision'], [pitfallsPath, 'pitfall']] as const) {
-          let content: string;
-          try {
-            content = await fs.readFile(filePath, 'utf-8');
-          } catch {
-            continue; // File doesn't exist
-          }
-
-          const prefix = type === 'decision' ? 'ADR' : 'PF';
-          const headingRe = new RegExp(`^## (${prefix}-\\d+):\\s*(.+)$`, 'gm');
-          let match;
-          while ((match = headingRe.exec(content)) !== null) {
-            const entryId = match[1];
-            const pattern = match[2].trim();
-
-            // Extract Status from section
-            const sectionStart = match.index;
-            const nextHeading = content.indexOf('\n## ', sectionStart + 1);
-            const section = nextHeading !== -1
-              ? content.slice(sectionStart, nextHeading)
-              : content.slice(sectionStart);
-            const statusMatch = section.match(/- \*\*Status\*\*:\s*(\w+)/);
-            const status = statusMatch ? statusMatch[1] : 'Unknown';
-
-            // Skip deprecated/superseded entries
-            if (status === 'Deprecated' || status === 'Superseded') continue;
-
-            // Extract Date for protection check
-            const dateMatch = section.match(/- \*\*Date\*\*:\s*(\d{4}-\d{2}-\d{2})/);
-            const createdDate = dateMatch ? dateMatch[1] : null;
-
-            allEntries.push({
-              id: entryId,
-              pattern,
-              file: type === 'decision' ? 'decisions' : 'pitfalls',
-              filePath,
-              status,
-              createdDate,
-            });
-          }
-        }
-
-        if (allEntries.length === 0) {
-          p.log.info('No active decisions entries found.');
-          return;
-        }
-
-        // D23: Filter out entries created within 7 days (protected)
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        const eligible = allEntries.filter(e => {
-          if (!e.createdDate) return true; // No date — eligible
-          return e.createdDate <= sevenDaysAgo;
-        });
-
-        if (eligible.length === 0) {
-          p.log.info('All active entries are within the 7-day protection window.');
-          return;
-        }
-
-        // Load usage data for sorting
-        let usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {};
-        try {
-          const raw = await fs.readFile(path.join(memoryDir, '.decisions-usage.json'), 'utf-8');
-          const parsed = JSON.parse(raw);
-          // D-SEC2: Guard against non-object/null/array shapes before narrowing into typed record.
-          if (
-            parsed !== null &&
-            typeof parsed === 'object' &&
-            !Array.isArray(parsed) &&
-            parsed.version === 1 &&
-            parsed.entries !== null &&
-            typeof parsed.entries === 'object' &&
-            !Array.isArray(parsed.entries)
-          ) {
-            usageData = parsed.entries as typeof usageData;
-          }
-        } catch { /* no usage data — all cites=0 */ }
-
-        // D23: Sort by least used: (cites ASC, last_cited ASC NULLS FIRST, created ASC)
-        const sorted = [...eligible].sort((a, b) => {
-          const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
-          const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
-
-          // cites ASC
-          if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
-
-          // last_cited ASC NULLS FIRST
-          if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
-          if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
-          if (aUsage.last_cited && bUsage.last_cited) {
-            if (aUsage.last_cited < bUsage.last_cited) return -1;
-            if (aUsage.last_cited > bUsage.last_cited) return 1;
-          }
-
-          // created ASC
-          const aCreated = a.createdDate || '';
-          const bCreated = b.createdDate || '';
-          return aCreated.localeCompare(bCreated);
-        });
-
-        // Take top 20
-        const candidates = sorted.slice(0, 20);
-
-        p.intro(color.bgYellow(color.black(' Decisions Capacity Review ')));
-        p.log.info(
-          `${allEntries.length} active entries across decisions files.\n` +
-          `${eligible.length} eligible for review (${allEntries.length - eligible.length} within 7-day protection).\n` +
-          `Showing ${candidates.length} least-used entries.`,
-        );
-
-        // D23: p.multiselect with unchecked default
-        const selected = await p.multiselect({
-          message: 'Select entries to deprecate:',
-          options: candidates.map(e => ({
-            value: e.id,
-            label: `[${e.file}] ${e.id}: ${e.pattern}`,
-            hint: `${usageData[e.id]?.cites ?? 0} cites, ${e.status}`,
-          })),
-          required: false,
-        });
-
-        if (p.isCancel(selected) || !Array.isArray(selected) || selected.length === 0) {
-          p.log.info('No entries selected. Capacity review cancelled.');
-          return;
-        }
-
-        // Batch deprecation
-        const learningLockDir = path.join(memoryDir, '.learning.lock');
-        const lockAcquired = await acquireMkdirLock(learningLockDir);
-        if (!lockAcquired) {
-          p.log.error('Learning system is currently running. Try again in a moment.');
-          return;
-        }
-
-        try {
-          let deprecatedCount = 0;
-          for (const entryId of selected as string[]) {
-            const entry = candidates.find(e => e.id === entryId);
-            if (!entry) continue;
-
-            const updated = await updateDecisionsStatus(entry.filePath, entry.id, 'Deprecated');
-            if (updated) {
-              deprecatedCount++;
-              p.log.success(`Deprecated ${entry.id}: ${entry.pattern}`);
-            } else {
-              p.log.warn(`Could not update ${entry.id} — update manually`);
-            }
-          }
-
-          // D28: Check if counts dropped below soft start, clear notifications if so
-          let notifications: Record<string, NotificationFileEntry> = {};
-          try {
-            const raw = JSON.parse(
-              await fs.readFile(path.join(memoryDir, '.learning-notifications.json'), 'utf-8'),
-            );
-            if (isNotificationMap(raw)) {
-              notifications = raw;
-            } else {
-              p.log.warn('Notifications file has unexpected shape — treating as empty.');
-            }
-          } catch { /* no notifications file — nothing to clear */ }
-
-          const devflowDir = getDevFlowDirectory();
-          const jsonHelperPath = path.join(devflowDir, 'scripts', 'hooks', 'json-helper.cjs');
-
-          for (const [filePath, type, notifKey] of [
-            [decisionsPath, 'decision', 'decisions-capacity-decisions'],
-            [pitfallsPath, 'pitfall', 'decisions-capacity-pitfalls'],
-          ] as const) {
-            try {
-              // D23: Use count-active op via json-helper.cjs (single source of truth)
-              // D-SEC3: execFileSync with argv array — no shell interpolation of cwd-derived paths.
-              const raw = JSON.parse(
-                execFileSync('node', [jsonHelperPath, 'count-active', filePath, type], {
-                  encoding: 'utf8',
-                  stdio: ['pipe', 'pipe', 'pipe'],
-                }).trim(),
-              );
-              const activeCount = isCountActiveResult(raw) ? raw.count : 0;
-
-              // D28: if count dropped below soft start, clear notification
-              if (activeCount < 50 && notifications[notifKey]) {
-                notifications[notifKey].active = false;
-                notifications[notifKey].dismissed_at_threshold = null;
-              }
-            } catch { /* count-active failed — skip notification update */ }
-          }
-
-          await writeFileAtomicExclusive(path.join(memoryDir, '.learning-notifications.json'), JSON.stringify(notifications, null, 2) + '\n');
-
-          p.log.success(`Deprecated ${deprecatedCount} entry(ies).`);
-        } finally {
-          try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
-        }
-
-        p.outro(color.green('Capacity review complete.'));
-        return;
-      }
-
+      p.outro(color.green('Review complete.'));
       return;
     }
 
