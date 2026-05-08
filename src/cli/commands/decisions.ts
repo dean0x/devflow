@@ -24,6 +24,7 @@ import {
   isLearningObservation,
   formatStaleReason,
   type LearningObservation,
+  type DecisionsEntryStatus,
 } from '../utils/observations.js';
 import {
   readObservations,
@@ -132,14 +133,17 @@ export function hasDecisionsHook(input: string | Settings): boolean {
 
 /**
  * A parsed entry from decisions.md or pitfalls.md used during capacity review.
+ * DecisionsEntryStatus is defined in observations.ts (pure data module) and
+ * re-exported here for consumers that import from the decisions command module.
  */
-export type DecisionsEntryStatus = 'Accepted' | 'Active' | 'Deprecated' | 'Superseded' | 'Unknown';
+export type { DecisionsEntryStatus };
 
-const VALID_STATUSES = new Set<string>(['Accepted', 'Active', 'Deprecated', 'Superseded', 'Unknown']);
+const VALID_STATUSES_ARRAY = ['Accepted', 'Active', 'Deprecated', 'Superseded', 'Unknown'] as const satisfies readonly DecisionsEntryStatus[];
+const VALID_STATUSES = new Set<DecisionsEntryStatus>(VALID_STATUSES_ARRAY);
 
 /** Normalise a raw status string from markdown to the DecisionsEntryStatus union. */
-function toDecisionsStatus(raw: string): DecisionsEntryStatus {
-  return VALID_STATUSES.has(raw) ? (raw as DecisionsEntryStatus) : 'Unknown';
+export function toDecisionsStatus(raw: string): DecisionsEntryStatus {
+  return VALID_STATUSES.has(raw as DecisionsEntryStatus) ? (raw as DecisionsEntryStatus) : 'Unknown';
 }
 
 export interface DecisionsEntry {
@@ -737,11 +741,16 @@ export const decisionsCommand = new Command('decisions')
                   const absPath = path.isAbsolute(decisionsFilePath)
                     ? decisionsFilePath
                     : path.join(process.cwd(), decisionsFilePath);
-                  const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
-                  if (updated) {
-                    p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+                  const decisionsDir = path.join(memoryDir, 'decisions') + path.sep;
+                  if (!absPath.startsWith(decisionsDir)) {
+                    p.log.warn(`Skipping status update — artifact_path outside decisions directory: ${absPath}`);
                   } else {
-                    p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
+                    const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
+                    if (updated) {
+                      p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+                    } else {
+                      p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
+                    }
                   }
                 }
               }

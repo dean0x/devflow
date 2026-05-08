@@ -6,6 +6,13 @@
  */
 
 /**
+ * Status values for a rendered decisions.md / pitfalls.md entry.
+ * Defined here (pure data module) so both observation-io.ts and decisions.ts
+ * can import it without creating a utility→command circular dependency.
+ */
+export type DecisionsEntryStatus = 'Accepted' | 'Active' | 'Deprecated' | 'Superseded' | 'Unknown';
+
+/**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
  * v2 extends type to include 'decision' and 'pitfall', and adds attention flags.
  */

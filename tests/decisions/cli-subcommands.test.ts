@@ -81,6 +81,7 @@ import {
   filterEligibleEntries,
   sortByLeastUsed,
   clearCapacityNotifications,
+  toDecisionsStatus,
   type DecisionsEntry,
 } from '../../src/cli/commands/decisions.js';
 
@@ -441,7 +442,7 @@ describe('decisions --review capacity mode logic', () => {
     // distinct pre-filter step from filterEligibleEntries, which applies the 7-day
     // protection window. Extracting a one-liner !== check into a named function adds
     // no clarity benefit here.
-    const allEntries = [
+    const allEntries: DecisionsEntry[] = [
       { id: 'ADR-001', pattern: 'Use X', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Accepted', createdDate: '2026-01-01' },
       { id: 'ADR-002', pattern: 'Use Y', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Deprecated', createdDate: '2026-01-10' },
       { id: 'ADR-003', pattern: 'Use Z', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Superseded', createdDate: '2026-01-15' },
@@ -502,6 +503,28 @@ describe('decisions --review capacity mode logic', () => {
     expect(sorted[2].id).toBe('ADR-001');
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// toDecisionsStatus normalizer
+// ---------------------------------------------------------------------------
+
+describe('toDecisionsStatus normalizer', () => {
+  it('passes through each valid status unchanged', () => {
+    expect(toDecisionsStatus('Accepted')).toBe('Accepted');
+    expect(toDecisionsStatus('Active')).toBe('Active');
+    expect(toDecisionsStatus('Deprecated')).toBe('Deprecated');
+    expect(toDecisionsStatus('Superseded')).toBe('Superseded');
+    expect(toDecisionsStatus('Unknown')).toBe('Unknown');
+  });
+
+  it('maps unrecognized strings to Unknown', () => {
+    expect(toDecisionsStatus('accepted')).toBe('Unknown'); // wrong case
+    expect(toDecisionsStatus('ACTIVE')).toBe('Unknown');
+    expect(toDecisionsStatus('')).toBe('Unknown');
+    expect(toDecisionsStatus('draft')).toBe('Unknown');
+    expect(toDecisionsStatus('archived')).toBe('Unknown');
+  });
 });
 
 // ---------------------------------------------------------------------------

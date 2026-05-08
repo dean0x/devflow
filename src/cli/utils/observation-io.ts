@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { acquireMkdirLock } from './mkdir-lock.js';
-import { type LearningObservation, loadAndCountObservations } from './observations.js';
+import { type LearningObservation, type DecisionsEntryStatus, loadAndCountObservations } from './observations.js';
 
 /**
  * @file observation-io.ts
@@ -63,7 +63,7 @@ function escapeRegExp(str: string): string {
 export async function updateDecisionsStatus(
   filePath: string,
   anchorId: string,
-  newStatus: string,
+  newStatus: DecisionsEntryStatus,
 ): Promise<boolean> {
   const memoryDir = path.dirname(path.dirname(filePath));
   const lockPath = path.join(memoryDir, '.decisions.lock');
