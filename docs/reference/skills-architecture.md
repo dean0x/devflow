@@ -48,7 +48,6 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 | `boundary-validation` | Boundary validation enforcement | Coder |
 | `gap-analysis` | Gap analysis for design plans — missing flows, edge cases, failure modes | Designer |
 | `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Designer |
-| `research` | Research-before-building enforcement for utility code | Coder |
 | `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Coder |
 
 ### Tier 3: Domain-Specific Skills

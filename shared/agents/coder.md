@@ -8,7 +8,6 @@ skills:
   - devflow:patterns
   - devflow:testing
   - devflow:test-driven-development
-  - devflow:research
   - devflow:boundary-validation
   - devflow:worktree-support
   - devflow:apply-feature-knowledge

@@ -1,0 +1,28 @@
+{
+  "name": "devflow-release",
+  "description": "Adaptive project release with learned configuration",
+  "author": {
+    "name": "Dean0x"
+  },
+  "version": "2.0.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": [
+    "release",
+    "publish",
+    "version",
+    "changelog",
+    "deployment"
+  ],
+  "agents": [
+    "git",
+    "synthesizer",
+    "validator"
+  ],
+  "skills": [
+    "agent-teams",
+    "git",
+    "worktree-support"
+  ]
+}

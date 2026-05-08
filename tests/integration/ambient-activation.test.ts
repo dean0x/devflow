@@ -78,7 +78,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('IMPLEMENT/GUIDED — loads router and implementation skills', async () => {
-    const expected = ['patterns', 'test-driven-development', 'research'];
+    const expected = ['patterns', 'test-driven-development'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'add a retry mechanism with exponential backoff to the HTTP client module',
       (r) => hasRequiredSkills(r, ['router']),
