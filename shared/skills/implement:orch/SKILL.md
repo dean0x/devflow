@@ -75,7 +75,7 @@ Pass `DECISIONS_CONTEXT` to Coder (Phase 4) and Scrutinizer (Phase 6).
 
 ## Phase 3: Plan Synthesis
 
-**Produces:** EXECUTION_PLAN
+**Produces:** EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE
 **Requires:** FEATURE_BRANCH
 
 Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
@@ -84,6 +84,8 @@ Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
 - **Otherwise** → synthesize from conversation: what to build, files/modules affected, constraints, decisions made during discussion.
 
 Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
+
+Extract `## PR Description Guidance` section from the plan (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
 
 ## Worktree Support
 
@@ -106,6 +108,9 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
 - **DECISIONS_CONTEXT**: From Phase 2 (or `(none)`)
+- **PR_DESCRIPTION_GUIDANCE**: From Phase 3 (or `(none)`)
+
+After Coder completes: if `PR_DESCRIPTION_GUIDANCE` is not `(none)`, write its content to `.docs/pr-description-guidance.md` so the git agent's `ensure-pr-ready` operation can read it when creating the PR.
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -148,7 +153,9 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 
 **Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS
 
-Cleanup: delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
+Cleanup:
+- Delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
+- Delete `.docs/pr-description-guidance.md` if it exists (transient file, already consumed by git agent during PR creation).
 
 After quality gates pass, check for overlapping feature knowledge entries whose `referencedFiles` intersect FILES_CHANGED:
 ```bash
@@ -237,7 +244,7 @@ Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
 - [ ] Phase 2: Load Decisions → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
-- [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured
+- [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured, PR_DESCRIPTION_GUIDANCE extracted (or `(none)`)
 - [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
 - [ ] Phase 5: FILES_CHANGED Detection → FILES_CHANGED captured
 - [ ] Phase 6: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)

@@ -23,13 +23,19 @@ This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. E
 
 ## Phase 1: Pre-flight
 
-**Produces:** BRANCH_INFO, PR_INFO
+**Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION
 
 Spawn `Agent(subagent_type="Git")` with action `ensure-pr-ready`:
 - Extract: branch, base_branch, branch_slug, pr_number
 - If BLOCKED (detached HEAD, no commits ahead of base): halt with message
 
 Determine base branch: use PR target if PR exists, otherwise `main`/`master`.
+
+**Fetch PR body** (after extracting `pr_number`):
+```bash
+PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
+```
+If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 ## Phase 2: Incremental Detection
 
@@ -89,7 +95,7 @@ Detect conditional reviewers from file types:
 ## Phase 5: Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, REVIEWER_LIST
 
 Spawn all reviewers in a single message (parallel execution):
 
@@ -106,6 +112,7 @@ Each reviewer receives:
 - **DIFF_COMMAND**: `git diff {DIFF_RANGE}` (incremental or full)
 - **DECISIONS_CONTEXT**: compact index from Phase 3 (or `(none)` when absent) — follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand
 - **FEATURE_KNOWLEDGE**: feature area context from Phase 3 (or `(none)`) — follow `devflow:apply-feature-knowledge` for consumption algorithm
+- **PR_DESCRIPTION**: PR body from GitHub (or `(none)`) — author's stated intent; use to contextualize findings
 
 ## Phase 6: Synthesis (Parallel)
 
@@ -121,6 +128,8 @@ After all reviewers complete, spawn in parallel:
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
 Write HEAD SHA to `.docs/reviews/{branch_slug}/.last-review-head` for next incremental review.
+
+Cleanup: delete `.docs/pr-description-guidance.md` if it exists (transient file written by implement:orch for ambient-mode PR creation, consumed by this point).
 
 Report to user:
 - Merge recommendation (from Synthesizer)
@@ -139,7 +148,7 @@ Report to user:
 
 Before reporting results, verify every phase was announced:
 
-- [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured
+- [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured, PR_DESCRIPTION fetched (or `(none)`)
 - [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
 - [ ] Phase 3: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
 - [ ] Phase 4: File Analysis → REVIEWER_LIST captured

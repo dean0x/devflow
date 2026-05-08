@@ -34,7 +34,7 @@ Process issues from code review reports: validate them (false positive check), a
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
-**Produces:** BRANCH_INFO
+**Produces:** BRANCH_INFO, PR_DESCRIPTION
 **Requires:** WORKTREES
 
 For each resolvable worktree, spawn Git agent:
@@ -52,6 +52,12 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 **If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` first. In multi-worktree mode, report the failure but continue with other worktrees.
 
 **Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` per worktree.
+
+**Fetch PR body** (after extracting `pr_number`):
+```bash
+PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
+```
+If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 #### Step 0c: Target Review Directory
 
@@ -151,6 +157,7 @@ BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+PR_DESCRIPTION: {pr_description}
 Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-decisions to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 

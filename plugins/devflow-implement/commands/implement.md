@@ -29,7 +29,7 @@ Orchestrate a single task through implementation by spawning specialized agents.
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_FEATURE_KNOWLEDGE_SLUGS
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_FEATURE_KNOWLEDGE_SLUGS, PR_DESCRIPTION_GUIDANCE
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
@@ -59,6 +59,7 @@ Return the branch setup summary."
 4. If `issue` field present in frontmatter: pass to Git agent as ISSUE_INPUT
 5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
 6. Captured values override defaults from Git agent where present
+7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
 
 **Load Decisions Context:**
 ```bash
@@ -104,7 +105,8 @@ PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
 DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}"
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
 ---
@@ -142,6 +144,7 @@ PRIOR_PHASE_SUMMARY: {summary from previous Coder}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 HANDOFF_REQUIRED: {true if not last phase}"
 ```
 
@@ -357,7 +360,7 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 **Produces:** PR_URL
 **Requires:** BASE_BRANCH, TASK_ID
 
-**For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+**For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`. If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Coder agent Responsibility 7 for field-to-section mapping).
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 

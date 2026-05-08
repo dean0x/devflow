@@ -33,7 +33,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
-**Produces:** BRANCH_INFO, PR_INFO
+**Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION
 **Requires:** WORKTREES
 
 For each reviewable worktree, spawn Git agent:
@@ -51,6 +51,12 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 **If BLOCKED:** In single-worktree mode, stop and report. In multi-worktree mode, report the failure but continue with other worktrees.
 
 **Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number` per worktree.
+
+**Fetch PR body** (after extracting `pr_number`):
+```bash
+PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
+```
+If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 #### Step 0c: Incremental Detection & Timestamp Setup
 
@@ -151,6 +157,7 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
+PR_DESCRIPTION: {pr_description}
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"

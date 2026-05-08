@@ -22,7 +22,7 @@ This is a lightweight variant of `/resolve` for ambient mode. Excluded: pitfall 
 
 ## Phase 1: Target Review Directory
 
-**Produces:** REVIEW_DIR, BRANCH_SLUG
+**Produces:** REVIEW_DIR, BRANCH_SLUG, PR_DESCRIPTION
 
 Find the latest timestamped directory under `.docs/reviews/` that:
 1. Contains a `review-summary.md` (has been reviewed)
@@ -31,6 +31,12 @@ Find the latest timestamped directory under `.docs/reviews/` that:
 If no unresolved review found: halt with "No unresolved review found. Run a review first."
 
 Extract branch slug from the directory path.
+
+**Detect PR and fetch body**: Check for open PR on current branch:
+```bash
+PR_DESCRIPTION=$(gh pr view --json number,body --jq '.body' 2>/dev/null || echo "(none)")
+```
+If no PR exists or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 ## Phase 2: Load Project Decisions
 
@@ -73,7 +79,7 @@ Determine execution: batches with no shared files can run in parallel.
 ## Phase 5: Resolve (Parallel)
 
 **Produces:** RESOLUTION_RESULTS
-**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, BRANCH_SLUG
+**Requires:** BATCHES, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, BRANCH_SLUG
 
 Spawn `Agent(subagent_type="Resolver")` agents — one per batch, parallel where possible.
 
@@ -83,6 +89,7 @@ Each receives:
 - **BATCH_ID**: Identifier for this batch
 - **DECISIONS_CONTEXT**: Decisions index from Phase 2 (or `(none)`). Resolvers follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand.
 - **FEATURE_KNOWLEDGE**: Feature area context from Phase 2 (or `(none)`). Follow `devflow:apply-feature-knowledge` for consumption algorithm.
+- **PR_DESCRIPTION**: PR body from GitHub (or `(none)`) — author's stated intent; use to contextualize issues before deciding FIX vs TECH_DEBT.
 
 Resolvers follow a 3-tier risk approach:
 - **Standard fixes**: Applied directly
@@ -127,7 +134,7 @@ Report to user:
 
 Before reporting results, verify every phase was announced:
 
-- [ ] Phase 1: Target Review Directory → REVIEW_DIR captured
+- [ ] Phase 1: Target Review Directory → REVIEW_DIR captured, PR_DESCRIPTION fetched (or `(none)`)
 - [ ] Phase 2: Load Project Decisions → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
 - [ ] Phase 3: Parse Issues → ISSUES captured (or stopped: no actionable issues)
 - [ ] Phase 4: Analyze & Batch → BATCHES captured
