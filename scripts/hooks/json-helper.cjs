@@ -503,19 +503,27 @@ function calculateConfidence(count, type) {
 }
 
 /**
- * D3+D4: Attempt immediate promotion for a newly-created entry whose type has
- * required=1 and spread=0 (decision/pitfall). If confidence >= threshold AND
- * quality_ok, sets entry.status = 'ready' in place.
+ * D3+D4: Attempt promotion for an entry whose type has required=1 and spread=0
+ * (decision/pitfall). If confidence >= threshold AND quality_ok, sets
+ * entry.status = 'ready' in place.
  *
- * Only call this immediately after constructing the entry object, before writing
- * to the log. Does NOT guard against 'created' status — the entry is brand-new.
- *
- * @param {object} entry - The newly-constructed log entry (mutated in place).
+ * @param {object} entry - The log entry (mutated in place).
+ * @param {object} [opts]
+ * @param {boolean} [opts.guardCreated=false] - When true, skip promotion if
+ *   entry.status === 'created' (already materialized). Use for existing entries.
+ *   Omit (false) for brand-new entries that cannot yet be 'created'.
+ * @param {boolean} [opts.firstSeenFallback=false] - When true, fall back to
+ *   epoch-0 when first_seen is absent (existing entries may lack the field).
+ *   Omit (false) for brand-new entries that always have first_seen set.
  */
-function tryImmediatePromotion(entry) {
+function tryImmediatePromotion(entry, opts = {}) {
+  const { guardCreated = false, firstSeenFallback = false } = opts;
+  if (guardCreated && entry.status === 'created') return;
   const th = THRESHOLDS[entry.type] || THRESHOLDS.procedural;
   if (entry.confidence >= th.promote && entry.quality_ok === true) {
-    const firstSeenMs = new Date(entry.first_seen).getTime();
+    const firstSeenMs = firstSeenFallback
+      ? (entry.first_seen ? new Date(entry.first_seen).getTime() : 0)
+      : new Date(entry.first_seen).getTime();
     const spread = (Date.now() - firstSeenMs) / 1000;
     if (!isNaN(firstSeenMs) && spread >= th.spread) {
       entry.status = 'ready';
@@ -1018,16 +1026,9 @@ try {
           // threshold AND quality_ok. quality_ok gates materialization; without it
           // we keep accumulating observations (so the count still grows) but the
           // downstream render-ready will skip the entry. See render-ready (line ~838).
-          if (existing.status !== 'created') {
-            const th = THRESHOLDS[existing.type] || THRESHOLDS.procedural;
-            if (existing.confidence >= th.promote && existing.quality_ok === true) {
-              const firstSeenMs = existing.first_seen ? new Date(existing.first_seen).getTime() : 0;
-              const spread = (Date.now() - firstSeenMs) / 1000;
-              if (!isNaN(firstSeenMs) && spread >= th.spread) {
-                existing.status = 'ready';
-              }
-            }
-          }
+          // guardCreated: skip already-materialized entries; firstSeenFallback: tolerate
+          // legacy entries that may lack first_seen.
+          tryImmediatePromotion(existing, { guardCreated: true, firstSeenFallback: true });
 
           learningLog(`Updated ${obs.id}: confidence ${existing.confidence}, status ${existing.status}`);
           updated++;
