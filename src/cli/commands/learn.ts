@@ -336,7 +336,9 @@ export async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, stal
     try {
       await fs.mkdir(lockDir);
       return true;
-    } catch {
+    } catch (err: unknown) {
+      // Re-throw unexpected filesystem errors; only EEXIST means "lock held"
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       try {
         const stat = await fs.stat(lockDir);
         if (Date.now() - stat.mtimeMs > staleMs) {

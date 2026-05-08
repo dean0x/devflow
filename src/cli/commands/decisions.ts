@@ -131,12 +131,21 @@ export function hasDecisionsHook(input: string | Settings): boolean {
 /**
  * A parsed entry from decisions.md or pitfalls.md used during capacity review.
  */
+export type DecisionsEntryStatus = 'Accepted' | 'Active' | 'Deprecated' | 'Superseded' | 'Unknown';
+
+const VALID_STATUSES = new Set<string>(['Accepted', 'Active', 'Deprecated', 'Superseded', 'Unknown']);
+
+/** Normalise a raw status string from markdown to the DecisionsEntryStatus union. */
+function toDecisionsStatus(raw: string): DecisionsEntryStatus {
+  return VALID_STATUSES.has(raw) ? (raw as DecisionsEntryStatus) : 'Unknown';
+}
+
 export interface DecisionsEntry {
   id: string;
   pattern: string;
-  file: string;
+  file: 'decisions' | 'pitfalls';
   filePath: string;
-  status: string;
+  status: DecisionsEntryStatus;
   createdDate: string | null;
 }
 
@@ -179,6 +188,30 @@ export function sortByLeastUsed(
     const bCreated = b.createdDate || '';
     return aCreated.localeCompare(bCreated);
   });
+}
+
+/**
+ * D28: Apply notification clearing after a capacity review deprecation pass.
+ *
+ * For each notifKey in `counts`, if the active entry count dropped below the
+ * soft-start threshold (50), mark the notification inactive. Mutates `notifications`
+ * in place so the caller can write it back atomically.
+ *
+ * Extracted for testability — the handler calls this after gathering counts via
+ * json-helper.cjs; tests pass synthetic counts without spawning a child process.
+ */
+export function clearCapacityNotifications(
+  notifications: Record<string, NotificationFileEntry>,
+  counts: Record<string, number>,
+  threshold = 50,
+): void {
+  for (const notifKey of Object.keys(counts)) {
+    const activeCount = counts[notifKey] ?? 0;
+    if (activeCount < threshold && notifications[notifKey]) {
+      notifications[notifKey].active = false;
+      notifications[notifKey].dismissed_at_threshold = null;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -726,6 +759,8 @@ export const decisionsCommand = new Command('decisions')
             // 'skip' — no change
           }
         } finally {
+          // Release side is intentionally a bare rmdir — all hardening (stale detection,
+          // EEXIST discrimination, timeout) belongs on the acquire side only.
           try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
         }
 
@@ -777,7 +812,7 @@ export const decisionsCommand = new Command('decisions')
               pattern,
               file: type === 'decision' ? 'decisions' : 'pitfalls',
               filePath,
-              status,
+              status: toDecisionsStatus(status),
               createdDate,
             });
           }
@@ -875,6 +910,9 @@ export const decisionsCommand = new Command('decisions')
         const devflowDir = getDevFlowDirectory();
         const jsonHelperPath = path.join(devflowDir, 'scripts', 'hooks', 'json-helper.cjs');
 
+        // D23/D28: gather post-deprecation active counts then delegate to
+        // clearCapacityNotifications (extracted for testability).
+        const postDeprecationCounts: Record<string, number> = {};
         for (const [filePath, type, notifKey] of [
           [decisionsPath, 'decision', 'decisions-capacity-decisions'],
           [pitfallsPath, 'pitfall', 'decisions-capacity-pitfalls'],
@@ -888,15 +926,10 @@ export const decisionsCommand = new Command('decisions')
                 stdio: ['pipe', 'pipe', 'pipe'],
               }).trim(),
             );
-            const activeCount = isCountActiveResult(raw) ? raw.count : 0;
-
-            // D28: if count dropped below soft start, clear notification
-            if (activeCount < 50 && notifications[notifKey]) {
-              notifications[notifKey].active = false;
-              notifications[notifKey].dismissed_at_threshold = null;
-            }
-          } catch { /* count-active failed — skip notification update */ }
+            postDeprecationCounts[notifKey] = isCountActiveResult(raw) ? raw.count : 0;
+          } catch { /* count-active failed — skip notification update for this file */ }
         }
+        clearCapacityNotifications(notifications, postDeprecationCounts);
 
         await writeFileAtomicExclusive(notifPath, JSON.stringify(notifications, null, 2) + '\n');
 
