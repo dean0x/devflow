@@ -6,14 +6,16 @@ import {
   addLearningHook,
   removeLearningHook,
   hasLearningHook,
-  parseLearningLog,
-  loadAndCountObservations,
   formatLearningStatus,
   loadLearningConfig,
-  isLearningObservation,
   applyConfigLayer,
-  type LearningObservation,
 } from '../src/cli/commands/learn.js';
+import {
+  parseLearningLog,
+  loadAndCountObservations,
+  isLearningObservation,
+  type LearningObservation,
+} from '../src/cli/utils/observations.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../src/cli/utils/learning-cleanup.js';
 
 describe('addLearningHook', () => {

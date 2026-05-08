@@ -19,16 +19,9 @@ import {
 } from '../utils/background-runner.js';
 import { runDecisionsAgent } from '../utils/decisions-agent.js';
 import { loadDecisionsConfig } from '../utils/decisions-config.js';
-import {
-  acquireMkdirLock,
-  formatStaleReason,
-  isLearningObservation,
-  readObservations,
-  warnIfInvalid,
-  writeObservations,
-  updateDecisionsStatus,
-  type LearningObservation,
-} from './learn.js';
+import { acquireMkdirLock } from '../utils/mkdir-lock.js';
+import { isLearningObservation, formatStaleReason, type LearningObservation } from '../utils/observations.js';
+import { readObservations, writeObservations, updateDecisionsStatus, warnIfInvalid } from '../utils/observation-io.js';
 
 /**
  * D-SEC2: Runtime guard for the `count-active` JSON result from json-helper.cjs.

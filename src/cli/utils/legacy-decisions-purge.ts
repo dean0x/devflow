@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { acquireMkdirLock } from './mkdir-lock.js';
 
 /**
  * @file legacy-decisions-purge.ts
@@ -44,35 +45,6 @@ type DecisionsFilePair = readonly [string, 'ADR' | 'PF'];
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Acquire a mkdir-based lock, waiting up to timeoutMs.
- * Uses the same 60 s stale threshold as acquireMkdirLock in learn.ts and
- * json-helper.cjs (background-learning intentionally uses 300 s — see its DESIGN comment).
- */
-async function acquireMkdirLock(
-  lockDir: string,
-  timeoutMs = 30_000,
-  staleMs = 60_000,
-): Promise<boolean> {
-  const start = Date.now();
-  while (true) {
-    try {
-      await fs.mkdir(lockDir);
-      return true;
-    } catch {
-      try {
-        const stat = await fs.stat(lockDir);
-        if (Date.now() - stat.mtimeMs > staleMs) {
-          try { await fs.rmdir(lockDir); } catch { /* race OK */ }
-          continue;
-        }
-      } catch { /* lock vanished between EEXIST and stat */ }
-      if (Date.now() - start >= timeoutMs) return false;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
 }
 
 /**

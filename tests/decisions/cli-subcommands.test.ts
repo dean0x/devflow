@@ -76,7 +76,7 @@ import {
   parseLearningLog,
   loadAndCountObservations,
   type LearningObservation,
-} from '../../src/cli/commands/learn.js';
+} from '../../src/cli/utils/observations.js';
 import {
   filterEligibleEntries,
   sortByLeastUsed,

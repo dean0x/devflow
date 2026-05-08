@@ -9,9 +9,9 @@ import * as os from 'os';
 import {
   parseLearningLog,
   isLearningObservation,
-  updateDecisionsStatus,
-} from '../../src/cli/commands/learn.js';
-import type { LearningObservation } from '../../src/cli/commands/learn.js';
+  type LearningObservation,
+} from '../../src/cli/utils/observations.js';
+import { updateDecisionsStatus } from '../../src/cli/utils/observation-io.js';
 import { runHelper } from './helpers.js';
 
 // Helper: serialize an array of observations to JSONL

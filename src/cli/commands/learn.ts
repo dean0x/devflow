@@ -19,36 +19,21 @@ import {
   checkStaleness,
 } from '../utils/background-runner.js';
 import { runLearningAgent } from '../utils/learning-agent.js';
+import { acquireMkdirLock } from '../utils/mkdir-lock.js';
+import {
+  type LearningObservation,
+  loadAndCountObservations,
+  formatStaleReason,
+} from '../utils/observations.js';
+import {
+  readObservations,
+  writeObservations,
+  updateDecisionsStatus,
+  warnIfInvalid,
+} from '../utils/observation-io.js';
 
 // Re-export the consolidated alias for callers that previously imported it from this module.
 export type { NotificationFileEntry };
-
-/**
- * Learning observation stored in learning-log.jsonl (one JSON object per line).
- * v2 extends type to include 'decision' and 'pitfall', and adds attention flags.
- */
-export interface LearningObservation {
-  id: string;
-  type: 'workflow' | 'procedural' | 'decision' | 'pitfall';
-  pattern: string;
-  confidence: number;
-  observations: number;
-  first_seen: string;
-  last_seen: string;
-  status: 'observing' | 'ready' | 'created' | 'deprecated';
-  evidence: string[];
-  details: string;
-  artifact_path?: string;
-  /** Set by staleness checker (D16) when code refs in artifact file are missing */
-  mayBeStale?: boolean;
-  staleReason?: string;
-  /** Set by merge-observation when an incoming observation's details diverge
-   *  significantly from the existing entry (Levenshtein ratio < 0.6). See D14. */
-  needsReview?: boolean;
-  /** D17: Set when decisions file hits hard ceiling (100 entries) — repurposed from 50 soft cap */
-  softCapExceeded?: boolean;
-  quality_ok?: boolean;
-}
 
 /**
  * Merged learning configuration from global and project-level config files.
@@ -60,25 +45,6 @@ export interface LearningConfig {
   debug: boolean;
   /** Number of observations processed per learning run. Default 3, adaptive 5 at 15+ observations. */
   batch_size: number;
-}
-
-/**
- * Type guard for validating raw JSON as a LearningObservation.
- * Accepts all 4 types (v2: decision + pitfall added) and all statuses including deprecated.
- */
-export function isLearningObservation(obj: unknown): obj is LearningObservation {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const o = obj as Record<string, unknown>;
-  return typeof o.id === 'string' && o.id.length > 0
-    && (o.type === 'workflow' || o.type === 'procedural' || o.type === 'decision' || o.type === 'pitfall')
-    && typeof o.pattern === 'string' && o.pattern.length > 0
-    && typeof o.confidence === 'number'
-    && typeof o.observations === 'number'
-    && typeof o.first_seen === 'string'
-    && typeof o.last_seen === 'string'
-    && (o.status === 'observing' || o.status === 'ready' || o.status === 'created' || o.status === 'deprecated')
-    && Array.isArray(o.evidence)
-    && typeof o.details === 'string';
 }
 
 const LEARNING_HOOK_MARKER = 'session-end-learning';
@@ -187,47 +153,6 @@ export function hasLearningHook(input: string | Settings): 'current' | 'legacy' 
 }
 
 /**
- * Parse a JSONL learning log into typed observations.
- * Skips empty and malformed lines.
- */
-export function parseLearningLog(logContent: string): LearningObservation[] {
-  if (!logContent.trim()) {
-    return [];
-  }
-
-  const observations: LearningObservation[] = [];
-
-  for (const line of logContent.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (isLearningObservation(parsed)) {
-        observations.push(parsed);
-      }
-    } catch {
-      // Skip malformed lines
-    }
-  }
-
-  return observations;
-}
-
-/**
- * Parse a JSONL log and return valid observations plus the count of invalid entries.
- * Centralises the raw-line-count + parse pattern used by --status, --list, and --purge.
- */
-export function loadAndCountObservations(logContent: string): {
-  observations: LearningObservation[];
-  invalidCount: number;
-} {
-  const rawLines = logContent.split('\n').filter(l => l.trim()).length;
-  const observations = parseLearningLog(logContent);
-  return { observations, invalidCount: rawLines - observations.length };
-}
-
-/**
  * Format a human-readable status summary for learning state.
  * hookState: 'current' (SessionEnd), 'legacy' (old Stop hook), or false (disabled).
  */
@@ -301,159 +226,6 @@ export function loadLearningConfig(globalJson: string | null, projectJson: strin
   if (projectJson) config = applyConfigLayer(config, projectJson);
 
   return config;
-}
-
-/**
- * Read and parse observations from a log file.
- * Returns empty results if the file does not exist.
- */
-export async function readObservations(logPath: string): Promise<{ observations: LearningObservation[]; invalidCount: number }> {
-  try {
-    const logContent = await fs.readFile(logPath, 'utf-8');
-    return loadAndCountObservations(logContent);
-  } catch {
-    return { observations: [], invalidCount: 0 };
-  }
-}
-
-/**
- * Acquire a mkdir-based lock directory.
- *
- * Used by CLI writers (`--review`, `--dismiss-capacity`) to serialize
- * against the background learning pipeline. `.learning.lock` guards log mutations;
- * `.decisions.lock` guards decisions.md / pitfalls.md — the caller picks the path.
- *
- * Stale detection: if the lock directory is older than `staleMs` we assume the
- * previous holder crashed and remove it. `json-helper.cjs` uses the same
- * 60 s threshold; `background-learning` intentionally uses 300 s (guards the
- * full Sonnet pipeline, not just file I/O — see DESIGN comment in that script).
- *
- * @returns true when the lock was acquired, false on timeout.
- */
-export async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, staleMs = 60_000): Promise<boolean> {
-  const start = Date.now();
-  while (true) {
-    try {
-      await fs.mkdir(lockDir);
-      return true;
-    } catch (err: unknown) {
-      // Re-throw unexpected filesystem errors; only EEXIST means "lock held"
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      try {
-        const stat = await fs.stat(lockDir);
-        if (Date.now() - stat.mtimeMs > staleMs) {
-          try { await fs.rmdir(lockDir); } catch { /* race condition OK */ }
-          continue;
-        }
-      } catch { /* lock vanished between EEXIST and stat */ }
-      if (Date.now() - start >= timeoutMs) return false;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-}
-
-/**
- * Warn the user if invalid entries were found in a log file.
- * Pass `command` to customize the purge command shown in the warning.
- */
-export function warnIfInvalid(invalidCount: number, command = 'devflow learn --purge'): void {
-  if (invalidCount > 0) {
-    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run '${command}' to clean.`);
-  }
-}
-
-/**
- * Write observations back to a log file atomically.
- * Each observation is serialized as a JSON line. Uses a `.tmp` sibling + rename so
- * concurrent readers (e.g. background-learning during a race) never observe a
- * half-written file. Delegates to `writeFileAtomicExclusive` in fs-atomic.ts
- * (D34/D39: canonical TS atomic-write helper).
- */
-export async function writeObservations(logPath: string, observations: LearningObservation[]): Promise<void> {
-  const lines = observations.map(o => JSON.stringify(o));
-  const content = lines.join('\n') + (lines.length ? '\n' : '');
-  await writeFileAtomicExclusive(logPath, content);
-}
-
-/**
- * Update the Status: field for a decision or pitfall entry in a decisions file.
- * Locates the entry by anchor ID (from artifact_path fragment), sets Status to the given value.
- * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
- *
- * The lock path MUST match the render-ready writer in json-helper.cjs so CLI updates
- * serialize against the background learning pipeline.
- */
-export async function updateDecisionsStatus(
-  filePath: string,
-  anchorId: string,
-  newStatus: string,
-): Promise<boolean> {
-  // Lock path MUST be `.memory/.decisions.lock` (sibling of `decisions/`) to match
-  // scripts/hooks/json-helper.cjs render-ready + decisions-append writers.
-  // Decisions files live at `.memory/decisions/{decisions,pitfalls}.md` so we go up
-  // one level from the file's parent directory.
-  const memoryDir = path.dirname(path.dirname(filePath));
-  const lockPath = path.join(memoryDir, '.decisions.lock');
-
-  const acquired = await acquireMkdirLock(lockPath);
-  if (!acquired) return false;
-
-  try {
-    let content: string;
-    try {
-      content = await fs.readFile(filePath, 'utf-8');
-    } catch {
-      return false; // File doesn't exist
-    }
-
-    // Find the anchor heading and update Status: field
-    const anchorPattern = new RegExp(`(##[^#][^\n]*${escapeRegExp(anchorId)}[^\n]*\n(?:(?!^##)[^\n]*\n)*?)(- \\*\\*Status\\*\\*: )[^\n]+`, 'm');
-    const updated = content.replace(anchorPattern, `$1$2${newStatus}`);
-
-    if (updated === content) {
-      // Try a simpler replacement: find the Status line after the anchor heading
-      const lines = content.split('\n');
-      let inSection = false;
-      let changed = false;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes(anchorId)) {
-          inSection = true;
-        } else if (inSection && lines[i].startsWith('## ')) {
-          break; // Past the section
-        } else if (inSection && lines[i].match(/^- \*\*Status\*\*: /)) {
-          lines[i] = `- **Status**: ${newStatus}`;
-          changed = true;
-          break;
-        }
-      }
-      if (!changed) return false;
-      await writeFileAtomicExclusive(filePath, lines.join('\n'));
-    } else {
-      await writeFileAtomicExclusive(filePath, updated);
-    }
-    return true;
-  } finally {
-    try { await fs.rmdir(lockPath); } catch { /* already cleaned */ }
-  }
-}
-
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Format a stale reason string for display.
- */
-export function formatStaleReason(obs: LearningObservation): string {
-  const reasons: string[] = [];
-  if (obs.mayBeStale && obs.staleReason) {
-    reasons.push(`stale: ${obs.staleReason}`);
-  } else if (obs.mayBeStale) {
-    reasons.push('may be stale');
-  }
-  if (obs.needsReview) reasons.push('artifact missing (deleted?)');
-  if (obs.softCapExceeded) reasons.push('decisions file at capacity');
-  return reasons.join(', ') || 'flagged for review';
 }
 
 interface LearnOptions {
