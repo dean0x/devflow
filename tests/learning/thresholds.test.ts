@@ -6,13 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
 import { runHelper } from './helpers.js';
-
-function nodeEval(code: string): unknown {
-  const result = execSync(`node -e "${code.replace(/"/g, '\\"')}"`, { encoding: 'utf8' });
-  return JSON.parse(result.trim());
-}
 
 // Direct calculation via inline node to test calculateConfidence
 function calculateConfidence(count: number, type: string): number {

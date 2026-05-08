@@ -484,7 +484,11 @@ export const learnCommand = new Command('learn')
   .option('--run-background', 'Run learning agent in background mode')
   .option('--cwd <path>', 'Working directory for background mode')
   .action(async (options: LearnOptions) => {
-    const hasFlag = options.enable || options.disable || options.status || options.list || options.configure || options.clear || options.reset || options.purge || options.review || options.dismissCapacity || options.runBackground;
+    const knownFlags: (keyof LearnOptions)[] = [
+      'enable', 'disable', 'status', 'list', 'configure',
+      'clear', 'reset', 'purge', 'review', 'dismissCapacity', 'runBackground',
+    ];
+    const hasFlag = knownFlags.some((f) => options[f]);
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
@@ -967,8 +971,8 @@ export const learnCommand = new Command('learn')
       // Acquire .learning.lock so we don't race with background-learning during the
       // interactive loop. The internal updateDecisionsStatus call still takes its own
       // .decisions.lock — different lock directories, no deadlock.
-      const memoryDirForReview = path.join(process.cwd(), '.memory');
-      const learningLockDir = path.join(memoryDirForReview, '.learning.lock');
+      const memoryDir = path.join(process.cwd(), '.memory');
+      const learningLockDir = path.join(memoryDir, '.learning.lock');
       const lockAcquired = await acquireMkdirLock(learningLockDir);
       if (!lockAcquired) {
         p.log.error('Learning system is currently running. Try again in a moment.');

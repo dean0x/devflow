@@ -513,18 +513,4 @@ describe('decisions --review capacity mode logic', () => {
     expect(sorted[2].id).toBe('ADR-001');
   });
 
-  it('uses .decisions-notifications.json not .learning-notifications.json', () => {
-    // Verify the correct notifications file key
-    // This is a naming convention test — the capacity review block should
-    // reference .decisions-notifications.json (decisions system) not
-    // .learning-notifications.json (learning system).
-    const decisionsNotifKey = '.decisions-notifications.json';
-    const learningNotifKey = '.learning-notifications.json';
-
-    // Sanity check: these are two different files
-    expect(decisionsNotifKey).not.toBe(learningNotifKey);
-    // The decisions system should only write to its own notifications file
-    expect(decisionsNotifKey).toMatch(/decisions/);
-    expect(learningNotifKey).toMatch(/learning/);
-  });
 });
