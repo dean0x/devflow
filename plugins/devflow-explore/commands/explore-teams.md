@@ -23,7 +23,7 @@ Explore a codebase area by spawning a team of agents for flow tracing, dependenc
 
 ## Phases
 
-### Phase 1: Load Decisions Index (Orchestrator-Local)
+### Phase 1: Load Decisions (Orchestrator-Local)
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
@@ -190,7 +190,7 @@ Spawn `Agent(subagent_type="Synthesizer")` in `exploration` mode with converged 
 - Merge validated findings from all explorers
 - Incorporate corrections from cross-validation
 - Flag unvalidated findings separately
-- Organize into structured output format
+- Organize into the Output format below
 
 ### Phase 9: Present
 
@@ -246,12 +246,27 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 
 **Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.
 
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
+## Output
+
+Structured exploration findings with concrete code references:
+
+- Scope (what was explored and boundaries)
+- Architecture Map (modules, layers, key abstractions with file:line)
+- Flow Trace (call chain from entry to exit with file:line at each step)
+- Integration Points (module boundaries, shared types, external dependencies)
+- Patterns (recurring conventions, design decisions observed)
+- Key Insights (non-obvious findings, surprises, potential concerns)
+
 ## Architecture
 
 ```
 /explore (orchestrator)
 │
-├─ Phase 1: Load Decisions Index (Orchestrator-Local)
+├─ Phase 1: Load Decisions (Orchestrator-Local)
 │
 ├─ Phase 2: Orient
 │  └─ Skimmer agent (pre-team codebase overview)
