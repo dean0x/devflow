@@ -39,8 +39,8 @@ Per-type thresholds (in `json-helper.cjs THRESHOLDS`):
 
 | Type | Required count | Spread | Promote threshold |
 |------|---------------|--------|-------------------|
-| workflow | 3 | 3 days | 0.60 |
-| procedural | 4 | 5 days | 0.70 |
+| workflow | 3 | 7 days | 0.60 |
+| procedural | 4 | 14 days | 0.70 |
 | decision | 2 | 0 days (no spread) | 0.65 |
 | pitfall | 2 | 0 days (no spread) | 0.65 |
 
