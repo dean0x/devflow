@@ -80,6 +80,7 @@ import {
 import {
   filterEligibleEntries,
   sortByLeastUsed,
+  clearCapacityNotifications,
   type DecisionsEntry,
 } from '../../src/cli/commands/decisions.js';
 
@@ -434,7 +435,12 @@ describe('decisions --dismiss-capacity notification logic', () => {
 
 describe('decisions --review capacity mode logic', () => {
   it('excludes deprecated and superseded entries from eligible list', () => {
-    // Simulate allEntries parsed from decisions.md/pitfalls.md
+    // NOTE: This status filter is intentionally inline — it mirrors the `continue`
+    // skip inside the capacity review parser (decisions.ts ~line 804), which excludes
+    // Deprecated/Superseded entries before they are pushed to `allEntries`. This is a
+    // distinct pre-filter step from filterEligibleEntries, which applies the 7-day
+    // protection window. Extracting a one-liner !== check into a named function adds
+    // no clarity benefit here.
     const allEntries = [
       { id: 'ADR-001', pattern: 'Use X', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Accepted', createdDate: '2026-01-01' },
       { id: 'ADR-002', pattern: 'Use Y', file: 'decisions', filePath: '/tmp/decisions.md', status: 'Deprecated', createdDate: '2026-01-10' },
@@ -442,7 +448,7 @@ describe('decisions --review capacity mode logic', () => {
       { id: 'PF-001', pattern: 'Avoid W', file: 'pitfalls', filePath: '/tmp/pitfalls.md', status: 'Active', createdDate: '2026-01-20' },
     ];
 
-    // Replicate the filtering logic from the capacity block
+    // Replicate the parser-level status filter (decisions.ts capacity block)
     const eligible = allEntries.filter(
       e => e.status !== 'Deprecated' && e.status !== 'Superseded',
     );
@@ -506,7 +512,7 @@ describe('capacity review notification clearing (D28)', () => {
   it('clears active notification when active count drops below 50', () => {
     // Simulate the post-deprecation notification update in --review capacity mode.
     // When count-active returns < 50 for a file, the notification should be deactivated.
-    const notifications: Record<string, { active: boolean; dismissed_at_threshold: number | null }> = {
+    const notifications = {
       'decisions-capacity-decisions': { active: true, dismissed_at_threshold: null },
       'decisions-capacity-pitfalls': { active: true, dismissed_at_threshold: null },
     };
@@ -517,14 +523,7 @@ describe('capacity review notification clearing (D28)', () => {
       'decisions-capacity-pitfalls': 60,
     };
 
-    // Replicate the clearing logic from the capacity review handler
-    for (const notifKey of Object.keys(notifications)) {
-      const activeCount = counts[notifKey] ?? 0;
-      if (activeCount < 50 && notifications[notifKey]) {
-        notifications[notifKey].active = false;
-        notifications[notifKey].dismissed_at_threshold = null;
-      }
-    }
+    clearCapacityNotifications(notifications, counts);
 
     // decisions notification cleared (count 45 < 50)
     expect(notifications['decisions-capacity-decisions'].active).toBe(false);
@@ -535,29 +534,27 @@ describe('capacity review notification clearing (D28)', () => {
   });
 
   it('does not clear notifications when active count stays at or above 50', () => {
-    const notifications: Record<string, { active: boolean; dismissed_at_threshold: number | null }> = {
+    const notifications = {
       'decisions-capacity-decisions': { active: true, dismissed_at_threshold: null },
     };
 
-    const activeCount = 55; // still above threshold
+    const counts: Record<string, number> = {
+      'decisions-capacity-decisions': 55, // still above threshold
+    };
 
-    if (activeCount < 50 && notifications['decisions-capacity-decisions']) {
-      notifications['decisions-capacity-decisions'].active = false;
-      notifications['decisions-capacity-decisions'].dismissed_at_threshold = null;
-    }
+    clearCapacityNotifications(notifications, counts);
 
     expect(notifications['decisions-capacity-decisions'].active).toBe(true);
   });
 
   it('skips notification update when notifications key is absent', () => {
     // If the key does not exist in the notifications map, the update should be a no-op
-    const notifications: Record<string, { active: boolean; dismissed_at_threshold: number | null }> = {};
-    const activeCount = 30;
-    const notifKey = 'decisions-capacity-decisions';
+    const notifications = {};
+    const counts: Record<string, number> = {
+      'decisions-capacity-decisions': 30,
+    };
 
-    if (activeCount < 50 && notifications[notifKey]) {
-      notifications[notifKey].active = false;
-    }
+    clearCapacityNotifications(notifications, counts);
 
     // Key was absent, nothing was added or mutated
     expect(Object.keys(notifications)).toHaveLength(0);
