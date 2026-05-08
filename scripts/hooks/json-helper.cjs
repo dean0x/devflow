@@ -1011,11 +1011,12 @@ try {
           learningLog(`Updated ${obs.id}: confidence ${existing.confidence}, status ${existing.status}`);
           updated++;
         } else {
+          const isImmediateType = obs.type === 'decision' || obs.type === 'pitfall';
           const newEntry = {
             id: obs.id,
             type: obs.type,
             pattern: obs.pattern,
-            confidence: INITIAL_CONFIDENCE,
+            confidence: isImmediateType ? calculateConfidence(1, obs.type) : INITIAL_CONFIDENCE,
             observations: 1,
             first_seen: nowIso,
             last_seen: nowIso,
@@ -1025,7 +1026,21 @@ try {
             quality_ok: qualityOk,
           };
           logMap.set(obs.id, newEntry);
-          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${INITIAL_CONFIDENCE} quality_ok=${qualityOk}`);
+
+          // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first observation
+          // if quality_ok=true. Check immediately after creation.
+          if (isImmediateType) {
+            const th = THRESHOLDS[newEntry.type] || THRESHOLDS.procedural;
+            if (newEntry.confidence >= th.promote && newEntry.quality_ok === true) {
+              const firstSeenMs = new Date(newEntry.first_seen).getTime();
+              const spread = (Date.now() - firstSeenMs) / 1000;
+              if (!isNaN(firstSeenMs) && spread >= th.spread) {
+                newEntry.status = 'ready';
+              }
+            }
+          }
+
+          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${newEntry.confidence} quality_ok=${qualityOk}`);
           created++;
         }
       }
@@ -1734,11 +1749,12 @@ try {
           newId = newId + '_b';
           learningLog(`merge-observation: ID collision resolved: ${newObs.id} -> ${newId}`);
         }
+        const isImmediateType = newObs.type === 'decision' || newObs.type === 'pitfall';
         const entry = {
           id: newId,
           type: newObs.type,
           pattern: newObs.pattern,
-          confidence: INITIAL_CONFIDENCE,
+          confidence: isImmediateType ? calculateConfidence(1, newObs.type) : INITIAL_CONFIDENCE,
           observations: 1,
           first_seen: nowIso,
           last_seen: nowIso,
@@ -1747,8 +1763,22 @@ try {
           details: newObs.details || '',
           quality_ok: newObs.quality_ok === true,
         };
+
+        // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first merge
+        // if quality_ok=true. Check immediately after creation.
+        if (isImmediateType) {
+          const th = THRESHOLDS[entry.type] || THRESHOLDS.procedural;
+          if (entry.confidence >= th.promote && entry.quality_ok === true) {
+            const firstSeenMs = new Date(entry.first_seen).getTime();
+            const spread = (Date.now() - firstSeenMs) / 1000;
+            if (!isNaN(firstSeenMs) && spread >= th.spread) {
+              entry.status = 'ready';
+            }
+          }
+        }
+
         logMap.set(newId, entry);
-        learningLog(`merge-observation: new entry ${newId}`);
+        learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
       }
 
       writeJsonlAtomic(logFile, Array.from(logMap.values()));
