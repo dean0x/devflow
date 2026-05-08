@@ -166,7 +166,8 @@ PATTERNS: {patterns}
 CREATE_PR: false
 DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}"
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
 "TASK_ID: {task-id}-part2
@@ -177,7 +178,8 @@ PATTERNS: {patterns}
 CREATE_PR: false
 DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}"
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODERS):
