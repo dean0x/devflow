@@ -77,6 +77,11 @@ import {
   loadAndCountObservations,
   type LearningObservation,
 } from '../../src/cli/commands/learn.js';
+import {
+  filterEligibleEntries,
+  sortByLeastUsed,
+  type DecisionsEntry,
+} from '../../src/cli/commands/decisions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -453,20 +458,15 @@ describe('decisions --review capacity mode logic', () => {
     const today = new Date().toISOString().slice(0, 10);
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-    const entries = [
+    const entries: DecisionsEntry[] = [
       { id: 'ADR-001', createdDate: tenDaysAgo, status: 'Accepted', pattern: 'Old entry', file: 'decisions', filePath: '' },
       { id: 'ADR-002', createdDate: threeDaysAgo, status: 'Accepted', pattern: 'Recent entry', file: 'decisions', filePath: '' },
       { id: 'ADR-003', createdDate: today, status: 'Accepted', pattern: 'Today entry', file: 'decisions', filePath: '' },
       { id: 'ADR-004', createdDate: null, status: 'Accepted', pattern: 'No date entry', file: 'decisions', filePath: '' },
     ];
 
-    // Protection logic: entries with createdDate > sevenDaysAgo are protected
-    const eligible = entries.filter(e => {
-      if (!e.createdDate) return true; // No date — eligible (can't determine age)
-      return e.createdDate <= sevenDaysAgo;
-    });
+    const eligible = filterEligibleEntries(entries);
 
     expect(eligible).toHaveLength(2); // tenDaysAgo and no-date
     expect(eligible.map(e => e.id)).toContain('ADR-001');
@@ -476,7 +476,7 @@ describe('decisions --review capacity mode logic', () => {
   });
 
   it('sorts entries by least-used (cites ASC, last_cited ASC NULLS FIRST, created ASC)', () => {
-    const entries = [
+    const entries: DecisionsEntry[] = [
       { id: 'ADR-001', createdDate: '2026-01-01', status: 'Accepted', pattern: 'Often cited', file: 'decisions', filePath: '' },
       { id: 'ADR-002', createdDate: '2026-01-02', status: 'Accepted', pattern: 'Never cited', file: 'decisions', filePath: '' },
       { id: 'ADR-003', createdDate: '2026-01-03', status: 'Accepted', pattern: 'Rarely cited', file: 'decisions', filePath: '' },
@@ -488,24 +488,7 @@ describe('decisions --review capacity mode logic', () => {
       'ADR-003': { cites: 2, last_cited: '2026-03-01', created: null },
     };
 
-    // Replicate the sort logic from the capacity block
-    const sorted = [...entries].sort((a, b) => {
-      const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
-      const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
-
-      if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
-
-      if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
-      if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
-      if (aUsage.last_cited && bUsage.last_cited) {
-        if (aUsage.last_cited < bUsage.last_cited) return -1;
-        if (aUsage.last_cited > bUsage.last_cited) return 1;
-      }
-
-      const aCreated = a.createdDate || '';
-      const bCreated = b.createdDate || '';
-      return aCreated.localeCompare(bCreated);
-    });
+    const sorted = sortByLeastUsed(entries, usageData);
 
     // Least used first: ADR-002 (0 cites), ADR-003 (2 cites), ADR-001 (10 cites)
     expect(sorted[0].id).toBe('ADR-002');
@@ -513,4 +496,70 @@ describe('decisions --review capacity mode logic', () => {
     expect(sorted[2].id).toBe('ADR-001');
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// Capacity review notification clearing logic (D28)
+// ---------------------------------------------------------------------------
+
+describe('capacity review notification clearing (D28)', () => {
+  it('clears active notification when active count drops below 50', () => {
+    // Simulate the post-deprecation notification update in --review capacity mode.
+    // When count-active returns < 50 for a file, the notification should be deactivated.
+    const notifications: Record<string, { active: boolean; dismissed_at_threshold: number | null }> = {
+      'decisions-capacity-decisions': { active: true, dismissed_at_threshold: null },
+      'decisions-capacity-pitfalls': { active: true, dismissed_at_threshold: null },
+    };
+
+    // Simulate count-active returning 45 for decisions (below threshold) and 60 for pitfalls (above)
+    const counts: Record<string, number> = {
+      'decisions-capacity-decisions': 45,
+      'decisions-capacity-pitfalls': 60,
+    };
+
+    // Replicate the clearing logic from the capacity review handler
+    for (const notifKey of Object.keys(notifications)) {
+      const activeCount = counts[notifKey] ?? 0;
+      if (activeCount < 50 && notifications[notifKey]) {
+        notifications[notifKey].active = false;
+        notifications[notifKey].dismissed_at_threshold = null;
+      }
+    }
+
+    // decisions notification cleared (count 45 < 50)
+    expect(notifications['decisions-capacity-decisions'].active).toBe(false);
+    expect(notifications['decisions-capacity-decisions'].dismissed_at_threshold).toBeNull();
+
+    // pitfalls notification NOT cleared (count 60 >= 50)
+    expect(notifications['decisions-capacity-pitfalls'].active).toBe(true);
+  });
+
+  it('does not clear notifications when active count stays at or above 50', () => {
+    const notifications: Record<string, { active: boolean; dismissed_at_threshold: number | null }> = {
+      'decisions-capacity-decisions': { active: true, dismissed_at_threshold: null },
+    };
+
+    const activeCount = 55; // still above threshold
+
+    if (activeCount < 50 && notifications['decisions-capacity-decisions']) {
+      notifications['decisions-capacity-decisions'].active = false;
+      notifications['decisions-capacity-decisions'].dismissed_at_threshold = null;
+    }
+
+    expect(notifications['decisions-capacity-decisions'].active).toBe(true);
+  });
+
+  it('skips notification update when notifications key is absent', () => {
+    // If the key does not exist in the notifications map, the update should be a no-op
+    const notifications: Record<string, { active: boolean; dismissed_at_threshold: number | null }> = {};
+    const activeCount = 30;
+    const notifKey = 'decisions-capacity-decisions';
+
+    if (activeCount < 50 && notifications[notifKey]) {
+      notifications[notifKey].active = false;
+    }
+
+    // Key was absent, nothing was added or mutated
+    expect(Object.keys(notifications)).toHaveLength(0);
+  });
 });

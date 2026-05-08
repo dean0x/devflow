@@ -20,6 +20,8 @@ import {
 import { runDecisionsAgent } from '../utils/decisions-agent.js';
 import { loadDecisionsConfig } from '../utils/decisions-config.js';
 import {
+  acquireMkdirLock,
+  formatStaleReason,
   isLearningObservation,
   readObservations,
   warnIfInvalid,
@@ -120,6 +122,63 @@ export function hasDecisionsHook(input: string | Settings): boolean {
   return settings.hooks?.SessionEnd?.some((matcher) =>
     matcher.hooks.some((h) => h.command.includes(DECISIONS_HOOK_MARKER)),
   ) ?? false;
+}
+
+// ---------------------------------------------------------------------------
+// Capacity review helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * A parsed entry from decisions.md or pitfalls.md used during capacity review.
+ */
+export interface DecisionsEntry {
+  id: string;
+  pattern: string;
+  file: string;
+  filePath: string;
+  status: string;
+  createdDate: string | null;
+}
+
+/**
+ * D23: Filter entries to those eligible for deprecation review.
+ * Excludes entries created within the 7-day protection window.
+ */
+export function filterEligibleEntries(entries: DecisionsEntry[]): DecisionsEntry[] {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return entries.filter(e => {
+    if (!e.createdDate) return true; // No date — eligible
+    return e.createdDate <= sevenDaysAgo;
+  });
+}
+
+/**
+ * D23: Sort entries by least used: cites ASC, last_cited ASC NULLS FIRST, created ASC.
+ */
+export function sortByLeastUsed(
+  entries: DecisionsEntry[],
+  usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }>,
+): DecisionsEntry[] {
+  return [...entries].sort((a, b) => {
+    const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
+    const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
+
+    // cites ASC
+    if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
+
+    // last_cited ASC NULLS FIRST
+    if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
+    if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
+    if (aUsage.last_cited && bUsage.last_cited) {
+      if (aUsage.last_cited < bUsage.last_cited) return -1;
+      if (aUsage.last_cited > bUsage.last_cited) return 1;
+    }
+
+    // created ASC
+    const aCreated = a.createdDate || '';
+    const bCreated = b.createdDate || '';
+    return aCreated.localeCompare(bCreated);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -584,11 +643,8 @@ export const decisionsCommand = new Command('decisions')
         }
 
         const decisionsLockDir = path.join(memoryDir, '.decisions.lock');
-        let lockAcquired = false;
-        try {
-          await fs.mkdir(decisionsLockDir);
-          lockAcquired = true;
-        } catch {
+        const lockAcquired = await acquireMkdirLock(decisionsLockDir);
+        if (!lockAcquired) {
           p.log.error('Decisions system is currently running. Try again in a moment.');
           return;
         }
@@ -600,12 +656,8 @@ export const decisionsCommand = new Command('decisions')
 
         try {
           for (const obs of flagged) {
-            const typeLabel = obs.type === 'decision' ? 'Decision' : 'Pitfall';
-            const reasons: string[] = [];
-            if (obs.mayBeStale) reasons.push(obs.staleReason ? `stale: ${obs.staleReason}` : 'may be stale');
-            if (obs.needsReview) reasons.push('artifact missing (deleted?)');
-            if (obs.softCapExceeded) reasons.push('decisions file at capacity');
-            const reason = reasons.join(', ') || 'flagged for review';
+            const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
+            const reason = formatStaleReason(obs);
 
             p.log.info(
               `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
@@ -674,9 +726,7 @@ export const decisionsCommand = new Command('decisions')
             // 'skip' — no change
           }
         } finally {
-          if (lockAcquired) {
-            try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
-          }
+          try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
         }
 
         p.outro(color.green('Review complete.'));
@@ -689,14 +739,7 @@ export const decisionsCommand = new Command('decisions')
         const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
         // D23: parse decisions entries from both files
-        const allEntries: Array<{
-          id: string;
-          pattern: string;
-          file: string;
-          filePath: string;
-          status: string;
-          createdDate: string | null;
-        }> = [];
+        const allEntries: DecisionsEntry[] = [];
 
         for (const [filePath, type] of [[decisionsPath, 'decision'], [pitfallsPath, 'pitfall']] as const) {
           let content: string;
@@ -746,11 +789,7 @@ export const decisionsCommand = new Command('decisions')
         }
 
         // D23: Filter out entries created within 7 days (protected)
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-        const eligible = allEntries.filter(e => {
-          if (!e.createdDate) return true; // No date — eligible
-          return e.createdDate <= sevenDaysAgo;
-        });
+        const eligible = filterEligibleEntries(allEntries);
 
         if (eligible.length === 0) {
           p.log.info('All active entries are within the 7-day protection window.');
@@ -777,26 +816,7 @@ export const decisionsCommand = new Command('decisions')
         } catch { /* no usage data — all cites=0 */ }
 
         // D23: Sort by least used: (cites ASC, last_cited ASC NULLS FIRST, created ASC)
-        const sorted = [...eligible].sort((a, b) => {
-          const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
-          const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
-
-          // cites ASC
-          if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
-
-          // last_cited ASC NULLS FIRST
-          if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
-          if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
-          if (aUsage.last_cited && bUsage.last_cited) {
-            if (aUsage.last_cited < bUsage.last_cited) return -1;
-            if (aUsage.last_cited > bUsage.last_cited) return 1;
-          }
-
-          // created ASC
-          const aCreated = a.createdDate || '';
-          const bCreated = b.createdDate || '';
-          return aCreated.localeCompare(bCreated);
-        });
+        const sorted = sortByLeastUsed(eligible, usageData);
 
         // Take top 20
         const candidates = sorted.slice(0, 20);

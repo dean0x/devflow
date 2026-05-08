@@ -330,7 +330,7 @@ export async function readObservations(logPath: string): Promise<{ observations:
  *
  * @returns true when the lock was acquired, false on timeout.
  */
-async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, staleMs = 60_000): Promise<boolean> {
+export async function acquireMkdirLock(lockDir: string, timeoutMs = 30_000, staleMs = 60_000): Promise<boolean> {
   const start = Date.now();
   while (true) {
     try {
@@ -442,7 +442,7 @@ function escapeRegExp(str: string): string {
 /**
  * Format a stale reason string for display.
  */
-function formatStaleReason(obs: LearningObservation): string {
+export function formatStaleReason(obs: LearningObservation): string {
   const reasons: string[] = [];
   if (obs.mayBeStale && obs.staleReason) {
     reasons.push(`stale: ${obs.staleReason}`);
