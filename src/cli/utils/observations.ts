@@ -56,10 +56,6 @@ export function isLearningObservation(obj: unknown): obj is LearningObservation 
  * Skips empty and malformed lines.
  */
 export function parseLearningLog(logContent: string): LearningObservation[] {
-  if (!logContent.trim()) {
-    return [];
-  }
-
   const observations: LearningObservation[] = [];
 
   for (const line of logContent.split('\n')) {
