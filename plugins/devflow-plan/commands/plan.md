@@ -380,6 +380,25 @@ Required sections:
 9. **Integration Points** — entry points, services, models to connect
 10. **Design Review Results** — anti-pattern findings with mitigations
 11. **Risk Assessment** — context risk level, unresolved risks
+12. **PR Description Guidance** — problem being solved, key changes, breaking changes, reviewer focus areas
+
+### 12. PR Description Guidance
+
+```markdown
+## PR Description Guidance
+
+### Problem Being Solved
+{1-2 sentences: the "why" behind this change}
+
+### Key Changes to Highlight
+{bulleted list: user-facing framing of what changed}
+
+### Breaking Changes
+{from gap analysis, or "None expected"}
+
+### Reviewer Focus Areas
+{areas needing careful review, with reasons}
+```
 
 **Create GitHub issue (optional):**
 

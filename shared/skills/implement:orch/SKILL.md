@@ -75,7 +75,7 @@ Pass `DECISIONS_CONTEXT` to Coder (Phase 4) and Scrutinizer (Phase 6).
 
 ## Phase 3: Plan Synthesis
 
-**Produces:** EXECUTION_PLAN
+**Produces:** EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE
 **Requires:** FEATURE_BRANCH
 
 Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
@@ -85,6 +85,8 @@ Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
 
 Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
 
+Extract `## PR Description Guidance` section from the plan (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
+
 ## Worktree Support
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
@@ -92,7 +94,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 ## Phase 4: Coder Execution
 
 **Produces:** CODER_COMMITS, PRE_CODER_SHA
-**Requires:** EXECUTION_PLAN, FEATURE_BRANCH
+**Requires:** EXECUTION_PLAN, FEATURE_BRANCH, PR_DESCRIPTION_GUIDANCE
 
 Record git SHA before first Coder: `git rev-parse HEAD`
 
@@ -106,6 +108,8 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
 - **DECISIONS_CONTEXT**: From Phase 2 (or `(none)`)
+- **PR_DESCRIPTION_GUIDANCE**: From Phase 3 (or `(none)`)
+- **HANDOFF_FILE**: `.docs/handoff-{branch_slug}.md` (substitute actual branch slug from Phase 1)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -113,7 +117,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 
 If Coder returns **BLOCKED**, halt the pipeline and report to user.
 
-**Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.docs/handoff.md` using the Write tool. The next Coder reads this on startup (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
+**Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.docs/handoff-{branch_slug}.md` using the Write tool. The next Coder reads this via HANDOFF_FILE (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
 
 ## Phase 5: FILES_CHANGED Detection
 
@@ -148,7 +152,8 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 
 **Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS
 
-Cleanup: delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
+Cleanup:
+- Delete `.docs/handoff-{branch_slug}.md` if it exists (no longer needed after pipeline completes).
 
 After quality gates pass, check for overlapping feature knowledge entries whose `referencedFiles` intersect FILES_CHANGED:
 ```bash
@@ -237,7 +242,7 @@ Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
 - [ ] Phase 2: Load Decisions → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
-- [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured
+- [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured, PR_DESCRIPTION_GUIDANCE extracted (or `(none)`)
 - [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
 - [ ] Phase 5: FILES_CHANGED Detection → FILES_CHANGED captured
 - [ ] Phase 6: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)

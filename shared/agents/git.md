@@ -23,7 +23,7 @@ The orchestrator provides:
 
 | Operation | Purpose | Key Parameters |
 |-----------|---------|----------------|
-| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | `WORKTREE_PATH` (optional) |
+| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | `WORKTREE_PATH` (optional), `PR_DESCRIPTION_GUIDANCE` (optional) |
 | `validate-branch` | Pre-flight for /resolve: check branch state | `WORKTREE_PATH` (optional) |
 | `setup-task` | Create feature branch and fetch issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |
@@ -38,13 +38,13 @@ The orchestrator provides:
 
 Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code review.
 
-**Input:** `WORKTREE_PATH` (optional)
+**Input:** `WORKTREE_PATH` (optional), `PR_DESCRIPTION_GUIDANCE` (optional)
 
 **Process:**
 1. Verify on feature branch (not main/master/develop/integration/trunk/release/*/staging/production) - error if not
 2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
-4. Check if PR exists - if not, create PR using `devflow:git` patterns
+4. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose PR body via `devflow:git` template.
 5. Get base branch from PR
 6. Derive branch-slug (replace `/` with `-`)
 
@@ -62,6 +62,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 - Committed: {yes/no} ({message} if yes)
 - Pushed: {yes/no}
 - PR Created: {yes/no}
+- PR Description Source: {guidance-variable | generated | existing}
 
 ### Status: READY | BLOCKED
 {BLOCKED reason if applicable}

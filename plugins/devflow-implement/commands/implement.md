@@ -29,7 +29,7 @@ Orchestrate a single task through implementation by spawning specialized agents.
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_FEATURE_KNOWLEDGE_SLUGS
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_FEATURE_KNOWLEDGE_SLUGS, PR_DESCRIPTION_GUIDANCE
 
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
@@ -59,6 +59,9 @@ Return the branch setup summary."
 4. If `issue` field present in frontmatter: pass to Git agent as ISSUE_INPUT
 5. Use extracted content as EXECUTION_PLAN for the Coder phase (replaces exploration/planning output)
 6. Captured values override defaults from Git agent where present
+7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
+
+If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
 
 **Load Decisions Context:**
 ```bash
@@ -76,7 +79,7 @@ Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
 ### Phase 2: Implement
 
 **Produces:** CODER_OUTPUT, FILES_CHANGED
-**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN
+**Requires:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, PR_DESCRIPTION_GUIDANCE
 
 Based on Setup context (plan document, issue body, or conversation context), use the three-strategy framework:
 
@@ -104,7 +107,8 @@ PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
 DOMAIN: {detected domain or 'fullstack'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}"
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
 ---
@@ -125,7 +129,9 @@ CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-HANDOFF_REQUIRED: true"
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+HANDOFF_REQUIRED: true
+HANDOFF_FILE: .docs/handoff-{branch_slug}.md"
 ```
 
 **Phase 2+ Coders** (after prior phase completes):
@@ -142,10 +148,12 @@ PRIOR_PHASE_SUMMARY: {summary from previous Coder}
 FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
-HANDOFF_REQUIRED: {true if not last phase}"
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+HANDOFF_REQUIRED: {true if not last phase}
+HANDOFF_FILE: .docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically.
+**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Coder with HANDOFF_REQUIRED=true completes, write its phase summary to `.docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction). Delete `.docs/handoff-{branch_slug}.md` after the final Coder completes (cleanup).
 
 ---
 
@@ -163,7 +171,8 @@ PATTERNS: {patterns}
 CREATE_PR: false
 DOMAIN: {subtask 1 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}"
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
 "TASK_ID: {task-id}-part2
@@ -174,7 +183,8 @@ PATTERNS: {patterns}
 CREATE_PR: false
 DOMAIN: {subtask 2 domain}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}"
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODERS):
@@ -358,6 +368,8 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 **Requires:** BASE_BRANCH, TASK_ID
 
 **For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+
+If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Coder agent Responsibility 7 for field-to-section mapping).
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
