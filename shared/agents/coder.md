@@ -35,6 +35,8 @@ You receive from orchestrator:
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries.
   When provided, use `devflow:apply-decisions` to Read full bodies on demand.
 
+**PR_DESCRIPTION_GUIDANCE** (optional): Structured hints for PR body from plan artifact. Contains: Problem Being Solved, Key Changes to Highlight, Breaking Changes, Reviewer Focus Areas. When present, use to compose the PR description — map: Problem Being Solved → Summary, Key Changes → Changes, Breaking Changes → Breaking Changes, Reviewer Focus Areas → Reviewer Focus Areas. `(none)` when absent.
+
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
 **Sequential execution context** (when part of multi-Coder chain):
@@ -75,7 +77,7 @@ When you apply a decision from `.memory/decisions/decisions.md` or avoid a pitfa
 
 6. **Commit and push**: Create atomic commits with clear messages. Reference TASK_ID. Push to remote.
 
-7. **Create PR** (if CREATE_PR=true): Create pull request against BASE_BRANCH with summary and testing notes.
+7. **Create PR** (if CREATE_PR=true): Create pull request against BASE_BRANCH. If `PR_DESCRIPTION_GUIDANCE` is provided (not `(none)`), use it to compose the PR body: map Problem Being Solved → Summary section, Key Changes to Highlight → Changes section, Breaking Changes → Breaking Changes section, Reviewer Focus Areas → Reviewer Focus Areas section. If `PR_DESCRIPTION_GUIDANCE` is absent, generate the PR body from implementation context.
 
 8. **Generate handoff** (if HANDOFF_REQUIRED=true): Include implementation summary for next Coder (see Output section).
 

@@ -214,6 +214,7 @@ Spawn `Agent(subagent_type="Plan")` with all findings, including `FEATURE_KNOWLE
 - Include: architecture decisions, file changes, new files needed, test strategy
 - Integrate gap mitigations from Phase 7 into the relevant steps
 - Flag areas where existing patterns conflict with the proposed approach
+- Generate a **PR Description Guidance** section as part of the plan artifact (section 12 per plan.md format) containing: Problem Being Solved (1-2 sentences on the "why"), Key Changes to Highlight (user-facing framing), Breaking Changes (from gap analysis or "None expected"), and Reviewer Focus Areas (areas needing careful review with reasons)
 
 ## Phase 9: Design Review Lite
 
@@ -264,6 +265,7 @@ Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
 - Test strategy
 - Design review notes (anti-patterns checked, any concerns)
 - Risks and mitigations
+- PR Description Guidance (problem, key changes, breaking changes, reviewer focus areas)
 - Open questions (if any)
 - Design artifact path (if written to disk)
 
