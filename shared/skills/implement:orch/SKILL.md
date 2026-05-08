@@ -109,8 +109,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
 - **DECISIONS_CONTEXT**: From Phase 2 (or `(none)`)
 - **PR_DESCRIPTION_GUIDANCE**: From Phase 3 (or `(none)`)
-
-After Coder completes: if `PR_DESCRIPTION_GUIDANCE` is not `(none)`, write its content to `.docs/pr-description-guidance.md` so the git agent's `ensure-pr-ready` operation can read it when creating the PR.
+- **HANDOFF_FILE**: `.docs/handoff-{branch_slug}.md` (branch-scoped handoff path)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -118,7 +117,7 @@ After Coder completes: if `PR_DESCRIPTION_GUIDANCE` is not `(none)`, write its c
 
 If Coder returns **BLOCKED**, halt the pipeline and report to user.
 
-**Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.docs/handoff.md` using the Write tool. The next Coder reads this on startup (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
+**Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.docs/handoff-{branch_slug}.md` using the Write tool. The next Coder reads this via HANDOFF_FILE (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
 
 ## Phase 5: FILES_CHANGED Detection
 
@@ -154,7 +153,7 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 **Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS
 
 Cleanup:
-- Delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
+- Delete `.docs/handoff-{branch_slug}.md` if it exists (no longer needed after pipeline completes).
 
 After quality gates pass, check for overlapping feature knowledge entries whose `referencedFiles` intersect FILES_CHANGED:
 ```bash

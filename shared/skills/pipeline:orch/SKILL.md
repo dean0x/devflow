@@ -36,7 +36,7 @@ Load `devflow:implement:orch` via the Skill tool, then execute its full pipeline
 
 If implementation returns **BLOCKED**: halt entire pipeline, report blocker.
 
-Cleanup: delete `.docs/handoff.md` if it exists (no longer needed before review).
+Cleanup: delete `.docs/handoff-{branch_slug}.md` if it exists (no longer needed before review).
 
 ## Phase 2: Status — Review Decision
 

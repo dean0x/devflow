@@ -44,7 +44,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 1. Verify on feature branch (not main/master/develop/integration/trunk/release/*/staging/production) - error if not
 2. Check for uncommitted changes - if any, create atomic commit using `devflow:git` patterns
 3. Check if branch pushed to remote - if not, push with `-u` flag
-4. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) `.docs/pr-description-guidance.md` file if it exists (resolved via WORKTREE_PATH), (c) generated from branch context. Compose PR body via `devflow:git` template.
+4. Check if PR exists - if not, create PR using guidance from (in priority order): (a) `PR_DESCRIPTION_GUIDANCE` variable if provided and not `(none)`, (b) generated from branch context. Compose PR body via `devflow:git` template.
 5. Get base branch from PR
 6. Derive branch-slug (replace `/` with `-`)
 
@@ -62,7 +62,7 @@ Pre-flight checks and fixes for `/code-review`. Ensures branch is ready for code
 - Committed: {yes/no} ({message} if yes)
 - Pushed: {yes/no}
 - PR Created: {yes/no}
-- PR Description Source: {guidance-variable | guidance-file | generated | existing}
+- PR Description Source: {guidance-variable | generated | existing}
 
 ### Status: READY | BLOCKED
 {BLOCKED reason if applicable}

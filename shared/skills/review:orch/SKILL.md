@@ -25,7 +25,11 @@ This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. E
 
 **Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION, PR_DESCRIPTION_GUIDANCE
 
-Read `.docs/pr-description-guidance.md` if it exists → set `PR_DESCRIPTION_GUIDANCE` to its content. If not found, set to `(none)`.
+Discover PR description guidance from plan artifact:
+1. List `.docs/design/*.md` files
+2. Sort by timestamp in filename (descending — timestamps are YYYY-MM-DD_HHMM, naturally sortable)
+3. Read the most recent file, extract `## PR Description Guidance` section
+4. If no plan files exist or section not found → set `PR_DESCRIPTION_GUIDANCE` to `(none)`
 
 Spawn `Agent(subagent_type="Git")` with action `ensure-pr-ready`, passing `PR_DESCRIPTION_GUIDANCE`:
 - Extract: branch, base_branch, branch_slug, pr_number
@@ -130,8 +134,6 @@ After all reviewers complete, spawn in parallel:
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
 Write HEAD SHA to `.docs/reviews/{branch_slug}/.last-review-head` for next incremental review.
-
-Cleanup: delete `.docs/pr-description-guidance.md` if it exists (transient file written by implement:orch for ambient-mode PR creation, consumed by this point).
 
 Report to user:
 - Merge recommendation (from Synthesizer)
