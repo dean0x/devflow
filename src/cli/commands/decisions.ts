@@ -640,6 +640,25 @@ export const decisionsCommand = new Command('decisions')
                 needsReview: undefined,
                 softCapExceeded: undefined,
               };
+
+              // Update Status: field in the decisions/pitfalls markdown file
+              if (obs.artifact_path) {
+                const hashIdx = obs.artifact_path.indexOf('#');
+                if (hashIdx !== -1) {
+                  const decisionsFilePath = obs.artifact_path.slice(0, hashIdx);
+                  const anchorId = obs.artifact_path.slice(hashIdx + 1);
+                  const absPath = path.isAbsolute(decisionsFilePath)
+                    ? decisionsFilePath
+                    : path.join(process.cwd(), decisionsFilePath);
+                  const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
+                  if (updated) {
+                    p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
+                  } else {
+                    p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
+                  }
+                }
+              }
+
               await writeObservations(logPath, updatedObservations);
               p.log.success(`Marked '${obs.pattern}' as deprecated.`);
             } else if (action === 'keep') {
