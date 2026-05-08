@@ -35,7 +35,7 @@ You receive from orchestrator:
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries.
   When provided, use `devflow:apply-decisions` to Read full bodies on demand.
 
-**PR_DESCRIPTION_GUIDANCE** (optional): Structured hints for PR body from plan artifact. Contains: Problem Being Solved, Key Changes to Highlight, Breaking Changes, Reviewer Focus Areas. When present, use to compose the PR description — map: Problem Being Solved → Summary, Key Changes → Changes, Breaking Changes → Breaking Changes, Reviewer Focus Areas → Reviewer Focus Areas. `(none)` when absent.
+**PR_DESCRIPTION_GUIDANCE** (optional): Structured hints for PR body from plan artifact. Contains: Problem Being Solved, Key Changes to Highlight, Breaking Changes, Reviewer Focus Areas. `(none)` when absent.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 

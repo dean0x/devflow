@@ -380,7 +380,7 @@ Required sections:
 9. **Integration Points** — entry points, services, models to connect
 10. **Design Review Results** — anti-pattern findings with mitigations
 11. **Risk Assessment** — context risk level, unresolved risks
-12. **PR Description Guidance** — structured hints for PR body (problem being solved, key changes, breaking changes, reviewer focus areas)
+12. **PR Description Guidance** — problem being solved, key changes, breaking changes, reviewer focus areas
 
 ### 12. PR Description Guidance
 

@@ -65,7 +65,7 @@ This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT`
 
 Also load feature knowledge:
 1. Read `.features/index.json` if it exists
-2. Based on changed files from Phase 4 file analysis, identify relevant feature knowledge entries (match file paths against each entry's `directories` and `referencedFiles`)
+2. Run `git diff --name-only {DIFF_RANGE}` to get changed files; identify relevant feature knowledge entries (match file paths against each entry's `directories` and `referencedFiles`)
 3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
