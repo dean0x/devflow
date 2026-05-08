@@ -33,8 +33,14 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
-**Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION
+**Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION, PR_DESCRIPTION_GUIDANCE
 **Requires:** WORKTREES
+
+Discover PR description guidance from plan artifact (per worktree):
+1. List `{worktree}/.docs/design/*.md` files
+2. Sort by timestamp in filename (descending -- timestamps are YYYY-MM-DD_HHMM, naturally sortable)
+3. Read the most recent file, extract `## PR Description Guidance` section
+4. If no plan files exist or section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`
 
 For each reviewable worktree, spawn Git agent:
 
@@ -42,6 +48,7 @@ For each reviewable worktree, spawn Git agent:
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, branch-slug, PR#"
 ```

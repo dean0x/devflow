@@ -130,7 +130,8 @@ DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
-HANDOFF_REQUIRED: true"
+HANDOFF_REQUIRED: true
+HANDOFF_FILE: .docs/handoff-{branch_slug}.md"
 ```
 
 **Phase 2+ Coders** (after prior phase completes):
@@ -148,10 +149,11 @@ FILES_FROM_PRIOR_PHASE: {list of files created}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
 PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
-HANDOFF_REQUIRED: {true if not last phase}"
+HANDOFF_REQUIRED: {true if not last phase}
+HANDOFF_FILE: .docs/handoff-{branch_slug}.md"
 ```
 
-**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically.
+**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Coder with HANDOFF_REQUIRED=true completes, write its phase summary to `.docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction). Delete `.docs/handoff-{branch_slug}.md` after the final Coder completes (cleanup).
 
 ---
 

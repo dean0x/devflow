@@ -152,7 +152,7 @@ Report to user:
 
 Before reporting results, verify every phase was announced:
 
-- [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured, PR_DESCRIPTION fetched (or `(none)`)
+- [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured, PR_DESCRIPTION fetched (or `(none)`), PR_DESCRIPTION_GUIDANCE discovered (or `(none)`)
 - [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
 - [ ] Phase 3: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
 - [ ] Phase 4: File Analysis → REVIEWER_LIST captured

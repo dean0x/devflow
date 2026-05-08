@@ -23,7 +23,7 @@ The orchestrator provides:
 
 | Operation | Purpose | Key Parameters |
 |-----------|---------|----------------|
-| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | `WORKTREE_PATH` (optional) |
+| `ensure-pr-ready` | Pre-flight for /review: commit, push, create PR | `WORKTREE_PATH` (optional), `PR_DESCRIPTION_GUIDANCE` (optional) |
 | `validate-branch` | Pre-flight for /resolve: check branch state | `WORKTREE_PATH` (optional) |
 | `setup-task` | Create feature branch and fetch issue | `BASE_BRANCH`, `ISSUE_INPUT` (optional), `TASK_DESCRIPTION` (optional) |
 | `fetch-issue` | Fetch GitHub issue for implementation | `ISSUE_INPUT` (number or search term) |

@@ -109,7 +109,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
 - **DECISIONS_CONTEXT**: From Phase 2 (or `(none)`)
 - **PR_DESCRIPTION_GUIDANCE**: From Phase 3 (or `(none)`)
-- **HANDOFF_FILE**: `.docs/handoff-{branch_slug}.md` (branch-scoped handoff path)
+- **HANDOFF_FILE**: `.docs/handoff-{branch_slug}.md` (substitute actual branch slug from Phase 1)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
