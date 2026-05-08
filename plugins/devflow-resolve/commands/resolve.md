@@ -157,7 +157,7 @@ BATCH_ID: batch-{n}
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
-PR_DESCRIPTION: {pr_description}
+PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-decisions to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 

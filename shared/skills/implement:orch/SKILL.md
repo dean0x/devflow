@@ -155,7 +155,6 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 
 Cleanup:
 - Delete `.docs/handoff.md` if it exists (no longer needed after pipeline completes).
-- Delete `.docs/pr-description-guidance.md` if it exists (transient file, already consumed by git agent during PR creation).
 
 After quality gates pass, check for overlapping feature knowledge entries whose `referencedFiles` intersect FILES_CHANGED:
 ```bash

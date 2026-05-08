@@ -61,6 +61,8 @@ Return the branch setup summary."
 6. Captured values override defaults from Git agent where present
 7. Extract `## PR Description Guidance` section (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
 
+If `PR_DESCRIPTION_GUIDANCE` was not set above (non-plan paths: issue input or task description), set it to `(none)`.
+
 **Load Decisions Context:**
 ```bash
 DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
@@ -127,6 +129,7 @@ CREATE_PR: false
 DOMAIN: {phase 1 domain, e.g., 'backend'}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 HANDOFF_REQUIRED: true"
 ```
 
@@ -362,7 +365,9 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
 **Produces:** PR_URL
 **Requires:** BASE_BRANCH, TASK_ID
 
-**For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`. If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Coder agent Responsibility 7 for field-to-section mapping).
+**For SEQUENTIAL_CODERS or PARALLEL_CODERS**: The last sequential Coder (with CREATE_PR: true) handles PR creation. For parallel coders, create unified PR using `devflow:git` skill patterns. Push branch and run `gh pr create` with comprehensive description, targeting `BASE_BRANCH`.
+
+If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see Coder agent Responsibility 7 for field-to-section mapping).
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
