@@ -206,7 +206,7 @@ export function clearCapacityNotifications(
   threshold = 50,
 ): void {
   for (const notifKey of Object.keys(counts)) {
-    const activeCount = counts[notifKey] ?? 0;
+    const activeCount = counts[notifKey];
     if (activeCount < threshold && notifications[notifKey]) {
       notifications[notifKey].active = false;
       notifications[notifKey].dismissed_at_threshold = null;
