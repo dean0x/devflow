@@ -44,7 +44,13 @@ The orchestrator provides:
 
 ## Responsibilities
 
-### 1. Load Research Skill
+### 1. Validate Research Type
+
+Verify RESEARCH_TYPE is one of: `codebase`, `external`, `market`, `competitor`, `technology`.
+If RESEARCH_TYPE does not match any of these, report an error to the orchestrator and halt.
+Do not attempt to load a skill for an unrecognized type.
+
+### 2. Load Research Skill
 
 Load the domain-specific skill for RESEARCH_TYPE:
 
@@ -54,22 +60,22 @@ Skill(skill="devflow:research-{RESEARCH_TYPE}")
 
 If the Skill invocation fails, proceed with built-in knowledge for that research type — the loaded skill provides methodology guidance but is not required for useful output.
 
-### 2. Apply Decisions
+### 3. Apply Decisions
 
 Follow `devflow:apply-decisions` to scan the DECISIONS_CONTEXT index. Read full ADR/PF bodies on demand. Cite `applies ADR-NNN` or `avoids PF-NNN` in findings where relevant. Skip when DECISIONS_CONTEXT is `(none)` or absent.
 
-### 3. Apply Feature Knowledge
+### 4. Apply Feature Knowledge
 
 Follow `devflow:apply-feature-knowledge` to absorb FEATURE_KNOWLEDGE patterns and integration points. Use as a starting point — verify against current state. Skip when FEATURE_KNOWLEDGE is `(none)` or absent.
 
-### 4. Execute Research Methodology
+### 5. Execute Research Methodology
 
 Execute the 6-step methodology from the loaded skill:
 - Use the ORIENT_OUTPUT (if provided for codebase type) as codebase context
 - Follow the trust tier and security protocol from the loaded skill
 - Apply the output format from the loaded skill
 
-### 5. Write Structured Output
+### 6. Write Structured Output
 
 Write findings to OUTPUT_PATH using the Write tool:
 1. Create the parent directory if needed
