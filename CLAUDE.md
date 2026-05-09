@@ -162,7 +162,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
 
-**Persisting agents**: Reviewer → `.docs/reviews/{branch-slug}/{timestamp}/{focus}.md`, Synthesizer → `.docs/reviews/{branch-slug}/{timestamp}/review-summary.md` (review mode), Resolver → `.docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md`, Working Memory → `.memory/WORKING-MEMORY.md` (automatic)
+**Persisting agents**: Reviewer → `.docs/reviews/{branch-slug}/{timestamp}/{focus}.md`, Synthesizer → `.docs/reviews/{branch-slug}/{timestamp}/review-summary.md` (review mode) / `.docs/research/{topic-slug}/{timestamp}/research-summary.md` (research mode), Researcher → `.docs/research/{topic-slug}/{timestamp}/{type}.md`, Resolver → `.docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md`, Working Memory → `.memory/WORKING-MEMORY.md` (automatic)
 
 **Incremental Reviews**: `/code-review` writes reports into timestamped subdirectories (`YYYY-MM-DD_HHMM`) and tracks HEAD SHA in `.last-review-head` for incremental diffs. Second review only diffs from last reviewed commit. `/resolve` defaults to latest timestamped directory. Both commands auto-discover git worktrees and process all reviewable branches in parallel.
 

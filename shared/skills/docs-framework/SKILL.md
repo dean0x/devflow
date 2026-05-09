@@ -89,6 +89,8 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 | Review head marker | `.last-review-head` | Plain text file with SHA |
 | Status logs | `{timestamp}.md` | `2025-12-26_1430.md` |
 | Design documents | `{issue}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
+| Research outputs | `{type}.md` in timestamped dir | `2025-12-26_1430/codebase.md` |
+| Research summary | `research-summary.md` in timestamped dir | `2025-12-26_1430/research-summary.md` |
 
 ---
 
@@ -121,6 +123,8 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Decisions | `.memory/decisions/decisions.md` | Append-only (ADR-NNN sequential IDs) |
 | Pitfalls | `.memory/decisions/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
 | Designer (via /plan) | `.docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
+| Researcher | `.docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
+| Synthesizer (research) | `.docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
 
 ### Agents That Don't Persist
 
