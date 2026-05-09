@@ -73,14 +73,14 @@ EXPLORE depth: simple lookups ("where is X?") → QUICK. Focused subsystem/flow 
 
 | Skill | When to Load | Depth | File Patterns |
 |-------|-------------|-------|---------------|
-| devflow:research:orch | Always for RESEARCH | GUIDED + ORCHESTRATED | Any — orchestrates multi-type research |
-| devflow:research-codebase | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
+| devflow:research-codebase | Always for RESEARCH | GUIDED | Any — main-session codebase exploration |
+| devflow:research:orch | Always for RESEARCH | ORCHESTRATED | Any — orchestrates multi-agent research pipeline |
 | devflow:research-external | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
 | devflow:research-market | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
 | devflow:research-competitor | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
 | devflow:research-technology | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
 
-RESEARCH depth: focused single-type research → GUIDED. Multi-perspective research needing synthesis → ORCHESTRATED.
+RESEARCH depth: focused single-type research → GUIDED. Multi-perspective research needing synthesis → ORCHESTRATED. GUIDED research loads the codebase research skill for main-session exploration. ORCHESTRATED research loads the full multi-agent pipeline.
 
 ### RELEASE Intent
 

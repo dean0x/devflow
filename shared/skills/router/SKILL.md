@@ -32,7 +32,7 @@ All ORCHESTRATED pipelines follow this protocol:
 | DEBUG | devflow:test-driven-development, devflow:software-design, devflow:testing |
 | PLAN | devflow:test-driven-development, devflow:patterns, devflow:software-design, devflow:security, devflow:design-review |
 | REVIEW | devflow:quality-gates, devflow:software-design |
-| RESEARCH | devflow:research:orch |
+| RESEARCH | devflow:research-codebase |
 | RELEASE | devflow:git |
 
 ## ORCHESTRATED
