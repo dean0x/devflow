@@ -4,7 +4,7 @@
   "author": {
     "name": "Dean0x"
   },
-  "version": "2.0.0",
+  "version": "1.8.3",
   "homepage": "https://github.com/dean0x/devflow",
   "repository": "https://github.com/dean0x/devflow",
   "license": "MIT",
@@ -23,6 +23,7 @@
   "skills": [
     "agent-teams",
     "git",
-    "worktree-support"
+    "worktree-support",
+    "release:orch"
   ]
 }
