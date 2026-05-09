@@ -602,7 +602,7 @@ describe('router structural validation', () => {
       if (!nameMatch) continue;
       const name = nameMatch[1];
 
-      const classMatch = name.match(/(IMPLEMENT|EXPLORE|DEBUG|PLAN|REVIEW|RESOLVE|PIPELINE)\/(GUIDED|ORCHESTRATED)/);
+      const classMatch = name.match(/(IMPLEMENT|EXPLORE|DEBUG|PLAN|REVIEW|RESOLVE|PIPELINE|RESEARCH|RELEASE)\/(GUIDED|ORCHESTRATED)/);
       if (!classMatch) continue;
 
       const [, intent, depth] = classMatch;
@@ -656,7 +656,7 @@ describe('preamble drift detection', () => {
     // Must contain Intent Signals heading
     expect(rulesContent).toContain('Intent Signals');
 
-    // Must contain all 8 intents
+    // Must contain all 10 intents
     expect(rulesContent).toContain('CHAT');
     expect(rulesContent).toContain('EXPLORE');
     expect(rulesContent).toContain('PLAN');
@@ -665,6 +665,8 @@ describe('preamble drift detection', () => {
     expect(rulesContent).toContain('RESOLVE');
     expect(rulesContent).toContain('DEBUG');
     expect(rulesContent).toContain('PIPELINE');
+    expect(rulesContent).toContain('RESEARCH');
+    expect(rulesContent).toContain('RELEASE');
 
     // Must contain all 3 depths
     expect(rulesContent).toContain('QUICK');
