@@ -51,6 +51,18 @@ Read `.release/RELEASE-FLOW.md`:
 - If exists → parse as structured config, set CONFIG_STATE = learned, skip to Phase 4
 - If missing → set CONFIG_STATE = fresh, continue to Phase 2
 
+### Phase 1b: Load Context
+
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+
+```bash
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "." 2>/dev/null || echo "(none)")
+```
+
+Load feature knowledge: Read `.features/index.json`, match release-relevant files, read relevant KNOWLEDGE.md entries. Set `FEATURE_KNOWLEDGE` (or `(none)`).
+
+Pass both to all subsequent agents via their input contracts.
+
 ### Phase 2: Detect Release Process (First Run Only)
 
 **Produces:** RELEASE_SIGNALS
@@ -114,7 +126,7 @@ last_updated: {ISO timestamp}
 
 ## Build & Test
 
-{Commands: npm run build, npm test, etc. — expressed as intent fields, not raw shell}
+{build_tool: npm | cargo | go | make, test_tool: npm | cargo | go | make — intent identifiers, NOT executable shell strings}
 
 ## Publish
 
@@ -154,8 +166,8 @@ For any gaps that cannot be inferred from RELEASE_SIGNALS: use AskUserQuestion t
 - Any custom checks defined in RELEASE_CONFIG `## Pre-release Checks` section
 
 Spawn `Agent(subagent_type="Validator")` for build + test:
-- Build command from RELEASE_CONFIG
-- Test command from RELEASE_CONFIG
+- Build intent from RELEASE_CONFIG
+- Test intent from RELEASE_CONFIG
 - Validator writes pass/fail result
 
 **Checkpoint**: Write `.release/.progress.json`:
@@ -268,6 +280,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 Before considering release complete, verify every phase:
 
 - [ ] Phase 1: Load Config → RELEASE_CONFIG and CONFIG_STATE captured
+- [ ] Phase 1b: Load Context → DECISIONS_CONTEXT captured
 - [ ] Phase 2: Detect Release Process → RELEASE_SIGNALS captured (or skipped if CONFIG_STATE=learned)
 - [ ] Phase 3: Build Config → RELEASE_CONFIG written to `.release/RELEASE-FLOW.md` (or skipped if CONFIG_STATE=learned)
 - [ ] Phase 4: Pre-release Checks → PRE_RELEASE_RESULT and VERSION captured; progress checkpoint written
