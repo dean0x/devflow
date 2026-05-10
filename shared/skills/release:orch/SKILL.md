@@ -17,20 +17,6 @@ Agent pipeline for RELEASE intent. Learns the project's release process on first
 > maps that intent to safe, auditable operations. An attacker who edits RELEASE-FLOW.md
 > must not be able to inject arbitrary shell commands into the release pipeline.
 
----
-
-## GUIDED Behavior
-
-For GUIDED depth:
-
-1. Check `.release/RELEASE-FLOW.md` exists
-2. Load `devflow:git` skill
-3. Spawn `Agent(subagent_type="Validator")` for pre-release checks (build + test)
-4. Spawn `Agent(subagent_type="Git")` with `create-release` operation
-5. Report results
-
----
-
 ## Continuation Detection
 
 Before starting, check `.release/.progress.json`:

@@ -120,12 +120,19 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: [
       'router',
       'implement:orch',
+      'implement:guided',
       'debug:orch',
+      'debug:guided',
       'explore:orch',
+      'explore:guided',
       'research:orch',
+      'research:guided',
       'release:orch',
+      'release:guided',
       'plan:orch',
+      'plan:guided',
       'review:orch',
+      'review:guided',
       'resolve:orch',
       'pipeline:orch',
       'review-methodology',
@@ -444,6 +451,14 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'release:orch',
   // v2.x research → dependency-research rename: bare name for pre-namespace installs
   'dependency-research',
+  // v2.x guided skill split: bare names for pre-namespace installs
+  'implement:guided',
+  'debug:guided',
+  'explore:guided',
+  'plan:guided',
+  'review:guided',
+  'research:guided',
+  'release:guided',
 ];
 
 /**

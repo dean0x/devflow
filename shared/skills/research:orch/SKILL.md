@@ -6,7 +6,7 @@ user-invocable: false
 
 # Research Orchestration
 
-Agent pipeline for RESEARCH intent in ambient GUIDED and ORCHESTRATED modes. Multi-type research with parallel researchers, trust-aware synthesis, and optional feature knowledge creation.
+Agent pipeline for RESEARCH intent in ambient ORCHESTRATED mode. Multi-type research with parallel researchers, trust-aware synthesis, and optional feature knowledge creation.
 
 ## Iron Law
 
@@ -16,22 +16,6 @@ Agent pipeline for RESEARCH intent in ambient GUIDED and ORCHESTRATED modes. Mul
 > codebase researcher + external researcher together produce higher-confidence findings
 > than either alone. Parallel research types are not redundant — they validate each
 > other across trust tiers.
-
----
-
-## GUIDED Behavior
-
-For GUIDED depth, the main session performs research directly:
-
-1. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Follow `devflow:apply-decisions` to Read full entry bodies on demand.
-2. **Infer research types** — From the user's prompt, infer 1-2 research types. Use the Research Types table below to determine the skill name for each type, then load it directly via Skill tool.
-3. **Check tool availability** — If WebSearch/WebFetch are not available, restrict to `codebase` type only. Inform user that external research is not available in this session.
-4. **Spawn 1-2 Researcher agents** with OUTPUT_PATH to `.docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/` and DECISIONS_CONTEXT from step 1.
-5. **Present findings** with trust annotations (trusted/untrusted/mixed per finding).
-
----
-
-## ORCHESTRATED Pipeline
 
 ### Phase 1: Load Decisions + Feature Knowledge (Orchestrator-Local)
 

@@ -6,7 +6,7 @@ user-invocable: false
 
 # Explore Orchestration
 
-Agent pipeline for EXPLORE intent in ambient GUIDED and ORCHESTRATED modes. Codebase analysis, flow tracing, dependency mapping, and architecture understanding.
+Agent pipeline for EXPLORE intent in ambient ORCHESTRATED mode. Codebase analysis, flow tracing, dependency mapping, and architecture understanding.
 
 ## Iron Law
 
@@ -15,20 +15,6 @@ Agent pipeline for EXPLORE intent in ambient GUIDED and ORCHESTRATED modes. Code
 > Every exploration must produce file:line references. Vague summaries like "the auth
 > system is complex" are failures. Every claim must point to concrete code locations,
 > real call chains, and actual file paths. If you can't cite it, you don't know it.
-
----
-
-## GUIDED Behavior
-
-For GUIDED depth, the main session performs exploration directly:
-
-1. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.features/index.json` if it exists. Based on the exploration question, identify relevant feature knowledge entries and read them. Use both locally to frame exploration. Set `FEATURE_KNOWLEDGE = (none)` if none are relevant.
-2. **Spawn Skimmer** — `Agent(subagent_type="Skimmer")` targeting the area of interest. Use orientation output to ground exploration in real file structures and patterns.
-3. **Trace** — Using Skimmer findings + `FEATURE_KNOWLEDGE`, trace the flow or analyze the subsystem directly in main session. Follow call chains, read key files, map integration points.
-4. **Present** — Deliver structured findings using the Output format below. Use AskUserQuestion to offer drill-down into specific areas.
-5. **Suggest Feature Knowledge Creation** — If `.features/.disabled` does NOT exist and the explored area has no matching feature knowledge entry in `.features/index.json`, ask the user if they want to create one. If yes, derive slug/name/directories from the explored area, spawn Knowledge agent with EXPLORATION_OUTPUTS (findings from step 3), read sidecar, update index with `--createdBy="explore"`. Same mechanism as Phase 6 below.
-
-## ORCHESTRATED Pipeline
 
 ### Phase 1: Load Decisions (Orchestrator-Local)
 
