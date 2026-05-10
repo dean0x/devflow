@@ -52,6 +52,8 @@ Devflow: IMPLEMENT/ORCHESTRATED
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
+**Always-on rules.** 11 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md`.
+
 **Full lifecycle.** `/plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/implement`. `/implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
 
 **Everything is composable.** 17 plugins (8 core + 9 language/ecosystem). Install only what you need. Six commands cover the entire development lifecycle.
@@ -109,6 +111,7 @@ npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit list                    # List available plugins
 npx devflow-kit ambient --enable        # Toggle ambient mode
 npx devflow-kit learn --enable          # Toggle self-learning (4-type extraction: workflow, procedural, decision, pitfall)
+npx devflow-kit rules --status          # Show installed rules
 npx devflow-kit uninstall               # Remove Devflow
 ```
 
