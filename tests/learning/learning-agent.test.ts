@@ -268,7 +268,7 @@ describe('runLearningAgent', () => {
         cwd: tmpDir,
         userSignals: ['signal'],
         model: 'sonnet',
-          logFile: path.join(tmpDir, 'learning-log.jsonl'),
+        logFile: path.join(tmpDir, 'learning-log.jsonl'),
         jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
       }),
     ).rejects.toThrow(/invalid JSON/i);
@@ -282,7 +282,7 @@ describe('runLearningAgent', () => {
         cwd: tmpDir,
         userSignals: ['signal'],
         model: 'sonnet',
-          logFile: path.join(tmpDir, 'learning-log.jsonl'),
+        logFile: path.join(tmpDir, 'learning-log.jsonl'),
         jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
       }),
     ).rejects.toThrow(/observations/i);
