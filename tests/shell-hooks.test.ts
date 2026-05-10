@@ -1241,7 +1241,7 @@ describe('working memory queue behavior', () => {
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     expect(lines).toHaveLength(1);
 
-    const entry = JSON.parse(lines[0]);
+    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     expect(entry.role).toBe('assistant');
     expect(entry.content).toBe('test response');
     expect(typeof entry.ts).toBe('number');
@@ -1265,7 +1265,7 @@ describe('working memory queue behavior', () => {
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     expect(lines).toHaveLength(1);
 
-    const entry = JSON.parse(lines[0]);
+    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     expect(entry.role).toBe('user');
     expect(entry.content).toBe('implement the cache');
     expect(typeof entry.ts).toBe('number');
@@ -1372,7 +1372,7 @@ describe('working memory queue behavior', () => {
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     // Orphans truncated, then new assistant entry appended
     expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]);
+    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     expect(entry.role).toBe('assistant');
     expect(entry.content).toBe('first real assistant response');
   });
@@ -1397,7 +1397,7 @@ describe('working memory queue behavior', () => {
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     // Empty queue truncated to empty, then new assistant entry appended — exactly 1 line
     expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]);
+    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     expect(entry.role).toBe('assistant');
     expect(entry.content).toBe('response after empty queue');
   });
@@ -1424,7 +1424,7 @@ describe('working memory queue behavior', () => {
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     // Single orphan truncated, new assistant entry appended — exactly 1 line
     expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]);
+    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     expect(entry.role).toBe('assistant');
     expect(entry.content).toBe('response after single orphan');
   });
@@ -1457,6 +1457,37 @@ describe('working memory queue behavior', () => {
     expect(lines).toHaveLength(4);
   });
 
+  it('auto-clean does not truncate queue with only assistant entries', () => {
+    // Design intent: auto-clean targets user-only queues (orphan prompts with no paired response).
+    // A queue containing only assistant entries is not an orphan state — preserve it.
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const now = Math.floor(Date.now() / 1000);
+    // Pre-populate with assistant-only entries
+    const assistantLines = Array.from({ length: 3 }, (_, i) =>
+      JSON.stringify({ role: 'assistant', content: `response ${i}`, ts: now + i }),
+    );
+    fs.writeFileSync(queueFile, assistantLines.join('\n') + '\n');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-autoclean-assistant-only',
+      stop_reason: 'end_turn',
+      response_text: 'new assistant response',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const resultLines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    // 3 existing assistant entries preserved + 1 new = 4
+    expect(resultLines).toHaveLength(4);
+    const lastEntry = JSON.parse(resultLines[resultLines.length - 1]) as { role: string; content: string; ts: number };
+    expect(lastEntry.role).toBe('assistant');
+    expect(lastEntry.content).toBe('new assistant response');
+  });
+
   it('queue overflow — >200 lines truncated to last 100', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
     // Touch throttle marker to prevent background spawn attempt
@@ -1487,11 +1518,11 @@ describe('working memory queue behavior', () => {
 
     // The first preserved entry must be from the tail of the original data
     // 201 pre-existing + 1 new = 202 lines → tail -100 starts at index 102
-    const firstEntry = JSON.parse(resultLines[0]);
+    const firstEntry = JSON.parse(resultLines[0]) as { role: string; content: string; ts: number };
     expect(firstEntry.content).toBe('entry 102');
 
     // The new entry (the assistant turn) must be present as the last line
-    const lastEntry = JSON.parse(resultLines[resultLines.length - 1]);
+    const lastEntry = JSON.parse(resultLines[resultLines.length - 1]) as { role: string; content: string; ts: number };
     expect(lastEntry.role).toBe('assistant');
     expect(lastEntry.content).toBe('overflow trigger response');
   });
@@ -1512,7 +1543,7 @@ describe('working memory queue behavior', () => {
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     expect(lines).toHaveLength(1);
 
-    const entry = JSON.parse(lines[0]);
+    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     // Truncated at 2000 chars + '... [truncated]' suffix (15 chars) = 2015
     expect(entry.content.length).toBe(2015);
     expect(entry.content).toContain('[truncated]');
@@ -1537,7 +1568,7 @@ describe('working memory queue behavior', () => {
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     expect(lines).toHaveLength(1);
 
-    const entry = JSON.parse(lines[0]);
+    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     // Truncated at 2000 chars + '... [truncated]' suffix (15 chars) = 2015
     expect(entry.content.length).toBe(2015);
     expect(entry.content).toContain('[truncated]');
@@ -1627,6 +1658,20 @@ describe('ensure-features-init behavioral', () => {
     const gitignore = fs.readFileSync(path.join(tmpDir, '.features', '.gitignore'), 'utf-8');
     const lockEntries = gitignore.split('\n').filter(l => l === '.knowledge.lock/');
     expect(lockEntries).toHaveLength(1);
+  });
+
+  it('returns non-zero and creates no .features/ when called with empty argument (SEC-3 guard)', () => {
+    // The `[ -z "$1" ] && return 1` guard at the top of ensure-features-init prevents
+    // accidental directory creation when no project path is supplied.
+    const result = execSync(
+      `bash -c 'source "${ENSURE_FEATURES}" ""; echo $?'`,
+      { stdio: 'pipe' },
+    ).toString().trim();
+
+    // return 1 from a sourced script propagates as the last exit status
+    expect(result).toBe('1');
+    // No .features/ directory should have been created in the test working directory
+    expect(fs.existsSync(path.join(tmpDir, '.features'))).toBe(false);
   });
 });
 

@@ -30,13 +30,22 @@ if [ ${#PROMPT} -gt 2000 ]; then
   PROMPT="${PROMPT:0:2000}... [truncated]"
 fi
 
+QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"
+
+# Ensure queue file is created with restricted permissions (600) before first write.
+# umask 077 ensures the file is never world-readable, even momentarily (avoids TOCTOU).
+# UserPromptSubmit fires before the Stop hook, so this hook is the first writer.
+if [ ! -f "$QUEUE_FILE" ]; then
+  (umask 077 && touch "$QUEUE_FILE") 2>/dev/null || true
+fi
+
 TS=$(date +%s)
 if [ "$_HAS_JQ" = "true" ]; then
   jq -n -c --arg role "user" --arg content "$PROMPT" --argjson ts "$TS" \
-    '{role: $role, content: $content, ts: $ts}' >> "$CWD/.memory/.pending-turns.jsonl"
+    '{role: $role, content: $content, ts: $ts}' >> "$QUEUE_FILE"
 else
   node -e "process.stdout.write(JSON.stringify({role:'user',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
-    -- "$PROMPT" "$TS" >> "$CWD/.memory/.pending-turns.jsonl"
+    -- "$PROMPT" "$TS" >> "$QUEUE_FILE"
 fi
 
 exit 0

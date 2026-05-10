@@ -52,7 +52,7 @@ fi
 # --- Auto-clean orphan user-only queues ---
 QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"
 if [ -f "$QUEUE_FILE" ]; then
-  if ! grep -q '"role"[[:space:]]*:[[:space:]]*"assistant"' "$QUEUE_FILE" 2>/dev/null; then
+  if ! grep -qF '"role":"assistant"' "$QUEUE_FILE" 2>/dev/null; then
     log "Auto-clean: truncating orphan user-only queue ($(wc -l < "$QUEUE_FILE" | tr -d ' ') lines)"
     : > "$QUEUE_FILE"
   fi
@@ -71,8 +71,9 @@ fi
 
 # --- Append to queue ---
 # Ensure queue file is created with restricted permissions (600) before first write.
+# umask 077 ensures the file is never world-readable, even momentarily (avoids TOCTOU).
 if [ ! -f "$QUEUE_FILE" ]; then
-  touch "$QUEUE_FILE" && chmod 600 "$QUEUE_FILE" 2>/dev/null || true
+  (umask 077 && touch "$QUEUE_FILE") 2>/dev/null || true
 fi
 TS=$(date +%s)
 if [ "$_HAS_JQ" = "true" ]; then
