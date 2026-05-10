@@ -496,34 +496,31 @@ describe('skill invocation helpers', () => {
   });
 });
 
-/** Parse router SKILL.md markdown tables into intent→skills maps */
-function parseRouterTables(content: string): { guided: Map<string, string[]>; orchestrated: Map<string, string[]> } {
-  const guided = new Map<string, string[]>();
-  const orchestrated = new Map<string, string[]>();
+/** Parse router SKILL.md two-column Workflow Skills table into intent→{guided, orchestrated} map */
+function parseWorkflowTable(content: string): Map<string, { guided: string | null; orchestrated: string | null }> {
+  const table = new Map<string, { guided: string | null; orchestrated: string | null }>();
 
-  let currentSection: 'guided' | 'orchestrated' | null = null;
+  let inSection = false;
 
   for (const line of content.split('\n')) {
-    if (line.startsWith('## GUIDED')) { currentSection = 'guided'; continue; }
-    if (line.startsWith('## ORCHESTRATED')) { currentSection = 'orchestrated'; continue; }
-    if (line.startsWith('## ') && currentSection) { currentSection = null; continue; }
+    if (line.startsWith('## Workflow Skills')) { inSection = true; continue; }
+    if (line.startsWith('## ') && inSection) break;
 
-    if (!currentSection) continue;
+    if (!inSection) continue;
 
-    const match = line.match(/^\|\s*(\w+)\s*\|\s*(.+?)\s*\|$/);
+    const match = line.match(/^\|\s*(\w+)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/);
     if (!match || match[1] === 'Intent') continue;
 
-    const intent = match[1];
-    const skillsStr = match[2].trim();
-    const skills = skillsStr === '—' || skillsStr === '-'
-      ? []
-      : skillsStr.split(',').map(s => s.trim());
+    const guided = match[2].trim();
+    const orchestrated = match[3].trim();
 
-    const table = currentSection === 'guided' ? guided : orchestrated;
-    table.set(intent, skills);
+    table.set(match[1], {
+      guided: guided === '—' ? null : guided,
+      orchestrated: orchestrated === '—' ? null : orchestrated,
+    });
   }
 
-  return { guided, orchestrated };
+  return table;
 }
 
 /** Extract intent names from classification-rules.md Intent Signals section only */
@@ -548,53 +545,66 @@ describe('router structural validation', () => {
   const rulesPath = path.resolve(__dirname, '../shared/skills/router/classification-rules.md');
   const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
 
-  it('router covers all ORCHESTRATED intents (every non-CHAT intent has a row)', async () => {
+  it('router covers all non-CHAT intents (every intent has a row with at least one skill)', async () => {
     const rulesContent = await fs.readFile(rulesPath, 'utf-8');
     const routerContent = await fs.readFile(routerPath, 'utf-8');
 
     const nonChatIntents = parseClassificationIntents(rulesContent).filter(i => i !== 'CHAT');
-    const { orchestrated } = parseRouterTables(routerContent);
+    const table = parseWorkflowTable(routerContent);
 
     for (const intent of nonChatIntents) {
-      expect(orchestrated.has(intent), `ORCHESTRATED table missing intent: ${intent}`).toBe(true);
+      expect(table.has(intent), `Workflow Skills table missing intent: ${intent}`).toBe(true);
+      const entry = table.get(intent)!;
+      expect(
+        entry.guided !== null || entry.orchestrated !== null,
+        `${intent}: must have at least one non-null skill`,
+      ).toBe(true);
     }
   });
 
-  it('RESOLVE and PIPELINE have no GUIDED rows (always ORCHESTRATED)', async () => {
+  it('ORCHESTRATED column entries map to :orch skills', async () => {
     const routerContent = await fs.readFile(routerPath, 'utf-8');
-    const { guided } = parseRouterTables(routerContent);
+    const table = parseWorkflowTable(routerContent);
 
-    expect(guided.has('RESOLVE'), 'RESOLVE must not have a GUIDED row — classification says always ORCHESTRATED').toBe(false);
-    expect(guided.has('PIPELINE'), 'PIPELINE must not have a GUIDED row — classification says always ORCHESTRATED').toBe(false);
-  });
-
-  it('router table skills are canonical — every prefixed ref exists in shared/skills/', async () => {
-    const routerContent = await fs.readFile(routerPath, 'utf-8');
-    const { guided, orchestrated } = parseRouterTables(routerContent);
-
-    const allSkills = new Set<string>();
-    for (const skills of [...guided.values(), ...orchestrated.values()]) {
-      for (const skill of skills) {
-        if (skill.startsWith('devflow:')) {
-          allSkills.add(skill.replace('devflow:', ''));
-        }
+    for (const [intent, entry] of table) {
+      if (entry.orchestrated) {
+        expect(entry.orchestrated, `${intent} ORCHESTRATED: must be an :orch skill`).toMatch(/^devflow:\w[\w-]*:orch$/);
       }
     }
+  });
+
+  it('GUIDED column entries map to :guided skills', async () => {
+    const routerContent = await fs.readFile(routerPath, 'utf-8');
+    const table = parseWorkflowTable(routerContent);
+
+    for (const [intent, entry] of table) {
+      if (entry.guided) {
+        expect(entry.guided, `${intent} GUIDED: must be a :guided skill`).toMatch(/^devflow:\w[\w-]*:guided$/);
+      }
+    }
+  });
+
+  it('router table skills are canonical — every ref exists in shared/skills/', async () => {
+    const routerContent = await fs.readFile(routerPath, 'utf-8');
+    const table = parseWorkflowTable(routerContent);
 
     const entries = await fs.readdir(sharedSkillsDir);
 
-    for (const skill of allSkills) {
-      expect(entries, `shared/skills/${skill}/ not found — router references nonexistent skill`).toContain(skill);
+    for (const [intent, entry] of table) {
+      for (const skill of [entry.guided, entry.orchestrated]) {
+        if (!skill) continue;
+        const skillName = skill.replace('devflow:', '');
+        expect(entries, `shared/skills/${skillName}/ not found — router references nonexistent skill`).toContain(skillName);
+      }
     }
   });
 
-  it('integration test expectations align with router skill tables', async () => {
+  it('integration test skill assertions align with router workflow table', async () => {
     const integrationPath = path.resolve(__dirname, './integration/ambient-activation.test.ts');
     const routerContent = await fs.readFile(routerPath, 'utf-8');
     const testContent = await fs.readFile(integrationPath, 'utf-8');
-    const { guided, orchestrated } = parseRouterTables(routerContent);
+    const table = parseWorkflowTable(routerContent);
 
-    // Split integration tests into blocks and extract intent/depth + expected/required arrays
     const blocks = testContent.split(/\bit\(/);
 
     for (const block of blocks) {
@@ -606,29 +616,30 @@ describe('router structural validation', () => {
       if (!classMatch) continue;
 
       const [, intent, depth] = classMatch;
-      const table = depth === 'GUIDED' ? guided : orchestrated;
-      const routerSkills = table.get(intent);
+      const routerEntry = table.get(intent);
 
-      // Extract expected or required array from block
-      const arrayMatch = block.match(/const (?:expected|required) = \[([^\]]*)\]/);
-      if (!arrayMatch) continue; // Some tests (like EXPLORE/GUIDED) have no expected array — skip
+      expect(routerEntry, `${name}: router has no row for ${intent}`).toBeDefined();
+      if (!routerEntry) continue;
+
+      const expectedSkill = depth === 'GUIDED' ? routerEntry.guided : routerEntry.orchestrated;
+      if (!expectedSkill) continue;
+
+      const skillName = expectedSkill.replace('devflow:', '');
+      const arrayMatch = block.match(/const (?:required|soft) = \[([^\]]*)\]/);
+      if (!arrayMatch) continue;
 
       const testSkills = arrayMatch[1]
         .split(',')
         .map(s => s.trim().replace(/['"]/g, ''))
-        .filter(Boolean)
-        .map(s => `devflow:${s}`);
+        .filter(Boolean);
 
-      expect(routerSkills, `${name}: router has no ${depth} row for ${intent}`).toBeDefined();
-      if (!routerSkills) return;
+      const hasSkillInArray = testSkills.includes(skillName);
+      const hasSkillInRequiredCall = block.includes(`'${skillName}'`);
 
-      // Every skill the test asserts must appear in the router table row
-      for (const skill of testSkills) {
-        expect(
-          routerSkills.includes(skill),
-          `${name}: test asserts '${skill}' but router ${depth} ${intent} row is [${routerSkills.join(', ')}]`,
-        ).toBe(true);
-      }
+      expect(
+        hasSkillInArray || hasSkillInRequiredCall,
+        `${name}: test does not assert '${skillName}' but router maps ${intent}/${depth} → ${expectedSkill}`,
+      ).toBe(true);
     }
   });
 });
@@ -677,19 +688,20 @@ describe('preamble drift detection', () => {
     expect(rulesContent).toContain('devflow:router');
   });
 
-  it('router SKILL.md contains skill lookup tables', async () => {
+  it('router SKILL.md contains workflow skills table', async () => {
     const routerPath = path.resolve(__dirname, '../shared/skills/router/SKILL.md');
     const routerContent = await fs.readFile(routerPath, 'utf-8');
 
-    // Must contain GUIDED/ORCHESTRATED headings
-    expect(routerContent).toContain('## GUIDED');
-    expect(routerContent).toContain('## ORCHESTRATED');
+    // Must contain unified Workflow Skills table with both depth columns
+    expect(routerContent).toContain('## Workflow Skills');
+    expect(routerContent).toContain('| GUIDED |');
+    expect(routerContent).toContain('| ORCHESTRATED |');
 
     // Must contain classification output format
     expect(routerContent).toContain('Devflow:');
     expect(routerContent).toContain('Loading:');
 
-    // Must contain intent names in tables
+    // Must contain intent names in table
     expect(routerContent).toContain('IMPLEMENT');
     expect(routerContent).toContain('EXPLORE');
     expect(routerContent).toContain('DEBUG');

@@ -1,109 +1,54 @@
-# Router — Skill Catalog
+# Skill Catalog
 
-Full mapping of Devflow skills to intents and file-type triggers. The router SKILL.md references this for detailed selection logic.
+Reference for companion skills loaded by each guided skill. The router dispatches by intent and depth to either a `:guided` or `:orch` skill. In ORCHESTRATED mode, agents load their own skills — the router only loads the orch skill.
 
-## Skills Available for Ambient Loading
+## Companion Skills by Workflow
 
-These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
+### IMPLEMENT (implement:guided)
 
-### IMPLEMENT Intent
+Always loaded: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`
 
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:implement:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates agent pipeline |
-| devflow:test-driven-development | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file — enforces RED-GREEN-REFACTOR |
-| devflow:patterns | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file |
-| devflow:dependency-research | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
-| devflow:typescript | TypeScript files in scope | GUIDED + ORCHESTRATED | `*.ts`, `*.tsx` |
-| devflow:react | React components in scope | GUIDED + ORCHESTRATED | `*.tsx`, `*.jsx` |
-| devflow:ui-design | UI/styling work | GUIDED + ORCHESTRATED | `*.css`, `*.scss`, `*.tsx` with styling keywords |
-| devflow:boundary-validation | Forms, APIs, user input | GUIDED + ORCHESTRATED | Files with form/input/validation keywords |
-| devflow:go | Go files in scope | GUIDED + ORCHESTRATED | `*.go` |
-| devflow:java | Java files in scope | GUIDED + ORCHESTRATED | `*.java` |
-| devflow:python | Python files in scope | GUIDED + ORCHESTRATED | `*.py` |
-| devflow:rust | Rust files in scope | GUIDED + ORCHESTRATED | `*.rs` |
-| devflow:security | Auth, crypto, secrets | GUIDED + ORCHESTRATED | Files with auth/token/crypto/password keywords |
+| Pattern | Skill |
+|---------|-------|
+| .ts, .tsx | devflow:typescript |
+| .tsx, .jsx | devflow:react |
+| .go | devflow:go |
+| .java | devflow:java |
+| .py | devflow:python |
+| .rs | devflow:rust |
+| CSS/UI/styling | devflow:ui-design |
+| Forms/API/input | devflow:boundary-validation |
+| Auth/crypto/secrets | devflow:security |
 
-### DEBUG Intent
+### DEBUG (debug:guided)
 
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:debug:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates investigation pipeline |
-| devflow:test-driven-development | Always for DEBUG | GUIDED | Any code file — bug fix needs regression test first |
-| devflow:software-design | Always for DEBUG | GUIDED | Any code file |
-| devflow:testing | Always for DEBUG (GUIDED) | GUIDED | Any code file |
-| devflow:git | Git operations involved | GUIDED + ORCHESTRATED | User mentions git, rebase, merge, etc. |
+Always loaded: `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing`
 
-### REVIEW Intent
+Same file-type table as IMPLEMENT.
 
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:quality-gates | Always for REVIEW | GUIDED | Any code file |
-| devflow:software-design | Always for REVIEW | GUIDED | Any code file |
-| devflow:testing | Test files in scope | GUIDED | `*.test.*`, `*.spec.*` |
-| devflow:review:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates multi-agent review pipeline |
+### PLAN (plan:guided)
 
-**REVIEW depth is continuation-aware**: If the prior classification in the same conversation was IMPLEMENT/GUIDED → REVIEW stays GUIDED. If prior was IMPLEMENT/ORCHESTRATED → REVIEW becomes ORCHESTRATED. Standalone REVIEW uses signal words: "full review"/"branch review"/"PR review" → ORCHESTRATED, "check this"/"review this file" → GUIDED. Ambiguous → GUIDED.
+Always loaded: `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review`
 
-### RESOLVE Intent
+### REVIEW (review:guided)
 
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:resolve:orch | Always for RESOLVE | ORCHESTRATED | Any — orchestrates issue resolution pipeline |
+Always loaded: `devflow:quality-gates`, `devflow:software-design`
 
-RESOLVE is always ORCHESTRATED — it requires multi-agent resolution with Resolver agents and Simplifier.
+### EXPLORE (explore:guided)
 
-### PIPELINE Intent
+No companion skills — self-sufficient (Skimmer + code reading + feature knowledge).
 
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:pipeline:orch | Always for PIPELINE | ORCHESTRATED | Any — meta-orchestrator for implement → review → resolve |
-| devflow:patterns | Always for PIPELINE | ORCHESTRATED | Any code file |
+### RESEARCH (research:guided)
 
-PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with status reporting between phases.
+Loads per-type research skills dynamically (e.g., `devflow:research-codebase`). See research:guided for the type→skill table.
 
-### EXPLORE Intent
+### RELEASE (release:guided)
 
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:explore:orch | Always for EXPLORE | GUIDED + ORCHESTRATED | Any — orchestrates codebase exploration |
+Loads `devflow:git`. See release:guided.
 
-EXPLORE depth: simple lookups ("where is X?") → QUICK. Focused subsystem/flow analysis → GUIDED. Multi-system architecture mapping → ORCHESTRATED.
+## Agent-Internal Skills (Not Router-Loaded)
 
-### RESEARCH Intent
-
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:research-codebase | Always for RESEARCH | GUIDED | Any — main-session codebase exploration |
-| devflow:research:orch | Always for RESEARCH | ORCHESTRATED | Any — orchestrates multi-agent research pipeline |
-| devflow:research-external | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
-| devflow:research-market | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
-| devflow:research-competitor | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
-| devflow:research-technology | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
-
-RESEARCH depth: focused single-type research → GUIDED. Multi-perspective research needing synthesis → ORCHESTRATED. GUIDED research loads the codebase research skill for main-session exploration. ORCHESTRATED research loads the full multi-agent pipeline.
-
-### RELEASE Intent
-
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:release:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates release pipeline |
-| devflow:git | Always for RELEASE | GUIDED | Git operations |
-
-RELEASE depth: simple version bump or tag → GUIDED. Full release pipeline with checks, changelog, publish → ORCHESTRATED.
-
-### PLAN Intent
-
-| Skill | When to Load | Depth | File Patterns |
-|-------|-------------|-------|---------------|
-| devflow:plan:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates design pipeline |
-| devflow:test-driven-development | Always for PLAN | GUIDED | Any planning context — plans must account for test-first workflow |
-| devflow:patterns | Always for PLAN | GUIDED + ORCHESTRATED | Any planning context |
-| devflow:software-design | Always for PLAN | GUIDED + ORCHESTRATED | System design discussions |
-
-## Skills Excluded from Ambient Router Loading
-
-These skills are always installed (universal skill installation) but loaded by agents internally at runtime, not by the ambient router. Reviewer agents load their pattern skill based on their focus area:
+These skills are always installed (universal skill installation) but loaded by agents internally at runtime, not by the router or guided skills:
 
 - devflow:review-methodology — Full review process (6-step, 3-category classification)
 - devflow:complexity — Cyclomatic complexity, deep nesting analysis
@@ -116,12 +61,3 @@ These skills are always installed (universal skill installation) but loaded by a
 - devflow:accessibility — WCAG compliance, ARIA roles, keyboard navigation
 - devflow:performance — N+1 queries, memory leaks, caching opportunities
 - devflow:qa — Scenario-based acceptance testing, evidence collection
-
-## Selection Limits
-
-- **Maximum 3 knowledge skills** per ambient response (primary + up to 2 secondary)
-- **Orchestration skills** (devflow:implement:orch, devflow:explore:orch, devflow:debug:orch, devflow:plan:orch, devflow:review:orch, devflow:resolve:orch, devflow:pipeline:orch, devflow:research:orch, devflow:release:orch) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
-- **Primary skills** are always loaded for the classified intent at both GUIDED and ORCHESTRATED depth
-- **Secondary skills** are loaded only when file patterns match conversation context
-- **GUIDED depth** loads knowledge skills only (no orchestration skills) — main session works directly
-- **ORCHESTRATED depth** loads orchestration skill + knowledge skills — agents execute the pipeline

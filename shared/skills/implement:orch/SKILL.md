@@ -18,8 +18,6 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 > Skipping a gate because "it looks fine" is never acceptable. The pipeline runs to completion
 > or halts on failure — there is no shortcut.
 
----
-
 ## Continuation Detection
 
 Before starting the full pipeline, check for re-validation context:

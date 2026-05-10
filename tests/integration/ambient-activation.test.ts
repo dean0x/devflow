@@ -64,99 +64,97 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
 
   // --- GUIDED tier: router must load (hard), specific skills logged (soft) ---
 
-  it('EXPLORE/GUIDED — loads router only (no additional skills)', async () => {
-    // GUIDED EXPLORE dispatches no additional skills — router instructs to spawn Skimmer + Explore agents directly
+  it('EXPLORE/GUIDED — loads router and explore:guided', async () => {
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'explain how the plugin loading system works from registration through initialization',
-      (r) => hasRequiredSkills(r, ['router']),
+      (r) => hasRequiredSkills(r, ['router', 'explore:guided']),
     );
 
     const skills = getSkillInvocations(result);
-    const nonRouter = skills.filter((s) => s !== 'router' && s !== 'devflow:router');
-    console.log(`EXPLORE/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${nonRouter.length > 0 ? ` ⚠ unexpected non-router: ${nonRouter.join(', ')}` : ''}`);
+    console.log(`EXPLORE/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
     expect(passed).toBe(true);
   });
 
-  it('IMPLEMENT/GUIDED — loads router and implementation skills', async () => {
-    const expected = ['patterns', 'test-driven-development', 'dependency-research'];
+  it('IMPLEMENT/GUIDED — loads router and implement:guided', async () => {
+    const soft = ['patterns', 'test-driven-development', 'dependency-research'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'add a retry mechanism with exponential backoff to the HTTP client module',
-      (r) => hasRequiredSkills(r, ['router']),
+      (r) => hasRequiredSkills(r, ['router', 'implement:guided']),
     );
 
     const skills = getSkillInvocations(result);
-    const hasExpected = hasRequiredSkills(result, expected);
-    console.log(`IMPLEMENT/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    const hasSoft = hasRequiredSkills(result, soft);
+    console.log(`IMPLEMENT/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasSoft ? ` ⚠ soft: ${soft.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('DEBUG/GUIDED — loads router and debug skills', async () => {
-    const expected = ['test-driven-development', 'software-design', 'testing'];
+  it('DEBUG/GUIDED — loads router and debug:guided', async () => {
+    const soft = ['test-driven-development', 'software-design', 'testing'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'fix the bug where the date formatter returns wrong timezone offset for DST transitions',
-      (r) => hasRequiredSkills(r, ['router']),
+      (r) => hasRequiredSkills(r, ['router', 'debug:guided']),
     );
 
     const skills = getSkillInvocations(result);
-    const hasExpected = hasRequiredSkills(result, expected);
-    console.log(`DEBUG/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    const hasSoft = hasRequiredSkills(result, soft);
+    console.log(`DEBUG/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasSoft ? ` ⚠ soft: ${soft.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('PLAN/GUIDED — loads router and planning skills', async () => {
-    const expected = ['test-driven-development', 'patterns', 'software-design', 'security', 'design-review'];
+  it('PLAN/GUIDED — loads router and plan:guided', async () => {
+    const soft = ['test-driven-development', 'patterns', 'software-design', 'security', 'design-review'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'how should we design a caching layer for API responses?',
-      (r) => hasRequiredSkills(r, ['router']),
+      (r) => hasRequiredSkills(r, ['router', 'plan:guided']),
     );
 
     const skills = getSkillInvocations(result);
-    const hasExpected = hasRequiredSkills(result, expected);
-    console.log(`PLAN/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    const hasSoft = hasRequiredSkills(result, soft);
+    console.log(`PLAN/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasSoft ? ` ⚠ soft: ${soft.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('REVIEW/GUIDED — loads router and review skills', async () => {
-    const expected = ['quality-gates', 'software-design'];
+  it('REVIEW/GUIDED — loads router and review:guided', async () => {
+    const soft = ['quality-gates', 'software-design'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'check this error handling in the authentication module',
-      (r) => hasRequiredSkills(r, ['router']),
+      (r) => hasRequiredSkills(r, ['router', 'review:guided']),
     );
 
     const skills = getSkillInvocations(result);
-    const hasExpected = hasRequiredSkills(result, expected);
-    console.log(`REVIEW/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    const hasSoft = hasRequiredSkills(result, soft);
+    console.log(`REVIEW/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasSoft ? ` ⚠ soft: ${soft.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('RESEARCH/GUIDED — loads router and research-codebase', async () => {
-    const expected = ['research-codebase'];
+  it('RESEARCH/GUIDED — loads router and research:guided', async () => {
+    const soft = ['research-codebase'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'research what logging libraries this codebase uses and how they compare to alternatives',
-      (r) => hasRequiredSkills(r, ['router']),
+      (r) => hasRequiredSkills(r, ['router', 'research:guided']),
     );
     const skills = getSkillInvocations(result);
-    const hasExpected = hasRequiredSkills(result, expected);
-    console.log(`RESEARCH/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    const hasSoft = hasRequiredSkills(result, soft);
+    console.log(`RESEARCH/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasSoft ? ` ⚠ soft: ${soft.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
-  it('RELEASE/GUIDED — loads router and git', async () => {
-    const expected = ['git'];
+  it('RELEASE/GUIDED — loads router and release:guided', async () => {
+    const soft = ['git'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'prepare a patch release for the latest bugfix',
-      (r) => hasRequiredSkills(r, ['router']),
+      (r) => hasRequiredSkills(r, ['router', 'release:guided']),
     );
     const skills = getSkillInvocations(result);
-    const hasExpected = hasRequiredSkills(result, expected);
-    console.log(`RELEASE/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    const hasSoft = hasRequiredSkills(result, soft);
+    console.log(`RELEASE/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasSoft ? ` ⚠ soft: ${soft.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
   // --- ORCHESTRATED tier: strict skill assertions ---
 
-  it('IMPLEMENT/ORCHESTRATED — loads implement, patterns', async () => {
-    const required = ['implement:orch', 'patterns'];
+  it('IMPLEMENT/ORCHESTRATED — loads implement:orch', async () => {
+    const required = ['implement:orch'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'build a multi-module authentication system with OAuth, session management, and role-based access control',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
@@ -220,8 +218,8 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     expect(passed).toBe(true);
   });
 
-  it('PLAN/ORCHESTRATED — loads plan:orch, patterns', async () => {
-    const required = ['plan:orch', 'patterns', 'design-review'];
+  it('PLAN/ORCHESTRATED — loads plan:orch', async () => {
+    const required = ['plan:orch'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'design the architecture for a multi-service notification system with email, SMS, and push channels that supports user preferences and delivery guarantees',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
@@ -233,8 +231,8 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     expect(passed).toBe(true);
   });
 
-  it('PIPELINE/ORCHESTRATED — loads pipeline, patterns', async () => {
-    const required = ['pipeline:orch', 'patterns'];
+  it('PIPELINE/ORCHESTRATED — loads pipeline:orch', async () => {
+    const required = ['pipeline:orch'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'implement and review end to end the new user preferences API',
       (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),

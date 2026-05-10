@@ -17,8 +17,6 @@ This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. E
 > A review that exists only in agent output disappears on compaction.
 > No disk artifact, no review. The Synthesizer reads from disk, not memory.
 
----
-
 **Continuation**: Phase 2 handles incremental detection via `.last-review-head` — no separate continuation path needed.
 
 ## Phase 1: Pre-flight

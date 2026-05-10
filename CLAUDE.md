@@ -43,7 +43,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Working Memory**: Four shell-script hooks (`scripts/hooks/`) provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. UserPromptSubmit (`prompt-capture-memory`) captures user prompt to `.memory/.pending-turns.jsonl` queue. Stop hook captures `response_text` (on `end_turn` only) to same queue, then spawns throttled background `claude -p --model haiku` updater (skips if triggered <2min ago; concurrent sessions serialize via mkdir-based lock). Background updater uses `mv`-based atomic handoff to process all pending turns in batch (capped at 10 most recent), with crash recovery via `.pending-turns.processing` file. Updates `.memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`). SessionStart hook → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact (warns if >1h stale; injects pre-compact memory snapshot when compaction happened mid-session). PreCompact hook → saves git state + WORKING-MEMORY.md snapshot + bootstraps minimal WORKING-MEMORY.md if none exists. Disabling memory removes all four hooks. Use `devflow memory --clear` to clean up pending queue files across projects. Zero-ceremony context preservation.
 
-**Ambient Mode**: Three-layer architecture for always-on intent classification. SessionStart hook (`session-start-classification`) reads lean classification rules (`~/.claude/skills/devflow:router/classification-rules.md`, ~30 lines) and injects as `additionalContext` — once per session, deterministic, zero model overhead. UserPromptSubmit hook (`preamble`) injects a one-sentence prompt per message triggering classification + conditional router loading via Skill tool. Router SKILL.md is a pure skill lookup table (~50 lines) loaded on-demand only for GUIDED/ORCHESTRATED depth — maps intent×depth to domain and orchestration skills. Toggleable via `devflow ambient --enable/--disable/--status` or `devflow init`.
+**Ambient Mode**: Three-layer architecture for always-on intent classification. SessionStart hook (`session-start-classification`) reads lean classification rules (`~/.claude/skills/devflow:router/classification-rules.md`, ~30 lines) and injects as `additionalContext` — once per session, deterministic, zero model overhead. UserPromptSubmit hook (`preamble`) injects a one-sentence prompt per message triggering classification + conditional router loading via Skill tool. Router SKILL.md is a pure dispatcher loaded on-demand only for GUIDED/ORCHESTRATED depth — maps intent + depth to a guided skill (short, focused, loads companion skills) or an orch skill (full agent pipeline). Toggleable via `devflow ambient --enable/--disable/--status` or `devflow init`.
 
 **Self-Learning**: Two independent agents detect patterns from session transcripts. Transcript content is split into two channels by `scripts/hooks/lib/transcript-filter.cjs`: `USER_SIGNALS` (plain user messages) and `DIALOG_PAIRS` (prior-assistant + user turns).
 
@@ -70,7 +70,7 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 ```
 devflow/
-├── shared/skills/          # 50 skills (single source of truth)
+├── shared/skills/          # 57 skills (single source of truth)
 ├── shared/agents/          # 14 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 20 plugins (11 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
@@ -190,7 +190,7 @@ Working memory files live in a dedicated `.memory/` directory:
 
 **Plugin-specific agents** (1): claude-md-auditor
 
-**Orchestration skills** (9): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch, research:orch, release:orch. These enable the same agent pipelines as slash commands but triggered via ambient intent classification.
+**Workflow skills** (16): 9 orch skills (implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch, research:orch, release:orch) + 7 guided skills (implement:guided, debug:guided, explore:guided, plan:guided, review:guided, research:guided, release:guided). Router dispatches by intent + depth to either a guided or orch skill.
 
 **Agent Teams**: 8 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/explore`, `/debug`, `/resolve`, `/research`, `/release`). One-team-per-session constraint — must TeamDelete before creating next team.
 
