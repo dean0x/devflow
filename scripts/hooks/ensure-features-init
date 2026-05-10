@@ -3,14 +3,16 @@
 # Called from session-end-knowledge-refresh. Idempotent, ~1μs after first run.
 # Usage: source ensure-features-init "$CWD"
 
+[ -z "$1" ] && return 1
+
 _FEATURES_DIR="$1/.features"
 
 # Create .features/ if needed
 mkdir -p "$_FEATURES_DIR" 2>/dev/null || return 1
 
-# Create index.json if missing (empty object = no knowledge bases yet)
+# Create index.json if missing (version+features structure required by feature-knowledge.cjs)
 if [ ! -f "$_FEATURES_DIR/index.json" ]; then
-  printf '{}' > "$_FEATURES_DIR/index.json"
+  printf '{"version":1,"features":{}}' > "$_FEATURES_DIR/index.json"
 fi
 
 # One-time .gitignore setup (marker prevents repeated checks)
