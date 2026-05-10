@@ -1377,6 +1377,58 @@ describe('working memory queue behavior', () => {
     expect(entry.content).toBe('first real assistant response');
   });
 
+  it('auto-clean with empty queue file — truncation no-ops, assistant entry appended', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    // Create an empty queue file — grep exits 1 (no match), auto-clean fires but truncates to same empty state
+    fs.writeFileSync(queueFile, '');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-autoclean-empty',
+      stop_reason: 'end_turn',
+      response_text: 'response after empty queue',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    // Empty queue truncated to empty, then new assistant entry appended — exactly 1 line
+    expect(lines).toHaveLength(1);
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('assistant');
+    expect(entry.content).toBe('response after empty queue');
+  });
+
+  it('auto-clean with single orphan user entry — truncated, only assistant entry remains', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const now = Math.floor(Date.now() / 1000);
+    // Minimum trigger case: exactly 1 orphan user entry
+    const singleOrphan = JSON.stringify({ role: 'user', content: 'lone orphan', ts: now });
+    fs.writeFileSync(queueFile, singleOrphan + '\n');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-autoclean-single',
+      stop_reason: 'end_turn',
+      response_text: 'response after single orphan',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    // Single orphan truncated, new assistant entry appended — exactly 1 line
+    expect(lines).toHaveLength(1);
+    const entry = JSON.parse(lines[0]);
+    expect(entry.role).toBe('assistant');
+    expect(entry.content).toBe('response after single orphan');
+  });
+
   it('auto-clean does not truncate queue that already has assistant entries', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
@@ -1432,6 +1484,11 @@ describe('working memory queue behavior', () => {
     // After overflow: 201 pre-existing + 1 new = 202 lines → truncated to last 100
     const resultLines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     expect(resultLines).toHaveLength(100);
+
+    // The first preserved entry must be from the tail of the original data
+    // 201 pre-existing + 1 new = 202 lines → tail -100 starts at index 102
+    const firstEntry = JSON.parse(resultLines[0]);
+    expect(firstEntry.content).toBe('entry 102');
 
     // The new entry (the assistant turn) must be present as the last line
     const lastEntry = JSON.parse(resultLines[resultLines.length - 1]);
