@@ -3,7 +3,7 @@
 #
 # Flow:
 #   1. Guard clauses (skip if background process, no JSON tools, etc.)
-#   2. Check that .features/index.json exists
+#   2. Lazy-init .features/index.json if missing
 #   3. Throttle: skip if refreshed within last 2 hours
 #   4. Query stale-slugs from feature-knowledge.cjs
 #   5. Spawn background-knowledge-refresh in detached background process
@@ -26,8 +26,10 @@ CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 [ -z "$CWD" ] && exit 0
 
 # Quick guards
-[ -f "$CWD/.features/index.json" ] || exit 0
 [ -f "$CWD/.features/.disabled" ] && exit 0
+
+# Lazy-init .features/ and index.json if missing
+source "$SCRIPT_DIR/ensure-features-init" "$CWD" || exit 0
 
 # Throttle: skip if refreshed within last 2 hours
 MARKER="$CWD/.features/.knowledge-last-refresh"
@@ -38,7 +40,7 @@ if [ -f "$MARKER" ]; then
 fi
 
 # Check for stale knowledge bases (bash-friendly output, one slug per line)
-STALE_SLUGS=$(node "$SCRIPT_DIR/lib/feature-knowledge.cjs" stale-slugs "$CWD" 2>/dev/null)
+STALE_SLUGS=$(node "$SCRIPT_DIR/lib/feature-knowledge.cjs" stale-slugs "$CWD" 2>/dev/null || true)
 [ -z "$STALE_SLUGS" ] && exit 0
 
 # Resolve claude binary (PATH lookup, exit silently if missing)

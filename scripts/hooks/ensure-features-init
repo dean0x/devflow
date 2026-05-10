@@ -1,0 +1,22 @@
+#!/bin/bash
+# Ensures .features/ exists with index.json and gitignore entries configured.
+# Called from session-end-knowledge-refresh. Idempotent, ~1μs after first run.
+# Usage: source ensure-features-init "$CWD"
+
+_FEATURES_DIR="$1/.features"
+
+# Create .features/ if needed
+mkdir -p "$_FEATURES_DIR" 2>/dev/null || return 1
+
+# Create index.json if missing (empty object = no knowledge bases yet)
+if [ ! -f "$_FEATURES_DIR/index.json" ]; then
+  printf '{}' > "$_FEATURES_DIR/index.json"
+fi
+
+# One-time .gitignore setup (marker prevents repeated checks)
+if [ ! -f "$_FEATURES_DIR/.gitignore-configured" ] && [ -e "$1/.git" ]; then
+  for _entry in ".knowledge.lock/" ".knowledge-last-refresh" ".gitignore-configured"; do
+    grep -qxF "$_entry" "$_FEATURES_DIR/.gitignore" 2>/dev/null || echo "$_entry" >> "$_FEATURES_DIR/.gitignore"
+  done
+  touch "$_FEATURES_DIR/.gitignore-configured"
+fi
