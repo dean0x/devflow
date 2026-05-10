@@ -119,7 +119,7 @@ export async function runDecisionsAgent(opts: DecisionsAgentOpts): Promise<strin
       '--dangerously-skip-permissions',
     ], {
       cwd,
-      timeout: 180_000,
+      timeout: 300_000,
     });
 
     // Parse the structured output envelope: {"structured_output": {"observations": [...]}}
@@ -345,4 +345,3 @@ function _serializePitfall(obs: RawObservation): string {
   if (obs.resolution) parts.push(`resolution: ${obs.resolution}`);
   return parts.join('; ');
 }
-

@@ -19,18 +19,18 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
-# Resolve project directory and stop reason in one subprocess (consistent with
-# batched extraction pattern used in UserPromptSubmit hooks).
+# Resolve project directory, stop reason, and response text in one subprocess.
 # Uses ASCII SOH (0x01) as delimiter for bash 3.2 compatibility with cut.
 if [ "$_HAS_JQ" = "true" ]; then
-  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "\u0001" + (.stop_reason // "")')
+  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "\u0001" + (.stop_reason // "") + "\u0001" + (.response_text // "")')
 else
   _FIELDS=$(printf '%s' "$INPUT" | node -e "
     const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-    process.stdout.write((j.cwd||'')+'\x01'+(j.stop_reason||''))")
+    process.stdout.write((j.cwd||'')+'\x01'+(j.stop_reason||'')+'\x01'+(j.response_text||''))")
 fi
-CWD="${_FIELDS%%$'\001'*}"
-STOP_REASON="${_FIELDS#*$'\001'}"
+CWD=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f1)
+STOP_REASON=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f2)
+RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f3-)
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
@@ -49,46 +49,39 @@ if [ "$STOP_REASON" != "end_turn" ]; then
   exit 0
 fi
 
-# --- Extract assistant_message (handles both string and content array) ---
-ASSISTANT_MSG=""
-if [ "$_HAS_JQ" = "true" ]; then
-  ASSISTANT_MSG=$(printf '%s' "$INPUT" | jq -r '
-    if (.assistant_message | type) == "string" then .assistant_message
-    elif (.assistant_message | type) == "array" then
-      [.assistant_message[] | select(.type == "text") | .text] | join("\n")
-    else "" end
-  ' 2>/dev/null || true)
-else
-  # Node fallback: extract assistant_message, try as string first
-  ASSISTANT_MSG=$(printf '%s' "$INPUT" | node -e "
-    let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
-      try{const o=JSON.parse(d);const m=o.assistant_message;
-      if(typeof m==='string'){process.stdout.write(m)}
-      else if(Array.isArray(m)){process.stdout.write(m.filter(b=>b.type==='text').map(b=>b.text).join('\n'))}
-      }catch(e){}
-    })" 2>/dev/null || true)
+# --- Auto-clean orphan user-only queues ---
+QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"
+if [ -f "$QUEUE_FILE" ]; then
+  if ! grep -qF '"role":"assistant"' "$QUEUE_FILE" 2>/dev/null; then
+    log "Auto-clean: truncating orphan user-only queue ($(wc -l < "$QUEUE_FILE" | tr -d ' ') lines)"
+    : > "$QUEUE_FILE"
+  fi
 fi
 
 # Skip if empty
-if [ -z "$ASSISTANT_MSG" ]; then
-  log "Skipped: empty assistant_message"
+if [ -z "$RESPONSE_TEXT" ]; then
+  log "Skipped: empty response_text"
   exit 0
 fi
 
 # Truncate to 2000 chars
-if [ ${#ASSISTANT_MSG} -gt 2000 ]; then
-  ASSISTANT_MSG="${ASSISTANT_MSG:0:2000}... [truncated]"
+if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
+  RESPONSE_TEXT="${RESPONSE_TEXT:0:2000}... [truncated]"
 fi
 
 # --- Append to queue ---
-QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"
+# Ensure queue file has restricted permissions (600) if not yet created.
+# umask 077 ensures the file is never world-readable, even momentarily (avoids TOCTOU).
+if [ ! -f "$QUEUE_FILE" ]; then
+  (umask 077 && touch "$QUEUE_FILE") 2>/dev/null || true
+fi
 TS=$(date +%s)
 if [ "$_HAS_JQ" = "true" ]; then
-  jq -n -c --arg role "assistant" --arg content "$ASSISTANT_MSG" --argjson ts "$TS" \
+  jq -n -c --arg role "assistant" --arg content "$RESPONSE_TEXT" --argjson ts "$TS" \
     '{role: $role, content: $content, ts: $ts}' >> "$QUEUE_FILE"
 else
   node -e "process.stdout.write(JSON.stringify({role:'assistant',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
-    -- "$ASSISTANT_MSG" "$TS" >> "$QUEUE_FILE"
+    -- "$RESPONSE_TEXT" "$TS" >> "$QUEUE_FILE"
 fi
 
 # Queue overflow safety: if >200 lines, keep last 100
@@ -101,12 +94,12 @@ if [ -f "$QUEUE_FILE" ]; then
   fi
 fi
 
-log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
+log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
 
 # D29: Usage scanner runs after queue append — memory capture is mission-critical, scanning is supplementary
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
 if [ -f "$SCANNER" ]; then
-  printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
+  printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
 fi
 
 # --- Throttle: only spawn background updater every 2 minutes ---
