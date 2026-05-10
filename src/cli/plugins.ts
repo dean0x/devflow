@@ -58,7 +58,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/plan'],
     agents: ['git', 'skimmer', 'synthesizer', 'designer', 'knowledge'],
     skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
-    rules: [],
   },
   {
     name: 'devflow-implement',
@@ -66,7 +65,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/implement'],
     agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
     skills: ['agent-teams', 'patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-knowledge'],
-    rules: [],
   },
   {
     name: 'devflow-code-review',
@@ -74,7 +72,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/code-review'],
     agents: ['git', 'reviewer', 'synthesizer'],
     skills: ['agent-teams', 'architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
-    rules: [],
   },
   {
     name: 'devflow-resolve',
@@ -82,7 +79,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
     skills: ['agent-teams', 'patterns', 'security', 'worktree-support', 'apply-feature-knowledge'],
-    rules: [],
   },
   {
     name: 'devflow-debug',
@@ -90,7 +86,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
     skills: ['agent-teams', 'git', 'worktree-support', 'apply-feature-knowledge'],
-    rules: [],
   },
   {
     name: 'devflow-explore',
@@ -98,7 +93,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/explore'],
     agents: ['skimmer', 'synthesizer', 'knowledge'],
     skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
-    rules: [],
   },
   {
     name: 'devflow-research',
@@ -106,7 +100,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/research'],
     agents: ['researcher', 'skimmer', 'synthesizer', 'knowledge'],
     skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology', 'research:orch'],
-    rules: [],
   },
   {
     name: 'devflow-release',
@@ -114,7 +107,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/release'],
     agents: ['git', 'synthesizer', 'validator'],
     skills: ['agent-teams', 'git', 'worktree-support', 'release:orch'],
-    rules: [],
   },
   {
     name: 'devflow-self-review',
@@ -122,7 +114,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-feature-knowledge'],
-    rules: [],
   },
   {
     name: 'devflow-ambient',
@@ -166,7 +157,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'feature-knowledge',
       'apply-feature-knowledge',
     ],
-    rules: [],
   },
   {
     name: 'devflow-audit-claude',
@@ -175,7 +165,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: ['claude-md-auditor'],
     skills: [],
     optional: true,
-    rules: [],
   },
   {
     name: 'devflow-typescript',

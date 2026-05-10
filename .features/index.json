@@ -1,4 +1,29 @@
 {
   "version": 1,
-  "features": {}
+  "features": {
+    "cli-rules": {
+      "name": "Rules System CLI",
+      "description": "Rules system: always-on engineering principles installed from selected plugins with shadow support and CLI management",
+      "directories": [
+        "src/cli/commands/",
+        "src/cli/utils/",
+        "shared/rules/",
+        "scripts/"
+      ],
+      "referencedFiles": [
+        "src/cli/commands/rules.ts",
+        "src/cli/commands/init.ts",
+        "src/cli/commands/uninstall.ts",
+        "src/cli/plugins.ts",
+        "src/cli/utils/installer.ts",
+        "src/cli/utils/manifest.ts",
+        "scripts/build-plugins.ts",
+        "shared/rules/security.md",
+        "shared/rules/engineering.md",
+        "shared/rules/quality.md"
+      ],
+      "lastUpdated": "2026-05-10T21:14:46.461Z",
+      "createdBy": "implement"
+    }
+  }
 }
