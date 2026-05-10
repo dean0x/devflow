@@ -70,7 +70,7 @@ export async function runLearningAgent(opts: LearningAgentOpts): Promise<string>
       '--dangerously-skip-permissions',
     ], {
       cwd,
-      timeout: 180_000,
+      timeout: 300_000,
     });
 
     // Strip markdown fences if present.
@@ -169,9 +169,9 @@ Do NOT emit artifact content, rendered markdown, YAML frontmatter, or templates.
  */
 export function _stripMarkdownFences(text: string): string {
   return text
-    .replace(/^```json\n/, '')
-    .replace(/^```\n/, '')
-    .replace(/\n```$/, '')
+    .replace(/^\s*```json\s*\n/, '')
+    .replace(/^\s*```\s*\n/, '')
+    .replace(/\n\s*```\s*$/, '')
     .trim();
 }
 

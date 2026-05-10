@@ -127,6 +127,16 @@ describe('_stripMarkdownFences', () => {
     const input = '  {"observations": []}  ';
     expect(_stripMarkdownFences(input)).toBe('{"observations": []}');
   });
+
+  it('strips fences with leading whitespace', () => {
+    const input = '  ```json\n{"observations": []}\n  ```';
+    expect(_stripMarkdownFences(input)).toBe('{"observations": []}');
+  });
+
+  it('strips fences with trailing whitespace after markers', () => {
+    const input = '```json  \n{"observations": []}\n```  ';
+    expect(_stripMarkdownFences(input)).toBe('{"observations": []}');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -152,7 +162,6 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['do this then that'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -162,7 +171,7 @@ describe('runLearningAgent', () => {
     expect(args[args.indexOf('--output-format') + 1]).toBe('text');
   });
 
-  it('passes 180s timeout to execFile', async () => {
+  it('passes 300s timeout to execFile', async () => {
     const mock = vi.mocked(execFile) as unknown as ExecFileMock;
     let capturedTimeout: number | undefined;
 
@@ -176,12 +185,11 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['signal'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
 
-    expect(capturedTimeout).toBe(180_000);
+    expect(capturedTimeout).toBe(300_000);
   });
 
   it('passes --allowedTools Read to claude', async () => {
@@ -191,7 +199,6 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['signal'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -208,7 +215,6 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['signal'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -224,7 +230,6 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['signal'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -246,7 +251,6 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['signal'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -264,8 +268,7 @@ describe('runLearningAgent', () => {
         cwd: tmpDir,
         userSignals: ['signal'],
         model: 'sonnet',
-        debug: false,
-        logFile: path.join(tmpDir, 'learning-log.jsonl'),
+          logFile: path.join(tmpDir, 'learning-log.jsonl'),
         jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
       }),
     ).rejects.toThrow(/invalid JSON/i);
@@ -279,8 +282,7 @@ describe('runLearningAgent', () => {
         cwd: tmpDir,
         userSignals: ['signal'],
         model: 'sonnet',
-        debug: false,
-        logFile: path.join(tmpDir, 'learning-log.jsonl'),
+          logFile: path.join(tmpDir, 'learning-log.jsonl'),
         jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
       }),
     ).rejects.toThrow(/observations/i);
@@ -293,7 +295,6 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['unique-signal-xyz-789'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -311,7 +312,6 @@ describe('runLearningAgent', () => {
       cwd: tmpDir,
       userSignals: ['signal'],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'learning-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });

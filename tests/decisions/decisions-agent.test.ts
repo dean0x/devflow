@@ -249,7 +249,6 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -266,7 +265,6 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -281,7 +279,7 @@ describe('runDecisionsAgent', () => {
     expect(schema.properties.observations).toBeDefined();
   });
 
-  it('passes 180s timeout to execFile', async () => {
+  it('passes 300s timeout to execFile', async () => {
     const mock = vi.mocked(execFile) as unknown as ExecFileMock;
     let capturedTimeout: number | undefined;
 
@@ -295,12 +293,11 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
 
-    expect(capturedTimeout).toBe(180_000);
+    expect(capturedTimeout).toBe(300_000);
   });
 
   it('passes --dangerously-skip-permissions to claude', async () => {
@@ -310,7 +307,6 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -336,7 +332,6 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [{ prior: 'I will throw', user: 'no, use Result because cleaner' }],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -370,7 +365,6 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -391,7 +385,6 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [{ prior: 'unique-prior-content-xyz', user: 'unique-user-content-abc' }],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -410,7 +403,6 @@ describe('runDecisionsAgent', () => {
       cwd: tmpDir,
       dialogPairs: [],
       model: 'sonnet',
-      debug: false,
       logFile: path.join(tmpDir, 'decisions-log.jsonl'),
       jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
     });
@@ -428,8 +420,7 @@ describe('runDecisionsAgent', () => {
         cwd: tmpDir,
         dialogPairs: [],
         model: 'sonnet',
-        debug: false,
-        logFile: path.join(tmpDir, 'decisions-log.jsonl'),
+          logFile: path.join(tmpDir, 'decisions-log.jsonl'),
         jsonHelperPath: path.join(tmpDir, 'json-helper.cjs'),
       }),
     ).rejects.toThrow(/invalid JSON/i);
