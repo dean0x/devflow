@@ -70,7 +70,7 @@ if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
 fi
 
 # --- Append to queue ---
-# Ensure queue file is created with restricted permissions (600) before first write.
+# Ensure queue file has restricted permissions (600) if not yet created.
 # umask 077 ensures the file is never world-readable, even momentarily (avoids TOCTOU).
 if [ ! -f "$QUEUE_FILE" ]; then
   (umask 077 && touch "$QUEUE_FILE") 2>/dev/null || true
