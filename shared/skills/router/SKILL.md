@@ -27,7 +27,7 @@ All ORCHESTRATED pipelines follow this protocol:
 
 | Intent | Skills |
 |--------|--------|
-| IMPLEMENT | devflow:test-driven-development, devflow:patterns |
+| IMPLEMENT | devflow:test-driven-development, devflow:patterns, devflow:dependency-research |
 | EXPLORE | — |
 | DEBUG | devflow:test-driven-development, devflow:software-design, devflow:testing |
 | PLAN | devflow:test-driven-development, devflow:patterns, devflow:software-design, devflow:security, devflow:design-review |

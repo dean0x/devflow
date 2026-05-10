@@ -78,7 +78,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('IMPLEMENT/GUIDED — loads router and implementation skills', async () => {
-    const expected = ['patterns', 'test-driven-development'];
+    const expected = ['patterns', 'test-driven-development', 'dependency-research'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'add a retry mechanism with exponential backoff to the HTTP client module',
       (r) => hasRequiredSkills(r, ['router']),
@@ -133,7 +133,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const expected = ['research-codebase'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'research what logging libraries this codebase uses and how they compare to alternatives',
-      (r) => hasSkillInvocations(r) && hasClassification(r),
+      (r) => hasRequiredSkills(r, ['router']),
     );
     const skills = getSkillInvocations(result);
     const hasExpected = hasRequiredSkills(result, expected);
@@ -145,7 +145,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const expected = ['git'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'prepare a patch release for the latest bugfix',
-      (r) => hasSkillInvocations(r) && hasClassification(r),
+      (r) => hasRequiredSkills(r, ['router']),
     );
     const skills = getSkillInvocations(result);
     const hasExpected = hasRequiredSkills(result, expected);

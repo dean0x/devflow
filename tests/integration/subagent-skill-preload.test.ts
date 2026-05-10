@@ -71,11 +71,11 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     ).toBe(true);
   }, 90000);
 
-  it('Coder preloads all 7 declared core skills', async () => {
+  it('Coder preloads all 8 declared core skills', async () => {
     const allPreloads = await spawnAgentAndGetAllPreloads('Coder', 'implement a no-op task');
     const expected = [
       'software-design', 'git', 'patterns', 'testing',
-      'test-driven-development', 'boundary-validation', 'worktree-support',
+      'test-driven-development', 'dependency-research', 'boundary-validation', 'worktree-support',
     ];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),

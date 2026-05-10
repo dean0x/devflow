@@ -25,6 +25,7 @@
     "git",
     "boundary-validation",
     "test-driven-development",
-    "testing"
+    "testing",
+    "dependency-research"
   ]
 }

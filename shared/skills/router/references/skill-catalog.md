@@ -13,6 +13,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | devflow:implement:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates agent pipeline |
 | devflow:test-driven-development | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file — enforces RED-GREEN-REFACTOR |
 | devflow:patterns | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file |
+| devflow:dependency-research | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
 | devflow:typescript | TypeScript files in scope | GUIDED + ORCHESTRATED | `*.ts`, `*.tsx` |
 | devflow:react | React components in scope | GUIDED + ORCHESTRATED | `*.tsx`, `*.jsx` |
 | devflow:ui-design | UI/styling work | GUIDED + ORCHESTRATED | `*.css`, `*.scss`, `*.tsx` with styling keywords |

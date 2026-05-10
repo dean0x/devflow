@@ -70,7 +70,7 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 ```
 devflow/
-├── shared/skills/          # 49 skills (single source of truth)
+├── shared/skills/          # 50 skills (single source of truth)
 ├── shared/agents/          # 14 shared agents (single source of truth)
 ├── plugins/devflow-*/      # 20 plugins (11 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation

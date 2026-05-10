@@ -280,7 +280,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 Before considering release complete, verify every phase:
 
 - [ ] Phase 1: Load Config → RELEASE_CONFIG and CONFIG_STATE captured
-- [ ] Phase 1b: Load Context → DECISIONS_CONTEXT captured
+- [ ] Phase 1b: Load Context → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured
 - [ ] Phase 2: Detect Release Process → RELEASE_SIGNALS captured (or skipped if CONFIG_STATE=learned)
 - [ ] Phase 3: Build Config → RELEASE_CONFIG written to `.release/RELEASE-FLOW.md` (or skipped if CONFIG_STATE=learned)
 - [ ] Phase 4: Pre-release Checks → PRE_RELEASE_RESULT and VERSION captured; progress checkpoint written
