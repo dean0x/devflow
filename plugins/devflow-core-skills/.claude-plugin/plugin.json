@@ -24,8 +24,8 @@
     "docs-framework",
     "git",
     "boundary-validation",
-    "research",
     "test-driven-development",
-    "testing"
+    "testing",
+    "dependency-research"
   ]
 }

@@ -78,7 +78,7 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
   });
 
   it('IMPLEMENT/GUIDED — loads router and implementation skills', async () => {
-    const expected = ['patterns', 'test-driven-development', 'research'];
+    const expected = ['patterns', 'test-driven-development', 'dependency-research'];
     const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
       'add a retry mechanism with exponential backoff to the HTTP client module',
       (r) => hasRequiredSkills(r, ['router']),
@@ -126,6 +126,30 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
     const skills = getSkillInvocations(result);
     const hasExpected = hasRequiredSkills(result, expected);
     console.log(`REVIEW/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    expect(passed).toBe(true);
+  });
+
+  it('RESEARCH/GUIDED — loads router and research-codebase', async () => {
+    const expected = ['research-codebase'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'research what logging libraries this codebase uses and how they compare to alternatives',
+      (r) => hasRequiredSkills(r, ['router']),
+    );
+    const skills = getSkillInvocations(result);
+    const hasExpected = hasRequiredSkills(result, expected);
+    console.log(`RESEARCH/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
+    expect(passed).toBe(true);
+  });
+
+  it('RELEASE/GUIDED — loads router and git', async () => {
+    const expected = ['git'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'prepare a patch release for the latest bugfix',
+      (r) => hasRequiredSkills(r, ['router']),
+    );
+    const skills = getSkillInvocations(result);
+    const hasExpected = hasRequiredSkills(result, expected);
+    console.log(`RELEASE/GUIDED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]${passed && !hasExpected ? ` ⚠ expected: ${expected.join(', ')}` : ''}`);
     expect(passed).toBe(true);
   });
 
@@ -218,6 +242,30 @@ describe.skipIf(!isClaudeAvailable())('devflow classification', () => {
 
     const skills = getSkillInvocations(result);
     console.log(`PIPELINE/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
+    if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
+    expect(passed).toBe(true);
+  });
+
+  it('RESEARCH/ORCHESTRATED — loads research:orch', async () => {
+    const required = ['research:orch'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'conduct a comprehensive multi-perspective research on how competing projects handle plugin architecture, including market analysis and technology comparison',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
+    );
+    const skills = getSkillInvocations(result);
+    console.log(`RESEARCH/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
+    if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
+    expect(passed).toBe(true);
+  });
+
+  it('RELEASE/ORCHESTRATED — loads release:orch', async () => {
+    const required = ['release:orch'];
+    const { result, passed, attempts, model } = await runClaudeStreamingWithRetry(
+      'run the full release pipeline for version 3.0.0 with changelog generation and npm publish',
+      (r) => hasSkillInvocations(r) && hasRequiredSkills(r, required),
+    );
+    const skills = getSkillInvocations(result);
+    console.log(`RELEASE/ORCHESTRATED: ${passed ? 'PASS' : 'FAIL'} (${model}, ${attempts} attempts, ${result.durationMs}ms). Skills: [${skills.join(', ')}]`);
     if (!passed) console.warn(`Expected: ${required.join(', ')}. Got: [${skills.join(', ')}]`);
     expect(passed).toBe(true);
   });

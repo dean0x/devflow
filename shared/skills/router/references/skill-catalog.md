@@ -13,7 +13,7 @@ These skills may be loaded during GUIDED and ORCHESTRATED-depth ambient routing.
 | devflow:implement:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates agent pipeline |
 | devflow:test-driven-development | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file — enforces RED-GREEN-REFACTOR |
 | devflow:patterns | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any code file |
-| devflow:research | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
+| devflow:dependency-research | Always for IMPLEMENT | GUIDED + ORCHESTRATED | Any — enforces research before building |
 | devflow:typescript | TypeScript files in scope | GUIDED + ORCHESTRATED | `*.ts`, `*.tsx` |
 | devflow:react | React components in scope | GUIDED + ORCHESTRATED | `*.tsx`, `*.jsx` |
 | devflow:ui-design | UI/styling work | GUIDED + ORCHESTRATED | `*.css`, `*.scss`, `*.tsx` with styling keywords |
@@ -70,6 +70,28 @@ PIPELINE is always ORCHESTRATED — it chains multiple orchestration stages with
 
 EXPLORE depth: simple lookups ("where is X?") → QUICK. Focused subsystem/flow analysis → GUIDED. Multi-system architecture mapping → ORCHESTRATED.
 
+### RESEARCH Intent
+
+| Skill | When to Load | Depth | File Patterns |
+|-------|-------------|-------|---------------|
+| devflow:research-codebase | Always for RESEARCH | GUIDED | Any — main-session codebase exploration |
+| devflow:research:orch | Always for RESEARCH | ORCHESTRATED | Any — orchestrates multi-agent research pipeline |
+| devflow:research-external | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
+| devflow:research-market | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
+| devflow:research-competitor | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
+| devflow:research-technology | Loaded by Researcher agent | — | Internal (agent-loaded, not router) |
+
+RESEARCH depth: focused single-type research → GUIDED. Multi-perspective research needing synthesis → ORCHESTRATED. GUIDED research loads the codebase research skill for main-session exploration. ORCHESTRATED research loads the full multi-agent pipeline.
+
+### RELEASE Intent
+
+| Skill | When to Load | Depth | File Patterns |
+|-------|-------------|-------|---------------|
+| devflow:release:orch | ORCHESTRATED only | ORCHESTRATED | Any — orchestrates release pipeline |
+| devflow:git | Always for RELEASE | GUIDED | Git operations |
+
+RELEASE depth: simple version bump or tag → GUIDED. Full release pipeline with checks, changelog, publish → ORCHESTRATED.
+
 ### PLAN Intent
 
 | Skill | When to Load | Depth | File Patterns |
@@ -98,7 +120,7 @@ These skills are always installed (universal skill installation) but loaded by a
 ## Selection Limits
 
 - **Maximum 3 knowledge skills** per ambient response (primary + up to 2 secondary)
-- **Orchestration skills** (devflow:implement:orch, devflow:explore:orch, devflow:debug:orch, devflow:plan:orch, devflow:review:orch, devflow:resolve:orch, devflow:pipeline:orch) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
+- **Orchestration skills** (devflow:implement:orch, devflow:explore:orch, devflow:debug:orch, devflow:plan:orch, devflow:review:orch, devflow:resolve:orch, devflow:pipeline:orch, devflow:research:orch, devflow:release:orch) are loaded only at ORCHESTRATED depth — they don't count toward the knowledge skill limit
 - **Primary skills** are always loaded for the classified intent at both GUIDED and ORCHESTRATED depth
 - **Secondary skills** are loaded only when file patterns match conversation context
 - **GUIDED depth** loads knowledge skills only (no orchestration skills) — main session works directly

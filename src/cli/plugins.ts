@@ -47,7 +47,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
     agents: [],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'research', 'test-driven-development', 'testing'],
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
   },
   {
     name: 'devflow-plan',
@@ -92,6 +92,20 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
   },
   {
+    name: 'devflow-research',
+    description: 'Multi-type research with parallel researchers and trust-aware synthesis',
+    commands: ['/research'],
+    agents: ['researcher', 'skimmer', 'synthesizer', 'knowledge'],
+    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology', 'research:orch'],
+  },
+  {
+    name: 'devflow-release',
+    description: 'Adaptive project release with learned configuration',
+    commands: ['/release'],
+    agents: ['git', 'synthesizer', 'validator'],
+    skills: ['agent-teams', 'git', 'worktree-support', 'release:orch'],
+  },
+  {
     name: 'devflow-self-review',
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
@@ -102,12 +116,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Ambient mode — intent classification with proportional agent orchestration',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
     skills: [
       'router',
       'implement:orch',
       'debug:orch',
       'explore:orch',
+      'research:orch',
+      'release:orch',
       'plan:orch',
       'review:orch',
       'resolve:orch',
@@ -377,6 +393,7 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'pipeline',
   'patterns',
   'research',
+  'devflow:research',
   // v2.0.0 orch rename: prefixed short names for cleanup
   'devflow:implement',
   'devflow:debug',
@@ -417,6 +434,16 @@ export const LEGACY_SKILL_NAMES: string[] = [
   // v2.x knowledge→decisions rename: current bare names for pre-namespace installs
   'apply-decisions',
   'decisions-format',
+  // v2.x research + release: new bare names for pre-namespace installs
+  'research-codebase',
+  'research-external',
+  'research-market',
+  'research-competitor',
+  'research-technology',
+  'research:orch',
+  'release:orch',
+  // v2.x research → dependency-research rename: bare name for pre-namespace installs
+  'dependency-research',
 ];
 
 /**
@@ -458,7 +485,8 @@ export const SHADOW_RENAMES: [string, string][] = [
   ['pipeline', 'pipeline:orch'],
   ['self-review', 'quality-gates'],
   ['implementation-patterns', 'patterns'],
-  ['search-first', 'research'],
+  ['search-first', 'dependency-research'],
+  ['research', 'dependency-research'],
 ];
 
 /**

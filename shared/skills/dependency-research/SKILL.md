@@ -1,5 +1,5 @@
 ---
-name: research
+name: dependency-research
 description: >-
   This skill should be used when the user asks to "add a utility", "create a helper",
   "implement parsing", "build a wrapper", or writes infrastructure/utility code that

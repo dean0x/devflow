@@ -75,7 +75,7 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
     const allPreloads = await spawnAgentAndGetAllPreloads('Coder', 'implement a no-op task');
     const expected = [
       'software-design', 'git', 'patterns', 'testing',
-      'test-driven-development', 'research', 'boundary-validation', 'worktree-support',
+      'test-driven-development', 'dependency-research', 'boundary-validation', 'worktree-support',
     ];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
@@ -95,6 +95,15 @@ describe.skipIf(!isClaudeAvailable())('subagent skill preload', () => {
   it('Git agent preloads git and worktree-support', async () => {
     const allPreloads = await spawnAgentAndGetAllPreloads('Git', 'run git status');
     const expected = ['git', 'worktree-support'];
+    expect(
+      allPreloads.some((p) => expected.every((s) => p.includes(s))),
+      `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,
+    ).toBe(true);
+  }, 90000);
+
+  it('Researcher preloads worktree-support, apply-decisions, apply-feature-knowledge', async () => {
+    const allPreloads = await spawnAgentAndGetAllPreloads('Researcher', 'research this topic: what testing frameworks exist');
+    const expected = ['worktree-support', 'apply-decisions', 'apply-feature-knowledge'];
     expect(
       allPreloads.some((p) => expected.every((s) => p.includes(s))),
       `No transcript contains ${expected.join(', ')}. Found: ${JSON.stringify(allPreloads)}`,

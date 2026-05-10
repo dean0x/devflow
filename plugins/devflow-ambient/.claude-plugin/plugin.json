@@ -28,13 +28,16 @@
     "synthesizer",
     "resolver",
     "designer",
-    "knowledge"
+    "knowledge",
+    "researcher"
   ],
   "skills": [
     "router",
     "implement:orch",
     "debug:orch",
     "explore:orch",
+    "research:orch",
+    "release:orch",
     "plan:orch",
     "review:orch",
     "resolve:orch",

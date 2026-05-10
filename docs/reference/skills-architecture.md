@@ -18,7 +18,7 @@ Shared patterns used by multiple agents.
 | `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
 | `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
-| `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug, /plan |
+| `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug, /plan, /research, /release |
 | `router` | Intent classification and proportional skill loading for Devflow mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
@@ -48,8 +48,36 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 | `boundary-validation` | Boundary validation enforcement | Coder |
 | `gap-analysis` | Gap analysis for design plans — missing flows, edge cases, failure modes | Designer |
 | `design-review` | Design review patterns — architectural feasibility, tradeoffs, alternatives | Designer |
-| `research` | Research-before-building enforcement for utility code | Coder |
+| `dependency-research` | Research-before-building enforcement | Coder |
 | `test-driven-development` | RED-GREEN-REFACTOR cycle enforcement | Coder |
+
+#### Research Skills (Agent-Loaded)
+
+Domain expertise for Researcher agent focus areas. Loaded dynamically by Researcher agent based on RESEARCH_TYPE parameter — not router-loaded.
+
+| Skill | Purpose | Trust Tier |
+|-------|---------|------------|
+| `research-codebase` | Local code patterns, flows, dependencies | Trusted |
+| `research-external` | Web docs, articles, community knowledge | Untrusted |
+| `research-market` | Market landscape, trends, positioning | Untrusted |
+| `research-competitor` | Feature comparison, gap analysis | Mixed |
+| `research-technology` | Library/framework evaluation | Mixed |
+
+### Orchestration Skills
+
+Ambient intent classification skills that orchestrate agent pipelines. Activated by the `router` skill via the ambient UserPromptSubmit hook for GUIDED/ORCHESTRATED depth. Each follows the Phase Protocol with `**Produces:**`/`**Requires:**` annotations and a `## Phase Completion Checklist`.
+
+| Skill | Purpose |
+|-------|---------|
+| `implement:orch` | Full implementation pipeline — pre-flight, Coder, quality gates, PR |
+| `explore:orch` | Codebase analysis, flow mapping, optional knowledge base creation |
+| `debug:orch` | Competing hypothesis investigation with parallel agents |
+| `plan:orch` | Requirements discovery, gap analysis, design artifact creation |
+| `review:orch` | Branch code review with specialized reviewer agents |
+| `resolve:orch` | Review issue resolution with risk-proportional fixes |
+| `pipeline:orch` | End-to-end meta-orchestrator chaining implement → review → resolve |
+| `research:orch` | Multi-type research with trust-aware synthesis |
+| `release:orch` | Adaptive release pipeline with learned project configuration |
 
 ### Tier 3: Domain-Specific Skills
 
