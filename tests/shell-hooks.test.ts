@@ -22,6 +22,7 @@ const HOOK_SCRIPTS = [
   'get-mtime',
   'session-end-knowledge-refresh',
   'background-knowledge-refresh',
+  'ensure-features-init',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1210,7 +1211,7 @@ describe('working memory queue behavior', () => {
       cwd: tmpDir,
       session_id: 'test-session-001',
       stop_reason: 'tool_use',
-      assistant_message: 'test response',
+      response_text: 'test response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1229,7 +1230,7 @@ describe('working memory queue behavior', () => {
       cwd: tmpDir,
       session_id: 'test-session-002',
       stop_reason: 'end_turn',
-      assistant_message: 'test response',
+      response_text: 'test response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1347,35 +1348,61 @@ describe('working memory queue behavior', () => {
     }
   });
 
-  it('stop_reason end_turn — content array: joins text blocks, excludes tool_use', () => {
+  it('auto-clean truncates orphan user-only queue before first assistant append', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    // Touch throttle marker to prevent background spawn attempt
     fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const now = Math.floor(Date.now() / 1000);
+    // Pre-populate with user-only entries (orphans from broken assistant capture)
+    const orphanLines = Array.from({ length: 5 }, (_, i) =>
+      JSON.stringify({ role: 'user', content: `orphan ${i}`, ts: now + i }),
+    );
+    fs.writeFileSync(queueFile, orphanLines.join('\n') + '\n');
 
     const input = JSON.stringify({
       cwd: tmpDir,
-      session_id: 'test-session-005',
+      session_id: 'test-session-autoclean',
       stop_reason: 'end_turn',
-      assistant_message: [
-        { type: 'text', text: 'First part of response' },
-        { type: 'tool_use', id: 'toolu_01', name: 'Read', input: { file_path: '/tmp/foo' } },
-        { type: 'text', text: 'Second part of response' },
-      ],
+      response_text: 'first real assistant response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
-    expect(fs.existsSync(queueFile)).toBe(true);
-
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    // Orphans truncated, then new assistant entry appended
     expect(lines).toHaveLength(1);
-
     const entry = JSON.parse(lines[0]);
     expect(entry.role).toBe('assistant');
-    // Both text blocks joined with newline; tool_use block excluded
-    expect(entry.content).toBe('First part of response\nSecond part of response');
-    expect(typeof entry.ts).toBe('number');
+    expect(entry.content).toBe('first real assistant response');
+  });
+
+  it('auto-clean does not truncate queue that already has assistant entries', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const now = Math.floor(Date.now() / 1000);
+    // Pre-populate with mixed entries (healthy queue)
+    const mixedLines = [
+      JSON.stringify({ role: 'user', content: 'hello', ts: now }),
+      JSON.stringify({ role: 'assistant', content: 'hi there', ts: now + 1 }),
+      JSON.stringify({ role: 'user', content: 'next prompt', ts: now + 2 }),
+    ];
+    fs.writeFileSync(queueFile, mixedLines.join('\n') + '\n');
+
+    const input = JSON.stringify({
+      cwd: tmpDir,
+      session_id: 'test-session-no-autoclean',
+      stop_reason: 'end_turn',
+      response_text: 'another response',
+    });
+
+    execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    // 3 existing + 1 new = 4
+    expect(lines).toHaveLength(4);
   });
 
   it('queue overflow — >200 lines truncated to last 100', () => {
@@ -1386,9 +1413,9 @@ describe('working memory queue behavior', () => {
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
 
-    // Pre-populate queue with 201 entries
+    // Pre-populate queue with 201 entries (mixed roles to avoid auto-clean)
     const existingLines = Array.from({ length: 201 }, (_, i) =>
-      JSON.stringify({ role: 'user', content: `entry ${i}`, ts: now + i }),
+      JSON.stringify({ role: i % 2 === 0 ? 'user' : 'assistant', content: `entry ${i}`, ts: now + i }),
     );
     fs.writeFileSync(queueFile, existingLines.join('\n') + '\n');
 
@@ -1397,7 +1424,7 @@ describe('working memory queue behavior', () => {
       cwd: tmpDir,
       session_id: 'test-session-006',
       stop_reason: 'end_turn',
-      assistant_message: 'overflow trigger response',
+      response_text: 'overflow trigger response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1444,7 +1471,7 @@ describe('working memory queue behavior', () => {
       cwd: tmpDir,
       session_id: 'test-trunc-002',
       stop_reason: 'end_turn',
-      assistant_message: longMessage,
+      response_text: longMessage,
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1481,6 +1508,68 @@ describe('working memory queue behavior', () => {
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
+  });
+});
+
+describe('ensure-features-init behavioral', () => {
+  const ENSURE_FEATURES = path.join(HOOKS_DIR, 'ensure-features-init');
+
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-features-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('creates .features/ and index.json when absent', () => {
+    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    expect(fs.existsSync(path.join(tmpDir, '.features', 'index.json'))).toBe(true);
+    const content = fs.readFileSync(path.join(tmpDir, '.features', 'index.json'), 'utf-8');
+    expect(content).toBe('{}');
+  });
+
+  it('does not overwrite existing index.json', () => {
+    fs.mkdirSync(path.join(tmpDir, '.features'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.features', 'index.json'), '{"existing":"data"}');
+
+    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const content = fs.readFileSync(path.join(tmpDir, '.features', 'index.json'), 'utf-8');
+    expect(content).toBe('{"existing":"data"}');
+  });
+
+  it('adds gitignore entries when .git exists', () => {
+    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+
+    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.features', '.gitignore'), 'utf-8');
+    expect(gitignore).toContain('.knowledge.lock/');
+    expect(gitignore).toContain('.knowledge-last-refresh');
+    expect(fs.existsSync(path.join(tmpDir, '.features', '.gitignore-configured'))).toBe(true);
+  });
+
+  it('skips gitignore when no .git directory', () => {
+    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    expect(fs.existsSync(path.join(tmpDir, '.features', '.gitignore'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.features', '.gitignore-configured'))).toBe(false);
+  });
+
+  it('is idempotent — marker prevents repeated gitignore checks', () => {
+    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+
+    // Run twice
+    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.features', '.gitignore'), 'utf-8');
+    const lockEntries = gitignore.split('\n').filter(l => l === '.knowledge.lock/');
+    expect(lockEntries).toHaveLength(1);
   });
 });
 
@@ -1534,11 +1623,14 @@ describe('session-end-knowledge-refresh guard clauses', () => {
     }).not.toThrow();
   });
 
-  it('exits cleanly when no .features/index.json exists', () => {
+  it('exits cleanly when no .features/index.json exists (lazy-inits it)', () => {
     const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-001' });
     expect(() => {
       execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
+
+    // Lazy-init should have created the index
+    expect(fs.existsSync(path.join(tmpDir, '.features', 'index.json'))).toBe(true);
   });
 
   it('exits cleanly when .features/.disabled sentinel exists', () => {
