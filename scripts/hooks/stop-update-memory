@@ -71,7 +71,9 @@ fi
 
 # --- Append to queue ---
 # Ensure queue file is created with restricted permissions (600) before first write.
-[ ! -f "$QUEUE_FILE" ] && touch "$QUEUE_FILE" && chmod 600 "$QUEUE_FILE" 2>/dev/null || true
+if [ ! -f "$QUEUE_FILE" ]; then
+  touch "$QUEUE_FILE" && chmod 600 "$QUEUE_FILE" 2>/dev/null || true
+fi
 TS=$(date +%s)
 if [ "$_HAS_JQ" = "true" ]; then
   jq -n -c --arg role "assistant" --arg content "$RESPONSE_TEXT" --argjson ts "$TS" \

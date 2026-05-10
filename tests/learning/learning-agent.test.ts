@@ -38,7 +38,7 @@ type ExecFileMock = ReturnType<typeof vi.fn>;
  */
 function mockExecFile(claudeStdout: string, nodeStdout = '[]'): ExecFileMock {
   const mock = vi.mocked(execFile) as unknown as ExecFileMock;
-  mock.mockImplementation((cmd: string, args: string[], _opts: unknown, callback: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
+  mock.mockImplementation((cmd: string, _args: string[], _opts: unknown, callback: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
     if (cmd === 'node') {
       callback(null, { stdout: nodeStdout, stderr: '' });
     } else {
