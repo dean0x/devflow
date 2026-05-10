@@ -3,6 +3,8 @@
 # Called from stop and pre-compact hooks. Idempotent, ~1μs after first run.
 # Usage: source ensure-memory-gitignore "$CWD"
 
+[ -z "$1" ] && return 1
+
 _MEMORY_DIR="$1/.memory"
 
 # Create .memory/ and decisions subdirectory if needed
