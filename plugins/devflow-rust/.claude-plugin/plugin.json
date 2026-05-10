@@ -17,5 +17,8 @@
   "agents": [],
   "skills": [
     "rust"
+  ],
+  "rules": [
+    "rust"
   ]
 }

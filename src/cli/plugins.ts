@@ -36,6 +36,8 @@ export interface PluginDefinition {
   skills: string[];
   /** Optional plugins are not installed by default — require explicit --plugin flag */
   optional?: boolean;
+  /** Rules installed from this plugin (flat .md files in ~/.claude/rules/devflow/) */
+  rules?: string[];
 }
 
 /**
@@ -48,6 +50,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: [],
     agents: [],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
+    rules: ['security', 'engineering', 'quality'],
   },
   {
     name: 'devflow-plan',
@@ -55,6 +58,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/plan'],
     agents: ['git', 'skimmer', 'synthesizer', 'designer', 'knowledge'],
     skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
+    rules: [],
   },
   {
     name: 'devflow-implement',
@@ -62,6 +66,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/implement'],
     agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
     skills: ['agent-teams', 'patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-knowledge'],
+    rules: [],
   },
   {
     name: 'devflow-code-review',
@@ -69,6 +74,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/code-review'],
     agents: ['git', 'reviewer', 'synthesizer'],
     skills: ['agent-teams', 'architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
+    rules: [],
   },
   {
     name: 'devflow-resolve',
@@ -76,6 +82,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
     skills: ['agent-teams', 'patterns', 'security', 'worktree-support', 'apply-feature-knowledge'],
+    rules: [],
   },
   {
     name: 'devflow-debug',
@@ -83,6 +90,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
     skills: ['agent-teams', 'git', 'worktree-support', 'apply-feature-knowledge'],
+    rules: [],
   },
   {
     name: 'devflow-explore',
@@ -90,6 +98,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/explore'],
     agents: ['skimmer', 'synthesizer', 'knowledge'],
     skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
+    rules: [],
   },
   {
     name: 'devflow-research',
@@ -97,6 +106,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/research'],
     agents: ['researcher', 'skimmer', 'synthesizer', 'knowledge'],
     skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology', 'research:orch'],
+    rules: [],
   },
   {
     name: 'devflow-release',
@@ -104,6 +114,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/release'],
     agents: ['git', 'synthesizer', 'validator'],
     skills: ['agent-teams', 'git', 'worktree-support', 'release:orch'],
+    rules: [],
   },
   {
     name: 'devflow-self-review',
@@ -111,6 +122,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
     skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-feature-knowledge'],
+    rules: [],
   },
   {
     name: 'devflow-ambient',
@@ -154,6 +166,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'feature-knowledge',
       'apply-feature-knowledge',
     ],
+    rules: [],
   },
   {
     name: 'devflow-audit-claude',
@@ -162,6 +175,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: ['claude-md-auditor'],
     skills: [],
     optional: true,
+    rules: [],
   },
   {
     name: 'devflow-typescript',
@@ -170,6 +184,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['typescript'],
     optional: true,
+    rules: ['typescript'],
   },
   {
     name: 'devflow-react',
@@ -178,6 +193,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['react'],
     optional: true,
+    rules: ['react'],
   },
   {
     name: 'devflow-accessibility',
@@ -186,6 +202,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['accessibility'],
     optional: true,
+    rules: ['accessibility'],
   },
   {
     name: 'devflow-ui-design',
@@ -194,6 +211,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['ui-design'],
     optional: true,
+    rules: ['ui-design'],
   },
   {
     name: 'devflow-go',
@@ -202,6 +220,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['go'],
     optional: true,
+    rules: ['go'],
   },
   {
     name: 'devflow-java',
@@ -210,6 +229,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['java'],
     optional: true,
+    rules: ['java'],
   },
   {
     name: 'devflow-python',
@@ -218,6 +238,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['python'],
     optional: true,
+    rules: ['python'],
   },
   {
     name: 'devflow-rust',
@@ -226,6 +247,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: [],
     skills: ['rust'],
     optional: true,
+    rules: ['rust'],
   },
 ];
 
@@ -572,3 +594,41 @@ export function buildFullSkillsMap(): Map<string, string> {
   }
   return skillsMap;
 }
+
+/**
+ * Derive unique rule names from all plugins.
+ */
+export function getAllRuleNames(): string[] {
+  const rules = new Set<string>();
+  for (const plugin of DEVFLOW_PLUGINS) {
+    for (const rule of (plugin.rules ?? [])) {
+      rules.add(rule);
+    }
+  }
+  return [...rules];
+}
+
+/**
+ * Build a map of rule name → owner plugin for SELECTED plugins only.
+ * Rules are plugin-scoped (unlike skills which install from all plugins).
+ * First plugin to declare a rule wins.
+ */
+export function buildRulesMap(plugins: PluginDefinition[]): Map<string, string> {
+  const rulesMap = new Map<string, string>();
+  for (const plugin of plugins) {
+    for (const rule of (plugin.rules ?? [])) {
+      if (!rulesMap.has(rule)) {
+        rulesMap.set(rule, plugin.name);
+      }
+    }
+  }
+  return rulesMap;
+}
+
+/**
+ * Deprecated rule names from old installations.
+ * Used during init to clean up stale rule files on upgrade.
+ *
+ * Pruning: entries can be removed after 2 major versions.
+ */
+export const LEGACY_RULE_NAMES: string[] = [];

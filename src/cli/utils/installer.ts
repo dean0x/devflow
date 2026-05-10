@@ -106,6 +106,8 @@ export interface FileCopyOptions {
   devflowDir: string;
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
+  /** Rules to install from selected plugins. Defaults to empty map (no rules). */
+  rulesMap?: Map<string, string>;
   isPartialInstall: boolean;
   teamsEnabled: boolean;
   spinner: Spinner;
@@ -125,6 +127,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     devflowDir,
     skillsMap,
     agentsMap,
+    rulesMap = new Map<string, string>(),
     isPartialInstall,
     teamsEnabled,
     spinner,
@@ -137,6 +140,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     const oldDirs = [
       path.join(claudeDir, 'commands', 'devflow'),
       path.join(claudeDir, 'agents', 'devflow'),
+      path.join(claudeDir, 'rules', 'devflow'),
     ];
     for (const dir of oldDirs) {
       try {
@@ -248,6 +252,34 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
       await copyDirectory(shadowDir, skillTarget);
     } else {
       await copyDirectory(skillSource, skillTarget);
+    }
+  }
+
+  // Install rules from selected plugins (rulesMap covers selected plugins only).
+  // Rules are flat .md files — no prefix, no directory nesting.
+  // Shadow: ~/.devflow/rules/{name}.md overrides source.
+  spinner.message('Installing rules...');
+  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
+  if (rulesMap.size > 0) {
+    await fs.mkdir(rulesTarget, { recursive: true });
+    for (const [ruleName, ownerPlugin] of rulesMap) {
+      const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
+      let isShadowed = false;
+      try {
+        await fs.access(shadowFile);
+        isShadowed = true;
+      } catch { /* no shadow */ }
+
+      const targetFile = path.join(rulesTarget, `${ruleName}.md`);
+      if (isShadowed) {
+        await fs.copyFile(shadowFile, targetFile);
+      } else {
+        const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
+        try {
+          await fs.access(ruleSource);
+          await fs.copyFile(ruleSource, targetFile);
+        } catch { continue; }
+      }
     }
   }
 

@@ -23,24 +23,28 @@ import { stripFlags } from '../utils/flags.js';
 /**
  * Compute which assets should be removed during selective plugin uninstall.
  * Skills and agents shared by remaining plugins are retained.
+ * Rules shared by remaining plugins are also retained.
  */
 export function computeAssetsToRemove(
   selectedPlugins: PluginDefinition[],
   allPlugins: PluginDefinition[],
-): { skills: string[]; agents: string[]; commands: string[] } {
+): { skills: string[]; agents: string[]; commands: string[]; rules: string[] } {
   const selectedNames = new Set(selectedPlugins.map(p => p.name));
   const remainingPlugins = allPlugins.filter(p => !selectedNames.has(p.name));
 
   const retainedSkills = new Set<string>();
   const retainedAgents = new Set<string>();
+  const retainedRules = new Set<string>();
   for (const rp of remainingPlugins) {
     for (const s of rp.skills) retainedSkills.add(s);
     for (const a of rp.agents) retainedAgents.add(a);
+    for (const r of (rp.rules ?? [])) retainedRules.add(r);
   }
 
   const skills: string[] = [];
   const agents: string[] = [];
   const commands: string[] = [];
+  const rules: string[] = [];
 
   for (const plugin of selectedPlugins) {
     for (const skill of plugin.skills) {
@@ -49,10 +53,13 @@ export function computeAssetsToRemove(
     for (const agent of plugin.agents) {
       if (!retainedAgents.has(agent)) agents.push(agent);
     }
+    for (const rule of (plugin.rules ?? [])) {
+      if (!retainedRules.has(rule)) rules.push(rule);
+    }
     commands.push(...plugin.commands);
   }
 
-  return { skills, agents, commands };
+  return { skills, agents, commands, rules };
 }
 
 /**
@@ -60,13 +67,14 @@ export function computeAssetsToRemove(
  * Pure function — no I/O, fully testable.
  */
 export function formatDryRunPlan(
-  assets: { skills: string[]; agents: string[]; commands: string[] },
+  assets: { skills: string[]; agents: string[]; commands: string[]; rules?: string[] },
   extras?: string[],
 ): string {
   const skills = [...new Set(assets.skills)];
   const agents = [...new Set(assets.agents)];
   const commands = [...new Set(assets.commands)];
-  const hasAssets = skills.length > 0 || agents.length > 0 || commands.length > 0;
+  const rules = [...new Set(assets.rules ?? [])];
+  const hasAssets = skills.length > 0 || agents.length > 0 || commands.length > 0 || rules.length > 0;
   const hasExtras = extras && extras.length > 0;
 
   if (!hasAssets && !hasExtras) {
@@ -77,6 +85,7 @@ export function formatDryRunPlan(
   if (skills.length > 0) lines.push(`Skills (${skills.length}): ${skills.join(', ')}`);
   if (agents.length > 0) lines.push(`Agents (${agents.length}): ${agents.join(', ')}`);
   if (commands.length > 0) lines.push(`Commands (${commands.length}): ${commands.join(', ')}`);
+  if (rules.length > 0) lines.push(`Rules (${rules.length}): ${rules.join(', ')}`);
   if (hasExtras) lines.push(`Extras: ${extras.join(', ')}`);
 
   return lines.join('\n');
@@ -517,6 +526,7 @@ async function removeAllDevFlow(
   const devflowDirectories = [
     { path: path.join(claudeDir, 'commands', 'devflow'), name: 'commands' },
     { path: path.join(claudeDir, 'agents', 'devflow'), name: 'agents' },
+    { path: path.join(claudeDir, 'rules', 'devflow'), name: 'rules' },
     { path: devflowScriptsDir, name: 'scripts' }
   ];
 
@@ -575,7 +585,7 @@ async function removeSelectedPlugins(
   plugins: typeof DEVFLOW_PLUGINS,
   verbose: boolean,
 ): Promise<void> {
-  const { skills, agents, commands } = computeAssetsToRemove(plugins, DEVFLOW_PLUGINS);
+  const { skills, agents, commands, rules } = computeAssetsToRemove(plugins, DEVFLOW_PLUGINS);
 
   const commandsDir = path.join(claudeDir, 'commands', 'devflow');
   for (const cmd of commands) {
@@ -618,5 +628,15 @@ async function removeSelectedPlugins(
     if (verbose) {
       p.log.success(`Removed skill ${skill}`);
     }
+  }
+
+  const rulesDir = path.join(claudeDir, 'rules', 'devflow');
+  for (const rule of rules) {
+    try {
+      await fs.rm(path.join(rulesDir, `${rule}.md`), { force: true });
+      if (verbose) {
+        p.log.success(`Removed rule ${rule}`);
+      }
+    } catch { /* Rule file might not exist */ }
   }
 }

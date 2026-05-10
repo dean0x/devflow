@@ -17,6 +17,7 @@ export function formatFeatures(features: ManifestData['features']): string {
     features.ambient ? 'ambient' : null,
     features.memory ? 'memory' : null,
     features.hud ? 'hud' : null,
+    features.rules ? 'rules' : null,
     features.flags?.length ? `flags: ${features.flags.length}` : null,
   ].filter(Boolean);
   return parts.join(', ') || 'none';

@@ -19,7 +19,7 @@ import {
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
 import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
-import { DEVFLOW_PLUGINS, buildAssetMaps, prefixSkillName } from '../src/cli/plugins.js';
+import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, prefixSkillName } from '../src/cli/plugins.js';
 import type { RunMigrationsResult } from '../src/cli/utils/migrations.js';
 
 describe('parsePluginSelection', () => {
@@ -942,5 +942,38 @@ describe('decisions hook re-exports from init.ts', () => {
   it('hasDecisionsHook returns true after hook is added', () => {
     const withHook = addDecisionsHook('{}', '/home/user/.devflow');
     expect(hasDecisionsHook(withHook)).toBe(true);
+  });
+});
+
+describe('buildRulesMap', () => {
+  it('returns rules only from selected plugins', () => {
+    const coreOnly = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-core-skills');
+    const map = buildRulesMap(coreOnly);
+    expect(map.size).toBe(3);
+    expect(map.get('security')).toBe('devflow-core-skills');
+    expect(map.get('engineering')).toBe('devflow-core-skills');
+    expect(map.get('quality')).toBe('devflow-core-skills');
+  });
+
+  it('includes optional plugin rules when selected', () => {
+    const selected = DEVFLOW_PLUGINS.filter(p => ['devflow-core-skills', 'devflow-typescript'].includes(p.name));
+    const map = buildRulesMap(selected);
+    expect(map.has('typescript')).toBe(true);
+    expect(map.get('typescript')).toBe('devflow-typescript');
+  });
+
+  it('returns empty map for plugins with no rules', () => {
+    const planOnly = DEVFLOW_PLUGINS.filter(p => p.name === 'devflow-plan');
+    const map = buildRulesMap(planOnly);
+    expect(map.size).toBe(0);
+  });
+
+  it('deduplicates rules when two plugins declare the same rule name', () => {
+    // Create synthetic plugins to test deduplication
+    const fakePlug1 = { name: 'devflow-a', description: '', commands: [], agents: [], skills: [], rules: ['shared-rule'] };
+    const fakePlug2 = { name: 'devflow-b', description: '', commands: [], agents: [], skills: [], rules: ['shared-rule'] };
+    const map = buildRulesMap([fakePlug1, fakePlug2]);
+    expect(map.size).toBe(1);
+    expect(map.get('shared-rule')).toBe('devflow-a'); // first plugin wins
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames } from '../src/cli/plugins.js';
+import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/cli/plugins.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -78,6 +78,16 @@ describe('agent references', () => {
         const agentFile = path.join(ROOT, 'plugins', ownerPlugin!.name, 'agents', `${agent}.md`);
         await expect(fs.access(agentFile)).resolves.toBeUndefined();
       }
+    }
+  });
+});
+
+describe('rule references', () => {
+  it('every rule referenced in plugins exists in shared/rules/', async () => {
+    const allRules = getAllRuleNames();
+    for (const rule of allRules) {
+      const ruleFile = path.join(ROOT, 'shared', 'rules', `${rule}.md`);
+      await expect(fs.access(ruleFile)).resolves.toBeUndefined();
     }
   });
 });

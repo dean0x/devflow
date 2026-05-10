@@ -8,6 +8,9 @@ dist/
 # Generated plugin skills (copied from shared/skills/ at build time)
 plugins/*/skills/
 
+# Generated plugin rules (copied from shared/rules/ at build time)
+plugins/devflow-*/rules/
+
 # Generated HUD scripts (copied from dist/hud/ at build time along with
 # any transitive dist/ dependencies the HUD imports — currently scripts/utils/).
 scripts/hud/

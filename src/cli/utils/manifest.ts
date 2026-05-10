@@ -17,6 +17,7 @@ export interface ManifestData {
     hud: boolean;
     knowledge: boolean;
     decisions: boolean;
+    rules: boolean;
     flags: string[];
   };
   installedAt: string;
@@ -64,6 +65,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         learn: typeof features.learn === 'boolean' ? features.learn : false,
         knowledge,
         decisions: typeof features.decisions === 'boolean' ? features.decisions : false,
+        rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
       },
       installedAt: data.installedAt as string,
