@@ -1586,7 +1586,7 @@ describe('ensure-features-init behavioral', () => {
 
     expect(fs.existsSync(path.join(tmpDir, '.features', 'index.json'))).toBe(true);
     const content = fs.readFileSync(path.join(tmpDir, '.features', 'index.json'), 'utf-8');
-    expect(content).toBe('{}');
+    expect(content).toBe('{"version":1,"features":{}}');
   });
 
   it('does not overwrite existing index.json', () => {
