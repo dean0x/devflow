@@ -49,19 +49,10 @@ if [ "$STOP_REASON" != "end_turn" ]; then
   exit 0
 fi
 
-# One-time diagnostic: log raw field names to confirm response_text is present
-DIAG_MARKER="$CWD/.memory/.stop-hook-diag-done"
-if [ ! -f "$DIAG_MARKER" ]; then
-  if [ "$_HAS_JQ" = "true" ]; then
-    log "DIAG: input fields=$(printf '%s' "$INPUT" | jq -r 'keys | join(",")')"
-  fi
-  touch "$DIAG_MARKER" 2>/dev/null || true
-fi
-
 # --- Auto-clean orphan user-only queues ---
 QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"
 if [ -f "$QUEUE_FILE" ]; then
-  if ! grep -q '"role":"assistant"' "$QUEUE_FILE" 2>/dev/null; then
+  if ! grep -q '"role"[[:space:]]*:[[:space:]]*"assistant"' "$QUEUE_FILE" 2>/dev/null; then
     log "Auto-clean: truncating orphan user-only queue ($(wc -l < "$QUEUE_FILE" | tr -d ' ') lines)"
     : > "$QUEUE_FILE"
   fi
@@ -79,6 +70,8 @@ if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
 fi
 
 # --- Append to queue ---
+# Ensure queue file is created with restricted permissions (600) before first write.
+[ ! -f "$QUEUE_FILE" ] && touch "$QUEUE_FILE" && chmod 600 "$QUEUE_FILE" 2>/dev/null || true
 TS=$(date +%s)
 if [ "$_HAS_JQ" = "true" ]; then
   jq -n -c --arg role "assistant" --arg content "$RESPONSE_TEXT" --argjson ts "$TS" \
