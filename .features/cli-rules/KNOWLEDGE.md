@@ -1,7 +1,7 @@
 ---
 feature: cli-rules
 name: Rules System CLI
-description: "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow."
+description: "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile."
 category: architecture
 directories: [src/cli/commands/, src/cli/utils/, shared/rules/, scripts/]
 referencedFiles:
@@ -16,7 +16,7 @@ referencedFiles:
   - shared/rules/engineering.md
   - shared/rules/quality.md
 created: 2026-05-10
-updated: 2026-05-11
+updated: 2026-05-12
 ---
 
 # Rules System CLI
@@ -33,31 +33,46 @@ Rules flow through four distinct stages that parallel the skill pipeline:
 
 1. **Authoring** — flat `.md` files with YAML frontmatter in `shared/rules/`
 2. **Build-time distribution** — `scripts/build-plugins.ts` copies each rule from `shared/rules/{name}.md` into `plugins/{plugin}/rules/{name}.md` based on the plugin's `plugin.json` `rules` array
-3. **Install-time placement** — `installViaFileCopy` in `src/cli/utils/installer.ts` copies rules from the built plugin directory to `~/.claude/rules/devflow/{name}.md`, respecting shadow overrides
+3. **Install-time placement** — `installRuleFile` in `src/cli/utils/installer.ts` copies rules from the built plugin directory to `~/.claude/rules/devflow/{name}.md`, respecting shadow overrides
 4. **Runtime activation** — Claude Code reads rules from `~/.claude/rules/devflow/` on every prompt automatically (no hooks required, unlike skills)
 
 ## Component Architecture
 
 ### Rule Anatomy
 
-Every rule file uses a two-part structure:
+Rules use a two-part structure, but the `paths` frontmatter differs by rule type:
 
+**Core rules** (security, engineering, quality) — apply to every file Claude touches:
 ```markdown
 ---
 paths: []
 ---
-# Rule Title
+# Engineering Principles
 
-**Iron law sentence.**
+**Never throw in business logic.**
 
 - Bullet enforcement principles (5-7 lines)
 ```
 
-The `paths: []` frontmatter tells Claude Code to apply this rule to all files (no path filter). Rules must be ultra-concise — the entire file should be ~10-15 lines. Longer explanations belong in a skill, not a rule.
+**Language/ecosystem rules** (typescript, react, go, etc.) — activate only when editing files matching their pattern:
+```markdown
+---
+paths: ["**/*.ts", "**/*.tsx"]
+---
+# TypeScript
+
+**Type safety is non-negotiable — `unknown` over `any`, always.**
+
+- Bullet enforcement principles (4-5 lines)
+```
+
+This two-tier design is what makes language rules low-cost: a Go rule never loads during TypeScript edits. The init Advanced-mode note shown to users describes this: *"They only load when you edit or generate code in a matching language — e.g., TypeScript rules activate for .ts files, Go rules for .go files. Not loaded all at once; minimal token cost."*
+
+Rules must be ultra-concise — ~10-15 lines total. Longer explanations belong in a skill, not a rule.
 
 ### Plugin Declaration
 
-Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the optional `rules` field. Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust:
+Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `rules` field (`string[]`). Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust:
 
 ```typescript
 // In DEVFLOW_PLUGINS:
@@ -75,12 +90,13 @@ Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the optional `
 // all follow the same pattern — one rule per plugin, same name as plugin suffix
 ```
 
-Plugins that have no rules simply omit the `rules` field from their `PluginDefinition` — do not set `rules: []`.
+Plugins that have no rules must still include `rules: []` — the field is required on `PluginDefinition` (not optional).
 
-Three helper functions in `plugins.ts` serve distinct scopes:
-- `getAllRuleNames()` — unique names across ALL plugins (used by `devflow rules --list`)
-- `buildRulesMap(plugins)` — name → ownerPlugin map for a GIVEN plugin subset (used during install and by `devflow rules --enable`)
-- `buildRulesMap(DEVFLOW_PLUGINS)` — called once at module load in `rules.ts` to create a module-level `allRulesMap` constant for owner lookups in `formatRuleRow`; avoids rebuilding on every `--status` or `--list` invocation
+Four helper functions in `plugins.ts` serve distinct scopes:
+- `getAllRuleNames()` — unique names across ALL plugins, sorted (used by `devflow rules --list`)
+- `buildRulesMap(plugins)` — name → ownerPlugin map for a GIVEN plugin subset; throws on invalid names (used during install and by `devflow rules --enable` and `--status`/`--list`)
+- `isValidRuleName(name)` — validates rule names match `/^[a-z0-9-]+$/`; called by `buildRulesMap` at map-build time as a path-traversal defense
+- `LEGACY_RULE_NAMES` — currently empty; add entries here when renaming or removing a rule
 
 ### Build Pipeline
 
@@ -90,27 +106,41 @@ The `shared/rules/` directory is optional — the build script warns but does no
 
 ### Install Flow
 
-In `src/cli/utils/installer.ts`, rules install happens after skills, guarded by `rulesMap.size > 0`:
+Rule installation is handled by `installRuleFile`, an exported function in `src/cli/utils/installer.ts`. It is called from both `installViaFileCopy` (during init) and the `devflow rules --enable` command. Shadow resolution is centralized here:
 
 ```typescript
-// Rules path: no prefix, no directory nesting (unlike skills which nest under devflow:name/)
-const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
-if (rulesMap.size > 0) {
-  await fs.mkdir(rulesTarget, { recursive: true });
-  for (const [ruleName, ownerPlugin] of rulesMap) {
-    const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
-    // Shadow check: ~/.devflow/rules/{name}.md overrides source
-    const isShadowed = ...
-    const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
-    await fs.copyFile(isShadowed ? shadowFile : ruleSource, targetFile);
-  }
+// installRuleFile: shadow-respecting copy for a single rule.
+// Called via Promise.all in both init and devflow rules --enable.
+export async function installRuleFile(
+  ruleName: string,
+  ownerPlugin: string,
+  pluginsDir: string,
+  devflowDir: string,
+  rulesTarget: string,
+): Promise<void> {
+  const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
+  const targetFile = path.join(rulesTarget, `${ruleName}.md`);
+
+  try {
+    await fs.access(shadowFile);
+    await fs.copyFile(shadowFile, targetFile);  // shadow wins
+    return;
+  } catch { /* no shadow — fall through to plugin source */ }
+
+  const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
+  try {
+    await fs.access(ruleSource);
+    await fs.copyFile(ruleSource, targetFile);
+  } catch { /* source missing — skip silently */ }
 }
 ```
+
+`installViaFileCopy` calls this via `Promise.all([...rulesMap.entries()].map(...))` after creating the target directory. Shadow check: `~/.devflow/rules/{name}.md` overrides the built plugin source.
 
 Key install properties:
 - Target: `~/.claude/rules/devflow/{name}.md` (flat, no subdirectory nesting)
 - Shadow: `~/.devflow/rules/{name}.md` overrides the Devflow source — same pattern as skills but for a flat file
-- Disabled: if `rulesEnabled` is false, the entire `~/.claude/rules/devflow/` directory is removed
+- Disabled: if `rulesEnabled` is false, no rules directory is created; post-install step in init removes it if it already exists
 
 ### Manifest Tracking
 
@@ -122,22 +152,22 @@ The `rules` command in `src/cli/commands/rules.ts` has four subcommands:
 
 | Subcommand | Behavior |
 |---|---|
-| `--enable` | Reads manifest, filters to installed plugins, copies rules from built plugin dirs (respecting shadows), updates `manifest.features.rules = true` |
+| `--enable` | Wipes `~/.claude/rules/devflow/` first (stale cleanup), reads manifest plugins, copies rules from built plugin dirs (respecting shadows), updates `manifest.features.rules = true` |
 | `--disable` | Removes `~/.claude/rules/devflow/` entirely, updates `manifest.features.rules = false` |
 | `--status` | Lists installed rules with owner plugin (shortened) and `[shadowed]` tag |
 | `--list` | Lists ALL available rules from all plugins with install indicator (✓/✗) |
 
-The `--enable` path resolves the source directory relative to the compiled CLI's location (`path.resolve(__dirname, '../..'), 'plugins'`), not the source tree — this is the built `dist/plugins/` path.
+The `--enable` path resolves the source directory relative to the compiled CLI's location (`path.resolve(__dirname, '../..'), 'plugins'`), not the source tree — this is the built `dist/plugins/` path. It also wipes the rules directory before reinstalling, mirroring the full-install init flow so that rules from previously uninstalled plugins are cleaned up.
 
-Two private helpers are extracted as top-level named functions in `rules.ts` (not inline):
+Two private helpers are top-level named functions in `rules.ts` (not inline):
 - `isShadowed(devflowDir, ruleName)` — `fs.access` on `~/.devflow/rules/{name}.md`; returns `Promise<boolean>`
-- `formatRuleRow(name, devflowDir, suffix)` — builds a colorized display row using `allRulesMap` for owner attribution; `suffix` is either the install indicator (✓/✗) for `--list` or empty string for `--status`
+- `formatRuleRow(name, devflowDir, ownerMap, suffix)` — builds a colorized display row; takes the `ownerMap` (a `Map<string, string>` from `buildRulesMap`) as an explicit parameter. Both `--status` and `--list` build their own `buildRulesMap(DEVFLOW_PLUGINS)` call locally and pass it in — there is no module-level constant.
 
 ## Component Interactions
 
-**init → rules**: During `devflow init`, `rulesEnabled` is computed from CLI flags or prompts. If true, `buildRulesMap(pluginsToInstall)` builds the map that gets passed to `installViaFileCopy`. If false, the map is empty, and a post-install step removes the rules directory.
+**init → rules**: During `devflow init`, `rulesEnabled` is computed from CLI flags or prompts. If true, `buildRulesMap(pluginsToInstall)` builds the map that gets passed to `installViaFileCopy`. The rules directory is cleared and recreated as part of the full-install wipe (partial install does NOT wipe the rules directory). If false, the map is empty, and a post-install step removes the rules directory.
 
-**uninstall → rules**: Full uninstall (`removeAllDevFlow`) includes `~/.claude/rules/devflow/` in its target directory list. Selective plugin uninstall (`computeAssetsToRemove`) computes which rules to remove using the same "retained by remaining plugins" logic as skills and agents.
+**uninstall → rules**: Full uninstall (`removeAllDevFlow`) includes `~/.claude/rules/devflow/` in its target directory list. Selective plugin uninstall (`computeAssetsToRemove`) computes which rules to remove using the same "retained by remaining plugins" logic as skills and agents — `removeSelectedPlugins` removes per-rule files from `~/.claude/rules/devflow/`.
 
 **list → rules**: `devflow list` shows `rules` in the Features line of the installation summary when `manifest.features.rules` is true.
 
@@ -148,28 +178,34 @@ Two private helpers are extracted as top-level named functions in `rules.ts` (no
 - Rules have no namespace prefix (unlike skills which install as `devflow:{name}/`). The directory `~/.claude/rules/devflow/` itself provides the namespace.
 - Rules are plugin-scoped by design — no `buildFullRulesMap()` equivalent exists. If you need a rule in all installs, put it in `devflow-core-skills`.
 - `LEGACY_RULE_NAMES` in `plugins.ts` is currently empty — the first rules are new. Add entries here when renaming or removing a rule.
-- The `paths: []` YAML frontmatter must remain — it signals to Claude Code that the rule applies globally. Omitting it may break rule loading.
+- The `paths` frontmatter key must always be present — Claude Code uses it to determine loading scope. Core rules use `paths: []` (global); language rules use a glob array (file-type-scoped). Omitting the key entirely may break rule loading.
+- `buildRulesMap` throws if any rule name fails the `isValidRuleName` check — misconfigured `plugin.json` entries are caught at map-build time, not at path-construction time.
 
 ## Anti-Patterns
 
 - **Adding a language rule to `devflow-core-skills`**: Core rules install for every user. Language-specific rules (TypeScript, React, Go) belong in their optional plugin so users who don't use that language don't pay the token cost.
+- **Using `paths: []` on a language-specific rule**: Language rules must scope to their file types (e.g. `paths: ["**/*.ts", "**/*.tsx"]`). Using `paths: []` makes them load on every prompt for every user, eliminating the per-language token savings.
+- **Using a file-type path on a core rule**: Core rules (security, engineering, quality) must use `paths: []` — they apply cross-language. A path filter would silently skip them for non-matching files.
 - **Installing rules from `shared/rules/` directly at runtime**: The installer reads from `plugins/{plugin}/rules/` (build output), not `shared/rules/`. Skipping `npm run build` after editing a rule will silently install the old version.
 - **Using a skill for ultra-concise guidance**: If content fits in ~15 lines and applies universally, prefer a rule. Rules load on every prompt with zero user action; skills require the router or explicit invocation.
 - **Long rule files**: Rules should be ~10-15 lines. If a rule grows beyond ~20 lines, extract the detail into a skill's `references/` directory and keep only the iron law in the rule.
+- **Omitting `rules: []` on a plugin**: The `rules` field is required on `PluginDefinition`. Omitting it causes TypeScript errors at build time.
 
 ## Gotchas
 
-- **Rules are not cleaned between partial installs**: On `devflow init --plugin=typescript` (partial install), the existing `~/.claude/rules/devflow/` directory is NOT wiped first (only commands and agents directories are wiped on full install). Rules from previously installed plugins persist unless they're explicitly removed via selective uninstall.
+- **Rules are not cleaned between partial installs via init**: On `devflow init --plugin=typescript` (partial install), the existing `~/.claude/rules/devflow/` directory is NOT wiped first (only commands and agents directories are wiped on full install). Use `devflow rules --enable` to get a clean reinstall of the current plugin set — it always wipes first.
 - **`devflow rules --enable` resolves plugin dirs from dist/**: The command computes the plugins directory as `path.resolve(__dirname, '../..', 'plugins')` relative to the compiled CLI file. In development, this means running the command against `dist/plugins/`, so you must build before running.
 - **Shadow files are flat, not directories**: Skills shadow at `~/.devflow/skills/{name}/` (a directory). Rules shadow at `~/.devflow/rules/{name}.md` (a flat file). The `isShadowed` check uses `fs.access()` on the flat path, not `fs.stat()` for a directory.
 - **Manifest defaults `rules: true` on read**: Old manifests without the `rules` field are read as `rules: true`. This means upgrading users get rules enabled automatically, which is the desired behavior but worth knowing when reading the manifest.
+- **`buildRulesMap` throws on invalid names**: If a `plugin.json` declares a rule name with uppercase letters, dots, or slashes, `buildRulesMap` throws immediately. This is intentional — catch misconfiguration early rather than silently writing a path-traversal-susceptible file.
+- **Core vs language rules have different token behavior**: Core rules (security, engineering, quality) load on every prompt regardless of file type. Language rules only activate when Claude is working with a matching file. A user without the TypeScript plugin pays zero cost for TypeScript rules — but a user with it only pays the cost when editing `.ts`/`.tsx` files.
 
 ## Key Files
 
 - `shared/rules/` — source of truth for all rule content; flat `.md` files
-- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `LEGACY_RULE_NAMES`
+- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
-- `src/cli/utils/installer.ts` — `installViaFileCopy` rules section; shadow resolution
+- `src/cli/utils/installer.ts` — `installRuleFile` (exported); `installViaFileCopy` rules section
 - `src/cli/commands/init.ts` — `rulesEnabled` flag, `buildRulesMap(pluginsToInstall)`, post-install cleanup of rules directory
 - `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files
 - `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default
