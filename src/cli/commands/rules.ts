@@ -7,6 +7,7 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { DEVFLOW_PLUGINS, buildRulesMap, getAllRuleNames } from '../plugins.js';
 import { readManifest, writeManifest } from '../utils/manifest.js';
+import { installRuleFile } from '../utils/installer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -66,24 +67,18 @@ export const rulesCommand = new Command('rules')
 
       const installedPlugins = DEVFLOW_PLUGINS.filter(pl => manifest.plugins.includes(pl.name));
       const rulesMap = buildRulesMap(installedPlugins);
-      await fs.mkdir(rulesTarget, { recursive: true });
-
       const pluginsDir = path.join(path.resolve(__dirname, '../..'), 'plugins');
 
-      for (const [ruleName, ownerPlugin] of rulesMap) {
-        const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
-        const targetFile = path.join(rulesTarget, `${ruleName}.md`);
+      // Wipe stale rules from previously uninstalled plugins before re-installing.
+      // Mirrors the init flow which always starts from a clean rules directory.
+      await fs.rm(rulesTarget, { recursive: true, force: true });
+      await fs.mkdir(rulesTarget, { recursive: true });
 
-        if (await isShadowed(devflowDir, ruleName)) {
-          await fs.copyFile(shadowFile, targetFile);
-        } else {
-          const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
-          try {
-            await fs.access(ruleSource);
-            await fs.copyFile(ruleSource, targetFile);
-          } catch { continue; }
-        }
-      }
+      await Promise.all(
+        [...rulesMap.entries()].map(([ruleName, ownerPlugin]) =>
+          installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget),
+        ),
+      );
 
       manifest.features.rules = true;
       manifest.updatedAt = new Date().toISOString();

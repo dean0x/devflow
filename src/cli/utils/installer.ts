@@ -5,6 +5,47 @@ import type { PluginDefinition } from '../plugins.js';
 import { DEVFLOW_PLUGINS, LEGACY_AGENT_NAMES, prefixSkillName } from '../plugins.js';
 
 /**
+ * Validate a rule name: only lowercase letters, digits, and hyphens.
+ * Defense-in-depth guard — rule names come from static plugin config but
+ * this prevents path traversal if the source ever includes user input.
+ */
+export function isValidRuleName(name: string): boolean {
+  return /^[a-z0-9-]+$/.test(name);
+}
+
+/**
+ * Install a single rule file, respecting the shadow override at
+ * ~/.devflow/rules/{name}.md over the built plugin source.
+ * Skips silently if the source file does not exist (missing build artifact).
+ */
+export async function installRuleFile(
+  ruleName: string,
+  ownerPlugin: string,
+  pluginsDir: string,
+  devflowDir: string,
+  rulesTarget: string,
+): Promise<void> {
+  const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
+  const targetFile = path.join(rulesTarget, `${ruleName}.md`);
+
+  let useShadow = false;
+  try {
+    await fs.access(shadowFile);
+    useShadow = true;
+  } catch { /* no shadow */ }
+
+  if (useShadow) {
+    await fs.copyFile(shadowFile, targetFile);
+  } else {
+    const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
+    try {
+      await fs.access(ruleSource);
+      await fs.copyFile(ruleSource, targetFile);
+    } catch { /* source missing — skip */ }
+  }
+}
+
+/**
  * Minimal spinner interface matching @clack/prompts spinner().
  */
 export interface Spinner {
@@ -262,25 +303,11 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
   if (rulesMap.size > 0) {
     await fs.mkdir(rulesTarget, { recursive: true });
-    for (const [ruleName, ownerPlugin] of rulesMap) {
-      const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
-      let isShadowed = false;
-      try {
-        await fs.access(shadowFile);
-        isShadowed = true;
-      } catch { /* no shadow */ }
-
-      const targetFile = path.join(rulesTarget, `${ruleName}.md`);
-      if (isShadowed) {
-        await fs.copyFile(shadowFile, targetFile);
-      } else {
-        const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
-        try {
-          await fs.access(ruleSource);
-          await fs.copyFile(ruleSource, targetFile);
-        } catch { continue; }
-      }
-    }
+    await Promise.all(
+      [...rulesMap.entries()].map(([ruleName, ownerPlugin]) =>
+        installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget),
+      ),
+    );
   }
 
   // Install scripts (always from root scripts/ directory)

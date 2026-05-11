@@ -598,14 +598,29 @@ export function getAllRuleNames(): string[] {
 }
 
 /**
+ * Rule names must be lowercase letters, digits, and hyphens only.
+ * Defense-in-depth: prevents path traversal if names ever come from
+ * non-static sources (e.g., manifest reads or user overrides).
+ */
+export function isValidRuleName(name: string): boolean {
+  return /^[a-z0-9-]+$/.test(name);
+}
+
+/**
  * Build a map of rule name → owner plugin for SELECTED plugins only.
  * Rules are plugin-scoped (unlike skills which install from all plugins).
  * First plugin to declare a rule wins.
+ * Throws if any rule name fails the isValidRuleName check — catches
+ * misconfigured plugin.json entries at map-build time rather than at
+ * path-construction time.
  */
 export function buildRulesMap(plugins: PluginDefinition[]): Map<string, string> {
   const rulesMap = new Map<string, string>();
   for (const plugin of plugins) {
     for (const rule of (plugin.rules ?? [])) {
+      if (!isValidRuleName(rule)) {
+        throw new Error(`Invalid rule name "${rule}" in plugin "${plugin.name}": must match /^[a-z0-9-]+$/`);
+      }
       if (!rulesMap.has(rule)) {
         rulesMap.set(rule, plugin.name);
       }
