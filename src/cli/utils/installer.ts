@@ -5,15 +5,6 @@ import type { PluginDefinition } from '../plugins.js';
 import { DEVFLOW_PLUGINS, LEGACY_AGENT_NAMES, prefixSkillName } from '../plugins.js';
 
 /**
- * Validate a rule name: only lowercase letters, digits, and hyphens.
- * Defense-in-depth guard — rule names come from static plugin config but
- * this prevents path traversal if the source ever includes user input.
- */
-export function isValidRuleName(name: string): boolean {
-  return /^[a-z0-9-]+$/.test(name);
-}
-
-/**
  * Install a single rule file, respecting the shadow override at
  * ~/.devflow/rules/{name}.md over the built plugin source.
  * Skips silently if the source file does not exist (missing build artifact).
@@ -25,24 +16,18 @@ export async function installRuleFile(
   devflowDir: string,
   rulesTarget: string,
 ): Promise<void> {
-  const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
   const targetFile = path.join(rulesTarget, `${ruleName}.md`);
+  const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
 
-  let useShadow = false;
   try {
-    await fs.access(shadowFile);
-    useShadow = true;
-  } catch { /* no shadow */ }
-
-  if (useShadow) {
     await fs.copyFile(shadowFile, targetFile);
-  } else {
-    const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
-    try {
-      await fs.access(ruleSource);
-      await fs.copyFile(ruleSource, targetFile);
-    } catch { /* source missing — skip */ }
-  }
+    return;
+  } catch { /* no shadow — fall through to plugin source */ }
+
+  const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
+  try {
+    await fs.copyFile(ruleSource, targetFile);
+  } catch { /* source missing — skip */ }
 }
 
 /**

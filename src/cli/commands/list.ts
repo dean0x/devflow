@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { Command } from 'commander';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -5,7 +6,6 @@ import { DEVFLOW_PLUGINS, type PluginDefinition } from '../plugins.js';
 import { getDevFlowDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { readManifest, type ManifestData } from '../utils/manifest.js';
-import * as path from 'path';
 
 /**
  * Format manifest feature flags into a human-readable comma-separated string.
