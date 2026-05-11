@@ -72,6 +72,34 @@ describe('computeAssetsToRemove', () => {
     expect(agents).toEqual(['only-a']); // 'shared' is retained by 'b'
     expect(skills).toEqual(['only-a-skill']); // 'shared-skill' is retained by 'b'
   });
+
+  it('returns rules unique to the removed plugin', () => {
+    const plugins: PluginDefinition[] = [
+      { name: 'plugin-a', description: '', commands: [], agents: [], skills: [], rules: ['rule-a', 'shared-rule'] },
+      { name: 'plugin-b', description: '', commands: [], agents: [], skills: [], rules: ['rule-b', 'shared-rule'] },
+    ];
+    const { rules } = computeAssetsToRemove([plugins[0]], plugins);
+    expect(rules).toContain('rule-a');
+    expect(rules).not.toContain('shared-rule'); // retained by plugin-b
+  });
+
+  it('retains rules shared across remaining plugins', () => {
+    // security, engineering, quality are in devflow-core-skills
+    // Removing devflow-typescript should not remove them
+    const typescriptPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-typescript')!;
+    const { rules } = computeAssetsToRemove([typescriptPlugin], DEVFLOW_PLUGINS);
+    expect(rules).not.toContain('security');
+    expect(rules).not.toContain('engineering');
+    expect(rules).not.toContain('quality');
+    // typescript rule is unique to this plugin
+    expect(rules).toContain('typescript');
+  });
+
+  it('returns empty rules array when plugin has no rules', () => {
+    const debugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-debug')!;
+    const { rules } = computeAssetsToRemove([debugPlugin], DEVFLOW_PLUGINS);
+    expect(rules).toEqual([]);
+  });
 });
 
 describe('formatDryRunPlan', () => {
@@ -123,5 +151,46 @@ describe('formatDryRunPlan', () => {
     expect(plan).toContain('Skills (2)');
     expect(plan).toContain('Agents (1)');
     expect(plan).toContain('Commands (1)');
+  });
+
+  it('includes rules section when rules are provided', () => {
+    const plan = formatDryRunPlan({
+      skills: [],
+      agents: [],
+      commands: [],
+      rules: ['security', 'engineering'],
+    });
+    expect(plan).toContain('Rules (2)');
+    expect(plan).toContain('security');
+    expect(plan).toContain('engineering');
+  });
+
+  it('omits rules section when rules array is empty', () => {
+    const plan = formatDryRunPlan({
+      skills: ['software-design'],
+      agents: [],
+      commands: [],
+      rules: [],
+    });
+    expect(plan).not.toContain('Rules');
+  });
+
+  it('omits rules section when rules field is absent', () => {
+    const plan = formatDryRunPlan({
+      skills: ['software-design'],
+      agents: [],
+      commands: [],
+    });
+    expect(plan).not.toContain('Rules');
+  });
+
+  it('deduplicates rules', () => {
+    const plan = formatDryRunPlan({
+      skills: [],
+      agents: [],
+      commands: [],
+      rules: ['security', 'security', 'engineering'],
+    });
+    expect(plan).toContain('Rules (2)');
   });
 });

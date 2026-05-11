@@ -117,6 +117,7 @@ describe('readManifest', () => {
     expect(result!.features.learn).toBe(false);
     expect(result!.features.knowledge).toBe(false);
     expect(result!.features.decisions).toBe(false);
+    expect(result!.features.rules).toBe(true);
     expect(result!.features.flags).toEqual([]);
   });
 
