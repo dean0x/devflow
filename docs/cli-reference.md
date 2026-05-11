@@ -22,6 +22,9 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
 | `--learn` / `--no-learn` | Enable/disable self-learning (default: on) |
+| `--decisions` / `--no-decisions` | Enable/disable decisions agent (default: on) |
+| `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
+| `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--verbose` | Show detailed output |
@@ -80,6 +83,42 @@ npx devflow-kit learn --clear        # Reset all observations
 npx devflow-kit learn --purge        # Remove invalid/corrupted entries
 ```
 
+## Decisions
+
+```bash
+npx devflow-kit decisions --enable     # Register the decisions hook
+npx devflow-kit decisions --disable    # Remove the decisions hook
+npx devflow-kit decisions --status     # Show status and entry counts
+npx devflow-kit decisions list         # List all decisions and pitfalls
+npx devflow-kit decisions --configure  # Interactive config (model, throttle)
+npx devflow-kit decisions --review     # Review observations or capacity
+npx devflow-kit decisions --purge      # Remove invalid entries
+npx devflow-kit decisions --clear      # Reset all observations
+npx devflow-kit decisions --reset      # Remove all artifacts + log
+```
+
+## Feature Knowledge
+
+```bash
+npx devflow-kit knowledge list              # List knowledge bases with staleness
+npx devflow-kit knowledge create <slug>     # Create a new knowledge base
+npx devflow-kit knowledge check             # Check all for staleness
+npx devflow-kit knowledge refresh [slug]    # Refresh stale knowledge base(s)
+npx devflow-kit knowledge remove <slug>     # Remove a knowledge base
+npx devflow-kit knowledge --enable          # Enable feature knowledge
+npx devflow-kit knowledge --disable         # Disable feature knowledge
+npx devflow-kit knowledge --status          # Show current status
+```
+
+## Rules
+
+```bash
+npx devflow-kit rules --enable       # Install rules from manifest plugins
+npx devflow-kit rules --disable      # Remove all installed rules
+npx devflow-kit rules --status       # Show installed rules with source plugin
+npx devflow-kit rules --list         # Show all available rules with install status
+```
+
 ## HUD (Status Line)
 
 ```bash
@@ -99,6 +138,15 @@ npx devflow-kit skills shadow software-design    # Create override (copies curre
 vim ~/.devflow/skills/software-design/SKILL.md   # Edit your override
 npx devflow-kit skills list-shadowed             # List all overrides
 npx devflow-kit skills unshadow software-design  # Remove override
+```
+
+## Feature Flags
+
+```bash
+npx devflow-kit flags --list           # List all flags with current state
+npx devflow-kit flags --enable <flag>  # Enable a flag
+npx devflow-kit flags --disable <flag> # Disable a flag
+npx devflow-kit flags --status         # Show enabled flags
 ```
 
 ## Uninstall
