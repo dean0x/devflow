@@ -9,6 +9,7 @@ export interface ClaudeCodeFlag {
   id: string;
   label: string;
   description: string;
+  hint: string;
   target:
     | { type: 'env'; key: string; value: string }
     | { type: 'setting'; key: string; value: boolean | string };
@@ -16,11 +17,20 @@ export interface ClaudeCodeFlag {
 }
 
 export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
-  // === Default ON ===
+  // === Recommended (default ON) ===
+  {
+    id: 'tui',
+    label: 'Fullscreen terminal UI',
+    description: 'Flicker-free fullscreen rendering',
+    hint: 'Modern fullscreen interface',
+    target: { type: 'setting', key: 'tui', value: 'fullscreen' },
+    defaultEnabled: true,
+  },
   {
     id: 'tool-search',
     label: 'Deferred tool loading',
     description: 'Load tool schemas on demand instead of all at startup',
+    hint: 'Faster startup',
     target: { type: 'env', key: 'ENABLE_TOOL_SEARCH', value: 'true' },
     defaultEnabled: true,
   },
@@ -28,13 +38,15 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'lsp',
     label: 'LSP support',
     description: 'Enable Language Server Protocol integration',
+    hint: 'Code intelligence from your editor',
     target: { type: 'env', key: 'ENABLE_LSP_TOOL', value: 'true' },
     defaultEnabled: true,
   },
   {
     id: 'prompt-caching-1h',
-    label: 'Extended prompt cache TTL',
+    label: 'Extended prompt cache',
     description: 'Extend prompt cache TTL from 5min to 1h',
+    hint: 'Cheaper long sessions',
     target: { type: 'env', key: 'ENABLE_PROMPT_CACHING_1H', value: 'true' },
     defaultEnabled: true,
   },
@@ -42,6 +54,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'show-turn-duration',
     label: 'Show turn duration',
     description: 'Display timing info after each turn',
+    hint: 'See how long each response takes',
     target: { type: 'setting', key: 'showTurnDuration', value: true },
     defaultEnabled: true,
   },
@@ -49,28 +62,24 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'clear-context-on-plan',
     label: 'Clear context on plan accept',
     description: 'Clear context window when accepting a plan',
+    hint: 'Clean slate after planning',
     target: { type: 'setting', key: 'showClearContextOnPlanAccept', value: true },
     defaultEnabled: true,
   },
-  // === Default OFF ===
+  // === Optional (default OFF) — skip these if you're unsure ===
   {
     id: 'brief',
     label: 'Brief output mode',
     description: 'Reduce verbosity of Claude Code output',
+    hint: 'Shorter responses',
     target: { type: 'env', key: 'CLAUDE_CODE_BRIEF', value: 'true' },
-    defaultEnabled: false,
-  },
-  {
-    id: 'tui',
-    label: 'Fullscreen TUI mode',
-    description: 'Flicker-free fullscreen rendering',
-    target: { type: 'setting', key: 'tui', value: 'fullscreen' },
     defaultEnabled: false,
   },
   {
     id: 'thinking-summaries',
     label: 'Thinking summaries',
     description: 'Show thinking summaries during reasoning',
+    hint: 'See reasoning previews',
     target: { type: 'setting', key: 'showThinkingSummaries', value: true },
     defaultEnabled: false,
   },
@@ -78,6 +87,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'subprocess-env-scrub',
     label: 'Subprocess env scrub',
     description: 'Strip cloud credentials from subprocesses',
+    hint: 'Security: strip cloud creds from subprocesses',
     target: { type: 'env', key: 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB', value: '1' },
     defaultEnabled: false,
   },
@@ -85,6 +95,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'disable-nonessential-traffic',
     label: 'Disable non-essential traffic',
     description: 'Suppress usage metrics telemetry',
+    hint: 'No telemetry',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', value: 'true' },
     defaultEnabled: false,
   },
@@ -92,6 +103,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'forked-subagents',
     label: 'Forked subagents',
     description: 'Better subagent perf on external builds',
+    hint: 'Faster parallel agents (experimental)',
     target: { type: 'env', key: 'CLAUDE_CODE_FORK_SUBAGENT', value: '1' },
     defaultEnabled: false,
   },
@@ -101,6 +113,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'disable-compact',
     label: 'Disable auto-compaction',
     description: 'Disable automatic context compaction',
+    hint: 'Keep full context (uses more tokens)',
     target: { type: 'env', key: 'DISABLE_COMPACT', value: 'true' },
     defaultEnabled: false,
   },
@@ -108,6 +121,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'disable-1m-context',
     label: 'Disable 1M context window',
     description: 'Use standard context window instead of extended 1M',
+    hint: 'Use smaller context window',
     target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_1M_CONTEXT', value: 'true' },
     defaultEnabled: false,
   },
@@ -115,6 +129,7 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     id: 'disable-autoupdater',
     label: 'Disable auto-updater',
     description: 'Prevent automatic update checks',
+    hint: 'No automatic updates',
     target: { type: 'env', key: 'DISABLE_AUTOUPDATER', value: 'true' },
     defaultEnabled: false,
   },

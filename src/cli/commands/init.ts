@@ -617,9 +617,10 @@ export const initCommand = new Command('init')
         rulesEnabled = options.rules;
       } else {
         p.note(
-          'Rules are ultra-condensed engineering principles that load\n' +
-          'on every prompt, filling the guidance gap for quick edits.\n' +
-          '~10-15 lines each, minimal token cost.',
+          'Rules are ultra-condensed engineering principles (~10-15 lines each).\n' +
+          'They only load when you edit or generate code in a matching language —\n' +
+          'e.g., TypeScript rules activate for .ts files, Go rules for .go files.\n' +
+          'Not loaded all at once; minimal token cost.',
           'Rules',
         );
         const rulesChoice = await p.confirm({
@@ -634,27 +635,41 @@ export const initCommand = new Command('init')
       }
 
       // Claude Code flags multiselect (advanced only)
-      if (process.stdin.isTTY) {
-        const flagChoices = FLAG_REGISTRY.map(f => ({
+      const recommended = FLAG_REGISTRY.filter(f => f.defaultEnabled);
+      const optional = FLAG_REGISTRY.filter(f => !f.defaultEnabled);
+      const flagChoices = [
+        ...recommended.map(f => ({
           value: f.id,
           label: f.label,
-          hint: f.description,
-        }));
-        const flagDefaults = getDefaultFlags();
+          hint: `${f.hint} · recommended`,
+        })),
+        { value: '_separator', label: color.dim('── Optional (skip if unsure) ──'), hint: '' },
+        ...optional.map(f => ({
+          value: f.id,
+          label: f.label,
+          hint: f.hint,
+        })),
+      ];
+      const flagDefaults = getDefaultFlags();
 
-        const flagSelection = await p.multiselect({
-          message: 'Claude Code flags',
-          options: flagChoices,
-          initialValues: flagDefaults,
-          required: false,
-        });
+      p.note(
+        'Recommended flags are pre-selected. Optional flags are for\n' +
+        'advanced users — if you don\'t recognize one, skip it.',
+        'Claude Code Flags',
+      );
 
-        if (p.isCancel(flagSelection)) {
-          p.cancel('Installation cancelled.');
-          process.exit(0);
-        }
-        enabledFlags = flagSelection as string[];
+      const flagSelection = await p.multiselect({
+        message: 'Claude Code flags',
+        options: flagChoices,
+        initialValues: flagDefaults,
+        required: false,
+      });
+
+      if (p.isCancel(flagSelection)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
       }
+      enabledFlags = (flagSelection as string[]).filter(id => id !== '_separator');
 
       // .claudeignore prompt
       if (earlyGitRoot) {
