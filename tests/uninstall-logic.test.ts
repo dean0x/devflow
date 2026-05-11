@@ -62,8 +62,8 @@ describe('computeAssetsToRemove', () => {
 
   it('handles custom plugin lists', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'a', description: '', commands: ['/a'], agents: ['shared', 'only-a'], skills: ['shared-skill', 'only-a-skill'] },
-      { name: 'b', description: '', commands: ['/b'], agents: ['shared', 'only-b'], skills: ['shared-skill', 'only-b-skill'] },
+      { name: 'a', description: '', commands: ['/a'], agents: ['shared', 'only-a'], skills: ['shared-skill', 'only-a-skill'], rules: [] },
+      { name: 'b', description: '', commands: ['/b'], agents: ['shared', 'only-b'], skills: ['shared-skill', 'only-b-skill'], rules: [] },
     ];
 
     // Remove 'a', keep 'b'

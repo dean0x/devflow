@@ -56,7 +56,7 @@ describe('isValidRuleName', () => {
 describe('buildRulesMap', () => {
   it('returns empty map for plugins with no rules', () => {
     const plugins: PluginDefinition[] = [
-      { name: 'devflow-plan', description: '', commands: [], agents: [], skills: [] },
+      { name: 'devflow-plan', description: '', commands: [], agents: [], skills: [], rules: [] },
     ];
     expect(buildRulesMap(plugins).size).toBe(0);
   });

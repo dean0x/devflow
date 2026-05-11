@@ -628,7 +628,7 @@ export function isValidRuleName(name: string): boolean {
 export function buildRulesMap(plugins: PluginDefinition[]): Map<string, string> {
   const rulesMap = new Map<string, string>();
   for (const plugin of plugins) {
-    for (const rule of (plugin.rules ?? [])) {
+    for (const rule of plugin.rules) {
       if (!isValidRuleName(rule)) {
         throw new Error(`Invalid rule name "${rule}" in plugin "${plugin.name}": must match /^[a-z0-9-]+$/`);
       }

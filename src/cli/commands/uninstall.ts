@@ -38,7 +38,7 @@ export function computeAssetsToRemove(
   for (const rp of remainingPlugins) {
     for (const s of rp.skills) retainedSkills.add(s);
     for (const a of rp.agents) retainedAgents.add(a);
-    for (const r of (rp.rules ?? [])) retainedRules.add(r);
+    for (const r of rp.rules) retainedRules.add(r);
   }
 
   const skills: string[] = [];
@@ -53,7 +53,7 @@ export function computeAssetsToRemove(
     for (const agent of plugin.agents) {
       if (!retainedAgents.has(agent)) agents.push(agent);
     }
-    for (const rule of (plugin.rules ?? [])) {
+    for (const rule of plugin.rules) {
       if (!retainedRules.has(rule)) rules.push(rule);
     }
     commands.push(...plugin.commands);
