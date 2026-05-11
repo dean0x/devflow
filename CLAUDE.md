@@ -57,12 +57,14 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 **Feature Knowledge Bases**: Per-feature `.features/` directory containing KNOWLEDGE.md files that capture area-specific patterns, conventions, architecture, and gotchas. Knowledge bases are created as side-effects of implementation (implement:orch Phase 8), loaded automatically across all workflows via `FEATURE_KNOWLEDGE` variable (companion to `DECISIONS_CONTEXT`), and use staleness detection via git log against `referencedFiles`. Index at `.features/index.json` (object keyed by slug). Managed via `devflow knowledge list|create|check|refresh|remove`. Knowledge agent (sonnet) structures exploration outputs into KNOWLEDGE.md. `apply-feature-knowledge` skill provides consumption algorithm for agents. `.features/.knowledge.lock` is gitignored (transient lock directory for concurrent index writes, added automatically by `devflow init`). `devflow knowledge list` — List all feature knowledge bases with staleness status. `devflow knowledge create <slug>` — Create a new knowledge base via claude -p exploration. `devflow knowledge check` — Check all knowledge bases for staleness. `devflow knowledge refresh [slug]` — Refresh stale knowledge base(s). `devflow knowledge remove <slug>` — Remove a knowledge base and its index entry. Note: debug:orch keeps FEATURE_KNOWLEDGE orchestrator-local (investigation workers examine code without pre-loaded context). Toggleable via `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`. SessionEnd hook auto-refreshes stale knowledge bases (throttled to once per 2 hours, max 3 per run). `.features/.disabled` sentinel gates Phase 8 generation and refresh hook.
 
+**Rules**: Ultra-concise, always-on engineering principle files (~10-15 lines each) installed to `~/.claude/rules/devflow/` as flat `.md` files. Claude Code loads them automatically on every prompt — no hooks required — filling the guidance gap for quick edits that don't trigger a full skill pipeline. Rules flow through the same four-stage pipeline as skills: authored in `shared/rules/`, distributed to `plugins/*/rules/` at build time, installed (or shadowed) at runtime, and activated automatically. Unlike skills (which install universally from all plugins), rules are **plugin-scoped**: only rules belonging to selected plugins are installed. This keeps core rules (`security`, `engineering`, `quality` from `devflow-core-skills`) always present, and language/ecosystem rules (`typescript`, `react`, `go`, etc.) present only when the user has that plugin installed. Shadow overrides: `~/.devflow/rules/{name}.md` overrides the Devflow source. Toggleable via `devflow rules --enable/--disable/--status/--list` or `devflow init --rules/--no-rules`. Stored in manifest `features.rules: boolean` (self-heals to `true` on old manifests). Currently 11 rules: 3 core + 8 language/UI. `paths: []` YAML frontmatter must remain — it signals Claude Code to apply the rule globally.
+
 **Three independent self-learning systems** (all toggleable separately):
 - `devflow learn --enable/--disable` — Learning agent (workflow + procedural detection from USER_SIGNALS)
 - `devflow decisions --enable/--disable` — Decisions agent (decision + pitfall detection from DIALOG_PAIRS)
 - `devflow knowledge --enable/--disable` — Feature knowledge bases (codebase area exploration)
 
-**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learn ON, decisions ON, HUD ON, teams OFF, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list. Use `--decisions/--no-decisions` to toggle the decisions agent independently.
+**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, learn ON, decisions ON, rules ON, HUD ON, teams OFF, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list. Use `--decisions/--no-decisions` to toggle the decisions agent independently. Use `--rules/--no-rules` to toggle rules independently.
 
 **Migrations**: Run-once migrations execute automatically on `devflow init`, tracked at `~/.devflow/migrations.json` (scope-independent; single file regardless of user-scope vs local-scope installs). Registry: append an entry to `MIGRATIONS` in `src/cli/utils/migrations.ts`. Scopes: `global` (runs once per machine, no project context) vs `per-project` (sweeps all discovered Claude-enabled projects in parallel). Failures are non-fatal — migrations retry on next init. Currently registered per-project migrations include `purge-legacy-knowledge-v2` (removes 4 hardcoded pre-v2 ADR/PF IDs and orphan `PROJECT-PATTERNS.md`) and `purge-legacy-knowledge-v3` (v3: sweeps all remaining pre-v2 seeded entries using the `- **Source**: self-learning:` format discriminator — any ADR/PF section lacking this marker is removed; entries the user edited to include the marker survive). **D37 edge case**: a project cloned *after* migrations have run won't be swept (the marker is global, not per-project). Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
 
@@ -72,11 +74,12 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 devflow/
 ├── shared/skills/          # 57 skills (single source of truth)
 ├── shared/agents/          # 14 shared agents (single source of truth)
+├── shared/rules/           # 11 rules (single source of truth; flat .md files)
 ├── plugins/devflow-*/      # 20 plugins (11 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Working Memory + ambient + learning hooks (prompt-capture-memory, stop-update-memory, background-memory-update, session-start-memory, session-start-classification, pre-compact-memory, preamble, session-end-learning, session-end-decisions, get-mtime, session-end-knowledge-refresh, background-knowledge-refresh)
-├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, decisions, flags, knowledge)
+├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, decisions, flags, knowledge, rules)
 ├── .claude-plugin/         # Marketplace registry
 ├── .docs/                  # Project docs (reviews, design) — per-project
 ├── .features/              # Per-feature knowledge bases (committed to git)
@@ -87,7 +90,7 @@ devflow/
 └── .memory/                # Working memory files — per-project
 ```
 
-**Install paths**: Commands → `~/.claude/commands/devflow/`, Agents → `~/.claude/agents/devflow/`, Skills → `~/.claude/skills/devflow:*/` (namespaced), Scripts → `~/.devflow/scripts/`
+**Install paths**: Commands → `~/.claude/commands/devflow/`, Agents → `~/.claude/agents/devflow/`, Skills → `~/.claude/skills/devflow:*/` (namespaced), Rules → `~/.claude/rules/devflow/` (flat, plugin-scoped), Scripts → `~/.devflow/scripts/`
 
 ## Development Loop
 
@@ -230,10 +233,11 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore
 - Never force push without explicit user request
 
 ### Build System
-- `shared/skills/` and `shared/agents/` are the single source of truth
-- Generated copies in `plugins/*/skills/` and shared agent files are gitignored
+- `shared/skills/`, `shared/agents/`, and `shared/rules/` are the single source of truth
+- Generated copies in `plugins/*/skills/`, `plugins/*/rules/`, and shared agent files are gitignored
 - Always run `npm run build` after modifying shared assets
-- Plugin manifests (`plugin.json`) declare `skills` and `agents` arrays
+- Plugin manifests (`plugin.json`) declare `skills`, `agents`, and `rules` arrays
+- Rules are flat `.md` files (no subdirectory nesting), distributed from `shared/rules/{name}.md` → `plugins/{plugin}/rules/{name}.md`; build fails if a declared rule is missing from `shared/rules/`
 - Every `-teams.md` command variant **must** have a matching base `.md` file — the installer iterates base files and looks up teams variants, so orphaned `-teams.md` files are silently skipped
 
 ### Token Optimization
