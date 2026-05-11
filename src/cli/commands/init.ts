@@ -1179,11 +1179,17 @@ export const initCommand = new Command('init')
       p.log.info('Installed via file copy (Claude CLI not available)');
     }
 
-    const installedCommands = pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0);
-    if (installedCommands.length > 0) {
-      const commandsNote = installedCommands
+    const WORKFLOW_ORDER = [
+      '/research', '/explore', '/plan', '/implement',
+      '/code-review', '/resolve', '/self-review',
+      '/debug', '/release', '/audit-claude',
+    ];
+    const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
+    const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));
+    if (orderedCommands.length > 0) {
+      const commandsNote = orderedCommands
         .map(cmd => color.cyan(cmd))
-        .join('  ');
+        .join('\n');
       p.note(commandsNote, 'Available commands');
     }
 
