@@ -7,53 +7,66 @@ import {
 } from '../src/cli/commands/list.js';
 import type { ManifestData } from '../src/cli/utils/manifest.js';
 
+const allOff: ManifestData['features'] = {
+  teams: false, ambient: false, memory: false,
+  learn: false, knowledge: false, decisions: false,
+  hud: false, rules: false, flags: [],
+};
+
 describe('formatFeatures', () => {
   it('returns all enabled features comma-separated', () => {
-    const features: ManifestData['features'] = { teams: true, ambient: true, memory: true };
+    const features: ManifestData['features'] = { ...allOff, teams: true, ambient: true, memory: true };
     expect(formatFeatures(features)).toBe('teams, ambient, memory');
   });
 
   it('returns subset of enabled features', () => {
-    const features: ManifestData['features'] = { teams: false, ambient: true, memory: true };
+    const features: ManifestData['features'] = { ...allOff, ambient: true, memory: true };
     expect(formatFeatures(features)).toBe('ambient, memory');
   });
 
   it('returns single enabled feature', () => {
-    const features: ManifestData['features'] = { teams: true, ambient: false, memory: false };
+    const features: ManifestData['features'] = { ...allOff, teams: true };
     expect(formatFeatures(features)).toBe('teams');
   });
 
   it('returns "none" when no features are enabled', () => {
-    const features: ManifestData['features'] = { teams: false, ambient: false, memory: false };
-    expect(formatFeatures(features)).toBe('none');
+    expect(formatFeatures(allOff)).toBe('none');
   });
 
   it('preserves feature order: teams, ambient, memory', () => {
-    const features: ManifestData['features'] = { teams: true, ambient: false, memory: true };
+    const features: ManifestData['features'] = { ...allOff, teams: true, memory: true };
     expect(formatFeatures(features)).toBe('teams, memory');
+  });
+
+  it('includes learn, knowledge, decisions when enabled', () => {
+    const features: ManifestData['features'] = {
+      ...allOff, memory: true, learn: true, knowledge: true, decisions: true,
+    };
+    expect(formatFeatures(features)).toBe('memory, learn, knowledge, decisions');
+  });
+
+  it('preserves feature order: memory, learn, knowledge, decisions, hud, rules', () => {
+    const features: ManifestData['features'] = {
+      ...allOff, memory: true, learn: true, knowledge: true, decisions: true, hud: true, rules: true,
+    };
+    expect(formatFeatures(features)).toBe('memory, learn, knowledge, decisions, hud, rules');
   });
 
   it('includes flags count when flags are present', () => {
     const features: ManifestData['features'] = {
-      teams: true, ambient: false, memory: false, hud: false, learn: false,
+      ...allOff, teams: true,
       flags: ['tool-search', 'lsp', 'clear-context-on-plan'],
     };
     expect(formatFeatures(features)).toBe('teams, flags: 3');
   });
 
   it('omits flags when flags array is empty', () => {
-    const features: ManifestData['features'] = {
-      teams: true, ambient: false, memory: false, hud: false, learn: false,
-      flags: [],
-    };
+    const features: ManifestData['features'] = { ...allOff, teams: true };
     expect(formatFeatures(features)).toBe('teams');
   });
 
   it('shows only flags when no boolean features are enabled', () => {
-    const features: ManifestData['features'] = {
-      teams: false, ambient: false, memory: false, hud: false, learn: false,
-      flags: ['lsp'],
-    };
+    const features: ManifestData['features'] = { ...allOff, flags: ['lsp'] };
     expect(formatFeatures(features)).toBe('flags: 1');
   });
 
@@ -69,7 +82,7 @@ describe('resolveScope', () => {
       version: '1.0.0',
       plugins: [],
       scope: 'local',
-      features: { teams: false, ambient: false, memory: false },
+      features: { ...allOff },
       installedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
