@@ -30,18 +30,13 @@ async function isShadowed(devflowDir: string, ruleName: string): Promise<boolean
   }
 }
 
-/** Reverse map of all rule names to their owning plugin (lazily computed once). */
-const allRulesMap = buildRulesMap(DEVFLOW_PLUGINS);
-
-/**
- * Format a single rule row with owner attribution and shadow tag.
- */
 async function formatRuleRow(
   name: string,
   devflowDir: string,
+  ownerMap: Map<string, string>,
   suffix: string,
 ): Promise<string> {
-  const owner = allRulesMap.get(name) ?? 'unknown';
+  const owner = ownerMap.get(name) ?? 'unknown';
   const shortOwner = owner.replace('devflow-', '');
   const shadowTag = await isShadowed(devflowDir, name) ? color.yellow(' [shadowed]') : '';
   return `  ${color.cyan(name.padEnd(16))} ${color.dim(shortOwner)}${suffix}${shadowTag}`;
@@ -108,8 +103,9 @@ export const rulesCommand = new Command('rules')
         return;
       }
 
+      const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
       const lines = await Promise.all(
-        installedFiles.map(file => formatRuleRow(path.basename(file, '.md'), devflowDir, '')),
+        installedFiles.map(file => formatRuleRow(path.basename(file, '.md'), devflowDir, ownerMap, '')),
       );
       p.note(lines.join('\n'), `Installed rules (${installedFiles.length})`);
 
@@ -122,10 +118,11 @@ export const rulesCommand = new Command('rules')
       } catch { /* dir doesn't exist */ }
       const installedSet = new Set(installedNames);
 
+      const ownerMap = buildRulesMap(DEVFLOW_PLUGINS);
       const lines = await Promise.all(
         allRules.map(name => {
           const tag = installedSet.has(name) ? color.green(' ✓') : color.dim(' ✗');
-          return formatRuleRow(name, devflowDir, tag);
+          return formatRuleRow(name, devflowDir, ownerMap, tag);
         }),
       );
       p.note(lines.join('\n'), `Available rules (${allRules.length})`);
