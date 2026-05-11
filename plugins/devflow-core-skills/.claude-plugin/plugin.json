@@ -27,5 +27,10 @@
     "test-driven-development",
     "testing",
     "dependency-research"
+  ],
+  "rules": [
+    "security",
+    "engineering",
+    "quality"
   ]
 }

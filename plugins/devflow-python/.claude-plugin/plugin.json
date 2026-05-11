@@ -17,5 +17,8 @@
   "agents": [],
   "skills": [
     "python"
+  ],
+  "rules": [
+    "python"
   ]
 }

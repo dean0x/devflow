@@ -19,18 +19,21 @@ import { fileURLToPath } from "url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHARED_SKILLS = path.join(ROOT, "shared", "skills");
 const SHARED_AGENTS = path.join(ROOT, "shared", "agents");
+const SHARED_RULES = path.join(ROOT, "shared", "rules");
 const PLUGINS_DIR = path.join(ROOT, "plugins");
 
 interface PluginManifest {
   name: string;
   skills?: string[];
   agents?: string[];
+  rules?: string[];
 }
 
 interface BuildResult {
   plugin: string;
   skillsCopied: string[];
   agentsCopied: string[];
+  rulesCopied: string[];
   errors: string[];
 }
 
@@ -73,16 +76,30 @@ function getAvailableAgents(): Set<string> {
   );
 }
 
+function getAvailableRules(): Set<string> {
+  if (!fs.existsSync(SHARED_RULES)) {
+    return new Set();
+  }
+  return new Set(
+    fs
+      .readdirSync(SHARED_RULES, { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.endsWith(".md"))
+      .map((d) => d.name.replace(".md", ""))
+  );
+}
+
 function buildPlugin(
   pluginDir: string,
   availableSkills: Set<string>,
-  availableAgents: Set<string>
+  availableAgents: Set<string>,
+  availableRules: Set<string>
 ): BuildResult {
   const pluginName = path.basename(pluginDir);
   const result: BuildResult = {
     plugin: pluginName,
     skillsCopied: [],
     agentsCopied: [],
+    rulesCopied: [],
     errors: [],
   };
 
@@ -156,6 +173,35 @@ function buildPlugin(
     }
   }
 
+  // Handle rules — flat .md files (no directory nesting like skills)
+  const requiredRules = manifest.rules ?? [];
+  if (requiredRules.length > 0) {
+    // Clean and recreate rules directory
+    const rulesDir = path.join(pluginDir, "rules");
+    if (fs.existsSync(rulesDir)) {
+      fs.rmSync(rulesDir, { recursive: true });
+    }
+    fs.mkdirSync(rulesDir, { recursive: true });
+
+    // Copy each required rule .md file from shared/rules/
+    for (const rule of requiredRules) {
+      if (!availableRules.has(rule)) {
+        result.errors.push(`Rule "${rule}" not found in shared/rules/`);
+        continue;
+      }
+
+      const src = path.join(SHARED_RULES, `${rule}.md`);
+      const dest = path.join(rulesDir, `${rule}.md`);
+
+      try {
+        fs.copyFileSync(src, dest);
+        result.rulesCopied.push(rule);
+      } catch (e) {
+        result.errors.push(`Failed to copy rule "${rule}": ${e}`);
+      }
+    }
+  }
+
   return result;
 }
 
@@ -171,11 +217,17 @@ function main(): void {
     console.error(`ERROR: shared/agents/ directory not found at ${SHARED_AGENTS}`);
     process.exit(1);
   }
+  // shared/rules/ is optional — warn only (rules are new)
+  if (!fs.existsSync(SHARED_RULES)) {
+    console.warn(`WARNING: shared/rules/ directory not found — no rules will be distributed`);
+  }
 
   const availableSkills = getAvailableSkills();
   const availableAgents = getAvailableAgents();
+  const availableRules = getAvailableRules();
   console.log(`Found ${availableSkills.size} skills in shared/skills/`);
-  console.log(`Found ${availableAgents.size} agents in shared/agents/\n`);
+  console.log(`Found ${availableAgents.size} agents in shared/agents/`);
+  console.log(`Found ${availableRules.size} rules in shared/rules/\n`);
 
   // Find all plugin directories
   const pluginDirs = fs
@@ -185,20 +237,22 @@ function main(): void {
 
   let totalSkillsCopied = 0;
   let totalAgentsCopied = 0;
+  let totalRulesCopied = 0;
   let totalErrors = 0;
   const results: BuildResult[] = [];
 
   for (const pluginDir of pluginDirs) {
-    const result = buildPlugin(pluginDir, availableSkills, availableAgents);
+    const result = buildPlugin(pluginDir, availableSkills, availableAgents, availableRules);
     results.push(result);
     totalSkillsCopied += result.skillsCopied.length;
     totalAgentsCopied += result.agentsCopied.length;
+    totalRulesCopied += result.rulesCopied.length;
     totalErrors += result.errors.length;
   }
 
   // Print results
   for (const result of results) {
-    const hasContent = result.skillsCopied.length > 0 || result.agentsCopied.length > 0;
+    const hasContent = result.skillsCopied.length > 0 || result.agentsCopied.length > 0 || result.rulesCopied.length > 0;
     const hasErrors = result.errors.length > 0;
 
     if (!hasContent && !hasErrors) {
@@ -207,11 +261,13 @@ function main(): void {
       const parts = [];
       if (result.skillsCopied.length > 0) parts.push(`${result.skillsCopied.length} skills`);
       if (result.agentsCopied.length > 0) parts.push(`${result.agentsCopied.length} agents`);
+      if (result.rulesCopied.length > 0) parts.push(`${result.rulesCopied.length} rules`);
       console.log(`  ${result.plugin}: ${parts.join(", ")} copied`);
     } else {
       const parts = [];
       if (result.skillsCopied.length > 0) parts.push(`${result.skillsCopied.length} skills`);
       if (result.agentsCopied.length > 0) parts.push(`${result.agentsCopied.length} agents`);
+      if (result.rulesCopied.length > 0) parts.push(`${result.rulesCopied.length} rules`);
       console.log(`  ${result.plugin}: ${parts.join(", ")} copied, ${result.errors.length} errors`);
       for (const error of result.errors) {
         console.log(`    ERROR: ${error}`);
@@ -219,7 +275,7 @@ function main(): void {
     }
   }
 
-  console.log(`\nTotal: ${totalSkillsCopied} skill copies + ${totalAgentsCopied} agent copies across ${pluginDirs.length} plugins`);
+  console.log(`\nTotal: ${totalSkillsCopied} skill copies + ${totalAgentsCopied} agent copies + ${totalRulesCopied} rule copies across ${pluginDirs.length} plugins`);
 
   if (totalErrors > 0) {
     console.error(`\n${totalErrors} error(s) occurred during build`);

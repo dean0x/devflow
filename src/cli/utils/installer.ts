@@ -5,6 +5,47 @@ import type { PluginDefinition } from '../plugins.js';
 import { DEVFLOW_PLUGINS, LEGACY_AGENT_NAMES, prefixSkillName } from '../plugins.js';
 
 /**
+ * Validate a rule name: only lowercase letters, digits, and hyphens.
+ * Defense-in-depth guard — rule names come from static plugin config but
+ * this prevents path traversal if the source ever includes user input.
+ */
+export function isValidRuleName(name: string): boolean {
+  return /^[a-z0-9-]+$/.test(name);
+}
+
+/**
+ * Install a single rule file, respecting the shadow override at
+ * ~/.devflow/rules/{name}.md over the built plugin source.
+ * Skips silently if the source file does not exist (missing build artifact).
+ */
+export async function installRuleFile(
+  ruleName: string,
+  ownerPlugin: string,
+  pluginsDir: string,
+  devflowDir: string,
+  rulesTarget: string,
+): Promise<void> {
+  const shadowFile = path.join(devflowDir, 'rules', `${ruleName}.md`);
+  const targetFile = path.join(rulesTarget, `${ruleName}.md`);
+
+  let useShadow = false;
+  try {
+    await fs.access(shadowFile);
+    useShadow = true;
+  } catch { /* no shadow */ }
+
+  if (useShadow) {
+    await fs.copyFile(shadowFile, targetFile);
+  } else {
+    const ruleSource = path.join(pluginsDir, ownerPlugin, 'rules', `${ruleName}.md`);
+    try {
+      await fs.access(ruleSource);
+      await fs.copyFile(ruleSource, targetFile);
+    } catch { /* source missing — skip */ }
+  }
+}
+
+/**
  * Minimal spinner interface matching @clack/prompts spinner().
  */
 export interface Spinner {
@@ -106,6 +147,8 @@ export interface FileCopyOptions {
   devflowDir: string;
   skillsMap: Map<string, string>;
   agentsMap: Map<string, string>;
+  /** Rules to install from selected plugins. Defaults to empty map (no rules). */
+  rulesMap?: Map<string, string>;
   isPartialInstall: boolean;
   teamsEnabled: boolean;
   spinner: Spinner;
@@ -125,6 +168,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     devflowDir,
     skillsMap,
     agentsMap,
+    rulesMap = new Map<string, string>(),
     isPartialInstall,
     teamsEnabled,
     spinner,
@@ -137,6 +181,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     const oldDirs = [
       path.join(claudeDir, 'commands', 'devflow'),
       path.join(claudeDir, 'agents', 'devflow'),
+      path.join(claudeDir, 'rules', 'devflow'),
     ];
     for (const dir of oldDirs) {
       try {
@@ -249,6 +294,20 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     } else {
       await copyDirectory(skillSource, skillTarget);
     }
+  }
+
+  // Install rules from selected plugins (rulesMap covers selected plugins only).
+  // Rules are flat .md files — no prefix, no directory nesting.
+  // Shadow: ~/.devflow/rules/{name}.md overrides source.
+  spinner.message('Installing rules...');
+  const rulesTarget = path.join(claudeDir, 'rules', 'devflow');
+  if (rulesMap.size > 0) {
+    await fs.mkdir(rulesTarget, { recursive: true });
+    await Promise.all(
+      [...rulesMap.entries()].map(([ruleName, ownerPlugin]) =>
+        installRuleFile(ruleName, ownerPlugin, pluginsDir, devflowDir, rulesTarget),
+      ),
+    );
   }
 
   // Install scripts (always from root scripts/ directory)

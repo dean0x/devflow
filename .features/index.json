@@ -1,4 +1,29 @@
 {
   "version": 1,
-  "features": {}
+  "features": {
+    "cli-rules": {
+      "name": "Rules System CLI",
+      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow.",
+      "directories": [
+        "src/cli/commands/",
+        "src/cli/utils/",
+        "shared/rules/",
+        "scripts/"
+      ],
+      "referencedFiles": [
+        "src/cli/commands/rules.ts",
+        "src/cli/commands/init.ts",
+        "src/cli/commands/uninstall.ts",
+        "src/cli/plugins.ts",
+        "src/cli/utils/installer.ts",
+        "src/cli/utils/manifest.ts",
+        "scripts/build-plugins.ts",
+        "shared/rules/security.md",
+        "shared/rules/engineering.md",
+        "shared/rules/quality.md"
+      ],
+      "lastUpdated": "2026-05-10T21:56:47.143Z",
+      "createdBy": "devflow-knowledge"
+    }
+  }
 }

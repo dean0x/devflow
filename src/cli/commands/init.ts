@@ -18,7 +18,7 @@ import {
   createDocsStructure,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, buildAssetMaps, buildFullSkillsMap, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
@@ -132,6 +132,7 @@ interface InitOptions {
   hud?: boolean;
   knowledge?: boolean;
   decisions?: boolean;
+  rules?: boolean;
   hudOnly?: boolean;
   recommended?: boolean;
   advanced?: boolean;
@@ -156,6 +157,8 @@ export const initCommand = new Command('init')
   .option('--no-knowledge', 'Disable feature knowledge bases')
   .option('--decisions', 'Enable decision/pitfall tracking')
   .option('--no-decisions', 'Disable decision/pitfall tracking')
+  .option('--rules', 'Enable rules (always-on engineering principles)')
+  .option('--no-rules', 'Disable rules')
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
   .option('--advanced', 'Show all configuration prompts')
@@ -265,7 +268,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, knowledge: false, decisions: false, flags: [] },
+          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, knowledge: false, decisions: false, rules: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -377,6 +380,7 @@ export const initCommand = new Command('init')
     let hudEnabled = true;
     let knowledgeEnabled = true;
     let decisionsEnabled = true;
+    let rulesEnabled = true;
     let enabledFlags = getDefaultFlags();
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
@@ -406,6 +410,7 @@ export const initCommand = new Command('init')
       if (options.hud !== undefined) hudEnabled = options.hud;
       if (options.knowledge !== undefined) knowledgeEnabled = options.knowledge;
       if (options.decisions !== undefined) decisionsEnabled = options.decisions;
+      if (options.rules !== undefined) rulesEnabled = options.rules;
 
       // Compute safe-delete block synchronously so we know whether to fetch installed version
       if (profilePath && safeDeleteAvailable) {
@@ -438,6 +443,7 @@ export const initCommand = new Command('init')
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
         `Self-learning:   ${learnEnabled ? 'enabled' : 'disabled'}`,
         `Decisions:       ${decisionsEnabled ? 'enabled' : 'disabled'}`,
+        `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Agent Teams:     ${teamsEnabled ? 'enabled' : 'disabled'}`,
@@ -605,6 +611,26 @@ export const initCommand = new Command('init')
           process.exit(0);
         }
         decisionsEnabled = decisionsChoice;
+      }
+
+      if (options.rules !== undefined) {
+        rulesEnabled = options.rules;
+      } else {
+        p.note(
+          'Rules are ultra-condensed engineering principles that load\n' +
+          'on every prompt, filling the guidance gap for quick edits.\n' +
+          '~10-15 lines each, minimal token cost.',
+          'Rules',
+        );
+        const rulesChoice = await p.confirm({
+          message: 'Enable rules? (Recommended)',
+          initialValue: true,
+        });
+        if (p.isCancel(rulesChoice)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        rulesEnabled = rulesChoice;
       }
 
       // Claude Code flags multiselect (advanced only)
@@ -852,6 +878,8 @@ export const initCommand = new Command('init')
     const skillsMap = buildFullSkillsMap();
     // Agents: install only from selected plugins
     const { agentsMap } = buildAssetMaps(pluginsToInstall);
+    // Rules: install only from selected plugins (plugin-scoped, not universal)
+    const rulesMap = rulesEnabled ? buildRulesMap(pluginsToInstall) : new Map<string, string>();
 
     // D32/D35: Apply one-time migrations (global + per-project) tracked at ~/.devflow/migrations.json.
     // Runs BEFORE installViaFileCopy so V1→V2 shadow renames are complete before the
@@ -890,6 +918,7 @@ export const initCommand = new Command('init')
           devflowDir,
           skillsMap,
           agentsMap,
+          rulesMap,
           isPartialInstall: !!options.plugin,
           teamsEnabled,
           spinner: s,
@@ -934,6 +963,29 @@ export const initCommand = new Command('init')
     }
     if (staleCommandsRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
+    }
+
+    // Clean up stale rules from previous installations
+    const rulesDir = path.join(claudeDir, 'rules', 'devflow');
+    let staleRulesRemoved = 0;
+    for (const legacy of LEGACY_RULE_NAMES) {
+      const legacyPath = path.join(rulesDir, `${legacy}.md`);
+      try {
+        await fs.rm(legacyPath);
+        staleRulesRemoved++;
+      } catch {
+        // Doesn't exist — expected for most entries
+      }
+    }
+    if (staleRulesRemoved > 0 && verbose) {
+      p.log.info(`Cleaned up ${staleRulesRemoved} legacy rule(s)`);
+    }
+
+    // Disable rules directory if rules not enabled
+    if (!rulesEnabled) {
+      try {
+        await fs.rm(path.join(claudeDir, 'rules', 'devflow'), { recursive: true, force: true });
+      } catch { /* ignore */ }
     }
 
     // Clean up legacy hook scripts and lib files (paths relative to hooksDir)
@@ -1170,7 +1222,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, flags: enabledFlags },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

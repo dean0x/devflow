@@ -17,5 +17,8 @@
   "agents": [],
   "skills": [
     "go"
+  ],
+  "rules": [
+    "go"
   ]
 }
