@@ -16,7 +16,7 @@ referencedFiles:
   - shared/rules/engineering.md
   - shared/rules/quality.md
 created: 2026-05-10
-updated: 2026-05-10
+updated: 2026-05-11
 ---
 
 # Rules System CLI
@@ -57,7 +57,7 @@ The `paths: []` frontmatter tells Claude Code to apply this rule to all files (n
 
 ### Plugin Declaration
 
-Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the optional `rules` field. Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin:
+Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the optional `rules` field. Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust:
 
 ```typescript
 // In DEVFLOW_PLUGINS:
@@ -68,13 +68,19 @@ Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the optional `
 {
   name: 'devflow-typescript',
   optional: true,
-  rules: ['typescript'],  // only installed when TypeScript plugin is selected
+  rules: ['typescript'],  // only installed when plugin is selected
 },
+// devflow-react, devflow-accessibility, devflow-ui-design,
+// devflow-go, devflow-java, devflow-python, devflow-rust
+// all follow the same pattern — one rule per plugin, same name as plugin suffix
 ```
 
-Two helper functions in `plugins.ts` serve distinct scopes:
+Plugins that have no rules simply omit the `rules` field from their `PluginDefinition` — do not set `rules: []`.
+
+Three helper functions in `plugins.ts` serve distinct scopes:
 - `getAllRuleNames()` — unique names across ALL plugins (used by `devflow rules --list`)
 - `buildRulesMap(plugins)` — name → ownerPlugin map for a GIVEN plugin subset (used during install and by `devflow rules --enable`)
+- `buildRulesMap(DEVFLOW_PLUGINS)` — called once at module load in `rules.ts` to create a module-level `allRulesMap` constant for owner lookups in `formatRuleRow`; avoids rebuilding on every `--status` or `--list` invocation
 
 ### Build Pipeline
 
@@ -122,6 +128,10 @@ The `rules` command in `src/cli/commands/rules.ts` has four subcommands:
 | `--list` | Lists ALL available rules from all plugins with install indicator (✓/✗) |
 
 The `--enable` path resolves the source directory relative to the compiled CLI's location (`path.resolve(__dirname, '../..'), 'plugins'`), not the source tree — this is the built `dist/plugins/` path.
+
+Two private helpers are extracted as top-level named functions in `rules.ts` (not inline):
+- `isShadowed(devflowDir, ruleName)` — `fs.access` on `~/.devflow/rules/{name}.md`; returns `Promise<boolean>`
+- `formatRuleRow(name, devflowDir, suffix)` — builds a colorized display row using `allRulesMap` for owner attribution; `suffix` is either the install indicator (✓/✗) for `--list` or empty string for `--status`
 
 ## Component Interactions
 
