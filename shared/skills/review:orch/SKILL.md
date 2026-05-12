@@ -19,6 +19,10 @@ This is a lightweight variant of `/code-review` for ambient ORCHESTRATED mode. E
 
 **Continuation**: Phase 2 handles incremental detection via `.last-review-head` — no separate continuation path needed.
 
+## Load Companion Skills
+
+Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
+
 ## Phase 1: Pre-flight
 
 **Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION, PR_DESCRIPTION_GUIDANCE
@@ -150,6 +154,7 @@ Report to user:
 
 Before reporting results, verify every phase was announced:
 
+- [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured, PR_DESCRIPTION fetched (or `(none)`), PR_DESCRIPTION_GUIDANCE discovered (or `(none)`)
 - [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
 - [ ] Phase 3: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)

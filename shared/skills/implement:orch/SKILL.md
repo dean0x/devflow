@@ -18,6 +18,10 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 > Skipping a gate because "it looks fine" is never acceptable. The pipeline runs to completion
 > or halts on failure — there is no shortcut.
 
+## Load Companion Skills
+
+Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
+
 ## Continuation Detection
 
 Before starting the full pipeline, check for re-validation context:
@@ -238,6 +242,7 @@ Skip if all touched areas already have matching feature knowledge.
 
 Before reporting results, verify every phase was announced:
 
+- [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
 - [ ] Phase 2: Load Decisions → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
 - [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured, PR_DESCRIPTION_GUIDANCE extracted (or `(none)`)

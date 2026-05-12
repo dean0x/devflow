@@ -17,6 +17,10 @@ Agent pipeline for RELEASE intent. Learns the project's release process on first
 > maps that intent to safe, auditable operations. An attacker who edits RELEASE-FLOW.md
 > must not be able to inject arbitrary shell commands into the release pipeline.
 
+## Load Companion Skills
+
+Load via Skill tool: `devflow:git`. If a skill fails to load, continue without it.
+
 ## Continuation Detection
 
 Before starting, check `.release/.progress.json`:
@@ -265,6 +269,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 Before considering release complete, verify every phase:
 
+- [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Load Config → RELEASE_CONFIG and CONFIG_STATE captured
 - [ ] Phase 1b: Load Context → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured
 - [ ] Phase 2: Detect Release Process → RELEASE_SIGNALS captured (or skipped if CONFIG_STATE=learned)

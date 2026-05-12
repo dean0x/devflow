@@ -31,6 +31,8 @@ Orchestrate a single task through implementation by spawning specialized agents.
 
 **Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_FEATURE_KNOWLEDGE_SLUGS, PR_DESCRIPTION_GUIDANCE
 
+**Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
+
 Record the current branch name as `BASE_BRANCH` - this will be the PR target.
 
 Spawn Git agent to set up task environment. The Git agent derives the branch name automatically from the issue or task description:

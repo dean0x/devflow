@@ -34,6 +34,8 @@ Parse from $ARGUMENTS:
 
 **Produces:** RELEASE_CONFIG, CONFIG_STATE (`learned` | `fresh`)
 
+**Load Companion Skills** — Load via Skill tool: `devflow:git`. If a skill fails to load, continue without it.
+
 **Continuation detection**: Check `.release/.progress.json`. If exists, offer Resume or Restart.
 
 Read `.release/RELEASE-FLOW.md`:

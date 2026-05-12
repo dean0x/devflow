@@ -110,6 +110,8 @@ Per worktree, detect file types in diff using `DIFF_RANGE` to determine conditio
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
+**Load Companion Skills** — Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a skill fails to load, continue without it.
+
 While file analysis runs (or just before spawning reviewers), load the decisions index for the current worktree:
 
 ```bash
