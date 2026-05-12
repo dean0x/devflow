@@ -482,6 +482,8 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'review:guided',
   'research:guided',
   'release:guided',
+  // v2.x reliability: bare name for pre-namespace installs
+  'reliability',
 ];
 
 /**
