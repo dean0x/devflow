@@ -18,13 +18,13 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 > real file structures, and actual integration points. A plan that ignores the codebase
 > will fail on contact with implementation.
 
-## Worktree Support
-
-If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
-
 ## Load Companion Skills
 
 Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review`. If a skill fails to load, continue without it.
+
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
 ---
 

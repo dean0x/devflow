@@ -1004,6 +1004,88 @@ describe('Cross-component runtime alignment', () => {
     }
   });
 
+  it('companion skill lists are consistent across catalog, orch skills, and commands', () => {
+    const catalogContent = readFileSync(
+      path.join(ROOT, 'shared', 'skills', 'router', 'references', 'skill-catalog.md'),
+      'utf-8',
+    );
+
+    // Parse the ORCHESTRATED Companion Skills table rows:
+    // | INTENT | orch-skill, /command | `devflow:a`, `devflow:b` |
+    const orchTable = new Map<string, string[]>();
+    const orchTableRegex =
+      /^\|\s*(IMPLEMENT|DEBUG|PLAN|REVIEW|RELEASE)\s*\|[^|]+\|\s*(.+?)\s*\|$/gm;
+    for (const match of catalogContent.matchAll(orchTableRegex)) {
+      const intent = match[1];
+      const companions = [...match[2].matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]);
+      if (companions.length > 0) orchTable.set(intent, companions.sort());
+    }
+
+    expect(orchTable.size).toBeGreaterThanOrEqual(5);
+
+    // Map intent → orch skill file path
+    const intentOrchMap: Record<string, string> = {
+      IMPLEMENT: 'implement:orch',
+      DEBUG: 'debug:orch',
+      PLAN: 'plan:orch',
+      REVIEW: 'review:orch',
+      RELEASE: 'release:orch',
+    };
+
+    // Map intent → command files (base + teams)
+    const intentCommandMap: Record<string, string[]> = {
+      IMPLEMENT: [
+        'plugins/devflow-implement/commands/implement.md',
+        'plugins/devflow-implement/commands/implement-teams.md',
+      ],
+      DEBUG: [
+        'plugins/devflow-debug/commands/debug.md',
+        'plugins/devflow-debug/commands/debug-teams.md',
+      ],
+      PLAN: [
+        'plugins/devflow-plan/commands/plan.md',
+        'plugins/devflow-plan/commands/plan-teams.md',
+      ],
+      REVIEW: [
+        'plugins/devflow-code-review/commands/code-review.md',
+        'plugins/devflow-code-review/commands/code-review-teams.md',
+      ],
+      RELEASE: [
+        'plugins/devflow-release/commands/release.md',
+        'plugins/devflow-release/commands/release-teams.md',
+      ],
+    };
+
+    // Extract companion skills from a "Load via Skill tool:" line
+    const parseCompanionLine = (content: string): string[] => {
+      const lineMatch = content.match(/Load via Skill tool:\s*(.+?)\.?\s*(?:If a skill|$)/m);
+      if (!lineMatch) return [];
+      return [...lineMatch[1].matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]).sort();
+    };
+
+    for (const [intent, expectedSkills] of orchTable) {
+      // Check orch skill
+      const orchSkillPath = path.join(ROOT, 'shared', 'skills', intentOrchMap[intent], 'SKILL.md');
+      const orchContent = readFileSync(orchSkillPath, 'utf-8');
+      const orchSkills = parseCompanionLine(orchContent);
+      expect(
+        orchSkills,
+        `${intentOrchMap[intent]} companions must match catalog for ${intent}`,
+      ).toEqual(expectedSkills);
+
+      // Check command files (base + teams)
+      for (const cmdRelPath of intentCommandMap[intent]) {
+        const cmdPath = path.join(ROOT, cmdRelPath);
+        const cmdContent = readFileSync(cmdPath, 'utf-8');
+        const cmdSkills = parseCompanionLine(cmdContent);
+        expect(
+          cmdSkills,
+          `${cmdRelPath} companions must match catalog for ${intent}`,
+        ).toEqual(expectedSkills);
+      }
+    }
+  });
+
   it('coder domain skill paths cover all language/ecosystem skills', () => {
     const coderContent = readFileSync(path.join(ROOT, 'shared', 'agents', 'coder.md'), 'utf-8');
 
