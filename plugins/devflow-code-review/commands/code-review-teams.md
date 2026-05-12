@@ -126,7 +126,7 @@ Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `DECISIONS_CONTEXT`
 - **Security**: vulnerabilities, injection, auth, crypto issues
 - **Architecture**: SOLID violations, coupling, layering, modularity
 - **Performance**: queries, algorithms, caching, I/O bottlenecks
-- **Quality**: complexity, testing, consistency, regression, naming
+- **Quality**: complexity, testing, consistency, regression, reliability, naming
 
 **Conditional perspectives (based on changed files):**
 - **TypeScript**: type safety, generics, utility types (if .ts/.tsx changed)
@@ -171,7 +171,7 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
 | security-reviewer | `~/.claude/skills/devflow:security/SKILL.md` | injection, auth bypass, crypto misuse, OWASP vulnerabilities | security | Security review done |
 | architecture-reviewer | `~/.claude/skills/devflow:architecture/SKILL.md` | SOLID violations, coupling, layering issues, modularity problems | architecture | Architecture review done |
 | performance-reviewer | `~/.claude/skills/devflow:performance/SKILL.md` | N+1 queries, memory leaks, algorithm issues, I/O bottlenecks | performance | Performance review done |
-| quality-reviewer | `~/.claude/skills/devflow:complexity/SKILL.md`, `~/.claude/skills/devflow:consistency/SKILL.md`, `~/.claude/skills/devflow:testing/SKILL.md`, `~/.claude/skills/devflow:regression/SKILL.md` | complexity, test gaps, pattern violations, regressions, naming | quality | Quality review done |
+| quality-reviewer | `~/.claude/skills/devflow:complexity/SKILL.md`, `~/.claude/skills/devflow:consistency/SKILL.md`, `~/.claude/skills/devflow:testing/SKILL.md`, `~/.claude/skills/devflow:regression/SKILL.md`, `~/.claude/skills/devflow:reliability/SKILL.md` | complexity, test gaps, pattern violations, regressions, reliability, naming | quality | Quality review done |
 
 **Conditional reviewers** — add based on Phase 1 changed-file analysis, using the same template:
 

@@ -38,6 +38,7 @@ Domain expertise for Reviewer agent focus areas. Loaded dynamically based on rev
 | `documentation` | Docs quality, alignment, code-comment drift | `documentation` |
 | `dependencies` | CVEs, versions, licenses, supply chain | `dependencies` |
 | `regression` | Lost functionality, broken behavior, migrations | `regression` |
+| `reliability` | Bounded iteration, assertions, allocation discipline, indirection | `reliability` |
 
 ### Tier 2: Specialized Skills
 

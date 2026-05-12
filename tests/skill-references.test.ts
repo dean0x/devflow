@@ -934,13 +934,13 @@ describe('Cross-component runtime alignment', () => {
     );
 
     // Extract core reviewer list: "- security, architecture, performance, ..."
-    const coreMatch = orchContent.match(/^\*\*7 core reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
+    const coreMatch = orchContent.match(/^\*\*8 core reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
     if (!coreMatch) {
-      expect.unreachable('review skill should list 7 core reviewers');
+      expect.unreachable('review skill should list 8 core reviewers');
     }
 
     const coreReviewers = coreMatch[1].split(',').map(s => s.trim());
-    expect(coreReviewers.length, 'should have 7 core reviewers').toBe(7);
+    expect(coreReviewers.length, 'should have 8 core reviewers').toBe(8);
 
     for (const focus of coreReviewers) {
       expect(

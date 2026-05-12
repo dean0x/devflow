@@ -47,8 +47,8 @@ The orchestrator provides:
 | `go` | `devflow:go` |
 | `java` | `devflow:java` |
 | `python` | `devflow:python` |
-| `rust` | `devflow:rust` |
 | `reliability` | `devflow:reliability` |
+| `rust` | `devflow:rust` |
 
 ## Apply Decisions
 

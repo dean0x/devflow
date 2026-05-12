@@ -131,7 +131,7 @@ Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
 **Produces:** REVIEWER_OUTPUTS
 **Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, REVIEWER_LIST
 
-Spawn Reviewer agents **in a single message**. Always run 7 core reviews; conditionally add more based on changed file types:
+Spawn Reviewer agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types:
 
 | Focus | Always | Pattern Skill |
 |-------|--------|---------------|
@@ -142,6 +142,7 @@ Spawn Reviewer agents **in a single message**. Always run 7 core reviews; condit
 | consistency | ✓ | devflow:consistency |
 | regression | ✓ | devflow:regression |
 | testing | ✓ | devflow:testing |
+| reliability | ✓ | devflow:reliability |
 | typescript | conditional | devflow:typescript |
 | react | conditional | devflow:react |
 | accessibility | conditional | devflow:accessibility |
@@ -170,7 +171,7 @@ Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specifi
 IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
-In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 7-18 reviewers per worktree across multiple worktrees simultaneously overwhelms the system.
+In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-19 reviewers per worktree across multiple worktrees simultaneously overwhelms the system.
 
 ### Phase 3: Synthesis (Parallel)
 

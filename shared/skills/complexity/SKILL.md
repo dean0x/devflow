@@ -111,28 +111,9 @@ if (canModerate(user)) { }
 
 ### 5. Reliability Patterns
 
-Operations that risk non-termination or resource exhaustion.
-
-**Violation**: Unbounded retry
-```typescript
-async function fetchData(url: string) {
-  while (true) {
-    try { return await fetch(url); }
-    catch { await sleep(1000); }
-  }
-}
-```
-
-**Solution**: Bounded retry with backoff
-```typescript
-const MAX_RETRIES = 5;
-async function fetchData(url: string) {
-  for (let i = 0; i < MAX_RETRIES; i++) {
-    try { return await fetch(url); }
-    catch { if (i === MAX_RETRIES - 1) throw; await sleep(1000 * 2 ** i); }
-  }
-}
-```
+Operations that risk non-termination or resource exhaustion. See `devflow:reliability` for
+full coverage of bounded iteration, assertion density, allocation discipline, and indirection limits.
+Complexity-relevant: unbounded loops increase cyclomatic complexity and make termination reasoning harder.
 
 ---
 
