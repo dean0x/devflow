@@ -96,12 +96,13 @@ describe('buildRulesMap', () => {
     expect(() => buildRulesMap(plugins)).toThrow(/Invalid rule name/);
   });
 
-  it('core-skills has security, engineering, quality rules', () => {
+  it('core-skills has security, engineering, quality, reliability rules', () => {
     const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills')!;
     const map = buildRulesMap([coreSkills]);
     expect(map.get('security')).toBe('devflow-core-skills');
     expect(map.get('engineering')).toBe('devflow-core-skills');
     expect(map.get('quality')).toBe('devflow-core-skills');
+    expect(map.get('reliability')).toBe('devflow-core-skills');
   });
 });
 
@@ -117,11 +118,12 @@ describe('getAllRuleNames', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('includes the three core rules', () => {
+  it('includes the four core rules', () => {
     const names = getAllRuleNames();
     expect(names).toContain('security');
     expect(names).toContain('engineering');
     expect(names).toContain('quality');
+    expect(names).toContain('reliability');
   });
 
   it('includes language-specific rules from optional plugins', () => {

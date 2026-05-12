@@ -47,6 +47,7 @@ The orchestrator provides:
 | `go` | `devflow:go` |
 | `java` | `devflow:java` |
 | `python` | `devflow:python` |
+| `reliability` | `devflow:reliability` |
 | `rust` | `devflow:rust` |
 
 ## Apply Decisions
@@ -164,7 +165,7 @@ Report format for `{output_path}`:
 
 | Focus | Condition |
 |-------|-----------|
-| security, architecture, performance, complexity, consistency, testing, regression | Always |
+| security, architecture, performance, complexity, consistency, testing, regression, reliability | Always |
 | typescript | If .ts/.tsx files changed |
 | database | If migration/schema files changed |
 | documentation | If docs changed |

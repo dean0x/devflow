@@ -9,3 +9,4 @@ paths: ["**/*.java"]
 - Sealed classes for restricted type hierarchies
 - Optional over null — never return null from public methods
 - Streams for collection pipelines — no manual iteration for transforms
+- Pool heavy resources (connections, threads, buffers) — no allocation in hot loops

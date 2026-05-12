@@ -25,7 +25,7 @@ updated: 2026-05-12
 
 Rules are ultra-condensed, always-on engineering principle files (~10 lines each) installed as flat `.md` files to `~/.claude/rules/devflow/`. Claude Code loads them automatically on every prompt, filling the guidance gap for quick edits that don't trigger a full skill pipeline. The system mirrors the skill build pipeline exactly: rules live in `shared/rules/`, are declared in `plugin.json` manifests and `DEVFLOW_PLUGINS`, distributed to plugins at build time, and installed (or shadowed) at runtime.
 
-Unlike skills, which install universally from all plugins, rules are **plugin-scoped**: only rules belonging to the currently installed plugins are installed. This keeps core rules (security, engineering, quality) always present and optional-plugin rules (typescript, react, go, etc.) only present when the user has that plugin installed.
+Unlike skills, which install universally from all plugins, rules are **plugin-scoped**: only rules belonging to the currently installed plugins are installed. This keeps core rules (security, engineering, quality, reliability) always present and optional-plugin rules (typescript, react, go, etc.) only present when the user has that plugin installed.
 
 ## System Context
 
@@ -78,7 +78,7 @@ Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `
 // In DEVFLOW_PLUGINS:
 {
   name: 'devflow-core-skills',
-  rules: ['security', 'engineering', 'quality'],  // always installed
+  rules: ['security', 'engineering', 'quality', 'reliability'],  // always installed
 },
 {
   name: 'devflow-typescript',
@@ -165,7 +165,7 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 
 ## Component Interactions
 
-**init → rules**: During `devflow init`, `rulesEnabled` is computed from CLI flags or prompts. If true, `buildRulesMap(pluginsToInstall)` builds the map that gets passed to `installViaFileCopy`. The rules directory is cleared and recreated as part of the full-install wipe (partial install does NOT wipe the rules directory). If false, the map is empty, and a post-install step removes the rules directory.
+**init → rules**: During `devflow init`, `rulesEnabled` defaults to `true`. In **Recommended mode** (`--recommended`, non-TTY, or user chooses Recommended at the setup-mode prompt), the value is applied silently — rules status appears only in the printed summary note, no prompt is shown. In **Advanced mode**, an explicit `p.note()` explains the per-language token model, followed by `p.confirm()`. CLI flags (`--rules`/`--no-rules`) override the default in both modes. Once decided, `buildRulesMap(pluginsToInstall)` builds the name→plugin map passed to `installViaFileCopy` (when enabled), or an empty Map is used (when disabled). Rules are **overwritten per-file** by `installViaFileCopy` — the rules directory itself is not wiped on init. Stale renamed or removed rules are cleaned up via the `LEGACY_RULE_NAMES` loop (analogous to `LEGACY_SKILL_NAMES` for skills). If disabled, a post-install step removes the entire `~/.claude/rules/devflow/` directory.
 
 **uninstall → rules**: Full uninstall (`removeAllDevFlow`) includes `~/.claude/rules/devflow/` in its target directory list. Selective plugin uninstall (`computeAssetsToRemove`) computes which rules to remove using the same "retained by remaining plugins" logic as skills and agents — `removeSelectedPlugins` removes per-rule files from `~/.claude/rules/devflow/`.
 
@@ -198,7 +198,7 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 - **Shadow files are flat, not directories**: Skills shadow at `~/.devflow/skills/{name}/` (a directory). Rules shadow at `~/.devflow/rules/{name}.md` (a flat file). The `isShadowed` check uses `fs.access()` on the flat path, not `fs.stat()` for a directory.
 - **Manifest defaults `rules: true` on read**: Old manifests without the `rules` field are read as `rules: true`. This means upgrading users get rules enabled automatically, which is the desired behavior but worth knowing when reading the manifest.
 - **`buildRulesMap` throws on invalid names**: If a `plugin.json` declares a rule name with uppercase letters, dots, or slashes, `buildRulesMap` throws immediately. This is intentional — catch misconfiguration early rather than silently writing a path-traversal-susceptible file.
-- **Core vs language rules have different token behavior**: Core rules (security, engineering, quality) load on every prompt regardless of file type. Language rules only activate when Claude is working with a matching file. A user without the TypeScript plugin pays zero cost for TypeScript rules — but a user with it only pays the cost when editing `.ts`/`.tsx` files.
+- **Core vs language rules have different token behavior**: Core rules (security, engineering, quality, reliability) load on every prompt regardless of file type. Language rules only activate when Claude is working with a matching file. A user without the TypeScript plugin pays zero cost for TypeScript rules — but a user with it only pays the cost when editing `.ts`/`.tsx` files.
 
 ## Key Files
 
@@ -206,7 +206,7 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 - `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
 - `src/cli/utils/installer.ts` — `installRuleFile` (exported); `installViaFileCopy` rules section
-- `src/cli/commands/init.ts` — `rulesEnabled` flag, `buildRulesMap(pluginsToInstall)`, post-install cleanup of rules directory
+- `src/cli/commands/init.ts` — `rulesEnabled` flag (default `true`); Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; post-install removal of rules dir when disabled
 - `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files
 - `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default
 - `scripts/build-plugins.ts` — build-time distribution from `shared/rules/` → `plugins/*/rules/`

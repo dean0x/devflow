@@ -109,6 +109,12 @@ const canModerate = (user: User): boolean => {
 if (canModerate(user)) { }
 ```
 
+### 5. Reliability Patterns
+
+Operations that risk non-termination or resource exhaustion. See `devflow:reliability` for
+full coverage of bounded iteration, assertion density, allocation discipline, and indirection limits.
+Complexity-relevant: unbounded loops increase cyclomatic complexity and make termination reasoning harder.
+
 ---
 
 ## Extended References
@@ -127,8 +133,8 @@ For extended examples and detection techniques:
 
 | Severity | Criteria |
 |----------|----------|
-| **CRITICAL** | Functions > 200 lines, complexity > 20, nesting > 6, duplication in 5+ places |
-| **HIGH** | Functions 50-200 lines, complexity 10-20, nesting 4-6, 5+ boolean conditions, 5+ parameters |
+| **CRITICAL** | Functions > 200 lines, complexity > 20, nesting > 6, duplication in 5+ places, unbounded loop on external I/O |
+| **HIGH** | Functions 50-200 lines, complexity 10-20, nesting 4-6, 5+ boolean conditions, 5+ parameters, retry with no max |
 | **MEDIUM** | Functions 30-50 lines, complexity 5-10, magic values, minor duplication |
 | **LOW** | Could be more readable, naming improvements, comments would help |
 
@@ -141,3 +147,4 @@ For extended examples and detection techniques:
 | Nesting depth | < 3 | 3-4 | > 4 |
 | Parameters | < 3 | 3-5 | > 5 |
 | File length | < 300 | 300-500 | > 500 |
+| Loop bound | explicit | implicit | unbounded |

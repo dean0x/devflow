@@ -9,3 +9,4 @@ paths: ["**/*.rs"]
 - `?` operator for error propagation — no `.unwrap()` outside tests
 - Small, focused traits — one capability per trait
 - `#[must_use]` on functions with important return values
+- debug_assert! for invariants in hot paths — assert! at module boundaries
