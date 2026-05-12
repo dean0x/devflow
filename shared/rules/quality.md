@@ -10,3 +10,4 @@ paths: []
 - Behavior-focused tests: assert outcomes, not implementation details
 - If you can't explain it in 5 minutes, it's too complex — simplify first
 - Delete dead code — commented-out code is not version control
+- Zero warnings policy — treat all compiler and linter warnings as errors

@@ -9,3 +9,4 @@ paths: ["**/*.go"]
 - Channels for communication, mutexes for state — never both
 - No bare goroutines — always handle lifecycle and cancellation
 - Accept interfaces, return structs
+- No **T (pointer-to-pointer) — single indirection only; prefer value receivers

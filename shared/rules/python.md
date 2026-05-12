@@ -9,3 +9,4 @@ paths: ["**/*.py"]
 - Protocols for structural typing — avoid deep inheritance
 - Explicit `__all__` exports in every module
 - Context managers for resource lifecycle
+- Cap retries, pagination, and iteration — every loop needs max_iterations or itertools.islice

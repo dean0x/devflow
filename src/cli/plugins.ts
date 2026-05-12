@@ -50,7 +50,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: [],
     agents: [],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
-    rules: ['security', 'engineering', 'quality'],
+    rules: ['security', 'engineering', 'quality', 'reliability'],
   },
   {
     name: 'devflow-plan',
@@ -73,7 +73,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Comprehensive code review with parallel specialized agents',
     commands: ['/code-review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['agent-teams', 'architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['agent-teams', 'architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'reliability', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -153,6 +153,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'performance',
       'complexity',
       'consistency',
+      'reliability',
       'regression',
       'testing',
       'database',
