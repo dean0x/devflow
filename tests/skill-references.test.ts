@@ -1096,12 +1096,12 @@ describe('Cross-component runtime alignment', () => {
       const content = readFileSync(path.join(ROOT, 'shared', 'skills', skill, 'SKILL.md'), 'utf-8');
       const companionIdx = content.indexOf('## Load Companion Skills');
       const worktreeIdx = content.indexOf('## Worktree Support');
-      if (companionIdx !== -1 && worktreeIdx !== -1) {
-        expect(
-          companionIdx,
-          `${skill}: Load Companion Skills must appear before Worktree Support`,
-        ).toBeLessThan(worktreeIdx);
-      }
+      expect(companionIdx, `${skill}: missing ## Load Companion Skills section`).toBeGreaterThanOrEqual(0);
+      expect(worktreeIdx, `${skill}: missing ## Worktree Support section`).toBeGreaterThanOrEqual(0);
+      expect(
+        companionIdx,
+        `${skill}: Load Companion Skills must appear before Worktree Support`,
+      ).toBeLessThan(worktreeIdx);
     }
   });
 
