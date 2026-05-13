@@ -22,6 +22,10 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 
 Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
 ## Continuation Detection
 
 Before starting the full pipeline, check for re-validation context:
@@ -88,10 +92,6 @@ Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
 Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
 
 Extract `## PR Description Guidance` section from the plan (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
-
-## Worktree Support
-
-If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
 ## Phase 4: Coder Execution
 

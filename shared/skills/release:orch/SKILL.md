@@ -21,6 +21,10 @@ Agent pipeline for RELEASE intent. Learns the project's release process on first
 
 Load via Skill tool: `devflow:git`. If a skill fails to load, continue without it.
 
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
 ## Continuation Detection
 
 Before starting, check `.release/.progress.json`:
@@ -244,12 +248,6 @@ Post-release analysis for improvement opportunities:
 Present as suggested diffs to RELEASE-FLOW.md. Never auto-apply — user must explicitly request changes.
 
 This phase is fire-and-forget: no persistent storage, no blocking.
-
----
-
-## Worktree Support
-
-If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
 ---
 
