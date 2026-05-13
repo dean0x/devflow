@@ -18,6 +18,14 @@ This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Exc
 > Skipping a gate because "it looks fine" is never acceptable. The pipeline runs to completion
 > or halts on failure — there is no shortcut.
 
+## Load Companion Skills
+
+Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
+
+## Worktree Support
+
+If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
+
 ## Continuation Detection
 
 Before starting the full pipeline, check for re-validation context:
@@ -84,10 +92,6 @@ Synthesize conversation context into a structured EXECUTION_PLAN for Coder:
 Format as structured markdown with: Goal, Steps, Files, Constraints, Decisions.
 
 Extract `## PR Description Guidance` section from the plan (if present) → set `PR_DESCRIPTION_GUIDANCE` to its full content. If section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`.
-
-## Worktree Support
-
-If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
 
 ## Phase 4: Coder Execution
 
@@ -238,6 +242,7 @@ Skip if all touched areas already have matching feature knowledge.
 
 Before reporting results, verify every phase was announced:
 
+- [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
 - [ ] Phase 2: Load Decisions → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
 - [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured, PR_DESCRIPTION_GUIDANCE extracted (or `(none)`)

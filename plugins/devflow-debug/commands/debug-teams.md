@@ -27,6 +27,8 @@ Investigate bugs by spawning a team of agents, each pursuing a different hypothe
 
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 
+**Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing`. If a skill fails to load, continue without it.
+
 Before hypothesizing, load the decisions index:
 
 ```bash

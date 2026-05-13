@@ -34,6 +34,8 @@ Parse from $ARGUMENTS:
 
 **Produces:** RELEASE_CONFIG, CONFIG_STATE (`learned` | `fresh`)
 
+**Load Companion Skills** — Load via Skill tool: `devflow:git`. If a skill fails to load, continue without it.
+
 **Continuation detection**: Check `.release/.progress.json`. If exists, an interrupted release is in progress. Offer user:
 - **Resume**: continue from last checkpoint (skip phases already completed)
 - **Restart**: clean start (delete `.release/.progress.json` and begin from Phase 1)

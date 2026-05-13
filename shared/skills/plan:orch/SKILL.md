@@ -18,6 +18,10 @@ This is a focused variant of the `/plan` command pipeline for ambient ORCHESTRAT
 > real file structures, and actual integration points. A plan that ignores the codebase
 > will fail on contact with implementation.
 
+## Load Companion Skills
+
+Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review`. If a skill fails to load, continue without it.
+
 ## Worktree Support
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
@@ -261,6 +265,7 @@ Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
 
 Before presenting output, verify every phase was announced:
 
+- [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Load Decisions Index → DECISIONS_CONTEXT captured
 - [ ] Phase 2: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.features/` absent)
 - [ ] Phase 3: Requirements Discovery → CONSTRAINED_PROBLEM captured (or skipped with stated reason)

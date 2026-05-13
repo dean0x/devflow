@@ -64,6 +64,8 @@ For multi-issue: present unified scope across all issues.
 **Produces:** SKIMMER_CONTEXT, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** CONFIRMED_SCOPE
 
+**Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review`. If a skill fails to load, continue without it.
+
 Spawn Skimmer agent for codebase context:
 
 ```

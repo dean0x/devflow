@@ -18,6 +18,10 @@ This is a lightweight variant of `/debug` for ambient ORCHESTRATED mode. Exclude
 > in parallel, and let evidence determine the root cause. Confirmation bias is the enemy
 > of debugging — multiple hypotheses are the antidote.
 
+## Load Companion Skills
+
+Load via Skill tool: `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing`. If a skill fails to load, continue without it.
+
 ## Worktree Support
 
 If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktree workflows), pass it through to all spawned agents. Each agent's "Worktree Support" section handles path resolution.
@@ -106,6 +110,7 @@ Ask user via AskUserQuestion: "Want me to implement this fix?"
 
 Before reporting results, verify every phase was announced:
 
+- [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (orchestrator-local only, or skipped if `.features/` absent)
 - [ ] Phase 2: Hypothesize → HYPOTHESES captured (3-5 distinct)
 - [ ] Phase 3: Investigate → INVESTIGATION_RESULTS captured per hypothesis

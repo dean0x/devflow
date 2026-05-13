@@ -1,6 +1,6 @@
 # Skill Catalog
 
-Reference for companion skills loaded by each guided skill. The router dispatches by intent and depth to either a `:guided` or `:orch` skill. In ORCHESTRATED mode, agents load their own skills — the router only loads the orch skill.
+Reference for companion skills loaded at both GUIDED and ORCHESTRATED depth. The router dispatches by intent and depth to either a `:guided` or `:orch` skill. Both depths load always-on companion skills; GUIDED additionally loads file-type conditionals.
 
 ## Companion Skills by Workflow
 
@@ -45,6 +45,22 @@ Loads per-type research skills dynamically (e.g., `devflow:research-codebase`). 
 ### RELEASE (release:guided)
 
 Loads `devflow:git`. See release:guided.
+
+## ORCHESTRATED Companion Skills
+
+At ORCHESTRATED depth, orch skills and commands load always-on companion skills before their first phase. No file-type conditionals — the orchestrator doesn't know which files will be touched, and agents load their own language/framework skills.
+
+| Intent | Orch Skill / Command | Companions |
+|--------|---------------------|------------|
+| IMPLEMENT | implement:orch, /implement | `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research` |
+| DEBUG | debug:orch, /debug | `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing` |
+| PLAN | plan:orch, /plan | `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review` |
+| REVIEW | review:orch, /code-review | `devflow:quality-gates`, `devflow:software-design` |
+| RELEASE | release:orch, /release | `devflow:git` |
+| EXPLORE | explore:orch, /explore | (none) |
+| RESEARCH | research:orch, /research | (none — agents load type-specific skills internally) |
+| RESOLVE | resolve:orch, /resolve | (none) |
+| PIPELINE | pipeline:orch | (none — delegates to sub-orchestrators) |
 
 ## Agent-Internal Skills (Not Router-Loaded)
 
