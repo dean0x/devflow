@@ -1076,12 +1076,31 @@ describe('Cross-component runtime alignment', () => {
       // Check command files (base + teams)
       for (const cmdRelPath of intentCommandMap[intent]) {
         const cmdPath = path.join(ROOT, cmdRelPath);
-        const cmdContent = readFileSync(cmdPath, 'utf-8');
+        let cmdContent: string;
+        try {
+          cmdContent = readFileSync(cmdPath, 'utf-8');
+        } catch {
+          continue; // teams variant may not exist
+        }
         const cmdSkills = parseCompanionLine(cmdContent);
         expect(
           cmdSkills,
           `${cmdRelPath} companions must match catalog for ${intent}`,
         ).toEqual(expectedSkills);
+      }
+    }
+
+    // Verify section ordering: Load Companion Skills must precede Worktree Support in orch skills
+    const orchSkillsWithBoth = ['implement:orch', 'debug:orch', 'plan:orch', 'release:orch'];
+    for (const skill of orchSkillsWithBoth) {
+      const content = readFileSync(path.join(ROOT, 'shared', 'skills', skill, 'SKILL.md'), 'utf-8');
+      const companionIdx = content.indexOf('## Load Companion Skills');
+      const worktreeIdx = content.indexOf('## Worktree Support');
+      if (companionIdx !== -1 && worktreeIdx !== -1) {
+        expect(
+          companionIdx,
+          `${skill}: Load Companion Skills must appear before Worktree Support`,
+        ).toBeLessThan(worktreeIdx);
       }
     }
   });
