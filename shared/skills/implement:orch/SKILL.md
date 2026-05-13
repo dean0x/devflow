@@ -8,7 +8,7 @@ user-invocable: false
 
 Agent pipeline for IMPLEMENT intent in ambient ORCHESTRATED mode. Pre-flight checks, plan synthesis, Coder execution, and quality gates.
 
-This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Excluded: strategy selection (single/sequential/parallel Coders), retry loops, PR creation.
+This is a lightweight variant of `/implement` for ambient ORCHESTRATED mode. Excluded: strategy selection (single/sequential/parallel Coders), retry loops.
 
 ## Iron Law
 
@@ -47,7 +47,7 @@ If not → proceed with the full pipeline below.
 
 Detect branch type before spawning Coder:
 
-- **Work branches** (`feat/`, `fix/`, `chore/`, `refactor/`, `docs/` prefix): proceed on current branch.
+- **Work branches** (`feat/`, `fix/`, `chore/`, `refactor/`, `docs/` prefix): proceed on current branch. Determine `BASE_BRANCH` (PR target) via `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'`, falling back to `main`.
 - **Protected branches** (`main`, `master`, `develop`, `integration`, `trunk`, `release/*`, `staging`, `production`): record current branch as `BASE_BRANCH`, then spawn Git agent to auto-create a feature branch:
 
 ```
@@ -95,18 +95,18 @@ Extract `## PR Description Guidance` section from the plan (if present) → set 
 
 ## Phase 4: Coder Execution
 
-**Produces:** CODER_COMMITS, PRE_CODER_SHA
-**Requires:** EXECUTION_PLAN, FEATURE_BRANCH, PR_DESCRIPTION_GUIDANCE
+**Produces:** CODER_COMMITS, PRE_CODER_SHA, PR_URL
+**Requires:** EXECUTION_PLAN, FEATURE_BRANCH, BASE_BRANCH, PR_DESCRIPTION_GUIDANCE
 
 Record git SHA before first Coder: `git rev-parse HEAD`
 
 Spawn `Agent(subagent_type="Coder")` with input variables:
 - **TASK_ID**: Generated from timestamp (e.g., `task-2026-03-19_1430`)
 - **TASK_DESCRIPTION**: From conversation context
-- **BASE_BRANCH**: Current branch (or newly created branch from Phase 1)
+- **BASE_BRANCH**: PR target branch from Phase 1
 - **EXECUTION_PLAN**: From Phase 3
 - **PATTERNS**: Codebase patterns from conversation context
-- **CREATE_PR**: `false` (commit only, no push)
+- **CREATE_PR**: `true` (push and create PR against BASE_BRANCH after implementation)
 - **DOMAIN**: Inferred from files in scope (`backend`, `frontend`, `tests`, `fullstack`)
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
 - **DECISIONS_CONTEXT**: From Phase 2 (or `(none)`)
@@ -152,7 +152,7 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 
 ## Phase 7: Completion
 
-**Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS
+**Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS, PR_URL
 
 Cleanup:
 - Delete `.docs/handoff-{branch_slug}.md` if it exists (no longer needed after pipeline completes).
@@ -164,10 +164,10 @@ OVERLAPPING_SLUGS=$(node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs find
 Parse the JSON array output to get slug strings. Pass `OVERLAPPING_SLUGS` to Phase 8.
 
 Report results:
+- PR URL (from Coder)
 - Commits created (from Coder)
 - Files changed
 - Quality gate results (pass/fail per gate)
-- No push — user decides when to push
 
 ## Phase 8: Feature Knowledge Generation (Conditional)
 
@@ -246,7 +246,7 @@ Before reporting results, verify every phase was announced:
 - [ ] Phase 1: Pre-flight → BASE_BRANCH, FEATURE_BRANCH captured
 - [ ] Phase 2: Load Decisions → DECISIONS_CONTEXT and FEATURE_KNOWLEDGE captured (or skipped)
 - [ ] Phase 3: Plan Synthesis → EXECUTION_PLAN captured, PR_DESCRIPTION_GUIDANCE extracted (or `(none)`)
-- [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA captured
+- [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA, PR_URL captured
 - [ ] Phase 5: FILES_CHANGED Detection → FILES_CHANGED captured
 - [ ] Phase 6: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)
 - [ ] Phase 7: Completion → Results reported, OVERLAPPING_SLUGS captured
