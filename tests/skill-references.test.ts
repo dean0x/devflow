@@ -1006,7 +1006,7 @@ describe('Cross-component runtime alignment', () => {
 
   it('companion skill lists are consistent across catalog, orch skills, and commands', () => {
     const catalogContent = readFileSync(
-      path.join(ROOT, 'shared', 'skills', 'router', 'references', 'skill-catalog.md'),
+      path.join(ROOT, 'docs', 'reference', 'skill-catalog.md'),
       'utf-8',
     );
 
