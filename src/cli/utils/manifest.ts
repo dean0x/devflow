@@ -19,6 +19,7 @@ export interface ManifestData {
     decisions: boolean;
     rules: boolean;
     flags: string[];
+    viewMode?: string;
   };
   installedAt: string;
   updatedAt: string;
@@ -67,6 +68,7 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         decisions: typeof features.decisions === 'boolean' ? features.decisions : false,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
+        viewMode: typeof features.viewMode === 'string' ? features.viewMode as string : undefined,
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,
