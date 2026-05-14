@@ -17,7 +17,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-05-12
+updated: 2026-05-14
 ---
 
 # Rules System CLI
@@ -147,6 +147,8 @@ Key install properties:
 
 `ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` key, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs).
 
+The full `ManifestData.features` object (as of v2.x) tracks: `teams`, `ambient`, `memory`, `learn`, `hud`, `knowledge`, `decisions`, `rules`, `flags: string[]`, and `viewMode?: ViewMode`. When adding new toggleable features, extend this interface and add the corresponding self-heal default in `readManifest`.
+
 ### `devflow rules` Command
 
 The `rules` command in `src/cli/commands/rules.ts` has four subcommands:
@@ -200,6 +202,7 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 - **Manifest defaults `rules: true` on read**: Old manifests without the `rules` field are read as `rules: true`. This means upgrading users get rules enabled automatically, which is the desired behavior but worth knowing when reading the manifest.
 - **`buildRulesMap` throws on invalid names**: If a `plugin.json` declares a rule name with uppercase letters, dots, or slashes, `buildRulesMap` throws immediately. This is intentional — catch misconfiguration early rather than silently writing a path-traversal-susceptible file.
 - **Core vs language rules have different token behavior**: Core rules (security, engineering, quality, reliability) load on every prompt regardless of file type. Language rules only activate when Claude is working with a matching file. A user without the TypeScript plugin pays zero cost for TypeScript rules — but a user with it only pays the cost when editing `.ts`/`.tsx` files.
+- **manifest.ts contains a `kb → knowledge` migration self-heal**: `readManifest` detects `features.kb` and migrates it to `features.knowledge` in-place (ADR-001 clean-break applies to install-time assets like rules, skills, commands — not to disk data that users cannot easily migrate themselves). This is the only backward-compat code in `manifest.ts`; do not add more. For rules, `LEGACY_RULE_NAMES` in `plugins.ts` is the correct pattern when renaming rule files — no manifest migration needed.
 
 ## Key Files
 
