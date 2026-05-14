@@ -289,7 +289,7 @@ Check CI/PR check status for a branch's pull request.
 2. If no PR found → output status `NO_PR`, stop
 3. Fetch checks: `gh pr checks {number} --json name,state,conclusion 2>/dev/null`
 4. If empty or command fails → output status `NO_CI`
-5. Classify: any state `IN_PROGRESS` or `PENDING` → `PENDING`, all conclusions are `SUCCESS` → `PASSING`, any `FAILURE` → `FAILING`
+5. Classify in priority order: if any check has state `IN_PROGRESS` or `PENDING` → `PENDING`; else if any conclusion is `FAILURE` → `FAILING`; else if all conclusions are `SUCCESS` → `PASSING`
 6. List failing/pending checks with names
 
 **Output:**
