@@ -417,9 +417,25 @@ describe('classification helpers', () => {
     expect(extractIntent(textResult('Devflow: RESEARCH. Loading: devflow:research:triage.'))).toBe('RESEARCH');
   });
 
+  it('returns null for old INTENT/DEPTH format', () => {
+    expect(extractIntent(textResult('Devflow: IMPLEMENT/ORCHESTRATED'))).toBeNull();
+    expect(extractIntent(textResult('Devflow: DEBUG/GUIDED'))).toBeNull();
+  });
+
   it('extracts depth from triage output', () => {
     expect(extractDepth(textResult('Scope: GUIDED'))).toBe('GUIDED');
     expect(extractDepth(textResult('Scope: ORCHESTRATED'))).toBe('ORCHESTRATED');
+  });
+
+  it('extractDepth handles casing and whitespace variations', () => {
+    expect(extractDepth(textResult('scope: guided'))).toBe('GUIDED');
+    expect(extractDepth(textResult('SCOPE: ORCHESTRATED'))).toBe('ORCHESTRATED');
+    expect(extractDepth(textResult('Scope:  ORCHESTRATED'))).toBe('ORCHESTRATED');
+  });
+
+  it('extractDepth does not match old slash format', () => {
+    expect(extractDepth(textResult('Devflow: IMPLEMENT/ORCHESTRATED'))).toBeNull();
+    expect(extractDepth(textResult('Devflow: DEBUG/GUIDED'))).toBeNull();
   });
 
   it('returns null for missing classification', () => {
@@ -596,7 +612,48 @@ describe('router structural validation', () => {
       expect(content, `${intent}:triage must have Skill in allowed-tools`).toContain('Skill');
       expect(content, `${intent}:triage must reference :guided target`).toContain(`${intent}:guided`);
       expect(content, `${intent}:triage must reference :orch target`).toContain(`${intent}:orch`);
+      expect(content, `${intent}:triage must have Scope Assessment section`).toContain('## Scope Assessment');
+      expect(content, `${intent}:triage must have Orchestration Hint Override section`).toContain('## Orchestration Hint Override');
     }
+  });
+
+  it('ci-status-gate PATTERN block is consistent across implement:orch and resolve:orch', async () => {
+    /** Extract lines between <!-- PATTERN: ci-status-gate --> markers */
+    function extractPatternBlock(content: string): string[] {
+      const lines = content.split('\n');
+      const result: string[] = [];
+      let inside = false;
+      for (const line of lines) {
+        if (line.includes('<!-- PATTERN: ci-status-gate')) { inside = true; continue; }
+        if (line.includes('<!-- /PATTERN: ci-status-gate -->')) break;
+        if (inside) result.push(line);
+      }
+      return result;
+    }
+
+    const implementContent = await fs.readFile(
+      path.join(sharedSkillsDir, 'implement:orch', 'SKILL.md'),
+      'utf-8',
+    );
+    const resolveContent = await fs.readFile(
+      path.join(sharedSkillsDir, 'resolve:orch', 'SKILL.md'),
+      'utf-8',
+    );
+
+    const implementLines = extractPatternBlock(implementContent);
+    const resolveLines = extractPatternBlock(resolveContent);
+
+    expect(implementLines.length, 'implement:orch PATTERN block not found').toBeGreaterThan(0);
+    expect(resolveLines.length, 'resolve:orch PATTERN block not found').toBeGreaterThan(0);
+
+    // Steps 2-6 (shared polling logic) must be identical; step 1 is context-specific and may differ
+    const implementShared = implementLines.filter(l => /^\d+\./.test(l.trimStart()) && !l.trimStart().startsWith('1.'));
+    const resolveShared = resolveLines.filter(l => /^\d+\./.test(l.trimStart()) && !l.trimStart().startsWith('1.'));
+
+    expect(
+      implementShared.join('\n'),
+      'ci-status-gate polling steps (2-6) diverged between implement:orch and resolve:orch',
+    ).toBe(resolveShared.join('\n'));
   });
 });
 
