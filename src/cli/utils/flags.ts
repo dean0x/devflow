@@ -107,6 +107,30 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     target: { type: 'env', key: 'CLAUDE_CODE_FORK_SUBAGENT', value: '1' },
     defaultEnabled: false,
   },
+  {
+    id: 'disable-adaptive-thinking',
+    label: 'Disable adaptive thinking',
+    description: 'Disable adaptive reasoning on Opus/Sonnet 4.6',
+    hint: 'Fixed thinking budget',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING', value: 'true' },
+    defaultEnabled: false,
+  },
+  {
+    id: 'always-thinking',
+    label: 'Always enable thinking',
+    description: 'Enable extended thinking by default',
+    hint: 'Thinking on every turn',
+    target: { type: 'setting', key: 'alwaysThinkingEnabled', value: true },
+    defaultEnabled: false,
+  },
+  {
+    id: 'disable-git-instructions',
+    label: 'Disable git instructions',
+    description: 'Remove git workflow instructions from system prompt',
+    hint: 'Smaller system prompt',
+    target: { type: 'env', key: 'CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS', value: 'true' },
+    defaultEnabled: false,
+  },
   // NOTE: DISABLE_COMPACT and DISABLE_AUTOUPDATER intentionally omit the CLAUDE_CODE_ prefix —
   // these names are defined by upstream Claude Code and must match exactly.
   {
@@ -190,5 +214,38 @@ export function stripFlags(settingsJson: string): string {
     delete settings.env;
   }
 
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+const VIEW_MODE_KEY = 'viewMode';
+
+/** All valid view mode values. Used for validation at manifest read boundaries. */
+export const VIEW_MODES = ['default', 'verbose', 'focus'] as const;
+
+/** The viewMode field type — a narrowed union of the three supported modes. */
+export type ViewMode = (typeof VIEW_MODES)[number];
+
+/**
+ * Apply a view mode to a settings JSON string.
+ * 'default' removes the viewMode key (Claude Code default behaviour);
+ * 'verbose' and 'focus' set the key explicitly.
+ */
+export function applyViewMode(settingsJson: string, mode: ViewMode): string {
+  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  if (mode === 'default') {
+    delete settings[VIEW_MODE_KEY];
+  } else {
+    settings[VIEW_MODE_KEY] = mode;
+  }
+  return JSON.stringify(settings, null, 2) + '\n';
+}
+
+/**
+ * Strip the viewMode key from a settings JSON string.
+ * Used during uninstall / flag strip to restore Claude Code defaults.
+ */
+export function stripViewMode(settingsJson: string): string {
+  const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  delete settings[VIEW_MODE_KEY];
   return JSON.stringify(settings, null, 2) + '\n';
 }

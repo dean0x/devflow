@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { LEGACY_PLUGIN_NAMES } from '../plugins.js';
+import { VIEW_MODES, ViewMode } from './flags.js';
 
 /**
  * Manifest data tracked for each Devflow installation.
@@ -19,6 +20,7 @@ export interface ManifestData {
     decisions: boolean;
     rules: boolean;
     flags: string[];
+    viewMode?: ViewMode;
   };
   installedAt: string;
   updatedAt: string;
@@ -67,6 +69,9 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         decisions: typeof features.decisions === 'boolean' ? features.decisions : false,
         rules: typeof features.rules === 'boolean' ? features.rules : true,
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
+        viewMode: typeof features.viewMode === 'string' && (VIEW_MODES as readonly string[]).includes(features.viewMode)
+          ? features.viewMode as ViewMode
+          : undefined,
       },
       installedAt: data.installedAt as string,
       updatedAt: data.updatedAt as string,

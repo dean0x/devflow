@@ -29,7 +29,7 @@ import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { addKnowledgeHook, removeKnowledgeHook } from './knowledge/index.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
-import { getDefaultFlags, applyFlags, stripFlags, FLAG_REGISTRY } from '../utils/flags.js';
+import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -382,6 +382,7 @@ export const initCommand = new Command('init')
     let decisionsEnabled = true;
     let rulesEnabled = true;
     let enabledFlags = getDefaultFlags();
+    let viewMode: ViewMode = 'default';
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
     let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
@@ -447,6 +448,7 @@ export const initCommand = new Command('init')
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
         `Agent Teams:     ${teamsEnabled ? 'enabled' : 'disabled'}`,
+        `View mode:       ${viewMode}`,
         `Claude Code flags: ${defaultFlagCount} enabled`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
         `${safeDeleteAction !== 'skip' ? 'Safe delete:     installed' : ''}`,
@@ -670,6 +672,29 @@ export const initCommand = new Command('init')
         process.exit(0);
       }
       enabledFlags = (flagSelection as string[]).filter(id => id !== '_separator');
+
+      // View mode selector (advanced only)
+      p.note(
+        'Controls how much detail Claude Code shows in the transcript.\n' +
+        '• default — normal display with expandable tool output\n' +
+        '• verbose — shows everything including thinking blocks\n' +
+        '• focus — minimal: prompt, one-line tool summaries, final response',
+        'View Mode',
+      );
+      const viewModeChoice = await p.select({
+        message: 'View mode',
+        options: [
+          { value: 'default', label: 'Default', hint: 'expandable tool output · recommended' },
+          { value: 'verbose', label: 'Verbose', hint: 'shows everything including thinking' },
+          { value: 'focus', label: 'Focus', hint: 'minimal output, one-line summaries' },
+        ],
+        initialValue: 'default',
+      });
+      if (p.isCancel(viewModeChoice)) {
+        p.cancel('Installation cancelled.');
+        process.exit(0);
+      }
+      viewMode = viewModeChoice as 'default' | 'verbose' | 'focus';
 
       // .claudeignore prompt
       if (earlyGitRoot) {
@@ -1066,6 +1091,21 @@ export const initCommand = new Command('init')
       content = stripFlags(content);
       content = applyFlags(content, enabledFlags);
 
+      // Preserve existing viewMode before stripping (user may have set it via /focus or settings.json)
+      try {
+        const parsed: unknown = JSON.parse(content);
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const existing = (parsed as Record<string, unknown>).viewMode;
+          if (VIEW_MODES.includes(existing as ViewMode) && existing !== 'default') {
+            viewMode = existing as ViewMode;
+          }
+        }
+      } catch { /* malformed settings.json — keep default */ }
+
+      // View mode — strip then apply for upgrade safety
+      content = stripViewMode(content);
+      content = applyViewMode(content, viewMode);
+
       if (content !== original) {
         await fs.writeFile(settingsPath, content, 'utf-8');
         if (verbose) {
@@ -1243,7 +1283,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

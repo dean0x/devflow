@@ -18,7 +18,7 @@ import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
-import { stripFlags } from '../utils/flags.js';
+import { stripFlags, stripViewMode } from '../utils/flags.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -412,6 +412,7 @@ export const uninstallCommand = new Command('uninstall')
           settingsContent = removeHudStatusLine(settingsContent);
           settingsContent = removeKnowledgeHook(settingsContent);
           settingsContent = stripFlags(settingsContent);
+          settingsContent = stripViewMode(settingsContent);
 
           if (settingsContent !== originalContent) {
             await fs.writeFile(settingsPath, settingsContent, 'utf-8');
