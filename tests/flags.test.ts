@@ -4,6 +4,9 @@ import {
   getDefaultFlags,
   applyFlags,
   stripFlags,
+  applyViewMode,
+  stripViewMode,
+  type ViewMode,
 } from '../src/cli/utils/flags.js';
 
 describe('FLAG_REGISTRY', () => {
@@ -223,5 +226,88 @@ describe('stripFlags', () => {
     }
     expect(result.env.CUSTOM).toBe('value');
     expect(result.hooks).toEqual({ Stop: [] });
+  });
+});
+
+describe('applyViewMode', () => {
+  it('sets viewMode to verbose', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    const result = JSON.parse(applyViewMode(input, 'verbose'));
+    expect(result.viewMode).toBe('verbose');
+  });
+
+  it('sets viewMode to focus', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    const result = JSON.parse(applyViewMode(input, 'focus'));
+    expect(result.viewMode).toBe('focus');
+  });
+
+  it('removes viewMode key when mode is default', () => {
+    const input = JSON.stringify({ hooks: {}, viewMode: 'verbose' }, null, 2);
+    const result = JSON.parse(applyViewMode(input, 'default'));
+    expect(result.viewMode).toBeUndefined();
+  });
+
+  it('does not add viewMode key when mode is default and key is absent', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    const result = JSON.parse(applyViewMode(input, 'default'));
+    expect(result.viewMode).toBeUndefined();
+    expect(Object.keys(result)).not.toContain('viewMode');
+  });
+
+  it('preserves existing settings when applying view mode', () => {
+    const input = JSON.stringify({
+      hooks: { Stop: [] },
+      env: { EXISTING: 'keep' },
+    }, null, 2);
+    const result = JSON.parse(applyViewMode(input, 'focus'));
+    expect(result.hooks).toEqual({ Stop: [] });
+    expect(result.env.EXISTING).toBe('keep');
+    expect(result.viewMode).toBe('focus');
+  });
+
+  it('overwrites an existing viewMode value', () => {
+    const input = JSON.stringify({ viewMode: 'verbose' }, null, 2);
+    const result = JSON.parse(applyViewMode(input, 'focus'));
+    expect(result.viewMode).toBe('focus');
+  });
+});
+
+describe('stripViewMode', () => {
+  it('removes viewMode key', () => {
+    const input = JSON.stringify({ viewMode: 'verbose', hooks: {} }, null, 2);
+    const result = JSON.parse(stripViewMode(input));
+    expect(result.viewMode).toBeUndefined();
+    expect(result.hooks).toEqual({});
+  });
+
+  it('handles missing viewMode key gracefully', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    const result = JSON.parse(stripViewMode(input));
+    expect(result).toEqual({ hooks: {} });
+  });
+
+  it('preserves all other settings', () => {
+    const input = JSON.stringify({
+      viewMode: 'focus',
+      hooks: { Stop: [] },
+      env: { CUSTOM: 'value' },
+    }, null, 2);
+    const result = JSON.parse(stripViewMode(input));
+    expect(result.viewMode).toBeUndefined();
+    expect(result.hooks).toEqual({ Stop: [] });
+    expect(result.env.CUSTOM).toBe('value');
+  });
+
+  it('roundtrip: applyViewMode then stripViewMode restores original', () => {
+    const base = JSON.stringify({ hooks: { Stop: [] } }, null, 2);
+    const modes: ViewMode[] = ['verbose', 'focus', 'default'];
+    for (const mode of modes) {
+      const applied = applyViewMode(base, mode);
+      const stripped = stripViewMode(applied);
+      const result = JSON.parse(stripped);
+      expect(result.viewMode).toBeUndefined();
+      expect(result.hooks).toEqual({ Stop: [] });
+    }
   });
 });

@@ -77,7 +77,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, decisions: false, rules: true, flags: [] },
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 'verbose' },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -169,6 +169,68 @@ describe('readManifest', () => {
     const healed = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8'));
     expect(healed.features.knowledge).toBe(true);
     expect(healed.features.kb).toBeUndefined();
+  });
+
+  it('normalizes missing viewMode to undefined', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, decisions: false, rules: true, flags: [] },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.viewMode).toBeUndefined();
+  });
+
+  it('preserves valid viewMode values (verbose, focus, default)', async () => {
+    for (const mode of ['verbose', 'focus', 'default'] as const) {
+      const data = {
+        version: '1.4.0',
+        plugins: ['devflow-core-skills'],
+        scope: 'user',
+        features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: mode },
+        installedAt: '2026-03-01T00:00:00.000Z',
+        updatedAt: '2026-03-13T00:00:00.000Z',
+      };
+      await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+      const result = await readManifest(tmpDir);
+      expect(result).not.toBeNull();
+      expect(result!.features.viewMode).toBe(mode);
+    }
+  });
+
+  it('normalizes invalid viewMode string to undefined', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 'invalid-mode' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.viewMode).toBeUndefined();
+  });
+
+  it('normalizes non-string viewMode to undefined', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { teams: false, ambient: true, memory: true, learn: false, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 42 },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.viewMode).toBeUndefined();
   });
 });
 
