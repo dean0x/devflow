@@ -152,17 +152,17 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 
 ## Phase 7: CI Status Gate
 
-<!-- SYNC: ci-status-gate -->
 **Produces:** CI_STATUS
 **Requires:** PR_URL, CODER_COMMITS
 
+<!-- PATTERN: ci-status-gate — shared polling/classification/budget logic; context-specific preamble lives outside this block -->
 1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.
-2. **If PASSING** → proceed to Phase 8.
-3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 8.
-4. **If PENDING** → poll every 60 seconds, max 10 iterations. Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after timeout → report "CI still running — verify manually before merging" and proceed.
+2. **If PASSING** → proceed to next phase.
+3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
+4. **If PENDING** → poll every 60 seconds (global budget, see step 6). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
 5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
 6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
-<!-- /SYNC: ci-status-gate -->
+<!-- /PATTERN: ci-status-gate -->
 
 ## Phase 8: Completion
 
