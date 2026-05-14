@@ -29,7 +29,7 @@ import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { addKnowledgeHook, removeKnowledgeHook } from './knowledge/index.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
-import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY } from '../utils/flags.js';
+import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -382,7 +382,7 @@ export const initCommand = new Command('init')
     let decisionsEnabled = true;
     let rulesEnabled = true;
     let enabledFlags = getDefaultFlags();
-    let viewMode: 'default' | 'verbose' | 'focus' = 'default';
+    let viewMode: ViewMode = 'default';
     let claudeignoreEnabled = !!earlyGitRoot;
     let discoveredProjects: string[] = [];
     let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
@@ -436,18 +436,6 @@ export const initCommand = new Command('init')
         else if (state === 'outdated') safeDeleteAction = 'upgrade';
         else safeDeleteAction = 'install';
       }
-
-      // Preserve existing viewMode (user may have set it via /focus or settings.json)
-      try {
-        const settingsDir = scope === 'user'
-          ? path.join(os.homedir(), '.claude')
-          : path.join(earlyGitRoot ?? '.', '.claude');
-        const currentSettings = await fs.readFile(path.join(settingsDir, 'settings.json'), 'utf-8');
-        const parsed = JSON.parse(currentSettings) as Record<string, unknown>;
-        if (parsed.viewMode === 'verbose' || parsed.viewMode === 'focus') {
-          viewMode = parsed.viewMode;
-        }
-      } catch { /* fresh install — use default */ }
 
       // Print summary
       const defaultFlagCount = enabledFlags.length;
@@ -1102,6 +1090,17 @@ export const initCommand = new Command('init')
       // Claude Code flags — strip all managed keys, then re-apply selected flags
       content = stripFlags(content);
       content = applyFlags(content, enabledFlags);
+
+      // Preserve existing viewMode before stripping (user may have set it via /focus or settings.json)
+      try {
+        const parsed: unknown = JSON.parse(content);
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const existing = (parsed as Record<string, unknown>).viewMode;
+          if (VIEW_MODES.includes(existing as ViewMode) && existing !== 'default') {
+            viewMode = existing as ViewMode;
+          }
+        }
+      } catch { /* malformed settings.json — keep default */ }
 
       // View mode — strip then apply for upgrade safety
       content = stripViewMode(content);
