@@ -2,7 +2,7 @@ import { execSync, spawn, ChildProcess } from 'child_process';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { resolve } from 'path';
 
-const CLASSIFICATION_PATTERN = /devflow:\s*(CHAT|EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE|RESEARCH|RELEASE)\s*[.]/i;
+const CLASSIFICATION_PATTERN = /devflow:\s*(EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE|RESEARCH|RELEASE)\s*[.]/i;
 const SCOPE_PATTERN = /scope:\s*(GUIDED|ORCHESTRATED)/i;
 
 /**

@@ -402,6 +402,12 @@ describe('classification helpers', () => {
     expect(hasClassification(textResult(''))).toBe(false);
   });
 
+  it('rejects old INTENT/DEPTH format', () => {
+    expect(hasClassification(textResult('Devflow: IMPLEMENT/ORCHESTRATED'))).toBe(false);
+    expect(hasClassification(textResult('Devflow: IMPLEMENT/GUIDED'))).toBe(false);
+    expect(hasClassification(textResult('Devflow: DEBUG/ORCHESTRATED'))).toBe(false);
+  });
+
   it('extracts intent', () => {
     expect(extractIntent(textResult('Devflow: IMPLEMENT. Loading: devflow:implement:triage.'))).toBe('IMPLEMENT');
     expect(extractIntent(textResult('Devflow: DEBUG. Loading: devflow:debug:triage.'))).toBe('DEBUG');
