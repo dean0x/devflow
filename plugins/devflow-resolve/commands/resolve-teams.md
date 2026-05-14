@@ -245,7 +245,22 @@ FILES_CHANGED: {list of files modified by Resolvers}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
-### Phase 7: Manage Tech Debt (Sequential)
+### Phase 7: CI Status Gate (Conditional)
+
+**Produces:** CI_STATUS
+**Requires:** RESOLUTION_RESULTS
+
+If no issues were fixed (RESOLUTION_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
+
+Otherwise, for each worktree with fixes:
+
+1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `WORKTREE_PATH`.
+2. **If PASSING** → proceed to Phase 8.
+3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 8.
+4. **If PENDING** → poll every 60 seconds, max 10 iterations. Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after timeout → report "CI still running — verify manually before merging" and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+
+### Phase 8: Manage Tech Debt (Sequential)
 
 **Produces:** DEBT_RESULT
 **Requires:** RESOLUTION_RESULTS, TARGET_DIR
@@ -263,7 +278,7 @@ TIMESTAMP: {timestamp}
 Note: Deferred issues from resolution are already in resolution-summary.md"
 ```
 
-### Phase 8: Report
+### Phase 9: Report
 
 **Requires:** AGGREGATED_RESULTS, KNOWLEDGE_CITATIONS, TARGET_DIR
 
@@ -328,10 +343,13 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 6: Simplify
 │  └─ Simplifier agent (refine fixes)
 │
-├─ Phase 7: Git agent (manage-debt) — SEQUENTIAL across worktrees
+├─ Phase 7: CI Status Gate (conditional — skipped if no fixes)
+│  └─ Git agent (check-ci-status) → poll/fix loop
+│
+├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 8: Write resolution-summary.md + display results
+└─ Phase 9: Write resolution-summary.md + display results
 ```
 
 ## Edge Cases

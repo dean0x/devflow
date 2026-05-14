@@ -393,8 +393,8 @@ describe('hasAmbientHook', () => {
 
 describe('classification helpers', () => {
   it('detects classification marker', () => {
-    expect(hasClassification(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe(true);
-    expect(hasClassification(textResult('Devflow: DEBUG/ORCHESTRATED. Loading: devflow:debug:orch.'))).toBe(true);
+    expect(hasClassification(textResult('Devflow: IMPLEMENT. Loading: devflow:implement:triage.'))).toBe(true);
+    expect(hasClassification(textResult('Devflow: DEBUG. Loading: devflow:debug:triage.'))).toBe(true);
   });
 
   it('returns false when no classification', () => {
@@ -403,17 +403,17 @@ describe('classification helpers', () => {
   });
 
   it('extracts intent', () => {
-    expect(extractIntent(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('IMPLEMENT');
-    expect(extractIntent(textResult('Devflow: DEBUG/ORCHESTRATED. Loading: devflow:debug:orch.'))).toBe('DEBUG');
-    expect(extractIntent(textResult('Devflow: REVIEW/GUIDED. Loading: devflow:quality-gates.'))).toBe('REVIEW');
-    expect(extractIntent(textResult('Devflow: PLAN/GUIDED. Loading: devflow:software-design.'))).toBe('PLAN');
-    expect(extractIntent(textResult('Devflow: EXPLORE/QUICK'))).toBe('EXPLORE');
-    expect(extractIntent(textResult('Devflow: CHAT/QUICK'))).toBe('CHAT');
+    expect(extractIntent(textResult('Devflow: IMPLEMENT. Loading: devflow:implement:triage.'))).toBe('IMPLEMENT');
+    expect(extractIntent(textResult('Devflow: DEBUG. Loading: devflow:debug:triage.'))).toBe('DEBUG');
+    expect(extractIntent(textResult('Devflow: REVIEW. Loading: devflow:review:triage.'))).toBe('REVIEW');
+    expect(extractIntent(textResult('Devflow: PLAN. Loading: devflow:plan:triage.'))).toBe('PLAN');
+    expect(extractIntent(textResult('Devflow: RESOLVE. Loading: devflow:resolve:orch.'))).toBe('RESOLVE');
+    expect(extractIntent(textResult('Devflow: RESEARCH. Loading: devflow:research:triage.'))).toBe('RESEARCH');
   });
 
-  it('extracts depth', () => {
-    expect(extractDepth(textResult('Devflow: IMPLEMENT/GUIDED. Loading: devflow:software-design.'))).toBe('GUIDED');
-    expect(extractDepth(textResult('Devflow: DEBUG/ORCHESTRATED. Loading: devflow:debug:orch.'))).toBe('ORCHESTRATED');
+  it('extracts depth from triage output', () => {
+    expect(extractDepth(textResult('Scope: GUIDED'))).toBe('GUIDED');
+    expect(extractDepth(textResult('Scope: ORCHESTRATED'))).toBe('ORCHESTRATED');
   });
 
   it('returns null for missing classification', () => {
@@ -422,14 +422,14 @@ describe('classification helpers', () => {
   });
 
   it('CLASSIFICATION_PATTERN matches model output variations', () => {
-    // Canonical format (model instruction says "Devflow: INTENT/DEPTH")
-    expect(hasClassification(textResult('Devflow: IMPLEMENT/GUIDED'))).toBe(true);
+    // Canonical format (model instruction says "Devflow: INTENT. Loading:")
+    expect(hasClassification(textResult('Devflow: IMPLEMENT. Loading: devflow:implement:triage.'))).toBe(true);
     // Lowercase (model might vary casing)
-    expect(hasClassification(textResult('devflow: implement/guided'))).toBe(true);
+    expect(hasClassification(textResult('devflow: implement. Loading: devflow:implement:triage.'))).toBe(true);
     // No space after colon
-    expect(hasClassification(textResult('Devflow:CHAT/QUICK'))).toBe(true);
+    expect(hasClassification(textResult('Devflow:IMPLEMENT.'))).toBe(true);
     // Extra whitespace
-    expect(hasClassification(textResult('Devflow:  PLAN / ORCHESTRATED'))).toBe(true);
+    expect(hasClassification(textResult('Devflow:  PLAN.'))).toBe(true);
   });
 });
 
@@ -450,11 +450,11 @@ describe('parseStreamEvent', () => {
     const event = {
       type: 'assistant',
       message: { content: [
-        { type: 'text', text: 'Devflow: IMPLEMENT/GUIDED' },
+        { type: 'text', text: 'Devflow: IMPLEMENT. Loading: devflow:implement:triage.' },
       ] },
     };
     const parsed = parseStreamEvent(event);
-    expect(parsed.textFragments).toEqual(['Devflow: IMPLEMENT/GUIDED']);
+    expect(parsed.textFragments).toEqual(['Devflow: IMPLEMENT. Loading: devflow:implement:triage.']);
     expect(parsed.skills).toEqual([]);
   });
 
@@ -475,14 +475,14 @@ describe('parseStreamEvent', () => {
     const event = {
       type: 'assistant',
       message: { content: [
-        { type: 'text', text: 'Devflow: DEBUG/ORCHESTRATED' },
-        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:debug:orch' } },
-        { type: 'text', text: 'Loading debug orchestrator.' },
+        { type: 'text', text: 'Devflow: DEBUG. Loading: devflow:debug:triage.' },
+        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:debug:triage' } },
+        { type: 'text', text: 'Loading debug triage.' },
       ] },
     };
     const parsed = parseStreamEvent(event);
-    expect(parsed.skills).toEqual(['devflow:debug:orch']);
-    expect(parsed.textFragments).toEqual(['Devflow: DEBUG/ORCHESTRATED', 'Loading debug orchestrator.']);
+    expect(parsed.skills).toEqual(['devflow:debug:triage']);
+    expect(parsed.textFragments).toEqual(['Devflow: DEBUG. Loading: devflow:debug:triage.', 'Loading debug triage.']);
   });
 });
 
@@ -496,9 +496,9 @@ describe('skill invocation helpers', () => {
   });
 });
 
-/** Parse router SKILL.md two-column Workflow Skills table into intent→{guided, orchestrated} map */
-function parseWorkflowTable(content: string): Map<string, { guided: string | null; orchestrated: string | null }> {
-  const table = new Map<string, { guided: string | null; orchestrated: string | null }>();
+/** Parse router SKILL.md single-column Workflow Skills table into intent→skill map */
+function parseWorkflowTable(content: string): Map<string, string> {
+  const table = new Map<string, string>();
 
   let inSection = false;
 
@@ -508,16 +508,10 @@ function parseWorkflowTable(content: string): Map<string, { guided: string | nul
 
     if (!inSection) continue;
 
-    const match = line.match(/^\|\s*(\w+)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/);
+    const match = line.match(/^\|\s*(\w+)\s*\|\s*(.+?)\s*\|$/);
     if (!match || match[1] === 'Intent') continue;
 
-    const guided = match[2].trim();
-    const orchestrated = match[3].trim();
-
-    table.set(match[1], {
-      guided: guided === '—' ? null : guided,
-      orchestrated: orchestrated === '—' ? null : orchestrated,
-    });
+    table.set(match[1], match[2].trim());
   }
 
   return table;
@@ -545,7 +539,7 @@ describe('router structural validation', () => {
   const rulesPath = path.resolve(__dirname, '../shared/skills/router/classification-rules.md');
   const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
 
-  it('router covers all non-CHAT intents (every intent has a row with at least one skill)', async () => {
+  it('router covers all non-CHAT intents (every intent has a row with a skill)', async () => {
     const rulesContent = await fs.readFile(rulesPath, 'utf-8');
     const routerContent = await fs.readFile(routerPath, 'utf-8');
 
@@ -554,32 +548,20 @@ describe('router structural validation', () => {
 
     for (const intent of nonChatIntents) {
       expect(table.has(intent), `Workflow Skills table missing intent: ${intent}`).toBe(true);
-      const entry = table.get(intent)!;
-      expect(
-        entry.guided !== null || entry.orchestrated !== null,
-        `${intent}: must have at least one non-null skill`,
-      ).toBe(true);
     }
   });
 
-  it('ORCHESTRATED column entries map to :orch skills', async () => {
+  it('dual-mode intents map to :triage skills, orch-only intents map to :orch skills', async () => {
     const routerContent = await fs.readFile(routerPath, 'utf-8');
     const table = parseWorkflowTable(routerContent);
 
-    for (const [intent, entry] of table) {
-      if (entry.orchestrated) {
-        expect(entry.orchestrated, `${intent} ORCHESTRATED: must be an :orch skill`).toMatch(/^devflow:\w[\w-]*:orch$/);
-      }
-    }
-  });
+    const orchOnly = new Set(['RESOLVE', 'PIPELINE']);
 
-  it('GUIDED column entries map to :guided skills', async () => {
-    const routerContent = await fs.readFile(routerPath, 'utf-8');
-    const table = parseWorkflowTable(routerContent);
-
-    for (const [intent, entry] of table) {
-      if (entry.guided) {
-        expect(entry.guided, `${intent} GUIDED: must be a :guided skill`).toMatch(/^devflow:\w[\w-]*:guided$/);
+    for (const [intent, skill] of table) {
+      if (orchOnly.has(intent)) {
+        expect(skill, `${intent}: orch-only intent must map to :orch skill`).toMatch(/^devflow:\w[\w-]*:orch$/);
+      } else {
+        expect(skill, `${intent}: dual-mode intent must map to :triage skill`).toMatch(/^devflow:\w[\w-]*:triage$/);
       }
     }
   });
@@ -590,56 +572,24 @@ describe('router structural validation', () => {
 
     const entries = await fs.readdir(sharedSkillsDir);
 
-    for (const [intent, entry] of table) {
-      for (const skill of [entry.guided, entry.orchestrated]) {
-        if (!skill) continue;
-        const skillName = skill.replace('devflow:', '');
-        expect(entries, `shared/skills/${skillName}/ not found — router references nonexistent skill`).toContain(skillName);
-      }
+    for (const [intent, skill] of table) {
+      const skillName = skill.replace('devflow:', '');
+      expect(entries, `shared/skills/${skillName}/ not found — router references nonexistent skill`).toContain(skillName);
     }
   });
 
-  it('integration test skill assertions align with router workflow table', async () => {
-    const integrationPath = path.resolve(__dirname, './integration/ambient-activation.test.ts');
-    const routerContent = await fs.readFile(routerPath, 'utf-8');
-    const testContent = await fs.readFile(integrationPath, 'utf-8');
-    const table = parseWorkflowTable(routerContent);
+  it('all 7 triage skills exist with correct frontmatter', async () => {
+    const triageIntents = ['implement', 'debug', 'explore', 'plan', 'review', 'research', 'release'];
 
-    const blocks = testContent.split(/\bit\(/);
+    for (const intent of triageIntents) {
+      const skillPath = path.join(sharedSkillsDir, `${intent}:triage`, 'SKILL.md');
+      const content = await fs.readFile(skillPath, 'utf-8');
 
-    for (const block of blocks) {
-      const nameMatch = block.match(/^'([^']+)'/);
-      if (!nameMatch) continue;
-      const name = nameMatch[1];
-
-      const classMatch = name.match(/(IMPLEMENT|EXPLORE|DEBUG|PLAN|REVIEW|RESOLVE|PIPELINE|RESEARCH|RELEASE)\/(GUIDED|ORCHESTRATED)/);
-      if (!classMatch) continue;
-
-      const [, intent, depth] = classMatch;
-      const routerEntry = table.get(intent);
-
-      expect(routerEntry, `${name}: router has no row for ${intent}`).toBeDefined();
-      if (!routerEntry) continue;
-
-      const expectedSkill = depth === 'GUIDED' ? routerEntry.guided : routerEntry.orchestrated;
-      if (!expectedSkill) continue;
-
-      const skillName = expectedSkill.replace('devflow:', '');
-      const arrayMatch = block.match(/const (?:required|soft) = \[([^\]]*)\]/);
-      if (!arrayMatch) continue;
-
-      const testSkills = arrayMatch[1]
-        .split(',')
-        .map(s => s.trim().replace(/['"]/g, ''))
-        .filter(Boolean);
-
-      const hasSkillInArray = testSkills.includes(skillName);
-      const hasSkillInRequiredCall = block.includes(`'${skillName}'`);
-
-      expect(
-        hasSkillInArray || hasSkillInRequiredCall,
-        `${name}: test does not assert '${skillName}' but router maps ${intent}/${depth} → ${expectedSkill}`,
-      ).toBe(true);
+      expect(content, `${intent}:triage missing name in frontmatter`).toContain(`name: ${intent}:triage`);
+      expect(content, `${intent}:triage must be non-user-invocable`).toContain('user-invocable: false');
+      expect(content, `${intent}:triage must have Skill in allowed-tools`).toContain('Skill');
+      expect(content, `${intent}:triage must reference :guided target`).toContain(`${intent}:guided`);
+      expect(content, `${intent}:triage must reference :orch target`).toContain(`${intent}:orch`);
     }
   });
 });
@@ -679,12 +629,14 @@ describe('preamble drift detection', () => {
     expect(rulesContent).toContain('RESEARCH');
     expect(rulesContent).toContain('RELEASE');
 
-    // Must contain all 3 depths
+    // Must contain QUICK criteria
     expect(rulesContent).toContain('QUICK');
-    expect(rulesContent).toContain('GUIDED');
-    expect(rulesContent).toContain('ORCHESTRATED');
+    expect(rulesContent).toContain('## QUICK Criteria');
 
-    // Must reference devflow:router for GUIDED/ORCHESTRATED
+    // Must NOT contain depth criteria section (moved to triage skills)
+    expect(rulesContent).not.toContain('## Depth Criteria');
+
+    // Must reference devflow:router
     expect(rulesContent).toContain('devflow:router');
   });
 
@@ -692,10 +644,9 @@ describe('preamble drift detection', () => {
     const routerPath = path.resolve(__dirname, '../shared/skills/router/SKILL.md');
     const routerContent = await fs.readFile(routerPath, 'utf-8');
 
-    // Must contain unified Workflow Skills table with both depth columns
+    // Must contain Workflow Skills table with single Skill column
     expect(routerContent).toContain('## Workflow Skills');
-    expect(routerContent).toContain('| GUIDED |');
-    expect(routerContent).toContain('| ORCHESTRATED |');
+    expect(routerContent).toContain('| Skill |');
 
     // Must contain classification output format
     expect(routerContent).toContain('Devflow:');

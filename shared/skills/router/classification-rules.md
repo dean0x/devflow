@@ -1,6 +1,6 @@
 # Ambient Classification
 
-Classify each prompt by **intent** and **depth** before responding.
+Classify each prompt by **intent** before responding.
 
 ## Intent Signals
 
@@ -15,18 +15,17 @@ Classify each prompt by **intent** and **depth** before responding.
 - **RESEARCH**: "research", "compare options", "evaluate alternatives", "analyze options", "what libraries", "how do others"
 - **RELEASE**: "release", "publish", "version bump", "cut a release", "prepare release", "deploy", "ship it"
 
-## Depth Criteria
+## QUICK Criteria
 
-- **QUICK**: CHAT intent. Single-answer lookups ("where is X?"). Git ops (commit, push, pull, branch, tag, stash, diff, status). Config changes. Rename/comment tweaks. 1-2 line edits with explicit target.
-- **GUIDED**: Quick focused changes without a plan — ≤2 files, clear bugs with known fix, focused exploration, quick review. Orchestration would add no value.
-- **ORCHESTRATED**: Substantive code work — multi-file, multi-module, complex or vague bugs, full reviews, system-level design. A detailed plan or specification in the prompt is a strong ORCHESTRATED signal. RESOLVE and PIPELINE always.
+- **CHAT** intent — always QUICK
+- Single-answer lookups ("where is X?")
+- Git ops (commit, push, pull, branch, tag, stash, diff, status)
+- Config changes, rename/comment tweaks
+- 1-2 line edits with explicit target
 
-Default to ORCHESTRATED for substantive work — it produces better results.
-Reserve GUIDED for small focused changes where orchestration adds no value.
-Prefer GUIDED over QUICK for any prompt involving code changes — UNLESS the
-change AND target are both explicit and trivial (e.g., "rename foo to bar in
-utils.ts", "change color from red to blue in header.tsx"). Such single-site,
-obvious edits stay QUICK.
+Prefer QUICK only when the change AND target are both explicit and trivial
+(e.g., "rename foo to bar in utils.ts"). Any prompt involving substantive
+code changes should go through the router.
 
 ## Disambiguation
 
@@ -34,11 +33,10 @@ obvious edits stay QUICK.
 - **EXPLORE vs PLAN**: EXPLORE seeks to understand what EXISTS. PLAN designs what SHOULD BE. "analyze this architecture" → EXPLORE. "redesign this architecture" → PLAN.
 - **REVIEW vs EXPLORE**: REVIEW evaluates quality/correctness. EXPLORE seeks understanding. "look at this for issues" → REVIEW. "look at how this works" → EXPLORE.
 - **DEBUG vs IMPLEMENT**: DEBUG requires investigation to find root cause. "fix this typo" → IMPLEMENT. "fix this intermittent failure" → DEBUG.
-- **REVIEW depth continuation**: If previous classification was IMPLEMENT, REVIEW inherits that depth.
 
 ## Action
 
 Classify every message — including the first message of a session — then:
 
 - **QUICK**: Respond directly. Do not display classification or load the router.
-- **GUIDED/ORCHESTRATED**: Load `devflow:router` via Skill tool.
+- **Otherwise**: Load `devflow:router` via Skill tool.

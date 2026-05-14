@@ -37,7 +37,7 @@ If this condition is true → execute **Re-validation Path**:
 2. Skip Phases 3-4 (no Coder needed)
 3. Run Phase 5 (FILES_CHANGED Detection) using the existing branch
 4. Run Phase 6 (Quality Gates) on detected changes
-5. Proceed to Phase 7 (Completion)
+5. Proceed to Phase 8 (Completion)
 
 If not → proceed with the full pipeline below.
 
@@ -150,7 +150,18 @@ Run sequentially — each gate must pass before the next:
 
 If any gate exhausts retries, halt pipeline and report what passed and what failed.
 
-## Phase 7: Completion
+## Phase 7: CI Status Gate
+
+**Produces:** CI_STATUS
+**Requires:** PR_URL, CODER_COMMITS
+
+1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.
+2. **If PASSING** → proceed to Phase 8.
+3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 8.
+4. **If PENDING** → poll every 60 seconds, max 10 iterations. Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after timeout → report "CI still running — verify manually before merging" and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+
+## Phase 8: Completion
 
 **Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS, PR_URL
 
@@ -161,7 +172,7 @@ After quality gates pass, check for overlapping feature knowledge entries whose 
 ```bash
 OVERLAPPING_SLUGS=$(node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs find-overlapping "{worktree}" {files_changed...} 2>/dev/null)
 ```
-Parse the JSON array output to get slug strings. Pass `OVERLAPPING_SLUGS` to Phase 8.
+Parse the JSON array output to get slug strings. Pass `OVERLAPPING_SLUGS` to Phase 9.
 
 Report results:
 - PR URL (from Coder)
@@ -169,7 +180,7 @@ Report results:
 - Files changed
 - Quality gate results (pass/fail per gate)
 
-## Phase 8: Feature Knowledge Generation (Conditional)
+## Phase 9: Feature Knowledge Generation (Conditional)
 
 **Requires:** FILES_CHANGED, STALE_FEATURE_KNOWLEDGE_SLUGS, OVERLAPPING_SLUGS, DECISIONS_CONTEXT
 **Produces:** Updated `.features/index.json` (or skipped)
@@ -249,7 +260,8 @@ Before reporting results, verify every phase was announced:
 - [ ] Phase 4: Coder Execution → CODER_COMMITS, PRE_CODER_SHA, PR_URL captured
 - [ ] Phase 5: FILES_CHANGED Detection → FILES_CHANGED captured
 - [ ] Phase 6: Quality Gates → GATE_RESULTS captured (per gate: pass/fail)
-- [ ] Phase 7: Completion → Results reported, OVERLAPPING_SLUGS captured
-- [ ] Phase 8: Feature Knowledge Generation → Knowledge agent spawned and index updated (or skipped if all areas covered or feature disabled)
+- [ ] Phase 7: CI Status Gate → CI_STATUS captured (or skipped if no PR/CI)
+- [ ] Phase 8: Completion → Results reported, OVERLAPPING_SLUGS captured
+- [ ] Phase 9: Feature Knowledge Generation → Knowledge agent spawned and index updated (or skipped if all areas covered or feature disabled)
 
 If any phase is unchecked, execute it before proceeding.

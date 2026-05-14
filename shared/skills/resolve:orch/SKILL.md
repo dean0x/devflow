@@ -110,7 +110,22 @@ Extract all decisions citations from Resolver Reasoning columns. Collect unique 
 
 Then spawn `Agent(subagent_type="Simplifier")` on all files modified by Resolvers.
 
-## Phase 7: Report
+## Phase 7: CI Status Gate (Conditional)
+
+**Produces:** CI_STATUS
+**Requires:** RESOLUTION_RESULTS
+
+If no issues were fixed (RESOLUTION_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
+
+Otherwise:
+
+1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status`.
+2. **If PASSING** → proceed to Phase 8.
+3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 8.
+4. **If PENDING** → poll every 60 seconds, max 10 iterations. Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after timeout → report "CI still running — verify manually before merging" and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+
+## Phase 8: Report
 
 **Requires:** REVIEW_DIR
 
@@ -140,6 +155,7 @@ Before reporting results, verify every phase was announced:
 - [ ] Phase 4: Analyze & Batch → BATCHES captured
 - [ ] Phase 5: Resolve → RESOLUTION_RESULTS captured per batch
 - [ ] Phase 6: Collect & Simplify → SIMPLIFICATION_RESULTS captured
-- [ ] Phase 7: Report → resolution-summary.md written
+- [ ] Phase 7: CI Status Gate → CI_STATUS captured (or skipped if no fixes/no PR/no CI)
+- [ ] Phase 8: Report → resolution-summary.md written
 
 If any phase is unchecked, execute it before proceeding.

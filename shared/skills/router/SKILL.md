@@ -1,13 +1,13 @@
 ---
 name: router
-description: Maps intents and depth to workflow skills (guided or orchestrated). Dispatches by intent AND depth.
+description: Maps intents to workflow skills. Dispatches by intent to triage or orch skills.
 user-invocable: false
 ---
 
 # Router
 
-State classification: `Devflow: INTENT/DEPTH. Loading: [skill].`
-Load the skill for the classified intent and depth via Skill tool before writing any text about the task.
+State classification: `Devflow: {INTENT}. Loading: {skill}.`
+Load the skill for the classified intent via Skill tool before writing any text about the task.
 
 ## Phase Protocol
 
@@ -21,18 +21,18 @@ Applies to ORCHESTRATED pipelines only. GUIDED skills do not have phases.
 
 ## Workflow Skills
 
-Load the skill for the classified intent and depth via Skill tool.
+Load the skill for the classified intent via Skill tool.
 
-| Intent | GUIDED | ORCHESTRATED |
-|--------|--------|--------------|
-| IMPLEMENT | devflow:implement:guided | devflow:implement:orch |
-| EXPLORE | devflow:explore:guided | devflow:explore:orch |
-| DEBUG | devflow:debug:guided | devflow:debug:orch |
-| PLAN | devflow:plan:guided | devflow:plan:orch |
-| REVIEW | devflow:review:guided | devflow:review:orch |
-| RESOLVE | — | devflow:resolve:orch |
-| PIPELINE | — | devflow:pipeline:orch |
-| RESEARCH | devflow:research:guided | devflow:research:orch |
-| RELEASE | devflow:release:guided | devflow:release:orch |
+| Intent | Skill |
+|--------|-------|
+| IMPLEMENT | devflow:implement:triage |
+| EXPLORE | devflow:explore:triage |
+| DEBUG | devflow:debug:triage |
+| PLAN | devflow:plan:triage |
+| REVIEW | devflow:review:triage |
+| RESOLVE | devflow:resolve:orch |
+| PIPELINE | devflow:pipeline:orch |
+| RESEARCH | devflow:research:triage |
+| RELEASE | devflow:release:triage |
 
-If GUIDED column is `—`, load the ORCHESTRATED skill instead — the workflow does not support GUIDED depth.
+RESOLVE and PIPELINE have no guided variant — they go directly to orchestrated.
