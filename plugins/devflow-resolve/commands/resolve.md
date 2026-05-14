@@ -181,7 +181,7 @@ Aggregate from all Resolvers:
 
 Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches.
 
-**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 8 — while the aggregated results are fresh in context. Use the template from the Output Artifact section below. This ensures the resolution record is persisted even if later phases (Simplify, Tech Debt) trigger context compaction.
+**Immediately write `resolution-summary.md`** to `{TARGET_DIR}` using the Write tool. Do this now — not in Phase 9 — while the aggregated results are fresh in context. Use the template from the Output Artifact section below. This ensures the resolution record is persisted even if later phases (Simplify, Tech Debt) trigger context compaction.
 
 ### Phase 6: Simplify
 
@@ -200,6 +200,7 @@ Simplify and refine the fixes for clarity and consistency"
 
 ### Phase 7: CI Status Gate (Conditional)
 
+<!-- SYNC: ci-status-gate -->
 **Produces:** CI_STATUS
 **Requires:** RESOLUTION_RESULTS
 
@@ -212,6 +213,8 @@ Otherwise, for each worktree with fixes:
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 8.
 4. **If PENDING** → poll every 60 seconds, max 10 iterations. Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after timeout → report "CI still running — verify manually before merging" and proceed.
 5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
+<!-- /SYNC: ci-status-gate -->
 
 ### Phase 8: Manage Tech Debt (Sequential)
 

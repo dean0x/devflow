@@ -152,6 +152,7 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 
 ## Phase 7: CI Status Gate
 
+<!-- SYNC: ci-status-gate -->
 **Produces:** CI_STATUS
 **Requires:** PR_URL, CODER_COMMITS
 
@@ -160,6 +161,8 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 8.
 4. **If PENDING** → poll every 60 seconds, max 10 iterations. Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after timeout → report "CI still running — verify manually before merging" and proceed.
 5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
+<!-- /SYNC: ci-status-gate -->
 
 ## Phase 8: Completion
 
@@ -220,7 +223,7 @@ If `.features/.disabled` exists, skip entirely.
 
 Skip if all touched areas already have matching feature knowledge.
 
-**Refresh stale feature knowledge**: Combine STALE_FEATURE_KNOWLEDGE_SLUGS (from Phase 2) and OVERLAPPING_SLUGS (from Phase 7), deduplicate. For each slug, refresh:
+**Refresh stale feature knowledge**: Combine STALE_FEATURE_KNOWLEDGE_SLUGS (from Phase 2) and OVERLAPPING_SLUGS (from Phase 8), deduplicate. For each slug, refresh:
 
 1. Read `.features/{slug}/KNOWLEDGE.md` and index entry
 2. Spawn Agent(subagent_type="Knowledge"):

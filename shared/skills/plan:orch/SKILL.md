@@ -248,7 +248,7 @@ Otherwise: plan stays in conversation context, ready for IMPLEMENT to consume di
 
 ## Output
 
-Structured plan ready to feed into IMPLEMENT/ORCHESTRATED if user proceeds:
+Structured plan ready to feed into IMPLEMENT (ORCHESTRATED) if user proceeds:
 
 - Goal and scope
 - Gap analysis findings (blocking vs. should-address)
