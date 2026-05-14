@@ -219,7 +219,18 @@ export function stripFlags(settingsJson: string): string {
 
 const VIEW_MODE_KEY = 'viewMode';
 
-export function applyViewMode(settingsJson: string, mode: string): string {
+/** All valid view mode values. Used for validation at manifest read boundaries. */
+export const VIEW_MODES = ['default', 'verbose', 'focus'] as const;
+
+/** The viewMode field type — a narrowed union of the three supported modes. */
+export type ViewMode = (typeof VIEW_MODES)[number];
+
+/**
+ * Apply a view mode to a settings JSON string.
+ * 'default' removes the viewMode key (Claude Code default behaviour);
+ * 'verbose' and 'focus' set the key explicitly.
+ */
+export function applyViewMode(settingsJson: string, mode: ViewMode): string {
   const settings = JSON.parse(settingsJson) as Record<string, unknown>;
   if (mode === 'default') {
     delete settings[VIEW_MODE_KEY];
@@ -229,6 +240,10 @@ export function applyViewMode(settingsJson: string, mode: string): string {
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
+/**
+ * Strip the viewMode key from a settings JSON string.
+ * Used during uninstall / flag strip to restore Claude Code defaults.
+ */
 export function stripViewMode(settingsJson: string): string {
   const settings = JSON.parse(settingsJson) as Record<string, unknown>;
   delete settings[VIEW_MODE_KEY];
