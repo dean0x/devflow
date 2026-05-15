@@ -433,7 +433,7 @@ describe('classification helpers', () => {
     expect(extractDepth(textResult('Scope:  ORCHESTRATED'))).toBe('ORCHESTRATED');
   });
 
-  it('extractDepth does not match old slash format', () => {
+  it('extractDepth returns null for old INTENT/DEPTH format', () => {
     expect(extractDepth(textResult('Devflow: IMPLEMENT/ORCHESTRATED'))).toBeNull();
     expect(extractDepth(textResult('Devflow: DEBUG/GUIDED'))).toBeNull();
   });
@@ -539,6 +539,19 @@ function parseWorkflowTable(content: string): Map<string, string> {
   return table;
 }
 
+/** Extract lines between <!-- PATTERN: {name} --> markers */
+function extractPatternBlock(content: string, name: string = 'ci-status-gate'): string[] {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  let inside = false;
+  for (const line of lines) {
+    if (line.includes(`<!-- PATTERN: ${name}`)) { inside = true; continue; }
+    if (line.includes(`<!-- /PATTERN: ${name} -->`)) break;
+    if (inside) result.push(line);
+  }
+  return result;
+}
+
 /** Extract intent names from classification-rules.md Intent Signals section only */
 function parseClassificationIntents(content: string): string[] {
   const intents: string[] = [];
@@ -618,19 +631,6 @@ describe('router structural validation', () => {
   });
 
   it('ci-status-gate PATTERN block is consistent across implement:orch and resolve:orch', async () => {
-    /** Extract lines between <!-- PATTERN: ci-status-gate --> markers */
-    function extractPatternBlock(content: string): string[] {
-      const lines = content.split('\n');
-      const result: string[] = [];
-      let inside = false;
-      for (const line of lines) {
-        if (line.includes('<!-- PATTERN: ci-status-gate')) { inside = true; continue; }
-        if (line.includes('<!-- /PATTERN: ci-status-gate -->')) break;
-        if (inside) result.push(line);
-      }
-      return result;
-    }
-
     const implementContent = await fs.readFile(
       path.join(sharedSkillsDir, 'implement:orch', 'SKILL.md'),
       'utf-8',

@@ -23,6 +23,8 @@ if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
+[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+
 if [ -z "$PROMPT" ]; then exit 0; fi
 
 # Truncate to 2000 chars

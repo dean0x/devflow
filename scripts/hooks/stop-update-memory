@@ -37,6 +37,8 @@ if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 # Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
+[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+
 source "$SCRIPT_DIR/get-mtime" || { echo "stop-update-memory: failed to source get-mtime" >&2; exit 1; }
 
 # Logging
@@ -97,8 +99,9 @@ fi
 log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
 
 # D29: Usage scanner runs after queue append — memory capture is mission-critical, scanning is supplementary
+# Scanner is gated by decisions sentinel: skip if decisions feature is disabled
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
-if [ -f "$SCANNER" ]; then
+if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
   printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
 fi
 

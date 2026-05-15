@@ -15,6 +15,7 @@ const HOOK_SCRIPTS = [
   'background-memory-update',
   'stop-update-memory',
   'session-start-memory',
+  'session-start-context',
   'pre-compact-memory',
   'prompt-capture-memory',
   'preamble',

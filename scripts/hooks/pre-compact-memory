@@ -22,6 +22,8 @@ fi
 # Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
 source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore" "$CWD" || exit 0
 
+[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+
 BACKUP_FILE="$CWD/.memory/backup.json"
 
 # Capture git state

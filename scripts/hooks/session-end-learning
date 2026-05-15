@@ -30,6 +30,8 @@ CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 MEMORY_DIR="$CWD/.memory"
 [ ! -d "$MEMORY_DIR" ] && exit 0
 
+[ -f "$MEMORY_DIR/.learning-disabled" ] && exit 0
+
 # Learning config — hook presence in settings.json IS the enabled state, no dual check
 LEARNING_CONFIG="$MEMORY_DIR/learning.json"
 if [ -f "$LEARNING_CONFIG" ]; then

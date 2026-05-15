@@ -14,6 +14,7 @@ import { removeMemoryHooks } from './memory.js';
 import { removeLearningHook } from './learn.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeKnowledgeHook } from './knowledge/index.js';
+import { removeContextHook } from './init.js';
 import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
@@ -411,6 +412,7 @@ export const uninstallCommand = new Command('uninstall')
           settingsContent = removeLearningHook(settingsContent);
           settingsContent = removeHudStatusLine(settingsContent);
           settingsContent = removeKnowledgeHook(settingsContent);
+          settingsContent = removeContextHook(settingsContent);
           settingsContent = stripFlags(settingsContent);
           settingsContent = stripViewMode(settingsContent);
 
