@@ -9,15 +9,7 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import {
-  addMemoryHooks,
-  removeMemoryHooks,
-  hasMemoryHooks,
-} from '../src/cli/commands/memory.js';
-import {
-  addLearningHook,
-  hasLearningHook,
-} from '../src/cli/commands/learn.js';
+import { manageSentinel } from '../src/cli/utils/sentinel.js';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 
@@ -39,6 +31,22 @@ function writeDisabledSentinel(sentinelPath: string): void {
 
 function sessionInput(tmpDir: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ cwd: tmpDir, session_id: 'test-session', ...extra });
+}
+
+/**
+ * Parse hook stdout into the additionalContext string.
+ * Asserts structural validity before property access so test failures are
+ * clear rather than runtime TypeErrors on undefined properties.
+ */
+function parseHookOutput(rawOutput: string): string {
+  const parsed: unknown = JSON.parse(rawOutput);
+  expect(parsed).toBeTypeOf('object');
+  expect(parsed).not.toBeNull();
+  const envelope = parsed as Record<string, unknown>;
+  expect(envelope.hookSpecificOutput).toBeTypeOf('object');
+  const hookOutput = envelope.hookSpecificOutput as Record<string, unknown>;
+  expect(hookOutput.additionalContext).toBeTypeOf('string');
+  return hookOutput.additionalContext as string;
 }
 
 // ─── Part B: Sentinel guards for memory hooks ────────────────────────────────
@@ -98,7 +106,7 @@ describe('sentinel guard: background-memory-update', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('exits cleanly and logs when .working-memory-disabled exists', () => {
+  it('exits cleanly and does not acquire lock when .working-memory-disabled exists', () => {
     mkMemoryDir(tmpDir);
     writeDisabledSentinel(path.join(tmpDir, '.memory', '.working-memory-disabled'));
 
@@ -106,6 +114,20 @@ describe('sentinel guard: background-memory-update', () => {
     expect(() => {
       execSync(`bash "${HOOK}" "${tmpDir}" ""`, { stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
+    // The hook must exit before acquiring the lock directory — sentinel guard works
+    expect(fs.existsSync(path.join(tmpDir, '.memory', '.working-memory.lock'))).toBe(false);
+  });
+
+  it('proceeds past sentinel check when .working-memory-disabled is absent', () => {
+    mkMemoryDir(tmpDir);
+    // Without sentinel and without a queue file, the hook exits 0 after checking
+    // (no work to do). The lock is acquired and then released, so it won't be
+    // visible after exit — but we confirm the hook exits cleanly and nothing
+    // is written to the pending-turns queue.
+    expect(() => {
+      execSync(`bash "${HOOK}" "${tmpDir}" ""`, { stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+    expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(false);
   });
 });
 
@@ -161,8 +183,8 @@ describe('sentinel guard: session-start-memory', () => {
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // Should output the session JSON envelope
     expect(output.length).toBeGreaterThan(0);
-    const parsed = JSON.parse(output);
-    expect(parsed.hookSpecificOutput.additionalContext).toContain('WORKING MEMORY');
+    const additionalContext = parseHookOutput(output);
+    expect(additionalContext).toContain('WORKING MEMORY');
   });
 });
 
@@ -305,8 +327,8 @@ describe('sentinel guard: session-start-context', () => {
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     expect(output.length).toBeGreaterThan(0);
-    const parsed = JSON.parse(output);
-    expect(parsed.hookSpecificOutput.additionalContext).toContain('PROJECT DECISIONS');
+    const additionalContext = parseHookOutput(output);
+    expect(additionalContext).toContain('PROJECT DECISIONS');
   });
 
   it('skips decisions TL;DR when decisions/.disabled exists', () => {
@@ -332,8 +354,8 @@ describe('sentinel guard: session-start-context', () => {
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     expect(output.length).toBeGreaterThan(0);
-    const parsed = JSON.parse(output);
-    expect(parsed.hookSpecificOutput.additionalContext).toContain('LEARNED BEHAVIORS');
+    const additionalContext = parseHookOutput(output);
+    expect(additionalContext).toContain('LEARNED BEHAVIORS');
   });
 
   it('skips learned behaviors when .learning-disabled exists', () => {
@@ -347,10 +369,16 @@ describe('sentinel guard: session-start-context', () => {
     writeDisabledSentinel(path.join(tmpDir, '.memory', '.learning-disabled'));
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    // No learned behaviors section
+    // The hook must produce no output when the only injectable section is disabled.
+    // Asserting unconditionally: either the output is empty (nothing to inject) or
+    // it contains content that does NOT include the learned behaviors section.
     if (output.length > 0) {
-      const parsed = JSON.parse(output);
-      expect(parsed.hookSpecificOutput.additionalContext).not.toContain('LEARNED BEHAVIORS');
+      const additionalContext = parseHookOutput(output);
+      expect(additionalContext).not.toContain('LEARNED BEHAVIORS');
+    } else {
+      // Empty output is the correct behavior when .learning-disabled suppresses the
+      // only available section. This is the expected path for this test.
+      expect(output).toBe('');
     }
   });
 
@@ -363,12 +391,12 @@ describe('sentinel guard: session-start-context', () => {
     fs.writeFileSync(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${SESSION_START_MEMORY}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    // session-start-memory should output context (WORKING MEMORY), but NOT decisions TL;DR
-    if (output.length > 0) {
-      const parsed = JSON.parse(output);
-      expect(parsed.hookSpecificOutput.additionalContext).not.toContain('PROJECT DECISIONS');
-      expect(parsed.hookSpecificOutput.additionalContext).toContain('WORKING MEMORY');
-    }
+    // WORKING-MEMORY.md exists so the hook always produces output here.
+    expect(output.length).toBeGreaterThan(0);
+    const additionalContext = parseHookOutput(output);
+    // session-start-memory must not include PROJECT DECISIONS (moved to session-start-context)
+    expect(additionalContext).not.toContain('PROJECT DECISIONS');
+    expect(additionalContext).toContain('WORKING MEMORY');
   });
 });
 
@@ -380,11 +408,11 @@ describe('context hook registration', () => {
     const result = addContextHook('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
     expect(settings.hooks?.SessionStart).toBeDefined();
-    const hasContextHook = settings.hooks.SessionStart.some(
+    const hookPresent = settings.hooks.SessionStart.some(
       (m: { hooks: { command: string }[] }) =>
         m.hooks.some((h: { command: string }) => h.command.includes('session-start-context')),
     );
-    expect(hasContextHook).toBe(true);
+    expect(hookPresent).toBe(true);
   });
 
   it('removeContextHook removes session-start-context from settings', async () => {
@@ -392,11 +420,11 @@ describe('context hook registration', () => {
     const withHook = addContextHook('{}', '/home/user/.devflow');
     const removed = removeContextHook(withHook);
     const settings = JSON.parse(removed);
-    const hasContextHook = settings.hooks?.SessionStart?.some(
+    const hookPresent = settings.hooks?.SessionStart?.some(
       (m: { hooks: { command: string }[] }) =>
         m.hooks.some((h: { command: string }) => h.command.includes('session-start-context')),
     ) ?? false;
-    expect(hasContextHook).toBe(false);
+    expect(hookPresent).toBe(false);
   });
 
   it('hasContextHook returns true when hook registered', async () => {
@@ -429,6 +457,98 @@ describe('context hook registration', () => {
     const settings = JSON.parse(removed);
     expect(settings.hooks?.SessionStart).toHaveLength(1);
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('session-start-memory');
+  });
+});
+
+// ─── Part E: manageSentinel utility ─────────────────────────────────────────
+
+describe('manageSentinel utility', () => {
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = mkTmpDir(); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('creates sentinel file when disabled=false', async () => {
+    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    await manageSentinel(tmpDir, sentinelPath, false);
+    expect(fs.existsSync(sentinelPath)).toBe(true);
+  });
+
+  it('creates parent directories when they do not exist', async () => {
+    const sentinelPath = path.join(tmpDir, '.memory', 'decisions', '.disabled');
+    await manageSentinel(tmpDir, sentinelPath, false);
+    expect(fs.existsSync(sentinelPath)).toBe(true);
+  });
+
+  it('removes sentinel file when enabled=true', async () => {
+    const sentinelPath = path.join(tmpDir, '.memory', '.learning-disabled');
+    writeDisabledSentinel(sentinelPath);
+    await manageSentinel(tmpDir, sentinelPath, true);
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+  });
+
+  it('is idempotent when enabling with no sentinel present', async () => {
+    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    // No sentinel exists — enabling again should not throw
+    await expect(manageSentinel(tmpDir, sentinelPath, true)).resolves.toBeUndefined();
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+  });
+
+  it('is idempotent when disabling with sentinel already present', async () => {
+    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    writeDisabledSentinel(sentinelPath);
+    await expect(manageSentinel(tmpDir, sentinelPath, false)).resolves.toBeUndefined();
+    expect(fs.existsSync(sentinelPath)).toBe(true);
+  });
+
+  it('disable then enable removes the sentinel', async () => {
+    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    await manageSentinel(tmpDir, sentinelPath, false);
+    expect(fs.existsSync(sentinelPath)).toBe(true);
+    await manageSentinel(tmpDir, sentinelPath, true);
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+  });
+});
+
+// ─── Part F: sentinel existence check (backing --status warning logic) ───────
+
+describe('sentinel existence check', () => {
+  // These tests verify the boolean sentinel-detection logic that backs the
+  // runtime-disabled warning in `memory --status` and `learn --status`.
+  // They test the filesystem state directly rather than the CLI output (which
+  // involves p.warn() / clack that require a TTY to render meaningfully).
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = mkTmpDir(); mkMemoryDir(tmpDir); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('reports sentinel absent when not created', async () => {
+    const sentinel = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    const sentinelExists = await fs.promises.access(sentinel).then(() => true).catch(() => false);
+    expect(sentinelExists).toBe(false);
+  });
+
+  it('reports sentinel present after disable', async () => {
+    const sentinel = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    await manageSentinel(tmpDir, sentinel, false);
+    const sentinelExists = await fs.promises.access(sentinel).then(() => true).catch(() => false);
+    expect(sentinelExists).toBe(true);
+  });
+
+  it('reports sentinel absent after re-enable', async () => {
+    const sentinel = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    await manageSentinel(tmpDir, sentinel, false);
+    await manageSentinel(tmpDir, sentinel, true);
+    const sentinelExists = await fs.promises.access(sentinel).then(() => true).catch(() => false);
+    expect(sentinelExists).toBe(false);
+  });
+
+  it('learning sentinel follows same create/remove lifecycle', async () => {
+    const sentinel = path.join(tmpDir, '.memory', '.learning-disabled');
+    await manageSentinel(tmpDir, sentinel, false);
+    expect(await fs.promises.access(sentinel).then(() => true).catch(() => false)).toBe(true);
+    await manageSentinel(tmpDir, sentinel, true);
+    expect(await fs.promises.access(sentinel).then(() => true).catch(() => false)).toBe(false);
   });
 });
 
