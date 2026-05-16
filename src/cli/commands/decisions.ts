@@ -1,25 +1,16 @@
 import { Command } from 'commander';
-import { promises as fs, readFileSync } from 'fs';
-import * as path from 'path';
+import { promises as fs } from 'fs';
 import { execFileSync } from 'child_process';
+import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import type { HookMatcher, Settings } from '../utils/hooks.js';
+import { getDevFlowDirectory } from '../utils/paths.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
-import {
-  acquireBackgroundLock,
-  releaseBackgroundLock,
-  registerLockCleanup,
-  extractBatchMessages,
-  applyTemporalDecay,
-  capEntries,
-  checkStaleness,
-} from '../utils/background-runner.js';
-import { runDecisionsAgent } from '../utils/decisions-agent.js';
 import { loadDecisionsConfig } from '../utils/decisions-config.js';
 import { acquireMkdirLock } from '../utils/mkdir-lock.js';
+import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
+import { getGitRoot } from '../utils/git.js';
 import {
   isLearningObservation,
   formatStaleReason,
@@ -41,90 +32,6 @@ import {
 function isCountActiveResult(v: unknown): v is { count: number } {
   return typeof v === 'object' && v !== null && !Array.isArray(v) &&
     typeof (v as Record<string, unknown>).count === 'number';
-}
-
-// ---------------------------------------------------------------------------
-// Hook management
-// ---------------------------------------------------------------------------
-
-const DECISIONS_HOOK_MARKER = 'session-end-decisions';
-
-/**
- * Add the decisions SessionEnd hook to settings JSON.
- * Idempotent — returns unchanged JSON if the hook already exists.
- */
-export function addDecisionsHook(settingsJson: string, devflowDir: string): string {
-  if (hasDecisionsHook(settingsJson)) {
-    return settingsJson;
-  }
-
-  const settings: Settings = JSON.parse(settingsJson);
-
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-end-decisions';
-
-  const newEntry: HookMatcher = {
-    hooks: [
-      {
-        type: 'command',
-        command: hookCommand,
-        timeout: 10,
-      },
-    ],
-  };
-
-  if (!settings.hooks.SessionEnd) {
-    settings.hooks.SessionEnd = [];
-  }
-
-  settings.hooks.SessionEnd.push(newEntry);
-
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Remove the decisions hook from settings JSON.
- * Idempotent — returns unchanged JSON if hook not present.
- * Preserves other hooks. Cleans empty arrays/objects.
- */
-export function removeDecisionsHook(settingsJson: string): string {
-  const settings: Settings = JSON.parse(settingsJson);
-  let changed = false;
-
-  const matchers = settings.hooks?.SessionEnd;
-  if (matchers) {
-    const before = matchers.length;
-    settings.hooks!.SessionEnd = matchers.filter(
-      (m) => !m.hooks.some((h) => h.command.includes(DECISIONS_HOOK_MARKER)),
-    );
-    if (settings.hooks!.SessionEnd!.length < before) changed = true;
-    if (settings.hooks!.SessionEnd!.length === 0) delete settings.hooks!.SessionEnd;
-  }
-
-  if (!changed) {
-    return settingsJson;
-  }
-
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Check if the decisions hook is registered in settings JSON or parsed Settings object.
- * Returns true if present, false otherwise.
- */
-export function hasDecisionsHook(input: string | Settings): boolean {
-  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
-
-  return settings.hooks?.SessionEnd?.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(DECISIONS_HOOK_MARKER)),
-  ) ?? false;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,14 +142,12 @@ interface DecisionsOptions {
   purge?: boolean;
   review?: boolean;
   dismissCapacity?: boolean;
-  runBackground?: boolean;
-  cwd?: string;
 }
 
 export const decisionsCommand = new Command('decisions')
   .description('Enable or disable decisions/pitfall learning (decision detection + knowledge base)')
-  .option('--enable', 'Register SessionEnd hook for decisions learning')
-  .option('--disable', 'Remove decisions hook and create disabled sentinel')
+  .option('--enable', 'Enable decisions learning via sidecar config')
+  .option('--disable', 'Disable decisions learning via sidecar config')
   .option('--status', 'Show decisions status and observation counts')
   .option('--list', 'Show all decision/pitfall observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard for decisions.json')
@@ -251,12 +156,10 @@ export const decisionsCommand = new Command('decisions')
   .option('--purge', 'Remove invalid/corrupted entries from decisions log')
   .option('--review', 'Interactively review flagged decision/pitfall observations')
   .option('--dismiss-capacity', 'Dismiss the current capacity notification')
-  .option('--run-background', 'Run decisions agent in background mode')
-  .option('--cwd <path>', 'Working directory for background mode')
   .action(async (options: DecisionsOptions) => {
     const knownFlags: (keyof DecisionsOptions)[] = [
       'enable', 'disable', 'status', 'list', 'configure',
-      'clear', 'reset', 'purge', 'review', 'dismissCapacity', 'runBackground',
+      'clear', 'reset', 'purge', 'review', 'dismissCapacity',
     ];
     const hasFlag = knownFlags.some((f) => options[f]);
     if (!hasFlag) {
@@ -278,96 +181,15 @@ export const decisionsCommand = new Command('decisions')
       return;
     }
 
-    // --- --run-background ---
-    if (options.runBackground) {
-      const cwd = options.cwd ?? process.cwd();
-      const devflowDir = getDevFlowDirectory();
-      const scriptDir = path.join(devflowDir, 'scripts', 'hooks');
-      const jsonHelperPath = path.join(scriptDir, 'json-helper.cjs');
-      const stalenessModulePath = path.join(scriptDir, 'lib', 'staleness.cjs');
-      const memoryDir = path.join(cwd, '.memory');
-
-      // Validate that the resolved cwd is a devflow-enabled project directory.
-      // This guards against passing an arbitrary path via --cwd from the CLI.
-      try {
-        await fs.access(memoryDir);
-      } catch {
-        process.stderr.write(`[decisions] --cwd path does not contain a .memory directory: ${cwd}\n`);
-        process.exit(1);
-      }
-
-      const lockDir = path.join(memoryDir, '.decisions.lock');
-      const logFile = path.join(memoryDir, 'decisions-log.jsonl');
-      const batchIdsFile = path.join(memoryDir, '.decisions-batch-ids');
-      const manifestPath = path.join(memoryDir, '.decisions-manifest.json');
-      const notificationsPath = path.join(memoryDir, '.decisions-notifications.json');
-
-      await acquireBackgroundLock(lockDir);
-      const cleanupLock = registerLockCleanup(lockDir);
-
-      try {
-        const config = loadDecisionsConfig(cwd);
-
-        // Daily cap is checked and incremented by the calling hook
-        // (session-end-decisions) before spawning this background process.
-        // No cap check needed here — the hook already gates the invocation.
-
-        const { dialogPairs } = await extractBatchMessages(batchIdsFile, cwd);
-
-        await applyTemporalDecay(jsonHelperPath, logFile);
-        capEntries(logFile, 100);
-
-        const responseFile = await runDecisionsAgent({
-          cwd,
-          dialogPairs,
-          model: config.model,
-          logFile,
-          jsonHelperPath,
-        });
-
-        // Merge observations into decisions log (decision + pitfall types only).
-        execFileSync('node', [jsonHelperPath, 'process-observations', responseFile, logFile, '--types', 'decision,pitfall'], {
-          stdio: 'pipe',
-        });
-
-        // Render ready observations to artifacts with decisions-specific paths.
-        execFileSync('node', [
-          jsonHelperPath, 'render-ready', logFile, cwd,
-          '--manifest-path', manifestPath,
-          '--notifications-path', notificationsPath,
-        ], { stdio: 'pipe' });
-
-        await checkStaleness(stalenessModulePath, logFile, cwd);
-        // Daily cap is incremented by the calling hook (session-end-decisions)
-        // before spawning this background process. Do not increment again here.
-      } finally {
-        cleanupLock();
-        releaseBackgroundLock(lockDir);
-      }
-      return;
-    }
-
-    const claudeDir = getClaudeDirectory();
-    const settingsPath = path.join(claudeDir, 'settings.json');
     const memoryDir = path.join(process.cwd(), '.memory');
-
-    let settingsContent: string;
-    try {
-      settingsContent = await fs.readFile(settingsPath, 'utf-8');
-    } catch {
-      if (options.status) {
-        p.log.info('Decisions learning: disabled (no settings.json found)');
-        return;
-      }
-      settingsContent = '{}';
-    }
 
     // Shared log path for --status, --list, --purge, --clear
     const logPath = path.join(process.cwd(), '.memory', 'decisions-log.jsonl');
 
     // --- --status ---
     if (options.status) {
-      const hookEnabled = hasDecisionsHook(settingsContent);
+      const gitRoot = await getGitRoot();
+      const enabled = gitRoot ? await isFeatureEnabled(gitRoot, 'decisions') : true;
       const { observations, invalidCount } = await readObservations(logPath);
 
       const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
@@ -379,7 +201,7 @@ export const decisionsCommand = new Command('decisions')
       const deprecated = decisionObs.filter(o => o.status === 'deprecated');
       const needReview = decisionObs.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
 
-      const lines: string[] = [`Decisions learning: ${hookEnabled ? 'enabled' : 'disabled'}`];
+      const lines: string[] = [`Decisions learning: ${enabled ? 'enabled' : 'disabled'}`];
       if (decisionObs.length === 0) {
         lines.push('Observations: none');
       } else {
@@ -392,18 +214,6 @@ export const decisionsCommand = new Command('decisions')
       }
       p.log.info(lines.join('\n'));
       warnIfInvalid(invalidCount, 'devflow decisions --purge');
-
-      // Show daily run count
-      const capsFile = path.join(memoryDir, '.decisions-runs-today');
-      try {
-        const capsContent = readFileSync(capsFile, 'utf-8').trim();
-        const [date, countStr] = capsContent.split('\t');
-        const today = new Date().toISOString().slice(0, 10);
-        if (date === today) {
-          p.log.info(`Daily runs today: ${countStr}`);
-        }
-      } catch { /* cap file absent — 0 runs today */ }
-
       return;
     }
 
@@ -991,51 +801,34 @@ export const decisionsCommand = new Command('decisions')
     }
 
     // --- --enable / --disable ---
-    let devflowDir: string;
-    try {
-      const settings: Settings = JSON.parse(settingsContent);
-      const sessionEndHook = settings.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command;
-      if (sessionEndHook) {
-        const hookBinary = sessionEndHook.split(' ')[0].replace(/^"/, '').replace(/"$/, '');
-        devflowDir = path.resolve(hookBinary, '..', '..', '..');
-      } else {
-        devflowDir = getDevFlowDirectory();
-      }
-    } catch {
-      devflowDir = getDevFlowDirectory();
-    }
-
     if (options.enable) {
-      const updated = addDecisionsHook(settingsContent, devflowDir);
-      if (updated === settingsContent) {
-        p.log.info('Decisions learning already enabled');
-        return;
+      const gitRoot = await getGitRoot();
+      if (gitRoot) {
+        await updateFeature(gitRoot, 'decisions', true);
+        // Remove decisions/.disabled sentinel if present (kept for session-start-context gating)
+        try {
+          await fs.unlink(path.join(gitRoot, '.memory', 'decisions', '.disabled'));
+        } catch { /* may not exist */ }
+        p.log.success('Decisions learning enabled — sidecar config updated');
+        p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
+      } else {
+        p.log.warn('Could not resolve git root — sidecar config not updated');
       }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
-
-      // Remove disabled sentinel if present.
-      const disabledSentinel = path.join(memoryDir, 'decisions', '.disabled');
-      try {
-        await fs.unlink(disabledSentinel);
-      } catch { /* may not exist */ }
-
-      p.log.success('Decisions learning enabled — SessionEnd hook registered');
-      p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
+      return;
     }
 
     if (options.disable) {
-      const updated = removeDecisionsHook(settingsContent);
-      if (updated === settingsContent) {
-        p.log.info('Decisions learning already disabled');
-        return;
+      const gitRoot = await getGitRoot();
+      if (gitRoot) {
+        await updateFeature(gitRoot, 'decisions', false);
+        // Create decisions/.disabled sentinel (gates session-start-context decisions section)
+        const decisionsDir = path.join(gitRoot, '.memory', 'decisions');
+        await fs.mkdir(decisionsDir, { recursive: true });
+        await fs.writeFile(path.join(decisionsDir, '.disabled'), '', 'utf-8');
+        p.log.success('Decisions learning disabled — sidecar config updated');
+      } else {
+        p.log.warn('Could not resolve git root — sidecar config not updated');
       }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
-
-      // Create disabled sentinel.
-      const decisionsDir = path.join(memoryDir, 'decisions');
-      await fs.mkdir(decisionsDir, { recursive: true });
-      await fs.writeFile(path.join(decisionsDir, '.disabled'), '', 'utf-8');
-
-      p.log.success('Decisions learning disabled — hook removed');
+      return;
     }
   });

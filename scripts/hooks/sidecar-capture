@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# Sidecar System: sidecar-capture (Stop Hook)
+# Captures assistant responses to .memory/.pending-turns.jsonl queue.
+# Writes .memory/.sidecar/memory.json marker when throttle has expired (>2 min).
+# On failure: does nothing (stale memory is better than fake data).
+
+set -e
+
+# Break feedback loop: sidecar subagents trigger stop hook on exit.
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
+
+# Resolve script directory once
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# JSON parsing (jq with node fallback)
+source "$SCRIPT_DIR/json-parse" || { echo "sidecar-capture: failed to source json-parse" >&2; exit 1; }
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+# Resolve project directory, stop reason, and response text in one subprocess.
+# Uses ASCII SOH (0x01) as delimiter for bash 3.2 compatibility with cut.
+if [ "$_HAS_JQ" = "true" ]; then
+  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.stop_reason // "") + "" + (.response_text // "")')
+else
+  _FIELDS=$(printf '%s' "$INPUT" | node -e "
+    const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    process.stdout.write((j.cwd||'')+'\x01'+(j.stop_reason||'')+'\x01'+(j.response_text||''))")
+fi
+CWD=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f1)
+STOP_REASON=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f2)
+RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f3-)
+
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
+
+MEMORY_DIR="$CWD/.memory"
+SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+
+# Read sidecar config — skip if memory: false
+SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+if [ -f "$SIDECAR_CONFIG" ]; then
+  MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
+  [ "$MEMORY_ENABLED" = "false" ] && exit 0
+fi
+
+# Auto-create .memory/ and ensure .gitignore entries
+source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
+
+source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-capture: failed to source get-mtime" >&2; exit 1; }
+
+# Logging
+source "$SCRIPT_DIR/log-paths" || { echo "sidecar-capture: failed to source log-paths" >&2; exit 1; }
+LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-capture] $1" >> "$LOG_FILE"; }
+
+# --- Filter: only capture end_turn stops ---
+if [ "$STOP_REASON" != "end_turn" ]; then
+  exit 0
+fi
+
+# Skip if empty
+if [ -z "$RESPONSE_TEXT" ]; then
+  log "Skipped: empty response_text"
+  exit 0
+fi
+
+# Truncate to 2000 chars
+if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
+  RESPONSE_TEXT="${RESPONSE_TEXT:0:2000}... [truncated]"
+fi
+
+# --- Append to queue ---
+QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
+
+# Ensure queue file has restricted permissions (600) if not yet created.
+if [ ! -f "$QUEUE_FILE" ]; then
+  (umask 077 && touch "$QUEUE_FILE") 2>/dev/null || true
+fi
+
+# Auto-clean orphan user-only queues
+if [ -f "$QUEUE_FILE" ]; then
+  if ! grep -qF '"role":"assistant"' "$QUEUE_FILE" 2>/dev/null; then
+    log "Auto-clean: truncating orphan user-only queue"
+    : > "$QUEUE_FILE"
+  fi
+fi
+
+TS=$(date +%s)
+if [ "$_HAS_JQ" = "true" ]; then
+  jq -n -c --arg role "assistant" --arg content "$RESPONSE_TEXT" --argjson ts "$TS" \
+    '{role: $role, content: $content, ts: $ts}' >> "$QUEUE_FILE"
+else
+  node -e "process.stdout.write(JSON.stringify({role:'assistant',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
+    -- "$RESPONSE_TEXT" "$TS" >> "$QUEUE_FILE"
+fi
+
+# Queue overflow safety: if >200 lines, keep last 100
+if [ -f "$QUEUE_FILE" ]; then
+  LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
+  if [ "$LINE_COUNT" -gt 200 ]; then
+    tail -100 "$QUEUE_FILE" > "$QUEUE_FILE.tmp" && mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+    log "Queue overflow: truncated from $LINE_COUNT to 100 lines"
+  fi
+fi
+
+log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
+
+# D29: Usage scanner runs after queue append — memory capture is mission-critical, scanning is supplementary
+SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
+if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
+  printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
+fi
+
+# --- Write memory marker if throttle expired ---
+# Skip if a .processing file already exists (in-flight update)
+PROCESSING_MARKER="$SIDECAR_DIR/memory.processing"
+if [ -f "$PROCESSING_MARKER" ]; then
+  log "Throttled: memory.processing exists (in-flight sidecar update)"
+  exit 0
+fi
+
+# Check time since last memory update or last marker
+WORKING_MEMORY="$MEMORY_DIR/WORKING-MEMORY.md"
+NOW=$(date +%s)
+LAST_UPDATE=0
+
+if [ -f "$WORKING_MEMORY" ]; then
+  LAST_UPDATE=$(get_mtime "$WORKING_MEMORY")
+fi
+
+AGE=$(( NOW - LAST_UPDATE ))
+if [ "$AGE" -lt 120 ]; then
+  log "Throttled: WORKING-MEMORY.md updated ${AGE}s ago"
+  exit 0
+fi
+
+# Write memory marker
+mkdir -p "$SIDECAR_DIR"
+
+if [ "$_HAS_JQ" = "true" ]; then
+  jq -n \
+    --arg pendingTurnsFile "$QUEUE_FILE" \
+    --arg existingMemoryFile "$WORKING_MEMORY" \
+    --arg model "haiku" \
+    --argjson timestamp "$NOW" \
+    '{pendingTurnsFile: $pendingTurnsFile, existingMemoryFile: $existingMemoryFile, model: $model, timestamp: $timestamp}' \
+    > "$SIDECAR_DIR/memory.json"
+else
+  node -e "
+    process.stdout.write(JSON.stringify({
+      pendingTurnsFile: process.argv[1],
+      existingMemoryFile: process.argv[2],
+      model: 'haiku',
+      timestamp: parseInt(process.argv[3])
+    }) + '\n')
+  " -- "$QUEUE_FILE" "$WORKING_MEMORY" "$NOW" > "$SIDECAR_DIR/memory.json"
+fi
+
+log "Wrote memory marker: $SIDECAR_DIR/memory.json"
+
+exit 0

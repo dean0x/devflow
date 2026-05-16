@@ -4,15 +4,14 @@
  */
 import { Command } from 'commander';
 
-import { handleToggle, addKnowledgeHook, removeKnowledgeHook, hasKnowledgeHook } from './toggle.js';
+import { handleToggle } from './toggle.js';
 import { handleList } from './list.js';
 import { handleCheck } from './check.js';
 import { handleCreate } from './create.js';
 import { handleRefresh } from './refresh.js';
 import { handleRemove } from './remove.js';
 
-// Re-export hook utilities and sidecar helpers for callers that import from knowledge/index.js
-export { addKnowledgeHook, removeKnowledgeHook, hasKnowledgeHook };
+// Re-export sidecar helpers for callers that import from knowledge/index.js
 export type { SidecarData } from '../../utils/sidecar.js';
 export { readSidecar } from '../../utils/sidecar.js';
 

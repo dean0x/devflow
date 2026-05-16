@@ -18,22 +18,6 @@ import * as os from 'os';
 // Mocks — all set up before any imports from the module under test.
 // ---------------------------------------------------------------------------
 
-vi.mock('../../src/cli/utils/background-runner.js', () => ({
-  acquireBackgroundLock: vi.fn(async () => undefined),
-  releaseBackgroundLock: vi.fn(() => undefined),
-  registerLockCleanup: vi.fn(() => vi.fn()),
-  checkDailyCap: vi.fn(() => true),
-  incrementDailyCap: vi.fn(() => undefined),
-  extractBatchMessages: vi.fn(async () => ({ userSignals: [], dialogPairs: [] })),
-  applyTemporalDecay: vi.fn(async () => undefined),
-  capEntries: vi.fn(() => undefined),
-  checkStaleness: vi.fn(async () => undefined),
-}));
-
-vi.mock('../../src/cli/utils/decisions-agent.js', () => ({
-  runDecisionsAgent: vi.fn(async () => '/tmp/response.tmp'),
-}));
-
 vi.mock('../../src/cli/utils/decisions-config.js', () => ({
   loadDecisionsConfig: vi.fn(() => ({
     max_daily_runs: 3,
@@ -48,13 +32,21 @@ vi.mock('../../src/cli/utils/paths.js', () => ({
   getDevFlowDirectory: vi.fn(() => '/home/user/.devflow'),
 }));
 
-vi.mock('child_process', () => ({
-  execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
-    callback(null, { stdout: '', stderr: '' });
-    return {} as ReturnType<typeof import('child_process').execFile>;
-  }),
-  execFileSync: vi.fn(() => undefined),
-}));
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    exec: vi.fn((_cmd: string, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+      callback(null, { stdout: '', stderr: '' });
+      return {} as ReturnType<typeof import('child_process').exec>;
+    }),
+    execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, callback: (err: null, result: { stdout: string; stderr: string }) => void) => {
+      callback(null, { stdout: '', stderr: '' });
+      return {} as ReturnType<typeof import('child_process').execFile>;
+    }),
+    execFileSync: vi.fn(() => undefined),
+  };
+});
 
 vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),

@@ -74,6 +74,7 @@
     "gap-analysis",
     "design-review",
     "feature-knowledge",
-    "apply-feature-knowledge"
+    "apply-feature-knowledge",
+    "sidecar"
   ]
 }

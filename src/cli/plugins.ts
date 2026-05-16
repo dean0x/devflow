@@ -173,6 +173,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'design-review',
       'feature-knowledge',
       'apply-feature-knowledge',
+      'sidecar',
     ],
     rules: [],
   },
@@ -499,6 +500,8 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'review:triage',
   'research:triage',
   'release:triage',
+  // v2.x sidecar system: bare name for pre-namespace installs
+  'sidecar',
 ];
 
 /**

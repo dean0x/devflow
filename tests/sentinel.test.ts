@@ -49,84 +49,59 @@ function parseHookOutput(rawOutput: string): string {
   return hookOutput.additionalContext as string;
 }
 
-// ─── Part B: Sentinel guards for memory hooks ────────────────────────────────
+// ─── Part B: Sentinel guards for sidecar capture hooks ──────────────────────
 
-describe('sentinel guard: prompt-capture-memory', () => {
-  const HOOK = path.join(HOOKS_DIR, 'prompt-capture-memory');
+describe('sentinel guard: sidecar-dispatch', () => {
+  const HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('captures user prompt normally when sentinel absent', () => {
+  it('captures user prompt normally when memory enabled (no config)', () => {
     mkMemoryDir(tmpDir);
     const input = sessionInput(tmpDir, { prompt: 'test prompt' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(true);
   });
 
-  it('exits early and writes nothing when .working-memory-disabled exists', () => {
+  it('exits early and writes nothing when config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', '.working-memory-disabled'));
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir, { prompt: 'test prompt' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(false);
   });
 });
 
-describe('sentinel guard: stop-update-memory', () => {
-  const HOOK = path.join(HOOKS_DIR, 'stop-update-memory');
+describe('sentinel guard: sidecar-capture', () => {
+  const HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('appends assistant turn normally when sentinel absent', () => {
+  it('appends assistant turn normally when memory enabled (no config)', () => {
     mkMemoryDir(tmpDir);
-    // Touch throttle marker to prevent background spawn attempt
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    // Write stale WORKING-MEMORY.md so throttle passes
+    const memFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, '## Now\n- testing');
+    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
     const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'hello' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(true);
   });
 
-  it('exits early when .working-memory-disabled exists', () => {
+  it('exits early when config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', '.working-memory-disabled'));
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'hello' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(false);
-  });
-});
-
-describe('sentinel guard: background-memory-update', () => {
-  const HOOK = path.join(HOOKS_DIR, 'background-memory-update');
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('exits cleanly and does not acquire lock when .working-memory-disabled exists', () => {
-    mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', '.working-memory-disabled'));
-
-    // background-memory-update takes CWD and CLAUDE_BIN as positional args
-    expect(() => {
-      execSync(`bash "${HOOK}" "${tmpDir}" ""`, { stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-    // The hook must exit before acquiring the lock directory — sentinel guard works
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.working-memory.lock'))).toBe(false);
-  });
-
-  it('proceeds past sentinel check when .working-memory-disabled is absent', () => {
-    mkMemoryDir(tmpDir);
-    // Without sentinel and without a queue file, the hook exits 0 after checking
-    // (no work to do). The lock is acquired and then released, so it won't be
-    // visible after exit — but we confirm the hook exits cleanly and nothing
-    // is written to the pending-turns queue.
-    expect(() => {
-      execSync(`bash "${HOOK}" "${tmpDir}" ""`, { stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
     expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(false);
   });
 });
@@ -188,31 +163,36 @@ describe('sentinel guard: session-start-memory', () => {
   });
 });
 
-// ─── Part C: Sentinel guard for learning hook ─────────────────────────────
+// ─── Part C: Sentinel guard for sidecar-evaluate hook ────────────────────────
 
-describe('sentinel guard: session-end-learning', () => {
-  const HOOK = path.join(HOOKS_DIR, 'session-end-learning');
+describe('sentinel guard: sidecar-evaluate', () => {
+  const HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('exits cleanly when .learning-disabled sentinel exists', () => {
+  it('exits cleanly when no session_id is provided', () => {
     mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', '.learning-disabled'));
-    const input = sessionInput(tmpDir);
+    const input = JSON.stringify({ cwd: tmpDir });
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
   });
 
-  it('proceeds normally when .learning-disabled absent (DEVFLOW_BG_LEARNER guard covers no-op)', () => {
-    mkMemoryDir(tmpDir);
+  it('exits cleanly for DEVFLOW_BG_LEARNER=1 (feedback loop guard)', () => {
+    expect(() => {
+      execSync(`DEVFLOW_BG_LEARNER=1 bash "${HOOK}"`, { stdio: 'ignore' });
+    }).not.toThrow();
+  });
+
+  it('exits cleanly when .memory/ does not exist (no markers written)', () => {
     const input = sessionInput(tmpDir);
-    // The hook should exit 0 even without a transcript (no-op on missing projects dir)
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
+    // Should not create any sidecar marker files
+    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar'))).toBe(false);
   });
 });
 
@@ -250,16 +230,23 @@ describe('sentinel guard: decisions-usage-scan.cjs', () => {
   });
 });
 
-describe('sentinel guard: stop-update-memory decisions scanner gating', () => {
-  const HOOK = path.join(HOOKS_DIR, 'stop-update-memory');
+describe('sentinel guard: sidecar-capture decisions scanner gating', () => {
+  const HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
+  function writeStaleWorkingMemory(dir: string): void {
+    const memFile = path.join(dir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, '## Now\n- stale memory');
+    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
+  }
+
   it('does NOT run scanner when decisions/.disabled exists', () => {
     mkMemoryDir(tmpDir);
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
     writeDisabledSentinel(path.join(tmpDir, '.memory', 'decisions', '.disabled'));
     // Create usage file to detect if scanner would have run
     const usagePath = path.join(tmpDir, '.memory', '.decisions-usage.json');
@@ -276,7 +263,7 @@ describe('sentinel guard: stop-update-memory decisions scanner gating', () => {
 
   it('runs scanner when decisions/.disabled absent', () => {
     mkMemoryDir(tmpDir);
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
     // Create usage file to detect scanner run
     const usagePath = path.join(tmpDir, '.memory', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({

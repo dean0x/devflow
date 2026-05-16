@@ -7,14 +7,16 @@ import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { discoverProjectGitRoots } from '../utils/post-install.js';
 import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
-import { manageSentinel } from '../utils/sentinel.js';
+import { updateFeature } from '../utils/sidecar-config.js';
 
 /**
- * Map of hook event type → filename marker for the 4 memory hooks.
+ * Map of hook event type → filename marker for the sidecar hooks.
+ * The sidecar system consolidates 5 hooks that replace the old 4 individual hooks.
  */
 const MEMORY_HOOK_CONFIG: Record<string, string> = {
-  UserPromptSubmit: 'prompt-capture-memory',
-  Stop: 'stop-update-memory',
+  UserPromptSubmit: 'sidecar-dispatch',
+  Stop: 'sidecar-capture',
+  SessionEnd: 'sidecar-evaluate',
   SessionStart: 'session-start-memory',
   PreCompact: 'pre-compact-memory',
 };
@@ -308,15 +310,6 @@ export const memoryCommand = new Command('memory')
       } else {
         p.log.info(`Working memory: ${color.yellow(`partial (${count}/${total} hooks)`)} — run --enable to fix`);
       }
-      // Warn if sentinel exists (hooks present but runtime-disabled)
-      if (gitRoot) {
-        const sentinel = path.join(gitRoot, '.memory', '.working-memory-disabled');
-        const sentinelExists = await fs.access(sentinel).then(() => true).catch(() => false);
-        if (sentinelExists) {
-          p.log.warn(color.yellow('Runtime-disabled: .memory/.working-memory-disabled sentinel exists — hooks will no-op'));
-          p.log.info(color.dim('Run devflow memory --enable to remove the sentinel'));
-        }
-      }
       return;
     }
 
@@ -328,32 +321,25 @@ export const memoryCommand = new Command('memory')
       } else {
         const updated = addMemoryHooks(settingsContent, devflowDir);
         await fs.writeFile(settingsPath, updated, 'utf-8');
-        p.log.success('Working memory enabled — UserPromptSubmit/Stop/SessionStart/PreCompact hooks registered');
+        p.log.success('Working memory enabled — sidecar hooks registered');
         p.log.info(color.dim('Session context will be automatically preserved across conversations'));
       }
-      // Remove runtime sentinel if present
+      // Update sidecar config to enable memory feature
       if (gitRoot) {
-        await manageSentinel(path.join(gitRoot, '.memory', '.working-memory-disabled'), true);
+        await updateFeature(gitRoot, 'memory', true);
       }
       return;
     }
 
     if (options.disable) {
-      if (countMemoryHooks(settingsContent) === 0) {
-        p.log.info('Working memory already disabled');
-      } else {
-        const updated = removeMemoryHooks(settingsContent);
-        await fs.writeFile(settingsPath, updated, 'utf-8');
-        p.log.success('Working memory disabled — hooks removed');
-        p.log.info(color.dim('Run devflow memory --clear to clean up queue files'));
-      }
-      // Write runtime sentinel so hooks no-op if re-added without --enable
+      // In the sidecar system, hooks remain registered (shared with other features).
+      // Disable by writing memory: false to sidecar config.
       if (gitRoot) {
-        const memDir = path.join(gitRoot, '.memory');
-        await manageSentinel(path.join(memDir, '.working-memory-disabled'), false);
-        // Best-effort: drain orphaned queue files so no stale turns are processed on re-enable
-        try { await fs.unlink(path.join(memDir, '.pending-turns.jsonl')); } catch { /* already gone */ }
-        try { await fs.unlink(path.join(memDir, '.pending-turns.processing')); } catch { /* already gone */ }
+        await updateFeature(gitRoot, 'memory', false);
+        p.log.success('Working memory disabled — sidecar config updated');
+        p.log.info(color.dim('Run devflow memory --clear to clean up queue files'));
+      } else {
+        p.log.warn('Could not resolve git root — sidecar config not updated');
       }
       return;
     }

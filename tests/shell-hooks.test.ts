@@ -9,21 +9,16 @@ const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
-  'session-end-learning',
-  'session-end-decisions',
-  'stop-update-learning',
-  'background-memory-update',
-  'stop-update-memory',
   'session-start-memory',
   'session-start-context',
   'pre-compact-memory',
-  'prompt-capture-memory',
   'preamble',
   'json-parse',
   'get-mtime',
-  'session-end-knowledge-refresh',
-  'background-knowledge-refresh',
   'ensure-features-init',
+  'sidecar-capture',
+  'sidecar-evaluate',
+  'sidecar-dispatch',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1085,15 +1080,6 @@ describe('json-helper.cjs filter-observations', () => {
   });
 });
 
-describe('session-end-learning structure', () => {
-  it('starts with bash shebang and sources json-parse', () => {
-    const scriptPath = path.join(HOOKS_DIR, 'session-end-learning');
-    const content = fs.readFileSync(scriptPath, 'utf8');
-    const lines = content.split('\n');
-    expect(lines[0]).toBe('#!/bin/bash');
-    expect(content).toContain('source "$SCRIPT_DIR/json-parse"');
-  });
-});
 
 describe('json-helper.cjs create-artifacts frontmatter stripping', () => {
   it('strips model-generated YAML frontmatter from artifact content', () => {
@@ -1190,9 +1176,9 @@ describe('json-parse wrapper', () => {
 });
 
 describe('working memory queue behavior', () => {
-  const STOP_HOOK = path.join(HOOKS_DIR, 'stop-update-memory');
+  const STOP_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
   const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
-  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'prompt-capture-memory');
+  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
 
   let tmpDir: string;
 
@@ -1203,6 +1189,17 @@ describe('working memory queue behavior', () => {
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  // Helper: write a fresh WORKING-MEMORY.md with an old mtime so the throttle passes.
+  // sidecar-capture throttles if WORKING-MEMORY.md was updated <120s ago.
+  // We write the file then backdate its mtime to 10 minutes ago.
+  function writeStaleWorkingMemory(tmpDir: string): void {
+    const memFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, '## Now\n- stale memory');
+    // Backdate 10 minutes (600 seconds)
+    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
+  }
 
   it('stop_reason tool_use — no queue append', () => {
     // Create .memory/ so the hook proceeds to the stop_reason check
@@ -1224,8 +1221,8 @@ describe('working memory queue behavior', () => {
   it('stop_reason end_turn — appends assistant turn to queue', () => {
     // Create .memory/ directory
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    // Touch throttle marker to prevent background spawn attempt
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    // Write stale WORKING-MEMORY.md so throttle check passes (no memory.processing marker needed)
+    writeStaleWorkingMemory(tmpDir);
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1248,7 +1245,7 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('prompt-capture-memory captures user prompt to queue', () => {
+  it('sidecar-dispatch captures user prompt to queue', () => {
     // Create .memory/ directory so capture is triggered
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
@@ -1272,7 +1269,7 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('prompt-capture-memory with missing .memory/ — creates it via ensure-memory-gitignore, exit 0', () => {
+  it('sidecar-dispatch with missing .memory/ — creates it via ensure-memory-gitignore, exit 0', () => {
     // tmpDir exists but has no .memory/ subdirectory — ensure-memory-gitignore creates it
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1351,7 +1348,7 @@ describe('working memory queue behavior', () => {
 
   it('auto-clean truncates orphan user-only queue before first assistant append', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1380,7 +1377,7 @@ describe('working memory queue behavior', () => {
 
   it('auto-clean with empty queue file — truncation no-ops, assistant entry appended', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     // Create an empty queue file — grep exits 1 (no match), auto-clean fires but truncates to same empty state
@@ -1405,7 +1402,7 @@ describe('working memory queue behavior', () => {
 
   it('auto-clean with single orphan user entry — truncated, only assistant entry remains', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1432,7 +1429,7 @@ describe('working memory queue behavior', () => {
 
   it('auto-clean does not truncate queue that already has assistant entries', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1462,7 +1459,7 @@ describe('working memory queue behavior', () => {
     // Design intent: auto-clean targets user-only queues (orphan prompts with no paired response).
     // A queue containing only assistant entries is not an orphan state — preserve it.
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1491,8 +1488,8 @@ describe('working memory queue behavior', () => {
 
   it('queue overflow — >200 lines truncated to last 100', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    // Touch throttle marker to prevent background spawn attempt
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    // Write stale WORKING-MEMORY.md so throttle passes
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1528,7 +1525,7 @@ describe('working memory queue behavior', () => {
     expect(lastEntry.content).toBe('overflow trigger response');
   });
 
-  it('prompt-capture-memory truncates prompts longer than 2000 chars', () => {
+  it('sidecar-dispatch truncates prompts longer than 2000 chars', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
     const longPrompt = 'a'.repeat(3000);
@@ -1550,10 +1547,10 @@ describe('working memory queue behavior', () => {
     expect(entry.content).toContain('[truncated]');
   });
 
-  it('stop-update-memory truncates assistant content longer than 2000 chars', () => {
+  it('sidecar-capture truncates assistant content longer than 2000 chars', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    // Touch throttle marker to prevent background spawn attempt
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    // Write stale WORKING-MEMORY.md so throttle passes
+    writeStaleWorkingMemory(tmpDir);
 
     const longMessage = 'b'.repeat(5000);
     const input = JSON.stringify({
@@ -1575,7 +1572,7 @@ describe('working memory queue behavior', () => {
     expect(entry.content).toContain('[truncated]');
   });
 
-  it('stop-update-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+  it('sidecar-capture exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
     // Hook exits at line 11 before reading stdin, so don't pipe input — would race
@@ -1588,7 +1585,7 @@ describe('working memory queue behavior', () => {
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
-  it('prompt-capture-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+  it('sidecar-dispatch exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
     expect(() => {
@@ -1701,83 +1698,3 @@ describe('get-mtime behavioral', () => {
   });
 });
 
-describe('session-end-knowledge-refresh guard clauses', () => {
-  const KB_HOOK = path.join(HOOKS_DIR, 'session-end-knowledge-refresh');
-
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-knowledge-hook-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('exits cleanly when DEVFLOW_BG_KNOWLEDGE_REFRESH=1', () => {
-    expect(() => {
-      execSync(`DEVFLOW_BG_KNOWLEDGE_REFRESH=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
-    }).not.toThrow();
-  });
-
-  it('exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
-    expect(() => {
-      execSync(`DEVFLOW_BG_UPDATER=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
-    }).not.toThrow();
-  });
-
-  it('exits cleanly when no .features/index.json exists (lazy-inits it)', () => {
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-001' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-
-    // Lazy-init should have created the index
-    expect(fs.existsSync(path.join(tmpDir, '.features', 'index.json'))).toBe(true);
-  });
-
-  it('exits cleanly when .features/.disabled sentinel exists', () => {
-    const featuresDir = path.join(tmpDir, '.features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
-    fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
-
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-002' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-  });
-
-  it('exits cleanly when .knowledge-last-refresh is recent (throttled)', () => {
-    const featuresDir = path.join(tmpDir, '.features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
-    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), String(Math.floor(Date.now() / 1000)));
-
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-003' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-  });
-
-  it('exits cleanly when no stale knowledge bases are found', () => {
-    // Non-git tmpDir → checkAllStaleness returns stale:false
-    const featuresDir = path.join(tmpDir, '.features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
-      version: 1,
-      features: {
-        'test-feature': {
-          name: 'Test', description: '', directories: ['src/'],
-          referencedFiles: ['src/index.ts'],
-          lastUpdated: new Date().toISOString(), createdBy: 'test',
-        },
-      },
-    }));
-
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-004' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-  });
-});

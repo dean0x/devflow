@@ -24,10 +24,7 @@ import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstal
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
-import { addLearningHook, removeLearningHook } from './learn.js';
-import { addDecisionsHook, removeDecisionsHook } from './decisions.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
-import { addKnowledgeHook, removeKnowledgeHook } from './knowledge/index.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
@@ -39,8 +36,6 @@ import * as os from 'os';
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
 export { addAmbientHook, removeAmbientHook, removeLegacyAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
-export { addLearningHook, removeLearningHook, hasLearningHook } from './learn.js';
-export { addDecisionsHook, removeDecisionsHook, hasDecisionsHook } from './decisions.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 // Re-export migrateShadowOverrides under its original name for backward compatibility
 export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
@@ -1072,25 +1067,15 @@ export const initCommand = new Command('init')
       content = ambientEnabled ? addAmbientHook(cleanedForAmbient, devflowDir) : cleanedForAmbient;
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
+      // Memory hooks include the unified sidecar hooks (sidecar-dispatch, sidecar-capture,
+      // sidecar-evaluate) which handle learning, decisions, and knowledge in the background.
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
-
-      // Learning hook — remove-then-add for upgrade safety
-      const cleanedForLearn = removeLearningHook(content);
-      content = learnEnabled ? addLearningHook(cleanedForLearn, devflowDir) : cleanedForLearn;
 
       // HUD statusLine
       content = hudEnabled
         ? addHudStatusLine(content, devflowDir)
         : removeHudStatusLine(content);
-
-      // Knowledge hook — remove-then-add for upgrade safety
-      const cleanedForKnowledge = removeKnowledgeHook(content);
-      content = knowledgeEnabled ? addKnowledgeHook(cleanedForKnowledge, devflowDir) : cleanedForKnowledge;
-
-      // Decisions hook — remove-then-add for upgrade safety
-      const cleanedForDecisions = removeDecisionsHook(content);
-      content = decisionsEnabled ? addDecisionsHook(cleanedForDecisions, devflowDir) : cleanedForDecisions;
 
       // Context hook — always-on, remove-then-add for upgrade safety
       const cleanedForContext = removeContextHook(content);
@@ -1142,12 +1127,19 @@ export const initCommand = new Command('init')
       }
     }
 
-    // Manage runtime-disable sentinels for each feature
+    // Manage runtime-disable sentinels for session-start-context gating
     if (gitRoot) {
       await manageSentinel(path.join(gitRoot, '.features', '.disabled'), knowledgeEnabled);
       await manageSentinel(path.join(gitRoot, '.memory', 'decisions', '.disabled'), decisionsEnabled);
-      await manageSentinel(path.join(gitRoot, '.memory', '.working-memory-disabled'), memoryEnabled);
-      await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), learnEnabled);
+    }
+
+    // Write sidecar config.json to manage per-feature enable/disable at runtime
+    if (gitRoot) {
+      const { updateFeature: updateSidecarFeature } = await import('../utils/sidecar-config.js');
+      await updateSidecarFeature(gitRoot, 'memory', memoryEnabled);
+      await updateSidecarFeature(gitRoot, 'learning', learnEnabled);
+      await updateSidecarFeature(gitRoot, 'decisions', decisionsEnabled);
+      await updateSidecarFeature(gitRoot, 'knowledge', knowledgeEnabled);
     }
 
     // Configure HUD

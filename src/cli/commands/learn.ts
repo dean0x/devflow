@@ -1,26 +1,14 @@
 import { Command } from 'commander';
-import { promises as fs, readFileSync } from 'fs';
+import { promises as fs } from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import { getDevFlowDirectory, getClaudeDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
-import type { HookMatcher, Settings } from '../utils/hooks.js';
-import { manageSentinel } from '../utils/sentinel.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
-import {
-  acquireBackgroundLock,
-  releaseBackgroundLock,
-  registerLockCleanup,
-  extractBatchMessages,
-  applyTemporalDecay,
-  capEntries,
-  checkStaleness,
-} from '../utils/background-runner.js';
-import { runLearningAgent } from '../utils/learning-agent.js';
+import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
 import { acquireMkdirLock } from '../utils/mkdir-lock.js';
 import {
   type LearningObservation,
@@ -37,6 +25,10 @@ import {
 // Re-export the consolidated alias for callers that previously imported it from this module.
 export type { NotificationFileEntry };
 
+// ---------------------------------------------------------------------------
+// Learning configuration
+// ---------------------------------------------------------------------------
+
 /**
  * Merged learning configuration from global and project-level config files.
  */
@@ -49,123 +41,13 @@ export interface LearningConfig {
   batch_size: number;
 }
 
-const LEARNING_HOOK_MARKER = 'session-end-learning';
-const LEGACY_HOOK_MARKER = 'stop-update-learning';
-
-/**
- * Add the learning SessionEnd hook to settings JSON.
- * Idempotent — returns unchanged JSON if current hook already exists.
- * Self-upgrading — removes legacy Stop hook before adding SessionEnd hook.
- */
-export function addLearningHook(settingsJson: string, devflowDir: string): string {
-  const hookState = hasLearningHook(settingsJson);
-
-  if (hookState === 'current') {
-    return settingsJson;
-  }
-
-  // Remove any legacy Stop hooks before adding the new SessionEnd hook
-  const cleanedJson = removeLearningHook(settingsJson);
-  const settings: Settings = JSON.parse(cleanedJson);
-
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-
-  const hookCommand = path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-end-learning';
-
-  const newEntry: HookMatcher = {
-    hooks: [
-      {
-        type: 'command',
-        command: hookCommand,
-        timeout: 10,
-      },
-    ],
-  };
-
-  if (!settings.hooks.SessionEnd) {
-    settings.hooks.SessionEnd = [];
-  }
-
-  settings.hooks.SessionEnd.push(newEntry);
-
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Remove the learning hook from settings JSON.
- * Checks BOTH SessionEnd (new) and Stop (legacy cleanup).
- * Idempotent — returns unchanged JSON if hook not present.
- * Preserves other hooks. Cleans empty arrays/objects.
- */
-export function removeLearningHook(settingsJson: string): string {
-  const settings: Settings = JSON.parse(settingsJson);
-  let changed = false;
-
-  function removeFromEvent(event: 'SessionEnd' | 'Stop', marker: string): void {
-    const matchers = settings.hooks?.[event];
-    if (!matchers) return;
-    const before = matchers.length;
-    settings.hooks![event] = matchers.filter(
-      (m) => !m.hooks.some((h) => h.command.includes(marker)),
-    );
-    if (settings.hooks![event]!.length < before) changed = true;
-    if (settings.hooks![event]!.length === 0) delete settings.hooks![event];
-  }
-
-  removeFromEvent('SessionEnd', LEARNING_HOOK_MARKER);
-  removeFromEvent('Stop', LEGACY_HOOK_MARKER);
-
-  if (!changed) {
-    return settingsJson;
-  }
-
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Check if the learning hook is registered in settings JSON or parsed Settings object.
- * Returns 'current' for SessionEnd hook, 'legacy' for old Stop hook, or false if absent.
- */
-export function hasLearningHook(input: string | Settings): 'current' | 'legacy' | false {
-  const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
-
-  const hasSessionEnd = settings.hooks?.SessionEnd?.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(LEARNING_HOOK_MARKER)),
-  ) ?? false;
-
-  if (hasSessionEnd) {
-    return 'current';
-  }
-
-  const hasLegacyStop = settings.hooks?.Stop?.some((matcher) =>
-    matcher.hooks.some((h) => h.command.includes(LEGACY_HOOK_MARKER)),
-  ) ?? false;
-
-  if (hasLegacyStop) {
-    return 'legacy';
-  }
-
-  return false;
-}
-
 /**
  * Format a human-readable status summary for learning state.
- * hookState: 'current' (SessionEnd), 'legacy' (old Stop hook), or false (disabled).
+ * enabled: true when the sidecar config has learning: true (or no config).
  */
-export function formatLearningStatus(observations: LearningObservation[], hookState: 'current' | 'legacy' | false): string {
+export function formatLearningStatus(observations: LearningObservation[], enabled: boolean): string {
   const lines: string[] = [];
-
-  if (hookState === 'legacy') {
-    lines.push('Self-learning: enabled (legacy — run `devflow learn --disable && devflow learn --enable` to upgrade)');
-  } else {
-    lines.push(`Self-learning: ${hookState ? 'enabled' : 'disabled'}`);
-  }
+  lines.push(`Self-learning: ${enabled ? 'enabled' : 'disabled'}`);
 
   if (observations.length === 0) {
     lines.push('Observations: none');
@@ -241,14 +123,12 @@ interface LearnOptions {
   purge?: boolean;
   review?: boolean;
   dismissCapacity?: boolean;
-  runBackground?: boolean;
-  cwd?: string;
 }
 
 export const learnCommand = new Command('learn')
   .description('Enable or disable self-learning (workflow detection + auto-commands)')
-  .option('--enable', 'Register SessionEnd hook for self-learning')
-  .option('--disable', 'Remove self-learning hook')
+  .option('--enable', 'Enable self-learning via sidecar config')
+  .option('--disable', 'Disable self-learning via sidecar config')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard')
@@ -257,19 +137,17 @@ export const learnCommand = new Command('learn')
   .option('--purge', 'Remove invalid/corrupted entries from learning log')
   .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
   .option('--dismiss-capacity', 'Dismiss the current capacity notification for a decisions file')
-  .option('--run-background', 'Run learning agent in background mode')
-  .option('--cwd <path>', 'Working directory for background mode')
   .action(async (options: LearnOptions) => {
     const knownFlags: (keyof LearnOptions)[] = [
       'enable', 'disable', 'status', 'list', 'configure',
-      'clear', 'reset', 'purge', 'review', 'dismissCapacity', 'runBackground',
+      'clear', 'reset', 'purge', 'review', 'dismissCapacity',
     ];
     const hasFlag = knownFlags.some((f) => options[f]);
     if (!hasFlag) {
       p.intro(color.bgYellow(color.black(' Self-Learning ')));
       p.note(
-        `${color.cyan('devflow learn --enable')}      Register learning hook\n` +
-        `${color.cyan('devflow learn --disable')}     Remove learning hook\n` +
+        `${color.cyan('devflow learn --enable')}      Enable self-learning\n` +
+        `${color.cyan('devflow learn --disable')}     Disable self-learning\n` +
         `${color.cyan('devflow learn --status')}      Show learning status\n` +
         `${color.cyan('devflow learn --list')}        Show all observations\n` +
         `${color.cyan('devflow learn --configure')}   Configuration wizard\n` +
@@ -284,119 +162,18 @@ export const learnCommand = new Command('learn')
       return;
     }
 
-    // --- --run-background ---
-    if (options.runBackground) {
-      const cwd = options.cwd ?? process.cwd();
-      const devflowDir = getDevFlowDirectory();
-      const scriptDir = path.join(devflowDir, 'scripts', 'hooks');
-      const jsonHelperPath = path.join(scriptDir, 'json-helper.cjs');
-      const stalenessModulePath = path.join(scriptDir, 'lib', 'staleness.cjs');
-      const memoryDir = path.join(cwd, '.memory');
-
-      // Validate that the resolved cwd is a devflow-enabled project directory.
-      // This guards against passing an arbitrary path via --cwd from the CLI.
-      try {
-        await fs.access(memoryDir);
-      } catch {
-        process.stderr.write(`[learn] --cwd path does not contain a .memory directory: ${cwd}\n`);
-        process.exit(1);
-      }
-
-      const lockDir = path.join(memoryDir, '.learning.lock');
-      const logFile = path.join(memoryDir, 'learning-log.jsonl');
-      const batchIdsFile = path.join(memoryDir, '.learning-batch-ids');
-
-      await acquireBackgroundLock(lockDir);
-      const cleanupLock = registerLockCleanup(lockDir);
-
-      try {
-        // Load config to get daily cap and model.
-        const globalJson = (() => {
-          try {
-            return readFileSync(path.join(devflowDir, 'learning.json'), 'utf-8');
-          } catch { return null; }
-        })();
-        const projectJson = (() => {
-          try {
-            return readFileSync(path.join(memoryDir, 'learning.json'), 'utf-8');
-          } catch { return null; }
-        })();
-        const config = loadLearningConfig(globalJson, projectJson);
-
-        // Daily cap is checked and incremented by the calling hook
-        // (session-end-learning) before spawning this background process.
-        // No cap check needed here — the hook already gates the invocation.
-
-        const { userSignals } = await extractBatchMessages(batchIdsFile, cwd);
-
-        await applyTemporalDecay(jsonHelperPath, logFile);
-        capEntries(logFile, 100);
-
-        const responseFile = await runLearningAgent({
-          cwd,
-          userSignals,
-          model: config.model,
-          logFile,
-          jsonHelperPath,
-        });
-
-        // Merge observations into learning log (workflow + procedural only).
-        execFileSync('node', [jsonHelperPath, 'process-observations', responseFile, logFile, '--types', 'workflow,procedural'], {
-          stdio: 'pipe',
-        });
-
-        // Render ready observations to artifacts.
-        const learningNotifPath = path.join(memoryDir, '.learning-notifications.json');
-        execFileSync('node', [
-          jsonHelperPath, 'render-ready', logFile, cwd,
-          '--notifications-path', learningNotifPath,
-        ], { stdio: 'pipe' });
-
-        await checkStaleness(stalenessModulePath, logFile, cwd);
-        // Daily cap is incremented by the calling hook (session-end-learning)
-        // before spawning this background process. Do not increment again here.
-      } finally {
-        cleanupLock();
-        releaseBackgroundLock(lockDir);
-      }
-      return;
-    }
-
-    const claudeDir = getClaudeDirectory();
-    const settingsPath = path.join(claudeDir, 'settings.json');
-
-    let settingsContent: string;
-    try {
-      settingsContent = await fs.readFile(settingsPath, 'utf-8');
-    } catch {
-      if (options.status) {
-        p.log.info('Self-learning: disabled (no settings.json found)');
-        return;
-      }
-      settingsContent = '{}';
-    }
-
     // Shared log path for --status, --list, --purge, --clear
     const logPath = path.join(process.cwd(), '.memory', 'learning-log.jsonl');
 
     // --- --status ---
     if (options.status) {
-      const hookState = hasLearningHook(settingsContent);
+      const gitRoot = await getGitRoot();
+      const enabled = gitRoot ? await isFeatureEnabled(gitRoot, 'learning') : true;
       const { observations, invalidCount } = await readObservations(logPath);
 
-      const status = formatLearningStatus(observations, hookState);
+      const status = formatLearningStatus(observations, enabled);
       p.log.info(status);
       warnIfInvalid(invalidCount);
-      // Warn if learning sentinel exists (hooks present but runtime-disabled)
-      const gitRoot = await getGitRoot();
-      if (gitRoot) {
-        const sentinel = path.join(gitRoot, '.memory', '.learning-disabled');
-        const sentinelExists = await fs.access(sentinel).then(() => true).catch(() => false);
-        if (sentinelExists) {
-          p.log.warn(color.yellow('Runtime-disabled: .memory/.learning-disabled sentinel exists — hook will no-op'));
-          p.log.info(color.dim('Run devflow learn --enable to remove the sentinel'));
-        }
-      }
       return;
     }
 
@@ -593,6 +370,7 @@ export const learnCommand = new Command('learn')
         const { observations } = await readObservations(logPath);
 
         // Count artifacts without removing them
+        const claudeDir = getClaudeDirectory();
         const skillsDir = path.join(claudeDir, 'skills');
         const commandsDir = path.join(claudeDir, 'commands', 'self-learning');
         let skillCount = 0;
@@ -899,58 +677,25 @@ export const learnCommand = new Command('learn')
     }
 
     // --- --enable / --disable ---
-    // Resolve devflow scripts directory from settings.json hooks or default
-    let devflowDir: string;
-    try {
-      const settings: Settings = JSON.parse(settingsContent);
-      // Try to extract devflowDir from existing hooks (SessionEnd first, Stop fallback)
-      const sessionEndHook = settings.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command;
-      const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
-      const hookCommand = sessionEndHook || stopHook;
-      if (hookCommand) {
-        const hookBinary = hookCommand.split(' ')[0];
-        devflowDir = path.resolve(hookBinary, '..', '..', '..');
-      } else {
-        devflowDir = getDevFlowDirectory();
-      }
-    } catch {
-      devflowDir = getDevFlowDirectory();
-    }
-
     if (options.enable) {
-      const priorState = hasLearningHook(settingsContent);
-      const updated = addLearningHook(settingsContent, devflowDir);
-      if (updated === settingsContent) {
-        p.log.info('Self-learning already enabled');
-      } else {
-        await fs.writeFile(settingsPath, updated, 'utf-8');
-        if (priorState === 'legacy') {
-          p.log.success('Self-learning upgraded — legacy Stop hook replaced with SessionEnd hook');
-        } else {
-          p.log.success('Self-learning enabled — SessionEnd hook registered');
-        }
-        p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
-      }
-      // Remove runtime sentinel if present
       const gitRoot = await getGitRoot();
       if (gitRoot) {
-        await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), true);
+        await updateFeature(gitRoot, 'learning', true);
+        p.log.success('Self-learning enabled — sidecar config updated');
+        p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
+      } else {
+        p.log.warn('Could not resolve git root — sidecar config not updated');
       }
       return;
     }
 
     if (options.disable) {
-      const updated = removeLearningHook(settingsContent);
-      if (updated === settingsContent) {
-        p.log.info('Self-learning already disabled');
-      } else {
-        await fs.writeFile(settingsPath, updated, 'utf-8');
-        p.log.success('Self-learning disabled — hook removed');
-      }
-      // Write runtime sentinel so the hook no-ops if re-added without --enable
       const gitRoot = await getGitRoot();
       if (gitRoot) {
-        await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), false);
+        await updateFeature(gitRoot, 'learning', false);
+        p.log.success('Self-learning disabled — sidecar config updated');
+      } else {
+        p.log.warn('Could not resolve git root — sidecar config not updated');
       }
       return;
     }

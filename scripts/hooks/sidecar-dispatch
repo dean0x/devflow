@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# Sidecar System: sidecar-dispatch (UserPromptSubmit Hook)
+# 1. Captures user turn to .memory/.pending-turns.jsonl
+# 2. Checks for pending sidecar markers in .memory/.sidecar/
+# 3. If markers found, injects SIDECAR directive via additionalContext
+
+set -e
+
+# Break feedback loop from background sidecar sessions
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/json-parse" || { echo "sidecar-dispatch: failed to source json-parse" >&2; exit 1; }
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
+CWD="${FIELDS%%$'\001'*}"
+PROMPT="${FIELDS#*$'\001'}"
+
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
+
+MEMORY_DIR="$CWD/.memory"
+SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+
+# Read sidecar config — skip user turn capture if memory: false
+SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+MEMORY_ENABLED="true"
+if [ -f "$SIDECAR_CONFIG" ]; then
+  MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
+fi
+
+# --- Capture user turn ---
+if [ "$MEMORY_ENABLED" = "true" ] && [ -n "$PROMPT" ]; then
+  source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || true
+
+  # Truncate to 2000 chars
+  if [ ${#PROMPT} -gt 2000 ]; then
+    PROMPT="${PROMPT:0:2000}... [truncated]"
+  fi
+
+  QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
+
+  # Ensure queue file is created with restricted permissions (600) before first write.
+  if [ ! -f "$QUEUE_FILE" ]; then
+    (umask 077 && touch "$QUEUE_FILE") 2>/dev/null || true
+  fi
+
+  TS=$(date +%s)
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -n -c --arg role "user" --arg content "$PROMPT" --argjson ts "$TS" \
+      '{role: $role, content: $content, ts: $ts}' >> "$QUEUE_FILE"
+  else
+    node -e "process.stdout.write(JSON.stringify({role:'user',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
+      -- "$PROMPT" "$TS" >> "$QUEUE_FILE"
+  fi
+fi
+
+# --- Check for pending sidecar markers ---
+# Skip if sidecar dir doesn't exist
+if [ ! -d "$SIDECAR_DIR" ]; then
+  exit 0
+fi
+
+# Stale retry: if any .processing file is >5 min old, rename back to .json
+NOW=$(date +%s)
+for PROC_FILE in "$SIDECAR_DIR"/*.processing; do
+  [ -f "$PROC_FILE" ] || continue
+  # Get file mtime
+  if [ "$_HAS_JQ" = "true" ] || command -v stat &>/dev/null; then
+    if stat --version 2>/dev/null | grep -q GNU; then
+      PROC_MTIME=$(stat -c %Y "$PROC_FILE" 2>/dev/null || echo "0")
+    else
+      PROC_MTIME=$(stat -f %m "$PROC_FILE" 2>/dev/null || echo "0")
+    fi
+    PROC_AGE=$(( NOW - PROC_MTIME ))
+    if [ "$PROC_AGE" -gt 300 ]; then
+      # Stale processing file — rename back to .json for retry
+      JSON_FILE="${PROC_FILE%.processing}.json"
+      mv "$PROC_FILE" "$JSON_FILE" 2>/dev/null || true
+    fi
+  fi
+done
+
+# Collect pending markers (exclude config.json)
+PENDING_TASKS=""
+for MARKER_FILE in "$SIDECAR_DIR"/*.json; do
+  [ -f "$MARKER_FILE" ] || continue
+  BASENAME=$(basename "$MARKER_FILE" .json)
+  # Skip config
+  [ "$BASENAME" = "config" ] && continue
+  if [ -n "$PENDING_TASKS" ]; then
+    PENDING_TASKS="$PENDING_TASKS,$BASENAME"
+  else
+    PENDING_TASKS="$BASENAME"
+  fi
+done
+
+# If no pending tasks, exit silently (no additionalContext output)
+if [ -z "$PENDING_TASKS" ]; then
+  exit 0
+fi
+
+# Output SIDECAR directive
+DIRECTIVE="SIDECAR: ${PENDING_TASKS}. Spawn background agents — load devflow:sidecar skill."
+json_prompt_output "$DIRECTIVE"
+
+exit 0
