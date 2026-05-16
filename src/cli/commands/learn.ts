@@ -934,7 +934,7 @@ export const learnCommand = new Command('learn')
       // Remove runtime sentinel if present
       const gitRoot = await getGitRoot();
       if (gitRoot) {
-        await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.learning-disabled'), true);
+        await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), true);
       }
       return;
     }
@@ -950,7 +950,7 @@ export const learnCommand = new Command('learn')
       // Write runtime sentinel so the hook no-ops if re-added without --enable
       const gitRoot = await getGitRoot();
       if (gitRoot) {
-        await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.learning-disabled'), false);
+        await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), false);
       }
       return;
     }

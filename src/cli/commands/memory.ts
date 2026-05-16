@@ -333,7 +333,7 @@ export const memoryCommand = new Command('memory')
       }
       // Remove runtime sentinel if present
       if (gitRoot) {
-        await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.working-memory-disabled'), true);
+        await manageSentinel(path.join(gitRoot, '.memory', '.working-memory-disabled'), true);
       }
       return;
     }
@@ -350,7 +350,7 @@ export const memoryCommand = new Command('memory')
       // Write runtime sentinel so hooks no-op if re-added without --enable
       if (gitRoot) {
         const memDir = path.join(gitRoot, '.memory');
-        await manageSentinel(gitRoot, path.join(memDir, '.working-memory-disabled'), false);
+        await manageSentinel(path.join(memDir, '.working-memory-disabled'), false);
         // Best-effort: drain orphaned queue files so no stale turns are processed on re-enable
         try { await fs.unlink(path.join(memDir, '.pending-turns.jsonl')); } catch { /* already gone */ }
         try { await fs.unlink(path.join(memDir, '.pending-turns.processing')); } catch { /* already gone */ }

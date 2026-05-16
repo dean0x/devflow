@@ -470,85 +470,43 @@ describe('manageSentinel utility', () => {
 
   it('creates sentinel file when disabled=false', async () => {
     const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
-    await manageSentinel(tmpDir, sentinelPath, false);
+    await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
 
   it('creates parent directories when they do not exist', async () => {
     const sentinelPath = path.join(tmpDir, '.memory', 'decisions', '.disabled');
-    await manageSentinel(tmpDir, sentinelPath, false);
+    await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
 
   it('removes sentinel file when enabled=true', async () => {
     const sentinelPath = path.join(tmpDir, '.memory', '.learning-disabled');
     writeDisabledSentinel(sentinelPath);
-    await manageSentinel(tmpDir, sentinelPath, true);
+    await manageSentinel(sentinelPath, true);
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 
   it('is idempotent when enabling with no sentinel present', async () => {
     const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
     // No sentinel exists — enabling again should not throw
-    await expect(manageSentinel(tmpDir, sentinelPath, true)).resolves.toBeUndefined();
+    await expect(manageSentinel(sentinelPath, true)).resolves.toBeUndefined();
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 
   it('is idempotent when disabling with sentinel already present', async () => {
     const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
     writeDisabledSentinel(sentinelPath);
-    await expect(manageSentinel(tmpDir, sentinelPath, false)).resolves.toBeUndefined();
+    await expect(manageSentinel(sentinelPath, false)).resolves.toBeUndefined();
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
 
   it('disable then enable removes the sentinel', async () => {
     const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
-    await manageSentinel(tmpDir, sentinelPath, false);
+    await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
-    await manageSentinel(tmpDir, sentinelPath, true);
+    await manageSentinel(sentinelPath, true);
     expect(fs.existsSync(sentinelPath)).toBe(false);
-  });
-});
-
-// ─── Part F: sentinel existence check (backing --status warning logic) ───────
-
-describe('sentinel existence check', () => {
-  // These tests verify the boolean sentinel-detection logic that backs the
-  // runtime-disabled warning in `memory --status` and `learn --status`.
-  // They test the filesystem state directly rather than the CLI output (which
-  // involves p.warn() / clack that require a TTY to render meaningfully).
-  let tmpDir: string;
-
-  beforeEach(() => { tmpDir = mkTmpDir(); mkMemoryDir(tmpDir); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('reports sentinel absent when not created', async () => {
-    const sentinel = path.join(tmpDir, '.memory', '.working-memory-disabled');
-    const sentinelExists = await fs.promises.access(sentinel).then(() => true).catch(() => false);
-    expect(sentinelExists).toBe(false);
-  });
-
-  it('reports sentinel present after disable', async () => {
-    const sentinel = path.join(tmpDir, '.memory', '.working-memory-disabled');
-    await manageSentinel(tmpDir, sentinel, false);
-    const sentinelExists = await fs.promises.access(sentinel).then(() => true).catch(() => false);
-    expect(sentinelExists).toBe(true);
-  });
-
-  it('reports sentinel absent after re-enable', async () => {
-    const sentinel = path.join(tmpDir, '.memory', '.working-memory-disabled');
-    await manageSentinel(tmpDir, sentinel, false);
-    await manageSentinel(tmpDir, sentinel, true);
-    const sentinelExists = await fs.promises.access(sentinel).then(() => true).catch(() => false);
-    expect(sentinelExists).toBe(false);
-  });
-
-  it('learning sentinel follows same create/remove lifecycle', async () => {
-    const sentinel = path.join(tmpDir, '.memory', '.learning-disabled');
-    await manageSentinel(tmpDir, sentinel, false);
-    expect(await fs.promises.access(sentinel).then(() => true).catch(() => false)).toBe(true);
-    await manageSentinel(tmpDir, sentinel, true);
-    expect(await fs.promises.access(sentinel).then(() => true).catch(() => false)).toBe(false);
   });
 });
 

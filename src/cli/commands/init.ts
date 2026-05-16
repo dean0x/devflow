@@ -1144,10 +1144,10 @@ export const initCommand = new Command('init')
 
     // Manage runtime-disable sentinels for each feature
     if (gitRoot) {
-      await manageSentinel(gitRoot, path.join(gitRoot, '.features', '.disabled'), knowledgeEnabled);
-      await manageSentinel(gitRoot, path.join(gitRoot, '.memory', 'decisions', '.disabled'), decisionsEnabled);
-      await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.working-memory-disabled'), memoryEnabled);
-      await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.learning-disabled'), learnEnabled);
+      await manageSentinel(path.join(gitRoot, '.features', '.disabled'), knowledgeEnabled);
+      await manageSentinel(path.join(gitRoot, '.memory', 'decisions', '.disabled'), decisionsEnabled);
+      await manageSentinel(path.join(gitRoot, '.memory', '.working-memory-disabled'), memoryEnabled);
+      await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), learnEnabled);
     }
 
     // Configure HUD
