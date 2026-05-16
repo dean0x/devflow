@@ -7,6 +7,7 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
+import { manageSentinel } from '../utils/sentinel.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
@@ -933,8 +934,7 @@ export const learnCommand = new Command('learn')
       // Remove runtime sentinel if present
       const gitRoot = await getGitRoot();
       if (gitRoot) {
-        const sentinel = path.join(gitRoot, '.memory', '.learning-disabled');
-        try { await fs.unlink(sentinel); } catch { /* sentinel didn't exist — that's fine */ }
+        await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.learning-disabled'), true);
       }
       return;
     }
@@ -950,10 +950,7 @@ export const learnCommand = new Command('learn')
       // Write runtime sentinel so the hook no-ops if re-added without --enable
       const gitRoot = await getGitRoot();
       if (gitRoot) {
-        const memDir = path.join(gitRoot, '.memory');
-        await fs.mkdir(memDir, { recursive: true });
-        const sentinel = path.join(memDir, '.learning-disabled');
-        await fs.writeFile(sentinel, '', 'utf-8');
+        await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.learning-disabled'), false);
       }
       return;
     }

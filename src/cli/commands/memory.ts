@@ -7,6 +7,7 @@ import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { discoverProjectGitRoots } from '../utils/post-install.js';
 import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
+import { manageSentinel } from '../utils/sentinel.js';
 
 /**
  * Map of hook event type → filename marker for the 4 memory hooks.
@@ -332,8 +333,7 @@ export const memoryCommand = new Command('memory')
       }
       // Remove runtime sentinel if present
       if (gitRoot) {
-        const sentinel = path.join(gitRoot, '.memory', '.working-memory-disabled');
-        try { await fs.unlink(sentinel); } catch { /* sentinel didn't exist — that's fine */ }
+        await manageSentinel(gitRoot, path.join(gitRoot, '.memory', '.working-memory-disabled'), true);
       }
       return;
     }
@@ -350,9 +350,10 @@ export const memoryCommand = new Command('memory')
       // Write runtime sentinel so hooks no-op if re-added without --enable
       if (gitRoot) {
         const memDir = path.join(gitRoot, '.memory');
-        await fs.mkdir(memDir, { recursive: true });
-        const sentinel = path.join(memDir, '.working-memory-disabled');
-        await fs.writeFile(sentinel, '', 'utf-8');
+        await manageSentinel(gitRoot, path.join(memDir, '.working-memory-disabled'), false);
+        // Best-effort: drain orphaned queue files so no stale turns are processed on re-enable
+        try { await fs.unlink(path.join(memDir, '.pending-turns.jsonl')); } catch { /* already gone */ }
+        try { await fs.unlink(path.join(memDir, '.pending-turns.processing')); } catch { /* already gone */ }
       }
       return;
     }

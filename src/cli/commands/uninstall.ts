@@ -15,7 +15,7 @@ import { removeLearningHook } from './learn.js';
 import { removeDecisionsHook } from './decisions.js';
 import { removeHudStatusLine } from './hud.js';
 import { removeKnowledgeHook } from './knowledge/index.js';
-import { removeContextHook } from './init.js';
+import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
