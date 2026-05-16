@@ -21,9 +21,11 @@ PROMPT="${FIELDS#*$'\001'}"
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
-source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
-
+# Sentinel check before ensure-memory-gitignore so a disabled feature stays inert
+# (does not create .memory/ or modify .gitignore when working memory is off).
 [ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+
+source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
 if [ -z "$PROMPT" ]; then exit 0; fi
 

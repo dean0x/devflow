@@ -34,10 +34,12 @@ RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f3-)
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
+# Sentinel check before ensure-memory-gitignore so a disabled feature stays inert
+# (does not create .memory/ or modify .gitignore when working memory is off).
+[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+
 # Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
-
-[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
 
 source "$SCRIPT_DIR/get-mtime" || { echo "stop-update-memory: failed to source get-mtime" >&2; exit 1; }
 

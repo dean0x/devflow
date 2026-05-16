@@ -8,7 +8,8 @@
 # Section 1.5: Decisions TL;DR (skipped if decisions/.disabled)
 # Section 1.75: Learned behaviors + new artifact notifications (skipped if .learning-disabled)
 
-set -e
+# set -e intentionally omitted: sections 1.4, 1.5, and 1.75 are independent —
+# a failure in one must not prevent the others from running.
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -133,7 +134,7 @@ TIP: Type the command name to use it. Rename to shorter path for quicker access.
 Run \`devflow learn --list\` to see all."
 
         # Only update notified marker when new artifacts exist
-        date +%s > "$NOTIFIED_MARKER"
+        date +%s > "$NOTIFIED_MARKER" 2>/dev/null || true
       fi
 
       if [ -n "$CONTEXT" ]; then
