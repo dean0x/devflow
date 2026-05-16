@@ -53,7 +53,7 @@ export async function writeConfig(projectRoot: string, config: SidecarConfig): P
 
 /**
  * Toggle a single feature in the sidecar config.
- * Reads, modifies, and writes atomically.
+ * Reads current config, applies the change, and writes back.
  */
 export async function updateFeature(
   projectRoot: string,
@@ -61,8 +61,7 @@ export async function updateFeature(
   enabled: boolean,
 ): Promise<void> {
   const config = await readConfig(projectRoot);
-  config[feature] = enabled;
-  await writeConfig(projectRoot, config);
+  await writeConfig(projectRoot, { ...config, [feature]: enabled });
 }
 
 /**

@@ -134,7 +134,9 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
       fi
     fi
 
-    CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" 2>/dev/null | tr -d ' ' || echo "0")
+    if [ -f "$SESSION_COUNT_FILE" ]; then
+      CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
+    fi
     log "Learning batch: $CURRENT_COUNT/$BATCH_SIZE sessions"
 
     if [ "$CURRENT_COUNT" -ge "$BATCH_SIZE" ] && [ -f "$SESSION_COUNT_FILE" ]; then

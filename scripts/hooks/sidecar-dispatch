@@ -70,8 +70,8 @@ fi
 NOW=$(date +%s)
 for PROC_FILE in "$SIDECAR_DIR"/*.processing; do
   [ -f "$PROC_FILE" ] || continue
-  # Get file mtime
-  if [ "$_HAS_JQ" = "true" ] || command -v stat &>/dev/null; then
+  # Get file mtime (stat available on all supported platforms)
+  if command -v stat &>/dev/null; then
     if stat --version 2>/dev/null | grep -q GNU; then
       PROC_MTIME=$(stat -c %Y "$PROC_FILE" 2>/dev/null || echo "0")
     else
