@@ -18,6 +18,8 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
+[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+
 CONTEXT=""
 
 # --- Section 1: Working Memory ---
@@ -97,120 +99,6 @@ ${GIT_STATUS}"
   if [ -n "$COMPACT_NOTE" ]; then
     CONTEXT="${CONTEXT}
 ${COMPACT_NOTE}"
-  fi
-fi
-
-# --- Section 1.4: Learning Manifest Reconciliation ---
-# DESIGN: D6 — reconciler runs at session-start to amortize filesystem checks
-# across session boundaries rather than on every tool call.
-# Silently ignores errors — a failed reconcile is non-fatal.
-
-if [ -f "$CWD/.memory/.learning-manifest.json" ] && [ -f "$CWD/.memory/learning-log.jsonl" ]; then
-  node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
-fi
-
-# Reconcile decisions manifest
-if [ -f "$CWD/.memory/decisions-log.jsonl" ]; then
-  node "$_JSON_HELPER" reconcile-manifest "$CWD" "$CWD/.memory/decisions-log.jsonl" "$CWD/.memory/.decisions-manifest.json" 2>/dev/null || true
-fi
-
-# --- Section 1.5: Project Decisions TL;DR ---
-DECISIONS_DIR="$CWD/.memory/decisions"
-# Heal older installs that have .memory/ but not .memory/decisions/
-if [ -d "$CWD/.memory" ] && [ ! -d "$DECISIONS_DIR" ]; then
-  mkdir -p "$DECISIONS_DIR" 2>/dev/null || true
-fi
-if [ -d "$DECISIONS_DIR" ]; then
-  DECISIONS_TLDR=""
-  for kf in "$DECISIONS_DIR"/decisions.md "$DECISIONS_DIR"/pitfalls.md; do
-    if [ -f "$kf" ]; then
-      TLDR_LINE=$(sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p' "$kf")
-      if [ -n "$TLDR_LINE" ]; then
-        DECISIONS_TLDR="${DECISIONS_TLDR}${TLDR_LINE}\n"
-      fi
-    fi
-  done
-  if [ -n "$DECISIONS_TLDR" ]; then
-    DECISIONS_SECTION="--- PROJECT DECISIONS (TL;DR) ---
-$(printf '%b' "$DECISIONS_TLDR")"
-    if [ -n "$CONTEXT" ]; then
-      CONTEXT="${CONTEXT}
-
-${DECISIONS_SECTION}"
-    else
-      CONTEXT="$DECISIONS_SECTION"
-    fi
-  fi
-fi
-
-# --- Section 1.75: Learned Behaviors ---
-
-LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
-NOTIFIED_MARKER="$CWD/.memory/.learning-notified-at"
-
-if [ -f "$LEARNING_LOG" ]; then
-  # Single-pass extraction of created artifacts (commands + skills)
-  LEARNED_JSON=$(json_learning_created "$LEARNING_LOG")
-
-  LEARNED_COMMANDS=""
-  LEARNED_SKILLS=""
-  if [ -n "$LEARNED_JSON" ]; then
-    if [ "$_HAS_JQ" = "true" ]; then
-      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | jq -r '.commands | map("/self-learning/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
-      LEARNED_SKILLS=$(echo "$LEARNED_JSON" | jq -r '.skills | map("\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
-    else
-      # Node fallback: parse the JSON and format
-      LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | node -e "
-        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        console.log(d.commands.map(c=>\"/self-learning/\"+c.name+\" (\"+c.conf+\")\").join(', '));
-      " 2>/dev/null)
-      LEARNED_SKILLS=$(echo "$LEARNED_JSON" | node -e "
-        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        console.log(d.skills.map(s=>s.name+\" (\"+s.conf+\")\").join(', '));
-      " 2>/dev/null)
-    fi
-  fi
-
-  if [ -n "$LEARNED_COMMANDS" ] || [ -n "$LEARNED_SKILLS" ]; then
-    LEARNED_SECTION="--- LEARNED BEHAVIORS ---"
-    if [ -n "$LEARNED_COMMANDS" ]; then
-      LEARNED_SECTION="$LEARNED_SECTION
-Commands: $LEARNED_COMMANDS"
-    fi
-    if [ -n "$LEARNED_SKILLS" ]; then
-      LEARNED_SECTION="$LEARNED_SECTION
-Skills: $LEARNED_SKILLS"
-    fi
-    LEARNED_SECTION="$LEARNED_SECTION
-Edit or delete: .claude/commands/self-learning/ and .claude/skills/"
-
-    # Check for new artifacts since last notification (single jq -s pass)
-    LAST_NOTIFIED=0
-    if [ -f "$NOTIFIED_MARKER" ]; then
-      LAST_NOTIFIED=$(cat "$NOTIFIED_MARKER" 2>/dev/null || echo "0")
-    fi
-
-    NEW_ARTIFACTS=$(json_learning_new "$LEARNING_LOG" "$LAST_NOTIFIED")
-
-    if [ -n "$NEW_ARTIFACTS" ]; then
-      LEARNED_SECTION="$LEARNED_SECTION
-
---- NEW LEARNED BEHAVIORS ---
-${NEW_ARTIFACTS}
-TIP: Type the command name to use it. Rename to shorter path for quicker access.
-Run \`devflow learn --list\` to see all."
-
-      # Only update notified marker when new artifacts exist
-      date +%s > "$NOTIFIED_MARKER"
-    fi
-
-    if [ -n "$CONTEXT" ]; then
-      CONTEXT="${CONTEXT}
-
-${LEARNED_SECTION}"
-    else
-      CONTEXT="$LEARNED_SECTION"
-    fi
   fi
 fi
 

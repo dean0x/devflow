@@ -34,6 +34,10 @@ RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f3-)
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
+# Sentinel check before ensure-memory-gitignore so a disabled feature stays inert
+# (does not create .memory/ or modify .gitignore when working memory is off).
+[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+
 # Auto-create .memory/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
@@ -97,8 +101,9 @@ fi
 log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
 
 # D29: Usage scanner runs after queue append — memory capture is mission-critical, scanning is supplementary
+# Scanner is gated by decisions sentinel: skip if decisions feature is disabled
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
-if [ -f "$SCANNER" ]; then
+if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
   printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
 fi
 

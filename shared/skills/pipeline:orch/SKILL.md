@@ -24,7 +24,7 @@ Meta-orchestrator chaining implement → review → resolve with status reportin
 ## Cost Communication
 
 Classification statement must warn about scope:
-`Devflow: PIPELINE/ORCHESTRATED. This runs implement → review → resolve (15+ agents across stages).`
+`Devflow: PIPELINE. This runs implement → review → resolve (15+ agents across stages).`
 
 **Scoped nesting**: When delegating to inner orch skills (implement:orch, review:orch, resolve:orch), those skills announce their phases with a scoped prefix: `Implement > Phase 1: Pre-flight`, `Review > Phase 3: File Analysis`, etc. Pipeline:orch announces its own phases without prefix.
 
@@ -32,11 +32,11 @@ Classification statement must warn about scope:
 
 **Produces:** IMPLEMENT_RESULT
 
-Load `devflow:implement:orch` via the Skill tool, then execute its full pipeline (Phases 1-7: pre-flight → feature knowledge → plan synthesis → Coder → FILES_CHANGED detection → quality gates → completion). The quality gates are non-negotiable: Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
+Load `devflow:implement:orch` via the Skill tool, then execute its full pipeline (Phases 1-9: pre-flight → feature knowledge → plan synthesis → Coder → FILES_CHANGED detection → quality gates → CI status gate → completion → feature knowledge generation). The quality gates are non-negotiable: Validator → Simplifier → Scrutinizer → re-Validate → Evaluator → Tester.
 
 If implementation returns **BLOCKED**: halt entire pipeline, report blocker.
 
-Cleanup: delete `.docs/handoff-{branch_slug}.md` if it exists (implement:orch Phase 7 normally removes it; this is a safety net before proceeding to review).
+Cleanup: delete `.docs/handoff-{branch_slug}.md` if it exists (implement:orch Phase 8 normally removes it; this is a safety net before proceeding to review).
 
 ## Phase 2: Status — Review Decision
 
@@ -75,7 +75,7 @@ If **no blocking issues**:
 **Produces:** RESOLVE_RESULT
 **Requires:** RESOLVE_DECISION, REVIEW_RESULT
 
-Load `devflow:resolve:orch` via the Skill tool, then execute its full pipeline (Phases 1-7: target review directory → project decisions → parse issues → analyze & batch → parallel resolvers → collect & simplify → report).
+Load `devflow:resolve:orch` via the Skill tool, then execute its full pipeline (Phases 1-8: target review directory → project decisions → parse issues → analyze & batch → parallel resolvers → collect & simplify → CI status gate → report).
 
 ## Phase 6: Summary
 

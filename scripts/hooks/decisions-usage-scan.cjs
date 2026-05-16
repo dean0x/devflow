@@ -26,6 +26,9 @@ const cwd = path.resolve(rawCwd);
 const memoryDir = path.join(cwd, '.memory');
 if (!fs.existsSync(memoryDir)) process.exit(0); // no .memory dir — nothing to scan
 
+// Skip if decisions feature is disabled (sentinel file)
+if (fs.existsSync(path.join(memoryDir, 'decisions', '.disabled'))) process.exit(0);
+
 // Read stdin synchronously
 let input = '';
 try {

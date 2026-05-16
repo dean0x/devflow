@@ -228,7 +228,7 @@ Aggregate from all Resolvers:
 - **Deferred**: High-risk issues marked for tech debt
 - **Blocked**: Issues that couldn't be fixed
 
-Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Decisions Citations` section in Phase 8.
+Extract all decisions citations from Resolver Reasoning columns. Collect unique `applies ADR-NNN` and `avoids PF-NNN` references across all batches. These will populate the `## Decisions Citations` section in Phase 9.
 
 ### Phase 6: Simplify
 
@@ -245,7 +245,25 @@ FILES_CHANGED: {list of files modified by Resolvers}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
-### Phase 7: Manage Tech Debt (Sequential)
+### Phase 7: CI Status Gate (Conditional)
+
+**Produces:** CI_STATUS
+**Requires:** RESOLUTION_RESULTS
+
+If no issues were fixed (RESOLUTION_RESULTS contains 0 fixes) → skip: "No fixes applied — skipping CI validation."
+
+Otherwise, for each worktree with fixes:
+
+<!-- PATTERN: ci-status-gate — shared polling/classification/budget logic; context-specific preamble lives outside this block -->
+1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `WORKTREE_PATH`.
+2. **If PASSING** → proceed to next phase.
+3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to next phase.
+4. **If PENDING** → poll every 60 seconds (global budget, see step 6). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If the budget is exhausted, report current status and proceed.
+<!-- /PATTERN: ci-status-gate -->
+
+### Phase 8: Manage Tech Debt (Sequential)
 
 **Produces:** DEBT_RESULT
 **Requires:** RESOLUTION_RESULTS, TARGET_DIR
@@ -263,7 +281,7 @@ TIMESTAMP: {timestamp}
 Note: Deferred issues from resolution are already in resolution-summary.md"
 ```
 
-### Phase 8: Report
+### Phase 9: Report
 
 **Requires:** AGGREGATED_RESULTS, KNOWLEDGE_CITATIONS, TARGET_DIR
 
@@ -328,10 +346,13 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 6: Simplify
 │  └─ Simplifier agent (refine fixes)
 │
-├─ Phase 7: Git agent (manage-debt) — SEQUENTIAL across worktrees
+├─ Phase 7: CI Status Gate (conditional — skipped if no fixes)
+│  └─ Git agent (check-ci-status) → poll/fix loop
+│
+├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 8: Write resolution-summary.md + display results
+└─ Phase 9: Write resolution-summary.md + display results
 ```
 
 ## Edge Cases
@@ -362,7 +383,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 ## Output Artifact
 
-Written by orchestrator in Phase 8 to `{TARGET_DIR}/resolution-summary.md`:
+Written by orchestrator in Phase 9 to `{TARGET_DIR}/resolution-summary.md`:
 
 ```markdown
 # Resolution Summary

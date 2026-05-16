@@ -5,7 +5,9 @@ import { execFileSync } from 'child_process';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
+import { manageSentinel } from '../utils/sentinel.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
@@ -385,6 +387,16 @@ export const learnCommand = new Command('learn')
       const status = formatLearningStatus(observations, hookState);
       p.log.info(status);
       warnIfInvalid(invalidCount);
+      // Warn if learning sentinel exists (hooks present but runtime-disabled)
+      const gitRoot = await getGitRoot();
+      if (gitRoot) {
+        const sentinel = path.join(gitRoot, '.memory', '.learning-disabled');
+        const sentinelExists = await fs.access(sentinel).then(() => true).catch(() => false);
+        if (sentinelExists) {
+          p.log.warn(color.yellow('Runtime-disabled: .memory/.learning-disabled sentinel exists — hook will no-op'));
+          p.log.info(color.dim('Run devflow learn --enable to remove the sentinel'));
+        }
+      }
       return;
     }
 
@@ -910,24 +922,36 @@ export const learnCommand = new Command('learn')
       const updated = addLearningHook(settingsContent, devflowDir);
       if (updated === settingsContent) {
         p.log.info('Self-learning already enabled');
-        return;
-      }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
-      if (priorState === 'legacy') {
-        p.log.success('Self-learning upgraded — legacy Stop hook replaced with SessionEnd hook');
       } else {
-        p.log.success('Self-learning enabled — SessionEnd hook registered');
+        await fs.writeFile(settingsPath, updated, 'utf-8');
+        if (priorState === 'legacy') {
+          p.log.success('Self-learning upgraded — legacy Stop hook replaced with SessionEnd hook');
+        } else {
+          p.log.success('Self-learning enabled — SessionEnd hook registered');
+        }
+        p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
       }
-      p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
+      // Remove runtime sentinel if present
+      const gitRoot = await getGitRoot();
+      if (gitRoot) {
+        await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), true);
+      }
+      return;
     }
 
     if (options.disable) {
       const updated = removeLearningHook(settingsContent);
       if (updated === settingsContent) {
         p.log.info('Self-learning already disabled');
-        return;
+      } else {
+        await fs.writeFile(settingsPath, updated, 'utf-8');
+        p.log.success('Self-learning disabled — hook removed');
       }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('Self-learning disabled — hook removed');
+      // Write runtime sentinel so the hook no-ops if re-added without --enable
+      const gitRoot = await getGitRoot();
+      if (gitRoot) {
+        await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), false);
+      }
+      return;
     }
   });

@@ -2,7 +2,8 @@ import { execSync, spawn, ChildProcess } from 'child_process';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { resolve } from 'path';
 
-const CLASSIFICATION_PATTERN = /devflow:\s*(CHAT|EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE)\s*\/\s*(QUICK|GUIDED|ORCHESTRATED)/i;
+const CLASSIFICATION_PATTERN = /devflow:\s*(EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE|RESEARCH|RELEASE)\s*[.]/i;
+const SCOPE_PATTERN = /scope:\s*(GUIDED|ORCHESTRATED)/i;
 
 /**
  * Check if the `claude` CLI is available on this machine.
@@ -27,7 +28,7 @@ function loadRouterContext(): string {
 
 // Simulates SessionStart injection (classification rules) + per-message preamble
 const DEVFLOW_PREAMBLE = loadRouterContext() +
-  '\nClassify this request\'s intent and depth. If GUIDED or ORCHESTRATED, load devflow:router via Skill tool.';
+  '\nClassify this request\'s intent. If not QUICK, load devflow:router via Skill tool.';
 
 /** Parsed fields from a single streaming event */
 export interface ParsedStreamEvent {
@@ -222,8 +223,8 @@ export function extractIntent(result: StreamResult): string | null {
 
 export function extractDepth(result: StreamResult): string | null {
   const text = result.textFragments.join(' ');
-  const match = text.match(CLASSIFICATION_PATTERN);
-  return match ? match[2].toUpperCase() : null;
+  const match = text.match(SCOPE_PATTERN);
+  return match ? match[1].toUpperCase() : null;
 }
 
 /**

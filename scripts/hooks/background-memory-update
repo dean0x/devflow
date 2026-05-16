@@ -22,6 +22,9 @@ source "$SCRIPT_DIR/json-parse" || { echo "background-memory-update: failed to s
 
 source "$SCRIPT_DIR/log-paths" || { echo "background-memory-update: failed to source log-paths" >&2; exit 1; }
 LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
+
+[ -f "$CWD/.memory/.working-memory-disabled" ] && { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Memory disabled — aborting" >> "$LOG_FILE"; exit 0; }
+
 LOCK_DIR="$CWD/.memory/.working-memory.lock"
 
 QUEUE_FILE="$CWD/.memory/.pending-turns.jsonl"

@@ -131,18 +131,25 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
     skills: [
       'router',
+      'implement:triage',
       'implement:orch',
       'implement:guided',
+      'debug:triage',
       'debug:orch',
       'debug:guided',
+      'explore:triage',
       'explore:orch',
       'explore:guided',
+      'research:triage',
       'research:orch',
       'research:guided',
+      'release:triage',
       'release:orch',
       'release:guided',
+      'plan:triage',
       'plan:orch',
       'plan:guided',
+      'review:triage',
       'review:orch',
       'review:guided',
       'resolve:orch',
@@ -484,6 +491,14 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'release:guided',
   // v2.x reliability: bare name for pre-namespace installs
   'reliability',
+  // v2.x triage skills: bare names for pre-namespace installs
+  'implement:triage',
+  'debug:triage',
+  'explore:triage',
+  'plan:triage',
+  'review:triage',
+  'research:triage',
+  'release:triage',
 ];
 
 /**

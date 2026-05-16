@@ -23,6 +23,7 @@ import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafe
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
+// Settings/HookMatcher types used by hook utilities — each in their own module
 import { addLearningHook, removeLearningHook } from './learn.js';
 import { addDecisionsHook, removeDecisionsHook } from './decisions.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
@@ -30,6 +31,8 @@ import { addKnowledgeHook, removeKnowledgeHook } from './knowledge/index.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
+import { addContextHook, removeContextHook, hasContextHook } from './context.js';
+import { manageSentinel } from '../utils/sentinel.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -98,6 +101,8 @@ export function classifySafeDeleteState(
   if (installedVersion > 0) return 'outdated';
   return 'missing';
 }
+
+export { addContextHook, removeContextHook, hasContextHook };
 
 /**
  * Parse a comma-separated plugin selection string into normalized plugin names.
@@ -1087,6 +1092,10 @@ export const initCommand = new Command('init')
       const cleanedForDecisions = removeDecisionsHook(content);
       content = decisionsEnabled ? addDecisionsHook(cleanedForDecisions, devflowDir) : cleanedForDecisions;
 
+      // Context hook — always-on, remove-then-add for upgrade safety
+      const cleanedForContext = removeContextHook(content);
+      content = addContextHook(cleanedForContext, devflowDir);
+
       // Claude Code flags — strip all managed keys, then re-apply selected flags
       content = stripFlags(content);
       content = applyFlags(content, enabledFlags);
@@ -1133,27 +1142,12 @@ export const initCommand = new Command('init')
       }
     }
 
-    // Manage .disabled sentinel based on knowledgeEnabled state
+    // Manage runtime-disable sentinels for each feature
     if (gitRoot) {
-      const disabledPath = path.join(gitRoot, '.features', '.disabled');
-      if (knowledgeEnabled) {
-        try { await fs.unlink(disabledPath); } catch { /* doesn't exist */ }
-      } else {
-        await fs.mkdir(path.join(gitRoot, '.features'), { recursive: true });
-        await fs.writeFile(disabledPath, '', 'utf-8');
-      }
-    }
-
-    // Manage .disabled sentinel for decisions based on decisionsEnabled state
-    if (gitRoot) {
-      const decisionsSentinelDir = path.join(gitRoot, '.memory', 'decisions');
-      const decisionsSentinel = path.join(decisionsSentinelDir, '.disabled');
-      if (decisionsEnabled) {
-        try { await fs.unlink(decisionsSentinel); } catch { /* doesn't exist */ }
-      } else {
-        await fs.mkdir(decisionsSentinelDir, { recursive: true });
-        await fs.writeFile(decisionsSentinel, '', 'utf-8');
-      }
+      await manageSentinel(path.join(gitRoot, '.features', '.disabled'), knowledgeEnabled);
+      await manageSentinel(path.join(gitRoot, '.memory', 'decisions', '.disabled'), decisionsEnabled);
+      await manageSentinel(path.join(gitRoot, '.memory', '.working-memory-disabled'), memoryEnabled);
+      await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), learnEnabled);
     }
 
     // Configure HUD

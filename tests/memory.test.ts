@@ -559,6 +559,51 @@ describe('session-start-memory hook integration', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it('does not include PROJECT DECISIONS section (decisions TL;DR moved to session-start-context)', async () => {
+    // Decisions TL;DR injection moved from session-start-memory to session-start-context.
+    // session-start-memory only handles working memory (WORKING-MEMORY.md).
+    await fs.writeFile(
+      path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
+      '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
+    );
+
+    const output = await runHook(tmpDir);
+    // With only decisions files (no WORKING-MEMORY.md), session-start-memory outputs nothing
+    expect(output.trim()).toBe('');
+  });
+
+  it('does not include PROJECT DECISIONS section when no decisions files exist', async () => {
+    // Empty tmpDir with just the directories — no decisions files, no WORKING-MEMORY.md
+    const output = await runHook(tmpDir);
+    // session-start-memory produces no output when there is no WORKING-MEMORY.md
+    expect(output.trim()).toBe('');
+  });
+});
+
+describe('session-start-context hook integration', () => {
+  let tmpDir: string;
+  const hookPath = path.resolve(__dirname, '..', 'scripts', 'hooks', 'session-start-context');
+
+  function runHook(cwd: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = exec(`bash "${hookPath}"`, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (err) return reject(new Error(`Hook failed: ${err.message}\nstderr: ${stderr}`));
+        resolve(stdout);
+      });
+      child.stdin?.write(JSON.stringify({ cwd }));
+      child.stdin?.end();
+    });
+  }
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-hook-test-'));
+    await fs.mkdir(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
   it('injects PROJECT DECISIONS TL;DR from decisions files', async () => {
     await fs.writeFile(
       path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
@@ -578,7 +623,7 @@ describe('session-start-memory hook integration', () => {
     expect(ctx).toContain('1 pitfall. Key: PF-001 Synthesizer glob');
   });
 
-  it('produces no leading newlines when only decisions files exist (no working memory)', async () => {
+  it('produces no leading newlines when only decisions files exist', async () => {
     await fs.writeFile(
       path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
@@ -593,9 +638,8 @@ describe('session-start-memory hook integration', () => {
   });
 
   it('does not include PROJECT DECISIONS section when no decisions files exist', async () => {
-    // Empty tmpDir with just the directories — no decisions files
+    // Empty tmpDir with decisions dir but no decisions files
     const output = await runHook(tmpDir);
-    // May still have ambient output depending on user settings, but should not have decisions
     if (output.trim()) {
       const json = JSON.parse(output);
       const ctx = json.hookSpecificOutput.additionalContext;

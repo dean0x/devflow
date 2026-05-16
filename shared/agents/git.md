@@ -30,6 +30,7 @@ The orchestrator provides:
 | `fetch-issues-batch` | Fetch multiple GitHub issues for multi-issue planning | `ISSUE_NUMBERS` |
 | `comment-pr` | Create PR inline comments for review findings | `PR_NUMBER`, `REVIEW_BASE_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
 | `manage-debt` | Update tech debt backlog with pre-existing issues | `REVIEW_DIR`, `TIMESTAMP`, `WORKTREE_PATH` (optional) |
+| `check-ci-status` | Check CI/PR check status for a branch | `PR_NUMBER` (optional), `WORKTREE_PATH` (optional) |
 | `create-release` | Create GitHub release with version tag | `VERSION`, `CHANGELOG_CONTENT` |
 
 ---
@@ -273,6 +274,37 @@ Update tech debt backlog with pre-existing issues from code review.
 
 ### Archive Status
 {Within limits | Archived to #{n}}
+```
+
+---
+
+## Operation: check-ci-status
+
+Check CI/PR check status for a branch's pull request.
+
+**Input:** `PR_NUMBER` (optional), `WORKTREE_PATH` (optional)
+
+**Process:**
+1. If `PR_NUMBER` not provided, discover it: `gh pr view --json number --jq '.number' 2>/dev/null`
+2. If no PR found → output status `NO_PR`, stop
+3. Fetch checks: `gh pr checks {number} --json name,state,conclusion 2>/dev/null`
+4. If empty or command fails → output status `NO_CI`
+5. Classify in priority order: if any check has state `IN_PROGRESS` or `PENDING` → `PENDING`; else if any conclusion is `FAILURE` → `FAILING`; else if all conclusions are `SUCCESS` → `PASSING`
+6. List failing/pending checks with names
+
+**Output:**
+```markdown
+## CI Status
+**PR**: #{number}
+**Status**: PASSING | FAILING | PENDING | NO_CI | NO_PR
+
+### Check Results
+| Check | State | Conclusion |
+|-------|-------|------------|
+| {name} | {state} | {conclusion} |
+
+### Failing Checks (if any)
+- {name}: {conclusion}
 ```
 
 ---
