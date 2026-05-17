@@ -1134,7 +1134,11 @@ export const initCommand = new Command('init')
       await manageSentinel(path.join(gitRoot, '.memory', 'decisions', '.disabled'), decisionsEnabled);
     }
 
-    // Write sidecar config.json to manage per-feature enable/disable at runtime
+    // Write sidecar config.json to manage per-feature enable/disable at runtime.
+    // Uses writeConfig (full atomic write) rather than four updateFeature calls because
+    // init always sets all four features at once and is never concurrent with toggle
+    // commands — it is a one-time setup action. See D1 in sidecar-config.ts for the
+    // concurrency assumption shared by both write strategies.
     if (gitRoot) {
       await writeSidecarConfig(gitRoot, {
         memory: memoryEnabled,

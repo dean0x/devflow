@@ -66,7 +66,7 @@ export function addMemoryHooks(settingsJson: string, devflowDir: string): string
 }
 
 /**
- * Remove all memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) from settings JSON.
+ * Remove all memory hooks (UserPromptSubmit, Stop, SessionEnd, SessionStart, PreCompact) from settings JSON.
  * Accepts either a JSON string or a parsed Settings object (consistent with hasMemoryHooks/countMemoryHooks).
  * Idempotent — returns unchanged JSON if no memory hooks present.
  * Preserves non-memory hooks. Cleans empty arrays/objects.
@@ -322,8 +322,14 @@ export const memoryCommand = new Command('memory')
       // writes sidecar config. This asymmetry is intentional: sidecar hooks are shared
       // across features (memory, learning, decisions) and must never be removed by a
       // single-feature disable. --enable must still install them on first use.
-      if (hasMemoryHooks(settingsContent)) {
+      const alreadyHasHooks = hasMemoryHooks(settingsContent);
+      const alreadyEnabled = alreadyHasHooks && (gitRoot ? await isFeatureEnabled(gitRoot, 'memory') : true);
+      if (alreadyEnabled) {
         p.log.info('Working memory already enabled');
+      } else if (alreadyHasHooks) {
+        // Hooks are registered but sidecar config has memory:false — re-enable via config
+        p.log.success('Working memory enabled — sidecar config updated');
+        p.log.info(color.dim('Session context will be automatically preserved across conversations'));
       } else {
         const updated = addMemoryHooks(settingsContent, devflowDir);
         await fs.writeFile(settingsPath, updated, 'utf-8');
