@@ -18,8 +18,7 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Check disable sentinel (legacy) or sidecar config (new)
-[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+# Check sidecar config for disable (single source of truth — applies ADR-001 clean break)
 SIDECAR_CONFIG="$CWD/.memory/.sidecar/config.json"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
