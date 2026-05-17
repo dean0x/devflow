@@ -466,6 +466,25 @@ export const learnCommand = new Command('learn')
           await fs.rmdir(path.join(memoryDir, '.decisions-usage.lock'));
         } catch { /* doesn't exist or already cleaned */ }
 
+        // Clean sidecar state files
+        const sidecarDir = path.join(memoryDir, '.sidecar');
+        for (const f of ['.learning-runs-today', '.learning-sessions']) {
+          try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* may not exist */ }
+        }
+        // Clean sidecar learning markers and locks
+        try {
+          const sidecarFiles = await fs.readdir(sidecarDir);
+          for (const f of sidecarFiles) {
+            if (f.startsWith('learning.') && f.endsWith('.json')) {
+              try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* sidecar dir may not exist */ }
+        // Clean lock directories
+        for (const lockName of ['.reinforce.lock', '.learning-batch.lock']) {
+          try { await fs.rmdir(path.join(sidecarDir, lockName)); } catch { /* ignore */ }
+        }
+
         // Remove stale `enabled` field from learning.json (migration)
         const configPath = path.join(memoryDir, 'learning.json');
         try {
@@ -685,6 +704,10 @@ export const learnCommand = new Command('learn')
       const gitRoot = await getGitRoot();
       if (gitRoot) {
         await updateFeature(gitRoot, 'learning', true);
+        // Remove .learning-disabled sentinel (defense-in-depth with sidecar config)
+        try {
+          await fs.unlink(path.join(gitRoot, '.memory', '.learning-disabled'));
+        } catch { /* may not exist */ }
         p.log.success('Self-learning enabled — sidecar config updated');
         p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
       } else {
@@ -697,6 +720,10 @@ export const learnCommand = new Command('learn')
       const gitRoot = await getGitRoot();
       if (gitRoot) {
         await updateFeature(gitRoot, 'learning', false);
+        // Create .learning-disabled sentinel (gates session-start-context)
+        const memDir = path.join(gitRoot, '.memory');
+        await fs.mkdir(memDir, { recursive: true });
+        await fs.writeFile(path.join(memDir, '.learning-disabled'), '', 'utf-8');
         p.log.success('Self-learning disabled — sidecar config updated');
       } else {
         p.log.warn('Could not resolve git root — sidecar config not updated');
