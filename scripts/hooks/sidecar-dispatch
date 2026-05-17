@@ -14,6 +14,7 @@ if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/json-parse" || { echo "sidecar-dispatch: failed to source json-parse" >&2; exit 1; }
+source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-dispatch: failed to source get-mtime" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
@@ -66,22 +67,34 @@ if [ ! -d "$SIDECAR_DIR" ]; then
   exit 0
 fi
 
-# Stale retry: if any .processing file is >5 min old, rename back to .json
+# Stale retry: if any .processing file is >5 min old, rename back to .json.
+# Cap at 10 files to guard against unexpected proliferation.
+# After MAX_RETRIES stale recoveries, mark as .failed instead of cycling.
 NOW=$(date +%s)
+MAX_RETRIES=3
+PROC_COUNT=0
+PROC_LIMIT=10
 for PROC_FILE in "$SIDECAR_DIR"/*.processing; do
   [ -f "$PROC_FILE" ] || continue
-  # Get file mtime (stat available on all supported platforms)
-  if command -v stat &>/dev/null; then
-    if stat --version 2>/dev/null | grep -q GNU; then
-      PROC_MTIME=$(stat -c %Y "$PROC_FILE" 2>/dev/null || echo "0")
+  PROC_COUNT=$(( PROC_COUNT + 1 ))
+  [ "$PROC_COUNT" -gt "$PROC_LIMIT" ] && break
+  PROC_MTIME=$(get_mtime "$PROC_FILE")
+  PROC_MTIME="${PROC_MTIME:-0}"
+  PROC_AGE=$(( NOW - PROC_MTIME ))
+  if [ "$PROC_AGE" -gt 300 ]; then
+    # Check how many times this marker has already been retried
+    BASE="${PROC_FILE%.processing}"
+    RETRY_FILE="${BASE}.retries"
+    RETRY_COUNT=0
+    [ -f "$RETRY_FILE" ] && RETRY_COUNT=$(cat "$RETRY_FILE" 2>/dev/null || echo "0")
+    if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+      # Too many retries — mark as permanently failed to stop cycling
+      mv "$PROC_FILE" "${BASE}.failed" 2>/dev/null || true
+      rm -f "$RETRY_FILE" 2>/dev/null || true
     else
-      PROC_MTIME=$(stat -f %m "$PROC_FILE" 2>/dev/null || echo "0")
-    fi
-    PROC_AGE=$(( NOW - PROC_MTIME ))
-    if [ "$PROC_AGE" -gt 300 ]; then
       # Stale processing file — rename back to .json for retry
-      JSON_FILE="${PROC_FILE%.processing}.json"
-      mv "$PROC_FILE" "$JSON_FILE" 2>/dev/null || true
+      echo $(( RETRY_COUNT + 1 )) > "$RETRY_FILE"
+      mv "$PROC_FILE" "${BASE}.json" 2>/dev/null || true
     fi
   fi
 done
