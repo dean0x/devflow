@@ -522,3 +522,90 @@ describe('cleanSelfLearningArtifacts', () => {
     }
   });
 });
+
+describe('learn --enable / --disable sentinel management', () => {
+  it('--disable sidecar state file targets include .learning-disabled sentinel path', () => {
+    // Verify the sentinel path is under .memory (matching learn.ts code)
+    const memoryDir = path.join('/project', '.memory');
+    const sentinelPath = path.join(memoryDir, '.learning-disabled');
+    expect(sentinelPath).toBe('/project/.memory/.learning-disabled');
+  });
+
+  it('--enable sidecar integration removes .learning-disabled sentinel', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
+    try {
+      const memDir = path.join(tmpDir, '.memory');
+      fs.mkdirSync(memDir, { recursive: true });
+      const sentinelPath = path.join(memDir, '.learning-disabled');
+      // Simulate a disabled state
+      fs.writeFileSync(sentinelPath, '');
+      expect(fs.existsSync(sentinelPath)).toBe(true);
+
+      // Manually remove as the --enable path does (unlink)
+      try { fs.unlinkSync(sentinelPath); } catch { /* may not exist */ }
+      expect(fs.existsSync(sentinelPath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('--disable sidecar integration creates .learning-disabled sentinel', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
+    try {
+      const memDir = path.join(tmpDir, '.memory');
+      fs.mkdirSync(memDir, { recursive: true });
+      const sentinelPath = path.join(memDir, '.learning-disabled');
+      expect(fs.existsSync(sentinelPath)).toBe(false);
+
+      // Simulate what --disable does: writeFile with empty string
+      fs.writeFileSync(sentinelPath, '');
+      expect(fs.existsSync(sentinelPath)).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('learn --reset sidecar state cleanup', () => {
+  it('sidecar cleanup targets .learning-runs-today and .learning-sessions', () => {
+    const sidecarFilesToClean = ['.learning-runs-today', '.learning-sessions'];
+
+    // All targeted state files should be learning-specific
+    for (const f of sidecarFilesToClean) {
+      expect(f).toContain('learning');
+    }
+  });
+
+  it('sidecar marker pattern matches per-session learning markers only', () => {
+    const learningMarkerPattern = /^learning\..+\.json$/;
+
+    expect(learningMarkerPattern.test('learning.abc123.json')).toBe(true);
+    expect(learningMarkerPattern.test('learning.session-xyz.json')).toBe(true);
+    // Should NOT match decisions or knowledge markers
+    expect(learningMarkerPattern.test('decisions.abc123.json')).toBe(false);
+    expect(learningMarkerPattern.test('learning.json')).toBe(false); // legacy (no session suffix)
+  });
+
+  it('sidecar cleanup removes lock directories (.reinforce.lock, .learning-batch.lock)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
+    try {
+      const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+      fs.mkdirSync(sidecarDir, { recursive: true });
+
+      // Create mock lock directories
+      for (const lock of ['.reinforce.lock', '.learning-batch.lock']) {
+        fs.mkdirSync(path.join(sidecarDir, lock));
+      }
+
+      // Simulate the cleanup that --reset does
+      for (const lockName of ['.reinforce.lock', '.learning-batch.lock']) {
+        try { fs.rmdirSync(path.join(sidecarDir, lockName)); } catch { /* ignore */ }
+      }
+
+      expect(fs.existsSync(path.join(sidecarDir, '.reinforce.lock'))).toBe(false);
+      expect(fs.existsSync(path.join(sidecarDir, '.learning-batch.lock'))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

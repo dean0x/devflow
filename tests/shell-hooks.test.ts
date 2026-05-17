@@ -1956,9 +1956,10 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'session-c',
     }, homeDir);
 
-    // Batch complete: learning.json marker should be written
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(true);
-    const marker = JSON.parse(fs.readFileSync(path.join(sidecarDir, 'learning.json'), 'utf-8'));
+    // Batch complete: per-session learning marker should be written (learning.session-c.json)
+    const learningMarker = path.join(sidecarDir, 'learning.session-c.json');
+    expect(fs.existsSync(learningMarker)).toBe(true);
+    const marker = JSON.parse(fs.readFileSync(learningMarker, 'utf-8'));
     expect(marker).toHaveProperty('userSignals');
     expect(marker).toHaveProperty('existingObservationIds');
 
@@ -2046,7 +2047,8 @@ describe('sidecar-evaluate business logic', () => {
     }, homeDir);
 
     const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
-    const decisionsMarker = path.join(sidecarDir, 'decisions.json');
+    // Per-session marker: decisions.test-session.json
+    const decisionsMarker = path.join(sidecarDir, 'decisions.test-session.json');
     expect(fs.existsSync(decisionsMarker)).toBe(true);
 
     const marker = JSON.parse(fs.readFileSync(decisionsMarker, 'utf-8'));
@@ -2310,7 +2312,8 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
     expect(exitCode).toBe(0);
 
     // The marker should still be written because cap defaults to 0 (not at max)
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(true);
+    // Per-session marker: learning.test-session.json
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.test-session.json'))).toBe(true);
   });
 
   it('non-numeric config values do not crash', () => {
@@ -2325,6 +2328,55 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
     createTranscript(homeDir, tmpDir, 5);
     const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+  });
+
+  it('LAST_REFRESH sanitization: non-numeric content in knowledge marker defaults to 0', () => {
+    // Write non-numeric content to .knowledge-last-refresh — should sanitize to 0
+    // resulting in a stale age calculation (now - 0 > 7200) and triggering evaluation
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    // No stale slugs — so no marker will be written — but hook should not crash
+    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
+    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), 'not-a-number\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+
+    // Hook should have attempted knowledge evaluation (no crash from bad timestamp)
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      // Either throttled (with sanitized timestamp near 0 → stale) or "no stale slugs"
+      // Both are valid outcomes — the key is it didn't crash
+      expect(log).toContain('Evaluating knowledge');
+    }
+  });
+
+  it('LAST_UPDATE get_mtime fallback: missing WORKING-MEMORY defaults to 0', () => {
+    // Without WORKING-MEMORY.md, get_mtime returns empty string; LAST_UPDATE should default to 0
+    // so age computation doesn't error
+    createTranscript(homeDir, tmpDir, 5);
+
+    // Deliberately do NOT create WORKING-MEMORY.md
+    // We call sidecar-capture (not sidecar-evaluate) for this one since it does the get_mtime check
+    const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+    // Use execSync to avoid wrapping in runHook abstraction
+    const { execSync: execSyncLocal } = require('child_process');
+    const exitCode = (() => {
+      try {
+        execSyncLocal(`bash "${CAPTURE_HOOK}"`, {
+          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', stop_reason: 'end_turn', response_text: 'response text here' }),
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, HOME: homeDir },
+        });
+        return 0;
+      } catch (e: unknown) {
+        return (e as { status: number }).status ?? 1;
+      }
+    })();
     expect(exitCode).toBe(0);
   });
 });

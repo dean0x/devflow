@@ -228,3 +228,46 @@ describe('isFeatureEnabled', () => {
     expect(await isFeatureEnabled(tmpDir, 'decisions')).toBe(false);
   });
 });
+
+describe('writeConfig atomic pattern', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sidecar-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writes valid JSON readable by readConfig (atomic pattern produces correct output)', async () => {
+    const config: SidecarConfig = { memory: false, learning: true, decisions: false, knowledge: true };
+    await writeConfig(tmpDir, config);
+
+    // readConfig should be able to read the atomically-written config
+    const read = await readConfig(tmpDir);
+    expect(read.memory).toBe(false);
+    expect(read.learning).toBe(true);
+    expect(read.decisions).toBe(false);
+    expect(read.knowledge).toBe(true);
+  });
+
+  it('leaves no .tmp.* files behind after successful write', async () => {
+    const config: SidecarConfig = { memory: true, learning: false, decisions: true, knowledge: false };
+    await writeConfig(tmpDir, config);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const files = fs.readdirSync(sidecarDir);
+    const tmpFiles = files.filter(f => f.includes('.tmp.'));
+    expect(tmpFiles).toHaveLength(0);
+  });
+
+  it('overwrites previous config atomically', async () => {
+    await writeConfig(tmpDir, { memory: true, learning: true, decisions: true, knowledge: true });
+    await writeConfig(tmpDir, { memory: false, learning: false, decisions: false, knowledge: false });
+
+    const read = await readConfig(tmpDir);
+    expect(read.memory).toBe(false);
+    expect(read.learning).toBe(false);
+  });
+});

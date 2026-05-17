@@ -666,3 +666,85 @@ describe('session-start-context hook integration', () => {
     // If no output at all, that's also correct
   });
 });
+
+describe('removeMemoryHooks removes legacy pre-sidecar hooks', () => {
+  it('removes prompt-capture-memory from UserPromptSubmit', () => {
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/run-hook prompt-capture-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook preamble', timeout: 10 }] },
+        ],
+      },
+    });
+    const result = removeMemoryHooks(input);
+    const settings = JSON.parse(result);
+
+    // prompt-capture-memory removed; preamble preserved
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain('preamble');
+  });
+
+  it('removes stop-update-memory and stop-update-learning from Stop', () => {
+    const input = JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/run-hook stop-update-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook stop-update-learning', timeout: 10 }] },
+        ],
+      },
+    });
+    const result = removeMemoryHooks(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('removes session-end-learning, session-end-decisions, session-end-knowledge-refresh from SessionEnd', () => {
+    const input = JSON.stringify({
+      hooks: {
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/run-hook session-end-learning', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook session-end-decisions', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook session-end-knowledge-refresh', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook sidecar-evaluate', timeout: 10 }] },
+        ],
+      },
+    });
+    const result = removeMemoryHooks(input);
+    const settings = JSON.parse(result);
+
+    // Legacy hooks removed; sidecar-evaluate (new hook) removed by MEMORY_HOOK_CONFIG
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it('handles mix of old and new hooks — removes all', () => {
+    // Simulate an upgrading user with both old and new hooks installed
+    const input = JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          { hooks: [{ type: 'command', command: '/path/run-hook prompt-capture-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook sidecar-dispatch', timeout: 10 }] },
+        ],
+        Stop: [
+          { hooks: [{ type: 'command', command: '/path/run-hook stop-update-memory', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook sidecar-capture', timeout: 10 }] },
+        ],
+        SessionEnd: [
+          { hooks: [{ type: 'command', command: '/path/run-hook session-end-learning', timeout: 10 }] },
+          { hooks: [{ type: 'command', command: '/path/run-hook sidecar-evaluate', timeout: 10 }] },
+        ],
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/run-hook session-start-memory', timeout: 10 }] },
+        ],
+        PreCompact: [
+          { hooks: [{ type: 'command', command: '/path/run-hook pre-compact-memory', timeout: 10 }] },
+        ],
+      },
+    });
+    const result = removeMemoryHooks(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+  });
+});

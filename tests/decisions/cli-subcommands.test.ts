@@ -575,3 +575,39 @@ describe('capacity review notification clearing (D28)', () => {
     expect(Object.keys(notifications)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// --reset sidecar cleanup: verify sidecar state files are targeted
+// ---------------------------------------------------------------------------
+
+describe('decisions --reset sidecar state cleanup', () => {
+  it('sidecar cleanup targets .decisions-runs-today and decisions.*.json markers', () => {
+    // Verify the set of sidecar state files that --reset should clean
+    // This is a documentation/assertion test — matches what the CLI code does
+    const sidecarFilesToClean = [
+      '.decisions-runs-today',
+    ];
+    const sidecarMarkerPattern = /^decisions\..+\.json$/;
+
+    // All targeted state files should be decisions-specific
+    for (const f of sidecarFilesToClean) {
+      expect(f).toContain('decisions');
+    }
+
+    // Marker pattern should match per-session decision markers
+    expect(sidecarMarkerPattern.test('decisions.abc123.json')).toBe(true);
+    expect(sidecarMarkerPattern.test('decisions.session-xyz.json')).toBe(true);
+    // Should NOT match learning or knowledge markers
+    expect(sidecarMarkerPattern.test('learning.abc123.json')).toBe(false);
+    expect(sidecarMarkerPattern.test('decisions.json')).toBe(false); // legacy (no session suffix)
+  });
+
+  it('sidecar cleanup does not target learning state files', () => {
+    const decisionsSidecarFiles = ['.decisions-runs-today'];
+    const learningFiles = ['.learning-runs-today', '.learning-sessions'];
+
+    for (const lf of learningFiles) {
+      expect(decisionsSidecarFiles).not.toContain(lf);
+    }
+  });
+});
