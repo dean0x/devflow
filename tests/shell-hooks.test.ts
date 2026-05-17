@@ -1698,3 +1698,616 @@ describe('get-mtime behavioral', () => {
   });
 });
 
+// =============================================================================
+// transcript-filter.cjs CLI handler
+// =============================================================================
+
+describe('transcript-filter.cjs CLI', () => {
+  const FILTER = path.join(HOOKS_DIR, 'lib', 'transcript-filter.cjs');
+
+  it('user-signals extracts user turns', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'transcript.jsonl');
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello world' } }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }),
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'thanks for helping' } }),
+      ].join('\n') + '\n');
+
+      const result = execSync(`node "${FILTER}" user-signals "${file}"`, { stdio: 'pipe' }).toString().trim();
+      const parsed = JSON.parse(result);
+      expect(parsed).toEqual(['hello world', 'thanks for helping']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('dialog-pairs extracts assistant+user pairs', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'transcript.jsonl');
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello world' } }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hi there' }] } }),
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'thanks for helping' } }),
+      ].join('\n') + '\n');
+
+      const result = execSync(`node "${FILTER}" dialog-pairs "${file}"`, { stdio: 'pipe' }).toString().trim();
+      const parsed = JSON.parse(result);
+      expect(parsed).toEqual([{ prior: 'hi there', user: 'thanks for helping' }]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('user-signals with empty transcript returns empty stdout (not "[]")', () => {
+    // transcript-filter outputs nothing (empty stdout) for empty results so that
+    // shell [ -n "$VAR" ] emptiness checks work correctly. JSON.stringify([]) produces
+    // "[]" which is a non-empty string and would fool shell emptiness checks.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'empty.jsonl');
+    try {
+      fs.writeFileSync(file, '');
+      const result = execSync(`node "${FILTER}" user-signals "${file}"`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('invalid subcommand exits non-zero', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'dummy.jsonl');
+    try {
+      fs.writeFileSync(file, '');
+      expect(() => {
+        execSync(`node "${FILTER}" bogus "${file}"`, { stdio: 'pipe' });
+      }).toThrow();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// =============================================================================
+// Sidecar hook test helpers
+// =============================================================================
+
+function encodeCwd(cwd: string): string {
+  return cwd.replace(/^\//, '').replace(/\//g, '-');
+}
+
+function createTranscript(
+  homeDir: string,
+  cwdDir: string,
+  userTurns: number,
+  assistantTurns: number = userTurns,
+  sessionId: string = 'test-session',
+): string {
+  const encoded = encodeCwd(cwdDir);
+  const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+  fs.mkdirSync(projDir, { recursive: true });
+  const transcriptPath = path.join(projDir, `${sessionId}.jsonl`);
+  const lines: string[] = [];
+  for (let i = 0; i < Math.max(userTurns, assistantTurns); i++) {
+    if (i < userTurns) lines.push(JSON.stringify({
+      type: 'user', message: { role: 'user', content: `user turn ${i}` },
+    }));
+    if (i < assistantTurns) lines.push(JSON.stringify({
+      type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `response ${i}` }] },
+    }));
+  }
+  fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+  return transcriptPath;
+}
+
+function createSidecarConfig(cwdDir: string, config: Record<string, boolean>): void {
+  const dir = path.join(cwdDir, '.memory', '.sidecar');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
+}
+
+function backdateMtime(filePath: string, secondsAgo: number): void {
+  const past = new Date(Date.now() - secondsAgo * 1000);
+  fs.utimesSync(filePath, past, past);
+}
+
+function runHook(hookPath: string, input: object, homeDir: string): { stdout: string; stderr: string; exitCode: number } {
+  try {
+    const result = execSync(`bash "${hookPath}"`, {
+      input: JSON.stringify(input),
+      env: { ...process.env, HOME: homeDir },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { stdout: result.toString(), stderr: '', exitCode: 0 };
+  } catch (e: any) {
+    return {
+      stdout: e.stdout?.toString() ?? '',
+      stderr: e.stderr?.toString() ?? '',
+      exitCode: e.status ?? 1,
+    };
+  }
+}
+
+// =============================================================================
+// sidecar-evaluate business logic
+// =============================================================================
+
+describe('sidecar-evaluate business logic', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-eval-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-eval-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('config defaults: all features enabled when no config present', () => {
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+    expect(exitCode).toBe(0);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).toContain('Evaluating learning');
+      expect(log).toContain('Evaluating decisions');
+      expect(log).toContain('Evaluating knowledge');
+    }
+  });
+
+  it('config disables learning: learning skipped, decisions still evaluated', () => {
+    createSidecarConfig(tmpDir, { learning: false });
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).not.toContain('Evaluating learning');
+      expect(log).toContain('Evaluating decisions');
+    }
+  });
+
+  it('shallow session (2 turns) skips learning and decisions', () => {
+    createTranscript(homeDir, tmpDir, 2);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'decisions.json'))).toBe(false);
+  });
+
+  it('deep session (5 turns) proceeds with evaluation', () => {
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).toContain('Session depth: 5 turns');
+    }
+  });
+
+  it('learning batch accumulation triggers at batch_size threshold', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    // Pre-write 2 session IDs (batch_size defaults to 3)
+    const sessionCountFile = path.join(sidecarDir, '.learning-sessions');
+    fs.writeFileSync(sessionCountFile, 'session-a\nsession-b\n');
+
+    // Create a deep transcript for session-c (the 3rd session)
+    createTranscript(homeDir, tmpDir, 5, 5, 'session-c');
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'session-c',
+    }, homeDir);
+
+    // Batch complete: learning.json marker should be written
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(true);
+    const marker = JSON.parse(fs.readFileSync(path.join(sidecarDir, 'learning.json'), 'utf-8'));
+    expect(marker).toHaveProperty('userSignals');
+    expect(marker).toHaveProperty('existingObservationIds');
+
+    // Session count file should be cleaned up
+    expect(fs.existsSync(sessionCountFile)).toBe(false);
+  });
+
+  it('learning daily cap blocks marker creation', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    // Set daily cap to max
+    const today = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\t5\n`);
+
+    // Pre-fill batch to trigger
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).toContain('daily cap reached');
+    }
+  });
+
+  it('learning adaptive batch: >=15 obs requires batch_size=5', () => {
+    // Write 16 observation lines
+    const logLines = Array.from({ length: 16 }, (_, i) =>
+      JSON.stringify({ id: `obs_${i}`, type: 'workflow', pattern: `p${i}` }),
+    );
+    fs.writeFileSync(path.join(tmpDir, '.memory', 'learning-log.jsonl'), logLines.join('\n') + '\n');
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    // Pre-fill only 3 sessions (less than adaptive batch_size=5)
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    // 4 sessions total (3 pre-existing + 1 new) < 5 adaptive threshold
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).toContain('4/5 sessions');
+    }
+  });
+
+  it('learning session dedup: same ID twice counted once', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    createTranscript(homeDir, tmpDir, 5, 5, 'dup-session');
+
+    // Run twice with same session_id
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
+
+    const sessionCountFile = path.join(sidecarDir, '.learning-sessions');
+    if (fs.existsSync(sessionCountFile)) {
+      const lines = fs.readFileSync(sessionCountFile, 'utf-8').trim().split('\n').filter(Boolean);
+      expect(lines).toHaveLength(1);
+    }
+  });
+
+  it('decisions marker written for deep session with dialog pairs', () => {
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const decisionsMarker = path.join(sidecarDir, 'decisions.json');
+    expect(fs.existsSync(decisionsMarker)).toBe(true);
+
+    const marker = JSON.parse(fs.readFileSync(decisionsMarker, 'utf-8'));
+    expect(marker).toHaveProperty('dialogPairs');
+    expect(marker).toHaveProperty('existingObservationIds');
+
+    // Verify dialog pairs are non-empty (5 alternating turns = 4 pairs)
+    const pairs = JSON.parse(marker.dialogPairs);
+    expect(pairs.length).toBeGreaterThan(0);
+  });
+
+  it('knowledge throttle: recent refresh skips evaluation', () => {
+    // Write a recent timestamp to the throttle marker
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
+    const now = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), String(now));
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).toContain('Knowledge throttled');
+    }
+  });
+
+  it('knowledge disabled sentinel skips evaluation', () => {
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).toContain('Knowledge disabled by sentinel');
+    }
+  });
+
+  it('session ID path traversal rejected, fallback used', () => {
+    // Create a valid transcript with a normal name
+    createTranscript(homeDir, tmpDir, 5, 5, 'valid-session');
+
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: '../etc',
+    }, homeDir);
+
+    // The hook should still work via ls -t fallback
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      expect(log).toContain('Session depth');
+    }
+  });
+});
+
+// =============================================================================
+// sidecar-dispatch stale marker recovery
+// =============================================================================
+
+describe('sidecar-dispatch stale marker recovery', () => {
+  const DISPATCH_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
+
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dispatch-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory', '.sidecar'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('fresh .processing left alone', () => {
+    const procFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.existsSync(procFile)).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar', 'learning.json'))).toBe(false);
+  });
+
+  it('stale .processing retried — renamed back to .json', () => {
+    const procFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 600);
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar', 'learning.json'))).toBe(true);
+
+    const retryFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.retries');
+    expect(fs.existsSync(retryFile)).toBe(true);
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
+  });
+
+  it('retry count increments on repeated stale recovery', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 600);
+    fs.writeFileSync(retryFile, '1');
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('2');
+  });
+
+  it('max retries exhausted — marked as .failed', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 600);
+    fs.writeFileSync(retryFile, '3');
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.failed'))).toBe(true);
+    expect(fs.existsSync(retryFile)).toBe(false);
+  });
+
+  it('pending marker directive includes multiple task names', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
+    fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
+
+    const result = execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString();
+
+    const parsed = JSON.parse(result);
+    const context = parsed.hookSpecificOutput.additionalContext;
+    expect(context).toContain('SIDECAR:');
+    expect(context).toContain('learning');
+    expect(context).toContain('decisions');
+  });
+});
+
+// =============================================================================
+// sidecar-capture memory marker
+// =============================================================================
+
+describe('sidecar-capture memory marker', () => {
+  const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('marker written when throttle expired', () => {
+    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(wmFile, '## Now\n- stale');
+    backdateMtime(wmFile, 600);
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const memMarker = path.join(sidecarDir, 'memory.json');
+    expect(fs.existsSync(memMarker)).toBe(true);
+
+    const marker = JSON.parse(fs.readFileSync(memMarker, 'utf-8'));
+    expect(marker).toHaveProperty('pendingTurnsFile');
+    expect(marker).toHaveProperty('existingMemoryFile');
+    expect(marker.model).toBe('haiku');
+    expect(typeof marker.timestamp).toBe('number');
+  });
+
+  it('marker skipped when .processing exists', () => {
+    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(wmFile, '## Now\n- stale');
+    backdateMtime(wmFile, 600);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'memory.processing'), '{}');
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+
+    // Queue append still happens
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+
+  it('marker skipped when memory recently updated', () => {
+    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(wmFile, '## Now\n- fresh');
+    // mtime is current — within 120s threshold
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+
+    // Queue append still happens
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+
+  it('memory disabled via config skips all capture', () => {
+    createSidecarConfig(tmpDir, { memory: false });
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+  });
+});
+

@@ -39,11 +39,41 @@ if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 MEMORY_DIR="$CWD/.memory"
 SIDECAR_DIR="$MEMORY_DIR/.sidecar"
 
-# Read sidecar config — skip if memory: false
+# Read sidecar config — memory:false gates memory-specific sections only.
+# The decisions usage scanner runs independently of memory state.
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+MEMORY_ENABLED="true"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
-  [ "$MEMORY_ENABLED" = "false" ] && exit 0
+fi
+
+# --- Filter: only process end_turn stops ---
+if [ "$STOP_REASON" != "end_turn" ]; then
+  exit 0
+fi
+
+# Skip if empty
+if [ -z "$RESPONSE_TEXT" ]; then
+  exit 0
+fi
+
+# Truncate to 2000 chars
+if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
+  RESPONSE_TEXT="${RESPONSE_TEXT:0:2000}... [truncated]"
+fi
+
+# --- Decisions usage scanner (independent of memory state) ---
+# D29: Supplementary — skip Node spawn when no ADR/PF citations present (~50-100ms savings).
+SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
+if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
+  if printf '%s' "$RESPONSE_TEXT" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
+    printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
+  fi
+fi
+
+# --- Memory-specific sections (gated by memory:false in sidecar config) ---
+if [ "$MEMORY_ENABLED" = "false" ]; then
+  exit 0
 fi
 
 # Auto-create .memory/ and ensure .gitignore entries
@@ -56,22 +86,6 @@ source "$SCRIPT_DIR/log-paths" || { echo "sidecar-capture: failed to source log-
 LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-capture] $1" >> "$LOG_FILE"; }
 
-# --- Filter: only capture end_turn stops ---
-if [ "$STOP_REASON" != "end_turn" ]; then
-  exit 0
-fi
-
-# Skip if empty
-if [ -z "$RESPONSE_TEXT" ]; then
-  log "Skipped: empty response_text"
-  exit 0
-fi
-
-# Truncate to 2000 chars
-if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
-  RESPONSE_TEXT="${RESPONSE_TEXT:0:2000}... [truncated]"
-fi
-
 # --- Append to queue ---
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
 
@@ -81,12 +95,9 @@ if [ ! -f "$QUEUE_FILE" ]; then
 fi
 
 # Auto-clean orphan user-only queues (only check when queue has entries to avoid grep on hot path)
-if [ -f "$QUEUE_FILE" ]; then
-  QUEUE_LINES=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
-  if [ "$QUEUE_LINES" -gt 0 ] && ! grep -qF '"role":"assistant"' "$QUEUE_FILE" 2>/dev/null; then
-    log "Auto-clean: truncating orphan user-only queue"
-    : > "$QUEUE_FILE"
-  fi
+if [ -s "$QUEUE_FILE" ] && ! grep -qF '"role":"assistant"' "$QUEUE_FILE" 2>/dev/null; then
+  log "Auto-clean: truncating orphan user-only queue"
+  : > "$QUEUE_FILE"
 fi
 
 TS=$(date +%s)
@@ -108,14 +119,6 @@ if [ -f "$QUEUE_FILE" ]; then
 fi
 
 log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
-
-# D29: Usage scanner is supplementary — skip Node spawn when no ADR/PF citations present (~50-100ms savings).
-SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
-if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
-  if printf '%s' "$RESPONSE_TEXT" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
-    printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
-  fi
-fi
 
 # --- Write memory marker if throttle expired ---
 # Skip if a .processing file already exists (in-flight update)
