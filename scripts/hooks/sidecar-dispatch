@@ -43,7 +43,7 @@ fi
 
 # --- Capture user turn ---
 if [ "$MEMORY_ENABLED" = "true" ] && [ -n "$PROMPT" ]; then
-  source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || true
+  source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
   # Truncate to 2000 chars
   if [ ${#PROMPT} -gt 2000 ]; then
@@ -82,6 +82,19 @@ MAX_RETRIES=3
 # Track markers recovered from stale .processing in this call — their .retries must
 # persist to the next call so the retry counter survives until dispatch can use it.
 JUST_RECOVERED=""
+
+# Clean up .failed markers older than 24h
+if compgen -G "$SIDECAR_DIR/*.failed" > /dev/null 2>&1; then
+  for FAILED_FILE in "$SIDECAR_DIR"/*.failed; do
+    [ -f "$FAILED_FILE" ] || continue
+    FAILED_MTIME=$(get_mtime "$FAILED_FILE")
+    FAILED_MTIME="${FAILED_MTIME:-0}"
+    FAILED_AGE=$(( NOW - FAILED_MTIME ))
+    if [ "$FAILED_AGE" -gt 86400 ]; then
+      rm -f "$FAILED_FILE" 2>/dev/null || true
+    fi
+  done
+fi
 
 # Guard: only enter stale-retry loop when .processing files actually exist.
 # This avoids the glob expansion cost (get_mtime + stat calls) on every prompt.
@@ -128,32 +141,34 @@ fi
 PENDING_TASKS=""
 for MARKER_FILE in "$SIDECAR_DIR"/*.json; do
   [ -f "$MARKER_FILE" ] || continue
-  BASENAME=$(basename "$MARKER_FILE" .json)
+  FULL_BASENAME=$(basename "$MARKER_FILE" .json)
+  # Extract type from session-scoped filename: learning.abc123 → learning
+  case "$FULL_BASENAME" in *.*) BASENAME="${FULL_BASENAME%%.*}" ;; *) BASENAME="$FULL_BASENAME" ;; esac
   # Skip config
   [ "$BASENAME" = "config" ] && continue
   # Skip marker if its feature is currently disabled — remove the stale marker to prevent
   # it accumulating indefinitely after a feature is turned off.
   case "$BASENAME" in
+    memory)     [ "$MEMORY_ENABLED"    != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
     learning)   [ "$LEARNING_ENABLED"  != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
     decisions)  [ "$DECISIONS_ENABLED" != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
     knowledge)  [ "$KNOWLEDGE_ENABLED" != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
   esac
   # Expire markers older than 24h (86400s) when they carry a timestamp field.
-  if [ "$_HAS_JQ" = "true" ]; then
-    MARKER_TS=$(jq '.timestamp // empty' "$MARKER_FILE" 2>/dev/null || true)
-    if [ -n "$MARKER_TS" ] && [ "$MARKER_TS" -gt 0 ] 2>/dev/null; then
-      MARKER_AGE=$(( NOW - MARKER_TS ))
-      if [ "$MARKER_AGE" -gt 86400 ]; then
-        rm -f "$MARKER_FILE" 2>/dev/null || true
-        continue
-      fi
+  # Use json_field_file for node fallback support.
+  MARKER_TS=$(json_field_file "$MARKER_FILE" "timestamp" "")
+  if [ -n "$MARKER_TS" ] && [ "$MARKER_TS" -gt 0 ] 2>/dev/null; then
+    MARKER_AGE=$(( NOW - MARKER_TS ))
+    if [ "$MARKER_AGE" -gt 86400 ]; then
+      rm -f "$MARKER_FILE" 2>/dev/null || true
+      continue
     fi
   fi
   # Clean up any stale .retries file for this marker, unless the marker was just recovered
   # from stale .processing in this same call (in which case the .retries counter must survive
   # to the next call so it isn't reset before the retry limit can be enforced).
   case " $JUST_RECOVERED " in
-    *" $BASENAME "*) ;;  # Just recovered — leave .retries in place
+    *" $FULL_BASENAME "*) ;;  # Just recovered — leave .retries in place
     *) rm -f "${MARKER_FILE%.json}.retries" 2>/dev/null || true ;;
   esac
   if [ -n "$PENDING_TASKS" ]; then
@@ -162,6 +177,11 @@ for MARKER_FILE in "$SIDECAR_DIR"/*.json; do
     PENDING_TASKS="$BASENAME"
   fi
 done
+
+# Deduplicate types (multiple session markers → single type entry)
+if [ -n "$PENDING_TASKS" ]; then
+  PENDING_TASKS=$(echo "$PENDING_TASKS" | tr ',' '\n' | sort -u | paste -sd ',' -)
+fi
 
 # If no pending tasks, exit silently (no additionalContext output)
 if [ -z "$PENDING_TASKS" ]; then

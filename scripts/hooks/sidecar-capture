@@ -107,7 +107,7 @@ fi
 if [ -f "$QUEUE_FILE" ]; then
   LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
   if [ "$LINE_COUNT" -gt 200 ]; then
-    tail -100 "$QUEUE_FILE" > "$QUEUE_FILE.tmp" && mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+    _TRUNC_TMP="$QUEUE_FILE.tmp.$$" && tail -100 "$QUEUE_FILE" > "$_TRUNC_TMP" && mv "$_TRUNC_TMP" "$QUEUE_FILE" || rm -f "$_TRUNC_TMP"
     log "Queue overflow: truncated from $LINE_COUNT to 100 lines"
   fi
 fi
@@ -130,6 +130,7 @@ LAST_UPDATE=0
 if [ -f "$WORKING_MEMORY" ]; then
   LAST_UPDATE=$(get_mtime "$WORKING_MEMORY")
 fi
+LAST_UPDATE="${LAST_UPDATE:-0}"
 
 AGE=$(( NOW - LAST_UPDATE ))
 if [ "$AGE" -lt 120 ]; then
@@ -140,6 +141,7 @@ fi
 # Write memory marker
 mkdir -p "$SIDECAR_DIR"
 
+_MEM_TMP="$SIDECAR_DIR/memory.json.tmp.$$"
 if [ "$_HAS_JQ" = "true" ]; then
   jq -n \
     --arg pendingTurnsFile "$QUEUE_FILE" \
@@ -147,7 +149,7 @@ if [ "$_HAS_JQ" = "true" ]; then
     --arg model "haiku" \
     --argjson timestamp "$NOW" \
     '{pendingTurnsFile: $pendingTurnsFile, existingMemoryFile: $existingMemoryFile, model: $model, timestamp: $timestamp}' \
-    > "$SIDECAR_DIR/memory.json"
+    > "$_MEM_TMP" && mv "$_MEM_TMP" "$SIDECAR_DIR/memory.json" || rm -f "$_MEM_TMP"
 else
   node -e "
     process.stdout.write(JSON.stringify({
@@ -156,7 +158,7 @@ else
       model: 'haiku',
       timestamp: parseInt(process.argv[3])
     }) + '\n')
-  " -- "$QUEUE_FILE" "$WORKING_MEMORY" "$NOW" > "$SIDECAR_DIR/memory.json"
+  " -- "$QUEUE_FILE" "$WORKING_MEMORY" "$NOW" > "$_MEM_TMP" && mv "$_MEM_TMP" "$SIDECAR_DIR/memory.json" || rm -f "$_MEM_TMP"
 fi
 
 log "Wrote memory marker: $SIDECAR_DIR/memory.json"
