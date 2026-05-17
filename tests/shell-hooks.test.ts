@@ -1346,17 +1346,17 @@ describe('working memory queue behavior', () => {
     }
   });
 
-  it('auto-clean truncates orphan user-only queue before first assistant append', () => {
+  it('preserves existing user entries when appending assistant turn', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
-    // Pre-populate with user-only entries (orphans from broken assistant capture)
-    const orphanLines = Array.from({ length: 5 }, (_, i) =>
-      JSON.stringify({ role: 'user', content: `orphan ${i}`, ts: now + i }),
+    // Pre-populate with user-only entries (from sidecar-dispatch)
+    const userLines = Array.from({ length: 5 }, (_, i) =>
+      JSON.stringify({ role: 'user', content: `user prompt ${i}`, ts: now + i }),
     );
-    fs.writeFileSync(queueFile, orphanLines.join('\n') + '\n');
+    fs.writeFileSync(queueFile, userLines.join('\n') + '\n');
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1368,19 +1368,18 @@ describe('working memory queue behavior', () => {
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
-    // Orphans truncated, then new assistant entry appended
-    expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
-    expect(entry.role).toBe('assistant');
-    expect(entry.content).toBe('first real assistant response');
+    // All 5 user entries preserved + 1 new assistant entry
+    expect(lines).toHaveLength(6);
+    const lastEntry = JSON.parse(lines[5]) as { role: string; content: string; ts: number };
+    expect(lastEntry.role).toBe('assistant');
+    expect(lastEntry.content).toBe('first real assistant response');
   });
 
-  it('auto-clean with empty queue file — truncation no-ops, assistant entry appended', () => {
+  it('empty queue file — assistant entry appended normally', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
-    // Create an empty queue file — grep exits 1 (no match), auto-clean fires but truncates to same empty state
     fs.writeFileSync(queueFile, '');
 
     const input = JSON.stringify({
@@ -1393,41 +1392,42 @@ describe('working memory queue behavior', () => {
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
-    // Empty queue truncated to empty, then new assistant entry appended — exactly 1 line
     expect(lines).toHaveLength(1);
     const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     expect(entry.role).toBe('assistant');
     expect(entry.content).toBe('response after empty queue');
   });
 
-  it('auto-clean with single orphan user entry — truncated, only assistant entry remains', () => {
+  it('single user entry preserved when assistant turn appends', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
-    // Minimum trigger case: exactly 1 orphan user entry
-    const singleOrphan = JSON.stringify({ role: 'user', content: 'lone orphan', ts: now });
-    fs.writeFileSync(queueFile, singleOrphan + '\n');
+    const userEntry = JSON.stringify({ role: 'user', content: 'user prompt', ts: now });
+    fs.writeFileSync(queueFile, userEntry + '\n');
 
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-single',
       stop_reason: 'end_turn',
-      response_text: 'response after single orphan',
+      response_text: 'response after user prompt',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
-    // Single orphan truncated, new assistant entry appended — exactly 1 line
-    expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
-    expect(entry.role).toBe('assistant');
-    expect(entry.content).toBe('response after single orphan');
+    // User entry preserved + new assistant entry = 2 lines
+    expect(lines).toHaveLength(2);
+    const firstEntry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
+    expect(firstEntry.role).toBe('user');
+    expect(firstEntry.content).toBe('user prompt');
+    const lastEntry = JSON.parse(lines[1]) as { role: string; content: string; ts: number };
+    expect(lastEntry.role).toBe('assistant');
+    expect(lastEntry.content).toBe('response after user prompt');
   });
 
-  it('auto-clean does not truncate queue that already has assistant entries', () => {
+  it('queue with mixed entries preserved when assistant turn appends', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
@@ -1455,9 +1455,7 @@ describe('working memory queue behavior', () => {
     expect(lines).toHaveLength(4);
   });
 
-  it('auto-clean does not truncate queue with only assistant entries', () => {
-    // Design intent: auto-clean targets user-only queues (orphan prompts with no paired response).
-    // A queue containing only assistant entries is not an orphan state — preserve it.
+  it('queue with only assistant entries preserved when new entry appends', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
@@ -1523,6 +1521,34 @@ describe('working memory queue behavior', () => {
     const lastEntry = JSON.parse(resultLines[resultLines.length - 1]) as { role: string; content: string; ts: number };
     expect(lastEntry.role).toBe('assistant');
     expect(lastEntry.content).toBe('overflow trigger response');
+  });
+
+  it('dispatch then capture preserves user turn in fresh queue', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    writeStaleWorkingMemory(tmpDir);
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+
+    // Step 1: sidecar-dispatch writes user turn
+    execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', prompt: 'implement feature X' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    // Step 2: sidecar-capture writes assistant turn
+    execSync(`bash "${STOP_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', stop_reason: 'end_turn', response_text: 'done' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(2);
+    const first = JSON.parse(lines[0]) as { role: string; content: string };
+    const second = JSON.parse(lines[1]) as { role: string; content: string };
+    expect(first.role).toBe('user');
+    expect(first.content).toBe('implement feature X');
+    expect(second.role).toBe('assistant');
+    expect(second.content).toBe('done');
   });
 
   it('sidecar-dispatch truncates prompts longer than 2000 chars', () => {
@@ -2092,6 +2118,214 @@ describe('sidecar-evaluate business logic', () => {
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Session depth');
+  });
+});
+
+// =============================================================================
+// sidecar-evaluate artifact reinforcement
+// =============================================================================
+
+describe('sidecar-evaluate artifact reinforcement', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('reinforcement updates last_seen for matching slugs', () => {
+    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const obs = {
+      id: 'obs_reinforce_1',
+      type: 'workflow',
+      pattern: 'test pattern',
+      status: 'created',
+      artifact_path: '.claude/commands/self-learning/test-cmd.md',
+      confidence: 0.9,
+      last_seen: '2026-01-01T00:00:00Z',
+    };
+    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
+
+    // Create transcript that references the slug
+    const encoded = encodeCwd(tmpDir);
+    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+    fs.mkdirSync(projDir, { recursive: true });
+    const transcriptPath = path.join(projDir, 'test-session.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Used self-learning:test-cmd in response' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+
+    const updated = JSON.parse(fs.readFileSync(logFile, 'utf-8').trim());
+    expect(updated.last_seen).not.toBe('2026-01-01T00:00:00Z');
+    expect(new Date(updated.last_seen).getTime()).toBeGreaterThan(0);
+  });
+
+  it('reinforcement leaves non-matching slugs unchanged', () => {
+    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const obs = {
+      id: 'obs_reinforce_2',
+      type: 'workflow',
+      pattern: 'unrelated pattern',
+      status: 'created',
+      artifact_path: '.claude/commands/self-learning/unrelated-slug.md',
+      confidence: 0.9,
+      last_seen: '2026-01-01T00:00:00Z',
+    };
+    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
+
+    // Create transcript referencing a different slug
+    const encoded = encodeCwd(tmpDir);
+    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+    fs.mkdirSync(projDir, { recursive: true });
+    const transcriptPath = path.join(projDir, 'test-session.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Used self-learning:other-slug here' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+
+    const updated = JSON.parse(fs.readFileSync(logFile, 'utf-8').trim());
+    expect(updated.last_seen).toBe('2026-01-01T00:00:00Z');
+  });
+
+  it('reinforcement log is conditional — no message when nothing reinforced', () => {
+    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const obs = {
+      id: 'obs_reinforce_3',
+      type: 'workflow',
+      pattern: 'some pattern',
+      status: 'created',
+      artifact_path: '.claude/commands/self-learning/no-match.md',
+      confidence: 0.9,
+      last_seen: '2026-01-01T00:00:00Z',
+    };
+    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
+
+    // Transcript with no self-learning references at all — but still 3+ turns for depth
+    const encoded = encodeCwd(tmpDir);
+    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+    fs.mkdirSync(projDir, { recursive: true });
+    const transcriptPath = path.join(projDir, 'test-session.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 0' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+
+    const hookLog = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir), '.sidecar-evaluate.log');
+    if (fs.existsSync(hookLog)) {
+      const log = fs.readFileSync(hookLog, 'utf-8');
+      expect(log).not.toContain('Reinforced');
+    }
+  });
+});
+
+// =============================================================================
+// sidecar-evaluate read_daily_cap sanitization
+// =============================================================================
+
+describe('sidecar-evaluate read_daily_cap sanitization', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory', '.sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('tab-less counter file does not crash and returns default', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const today = new Date().toISOString().slice(0, 10);
+    // Write date string with no tab separator — cut -f2 returns the whole line
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\n`);
+
+    // Pre-fill batch to trigger learning evaluation
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+  });
+
+  it('empty counter file does not crash', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), '');
+
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+  });
+
+  it('non-numeric count field returns default', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const today = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\tabc\n`);
+
+    // Pre-fill batch to trigger
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+
+    // The marker should still be written because cap defaults to 0 (not at max)
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(true);
+  });
+
+  it('non-numeric config values do not crash', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.memory', 'learning.json'),
+      JSON.stringify({ max_daily_runs: 'xyz', batch_size: 'abc' }),
+    );
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    // Pre-fill enough sessions for any reasonable batch_size default (3)
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
   });
 });
 

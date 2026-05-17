@@ -94,12 +94,6 @@ if [ ! -f "$QUEUE_FILE" ]; then
   (umask 077 && touch "$QUEUE_FILE") 2>/dev/null || true
 fi
 
-# Auto-clean orphan user-only queues (only check when queue has entries to avoid grep on hot path)
-if [ -s "$QUEUE_FILE" ] && ! grep -qF '"role":"assistant"' "$QUEUE_FILE" 2>/dev/null; then
-  log "Auto-clean: truncating orphan user-only queue"
-  : > "$QUEUE_FILE"
-fi
-
 TS=$(date +%s)
 if [ "$_HAS_JQ" = "true" ]; then
   jq -n -c --arg role "assistant" --arg content "$RESPONSE_TEXT" --argjson ts "$TS" \
