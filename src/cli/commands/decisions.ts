@@ -435,6 +435,21 @@ export const decisionsCommand = new Command('decisions')
           await fs.rm(path.join(memoryDir, 'decisions'), { recursive: true, force: true });
         } catch { /* best effort */ }
 
+        // Clean sidecar state files
+        const sidecarDir = path.join(memoryDir, '.sidecar');
+        for (const f of ['.decisions-runs-today']) {
+          try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* may not exist */ }
+        }
+        // Clean sidecar decisions markers
+        try {
+          const sidecarFiles = await fs.readdir(sidecarDir);
+          for (const f of sidecarFiles) {
+            if (f.startsWith('decisions.') && f.endsWith('.json')) {
+              try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* sidecar dir may not exist */ }
+
         p.log.success(`Reset complete — removed ${removed} file(s).`);
       } finally {
         try { await fs.rmdir(lockDir); } catch { /* already cleaned */ }
