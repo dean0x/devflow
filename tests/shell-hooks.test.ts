@@ -1821,11 +1821,12 @@ function runHook(hookPath: string, input: object, homeDir: string): { stdout: st
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return { stdout: result.toString(), stderr: '', exitCode: 0 };
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
     return {
-      stdout: e.stdout?.toString() ?? '',
-      stderr: e.stderr?.toString() ?? '',
-      exitCode: e.status ?? 1,
+      stdout: err.stdout?.toString() ?? '',
+      stderr: err.stderr?.toString() ?? '',
+      exitCode: err.status ?? 1,
     };
   }
 }
@@ -1862,12 +1863,11 @@ describe('sidecar-evaluate business logic', () => {
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).toContain('Evaluating learning');
-      expect(log).toContain('Evaluating decisions');
-      expect(log).toContain('Evaluating knowledge');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Evaluating learning');
+    expect(log).toContain('Evaluating decisions');
+    expect(log).toContain('Evaluating knowledge');
   });
 
   it('config disables learning: learning skipped, decisions still evaluated', () => {
@@ -1883,11 +1883,10 @@ describe('sidecar-evaluate business logic', () => {
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).not.toContain('Evaluating learning');
-      expect(log).toContain('Evaluating decisions');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).not.toContain('Evaluating learning');
+    expect(log).toContain('Evaluating decisions');
   });
 
   it('shallow session (2 turns) skips learning and decisions', () => {
@@ -1911,10 +1910,9 @@ describe('sidecar-evaluate business logic', () => {
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).toContain('Session depth: 5 turns');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Session depth: 5 turns');
   });
 
   it('learning batch accumulation triggers at batch_size threshold', () => {
@@ -1963,10 +1961,9 @@ describe('sidecar-evaluate business logic', () => {
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).toContain('daily cap reached');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('daily cap reached');
   });
 
   it('learning adaptive batch: >=15 obs requires batch_size=5', () => {
@@ -1993,10 +1990,9 @@ describe('sidecar-evaluate business logic', () => {
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).toContain('4/5 sessions');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('4/5 sessions');
   });
 
   it('learning session dedup: same ID twice counted once', () => {
@@ -2055,10 +2051,9 @@ describe('sidecar-evaluate business logic', () => {
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).toContain('Knowledge throttled');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Knowledge throttled');
   });
 
   it('knowledge disabled sentinel skips evaluation', () => {
@@ -2077,10 +2072,9 @@ describe('sidecar-evaluate business logic', () => {
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).toContain('Knowledge disabled by sentinel');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Knowledge disabled by sentinel');
   });
 
   it('session ID path traversal rejected, fallback used', () => {
@@ -2095,10 +2089,9 @@ describe('sidecar-evaluate business logic', () => {
     // The hook should still work via ls -t fallback
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
     const logFile = path.join(logDir, '.sidecar-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      expect(log).toContain('Session depth');
-    }
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Session depth');
   });
 });
 
