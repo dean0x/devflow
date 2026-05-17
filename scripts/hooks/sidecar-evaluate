@@ -96,8 +96,10 @@ read_daily_cap() {
     local date_field
     date_field=$(cut -f1 "$runs_file" 2>/dev/null || true)
     if [ "$date_field" = "$TODAY" ]; then
-      count=$(cut -f2 "$runs_file" 2>/dev/null | tr -dc '0-9')
-      count="${count:-$default}"
+      if grep -q "$(printf '\t')" "$runs_file" 2>/dev/null; then
+        count=$(cut -f2 "$runs_file" 2>/dev/null | tr -dc '0-9')
+        count="${count:-$default}"
+      fi
     fi
   fi
   echo "$count"
@@ -390,13 +392,14 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
           jq -n \
             --argjson staleSlugs "$STALE_ARRAY" \
             --arg worktreePath "$CWD" \
-            '{staleSlugs: $staleSlugs, worktreePath: $worktreePath}' \
+            --argjson timestamp "$NOW" \
+            '{staleSlugs: $staleSlugs, worktreePath: $worktreePath, timestamp: $timestamp}' \
             > "$SIDECAR_DIR/knowledge.json"
         else
           node -e "
             const slugs = process.argv[1].trim().split('\n').filter(Boolean);
-            process.stdout.write(JSON.stringify({staleSlugs: slugs, worktreePath: process.argv[2]}) + '\n')
-          " -- "$STALE_SLUGS" "$CWD" > "$SIDECAR_DIR/knowledge.json"
+            process.stdout.write(JSON.stringify({staleSlugs: slugs, worktreePath: process.argv[2], timestamp: parseInt(process.argv[3])}) + '\n')
+          " -- "$STALE_SLUGS" "$CWD" "$NOW" > "$SIDECAR_DIR/knowledge.json"
         fi
         # Optimistically update throttle marker so the stale-slug query is skipped
         # on the next session end — the sidecar agent will do the actual refresh.
