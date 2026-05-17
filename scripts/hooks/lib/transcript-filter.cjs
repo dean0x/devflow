@@ -176,3 +176,37 @@ function extractChannels(jsonlContent) {
 }
 
 module.exports = { extractChannels };
+
+if (require.main === module) {
+  const argv = process.argv.slice(2);
+  const subcommand = argv[0];
+  const filePath = argv[1];
+
+  if (!subcommand || !filePath || !['user-signals', 'dialog-pairs'].includes(subcommand)) {
+    process.stderr.write('Usage: node transcript-filter.cjs <user-signals|dialog-pairs> <file>\n');
+    process.exit(1);
+  }
+
+  const fs = require('fs');
+  let content = '';
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    // Output nothing so shell [ -n "$VAR" ] emptiness checks work correctly.
+    process.exit(0);
+  }
+
+  const { userSignals, dialogPairs } = extractChannels(content);
+
+  if (subcommand === 'user-signals') {
+    // Output nothing (empty stdout) when results are empty so shell [ -n "$VAR" ] checks work.
+    // JSON.stringify([]) produces "[]" which is a non-empty string and would fool shell emptiness checks.
+    if (userSignals.length > 0) {
+      process.stdout.write(JSON.stringify(userSignals) + '\n');
+    }
+  } else {
+    if (dialogPairs.length > 0) {
+      process.stdout.write(JSON.stringify(dialogPairs) + '\n');
+    }
+  }
+}
