@@ -22,9 +22,14 @@ This skill activates when the model receives `SIDECAR: <tasks>` in additionalCon
 ## Processing
 
 1. For each task listed in the SIDECAR directive:
-   a. Rename `.memory/.sidecar/{task}.json` → `.memory/.sidecar/{task}.processing` (atomic claim)
-   b. Read the marker content
-   c. Spawn the appropriate background agent
+   a. Find all markers for this task type: glob `.memory/.sidecar/{task}.*.json` (per-session) and `.memory/.sidecar/{task}.json` (legacy)
+   b. Rename each matching marker to `.processing` suffix (atomic claim)
+   c. Read and merge content from all markers of the same type:
+      - **learning**: concatenate `userSignals` strings, union `existingObservationIds` arrays
+      - **decisions**: concatenate `dialogPairs` strings, union `existingObservationIds` arrays
+      - **knowledge**: union `staleSlugs` arrays, use any `worktreePath`
+      - **memory**: single `memory.json` — no merge needed
+   d. Spawn the appropriate background agent with the merged content
 2. Continue with the user's actual request — sidecar processing is fire-and-forget.
 
 ## Task: memory
