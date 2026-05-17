@@ -44,11 +44,14 @@ export async function readConfig(projectRoot: string): Promise<SidecarConfig> {
 /**
  * Write the sidecar config for a project root.
  * Creates the .memory/.sidecar/ directory if missing.
+ * Uses an atomic temp+rename pattern to prevent partial reads under concurrent writes.
  */
 export async function writeConfig(projectRoot: string, config: SidecarConfig): Promise<void> {
   const configPath = getConfigPath(projectRoot);
   await fs.mkdir(path.dirname(configPath), { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+  const tmpPath = configPath + '.tmp.' + process.pid;
+  await fs.writeFile(tmpPath, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+  await fs.rename(tmpPath, configPath);
 }
 
 /**
