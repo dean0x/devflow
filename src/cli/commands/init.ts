@@ -1039,6 +1039,15 @@ export const initCommand = new Command('init')
       'lib/feature-kb.cjs',
       // decisions agent decoupling: background-learning replaced by TypeScript CLI (devflow learn --run-background)
       'background-learning',
+      // Pre-sidecar hooks replaced by sidecar-capture/dispatch/evaluate
+      'prompt-capture-memory',
+      'stop-update-memory',
+      'stop-update-learning',
+      'session-end-learning',
+      'session-end-decisions',
+      'session-end-knowledge-refresh',
+      'background-memory-update',
+      'background-knowledge-refresh',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {

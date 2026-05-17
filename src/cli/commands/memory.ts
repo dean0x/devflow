@@ -22,6 +22,16 @@ const MEMORY_HOOK_CONFIG: Record<string, string> = {
 };
 
 /**
+ * Legacy hook filename markers from the pre-sidecar 8-hook system.
+ * Used by removeMemoryHooks to clean up hooks from upgrading users.
+ */
+const LEGACY_HOOK_MARKERS: Record<string, string[]> = {
+  UserPromptSubmit: ['prompt-capture-memory'],
+  Stop: ['stop-update-memory', 'stop-update-learning'],
+  SessionEnd: ['session-end-learning', 'session-end-decisions', 'session-end-knowledge-refresh'],
+};
+
+/**
  * Add all 5 memory hooks (UserPromptSubmit, Stop, SessionEnd, SessionStart, PreCompact) to settings JSON.
  * Idempotent — skips hooks that already exist. Returns unchanged JSON if all 5 present.
  */
@@ -98,6 +108,17 @@ export function removeMemoryHooks(input: string | Settings): string {
     if (settings.hooks[hookType].length === 0) {
       delete settings.hooks[hookType];
     }
+  }
+
+  // Remove legacy pre-sidecar hooks from upgrading users
+  for (const [hookType, markers] of Object.entries(LEGACY_HOOK_MARKERS)) {
+    if (!settings.hooks[hookType]) continue;
+    const before = settings.hooks[hookType].length;
+    settings.hooks[hookType] = settings.hooks[hookType].filter(
+      (matcher) => !matcher.hooks.some((h) => markers.some((m) => h.command.includes(m))),
+    );
+    if (settings.hooks[hookType].length !== before) changed = true;
+    if (settings.hooks[hookType].length === 0) delete settings.hooks[hookType];
   }
 
   if (settings.hooks && Object.keys(settings.hooks).length === 0) {
