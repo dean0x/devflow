@@ -88,6 +88,40 @@ NOW=$(date +%s)
 TODAY=$(date '+%Y-%m-%d')
 FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
 
+# read_daily_cap FILE DEFAULT → echoes today's run count (0 if file absent or dated yesterday)
+read_daily_cap() {
+  local runs_file="$1" default="${2:-0}"
+  local count=0
+  if [ -f "$runs_file" ]; then
+    local date_field
+    date_field=$(cut -f1 "$runs_file" 2>/dev/null || true)
+    if [ "$date_field" = "$TODAY" ]; then
+      count=$(cut -f2 "$runs_file" 2>/dev/null || echo "$default")
+    fi
+  fi
+  echo "$count"
+}
+
+# load_existing_ids LOG_FILE → echoes JSON array of .id values ([] when absent/empty)
+load_existing_ids() {
+  local log_file="$1"
+  if [ ! -f "$log_file" ]; then
+    echo "[]"
+    return
+  fi
+  if [ "$_HAS_JQ" = "true" ]; then
+    # Stream line-by-line then collect — avoids slurping entire file into memory
+    jq -c '.id // empty' "$log_file" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]"
+  else
+    node -e "
+      const fs=require('fs');
+      const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
+      const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
+      process.stdout.write(JSON.stringify(ids));
+    " -- "$log_file" 2>/dev/null || echo "[]"
+  fi
+}
+
 # =============================================================================
 # Artifact reinforcement — update last_seen for loaded self-learning artifacts
 # =============================================================================
@@ -178,13 +212,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
   # Daily cap check
   RUNS_FILE="$SIDECAR_DIR/.learning-runs-today"
-  RUNS_TODAY=0
-  if [ -f "$RUNS_FILE" ]; then
-    RUNS_DATE=$(cut -f1 "$RUNS_FILE" 2>/dev/null || true)
-    if [ "$RUNS_DATE" = "$TODAY" ]; then
-      RUNS_TODAY=$(cut -f2 "$RUNS_FILE" 2>/dev/null || echo "0")
-    fi
-  fi
+  RUNS_TODAY=$(read_daily_cap "$RUNS_FILE" 0)
 
   if [ "$RUNS_TODAY" -ge "$MAX_DAILY" ]; then
     log "Learning daily cap reached ($RUNS_TODAY/$MAX_DAILY)"
@@ -217,20 +245,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
       if [ -n "$USER_SIGNALS" ]; then
         # Load existing observation IDs for deduplication
-        EXISTING_IDS="[]"
-        if [ -f "$MEMORY_DIR/learning-log.jsonl" ]; then
-          if [ "$_HAS_JQ" = "true" ]; then
-            # Stream line-by-line then collect — avoids slurping entire file into memory
-            EXISTING_IDS=$(jq -c '.id // empty' "$MEMORY_DIR/learning-log.jsonl" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
-          else
-            EXISTING_IDS=$(node -e "
-              const fs=require('fs');
-              const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
-              const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
-              process.stdout.write(JSON.stringify(ids));
-            " -- "$MEMORY_DIR/learning-log.jsonl" 2>/dev/null || echo "[]")
-          fi
-        fi
+        EXISTING_IDS=$(load_existing_ids "$MEMORY_DIR/learning-log.jsonl")
 
         # Write learning marker
         if [ "$_HAS_JQ" = "true" ]; then
@@ -275,13 +290,7 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
   # Daily cap check
   DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
-  DEC_RUNS_TODAY=0
-  if [ -f "$DEC_RUNS_FILE" ]; then
-    DEC_RUNS_DATE=$(cut -f1 "$DEC_RUNS_FILE" 2>/dev/null || true)
-    if [ "$DEC_RUNS_DATE" = "$TODAY" ]; then
-      DEC_RUNS_TODAY=$(cut -f2 "$DEC_RUNS_FILE" 2>/dev/null || echo "0")
-    fi
-  fi
+  DEC_RUNS_TODAY=$(read_daily_cap "$DEC_RUNS_FILE" 0)
 
   MAX_DEC_RUNS=3
   DEC_CONFIG="$MEMORY_DIR/decisions.json"
@@ -300,20 +309,7 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
     if [ -n "$DIALOG_PAIRS" ]; then
       # Load existing observation IDs
-      EXISTING_IDS="[]"
-      if [ -f "$MEMORY_DIR/decisions-log.jsonl" ]; then
-        if [ "$_HAS_JQ" = "true" ]; then
-          # Stream line-by-line then collect — avoids slurping entire file into memory
-          EXISTING_IDS=$(jq -c '.id // empty' "$MEMORY_DIR/decisions-log.jsonl" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
-        else
-          EXISTING_IDS=$(node -e "
-            const fs=require('fs');
-            const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
-            const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
-            process.stdout.write(JSON.stringify(ids));
-          " -- "$MEMORY_DIR/decisions-log.jsonl" 2>/dev/null || echo "[]")
-        fi
-      fi
+      EXISTING_IDS=$(load_existing_ids "$MEMORY_DIR/decisions-log.jsonl")
 
       # Write decisions marker
       if [ "$_HAS_JQ" = "true" ]; then

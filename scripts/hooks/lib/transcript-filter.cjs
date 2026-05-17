@@ -198,15 +198,10 @@ if (require.main === module) {
 
   const { userSignals, dialogPairs } = extractChannels(content);
 
-  if (subcommand === 'user-signals') {
-    // Output nothing (empty stdout) when results are empty so shell [ -n "$VAR" ] checks work.
-    // JSON.stringify([]) produces "[]" which is a non-empty string and would fool shell emptiness checks.
-    if (userSignals.length > 0) {
-      process.stdout.write(JSON.stringify(userSignals) + '\n');
-    }
-  } else {
-    if (dialogPairs.length > 0) {
-      process.stdout.write(JSON.stringify(dialogPairs) + '\n');
-    }
+  // Output nothing when results are empty so shell [ -n "$VAR" ] checks work correctly.
+  // JSON.stringify([]) produces "[]" which is a non-empty string that fools shell emptiness checks.
+  const results = subcommand === 'user-signals' ? userSignals : dialogPairs;
+  if (results.length > 0) {
+    process.stdout.write(JSON.stringify(results) + '\n');
   }
 }
