@@ -66,8 +66,7 @@ fi
 # Session depth check (min 3 user turns)
 SESSION_DEEP="false"
 if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-  # Use jq for accurate top-level type field matching; grep fallback may over-count
-  # if '"type":"user"' appears inside message content
+  # Use jq for accurate top-level type matching; grep may over-count when the literal appears in content
   if [ "$_HAS_JQ" = "true" ]; then
     USER_TURNS=$(jq -c 'select(.type == "user")' "$TRANSCRIPT" 2>/dev/null | wc -l | tr -d ' ')
   else
@@ -87,6 +86,7 @@ mkdir -p "$SIDECAR_DIR"
 
 NOW=$(date +%s)
 TODAY=$(date '+%Y-%m-%d')
+FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
 
 # =============================================================================
 # Learning evaluation
@@ -148,7 +148,6 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
     if [ "$CURRENT_COUNT" -ge "$BATCH_SIZE" ] && [ -f "$SESSION_COUNT_FILE" ]; then
       # Extract user signals from transcript
-      FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
       USER_SIGNALS=""
       if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
         USER_SIGNALS=$(node "$FILTER_LIB" user-signals "$TRANSCRIPT" 2>/dev/null || true)
@@ -208,9 +207,7 @@ fi
 if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   log "Evaluating decisions..."
 
-  # DECISIONS_ENABLED is already sourced from sidecar config above — no second source of
-  # truth needed here. The .memory/decisions/.disabled sentinel exists for session-start-context
-  # (an always-on hook that never reads sidecar config), not for this hook.
+  # Note: .memory/decisions/.disabled is for session-start-context only — this hook uses DECISIONS_ENABLED.
 
   # Daily cap check
   DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
@@ -232,7 +229,6 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
     log "Decisions daily cap reached ($DEC_RUNS_TODAY/$MAX_DEC_RUNS)"
   else
     # Extract dialog pairs from transcript
-    FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
     DIALOG_PAIRS=""
     if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
       DIALOG_PAIRS=$(node "$FILTER_LIB" dialog-pairs "$TRANSCRIPT" 2>/dev/null || true)

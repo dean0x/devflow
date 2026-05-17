@@ -109,8 +109,7 @@ fi
 
 log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
 
-# D29: Usage scanner runs after queue append — memory capture is mission-critical, scanning is supplementary.
-# Pre-filter: ADR/PF citations are rare — skip Node spawn entirely when none are present (~50-100ms savings).
+# D29: Usage scanner is supplementary — skip Node spawn when no ADR/PF citations present (~50-100ms savings).
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
 if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
   if printf '%s' "$RESPONSE_TEXT" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
