@@ -7,7 +7,7 @@ import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { discoverProjectGitRoots } from '../utils/post-install.js';
 import { getGitRoot } from '../utils/git.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
-import { updateFeature } from '../utils/sidecar-config.js';
+import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
 
 /**
  * Map of hook event type → filename marker for the sidecar hooks.
@@ -205,8 +205,8 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
 
 export const memoryCommand = new Command('memory')
   .description('Enable, disable, or clean up working memory (session context preservation)')
-  .option('--enable', 'Add UserPromptSubmit/Stop/SessionStart/PreCompact hooks')
-  .option('--disable', 'Remove memory hooks')
+  .option('--enable', 'Enable working memory via sidecar config')
+  .option('--disable', 'Disable working memory via sidecar config')
   .option('--status', 'Show current state')
   .option('--clear', 'Clean up queue files from projects')
   .action(async (options: MemoryOptions) => {
@@ -297,15 +297,17 @@ export const memoryCommand = new Command('memory')
       settingsContent = '{}';
     }
 
-    // Resolve current project root for sentinel management
+    // Resolve current project root for sidecar config
     const gitRoot = await getGitRoot();
 
     if (options.status) {
       const count = countMemoryHooks(settingsContent);
       const total = Object.keys(MEMORY_HOOK_CONFIG).length;
-      if (count === total) {
+      // Also check sidecar config: hooks may be registered but feature toggled off
+      const featureEnabled = gitRoot ? await isFeatureEnabled(gitRoot, 'memory') : true;
+      if (count === total && featureEnabled) {
         p.log.info(`Working memory: ${color.green('enabled')} (${total}/${total} hooks)`);
-      } else if (count === 0) {
+      } else if (count === 0 || !featureEnabled) {
         p.log.info(`Working memory: ${color.dim('disabled')}`);
       } else {
         p.log.info(`Working memory: ${color.yellow(`partial (${count}/${total} hooks)`)} — run --enable to fix`);
@@ -316,6 +318,10 @@ export const memoryCommand = new Command('memory')
     const devflowDir = getDevFlowDirectory();
 
     if (options.enable) {
+      // D: --enable both installs hooks AND writes sidecar config, while --disable only
+      // writes sidecar config. This asymmetry is intentional: sidecar hooks are shared
+      // across features (memory, learning, decisions) and must never be removed by a
+      // single-feature disable. --enable must still install them on first use.
       if (hasMemoryHooks(settingsContent)) {
         p.log.info('Working memory already enabled');
       } else {
@@ -333,11 +339,16 @@ export const memoryCommand = new Command('memory')
 
     if (options.disable) {
       // In the sidecar system, hooks remain registered (shared with other features).
-      // Disable by writing memory: false to sidecar config.
+      // Disable by writing memory: false to sidecar config only — hooks are not removed.
       if (gitRoot) {
         await updateFeature(gitRoot, 'memory', false);
+        // Drain orphaned queue files so stale turns don't process on re-enable
+        const memDir = path.join(gitRoot, '.memory');
+        await Promise.all([
+          fs.unlink(path.join(memDir, '.pending-turns.jsonl')).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+          fs.unlink(path.join(memDir, '.pending-turns.processing')).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+        ]);
         p.log.success('Working memory disabled — sidecar config updated');
-        p.log.info(color.dim('Run devflow memory --clear to clean up queue files'));
       } else {
         p.log.warn('Could not resolve git root — sidecar config not updated');
       }
