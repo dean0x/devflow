@@ -28,7 +28,7 @@ export async function readConfig(projectRoot: string): Promise<SidecarConfig> {
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_CONFIG };
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ...DEFAULT_CONFIG };
     const p = parsed as Record<string, unknown>;
     return {
       memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
@@ -48,12 +48,19 @@ export async function readConfig(projectRoot: string): Promise<SidecarConfig> {
 export async function writeConfig(projectRoot: string, config: SidecarConfig): Promise<void> {
   const configPath = getConfigPath(projectRoot);
   await fs.mkdir(path.dirname(configPath), { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
 }
 
 /**
  * Toggle a single feature in the sidecar config.
  * Reads current config, applies the change, and writes back.
+ *
+ * D1: Non-atomic read-modify-write. Concurrent invocations of `updateFeature`
+ * could lose each other's writes. Acceptable here because: (a) devflow CLI
+ * commands are single-threaded user-initiated actions, and (b) the window is
+ * milliseconds on a local filesystem with no concurrent writers in normal use.
+ * If concurrent safety is ever required, replace with an atomic file-swap or
+ * a lock file.
  */
 export async function updateFeature(
   projectRoot: string,

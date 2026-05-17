@@ -87,6 +87,18 @@ describe('readConfig', () => {
     const config = await readConfig(tmpDir);
     expect(config.memory).toBe(true);
   });
+
+  it('returns defaults when config is a JSON array', async () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'config.json'), '[false, true]');
+
+    const config = await readConfig(tmpDir);
+    expect(config.memory).toBe(true);
+    expect(config.learning).toBe(true);
+    expect(config.decisions).toBe(true);
+    expect(config.knowledge).toBe(true);
+  });
 });
 
 describe('writeConfig', () => {

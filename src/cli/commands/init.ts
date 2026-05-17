@@ -30,7 +30,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '.
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { manageSentinel } from '../utils/sentinel.js';
-import { updateFeature as updateSidecarFeature } from '../utils/sidecar-config.js';
+import { writeConfig as writeSidecarConfig } from '../utils/sidecar-config.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -1136,10 +1136,12 @@ export const initCommand = new Command('init')
 
     // Write sidecar config.json to manage per-feature enable/disable at runtime
     if (gitRoot) {
-      await updateSidecarFeature(gitRoot, 'memory', memoryEnabled);
-      await updateSidecarFeature(gitRoot, 'learning', learnEnabled);
-      await updateSidecarFeature(gitRoot, 'decisions', decisionsEnabled);
-      await updateSidecarFeature(gitRoot, 'knowledge', knowledgeEnabled);
+      await writeSidecarConfig(gitRoot, {
+        memory: memoryEnabled,
+        learning: learnEnabled,
+        decisions: decisionsEnabled,
+        knowledge: knowledgeEnabled,
+      });
     }
 
     // Configure HUD
