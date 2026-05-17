@@ -168,7 +168,11 @@ export const learnCommand = new Command('learn')
     // --- --status ---
     if (options.status) {
       const gitRoot = await getGitRoot();
-      const enabled = gitRoot ? await isFeatureEnabled(gitRoot, 'learning') : true;
+      if (!gitRoot) {
+        p.log.info('Self-learning: disabled (not in a git project)');
+        return;
+      }
+      const enabled = await isFeatureEnabled(gitRoot, 'learning');
       const { observations, invalidCount } = await readObservations(logPath);
 
       const status = formatLearningStatus(observations, enabled);

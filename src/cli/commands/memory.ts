@@ -301,10 +301,14 @@ export const memoryCommand = new Command('memory')
     const gitRoot = await getGitRoot();
 
     if (options.status) {
+      if (!gitRoot) {
+        p.log.info(`Working memory: ${color.dim('disabled')} (not in a git project)`);
+        return;
+      }
       const count = countMemoryHooks(settingsContent);
       const total = Object.keys(MEMORY_HOOK_CONFIG).length;
       // Also check sidecar config: hooks may be registered but feature toggled off
-      const featureEnabled = gitRoot ? await isFeatureEnabled(gitRoot, 'memory') : true;
+      const featureEnabled = await isFeatureEnabled(gitRoot, 'memory');
       if (count === total && featureEnabled) {
         p.log.info(`Working memory: ${color.green('enabled')} (${total}/${total} hooks)`);
       } else if (count === 0 || !featureEnabled) {
@@ -323,7 +327,7 @@ export const memoryCommand = new Command('memory')
       // across features (memory, learning, decisions) and must never be removed by a
       // single-feature disable. --enable must still install them on first use.
       const alreadyHasHooks = hasMemoryHooks(settingsContent);
-      const alreadyEnabled = alreadyHasHooks && (gitRoot ? await isFeatureEnabled(gitRoot, 'memory') : true);
+      const alreadyEnabled = alreadyHasHooks && (gitRoot ? await isFeatureEnabled(gitRoot, 'memory') : false);
       if (alreadyEnabled) {
         p.log.info('Working memory already enabled');
       } else if (alreadyHasHooks) {

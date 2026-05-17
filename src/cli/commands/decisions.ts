@@ -189,7 +189,11 @@ export const decisionsCommand = new Command('decisions')
     // --- --status ---
     if (options.status) {
       const gitRoot = await getGitRoot();
-      const enabled = gitRoot ? await isFeatureEnabled(gitRoot, 'decisions') : true;
+      if (!gitRoot) {
+        p.log.info('Decisions learning: disabled (not in a git project)');
+        return;
+      }
+      const enabled = await isFeatureEnabled(gitRoot, 'decisions');
       const { observations, invalidCount } = await readObservations(logPath);
 
       const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
