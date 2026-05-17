@@ -25,13 +25,20 @@ fi
 
 CONTEXT=""
 
+# Read sidecar config for feature state (primary source of truth)
+_SIDECAR_CONFIG="$CWD/.memory/.sidecar/config.json"
+_LEARNING_SIDECAR="true"
+if [ -f "$_SIDECAR_CONFIG" ]; then
+  _LEARNING_SIDECAR=$(json_field_file "$_SIDECAR_CONFIG" "learning" "true")
+fi
+
 # --- Section 1.4: Learning Manifest Reconciliation ---
 # DESIGN: D6 — reconciler runs at session-start to amortize filesystem checks
 # across session boundaries rather than on every tool call.
 # Silently ignores errors — a failed reconcile is non-fatal.
-# Skipped if learning feature is disabled via sentinel.
+# Skipped if learning feature is disabled via sentinel or sidecar config.
 
-if [ ! -f "$CWD/.memory/.learning-disabled" ]; then
+if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$CWD/.memory/.learning-disabled" ]; then
   if [ -f "$CWD/.memory/.learning-manifest.json" ] && [ -f "$CWD/.memory/learning-log.jsonl" ]; then
     node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
   fi
@@ -75,9 +82,9 @@ ${DECISIONS_SECTION}"
 fi
 
 # --- Section 1.75: Learned Behaviors ---
-# Skipped if learning feature is disabled via sentinel.
+# Skipped if learning feature is disabled via sentinel or sidecar config.
 
-if [ ! -f "$CWD/.memory/.learning-disabled" ]; then
+if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$CWD/.memory/.learning-disabled" ]; then
   LEARNING_LOG="$CWD/.memory/learning-log.jsonl"
   NOTIFIED_MARKER="$CWD/.memory/.learning-notified-at"
 

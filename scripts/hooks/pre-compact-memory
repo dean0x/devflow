@@ -19,9 +19,13 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-# Sentinel check before ensure-memory-gitignore so a disabled feature stays inert
-# (does not create .memory/ or modify .gitignore when working memory is off).
-[ -f "$CWD/.memory/.working-memory-disabled" ] && exit 0
+# Check sidecar config — single source of truth for memory enabled/disabled (ADR-001 clean break).
+# The legacy .working-memory-disabled sentinel is not checked: sidecar config supersedes it.
+SIDECAR_CONFIG="$CWD/.memory/.sidecar/config.json"
+if [ -f "$SIDECAR_CONFIG" ]; then
+  MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
+  [ "$MEMORY_ENABLED" = "false" ] && exit 0
+fi
 
 # Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
 source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore" "$CWD" || exit 0

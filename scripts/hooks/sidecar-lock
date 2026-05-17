@@ -1,0 +1,31 @@
+#!/bin/bash
+# mkdir-based locking for macOS bash 3.2 (no flock)
+
+sidecar_lock_acquire() {
+  local lock_dir="$1"
+  local timeout="${2:-3}"
+  local stale_threshold=30
+  local waited=0
+
+  # Break stale locks
+  if [ -d "$lock_dir" ]; then
+    local lock_age
+    lock_age=$(( $(date +%s) - $(stat -f %m "$lock_dir" 2>/dev/null || echo 0) ))
+    if [ "$lock_age" -gt "$stale_threshold" ]; then
+      rmdir "$lock_dir" 2>/dev/null || true
+    fi
+  fi
+
+  while [ "$waited" -lt "$timeout" ]; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  return 1
+}
+
+sidecar_lock_release() {
+  rmdir "$1" 2>/dev/null || true
+}

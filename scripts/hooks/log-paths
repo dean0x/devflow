@@ -2,11 +2,23 @@
 # Shared log path computation for Devflow hooks.
 # Source this file to get devflow_log_dir function.
 
+# Cache the computed log dir path to avoid spawning 4 subprocesses (sed+tr+mkdir+chmod)
+# on every call within the same hook process.
+_LOG_DIR_CACHED=""
+_LOG_DIR_CACHED_CWD=""
+
 devflow_log_dir() {
   local cwd="$1"
-  local slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
+  if [ "$cwd" = "$_LOG_DIR_CACHED_CWD" ] && [ -n "$_LOG_DIR_CACHED" ]; then
+    echo "$_LOG_DIR_CACHED"
+    return 0
+  fi
+  local slug
+  slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
   local dir="$HOME/.devflow/logs/$slug"
   mkdir -p "$dir"
   chmod 700 "$dir"
+  _LOG_DIR_CACHED="$dir"
+  _LOG_DIR_CACHED_CWD="$cwd"
   echo "$dir"
 }

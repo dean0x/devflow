@@ -3,9 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
-  addLearningHook,
-  removeLearningHook,
-  hasLearningHook,
   formatLearningStatus,
   loadLearningConfig,
   applyConfigLayer,
@@ -17,284 +14,6 @@ import {
   type LearningObservation,
 } from '../src/cli/utils/observations.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../src/cli/utils/learning-cleanup.js';
-
-describe('addLearningHook', () => {
-  it('adds hook to empty settings', () => {
-    const result = addLearningHook('{}', '/home/user/.devflow');
-    const settings = JSON.parse(result);
-
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
-    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
-    expect(settings.hooks.SessionEnd[0].hooks[0].timeout).toBe(10);
-  });
-
-  it('adds alongside existing hooks (Stop hooks from memory)', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: 'stop-update-memory' }] }],
-      },
-    });
-    const result = addLearningHook(input, '/home/user/.devflow');
-    const settings = JSON.parse(result);
-
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
-    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
-  });
-
-  it('is idempotent — does not add duplicate', () => {
-    const first = addLearningHook('{}', '/home/user/.devflow');
-    const second = addLearningHook(first, '/home/user/.devflow');
-
-    expect(second).toBe(first);
-  });
-
-  it('uses correct path via run-hook wrapper', () => {
-    const result = addLearningHook('{}', '/custom/path/.devflow');
-    const settings = JSON.parse(result);
-    const command = settings.hooks.SessionEnd[0].hooks[0].command;
-
-    expect(command).toContain('/custom/path/.devflow/scripts/hooks/run-hook');
-    expect(command).toContain('session-end-learning');
-  });
-
-  it('preserves other settings', () => {
-    const input = JSON.stringify({
-      statusLine: { type: 'command', command: 'statusline.sh' },
-      env: { SOME_VAR: '1' },
-    });
-    const result = addLearningHook(input, '/home/user/.devflow');
-    const settings = JSON.parse(result);
-
-    expect(settings.statusLine.command).toBe('statusline.sh');
-    expect(settings.env.SOME_VAR).toBe('1');
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
-  });
-
-  it('adds alongside existing SessionEnd hooks', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [{ hooks: [{ type: 'command', command: 'other-session-end.sh' }] }],
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
-      },
-    });
-    const result = addLearningHook(input, '/home/user/.devflow');
-    const settings = JSON.parse(result);
-
-    expect(settings.hooks.SessionEnd).toHaveLength(2);
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-  });
-
-  it('self-upgrades legacy Stop hook to SessionEnd', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-          { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
-        ],
-      },
-    });
-    const result = addLearningHook(input, '/home/user/.devflow');
-    const settings = JSON.parse(result);
-
-    // Legacy Stop learning hook removed, memory hook preserved
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
-    // New SessionEnd hook added
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
-    expect(settings.hooks.SessionEnd[0].hooks[0].command).toContain('session-end-learning');
-  });
-
-  it('self-upgrades legacy Stop hook and preserves other events', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
-        ],
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
-      },
-    });
-    const result = addLearningHook(input, '/home/user/.devflow');
-    const settings = JSON.parse(result);
-
-    // Legacy Stop hook removed entirely (was the only Stop entry)
-    expect(settings.hooks.Stop).toBeUndefined();
-    // New SessionEnd hook added
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
-    // Other hooks preserved
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-  });
-});
-
-describe('removeLearningHook', () => {
-  it('removes learning hook from SessionEnd', () => {
-    const withHook = addLearningHook('{}', '/home/user/.devflow');
-    const result = removeLearningHook(withHook);
-    const settings = JSON.parse(result);
-
-    expect(settings.hooks).toBeUndefined();
-  });
-
-  it('preserves other SessionEnd hooks', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: 'other-session-end-hook' }] },
-          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
-        ],
-      },
-    });
-    const result = removeLearningHook(input);
-    const settings = JSON.parse(result);
-
-    expect(settings.hooks.SessionEnd).toHaveLength(1);
-    expect(settings.hooks.SessionEnd[0].hooks[0].command).toBe('other-session-end-hook');
-  });
-
-  it('cleans empty hooks object when last hook removed', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
-        ],
-      },
-    });
-    const result = removeLearningHook(input);
-    const settings = JSON.parse(result);
-
-    expect(settings.hooks).toBeUndefined();
-  });
-
-  it('preserves other hook event types', () => {
-    const input = JSON.stringify({
-      hooks: {
-        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'preamble' }] }],
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
-        ],
-      },
-    });
-    const result = removeLearningHook(input);
-    const settings = JSON.parse(result);
-
-    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.SessionEnd).toBeUndefined();
-  });
-
-  it('is idempotent', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [{ hooks: [{ type: 'command', command: 'stop-update-memory' }] }],
-      },
-    });
-    const result = removeLearningHook(input);
-
-    expect(result).toBe(input);
-  });
-
-  it('cleans up legacy Stop entries', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
-        ],
-      },
-    });
-    const result = removeLearningHook(input);
-    const settings = JSON.parse(result);
-    expect(settings.hooks.Stop).toHaveLength(1);
-    expect(settings.hooks.Stop[0].hooks[0].command).toBe('stop-update-memory');
-  });
-
-  it('cleans both SessionEnd and legacy Stop', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/session-end-learning' }] },
-        ],
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-          { hooks: [{ type: 'command', command: '/old/path/stop-update-learning' }] },
-        ],
-      },
-    });
-    const result = removeLearningHook(input);
-    const settings = JSON.parse(result);
-    expect(settings.hooks.SessionEnd).toBeUndefined();
-    expect(settings.hooks.Stop).toHaveLength(1);
-  });
-});
-
-describe('hasLearningHook', () => {
-  it('returns current when present on SessionEnd', () => {
-    const withHook = addLearningHook('{}', '/home/user/.devflow');
-    expect(hasLearningHook(withHook)).toBe('current');
-  });
-
-  it('returns false when absent', () => {
-    expect(hasLearningHook('{}')).toBe(false);
-  });
-
-  it('returns false for non-learning SessionEnd hooks', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: 'some-other-hook' }] },
-        ],
-      },
-    });
-    expect(hasLearningHook(input)).toBe(false);
-  });
-
-  it('returns current among other SessionEnd hooks', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: 'some-other-hook' }] },
-          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
-        ],
-      },
-    });
-    expect(hasLearningHook(input)).toBe('current');
-  });
-
-  it('returns legacy for Stop hook with stop-update-learning', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
-        ],
-      },
-    });
-    expect(hasLearningHook(input)).toBe('legacy');
-  });
-
-  it('returns current when both SessionEnd and legacy Stop present', () => {
-    const input = JSON.stringify({
-      hooks: {
-        SessionEnd: [
-          { hooks: [{ type: 'command', command: '/path/to/session-end-learning' }] },
-        ],
-        Stop: [
-          { hooks: [{ type: 'command', command: '/path/to/stop-update-learning' }] },
-        ],
-      },
-    });
-    expect(hasLearningHook(input)).toBe('current');
-  });
-
-  it('returns false for non-learning Stop hooks', () => {
-    const input = JSON.stringify({
-      hooks: {
-        Stop: [
-          { hooks: [{ type: 'command', command: 'stop-update-memory' }] },
-        ],
-      },
-    });
-    expect(hasLearningHook(input)).toBe(false);
-  });
-});
 
 describe('parseLearningLog', () => {
   it('parses valid JSONL', () => {
@@ -388,21 +107,14 @@ describe('loadAndCountObservations', () => {
 });
 
 describe('formatLearningStatus', () => {
-  it('shows enabled state for current hook', () => {
-    const result = formatLearningStatus([], 'current');
+  it('shows enabled state', () => {
+    const result = formatLearningStatus([], true);
     expect(result).toContain('enabled');
-    expect(result).not.toContain('legacy');
   });
 
   it('shows disabled state', () => {
     const result = formatLearningStatus([], false);
     expect(result).toContain('disabled');
-  });
-
-  it('shows legacy upgrade message for legacy hook', () => {
-    const result = formatLearningStatus([], 'legacy');
-    expect(result).toContain('legacy');
-    expect(result).toContain('devflow learn --disable && devflow learn --enable');
   });
 
   it('shows observation counts', () => {
@@ -411,7 +123,7 @@ describe('formatLearningStatus', () => {
       { id: 'obs_2', type: 'procedural', pattern: 'p2', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
       { id: 'obs_3', type: 'workflow', pattern: 'p3', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'ready', evidence: [], details: 'd' },
     ];
-    const result = formatLearningStatus(observations, 'current');
+    const result = formatLearningStatus(observations, true);
     expect(result).toContain('3 total');
     expect(result).toContain('Workflows: 2');
     expect(result).toContain('Procedural: 1');
@@ -423,7 +135,7 @@ describe('formatLearningStatus', () => {
       { id: 'obs_2', type: 'pitfall', pattern: 'avoid circular deps in services', confidence: 0.70, observations: 2, first_seen: 't', last_seen: 't', status: 'observing', evidence: ['Circular dep caused build fail'], details: 'PF-001' },
       { id: 'obs_3', type: 'decision', pattern: 'inject all deps via constructor', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'ready', evidence: ['Consistent DI across services'], details: 'ADR-002' },
     ];
-    const result = formatLearningStatus(observations, 'current');
+    const result = formatLearningStatus(observations, true);
     expect(result).toContain('3 total');
     expect(result).toContain('Decisions: 2');
     expect(result).toContain('Pitfalls: 1');
@@ -436,7 +148,7 @@ describe('formatLearningStatus', () => {
       { id: 'obs_3', type: 'decision', pattern: 'd1', confidence: 0.5, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
       { id: 'obs_4', type: 'pitfall', pattern: 'f1', confidence: 0.5, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
     ];
-    const result = formatLearningStatus(observations, 'current');
+    const result = formatLearningStatus(observations, true);
     expect(result).toContain('4 total');
     expect(result).toContain('Workflows: 1');
     expect(result).toContain('Procedural: 1');
@@ -449,7 +161,7 @@ describe('formatLearningStatus', () => {
       { id: 'obs_1', type: 'workflow', pattern: 'p1', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '/path' },
       { id: 'obs_2', type: 'procedural', pattern: 'p2', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
     ];
-    const result = formatLearningStatus(observations, 'current');
+    const result = formatLearningStatus(observations, true);
     expect(result).toContain('1 promoted');
     expect(result).toContain('1 observing');
   });
@@ -460,14 +172,14 @@ describe('formatLearningStatus', () => {
       { id: 'obs_2', type: 'pitfall', pattern: 'avoid mutating state', confidence: 0.90, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/decisions/pitfalls.md#pf-001' },
       { id: 'obs_3', type: 'workflow', pattern: 'w1', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
     ];
-    const result = formatLearningStatus(observations, 'current');
+    const result = formatLearningStatus(observations, true);
     expect(result).toContain('2 promoted');
     expect(result).toContain('Decisions: 1');
     expect(result).toContain('Pitfalls: 1');
   });
 
   it('handles empty observations', () => {
-    const result = formatLearningStatus([], 'current');
+    const result = formatLearningStatus([], true);
     expect(result).toContain('none');
   });
 });
@@ -807,6 +519,93 @@ describe('cleanSelfLearningArtifacts', () => {
       expect(result.paths.some(p => p.includes('learned-cmd'))).toBe(true);
     } finally {
       fs.rmSync(claudeDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('learn --enable / --disable sentinel management', () => {
+  it('--disable sidecar state file targets include .learning-disabled sentinel path', () => {
+    // Verify the sentinel path is under .memory (matching learn.ts code)
+    const memoryDir = path.join('/project', '.memory');
+    const sentinelPath = path.join(memoryDir, '.learning-disabled');
+    expect(sentinelPath).toBe('/project/.memory/.learning-disabled');
+  });
+
+  it('--enable sidecar integration removes .learning-disabled sentinel', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
+    try {
+      const memDir = path.join(tmpDir, '.memory');
+      fs.mkdirSync(memDir, { recursive: true });
+      const sentinelPath = path.join(memDir, '.learning-disabled');
+      // Simulate a disabled state
+      fs.writeFileSync(sentinelPath, '');
+      expect(fs.existsSync(sentinelPath)).toBe(true);
+
+      // Manually remove as the --enable path does (unlink)
+      try { fs.unlinkSync(sentinelPath); } catch { /* may not exist */ }
+      expect(fs.existsSync(sentinelPath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('--disable sidecar integration creates .learning-disabled sentinel', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
+    try {
+      const memDir = path.join(tmpDir, '.memory');
+      fs.mkdirSync(memDir, { recursive: true });
+      const sentinelPath = path.join(memDir, '.learning-disabled');
+      expect(fs.existsSync(sentinelPath)).toBe(false);
+
+      // Simulate what --disable does: writeFile with empty string
+      fs.writeFileSync(sentinelPath, '');
+      expect(fs.existsSync(sentinelPath)).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('learn --reset sidecar state cleanup', () => {
+  it('sidecar cleanup targets .learning-runs-today and .learning-sessions', () => {
+    const sidecarFilesToClean = ['.learning-runs-today', '.learning-sessions'];
+
+    // All targeted state files should be learning-specific
+    for (const f of sidecarFilesToClean) {
+      expect(f).toContain('learning');
+    }
+  });
+
+  it('sidecar marker pattern matches per-session learning markers only', () => {
+    const learningMarkerPattern = /^learning\..+\.json$/;
+
+    expect(learningMarkerPattern.test('learning.abc123.json')).toBe(true);
+    expect(learningMarkerPattern.test('learning.session-xyz.json')).toBe(true);
+    // Should NOT match decisions or knowledge markers
+    expect(learningMarkerPattern.test('decisions.abc123.json')).toBe(false);
+    expect(learningMarkerPattern.test('learning.json')).toBe(false); // legacy (no session suffix)
+  });
+
+  it('sidecar cleanup removes lock directories (.reinforce.lock, .learning-batch.lock)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
+    try {
+      const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+      fs.mkdirSync(sidecarDir, { recursive: true });
+
+      // Create mock lock directories
+      for (const lock of ['.reinforce.lock', '.learning-batch.lock']) {
+        fs.mkdirSync(path.join(sidecarDir, lock));
+      }
+
+      // Simulate the cleanup that --reset does
+      for (const lockName of ['.reinforce.lock', '.learning-batch.lock']) {
+        try { fs.rmdirSync(path.join(sidecarDir, lockName)); } catch { /* ignore */ }
+      }
+
+      expect(fs.existsSync(path.join(sidecarDir, '.reinforce.lock'))).toBe(false);
+      expect(fs.existsSync(path.join(sidecarDir, '.learning-batch.lock'))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

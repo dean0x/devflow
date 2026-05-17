@@ -1,4 +1,0 @@
-#!/bin/bash
-# DEPRECATED: Learning moved from Stop -> SessionEnd hook.
-# Run `devflow learn --disable && devflow learn --enable` to upgrade.
-exit 0

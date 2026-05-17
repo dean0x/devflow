@@ -24,23 +24,19 @@ import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstal
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
 import { addMemoryHooks, removeMemoryHooks } from './memory.js';
 // Settings/HookMatcher types used by hook utilities — each in their own module
-import { addLearningHook, removeLearningHook } from './learn.js';
-import { addDecisionsHook, removeDecisionsHook } from './decisions.js';
 import { addHudStatusLine, removeHudStatusLine } from './hud.js';
-import { addKnowledgeHook, removeKnowledgeHook } from './knowledge/index.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '../utils/manifest.js';
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { manageSentinel } from '../utils/sentinel.js';
+import { writeConfig as writeSidecarConfig } from '../utils/sidecar-config.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
 export { addAmbientHook, removeAmbientHook, removeLegacyAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
-export { addLearningHook, removeLearningHook, hasLearningHook } from './learn.js';
-export { addDecisionsHook, removeDecisionsHook, hasDecisionsHook } from './decisions.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 // Re-export migrateShadowOverrides under its original name for backward compatibility
 export { migrateShadowOverridesRegistry as migrateShadowOverrides } from '../utils/shadow-overrides-migration.js';
@@ -1043,6 +1039,15 @@ export const initCommand = new Command('init')
       'lib/feature-kb.cjs',
       // decisions agent decoupling: background-learning replaced by TypeScript CLI (devflow learn --run-background)
       'background-learning',
+      // Pre-sidecar hooks replaced by sidecar-capture/dispatch/evaluate
+      'prompt-capture-memory',
+      'stop-update-memory',
+      'stop-update-learning',
+      'session-end-learning',
+      'session-end-decisions',
+      'session-end-knowledge-refresh',
+      'background-memory-update',
+      'background-knowledge-refresh',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
@@ -1072,25 +1077,15 @@ export const initCommand = new Command('init')
       content = ambientEnabled ? addAmbientHook(cleanedForAmbient, devflowDir) : cleanedForAmbient;
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
+      // Memory hooks include the unified sidecar hooks (sidecar-dispatch, sidecar-capture,
+      // sidecar-evaluate) which handle learning, decisions, and knowledge in the background.
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
-
-      // Learning hook — remove-then-add for upgrade safety
-      const cleanedForLearn = removeLearningHook(content);
-      content = learnEnabled ? addLearningHook(cleanedForLearn, devflowDir) : cleanedForLearn;
 
       // HUD statusLine
       content = hudEnabled
         ? addHudStatusLine(content, devflowDir)
         : removeHudStatusLine(content);
-
-      // Knowledge hook — remove-then-add for upgrade safety
-      const cleanedForKnowledge = removeKnowledgeHook(content);
-      content = knowledgeEnabled ? addKnowledgeHook(cleanedForKnowledge, devflowDir) : cleanedForKnowledge;
-
-      // Decisions hook — remove-then-add for upgrade safety
-      const cleanedForDecisions = removeDecisionsHook(content);
-      content = decisionsEnabled ? addDecisionsHook(cleanedForDecisions, devflowDir) : cleanedForDecisions;
 
       // Context hook — always-on, remove-then-add for upgrade safety
       const cleanedForContext = removeContextHook(content);
@@ -1142,12 +1137,24 @@ export const initCommand = new Command('init')
       }
     }
 
-    // Manage runtime-disable sentinels for each feature
+    // Manage runtime-disable sentinels for session-start-context gating
     if (gitRoot) {
       await manageSentinel(path.join(gitRoot, '.features', '.disabled'), knowledgeEnabled);
       await manageSentinel(path.join(gitRoot, '.memory', 'decisions', '.disabled'), decisionsEnabled);
-      await manageSentinel(path.join(gitRoot, '.memory', '.working-memory-disabled'), memoryEnabled);
-      await manageSentinel(path.join(gitRoot, '.memory', '.learning-disabled'), learnEnabled);
+    }
+
+    // Write sidecar config.json to manage per-feature enable/disable at runtime.
+    // Uses writeConfig (full atomic write) rather than four updateFeature calls because
+    // init always sets all four features at once and is never concurrent with toggle
+    // commands — it is a one-time setup action. See D1 in sidecar-config.ts for the
+    // concurrency assumption shared by both write strategies.
+    if (gitRoot) {
+      await writeSidecarConfig(gitRoot, {
+        memory: memoryEnabled,
+        learning: learnEnabled,
+        decisions: decisionsEnabled,
+        knowledge: knowledgeEnabled,
+      });
     }
 
     // Configure HUD

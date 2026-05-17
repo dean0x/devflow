@@ -1,0 +1,464 @@
+#!/bin/bash
+
+# Sidecar System: sidecar-evaluate (SessionEnd Hook)
+# Evaluates session-level features: learning batching, decisions detection, knowledge refresh.
+# Writes marker files to .memory/.sidecar/ for sidecar-dispatch to pick up.
+
+set -e
+
+# Break feedback loop from background sidecar sessions
+[ "${DEVFLOW_BG_LEARNER:-}" = "1" ] && exit 0
+[ "${DEVFLOW_BG_UPDATER:-}" = "1" ] && exit 0
+[ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ] && exit 0
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/json-parse" || { echo "sidecar-evaluate: failed to source json-parse" >&2; exit 1; }
+if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+
+INPUT=$(cat)
+
+CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
+[ -z "$CWD" ] && exit 0
+
+MEMORY_DIR="$CWD/.memory"
+[ ! -d "$MEMORY_DIR" ] && exit 0
+
+SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+
+# Read sidecar config
+SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+LEARNING_ENABLED="true"
+DECISIONS_ENABLED="true"
+KNOWLEDGE_ENABLED="true"
+
+if [ -f "$SIDECAR_CONFIG" ]; then
+  LEARNING_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "learning" "true")
+  DECISIONS_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "decisions" "true")
+  KNOWLEDGE_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "knowledge" "true")
+fi
+
+# Log
+source "$SCRIPT_DIR/log-paths" || { echo "sidecar-evaluate: failed to source log-paths" >&2; exit 1; }
+LOG_FILE="$(devflow_log_dir "$CWD")/.sidecar-evaluate.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-evaluate] $1" >> "$LOG_FILE"; }
+source "$SCRIPT_DIR/sidecar-lock" || { log "failed to source sidecar-lock"; exit 1; }
+
+log "SessionEnd hook triggered"
+
+# --- Find transcript ---
+ENCODED_CWD=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
+PROJECTS_DIR="$HOME/.claude/projects/-${ENCODED_CWD}"
+
+SESSION_ID=$(printf '%s' "$INPUT" | json_field "session_id" "")
+TRANSCRIPT=""
+
+if [ -d "$PROJECTS_DIR" ]; then
+  # Validate session_id before use in path — guard against path traversal (../ sequences)
+  if [ -n "$SESSION_ID" ] && echo "$SESSION_ID" | grep -qE '^[a-zA-Z0-9_-]+$' && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
+    TRANSCRIPT="$PROJECTS_DIR/${SESSION_ID}.jsonl"
+  else
+    TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
+    [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ] && TRANSCRIPT=""
+    [ -n "$TRANSCRIPT" ] && SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+  fi
+fi
+
+# Session depth check (min 3 user turns)
+SESSION_DEEP="false"
+if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  # Use jq for accurate top-level type matching; grep may over-count when the literal appears in content
+  if [ "$_HAS_JQ" = "true" ]; then
+    USER_TURNS=$(jq -c 'select(.type == "user")' "$TRANSCRIPT" 2>/dev/null | wc -l | tr -d ' ')
+  else
+    USER_TURNS=$(grep -c '"type":"user"' "$TRANSCRIPT" 2>/dev/null || echo "0")
+  fi
+  if [ "$USER_TURNS" -ge 3 ]; then
+    SESSION_DEEP="true"
+    log "Session depth: $USER_TURNS turns"
+  else
+    log "Shallow session ($USER_TURNS turns)"
+  fi
+else
+  log "No transcript found"
+fi
+
+mkdir -p "$SIDECAR_DIR"
+
+NOW=$(date +%s)
+TODAY=$(date '+%Y-%m-%d')
+FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
+MARKER_SUFFIX="${SESSION_ID:-$$}"
+
+# read_daily_cap FILE DEFAULT → echoes today's run count (0 if file absent or dated yesterday)
+read_daily_cap() {
+  local runs_file="$1" default="${2:-0}"
+  local count=0
+  if [ -f "$runs_file" ]; then
+    local date_field
+    date_field=$(cut -f1 "$runs_file" 2>/dev/null || true)
+    if [ "$date_field" = "$TODAY" ]; then
+      if grep -q "$(printf '\t')" "$runs_file" 2>/dev/null; then
+        count=$(cut -f2 "$runs_file" 2>/dev/null | tr -dc '0-9')
+        count="${count:-$default}"
+      fi
+    fi
+  fi
+  echo "$count"
+}
+
+# atomic_increment_daily RUNS_FILE TODAY_VAL CURRENT — increment daily counter under lock
+atomic_increment_daily() {
+  local runs_file="$1" today_val="$2"
+  local lock_dir="${runs_file}.lock"
+  if sidecar_lock_acquire "$lock_dir" 3; then
+    # Re-read under lock for accurate count
+    local actual
+    actual=$(read_daily_cap "$runs_file" 0)
+    printf '%s\t%d\n' "$today_val" "$((actual + 1))" > "$runs_file"
+    sidecar_lock_release "$lock_dir"
+  fi
+}
+
+# load_existing_ids LOG_FILE → echoes JSON array of .id values ([] when absent/empty)
+load_existing_ids() {
+  local log_file="$1"
+  if [ ! -f "$log_file" ]; then
+    echo "[]"
+    return
+  fi
+  if [ "$_HAS_JQ" = "true" ]; then
+    # Stream line-by-line then collect — avoids slurping entire file into memory
+    jq -c '.id // empty' "$log_file" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]"
+  else
+    node -e "
+      const fs=require('fs');
+      const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
+      const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
+      process.stdout.write(JSON.stringify(ids));
+    " -- "$log_file" 2>/dev/null || echo "[]"
+  fi
+}
+
+# =============================================================================
+# Artifact reinforcement — update last_seen for loaded self-learning artifacts
+# =============================================================================
+
+if [ "$LEARNING_ENABLED" = "true" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  LEARNING_LOG="$MEMORY_DIR/learning-log.jsonl"
+  if [ -f "$LEARNING_LOG" ]; then
+    # Extract slugs of self-learning artifacts used in this session
+    LOADED_SLUGS=$(grep -oE 'self-learning[:/][a-z0-9-]+' "$TRANSCRIPT" 2>/dev/null | \
+      sed 's|self-learning[:/]||' | sort -u || true)
+    if [ -n "$LOADED_SLUGS" ]; then
+      NOW_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+      SLUGS_PATTERN=$(echo "$LOADED_SLUGS" | paste -sd '|' -)
+      if sidecar_lock_acquire "$SIDECAR_DIR/.reinforce.lock" 3; then
+        trap 'sidecar_lock_release "$SIDECAR_DIR/.reinforce.lock"' EXIT
+        TEMP_LOG="${LEARNING_LOG}.tmp.$$"
+        rm -f "$TEMP_LOG" 2>/dev/null || true
+        if [ "$_HAS_JQ" = "true" ]; then
+          if jq -c --arg now "$NOW_ISO" --arg slugs "$SLUGS_PATTERN" '
+            def extract_slug:
+              .artifact_path as $p |
+              if ($p | contains("/commands/")) then ($p | split("/") | last | rtrimstr(".md"))
+              else ($p | split("/") | .[-2])
+              end;
+            if .status == "created" and .artifact_path != null and .artifact_path != "" then
+              extract_slug as $slug |
+              if ($slugs | split("|") | any(. == $slug)) then .last_seen = $now
+              else .
+              end
+            else .
+            end
+          ' "$LEARNING_LOG" > "$TEMP_LOG" 2>/dev/null; then
+            if ! cmp -s "$LEARNING_LOG" "$TEMP_LOG"; then
+              mv "$TEMP_LOG" "$LEARNING_LOG"
+              log "Reinforced artifacts for slugs: $SLUGS_PATTERN"
+            else
+              rm -f "$TEMP_LOG"
+            fi
+          else
+            rm -f "$TEMP_LOG"
+          fi
+        else
+          REINFORCED=$(node -e "
+            const fs = require('fs');
+            const lines = fs.readFileSync(process.argv[1], 'utf8').trim().split('\n').filter(Boolean);
+            const slugs = process.argv[2].split('|');
+            const now = process.argv[3];
+            const tmpPath = process.argv[1] + '.tmp.' + process.pid;
+            let reinforced = false;
+            const result = lines.map(line => {
+              try {
+                const obj = JSON.parse(line);
+                if (obj.status === 'created' && obj.artifact_path) {
+                  const slug = obj.artifact_path.includes('/commands/')
+                    ? obj.artifact_path.split('/').pop().replace(/\.md$/, '')
+                    : obj.artifact_path.split('/').slice(-2, -1)[0];
+                  if (slugs.includes(slug)) { obj.last_seen = now; reinforced = true; }
+                }
+                return JSON.stringify(obj);
+              } catch (e) { return line; }
+            });
+            if (reinforced) {
+              fs.writeFileSync(tmpPath, result.join('\n') + '\n');
+              fs.renameSync(tmpPath, process.argv[1]);
+            }
+            process.stdout.write(reinforced ? 'true' : 'false');
+          " -- "$LEARNING_LOG" "$SLUGS_PATTERN" "$NOW_ISO" 2>/dev/null || echo "false")
+          if [ "$REINFORCED" = "true" ]; then
+            log "Reinforced artifacts for slugs: $SLUGS_PATTERN (node)"
+          fi
+        fi
+        sidecar_lock_release "$SIDECAR_DIR/.reinforce.lock"
+        trap - EXIT
+      else
+        log "Reinforcement skipped: could not acquire lock"
+      fi
+    fi
+  fi
+fi
+
+# =============================================================================
+# Learning evaluation
+# =============================================================================
+
+if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
+  log "Evaluating learning..."
+
+  # Load learning config
+  LEARNING_CONFIG="$MEMORY_DIR/learning.json"
+  MAX_DAILY=5
+  BATCH_SIZE=3
+
+  if [ -f "$LEARNING_CONFIG" ]; then
+    MAX_DAILY=$(json_field_file "$LEARNING_CONFIG" "max_daily_runs" "5")
+    BATCH_SIZE=$(json_field_file "$LEARNING_CONFIG" "batch_size" "3")
+  fi
+  MAX_DAILY=$(echo "$MAX_DAILY" | tr -dc '0-9')
+  MAX_DAILY="${MAX_DAILY:-5}"
+  BATCH_SIZE=$(echo "$BATCH_SIZE" | tr -dc '0-9')
+  BATCH_SIZE="${BATCH_SIZE:-3}"
+
+  # Adaptive batch size
+  OBS_TOTAL=0
+  if [ -f "$MEMORY_DIR/learning-log.jsonl" ]; then
+    OBS_TOTAL=$(wc -l < "$MEMORY_DIR/learning-log.jsonl" | tr -d ' ')
+  fi
+  if [ "$OBS_TOTAL" -ge 15 ]; then
+    BATCH_SIZE=5
+  fi
+
+  # Daily cap check
+  RUNS_FILE="$SIDECAR_DIR/.learning-runs-today"
+  RUNS_TODAY=$(read_daily_cap "$RUNS_FILE" 0)
+
+  if [ "$RUNS_TODAY" -ge "$MAX_DAILY" ]; then
+    log "Learning daily cap reached ($RUNS_TODAY/$MAX_DAILY)"
+  else
+    # Batch counting — accumulate session IDs
+    SESSION_COUNT_FILE="$SIDECAR_DIR/.learning-sessions"
+    CURRENT_COUNT=0
+
+    # Validate session ID format
+    if [ -n "$SESSION_ID" ] && echo "$SESSION_ID" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+      # Deduplicate
+      if [ -f "$SESSION_COUNT_FILE" ] && grep -qxF "$SESSION_ID" "$SESSION_COUNT_FILE" 2>/dev/null; then
+        log "Learning: session already counted"
+      else
+        echo "$SESSION_ID" >> "$SESSION_COUNT_FILE"
+      fi
+    fi
+
+    # Cap session file at 50 lines
+    if [ -f "$SESSION_COUNT_FILE" ]; then
+      _SC_LINES=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
+      if [ "$_SC_LINES" -gt 50 ]; then
+        _SC_TMP="$SESSION_COUNT_FILE.tmp.$$"
+        tail -50 "$SESSION_COUNT_FILE" > "$_SC_TMP" && mv "$_SC_TMP" "$SESSION_COUNT_FILE" || rm -f "$_SC_TMP"
+      fi
+    fi
+
+    if [ -f "$SESSION_COUNT_FILE" ]; then
+      CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
+    fi
+    log "Learning batch: $CURRENT_COUNT/$BATCH_SIZE sessions"
+
+    if [ "$CURRENT_COUNT" -ge "$BATCH_SIZE" ] && [ -f "$SESSION_COUNT_FILE" ]; then
+      if sidecar_lock_acquire "$SIDECAR_DIR/.learning-batch.lock" 3; then
+        # Re-read count under lock
+        if [ -f "$SESSION_COUNT_FILE" ]; then
+          CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
+        fi
+        if [ "$CURRENT_COUNT" -ge "$BATCH_SIZE" ] && [ -f "$SESSION_COUNT_FILE" ]; then
+          # Extract user signals from transcript
+          USER_SIGNALS=""
+          if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+            USER_SIGNALS=$(node "$FILTER_LIB" user-signals "$TRANSCRIPT" 2>/dev/null || true)
+          fi
+
+          if [ -n "$USER_SIGNALS" ]; then
+            # Load existing observation IDs for deduplication
+            EXISTING_IDS=$(load_existing_ids "$MEMORY_DIR/learning-log.jsonl")
+
+            # Write learning marker (per-session name for concurrency safety)
+            _LEARN_MARKER="$SIDECAR_DIR/learning.${MARKER_SUFFIX}.json"
+            _LEARN_TMP="${_LEARN_MARKER}.tmp.$$"
+            if [ "$_HAS_JQ" = "true" ]; then
+              jq -n \
+                --arg userSignals "$USER_SIGNALS" \
+                --argjson existingObservationIds "$EXISTING_IDS" \
+                --argjson timestamp "$NOW" \
+                '{userSignals: $userSignals, existingObservationIds: $existingObservationIds, timestamp: $timestamp}' \
+                > "$_LEARN_TMP" && mv "$_LEARN_TMP" "$_LEARN_MARKER" || rm -f "$_LEARN_TMP"
+            else
+              node -e "
+                process.stdout.write(JSON.stringify({
+                  userSignals: process.argv[1],
+                  existingObservationIds: JSON.parse(process.argv[2]),
+                  timestamp: parseInt(process.argv[3])
+                }) + '\n')
+              " -- "$USER_SIGNALS" "$EXISTING_IDS" "$NOW" > "$_LEARN_TMP" && mv "$_LEARN_TMP" "$_LEARN_MARKER" || rm -f "$_LEARN_TMP"
+            fi
+
+            # Update daily cap under lock
+            atomic_increment_daily "$RUNS_FILE" "$TODAY"
+
+            # Clear session count file (atomically via mv on same filesystem)
+            rm -f "$SESSION_COUNT_FILE"
+
+            log "Wrote learning marker (batch of $CURRENT_COUNT sessions)"
+          else
+            log "Learning: no user signals extracted from transcript"
+          fi
+        fi
+        sidecar_lock_release "$SIDECAR_DIR/.learning-batch.lock"
+      else
+        log "Learning batch skipped: could not acquire lock"
+      fi
+    fi
+  fi
+fi
+
+# =============================================================================
+# Decisions evaluation
+# =============================================================================
+
+if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
+  log "Evaluating decisions..."
+
+  # Note: .memory/decisions/.disabled is for session-start-context only — this hook uses DECISIONS_ENABLED.
+
+  # Daily cap check
+  DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
+  DEC_RUNS_TODAY=$(read_daily_cap "$DEC_RUNS_FILE" 0)
+
+  MAX_DEC_RUNS=3
+  DEC_CONFIG="$MEMORY_DIR/decisions.json"
+  if [ -f "$DEC_CONFIG" ]; then
+    MAX_DEC_RUNS=$(json_field_file "$DEC_CONFIG" "max_daily_runs" "3")
+  fi
+  MAX_DEC_RUNS=$(echo "$MAX_DEC_RUNS" | tr -dc '0-9')
+  MAX_DEC_RUNS="${MAX_DEC_RUNS:-3}"
+
+  if [ "$DEC_RUNS_TODAY" -ge "$MAX_DEC_RUNS" ]; then
+    log "Decisions daily cap reached ($DEC_RUNS_TODAY/$MAX_DEC_RUNS)"
+  else
+    # Extract dialog pairs from transcript
+    DIALOG_PAIRS=""
+    if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+      DIALOG_PAIRS=$(node "$FILTER_LIB" dialog-pairs "$TRANSCRIPT" 2>/dev/null || true)
+    fi
+
+    if [ -n "$DIALOG_PAIRS" ]; then
+      # Load existing observation IDs
+      EXISTING_IDS=$(load_existing_ids "$MEMORY_DIR/decisions-log.jsonl")
+
+      # Write decisions marker (per-session name for concurrency safety)
+      _DEC_MARKER="$SIDECAR_DIR/decisions.${MARKER_SUFFIX}.json"
+      _DEC_TMP="${_DEC_MARKER}.tmp.$$"
+      if [ "$_HAS_JQ" = "true" ]; then
+        jq -n \
+          --arg dialogPairs "$DIALOG_PAIRS" \
+          --argjson existingObservationIds "$EXISTING_IDS" \
+          --argjson timestamp "$NOW" \
+          '{dialogPairs: $dialogPairs, existingObservationIds: $existingObservationIds, timestamp: $timestamp}' \
+          > "$_DEC_TMP" && mv "$_DEC_TMP" "$_DEC_MARKER" || rm -f "$_DEC_TMP"
+      else
+        node -e "
+          process.stdout.write(JSON.stringify({
+            dialogPairs: process.argv[1],
+            existingObservationIds: JSON.parse(process.argv[2]),
+            timestamp: parseInt(process.argv[3])
+          }) + '\n')
+        " -- "$DIALOG_PAIRS" "$EXISTING_IDS" "$NOW" > "$_DEC_TMP" && mv "$_DEC_TMP" "$_DEC_MARKER" || rm -f "$_DEC_TMP"
+      fi
+
+      # Update daily cap
+      atomic_increment_daily "$DEC_RUNS_FILE" "$TODAY"
+
+      log "Wrote decisions marker"
+    else
+      log "Decisions: no dialog pairs extracted"
+    fi
+  fi
+fi
+
+# =============================================================================
+# Knowledge evaluation
+# =============================================================================
+
+if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
+  log "Evaluating knowledge..."
+
+  # Check .features/.disabled sentinel
+  if [ -f "$CWD/.features/.disabled" ]; then
+    log "Knowledge disabled by sentinel"
+  else
+    # Throttle: skip if refreshed within last 2 hours
+    KNOWLEDGE_MARKER="$CWD/.features/.knowledge-last-refresh"
+    LAST_REFRESH=$(cat "$KNOWLEDGE_MARKER" 2>/dev/null | tr -dc '0-9' || true)
+    LAST_REFRESH="${LAST_REFRESH:-0}"
+    AGE=$(( NOW - LAST_REFRESH ))
+
+    if [ "$AGE" -lt 7200 ]; then
+      log "Knowledge throttled: refreshed ${AGE}s ago"
+    else
+      # Query stale slugs
+      FEATURE_KNOWLEDGE_LIB="$SCRIPT_DIR/lib/feature-knowledge.cjs"
+      STALE_SLUGS=""
+      if [ -f "$FEATURE_KNOWLEDGE_LIB" ]; then
+        STALE_SLUGS=$(node "$FEATURE_KNOWLEDGE_LIB" stale-slugs "$CWD" 2>/dev/null || true)
+      fi
+
+      if [ -n "$STALE_SLUGS" ]; then
+        # Write knowledge marker (per-session name for concurrency safety)
+        _KNOW_MARKER="$SIDECAR_DIR/knowledge.${MARKER_SUFFIX}.json"
+        _KNOW_TMP="${_KNOW_MARKER}.tmp.$$"
+        if [ "$_HAS_JQ" = "true" ]; then
+          STALE_ARRAY=$(echo "$STALE_SLUGS" | jq -R . | jq -s .)
+          jq -n \
+            --argjson staleSlugs "$STALE_ARRAY" \
+            --arg worktreePath "$CWD" \
+            --argjson timestamp "$NOW" \
+            '{staleSlugs: $staleSlugs, worktreePath: $worktreePath, timestamp: $timestamp}' \
+            > "$_KNOW_TMP" && mv "$_KNOW_TMP" "$_KNOW_MARKER" || rm -f "$_KNOW_TMP"
+        else
+          node -e "
+            const slugs = process.argv[1].trim().split('\n').filter(Boolean);
+            process.stdout.write(JSON.stringify({staleSlugs: slugs, worktreePath: process.argv[2], timestamp: parseInt(process.argv[3])}) + '\n')
+          " -- "$STALE_SLUGS" "$CWD" "$NOW" > "$_KNOW_TMP" && mv "$_KNOW_TMP" "$_KNOW_MARKER" || rm -f "$_KNOW_TMP"
+        fi
+        # Optimistically update throttle marker so the stale-slug query is skipped
+        # on the next session end — the sidecar agent will do the actual refresh.
+        echo "$NOW" > "$KNOWLEDGE_MARKER"
+        log "Wrote knowledge marker: $(echo "$STALE_SLUGS" | wc -l | tr -d ' ') stale slug(s)"
+      else
+        log "Knowledge: no stale slugs found"
+      fi
+    fi
+  fi
+fi
+
+exit 0

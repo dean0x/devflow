@@ -17,7 +17,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-05-16
+updated: 2026-05-17
 ---
 
 # Rules System CLI
@@ -201,6 +201,7 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 - **Shadow files are flat, not directories**: Skills shadow at `~/.devflow/skills/{name}/` (a directory). Rules shadow at `~/.devflow/rules/{name}.md` (a flat file). The `isShadowed` check uses `fs.access()` on the flat path, not `fs.stat()` for a directory.
 - **Manifest defaults `rules: true` on read**: Old manifests without the `rules` field are read as `rules: true`. This means upgrading users get rules enabled automatically, which is the desired behavior but worth knowing when reading the manifest.
 - **`buildRulesMap` throws on invalid names**: If a `plugin.json` declares a rule name with uppercase letters, dots, or slashes, `buildRulesMap` throws immediately. This is intentional — catch misconfiguration early rather than silently writing a path-traversal-susceptible file.
+- **Rules have no runtime sentinel**: Unlike knowledge (`.features/.disabled`), decisions (`.memory/decisions/.disabled`), memory (`.memory/.working-memory-disabled`), and learn (`.memory/.learning-disabled`), rules have no `.disabled` file sentinel. Both `manageSentinel` and `writeSidecarConfig` calls in `init.ts` conspicuously omit rules — this is intentional. The sidecar system (which writes `.memory/.sidecar/config.json` entries for memory, learning, decisions, and knowledge to coordinate background agents) has no entry for rules because rules have no background agent: they are static files loaded by Claude Code directly. Disabling rules is a destructive operation: `devflow rules --disable` removes `~/.claude/rules/devflow/` entirely, and `devflow init --no-rules` does the same. There is no way to temporarily suppress rules without removing the files themselves.
 - **Core vs language rules have different token behavior**: Core rules (security, engineering, quality, reliability) load on every prompt regardless of file type. Language rules only activate when Claude is working with a matching file. A user without the TypeScript plugin pays zero cost for TypeScript rules — but a user with it only pays the cost when editing `.ts`/`.tsx` files.
 - **manifest.ts contains a `kb → knowledge` migration self-heal**: `readManifest` detects `features.kb` and migrates it to `features.knowledge` in-place (ADR-001 clean-break applies to install-time assets like rules, skills, commands — not to disk data that users cannot easily migrate themselves). This is the only backward-compat code in `manifest.ts`; do not add more. For rules, `LEGACY_RULE_NAMES` in `plugins.ts` is the correct pattern when renaming rule files — no manifest migration needed.
 

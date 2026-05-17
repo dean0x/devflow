@@ -9,21 +9,16 @@ const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
-  'session-end-learning',
-  'session-end-decisions',
-  'stop-update-learning',
-  'background-memory-update',
-  'stop-update-memory',
   'session-start-memory',
   'session-start-context',
   'pre-compact-memory',
-  'prompt-capture-memory',
   'preamble',
   'json-parse',
   'get-mtime',
-  'session-end-knowledge-refresh',
-  'background-knowledge-refresh',
   'ensure-features-init',
+  'sidecar-capture',
+  'sidecar-evaluate',
+  'sidecar-dispatch',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1085,15 +1080,6 @@ describe('json-helper.cjs filter-observations', () => {
   });
 });
 
-describe('session-end-learning structure', () => {
-  it('starts with bash shebang and sources json-parse', () => {
-    const scriptPath = path.join(HOOKS_DIR, 'session-end-learning');
-    const content = fs.readFileSync(scriptPath, 'utf8');
-    const lines = content.split('\n');
-    expect(lines[0]).toBe('#!/bin/bash');
-    expect(content).toContain('source "$SCRIPT_DIR/json-parse"');
-  });
-});
 
 describe('json-helper.cjs create-artifacts frontmatter stripping', () => {
   it('strips model-generated YAML frontmatter from artifact content', () => {
@@ -1190,9 +1176,9 @@ describe('json-parse wrapper', () => {
 });
 
 describe('working memory queue behavior', () => {
-  const STOP_HOOK = path.join(HOOKS_DIR, 'stop-update-memory');
+  const STOP_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
   const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
-  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'prompt-capture-memory');
+  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
 
   let tmpDir: string;
 
@@ -1203,6 +1189,17 @@ describe('working memory queue behavior', () => {
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  // Helper: write a fresh WORKING-MEMORY.md with an old mtime so the throttle passes.
+  // sidecar-capture throttles if WORKING-MEMORY.md was updated <120s ago.
+  // We write the file then backdate its mtime to 10 minutes ago.
+  function writeStaleWorkingMemory(tmpDir: string): void {
+    const memFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, '## Now\n- stale memory');
+    // Backdate 10 minutes (600 seconds)
+    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
+  }
 
   it('stop_reason tool_use — no queue append', () => {
     // Create .memory/ so the hook proceeds to the stop_reason check
@@ -1224,8 +1221,8 @@ describe('working memory queue behavior', () => {
   it('stop_reason end_turn — appends assistant turn to queue', () => {
     // Create .memory/ directory
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    // Touch throttle marker to prevent background spawn attempt
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    // Write stale WORKING-MEMORY.md so throttle check passes (no memory.processing marker needed)
+    writeStaleWorkingMemory(tmpDir);
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1248,7 +1245,7 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('prompt-capture-memory captures user prompt to queue', () => {
+  it('sidecar-dispatch captures user prompt to queue', () => {
     // Create .memory/ directory so capture is triggered
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
@@ -1272,7 +1269,7 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('prompt-capture-memory with missing .memory/ — creates it via ensure-memory-gitignore, exit 0', () => {
+  it('sidecar-dispatch with missing .memory/ — creates it via ensure-memory-gitignore, exit 0', () => {
     // tmpDir exists but has no .memory/ subdirectory — ensure-memory-gitignore creates it
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1349,17 +1346,17 @@ describe('working memory queue behavior', () => {
     }
   });
 
-  it('auto-clean truncates orphan user-only queue before first assistant append', () => {
+  it('preserves existing user entries when appending assistant turn', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
-    // Pre-populate with user-only entries (orphans from broken assistant capture)
-    const orphanLines = Array.from({ length: 5 }, (_, i) =>
-      JSON.stringify({ role: 'user', content: `orphan ${i}`, ts: now + i }),
+    // Pre-populate with user-only entries (from sidecar-dispatch)
+    const userLines = Array.from({ length: 5 }, (_, i) =>
+      JSON.stringify({ role: 'user', content: `user prompt ${i}`, ts: now + i }),
     );
-    fs.writeFileSync(queueFile, orphanLines.join('\n') + '\n');
+    fs.writeFileSync(queueFile, userLines.join('\n') + '\n');
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1371,19 +1368,18 @@ describe('working memory queue behavior', () => {
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
-    // Orphans truncated, then new assistant entry appended
-    expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
-    expect(entry.role).toBe('assistant');
-    expect(entry.content).toBe('first real assistant response');
+    // All 5 user entries preserved + 1 new assistant entry
+    expect(lines).toHaveLength(6);
+    const lastEntry = JSON.parse(lines[5]) as { role: string; content: string; ts: number };
+    expect(lastEntry.role).toBe('assistant');
+    expect(lastEntry.content).toBe('first real assistant response');
   });
 
-  it('auto-clean with empty queue file — truncation no-ops, assistant entry appended', () => {
+  it('empty queue file — assistant entry appended normally', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
-    // Create an empty queue file — grep exits 1 (no match), auto-clean fires but truncates to same empty state
     fs.writeFileSync(queueFile, '');
 
     const input = JSON.stringify({
@@ -1396,43 +1392,44 @@ describe('working memory queue behavior', () => {
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
-    // Empty queue truncated to empty, then new assistant entry appended — exactly 1 line
     expect(lines).toHaveLength(1);
     const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
     expect(entry.role).toBe('assistant');
     expect(entry.content).toBe('response after empty queue');
   });
 
-  it('auto-clean with single orphan user entry — truncated, only assistant entry remains', () => {
+  it('single user entry preserved when assistant turn appends', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
-    // Minimum trigger case: exactly 1 orphan user entry
-    const singleOrphan = JSON.stringify({ role: 'user', content: 'lone orphan', ts: now });
-    fs.writeFileSync(queueFile, singleOrphan + '\n');
+    const userEntry = JSON.stringify({ role: 'user', content: 'user prompt', ts: now });
+    fs.writeFileSync(queueFile, userEntry + '\n');
 
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-single',
       stop_reason: 'end_turn',
-      response_text: 'response after single orphan',
+      response_text: 'response after user prompt',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
-    // Single orphan truncated, new assistant entry appended — exactly 1 line
-    expect(lines).toHaveLength(1);
-    const entry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
-    expect(entry.role).toBe('assistant');
-    expect(entry.content).toBe('response after single orphan');
+    // User entry preserved + new assistant entry = 2 lines
+    expect(lines).toHaveLength(2);
+    const firstEntry = JSON.parse(lines[0]) as { role: string; content: string; ts: number };
+    expect(firstEntry.role).toBe('user');
+    expect(firstEntry.content).toBe('user prompt');
+    const lastEntry = JSON.parse(lines[1]) as { role: string; content: string; ts: number };
+    expect(lastEntry.role).toBe('assistant');
+    expect(lastEntry.content).toBe('response after user prompt');
   });
 
-  it('auto-clean does not truncate queue that already has assistant entries', () => {
+  it('queue with mixed entries preserved when assistant turn appends', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1458,11 +1455,9 @@ describe('working memory queue behavior', () => {
     expect(lines).toHaveLength(4);
   });
 
-  it('auto-clean does not truncate queue with only assistant entries', () => {
-    // Design intent: auto-clean targets user-only queues (orphan prompts with no paired response).
-    // A queue containing only assistant entries is not an orphan state — preserve it.
+  it('queue with only assistant entries preserved when new entry appends', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1491,8 +1486,8 @@ describe('working memory queue behavior', () => {
 
   it('queue overflow — >200 lines truncated to last 100', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    // Touch throttle marker to prevent background spawn attempt
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    // Write stale WORKING-MEMORY.md so throttle passes
+    writeStaleWorkingMemory(tmpDir);
 
     const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
@@ -1528,7 +1523,35 @@ describe('working memory queue behavior', () => {
     expect(lastEntry.content).toBe('overflow trigger response');
   });
 
-  it('prompt-capture-memory truncates prompts longer than 2000 chars', () => {
+  it('dispatch then capture preserves user turn in fresh queue', () => {
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    writeStaleWorkingMemory(tmpDir);
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+
+    // Step 1: sidecar-dispatch writes user turn
+    execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', prompt: 'implement feature X' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    // Step 2: sidecar-capture writes assistant turn
+    execSync(`bash "${STOP_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', stop_reason: 'end_turn', response_text: 'done' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(2);
+    const first = JSON.parse(lines[0]) as { role: string; content: string };
+    const second = JSON.parse(lines[1]) as { role: string; content: string };
+    expect(first.role).toBe('user');
+    expect(first.content).toBe('implement feature X');
+    expect(second.role).toBe('assistant');
+    expect(second.content).toBe('done');
+  });
+
+  it('sidecar-dispatch truncates prompts longer than 2000 chars', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
     const longPrompt = 'a'.repeat(3000);
@@ -1550,10 +1573,10 @@ describe('working memory queue behavior', () => {
     expect(entry.content).toContain('[truncated]');
   });
 
-  it('stop-update-memory truncates assistant content longer than 2000 chars', () => {
+  it('sidecar-capture truncates assistant content longer than 2000 chars', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    // Touch throttle marker to prevent background spawn attempt
-    fs.writeFileSync(path.join(tmpDir, '.memory', '.working-memory-last-trigger'), '');
+    // Write stale WORKING-MEMORY.md so throttle passes
+    writeStaleWorkingMemory(tmpDir);
 
     const longMessage = 'b'.repeat(5000);
     const input = JSON.stringify({
@@ -1575,7 +1598,7 @@ describe('working memory queue behavior', () => {
     expect(entry.content).toContain('[truncated]');
   });
 
-  it('stop-update-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+  it('sidecar-capture exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
     // Hook exits at line 11 before reading stdin, so don't pipe input — would race
@@ -1588,7 +1611,7 @@ describe('working memory queue behavior', () => {
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
-  it('prompt-capture-memory exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+  it('sidecar-dispatch exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
 
     expect(() => {
@@ -1701,83 +1724,869 @@ describe('get-mtime behavioral', () => {
   });
 });
 
-describe('session-end-knowledge-refresh guard clauses', () => {
-  const KB_HOOK = path.join(HOOKS_DIR, 'session-end-knowledge-refresh');
+// =============================================================================
+// transcript-filter.cjs CLI handler
+// =============================================================================
+
+describe('transcript-filter.cjs CLI', () => {
+  const FILTER = path.join(HOOKS_DIR, 'lib', 'transcript-filter.cjs');
+
+  it('user-signals extracts user turns', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'transcript.jsonl');
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello world' } }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }),
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'thanks for helping' } }),
+      ].join('\n') + '\n');
+
+      const result = execSync(`node "${FILTER}" user-signals "${file}"`, { stdio: 'pipe' }).toString().trim();
+      const parsed = JSON.parse(result);
+      expect(parsed).toEqual(['hello world', 'thanks for helping']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('dialog-pairs extracts assistant+user pairs', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'transcript.jsonl');
+    try {
+      fs.writeFileSync(file, [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello world' } }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hi there' }] } }),
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'thanks for helping' } }),
+      ].join('\n') + '\n');
+
+      const result = execSync(`node "${FILTER}" dialog-pairs "${file}"`, { stdio: 'pipe' }).toString().trim();
+      const parsed = JSON.parse(result);
+      expect(parsed).toEqual([{ prior: 'hi there', user: 'thanks for helping' }]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('user-signals with empty transcript returns empty stdout (not "[]")', () => {
+    // transcript-filter outputs nothing (empty stdout) for empty results so that
+    // shell [ -n "$VAR" ] emptiness checks work correctly. JSON.stringify([]) produces
+    // "[]" which is a non-empty string and would fool shell emptiness checks.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'empty.jsonl');
+    try {
+      fs.writeFileSync(file, '');
+      const result = execSync(`node "${FILTER}" user-signals "${file}"`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('invalid subcommand exits non-zero', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const file = path.join(tmpDir, 'dummy.jsonl');
+    try {
+      fs.writeFileSync(file, '');
+      expect(() => {
+        execSync(`node "${FILTER}" bogus "${file}"`, { stdio: 'pipe' });
+      }).toThrow();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// =============================================================================
+// Sidecar hook test helpers
+// =============================================================================
+
+function encodeCwd(cwd: string): string {
+  return cwd.replace(/^\//, '').replace(/\//g, '-');
+}
+
+function createTranscript(
+  homeDir: string,
+  cwdDir: string,
+  userTurns: number,
+  assistantTurns: number = userTurns,
+  sessionId: string = 'test-session',
+): string {
+  const encoded = encodeCwd(cwdDir);
+  const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+  fs.mkdirSync(projDir, { recursive: true });
+  const transcriptPath = path.join(projDir, `${sessionId}.jsonl`);
+  const lines: string[] = [];
+  for (let i = 0; i < Math.max(userTurns, assistantTurns); i++) {
+    if (i < userTurns) lines.push(JSON.stringify({
+      type: 'user', message: { role: 'user', content: `user turn ${i}` },
+    }));
+    if (i < assistantTurns) lines.push(JSON.stringify({
+      type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `response ${i}` }] },
+    }));
+  }
+  fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+  return transcriptPath;
+}
+
+function createSidecarConfig(cwdDir: string, config: Record<string, boolean>): void {
+  const dir = path.join(cwdDir, '.memory', '.sidecar');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
+}
+
+function backdateMtime(filePath: string, secondsAgo: number): void {
+  const past = new Date(Date.now() - secondsAgo * 1000);
+  fs.utimesSync(filePath, past, past);
+}
+
+function runHook(hookPath: string, input: object, homeDir: string): { stdout: string; stderr: string; exitCode: number } {
+  try {
+    const result = execSync(`bash "${hookPath}"`, {
+      input: JSON.stringify(input),
+      env: { ...process.env, HOME: homeDir },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { stdout: result.toString(), stderr: '', exitCode: 0 };
+  } catch (e: unknown) {
+    const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
+    return {
+      stdout: err.stdout?.toString() ?? '',
+      stderr: err.stderr?.toString() ?? '',
+      exitCode: err.status ?? 1,
+    };
+  }
+}
+
+// =============================================================================
+// sidecar-evaluate business logic
+// =============================================================================
+
+describe('sidecar-evaluate business logic', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-eval-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-eval-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('config defaults: all features enabled when no config present', () => {
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+    expect(exitCode).toBe(0);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Evaluating learning');
+    expect(log).toContain('Evaluating decisions');
+    expect(log).toContain('Evaluating knowledge');
+  });
+
+  it('config disables learning: learning skipped, decisions still evaluated', () => {
+    createSidecarConfig(tmpDir, { learning: false });
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).not.toContain('Evaluating learning');
+    expect(log).toContain('Evaluating decisions');
+  });
+
+  it('shallow session (2 turns) skips learning and decisions', () => {
+    createTranscript(homeDir, tmpDir, 2);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'decisions.json'))).toBe(false);
+  });
+
+  it('deep session (5 turns) proceeds with evaluation', () => {
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Session depth: 5 turns');
+  });
+
+  it('learning batch accumulation triggers at batch_size threshold', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    // Pre-write 2 session IDs (batch_size defaults to 3)
+    const sessionCountFile = path.join(sidecarDir, '.learning-sessions');
+    fs.writeFileSync(sessionCountFile, 'session-a\nsession-b\n');
+
+    // Create a deep transcript for session-c (the 3rd session)
+    createTranscript(homeDir, tmpDir, 5, 5, 'session-c');
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'session-c',
+    }, homeDir);
+
+    // Batch complete: per-session learning marker should be written (learning.session-c.json)
+    const learningMarker = path.join(sidecarDir, 'learning.session-c.json');
+    expect(fs.existsSync(learningMarker)).toBe(true);
+    const marker = JSON.parse(fs.readFileSync(learningMarker, 'utf-8'));
+    expect(marker).toHaveProperty('userSignals');
+    expect(marker).toHaveProperty('existingObservationIds');
+
+    // Session count file should be cleaned up
+    expect(fs.existsSync(sessionCountFile)).toBe(false);
+  });
+
+  it('learning daily cap blocks marker creation', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    // Set daily cap to max
+    const today = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\t5\n`);
+
+    // Pre-fill batch to trigger
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('daily cap reached');
+  });
+
+  it('learning adaptive batch: >=15 obs requires batch_size=5', () => {
+    // Write 16 observation lines
+    const logLines = Array.from({ length: 16 }, (_, i) =>
+      JSON.stringify({ id: `obs_${i}`, type: 'workflow', pattern: `p${i}` }),
+    );
+    fs.writeFileSync(path.join(tmpDir, '.memory', 'learning-log.jsonl'), logLines.join('\n') + '\n');
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    // Pre-fill only 3 sessions (less than adaptive batch_size=5)
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    // 4 sessions total (3 pre-existing + 1 new) < 5 adaptive threshold
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('4/5 sessions');
+  });
+
+  it('learning session dedup: same ID twice counted once', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+
+    createTranscript(homeDir, tmpDir, 5, 5, 'dup-session');
+
+    // Run twice with same session_id
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
+
+    const sessionCountFile = path.join(sidecarDir, '.learning-sessions');
+    if (fs.existsSync(sessionCountFile)) {
+      const lines = fs.readFileSync(sessionCountFile, 'utf-8').trim().split('\n').filter(Boolean);
+      expect(lines).toHaveLength(1);
+    }
+  });
+
+  it('decisions marker written for deep session with dialog pairs', () => {
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    // Per-session marker: decisions.test-session.json
+    const decisionsMarker = path.join(sidecarDir, 'decisions.test-session.json');
+    expect(fs.existsSync(decisionsMarker)).toBe(true);
+
+    const marker = JSON.parse(fs.readFileSync(decisionsMarker, 'utf-8'));
+    expect(marker).toHaveProperty('dialogPairs');
+    expect(marker).toHaveProperty('existingObservationIds');
+
+    // Verify dialog pairs are non-empty (5 alternating turns = 4 pairs)
+    const pairs = JSON.parse(marker.dialogPairs);
+    expect(pairs.length).toBeGreaterThan(0);
+  });
+
+  it('knowledge throttle: recent refresh skips evaluation', () => {
+    // Write a recent timestamp to the throttle marker
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
+    const now = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), String(now));
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Knowledge throttled');
+  });
+
+  it('knowledge disabled sentinel skips evaluation', () => {
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
+
+    createTranscript(homeDir, tmpDir, 5);
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Knowledge disabled by sentinel');
+  });
+
+  it('session ID path traversal rejected, fallback used', () => {
+    // Create a valid transcript with a normal name
+    createTranscript(homeDir, tmpDir, 5, 5, 'valid-session');
+
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: '../etc',
+    }, homeDir);
+
+    // The hook should still work via ls -t fallback
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    expect(fs.existsSync(logFile)).toBe(true);
+    const log = fs.readFileSync(logFile, 'utf-8');
+    expect(log).toContain('Session depth');
+  });
+});
+
+// =============================================================================
+// sidecar-evaluate artifact reinforcement
+// =============================================================================
+
+describe('sidecar-evaluate artifact reinforcement', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('reinforcement updates last_seen for matching slugs', () => {
+    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const obs = {
+      id: 'obs_reinforce_1',
+      type: 'workflow',
+      pattern: 'test pattern',
+      status: 'created',
+      artifact_path: '.claude/commands/self-learning/test-cmd.md',
+      confidence: 0.9,
+      last_seen: '2026-01-01T00:00:00Z',
+    };
+    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
+
+    // Create transcript that references the slug
+    const encoded = encodeCwd(tmpDir);
+    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+    fs.mkdirSync(projDir, { recursive: true });
+    const transcriptPath = path.join(projDir, 'test-session.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Used self-learning:test-cmd in response' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+
+    const updated = JSON.parse(fs.readFileSync(logFile, 'utf-8').trim());
+    expect(updated.last_seen).not.toBe('2026-01-01T00:00:00Z');
+    expect(new Date(updated.last_seen).getTime()).toBeGreaterThan(0);
+  });
+
+  it('reinforcement leaves non-matching slugs unchanged', () => {
+    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const obs = {
+      id: 'obs_reinforce_2',
+      type: 'workflow',
+      pattern: 'unrelated pattern',
+      status: 'created',
+      artifact_path: '.claude/commands/self-learning/unrelated-slug.md',
+      confidence: 0.9,
+      last_seen: '2026-01-01T00:00:00Z',
+    };
+    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
+
+    // Create transcript referencing a different slug
+    const encoded = encodeCwd(tmpDir);
+    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+    fs.mkdirSync(projDir, { recursive: true });
+    const transcriptPath = path.join(projDir, 'test-session.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Used self-learning:other-slug here' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+
+    const updated = JSON.parse(fs.readFileSync(logFile, 'utf-8').trim());
+    expect(updated.last_seen).toBe('2026-01-01T00:00:00Z');
+  });
+
+  it('reinforcement log is conditional — no message when nothing reinforced', () => {
+    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const obs = {
+      id: 'obs_reinforce_3',
+      type: 'workflow',
+      pattern: 'some pattern',
+      status: 'created',
+      artifact_path: '.claude/commands/self-learning/no-match.md',
+      confidence: 0.9,
+      last_seen: '2026-01-01T00:00:00Z',
+    };
+    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
+
+    // Transcript with no self-learning references at all — but still 3+ turns for depth
+    const encoded = encodeCwd(tmpDir);
+    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
+    fs.mkdirSync(projDir, { recursive: true });
+    const transcriptPath = path.join(projDir, 'test-session.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 0' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+
+    const hookLog = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir), '.sidecar-evaluate.log');
+    if (fs.existsSync(hookLog)) {
+      const log = fs.readFileSync(hookLog, 'utf-8');
+      expect(log).not.toContain('Reinforced');
+    }
+  });
+});
+
+// =============================================================================
+// sidecar-evaluate read_daily_cap sanitization
+// =============================================================================
+
+describe('sidecar-evaluate read_daily_cap sanitization', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory', '.sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('tab-less counter file does not crash and returns default', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const today = new Date().toISOString().slice(0, 10);
+    // Write date string with no tab separator — cut -f2 returns the whole line
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\n`);
+
+    // Pre-fill batch to trigger learning evaluation
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+  });
+
+  it('empty counter file does not crash', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), '');
+
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+  });
+
+  it('non-numeric count field returns default', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const today = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\tabc\n`);
+
+    // Pre-fill batch to trigger
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+
+    // The marker should still be written because cap defaults to 0 (not at max)
+    // Per-session marker: learning.test-session.json
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.test-session.json'))).toBe(true);
+  });
+
+  it('non-numeric config values do not crash', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.memory', 'learning.json'),
+      JSON.stringify({ max_daily_runs: 'xyz', batch_size: 'abc' }),
+    );
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    // Pre-fill enough sessions for any reasonable batch_size default (3)
+    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+  });
+
+  it('LAST_REFRESH sanitization: non-numeric content in knowledge marker defaults to 0', () => {
+    // Write non-numeric content to .knowledge-last-refresh — should sanitize to 0
+    // resulting in a stale age calculation (now - 0 > 7200) and triggering evaluation
+    const featuresDir = path.join(tmpDir, '.features');
+    fs.mkdirSync(featuresDir, { recursive: true });
+    // No stale slugs — so no marker will be written — but hook should not crash
+    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
+    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), 'not-a-number\n');
+
+    createTranscript(homeDir, tmpDir, 5);
+    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
+    expect(exitCode).toBe(0);
+
+    // Hook should have attempted knowledge evaluation (no crash from bad timestamp)
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    if (fs.existsSync(logFile)) {
+      const log = fs.readFileSync(logFile, 'utf-8');
+      // Either throttled (with sanitized timestamp near 0 → stale) or "no stale slugs"
+      // Both are valid outcomes — the key is it didn't crash
+      expect(log).toContain('Evaluating knowledge');
+    }
+  });
+
+  it('LAST_UPDATE get_mtime fallback: missing WORKING-MEMORY defaults to 0', () => {
+    // Without WORKING-MEMORY.md, get_mtime returns empty string; LAST_UPDATE should default to 0
+    // so age computation doesn't error
+    createTranscript(homeDir, tmpDir, 5);
+
+    // Deliberately do NOT create WORKING-MEMORY.md
+    // We call sidecar-capture (not sidecar-evaluate) for this one since it does the get_mtime check
+    const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+    // Use execSync to avoid wrapping in runHook abstraction
+    const { execSync: execSyncLocal } = require('child_process');
+    const exitCode = (() => {
+      try {
+        execSyncLocal(`bash "${CAPTURE_HOOK}"`, {
+          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', stop_reason: 'end_turn', response_text: 'response text here' }),
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, HOME: homeDir },
+        });
+        return 0;
+      } catch (e: unknown) {
+        return (e as { status: number }).status ?? 1;
+      }
+    })();
+    expect(exitCode).toBe(0);
+  });
+});
+
+// =============================================================================
+// sidecar-dispatch stale marker recovery
+// =============================================================================
+
+describe('sidecar-dispatch stale marker recovery', () => {
+  const DISPATCH_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
 
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-knowledge-hook-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dispatch-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory', '.sidecar'), { recursive: true });
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('exits cleanly when DEVFLOW_BG_KNOWLEDGE_REFRESH=1', () => {
-    expect(() => {
-      execSync(`DEVFLOW_BG_KNOWLEDGE_REFRESH=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
-    }).not.toThrow();
+  it('fresh .processing left alone', () => {
+    const procFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.existsSync(procFile)).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar', 'learning.json'))).toBe(false);
   });
 
-  it('exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
-    expect(() => {
-      execSync(`DEVFLOW_BG_UPDATER=1 bash "${KB_HOOK}"`, { stdio: 'ignore' });
-    }).not.toThrow();
+  it('stale .processing retried — renamed back to .json', () => {
+    const procFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 600);
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar', 'learning.json'))).toBe(true);
+
+    const retryFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.retries');
+    expect(fs.existsSync(retryFile)).toBe(true);
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
   });
 
-  it('exits cleanly when no .features/index.json exists (lazy-inits it)', () => {
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-001' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
+  it('retry count increments on repeated stale recovery', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
 
-    // Lazy-init should have created the index
-    expect(fs.existsSync(path.join(tmpDir, '.features', 'index.json'))).toBe(true);
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 600);
+    fs.writeFileSync(retryFile, '1');
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('2');
   });
 
-  it('exits cleanly when .features/.disabled sentinel exists', () => {
-    const featuresDir = path.join(tmpDir, '.features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
-    fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
+  it('max retries exhausted — marked as .failed', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
 
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-002' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 600);
+    fs.writeFileSync(retryFile, '3');
+
+    execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.failed'))).toBe(true);
+    expect(fs.existsSync(retryFile)).toBe(false);
   });
 
-  it('exits cleanly when .knowledge-last-refresh is recent (throttled)', () => {
-    const featuresDir = path.join(tmpDir, '.features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({ version: 1, features: {} }));
-    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), String(Math.floor(Date.now() / 1000)));
+  it('pending marker directive includes multiple task names', () => {
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
+    fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
 
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-003' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
-  });
+    const result = execSync(`bash "${DISPATCH_HOOK}"`, {
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString();
 
-  it('exits cleanly when no stale knowledge bases are found', () => {
-    // Non-git tmpDir → checkAllStaleness returns stale:false
-    const featuresDir = path.join(tmpDir, '.features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
-      version: 1,
-      features: {
-        'test-feature': {
-          name: 'Test', description: '', directories: ['src/'],
-          referencedFiles: ['src/index.ts'],
-          lastUpdated: new Date().toISOString(), createdBy: 'test',
-        },
-      },
-    }));
-
-    const input = JSON.stringify({ cwd: tmpDir, session_id: 'test-knowledge-004' });
-    expect(() => {
-      execSync(`bash "${KB_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    }).not.toThrow();
+    const parsed = JSON.parse(result);
+    const context = parsed.hookSpecificOutput.additionalContext;
+    expect(context).toContain('SIDECAR:');
+    expect(context).toContain('learning');
+    expect(context).toContain('decisions');
   });
 });
+
+// =============================================================================
+// sidecar-capture memory marker
+// =============================================================================
+
+describe('sidecar-capture memory marker', () => {
+  const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('marker written when throttle expired', () => {
+    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(wmFile, '## Now\n- stale');
+    backdateMtime(wmFile, 600);
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const memMarker = path.join(sidecarDir, 'memory.json');
+    expect(fs.existsSync(memMarker)).toBe(true);
+
+    const marker = JSON.parse(fs.readFileSync(memMarker, 'utf-8'));
+    expect(marker).toHaveProperty('pendingTurnsFile');
+    expect(marker).toHaveProperty('existingMemoryFile');
+    expect(marker.model).toBe('haiku');
+    expect(typeof marker.timestamp).toBe('number');
+  });
+
+  it('marker skipped when .processing exists', () => {
+    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(wmFile, '## Now\n- stale');
+    backdateMtime(wmFile, 600);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'memory.processing'), '{}');
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+
+    // Queue append still happens
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+
+  it('marker skipped when memory recently updated', () => {
+    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(wmFile, '## Now\n- fresh');
+    // mtime is current — within 120s threshold
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+
+    // Queue append still happens
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+
+  it('memory disabled via config skips all capture', () => {
+    createSidecarConfig(tmpDir, { memory: false });
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      stop_reason: 'end_turn',
+      response_text: 'test response',
+    }, homeDir);
+
+    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+  });
+});
+
