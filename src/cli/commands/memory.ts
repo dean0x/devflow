@@ -11,7 +11,7 @@ import { updateFeature } from '../utils/sidecar-config.js';
 
 /**
  * Map of hook event type → filename marker for the sidecar hooks.
- * The sidecar system consolidates 5 hooks that replace the old 4 individual hooks.
+ * Five hooks total: UserPromptSubmit, Stop, SessionEnd, SessionStart, PreCompact.
  */
 const MEMORY_HOOK_CONFIG: Record<string, string> = {
   UserPromptSubmit: 'sidecar-dispatch',
@@ -22,8 +22,8 @@ const MEMORY_HOOK_CONFIG: Record<string, string> = {
 };
 
 /**
- * Add all 4 memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) to settings JSON.
- * Idempotent — skips hooks that already exist. Returns unchanged JSON if all 4 present.
+ * Add all 5 memory hooks (UserPromptSubmit, Stop, SessionEnd, SessionStart, PreCompact) to settings JSON.
+ * Idempotent — skips hooks that already exist. Returns unchanged JSON if all 5 present.
  */
 export function addMemoryHooks(settingsJson: string, devflowDir: string): string {
   const settings: Settings = JSON.parse(settingsJson);
@@ -112,14 +112,14 @@ export function removeMemoryHooks(input: string | Settings): string {
 }
 
 /**
- * Check if ALL 4 memory hooks are registered in settings JSON or parsed Settings object.
+ * Check if ALL 5 memory hooks are registered in settings JSON or parsed Settings object.
  */
 export function hasMemoryHooks(input: string | Settings): boolean {
   return countMemoryHooks(input) === Object.keys(MEMORY_HOOK_CONFIG).length;
 }
 
 /**
- * Count how many of the 4 memory hooks are present (0-4).
+ * Count how many of the 5 memory hooks are present (0-5).
  * Accepts either a JSON string or a parsed Settings object.
  */
 export function countMemoryHooks(input: string | Settings): number {

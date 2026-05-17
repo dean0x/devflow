@@ -20,10 +20,9 @@
         "scripts/build-plugins.ts",
         "shared/rules/security.md",
         "shared/rules/engineering.md",
-        "shared/rules/quality.md",
-        "shared/rules/reliability.md"
+        "shared/rules/quality.md"
       ],
-      "lastUpdated": "2026-05-16T07:01:25.319Z",
+      "lastUpdated": "2026-05-17T07:04:15.773Z",
       "createdBy": "devflow-knowledge"
     }
   }
