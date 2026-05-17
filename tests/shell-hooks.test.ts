@@ -1972,7 +1972,7 @@ describe('sidecar-evaluate business logic', () => {
     fs.mkdirSync(sidecarDir, { recursive: true });
 
     // Set daily cap to max
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('en-CA');
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\t5\n`);
 
     // Pre-fill batch to trigger
@@ -2276,7 +2276,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
   it('tab-less counter file does not crash and returns default', () => {
     const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('en-CA');
     // Write date string with no tab separator — cut -f2 returns the whole line
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\n`);
 
@@ -2301,7 +2301,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
   it('non-numeric count field returns default', () => {
     const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('en-CA');
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\tabc\n`);
 
     // Pre-fill batch to trigger

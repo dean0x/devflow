@@ -271,15 +271,6 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
       fi
     fi
 
-    # Cap session file at 50 lines
-    if [ -f "$SESSION_COUNT_FILE" ]; then
-      _SC_LINES=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
-      if [ "$_SC_LINES" -gt 50 ]; then
-        _SC_TMP="$SESSION_COUNT_FILE.tmp.$$"
-        tail -50 "$SESSION_COUNT_FILE" > "$_SC_TMP" && mv "$_SC_TMP" "$SESSION_COUNT_FILE" || rm -f "$_SC_TMP"
-      fi
-    fi
-
     if [ -f "$SESSION_COUNT_FILE" ]; then
       CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
     fi
@@ -290,6 +281,12 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
         # Re-read count under lock
         if [ -f "$SESSION_COUNT_FILE" ]; then
           CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
+        fi
+        # Cap session file at 50 lines (inside lock to prevent multi-session race)
+        if [ "$CURRENT_COUNT" -gt 50 ]; then
+          _SC_TMP="$SESSION_COUNT_FILE.tmp.$$"
+          tail -50 "$SESSION_COUNT_FILE" > "$_SC_TMP" && mv "$_SC_TMP" "$SESSION_COUNT_FILE" || rm -f "$_SC_TMP"
+          CURRENT_COUNT=50
         fi
         if [ "$CURRENT_COUNT" -ge "$BATCH_SIZE" ] && [ -f "$SESSION_COUNT_FILE" ]; then
           # Extract user signals from transcript
