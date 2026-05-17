@@ -53,7 +53,8 @@ SESSION_ID=$(printf '%s' "$INPUT" | json_field "session_id" "")
 TRANSCRIPT=""
 
 if [ -d "$PROJECTS_DIR" ]; then
-  if [ -n "$SESSION_ID" ] && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
+  # Validate session_id before use in path — guard against path traversal (../ sequences)
+  if [ -n "$SESSION_ID" ] && echo "$SESSION_ID" | grep -qE '^[a-zA-Z0-9_-]+$' && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
     TRANSCRIPT="$PROJECTS_DIR/${SESSION_ID}.jsonl"
   else
     TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
@@ -65,7 +66,13 @@ fi
 # Session depth check (min 3 user turns)
 SESSION_DEEP="false"
 if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-  USER_TURNS=$(grep -c '"type":"user"' "$TRANSCRIPT" 2>/dev/null || echo "0")
+  # Use jq for accurate top-level type field matching; grep fallback may over-count
+  # if '"type":"user"' appears inside message content
+  if [ "$_HAS_JQ" = "true" ]; then
+    USER_TURNS=$(jq -c 'select(.type == "user")' "$TRANSCRIPT" 2>/dev/null | wc -l | tr -d ' ')
+  else
+    USER_TURNS=$(grep -c '"type":"user"' "$TRANSCRIPT" 2>/dev/null || echo "0")
+  fi
   if [ "$USER_TURNS" -ge 3 ]; then
     SESSION_DEEP="true"
     log "Session depth: $USER_TURNS turns"
@@ -152,14 +159,15 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
         EXISTING_IDS="[]"
         if [ -f "$MEMORY_DIR/learning-log.jsonl" ]; then
           if [ "$_HAS_JQ" = "true" ]; then
-            EXISTING_IDS=$(jq -s '[.[].id // empty]' "$MEMORY_DIR/learning-log.jsonl" 2>/dev/null || echo "[]")
+            # Stream line-by-line then collect — avoids slurping entire file into memory
+            EXISTING_IDS=$(jq -c '.id // empty' "$MEMORY_DIR/learning-log.jsonl" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
           else
             EXISTING_IDS=$(node -e "
               const fs=require('fs');
-              const lines=fs.readFileSync('$MEMORY_DIR/learning-log.jsonl','utf8').trim().split('\n').filter(Boolean);
+              const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
               const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
               process.stdout.write(JSON.stringify(ids));
-            " 2>/dev/null || echo "[]")
+            " -- "$MEMORY_DIR/learning-log.jsonl" 2>/dev/null || echo "[]")
           fi
         fi
 
@@ -200,75 +208,75 @@ fi
 if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   log "Evaluating decisions..."
 
-  # Check disabled sentinel
-  if [ -f "$CWD/.memory/decisions/.disabled" ]; then
-    log "Decisions disabled by sentinel"
+  # DECISIONS_ENABLED is already sourced from sidecar config above — no second source of
+  # truth needed here. The .memory/decisions/.disabled sentinel exists for session-start-context
+  # (an always-on hook that never reads sidecar config), not for this hook.
+
+  # Daily cap check
+  DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
+  DEC_RUNS_TODAY=0
+  if [ -f "$DEC_RUNS_FILE" ]; then
+    DEC_RUNS_DATE=$(cut -f1 "$DEC_RUNS_FILE" 2>/dev/null || true)
+    if [ "$DEC_RUNS_DATE" = "$TODAY" ]; then
+      DEC_RUNS_TODAY=$(cut -f2 "$DEC_RUNS_FILE" 2>/dev/null || echo "0")
+    fi
+  fi
+
+  MAX_DEC_RUNS=3
+  DEC_CONFIG="$MEMORY_DIR/decisions.json"
+  if [ -f "$DEC_CONFIG" ]; then
+    MAX_DEC_RUNS=$(json_field_file "$DEC_CONFIG" "max_daily_runs" "3")
+  fi
+
+  if [ "$DEC_RUNS_TODAY" -ge "$MAX_DEC_RUNS" ]; then
+    log "Decisions daily cap reached ($DEC_RUNS_TODAY/$MAX_DEC_RUNS)"
   else
-    # Daily cap check
-    DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
-    DEC_RUNS_TODAY=0
-    if [ -f "$DEC_RUNS_FILE" ]; then
-      DEC_RUNS_DATE=$(cut -f1 "$DEC_RUNS_FILE" 2>/dev/null || true)
-      if [ "$DEC_RUNS_DATE" = "$TODAY" ]; then
-        DEC_RUNS_TODAY=$(cut -f2 "$DEC_RUNS_FILE" 2>/dev/null || echo "0")
-      fi
+    # Extract dialog pairs from transcript
+    FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
+    DIALOG_PAIRS=""
+    if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+      DIALOG_PAIRS=$(node "$FILTER_LIB" dialog-pairs "$TRANSCRIPT" 2>/dev/null || true)
     fi
 
-    MAX_DEC_RUNS=3
-    DEC_CONFIG="$MEMORY_DIR/decisions.json"
-    if [ -f "$DEC_CONFIG" ]; then
-      MAX_DEC_RUNS=$(json_field_file "$DEC_CONFIG" "max_daily_runs" "3")
-    fi
-
-    if [ "$DEC_RUNS_TODAY" -ge "$MAX_DEC_RUNS" ]; then
-      log "Decisions daily cap reached ($DEC_RUNS_TODAY/$MAX_DEC_RUNS)"
-    else
-      # Extract dialog pairs from transcript
-      FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
-      DIALOG_PAIRS=""
-      if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-        DIALOG_PAIRS=$(node "$FILTER_LIB" dialog-pairs "$TRANSCRIPT" 2>/dev/null || true)
-      fi
-
-      if [ -n "$DIALOG_PAIRS" ]; then
-        # Load existing observation IDs
-        EXISTING_IDS="[]"
-        if [ -f "$MEMORY_DIR/decisions-log.jsonl" ]; then
-          if [ "$_HAS_JQ" = "true" ]; then
-            EXISTING_IDS=$(jq -s '[.[].id // empty]' "$MEMORY_DIR/decisions-log.jsonl" 2>/dev/null || echo "[]")
-          else
-            EXISTING_IDS=$(node -e "
-              const fs=require('fs');
-              const lines=fs.readFileSync('$MEMORY_DIR/decisions-log.jsonl','utf8').trim().split('\n').filter(Boolean);
-              const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
-              process.stdout.write(JSON.stringify(ids));
-            " 2>/dev/null || echo "[]")
-          fi
-        fi
-
-        # Write decisions marker
+    if [ -n "$DIALOG_PAIRS" ]; then
+      # Load existing observation IDs
+      EXISTING_IDS="[]"
+      if [ -f "$MEMORY_DIR/decisions-log.jsonl" ]; then
         if [ "$_HAS_JQ" = "true" ]; then
-          jq -n \
-            --arg dialogPairs "$DIALOG_PAIRS" \
-            --argjson existingObservationIds "$EXISTING_IDS" \
-            '{dialogPairs: $dialogPairs, existingObservationIds: $existingObservationIds}' \
-            > "$SIDECAR_DIR/decisions.json"
+          # Stream line-by-line then collect — avoids slurping entire file into memory
+          EXISTING_IDS=$(jq -c '.id // empty' "$MEMORY_DIR/decisions-log.jsonl" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]")
         else
-          node -e "
-            process.stdout.write(JSON.stringify({
-              dialogPairs: process.argv[1],
-              existingObservationIds: JSON.parse(process.argv[2])
-            }) + '\n')
-          " -- "$DIALOG_PAIRS" "$EXISTING_IDS" > "$SIDECAR_DIR/decisions.json"
+          EXISTING_IDS=$(node -e "
+            const fs=require('fs');
+            const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
+            const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
+            process.stdout.write(JSON.stringify(ids));
+          " -- "$MEMORY_DIR/decisions-log.jsonl" 2>/dev/null || echo "[]")
         fi
-
-        # Update daily cap
-        printf '%s\t%d\n' "$TODAY" "$((DEC_RUNS_TODAY + 1))" > "$DEC_RUNS_FILE"
-
-        log "Wrote decisions marker"
-      else
-        log "Decisions: no dialog pairs extracted"
       fi
+
+      # Write decisions marker
+      if [ "$_HAS_JQ" = "true" ]; then
+        jq -n \
+          --arg dialogPairs "$DIALOG_PAIRS" \
+          --argjson existingObservationIds "$EXISTING_IDS" \
+          '{dialogPairs: $dialogPairs, existingObservationIds: $existingObservationIds}' \
+          > "$SIDECAR_DIR/decisions.json"
+      else
+        node -e "
+          process.stdout.write(JSON.stringify({
+            dialogPairs: process.argv[1],
+            existingObservationIds: JSON.parse(process.argv[2])
+          }) + '\n')
+        " -- "$DIALOG_PAIRS" "$EXISTING_IDS" > "$SIDECAR_DIR/decisions.json"
+      fi
+
+      # Update daily cap
+      printf '%s\t%d\n' "$TODAY" "$((DEC_RUNS_TODAY + 1))" > "$DEC_RUNS_FILE"
+
+      log "Wrote decisions marker"
+    else
+      log "Decisions: no dialog pairs extracted"
     fi
   fi
 fi
