@@ -142,9 +142,11 @@ describe('sentinel guard: session-start-memory', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('outputs nothing when .working-memory-disabled exists (even with WORKING-MEMORY.md present)', () => {
+  it('outputs nothing when sidecar config has memory: false (even with WORKING-MEMORY.md present)', () => {
     mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', '.working-memory-disabled'));
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
     fs.writeFileSync(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
