@@ -96,7 +96,7 @@ read_daily_cap() {
     local date_field
     date_field=$(cut -f1 "$runs_file" 2>/dev/null || true)
     if [ "$date_field" = "$TODAY" ]; then
-      count=$(cut -f2 "$runs_file" 2>/dev/null | tr -dc '0-9' || echo "$default")
+      count=$(cut -f2 "$runs_file" 2>/dev/null | tr -dc '0-9')
       count="${count:-$default}"
     fi
   fi
