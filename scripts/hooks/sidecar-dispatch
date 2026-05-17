@@ -28,11 +28,17 @@ if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 MEMORY_DIR="$CWD/.memory"
 SIDECAR_DIR="$MEMORY_DIR/.sidecar"
 
-# Read sidecar config — skip user turn capture if memory: false
+# Read sidecar config — skip user turn capture if memory: false; gate marker dispatch per feature
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
 MEMORY_ENABLED="true"
+LEARNING_ENABLED="true"
+DECISIONS_ENABLED="true"
+KNOWLEDGE_ENABLED="true"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
+  LEARNING_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "learning" "true")
+  DECISIONS_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "decisions" "true")
+  KNOWLEDGE_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "knowledge" "true")
 fi
 
 # --- Capture user turn ---
@@ -100,12 +106,24 @@ for PROC_FILE in "$SIDECAR_DIR"/*.processing; do
 done
 
 # Collect pending markers (exclude config.json)
+# Markers with a timestamp field older than 24h are expired — delete and skip.
 PENDING_TASKS=""
 for MARKER_FILE in "$SIDECAR_DIR"/*.json; do
   [ -f "$MARKER_FILE" ] || continue
   BASENAME=$(basename "$MARKER_FILE" .json)
   # Skip config
   [ "$BASENAME" = "config" ] && continue
+  # Expire markers older than 24h (86400s) when they carry a timestamp field.
+  if [ "$_HAS_JQ" = "true" ]; then
+    MARKER_TS=$(jq '.timestamp // empty' "$MARKER_FILE" 2>/dev/null || true)
+    if [ -n "$MARKER_TS" ] && [ "$MARKER_TS" -gt 0 ] 2>/dev/null; then
+      MARKER_AGE=$(( NOW - MARKER_TS ))
+      if [ "$MARKER_AGE" -gt 86400 ]; then
+        rm -f "$MARKER_FILE" 2>/dev/null || true
+        continue
+      fi
+    fi
+  fi
   if [ -n "$PENDING_TASKS" ]; then
     PENDING_TASKS="$PENDING_TASKS,$BASENAME"
   else
