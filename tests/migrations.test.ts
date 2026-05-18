@@ -9,7 +9,6 @@ import {
   reportMigrationResult,
   MIGRATIONS,
   type Migration,
-  type MigrationContext,
   type MigrationLogger,
   type RunMigrationsResult,
 } from '../src/cli/utils/migrations.js';
@@ -146,6 +145,24 @@ describe('MIGRATIONS', () => {
     expect(v3Index).toBeGreaterThan(v2Index);
   });
 
+  it('contains rename-kb-to-knowledge with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'rename-kb-to-knowledge');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('contains consolidate-to-devflow-dir with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'consolidate-to-devflow-dir');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('rename-kb-to-knowledge runs before consolidate-to-devflow-dir', () => {
+    const renameIdx = MIGRATIONS.findIndex(m => m.id === 'rename-kb-to-knowledge');
+    const consolidateIdx = MIGRATIONS.findIndex(m => m.id === 'consolidate-to-devflow-dir');
+    expect(renameIdx).toBeGreaterThanOrEqual(0);
+    expect(consolidateIdx).toBeGreaterThan(renameIdx);
+  });
 });
 
 describe('runMigrations', () => {
@@ -788,6 +805,40 @@ describe('consolidate-to-devflow-dir migration', () => {
   it('is a no-op when old directories do not exist', async () => {
     // No .memory/, .features/, .docs/ created — should succeed without errors
     await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('moves .memory/.sidecar/ contents to .devflow/sidecar/', async () => {
+    const memorySrc = path.join(projectRoot, '.memory');
+    const sidecarSrc = path.join(memorySrc, '.sidecar');
+    await fs.mkdir(sidecarSrc, { recursive: true });
+    await fs.writeFile(path.join(sidecarSrc, 'memory.json'), '{"type":"memory"}', 'utf-8');
+    await fs.writeFile(path.join(sidecarSrc, 'learning.abc123.json'), '{"type":"learning"}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // Files should appear in .devflow/sidecar/
+    const mem = await fs.readFile(path.join(devflowDir, 'sidecar', 'memory.json'), 'utf-8');
+    expect(mem).toBe('{"type":"memory"}');
+    const learn = await fs.readFile(path.join(devflowDir, 'sidecar', 'learning.abc123.json'), 'utf-8');
+    expect(learn).toBe('{"type":"learning"}');
+    // Source files should be gone
+    await expect(fs.access(path.join(sidecarSrc, 'memory.json'))).rejects.toThrow();
+    await expect(fs.access(path.join(sidecarSrc, 'learning.abc123.json'))).rejects.toThrow();
+  });
+
+  it('moves unknown .memory/ files to .devflow/memory/ via catch-all pass', async () => {
+    const memorySrc = path.join(projectRoot, '.memory');
+    await fs.mkdir(memorySrc, { recursive: true });
+    // A file not in the explicit memMap — should be swept by the catch-all moveDirContents
+    await fs.writeFile(path.join(memorySrc, 'custom-notes.txt'), 'user notes', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // File should land in .devflow/memory/
+    const content = await fs.readFile(path.join(devflowDir, 'memory', 'custom-notes.txt'), 'utf-8');
+    expect(content).toBe('user notes');
+    // Source should be gone
+    await expect(fs.access(path.join(memorySrc, 'custom-notes.txt'))).rejects.toThrow();
   });
 
   it('handles partial state — files not yet migrated are moved, already-absent sources are skipped', async () => {

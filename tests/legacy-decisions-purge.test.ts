@@ -269,6 +269,90 @@ describe('purgeLegacyDecisionsEntries', () => {
   });
 });
 
+describe('purgeLegacyDecisionsEntries with projectRoot', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let memoryDir: string;
+  let decisionsDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-projectroot-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    // New layout: .devflow/decisions/ (used when projectRoot is provided)
+    decisionsDir = path.join(projectRoot, '.devflow', 'decisions');
+    // memoryDir is .devflow/memory/ in the new layout
+    memoryDir = path.join(projectRoot, '.devflow', 'memory');
+    await fs.mkdir(decisionsDir, { recursive: true });
+    await fs.mkdir(memoryDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('uses .devflow/decisions/ when projectRoot is provided (not .memory/decisions/)', async () => {
+    const decisionsPath = path.join(decisionsDir, 'decisions.md');
+    const content = `<!-- TL;DR: 1 decisions. Key: -->
+
+## ADR-002: Legacy decision
+
+- **Status**: accepted
+- Should be removed
+`;
+    await fs.writeFile(decisionsPath, content, 'utf-8');
+
+    const result = await purgeLegacyDecisionsEntries({ memoryDir, projectRoot });
+
+    expect(result.removed).toBe(1);
+    expect(result.files).toContain(decisionsPath);
+    const updated = await fs.readFile(decisionsPath, 'utf-8');
+    expect(updated).not.toContain('ADR-002');
+  });
+
+  it('removes PROJECT-PATTERNS.md from old .memory/ path when projectRoot is provided', async () => {
+    // Old path: {projectRoot}/.memory/PROJECT-PATTERNS.md
+    const oldMemoryDir = path.join(projectRoot, '.memory');
+    await fs.mkdir(oldMemoryDir, { recursive: true });
+    const oldPatternsPath = path.join(oldMemoryDir, 'PROJECT-PATTERNS.md');
+    await fs.writeFile(oldPatternsPath, '# Old patterns (old path)', 'utf-8');
+
+    const result = await purgeLegacyDecisionsEntries({ memoryDir, projectRoot });
+
+    expect(result.removed).toBeGreaterThanOrEqual(1);
+    expect(result.files).toContain(oldPatternsPath);
+    await expect(fs.access(oldPatternsPath)).rejects.toThrow();
+  });
+
+  it('removes PROJECT-PATTERNS.md from new .devflow/memory/ path when projectRoot is provided', async () => {
+    // New path: {projectRoot}/.devflow/memory/PROJECT-PATTERNS.md (memoryDir is .devflow/memory/)
+    const newPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
+    await fs.writeFile(newPatternsPath, '# Old patterns (new path)', 'utf-8');
+
+    const result = await purgeLegacyDecisionsEntries({ memoryDir, projectRoot });
+
+    expect(result.removed).toBeGreaterThanOrEqual(1);
+    expect(result.files).toContain(newPatternsPath);
+    await expect(fs.access(newPatternsPath)).rejects.toThrow();
+  });
+
+  it('removes PROJECT-PATTERNS.md from both old and new paths when both exist', async () => {
+    const oldMemoryDir = path.join(projectRoot, '.memory');
+    await fs.mkdir(oldMemoryDir, { recursive: true });
+    const oldPatternsPath = path.join(oldMemoryDir, 'PROJECT-PATTERNS.md');
+    const newPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
+    await fs.writeFile(oldPatternsPath, '# Old path patterns', 'utf-8');
+    await fs.writeFile(newPatternsPath, '# New path patterns', 'utf-8');
+
+    const result = await purgeLegacyDecisionsEntries({ memoryDir, projectRoot });
+
+    expect(result.removed).toBe(2);
+    expect(result.files).toContain(oldPatternsPath);
+    expect(result.files).toContain(newPatternsPath);
+    await expect(fs.access(oldPatternsPath)).rejects.toThrow();
+    await expect(fs.access(newPatternsPath)).rejects.toThrow();
+  });
+});
+
 describe('purgeAllPreV2DecisionsEntries', () => {
   let tmpDir: string;
   let memoryDir: string;

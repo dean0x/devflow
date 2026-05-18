@@ -59,6 +59,7 @@ import {
   getResearchDir,
   getHandoffPath,
   getGitignoreEntries,
+  getDevflowGitignoreContent,
 } from '../src/cli/utils/project-paths.js';
 
 // Load CJS module
@@ -358,5 +359,9 @@ describe('CJS project-paths parity', () => {
 
   it('getGitignoreEntries — TypeScript and CJS agree', () => {
     expect(cjsPaths.getGitignoreEntries()).toEqual(getGitignoreEntries());
+  });
+
+  it('getDevflowGitignoreContent — TypeScript and CJS agree', () => {
+    expect(cjsPaths.getDevflowGitignoreContent()).toBe(getDevflowGitignoreContent());
   });
 });
