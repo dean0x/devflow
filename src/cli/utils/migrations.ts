@@ -12,18 +12,27 @@ import { getMemoryDir, getFeaturesDir, getDevflowGitignoreContent } from './proj
  * Move src to dest, skipping when src doesn't exist or dest already exists
  * (idempotent). Falls back to copy+delete on EXDEV (cross-device rename).
  *
- * Avoids the TOCTOU race of access(src)+access(dest)+rename by attempting
- * rename directly and handling ENOENT/EEXIST from the syscall itself.
+ * POSIX rename(2) atomically replaces files and does not return EEXIST, so
+ * we check dest existence with lstat before rename to preserve idempotency.
+ * For directory renames, POSIX returns ENOTEMPTY when dest is a non-empty
+ * directory — treated the same as EEXIST (idempotent skip).
  */
 async function moveFile(src: string, dest: string): Promise<void> {
   // Ensure parent directory exists before attempting rename
   await fs.mkdir(path.dirname(dest), { recursive: true });
+  // Check dest existence first: POSIX rename(2) silently overwrites files
+  // and returns ENOTEMPTY (not EEXIST) for non-empty directory destinations.
+  // An explicit lstat guard restores idempotency for both cases.
+  try {
+    await fs.lstat(dest);
+    return; // dest already present — idempotent skip
+  } catch { /* dest absent — proceed with rename */ }
   try {
     await fs.rename(src, dest);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return;    // src gone — already moved or never existed
-    if (code === 'EEXIST') return;    // dest already present — idempotent skip
+    if (code === 'ENOENT') return;               // src gone — already moved or never existed
+    if (code === 'EEXIST' || code === 'ENOTEMPTY') return; // dest appeared concurrently — idempotent skip
     // Cross-device: fall back to copy+delete
     if (code === 'EXDEV') {
       await fs.cp(src, dest, { recursive: true });
@@ -65,7 +74,7 @@ async function moveDirContents(
  * This ensures that adding a new entry to memMap automatically excludes it
  * from the catch-all moveDirContents pass without a manual update here.
  */
-const MEMORY_LEGACY_SKIP_FILES: readonly string[] = [
+const MEMORY_LEGACY_SKIP_FILES = [
   'knowledge',                        // pre-rename V1 decisions dir
   'short',                            // V1 format
   'index.md',                         // V1 format
@@ -77,7 +86,7 @@ const MEMORY_LEGACY_SKIP_FILES: readonly string[] = [
   // Directories handled by moveDirContents — exclude from catch-all
   '.sidecar',
   'decisions',
-];
+] as const;
 
 /**
  * @file migrations.ts
@@ -227,11 +236,12 @@ const MIGRATION_RENAME_KB_TO_KNOWLEDGE: Migration<'per-project'> = {
       const oldPath = path.join(featuresDir, oldName);
       const newPath = path.join(featuresDir, newName);
       try {
-        await fs.access(oldPath);
         await fs.rename(oldPath, newPath);
-        infos.push(`Renamed .features/${oldName} → .features/${newName}`);
-      } catch {
-        // File doesn't exist — nothing to do
+        infos.push(`Renamed .devflow/features/${oldName} → .devflow/features/${newName}`);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') continue; // src absent — nothing to rename
+        throw err;                        // unexpected error — surface to caller
       }
     }
 
