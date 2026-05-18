@@ -159,7 +159,7 @@ describe('render-ready — --manifest-path', () => {
 
     runHelper(`render-ready "${logFile}" "${baseDir}"`);
 
-    const defaultManifestPath = path.join(baseDir, '.memory', '.learning-manifest.json');
+    const defaultManifestPath = path.join(baseDir, '.devflow', 'learning', '.learning-manifest.json');
     expect(fs.existsSync(defaultManifestPath)).toBe(true);
     expect(fs.existsSync(customManifestPath)).toBe(false);
   });
@@ -190,7 +190,7 @@ describe('render-ready — --manifest-path', () => {
     expect(manifest.entries[0].observationId).toBe('obs_w002');
 
     // Default manifest should NOT be created
-    const defaultManifestPath = path.join(baseDir, '.memory', '.learning-manifest.json');
+    const defaultManifestPath = path.join(baseDir, '.devflow', 'learning', '.learning-manifest.json');
     expect(fs.existsSync(defaultManifestPath)).toBe(false);
   });
 });
@@ -210,11 +210,13 @@ describe('reconcile-manifest — custom logFile and manifestPath', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('without custom paths, uses default .memory/learning-log.jsonl and .memory/.learning-manifest.json', () => {
+  it('without custom paths, uses default .devflow/learning/learning-log.jsonl and .devflow/learning/.learning-manifest.json', () => {
     // Create default log file so reconcile-manifest does not short-circuit
-    const memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
-    const defaultLog = path.join(memoryDir, 'learning-log.jsonl');
+    const learningDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(learningDir, { recursive: true });
+    // Also create memory dir (needed for lock path)
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    const defaultLog = path.join(learningDir, 'learning-log.jsonl');
     fs.writeFileSync(defaultLog, ''); // empty — no entries to reconcile
 
     const out = JSON.parse(runHelper(`reconcile-manifest "${tmpDir}"`));
@@ -237,9 +239,8 @@ describe('reconcile-manifest — custom logFile and manifestPath', () => {
   });
 
   it('with custom logFile and manifestPath: uses both custom paths', () => {
-    // reconcile-manifest always uses <cwd>/.memory/.learning.lock — create that dir
-    const memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
+    // reconcile-manifest always uses <cwd>/.devflow/memory/.learning.lock — create that dir
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const customLog = path.join(tmpDir, 'custom-log.jsonl');
     const customManifest = path.join(tmpDir, 'custom-manifest.json');
@@ -284,7 +285,7 @@ describe('reconcile-manifest — custom logFile and manifestPath', () => {
     expect(updatedManifest.entries).toHaveLength(0); // deletion removed the entry
 
     // Default manifest should NOT have been created
-    const defaultManifest = path.join(memoryDir, '.learning-manifest.json');
+    const defaultManifest = path.join(tmpDir, '.devflow', 'learning', '.learning-manifest.json');
     expect(fs.existsSync(defaultManifest)).toBe(false);
   });
 });

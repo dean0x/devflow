@@ -60,7 +60,7 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 For each worktree:
 
-1. List directories in `{worktree}/.docs/reviews/{branch-slug}/`
+1. List directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`
 2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
 3. **Otherwise:** sort directories by name (timestamps are naturally sortable), select the latest that contains `review-summary.md` (complete review)
 4. **If latest directory already has `resolution-summary.md`:** skip worktree — already resolved
@@ -81,9 +81,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 This produces a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 **Load Feature Knowledge:**
-1. Read `.features/index.json` if it exists
+1. Read `.devflow/features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant feature knowledge
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` to every Resolver teammate in Phase 4.

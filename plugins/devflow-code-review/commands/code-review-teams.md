@@ -60,8 +60,8 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 For each worktree:
 
 1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
-2. Create timestamped review directory: `mkdir -p {worktree}/.docs/reviews/{branch-slug}/{timestamp}/`
-3. Check if `{worktree}/.docs/reviews/{branch-slug}/.last-review-head` exists:
+2. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
+3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
      - Read the SHA from the file
      - Verify reachable: `git -C {worktree} cat-file -t {sha}` (handles rebases — if unreachable, fallback to full)
@@ -108,9 +108,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to each reviewer teammate prompt. Reviewers use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 **Load Feature Knowledge:**
-1. Read `.features/index.json` if it exists
+1. Read `.devflow/features/index.json` if it exists
 2. Based on changed files from Phase 1 analysis, identify relevant feature knowledge (match file paths against each feature knowledge entry's `directories` and `referencedFiles`)
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none is relevant)
 
 Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `DECISIONS_CONTEXT`.
@@ -163,7 +163,7 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
     7. Focus: {FOCUS}
     8. Classify each finding: 🔴 BLOCKING / ⚠️ SHOULD-FIX / ℹ️ PRE-EXISTING
     9. Include file:line references for every finding
-    10. Write your report: `Write to {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/{REPORT_NAME}.md`
+    10. Write your report: `Write to {worktree_path}/.devflow/docs/reviews/{branch_slug}/{timestamp}/{REPORT_NAME}.md`
     11. Report completion: SendMessage(type: "message", recipient: "team-lead", summary: "{SUMMARY}")
 
 **Core reviewers (always spawn):**
@@ -238,14 +238,14 @@ Spawn 2 agents **in a single message**:
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Read reviews from {worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/
+Read reviews from {worktree_path}/.devflow/docs/reviews/{branch_slug}/{timestamp}/
 Create inline PR comments. Deduplicate overlapping findings.
 Consolidate skipped findings into summary comment.
 Include confidence levels from debate consensus.
 Check for existing inline comments at same file:line before creating new ones."
 ```
 
-**Lead synthesizes review summary** (written to `{worktree_path}/.docs/reviews/{branch_slug}/{timestamp}/review-summary.md`):
+**Lead synthesizes review summary** (written to `{worktree_path}/.devflow/docs/reviews/{branch_slug}/{timestamp}/review-summary.md`):
 
 ```markdown
 ## Review Summary: {branch}
@@ -276,7 +276,7 @@ Check for existing inline comments at same file:line before creating new ones."
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
 Per worktree, after successful completion:
-1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
+1. Write current HEAD SHA to `{worktree_path}/.devflow/docs/reviews/{branch-slug}/.last-review-head`
 
 ### Phase 5: Cleanup and Report
 

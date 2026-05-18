@@ -4,6 +4,7 @@ import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
 import { readSidecar, type SidecarData } from './sidecar.js';
 import { getDevFlowDirectory } from './paths.js';
+import { getKnowledgePath } from './project-paths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,7 +49,7 @@ export interface RunKnowledgeAgentResult {
  * Spawn the Knowledge agent via `claude -p`, then read and clean up the sidecar file.
  *
  * The agent is expected to write a sidecar JSON file at
- * `.features/{slug}/{sidecarName}` with `referencedFiles` and optionally `description`.
+ * `.devflow/features/{slug}/{sidecarName}` with `referencedFiles` and optionally `description`.
  * If the sidecar is absent (agent failure), an empty SidecarData is returned.
  *
  * Using async execFile keeps the event loop free so the clack spinner can
@@ -61,7 +62,8 @@ export interface RunKnowledgeAgentResult {
  */
 export async function runKnowledgeAgent(opts: RunKnowledgeAgentOptions): Promise<RunKnowledgeAgentResult> {
   const { worktreePath, slug, prompt, sidecarName } = opts;
-  const sidecarPath = path.join(worktreePath, '.features', slug, sidecarName);
+  // Build sidecar path in .devflow/features/{slug}/ (same directory as KNOWLEDGE.md)
+  const sidecarPath = path.join(path.dirname(getKnowledgePath(worktreePath, slug)), sidecarName);
 
   // Pre-clean any leftover sidecar from a previous run
   try { await fs.unlink(sidecarPath); } catch { /* doesn't exist — that's fine */ }

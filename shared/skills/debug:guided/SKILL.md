@@ -26,6 +26,6 @@ Direct main-session debugging for GUIDED depth. Load skills, investigate, fix.
 
    If a skill fails to load, continue without it — do not halt the workflow.
 
-2. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.features/index.json`, load relevant feature knowledge. Use locally for hypothesis generation.
+2. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.devflow/features/index.json`, load relevant feature knowledge. Use locally for hypothesis generation.
 3. **Investigate** — Analyze the bug directly. Trace code, check logs, verify hypotheses.
 4. **Fix** — If root cause is clear, implement the fix. Spawn `Agent(subagent_type="Simplifier")` on changed files.

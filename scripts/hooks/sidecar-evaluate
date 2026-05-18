@@ -2,7 +2,7 @@
 
 # Sidecar System: sidecar-evaluate (SessionEnd Hook)
 # Evaluates session-level features: learning batching, decisions detection, knowledge refresh.
-# Writes marker files to .memory/.sidecar/ for sidecar-dispatch to pick up.
+# Writes marker files to .devflow/sidecar/ for sidecar-dispatch to pick up.
 
 set -e
 
@@ -20,10 +20,14 @@ INPUT=$(cat)
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 [ -z "$CWD" ] && exit 0
 
-MEMORY_DIR="$CWD/.memory"
-[ ! -d "$MEMORY_DIR" ] && exit 0
+DEVFLOW_DIR="$CWD/.devflow"
+[ ! -d "$DEVFLOW_DIR" ] && exit 0
 
-SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+FEATURES_DIR="$DEVFLOW_DIR/features"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+LEARNING_DIR="$DEVFLOW_DIR/learning"
+DECISIONS_DIR_DATA="$DEVFLOW_DIR/decisions"
 
 # Read sidecar config
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
@@ -145,7 +149,7 @@ load_existing_ids() {
 # =============================================================================
 
 if [ "$LEARNING_ENABLED" = "true" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-  LEARNING_LOG="$MEMORY_DIR/learning-log.jsonl"
+  LEARNING_LOG="$LEARNING_DIR/learning-log.jsonl"
   if [ -f "$LEARNING_LOG" ]; then
     # Extract slugs of self-learning artifacts used in this session
     LOADED_SLUGS=$(grep -oE 'self-learning[:/][a-z0-9-]+' "$TRANSCRIPT" 2>/dev/null | \
@@ -228,7 +232,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   log "Evaluating learning..."
 
   # Load learning config
-  LEARNING_CONFIG="$MEMORY_DIR/learning.json"
+  LEARNING_CONFIG="$LEARNING_DIR/learning.json"
   MAX_DAILY=5
   BATCH_SIZE=3
 
@@ -243,8 +247,8 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
   # Adaptive batch size
   OBS_TOTAL=0
-  if [ -f "$MEMORY_DIR/learning-log.jsonl" ]; then
-    OBS_TOTAL=$(wc -l < "$MEMORY_DIR/learning-log.jsonl" | tr -d ' ')
+  if [ -f "$LEARNING_DIR/learning-log.jsonl" ]; then
+    OBS_TOTAL=$(wc -l < "$LEARNING_DIR/learning-log.jsonl" | tr -d ' ')
   fi
   if [ "$OBS_TOTAL" -ge 15 ]; then
     BATCH_SIZE=5
@@ -297,7 +301,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
           if [ -n "$USER_SIGNALS" ]; then
             # Load existing observation IDs for deduplication
-            EXISTING_IDS=$(load_existing_ids "$MEMORY_DIR/learning-log.jsonl")
+            EXISTING_IDS=$(load_existing_ids "$LEARNING_DIR/learning-log.jsonl")
 
             # Write learning marker (per-session name for concurrency safety)
             _LEARN_MARKER="$SIDECAR_DIR/learning.${MARKER_SUFFIX}.json"
@@ -345,14 +349,14 @@ fi
 if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   log "Evaluating decisions..."
 
-  # Note: .memory/decisions/.disabled is for session-start-context only — this hook uses DECISIONS_ENABLED.
+  # Note: .devflow/decisions/.disabled is for session-start-context only — this hook uses DECISIONS_ENABLED.
 
   # Daily cap check
   DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
   DEC_RUNS_TODAY=$(read_daily_cap "$DEC_RUNS_FILE" 0)
 
   MAX_DEC_RUNS=3
-  DEC_CONFIG="$MEMORY_DIR/decisions.json"
+  DEC_CONFIG="$DECISIONS_DIR_DATA/decisions.json"
   if [ -f "$DEC_CONFIG" ]; then
     MAX_DEC_RUNS=$(json_field_file "$DEC_CONFIG" "max_daily_runs" "3")
   fi
@@ -370,7 +374,7 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
     if [ -n "$DIALOG_PAIRS" ]; then
       # Load existing observation IDs
-      EXISTING_IDS=$(load_existing_ids "$MEMORY_DIR/decisions-log.jsonl")
+      EXISTING_IDS=$(load_existing_ids "$DECISIONS_DIR_DATA/decisions-log.jsonl")
 
       # Write decisions marker (per-session name for concurrency safety)
       _DEC_MARKER="$SIDECAR_DIR/decisions.${MARKER_SUFFIX}.json"
@@ -409,12 +413,12 @@ fi
 if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
   log "Evaluating knowledge..."
 
-  # Check .features/.disabled sentinel
-  if [ -f "$CWD/.features/.disabled" ]; then
+  # Check .devflow/features/.disabled sentinel
+  if [ -f "$FEATURES_DIR/.disabled" ]; then
     log "Knowledge disabled by sentinel"
   else
     # Throttle: skip if refreshed within last 2 hours
-    KNOWLEDGE_MARKER="$CWD/.features/.knowledge-last-refresh"
+    KNOWLEDGE_MARKER="$FEATURES_DIR/.knowledge-last-refresh"
     LAST_REFRESH=$(cat "$KNOWLEDGE_MARKER" 2>/dev/null | tr -dc '0-9' || true)
     LAST_REFRESH="${LAST_REFRESH:-0}"
     AGE=$(( NOW - LAST_REFRESH ))

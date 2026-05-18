@@ -24,7 +24,7 @@ This is a lightweight variant of `/resolve` for ambient mode. Excluded: pitfall 
 
 **Produces:** REVIEW_DIR, BRANCH_SLUG, PR_DESCRIPTION
 
-Find the latest timestamped directory under `.docs/reviews/` that:
+Find the latest timestamped directory under `.devflow/docs/reviews/` that:
 1. Contains a `review-summary.md` (has been reviewed)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
@@ -46,9 +46,9 @@ If no PR exists or the command fails, set `PR_DESCRIPTION` to `(none)`.
 Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 Also load feature knowledge:
-1. Read `.features/index.json` if it exists
+1. Read `.devflow/features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant feature knowledge entries
-3. Read matching `.features/{slug}/KNOWLEDGE.md` files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`
+3. Read matching `.devflow/features/{slug}/KNOWLEDGE.md` files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 3: Parse Issues
@@ -153,7 +153,7 @@ Report to user:
 Before reporting results, verify every phase was announced:
 
 - [ ] Phase 1: Target Review Directory → REVIEW_DIR captured, PR_DESCRIPTION fetched (or `(none)`)
-- [ ] Phase 2: Load Project Decisions → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
+- [ ] Phase 2: Load Project Decisions → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.devflow/features/` absent)
 - [ ] Phase 3: Parse Issues → ISSUES captured (or stopped: no actionable issues)
 - [ ] Phase 4: Analyze & Batch → BATCHES captured
 - [ ] Phase 5: Resolve → RESOLUTION_RESULTS captured per batch

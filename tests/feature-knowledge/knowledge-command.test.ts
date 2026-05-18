@@ -22,7 +22,7 @@ describe('feature-knowledge.cjs CLI', () => {
   it('list returns empty array for missing index', () => {
     const tmp = makeTmpFeatureWorktree();
     // Remove the index file so index is missing
-    try { rmSync(path.join(tmp, '.features', 'index.json')); } catch { /* ignore */ }
+    try { rmSync(path.join(tmp, '.devflow', 'features', 'index.json')); } catch { /* ignore */ }
     const result = execSync(`node ${CJS_PATH} list ${tmp}`, { encoding: 'utf8' });
     expect(JSON.parse(result)).toEqual([]);
   });
@@ -45,7 +45,7 @@ describe('feature-knowledge.cjs CLI', () => {
       `node ${CJS_PATH} update-index ${tmp} --slug=payments --name="Payment Processing" --directories='["src/payments/"]' --referencedFiles='["src/payments/checkout.ts"]'`,
       { encoding: 'utf8' }
     );
-    const index = JSON.parse(readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8'));
+    const index = JSON.parse(readFileSync(path.join(tmp, '.devflow', 'features', 'index.json'), 'utf8'));
     expect(index.features.payments).toBeDefined();
     expect(index.features.payments.name).toBe('Payment Processing');
   });
@@ -53,7 +53,7 @@ describe('feature-knowledge.cjs CLI', () => {
   it('remove deletes entry and directory', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': '# Test Feature Knowledge' });
     execSync(`node ${CJS_PATH} remove ${tmp} cli-commands`, { encoding: 'utf8' });
-    const index = JSON.parse(readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8'));
+    const index = JSON.parse(readFileSync(path.join(tmp, '.devflow', 'features', 'index.json'), 'utf8'));
     expect(index.features['cli-commands']).toBeUndefined();
   });
 

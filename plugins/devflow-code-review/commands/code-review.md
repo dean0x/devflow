@@ -37,7 +37,7 @@ Run a comprehensive code review of the current branch by spawning parallel revie
 **Requires:** WORKTREES
 
 Discover PR description guidance from plan artifact (per worktree):
-1. List `{worktree}/.docs/design/*.md` files
+1. List `{worktree}/.devflow/docs/design/*.md` files
 2. Sort by timestamp in filename (descending -- timestamps are YYYY-MM-DD_HHMM, naturally sortable)
 3. Read the most recent file, extract `## PR Description Guidance` section
 4. If no plan files exist or section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`
@@ -73,8 +73,8 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 For each worktree:
 
 1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
-2. Create timestamped review directory: `mkdir -p {worktree}/.docs/reviews/{branch-slug}/{timestamp}/`
-3. Check if `{worktree}/.docs/reviews/{branch-slug}/.last-review-head` exists:
+2. Create timestamped review directory: `mkdir -p {worktree}/.devflow/docs/reviews/{branch-slug}/{timestamp}/`
+3. Check if `{worktree}/.devflow/docs/reviews/{branch-slug}/.last-review-head` exists:
    - **If yes AND `--full` NOT set:**
      - Read the SHA from the file
      - Verify reachable: `git -C {worktree} cat-file -t {sha}` (handles rebases — if unreachable, fallback to full)
@@ -121,9 +121,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 **Load Feature Knowledge:**
-1. Read `.features/index.json` if it exists
+1. Read `.devflow/features/index.json` if it exists
 2. Based on changed files from Phase 1 analysis, identify relevant feature knowledge (match file paths against each feature knowledge entry's `directories` and `referencedFiles`)
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
 4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none is relevant)
 
 Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
@@ -170,7 +170,7 @@ FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
-IMPORTANT: Write report to {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
+IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
 In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-19 reviewers per worktree across multiple worktrees simultaneously overwhelms the system.
@@ -187,7 +187,7 @@ In multi-worktree mode, process worktrees **sequentially** (one worktree at a ti
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-Read reviews from {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/
+Read reviews from {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/
 Create inline PR comments for findings with ≥80% confidence only.
 Lower-confidence suggestions (60-79%) go in the summary comment, not as inline comments.
 Deduplicate findings across reviewers, consolidate skipped into summary.
@@ -199,10 +199,10 @@ Check for existing inline comments at same file:line before creating new ones to
 Agent(subagent_type="Synthesizer", run_in_background=false):
 "Mode: review
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
-REVIEW_BASE_DIR: {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}
+REVIEW_BASE_DIR: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}
 TIMESTAMP: {timestamp}
 Aggregate findings, determine merge recommendation
-Output: {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
+Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
 ```
 
 ### Phase 4: Write Review Head Marker & Report
@@ -210,7 +210,7 @@ Output: {worktree_path}/.docs/reviews/{branch-slug}/{timestamp}/review-summary.m
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
 Per worktree, after successful completion:
-1. Write current HEAD SHA to `{worktree_path}/.docs/reviews/{branch-slug}/.last-review-head`
+1. Write current HEAD SHA to `{worktree_path}/.devflow/docs/reviews/{branch-slug}/.last-review-head`
 2. Display results from all agents:
    - Merge recommendation (from Synthesizer)
    - Issue counts by category (🔴 blocking / ⚠️ should-fix / ℹ️ pre-existing)
@@ -269,7 +269,7 @@ In multi-worktree mode, report results per worktree.
 ## Backwards Compatibility
 
 - **Single worktree**: Auto-discovery finds only one worktree → proceeds exactly as before. Zero behavior change.
-- **Legacy flat layout**: If `.docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
+- **Legacy flat layout**: If `.devflow/docs/reviews/{branch-slug}/` contains flat `*.md` files (no timestamped subdirectories), new runs create timestamped subdirectories. Old flat files remain untouched.
 
 ## Principles
 

@@ -243,7 +243,7 @@ Run through this before writing. If any check fails, go back and fix it.
 After writing KNOWLEDGE.md, write a sidecar JSON for the host process:
 
 **Filename**: `.create-result.json` (new feature knowledge entries) or `.refresh-result.json` (refreshes)
-**Location**: Same directory as KNOWLEDGE.md (`.features/{slug}/`)
+**Location**: Same directory as KNOWLEDGE.md (`.devflow/features/{slug}/`)
 
 ```json
 {
@@ -252,7 +252,7 @@ After writing KNOWLEDGE.md, write a sidecar JSON for the host process:
 }
 ```
 
-The host process reads this sidecar and updates `.features/index.json` — do NOT update the index directly.
+The host process reads this sidecar and updates `.devflow/features/index.json` — do NOT update the index directly.
 
 ---
 

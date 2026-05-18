@@ -68,7 +68,7 @@ export function makeTmpFeatureWorktree(
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'feature-knowledge-test-'));
   createdTmpDirs.push(tmp);
 
-  const featuresDir = path.join(tmp, '.features');
+  const featuresDir = path.join(tmp, '.devflow', 'features');
   mkdirSync(featuresDir, { recursive: true });
 
   if (indexContent) {

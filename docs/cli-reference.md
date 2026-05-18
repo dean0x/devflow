@@ -159,6 +159,6 @@ npx devflow-kit uninstall
 |--------|-------------|
 | `--scope <user\|local>` | Uninstall scope (default: user) |
 | `--plugin <names>` | Selective uninstall by plugin name |
-| `--keep-docs` | Preserve `.docs/` directory |
+| `--keep-docs` | Preserve `.devflow/docs/` directory |
 | `--dry-run` | Show what would be removed |
 | `--verbose` | Show detailed output |

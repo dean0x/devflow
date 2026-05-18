@@ -102,7 +102,7 @@ describe('render-ready — workflow type (D5 snapshot tests)', () => {
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
     runHelper(`render-ready "${logFile}" "${tmpDir}"`);
 
-    const manifestFile = path.join(tmpDir, '.memory', '.learning-manifest.json');
+    const manifestFile = path.join(tmpDir, '.devflow', 'learning', '.learning-manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.entries[0].type).toBe('workflow');

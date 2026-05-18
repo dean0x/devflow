@@ -96,10 +96,10 @@ TIMESTAMP=$(date +%Y-%m-%d_%H%M)
 BRANCH_SLUG=$(git branch --show-current | sed 's/\//-/g')
 
 # When invoked by /code-review command
-REPORT_FILE=".docs/reviews/${BRANCH_SLUG}/{domain}-report.${TIMESTAMP}.md"
+REPORT_FILE=".devflow/docs/reviews/${BRANCH_SLUG}/{domain}-report.${TIMESTAMP}.md"
 
 # When invoked standalone
-REPORT_FILE="${REPORT_FILE:-.docs/reviews/standalone/{domain}-report.${TIMESTAMP}.md}"
+REPORT_FILE="${REPORT_FILE:-.devflow/docs/reviews/standalone/{domain}-report.${TIMESTAMP}.md}"
 
 # Ensure directory exists
 mkdir -p "$(dirname "$REPORT_FILE")"

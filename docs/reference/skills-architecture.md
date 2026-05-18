@@ -15,7 +15,7 @@ Shared patterns used by multiple agents.
 | `software-design` | Engineering patterns (Result types, DI, immutability, workaround labeling) | Coder, Scrutinizer, Resolver, Evaluator |
 | `review-methodology` | 6-step review process, 3-category issue classification | Reviewer, Synthesizer |
 | `quality-gates` | 9-pillar self-review framework | Scrutinizer |
-| `docs-framework` | Documentation conventions (.docs/ structure, naming, templates) | Synthesizer |
+| `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | Synthesizer |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
 | `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug, /plan, /research, /release |
@@ -99,7 +99,7 @@ Language and framework patterns. Referenced by agents via frontmatter and condit
 
 Some skills exist in `shared/skills/` but are not distributed to any plugin. They serve as on-disk format specifications consumed by background processes, not by agents or commands.
 
-- **decisions-format** — Format spec for `.memory/decisions/decisions.md` and `pitfalls.md` (entry format, lock protocol, capacity limits). Consumed by `scripts/hooks/background-learning` via `json-helper.cjs render-ready`. Not distributed to plugins per D9.
+- **decisions-format** — Format spec for `.devflow/decisions/decisions.md` and `pitfalls.md` (entry format, lock protocol, capacity limits). Consumed by `scripts/hooks/background-learning` via `json-helper.cjs render-ready`. Not distributed to plugins per D9.
 
 ## How Skills Activate
 

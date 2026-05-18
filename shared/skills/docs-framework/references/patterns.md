@@ -9,7 +9,7 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 ### Standard Layout
 
 ```
-.docs/
+.devflow/docs/
 ├── reviews/{branch-slug}/          # Code review reports per branch
 │   ├── .last-review-head           # HEAD SHA of last completed review
 │   ├── {timestamp}/                # Timestamped review directory
@@ -31,7 +31,7 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 
 **Minimal (new project):**
 ```
-.docs/
+.devflow/docs/
 ├── status/
 │   └── INDEX.md
 └── CATCH_UP.md
@@ -39,7 +39,7 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 
 **With Reviews (single review):**
 ```
-.docs/
+.devflow/docs/
 ├── reviews/feat-auth/
 │   ├── .last-review-head
 │   └── 2025-01-05_1430/
@@ -59,7 +59,7 @@ Correct patterns for Devflow documentation artifacts with templates and helper f
 
 **With Multiple Reviews (incremental):**
 ```
-.docs/
+.devflow/docs/
 ├── reviews/feat-auth/
 │   ├── .last-review-head
 │   ├── 2025-01-05_1430/
@@ -185,7 +185,7 @@ get_topic_slug() {
 # Ensure docs directory exists
 ensure_docs_dir() {
     local subdir="$1"
-    mkdir -p ".docs/$subdir"
+    mkdir -p ".devflow/docs/$subdir"
 }
 
 # Get full output path for a document
@@ -193,7 +193,7 @@ get_doc_path() {
     local subdir="$1"
     local filename="$2"
     ensure_docs_dir "$subdir"
-    echo ".docs/$subdir/$filename"
+    echo ".devflow/docs/$subdir/$filename"
 }
 
 # Create timestamped status log path
@@ -211,7 +211,7 @@ get_review_path() {
     branch_slug=$(get_branch_slug)
     timestamp=$(get_timestamp)
     ensure_docs_dir "reviews/$branch_slug/$timestamp"
-    echo ".docs/reviews/$branch_slug/$timestamp/${focus}.md"
+    echo ".devflow/docs/reviews/$branch_slug/$timestamp/${focus}.md"
 }
 ```
 
@@ -224,7 +224,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
     get_timestamp() { date +%Y-%m-%d_%H%M; }
     get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
     get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
-    ensure_docs_dir() { mkdir -p ".docs/$1"; }
+    ensure_docs_dir() { mkdir -p ".devflow/docs/$1"; }
 }
 
 # Use helpers
@@ -353,7 +353,7 @@ Branch slug falls back to "standalone":
 get_branch_slug  # Returns: standalone
 
 # Review path becomes:
-# .docs/reviews/standalone/security-report.2025-01-05_1430.md
+# .devflow/docs/reviews/standalone/security-report.2025-01-05_1430.md
 ```
 
 ### Special Characters in Topics

@@ -98,7 +98,7 @@ create_pr_comment "file.ts" "123" "This is a problem"  # No severity
 REPORT_FILE="review.md"  # No timestamp, no branch
 
 # VIOLATION: Wrong directory
-REPORT_FILE="./reviews/report.md"  # Should be .docs/reviews/
+REPORT_FILE="./reviews/report.md"  # Should be .devflow/docs/reviews/
 ```
 
 ---

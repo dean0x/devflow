@@ -2,6 +2,91 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { getMemoryDir, getFeaturesDir, getDevflowGitignoreContent } from './project-paths.js';
+
+// ---------------------------------------------------------------------------
+// consolidate-to-devflow-dir helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Move src to dest, skipping when src doesn't exist or dest already exists
+ * (idempotent). Falls back to copy+delete on EXDEV (cross-device rename).
+ *
+ * POSIX rename(2) atomically replaces files and does not return EEXIST, so
+ * we check dest existence with lstat before rename to preserve idempotency.
+ * For directory renames, POSIX returns ENOTEMPTY when dest is a non-empty
+ * directory — treated the same as EEXIST (idempotent skip).
+ */
+async function moveFile(src: string, dest: string): Promise<void> {
+  // Ensure parent directory exists before attempting rename
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  // Check dest existence first: POSIX rename(2) silently overwrites files
+  // and returns ENOTEMPTY (not EEXIST) for non-empty directory destinations.
+  // An explicit lstat guard restores idempotency for both cases.
+  try {
+    await fs.lstat(dest);
+    return; // dest already present — idempotent skip
+  } catch { /* dest absent — proceed with rename */ }
+  try {
+    await fs.rename(src, dest);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return;               // src gone — already moved or never existed
+    if (code === 'EEXIST' || code === 'ENOTEMPTY') return; // dest appeared concurrently — idempotent skip
+    // Cross-device: fall back to copy+delete
+    if (code === 'EXDEV') {
+      await fs.cp(src, dest, { recursive: true });
+      await fs.rm(src, { recursive: true, force: true });
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
+ * Move a directory entry-by-entry into destDir.
+ * srcDir itself is left in place (emptied); callers remove it after.
+ */
+async function moveDirContents(
+  srcDir: string,
+  destDir: string,
+  skipNames: Set<string>,
+): Promise<void> {
+  let entries: import('fs').Dirent[];
+  try {
+    entries = await fs.readdir(srcDir, { withFileTypes: true });
+  } catch { return; }
+
+  await Promise.all(
+    entries
+      .filter(entry => !skipNames.has(entry.name))
+      .map(entry => moveFile(path.join(srcDir, entry.name), path.join(destDir, entry.name))),
+  );
+}
+
+/**
+ * Legacy / V1 files in .memory/ that no longer exist in any meaningful sense
+ * and must NOT be migrated to .devflow/. These are entries NOT present in the
+ * memMap below — derived programmatically from the mapping.
+ *
+ * The full catch-all skip set is computed inside the migration run function as:
+ *   new Set([...MEMORY_LEGACY_SKIP_FILES, ...memMap.map(([name]) => name)])
+ * This ensures that adding a new entry to memMap automatically excludes it
+ * from the catch-all moveDirContents pass without a manual update here.
+ */
+const MEMORY_LEGACY_SKIP_FILES = [
+  'knowledge',                        // pre-rename V1 decisions dir
+  'short',                            // V1 format
+  'index.md',                         // V1 format
+  'candidates.json',                  // V1 format
+  '.knowledge-usage.json',            // pre-rename
+  '.working-memory-last-trigger',     // obsolete
+  '.working-memory-update.log',       // old log
+  '.gitignore-configured',            // replaced
+  // Directories handled by moveDirContents — exclude from catch-all
+  '.sidecar',
+  'decisions',
+] as const;
 
 /**
  * @file migrations.ts
@@ -99,7 +184,7 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
     const { purgeLegacyDecisionsEntries } = await import('./legacy-decisions-purge.js');
-    const result = await purgeLegacyDecisionsEntries({ memoryDir: ctx.memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir: ctx.memoryDir, projectRoot: ctx.projectRoot });
     const infos = result.removed > 0
       ? [`Purged ${result.removed} legacy decisions entry(ies) in ${result.files.length} file(s)`]
       : [];
@@ -124,7 +209,7 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
     const { purgeAllPreV2DecisionsEntries } = await import('./legacy-decisions-purge.js');
-    const result = await purgeAllPreV2DecisionsEntries({ memoryDir: ctx.memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir: ctx.memoryDir, projectRoot: ctx.projectRoot });
     const infos = result.removed > 0
       ? [`Purged ${result.removed} pre-v2 decisions entry(ies) in ${result.files.length} file(s)`]
       : [];
@@ -140,7 +225,7 @@ const MIGRATION_RENAME_KB_TO_KNOWLEDGE: Migration<'per-project'> = {
     const infos: string[] = [];
     const warnings: string[] = [];
 
-    const featuresDir = path.join(ctx.projectRoot, '.features');
+    const featuresDir = getFeaturesDir(ctx.projectRoot);
     const renames: Array<[string, string]> = [
       ['.kb.lock', '.knowledge.lock'],
       ['.kb-last-refresh', '.knowledge-last-refresh'],
@@ -151,11 +236,12 @@ const MIGRATION_RENAME_KB_TO_KNOWLEDGE: Migration<'per-project'> = {
       const oldPath = path.join(featuresDir, oldName);
       const newPath = path.join(featuresDir, newName);
       try {
-        await fs.access(oldPath);
         await fs.rename(oldPath, newPath);
-        infos.push(`Renamed .features/${oldName} → .features/${newName}`);
-      } catch {
-        // File doesn't exist — nothing to do
+        infos.push(`Renamed .devflow/features/${oldName} → .devflow/features/${newName}`);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') continue; // src absent — nothing to rename
+        throw err;                        // unexpected error — surface to caller
       }
     }
 
@@ -180,6 +266,187 @@ const MIGRATION_RENAME_KB_TO_KNOWLEDGE: Migration<'per-project'> = {
 };
 
 /**
+ * Stale .gitignore entries removed by the consolidate-to-devflow-dir migration.
+ * Extracted as a module-level constant so tests can assert against it.
+ */
+const CONSOLIDATE_STALE_GITIGNORE_ENTRIES = [
+  '.memory/',
+  '.docs/',
+  '.features/.knowledge.lock',
+  '.features/.disabled',
+  '.features/.knowledge-last-refresh',
+  '.features/.knowledge-refresh.lock',
+  '.devflow/',
+] as const;
+
+/**
+ * Step 5 helper: create .devflow/.gitignore only when absent.
+ *
+ * Uses O_EXCL (flag: 'wx') so the kernel rejects the open atomically if the
+ * file already exists — no TOCTOU window between the existence check and the
+ * write. EEXIST is silently ignored (idempotent).
+ */
+async function createDevflowGitignoreIfAbsent(devflowDir: string): Promise<void> {
+  const gitignore = path.join(devflowDir, '.gitignore');
+  try {
+    await fs.writeFile(gitignore, getDevflowGitignoreContent(), { encoding: 'utf-8', flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    // File already present — idempotent skip
+  }
+}
+
+/**
+ * Step 6 helper: remove stale old-layout entries from the project .gitignore.
+ *
+ * Uses writeFileAtomicExclusive (temp+rename) so a crash between read and
+ * write never leaves the .gitignore truncated.
+ *
+ * @returns Info messages suitable for appending to MigrationRunResult.infos.
+ */
+async function cleanStaleGitignoreEntries(projectRoot: string): Promise<string[]> {
+  const gitignorePath = path.join(projectRoot, '.gitignore');
+  try {
+    const content = await fs.readFile(gitignorePath, 'utf-8');
+    const lines = content.split('\n');
+    const cleaned = lines.filter(
+      line => !CONSOLIDATE_STALE_GITIGNORE_ENTRIES.includes(
+        line.trim() as typeof CONSOLIDATE_STALE_GITIGNORE_ENTRIES[number],
+      ),
+    );
+    if (cleaned.length !== lines.length) {
+      await writeFileAtomicExclusive(gitignorePath, cleaned.join('\n'));
+      return ['Cleaned stale entries from .gitignore'];
+    }
+  } catch { /* .gitignore may not exist — non-fatal */ }
+  return [];
+}
+
+/**
+ * Step 2 helper: move all .memory/ content into the appropriate .devflow/
+ * subdirectories using the explicit memMap plus catch-all subdirectory sweeps.
+ */
+async function migrateMemoryDir(
+  memSrc: string,
+  devflowDir: string,
+  memMap: Array<[string, string]>,
+): Promise<void> {
+  // Explicit mapped moves (all independent — run in parallel)
+  await Promise.all(memMap.map(([name, dest]) => moveFile(path.join(memSrc, name), dest)));
+
+  // Move .memory/.sidecar/ → .devflow/sidecar/ (directory contents)
+  await moveDirContents(path.join(memSrc, '.sidecar'), path.join(devflowDir, 'sidecar'), new Set());
+
+  // Move .memory/decisions/ contents → .devflow/decisions/
+  await moveDirContents(path.join(memSrc, 'decisions'), path.join(devflowDir, 'decisions'), new Set());
+
+  // Catch-all: move any remaining .memory/ files not already handled.
+  // Skip set is derived from memMap keys (already moved above) plus legacy-only
+  // entries, so adding a new memMap entry never needs a manual skip-set update.
+  const memSkipFiles = new Set([
+    ...MEMORY_LEGACY_SKIP_FILES,
+    ...memMap.map(([name]) => name),
+  ]);
+  await moveDirContents(memSrc, path.join(devflowDir, 'memory'), memSkipFiles);
+}
+
+/**
+ * Moves .memory/, .features/, and .docs/ into .devflow/ subdirectories.
+ * Idempotent and resumable: each file/dir move skips if destination exists.
+ *
+ * Layout after migration:
+ *   .devflow/memory/    — working memory files
+ *   .devflow/sidecar/   — promoted from .memory/.sidecar/
+ *   .devflow/decisions/ — promoted from .memory/decisions/
+ *   .devflow/learning/  — promoted from .memory/ learning-* files
+ *   .devflow/features/  — promoted from .features/
+ *   .devflow/docs/      — promoted from .docs/
+ */
+const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
+  id: 'consolidate-to-devflow-dir',
+  description: 'Move .memory/, .features/, .docs/ under .devflow/',
+  scope: 'per-project',
+  run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
+    const { projectRoot } = ctx;
+
+    const devflowDir = path.join(projectRoot, '.devflow');
+    const memSrc     = path.join(projectRoot, '.memory');
+    const featSrc    = path.join(projectRoot, '.features');
+    const docsSrc    = path.join(projectRoot, '.docs');
+
+    // 1. Create target subdirectories (independent — run in parallel)
+    await Promise.all([
+      fs.mkdir(path.join(devflowDir, 'memory'),    { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'sidecar'),   { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'decisions'), { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'learning'),  { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'features'),  { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'docs'),      { recursive: true }),
+    ]);
+
+    // 2. Move all .memory/ content into .devflow/ subdirectories
+    const memMap: Array<[string, string]> = [
+      ['WORKING-MEMORY.md',             path.join(devflowDir, 'memory',    'WORKING-MEMORY.md')],
+      ['backup.json',                   path.join(devflowDir, 'memory',    'backup.json')],
+      ['.pending-turns.jsonl',          path.join(devflowDir, 'memory',    '.pending-turns.jsonl')],
+      ['.pending-turns.processing',     path.join(devflowDir, 'memory',    '.pending-turns.processing')],
+      ['.pending-turns.lock',           path.join(devflowDir, 'memory',    '.pending-turns.lock')],
+      ['.learning-disabled',            path.join(devflowDir, 'memory',    '.learning-disabled')],
+      ['.working-memory-disabled',      path.join(devflowDir, 'memory',    '.working-memory-disabled')],
+      // decisions files
+      ['decisions-log.jsonl',           path.join(devflowDir, 'decisions', 'decisions-log.jsonl')],
+      ['decisions.json',                path.join(devflowDir, 'decisions', 'decisions.json')],
+      ['.decisions-manifest.json',      path.join(devflowDir, 'decisions', '.decisions-manifest.json')],
+      ['.decisions.lock',               path.join(devflowDir, 'decisions', '.decisions.lock')],
+      ['.decisions-usage.json',         path.join(devflowDir, 'decisions', '.decisions-usage.json')],
+      ['.decisions-usage.lock',         path.join(devflowDir, 'decisions', '.decisions-usage.lock')],
+      ['.decisions-notifications.json', path.join(devflowDir, 'decisions', '.decisions-notifications.json')],
+      ['.decisions-runs-today',         path.join(devflowDir, 'decisions', '.decisions-runs-today')],
+      ['.decisions-batch-ids',          path.join(devflowDir, 'decisions', '.decisions-batch-ids')],
+      // learning files
+      ['learning-log.jsonl',            path.join(devflowDir, 'learning',  'learning-log.jsonl')],
+      ['learning.json',                 path.join(devflowDir, 'learning',  'learning.json')],
+      ['.learning-manifest.json',       path.join(devflowDir, 'learning',  '.learning-manifest.json')],
+      ['.learning-notified-at',         path.join(devflowDir, 'learning',  '.learning-notified-at')],
+      ['.learning-notifications.json',  path.join(devflowDir, 'learning',  '.learning-notifications.json')],
+      ['.learning-runs-today',          path.join(devflowDir, 'learning',  '.learning-runs-today')],
+      ['.learning-session-count',       path.join(devflowDir, 'learning',  '.learning-session-count')],
+      ['.learning-batch-ids',           path.join(devflowDir, 'learning',  '.learning-batch-ids')],
+      ['debug',                         path.join(devflowDir, 'learning',  'debug')],
+      ['working',                       path.join(devflowDir, 'memory',    'working')],
+    ];
+    await migrateMemoryDir(memSrc, devflowDir, memMap);
+
+    // 3. Move .features/ contents → .devflow/features/
+    await moveDirContents(featSrc, path.join(devflowDir, 'features'), new Set());
+
+    // 4. Move .docs/ contents → .devflow/docs/
+    await moveDirContents(docsSrc, path.join(devflowDir, 'docs'), new Set());
+
+    // 5. Create .devflow/.gitignore if not present (atomic exclusive create — no TOCTOU)
+    await createDevflowGitignoreIfAbsent(devflowDir);
+
+    // 6. Clean up project .gitignore — remove stale entries (atomic temp+rename write)
+    const gitignoreInfos = await cleanStaleGitignoreEntries(projectRoot);
+
+    // 7. Remove empty old directories (best-effort)
+    for (const oldDir of [memSrc, featSrc, docsSrc]) {
+      try {
+        const remaining = await fs.readdir(oldDir);
+        if (remaining.length === 0) {
+          await fs.rmdir(oldDir);
+        }
+      } catch { /* may already be removed or non-empty — non-fatal */ }
+    }
+
+    return {
+      infos: [...gitignoreInfos, 'Consolidated .memory/, .features/, .docs/ under .devflow/'],
+      warnings: [],
+    };
+  },
+};
+
+/**
  * Migration ID suffix conventions:
  *
  * - `-vN`        A revision of a migration. `-v2`, `-v3`, etc. indicate
@@ -200,6 +467,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
   MIGRATION_RENAME_KB_TO_KNOWLEDGE,
+  MIGRATION_CONSOLIDATE_TO_DEVFLOW,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
@@ -411,7 +679,7 @@ async function runPerProjectMigration(
     discoveredProjects,
     16,
     (projectRoot) => {
-      const memoryDir = path.join(projectRoot, '.memory');
+      const memoryDir = getMemoryDir(projectRoot);
       return migration.run({
         scope: 'per-project',
         devflowDir: ctx.devflowDir,

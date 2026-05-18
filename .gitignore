@@ -41,10 +41,6 @@ yarn-error.log*
 *.backup.*
 
 # Test documentation created during development
-.docs/
-# Working memory background updater artifacts (also covered by .docs/ above)
-.docs/.working-memory.lock
-.docs/.working-memory-update.log
 test-docs/
 
 # Temporary files
@@ -71,10 +67,7 @@ commands/local-*
 install.log
 # Devflow local scope installation (use --scope local)
 .claude/
-.devflow/
 
-# Session working data
-.memory/
 src/claude/CLAUDE.legacy.md
 
 # Launch marketing materials

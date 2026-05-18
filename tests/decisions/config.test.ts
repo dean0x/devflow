@@ -106,7 +106,7 @@ describe('loadDecisionsConfig', () => {
   beforeEach(() => {
     devflowDir = makeTmpDir();
     projectCwd = makeTmpDir();
-    ensureDir(path.join(projectCwd, '.memory'));
+    ensureDir(path.join(projectCwd, '.devflow', 'decisions'));
 
     // Override the DEVFLOW_DIR env var so loadDecisionsConfig reads from our
     // temp directory instead of ~/.devflow.
@@ -146,7 +146,7 @@ describe('loadDecisionsConfig', () => {
       max_daily_runs: 7,
       model: 'haiku',
     });
-    writeJson(path.join(projectCwd, '.memory'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
       max_daily_runs: 2,
     });
     const config = loadDecisionsConfig(projectCwd);
@@ -155,7 +155,7 @@ describe('loadDecisionsConfig', () => {
   });
 
   it('project config alone overrides defaults', () => {
-    writeJson(path.join(projectCwd, '.memory'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
       model: 'opus',
     });
     const config = loadDecisionsConfig(projectCwd);
@@ -177,7 +177,7 @@ describe('loadDecisionsConfig', () => {
   it('invalid JSON in project config falls back to global + defaults', () => {
     writeJson(devflowDir, 'decisions.json', { max_daily_runs: 7 });
     fs.writeFileSync(
-      path.join(projectCwd, '.memory', 'decisions.json'),
+      path.join(projectCwd, '.devflow', 'decisions', 'decisions.json'),
       'bad json',
       'utf-8',
     );
@@ -191,7 +191,7 @@ describe('loadDecisionsConfig', () => {
       throttle_minutes: 15,
       model: 'haiku',
     });
-    writeJson(path.join(projectCwd, '.memory'), 'decisions.json', {
+    writeJson(path.join(projectCwd, '.devflow', 'decisions'), 'decisions.json', {
       debug: true,
     });
     const config = loadDecisionsConfig(projectCwd);

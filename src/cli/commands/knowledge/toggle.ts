@@ -1,4 +1,3 @@
-import * as path from 'path';
 import { promises as fs } from 'fs';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -6,6 +5,7 @@ import { getDevFlowDirectory } from '../../utils/paths.js';
 import { readManifest, writeManifest } from '../../utils/manifest.js';
 import { getFeatureKnowledge, getWorktreePath } from './shared.js';
 import { updateFeature, isFeatureEnabled } from '../../utils/sidecar-config.js';
+import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel } from '../../utils/project-paths.js';
 
 /**
  * Handle the enable/disable/status toggle actions for `devflow knowledge`.
@@ -20,9 +20,9 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     p.intro(color.cyan('Enable Feature Knowledge Bases'));
 
     // Create .features/index.json if missing
-    const featuresDir = path.join(worktreePath, '.features');
+    const featuresDir = getFeaturesDir(worktreePath);
     await fs.mkdir(featuresDir, { recursive: true });
-    const indexPath = path.join(featuresDir, 'index.json');
+    const indexPath = getFeaturesIndexPath(worktreePath);
     try {
       await fs.access(indexPath);
     } catch {
@@ -30,7 +30,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     }
 
     // Remove .disabled sentinel
-    try { await fs.unlink(path.join(featuresDir, '.disabled')); } catch { /* doesn't exist */ }
+    try { await fs.unlink(getFeaturesDisabledSentinel(worktreePath)); } catch { /* doesn't exist */ }
 
     // Update sidecar config
     await updateFeature(worktreePath, 'knowledge', true);
@@ -50,9 +50,9 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     p.intro(color.cyan('Disable Feature Knowledge Bases'));
 
     // Create .disabled sentinel
-    const featuresDir = path.join(worktreePath, '.features');
+    const featuresDir = getFeaturesDir(worktreePath);
     await fs.mkdir(featuresDir, { recursive: true });
-    await fs.writeFile(path.join(featuresDir, '.disabled'), '', 'utf-8');
+    await fs.writeFile(getFeaturesDisabledSentinel(worktreePath), '', 'utf-8');
 
     // Update sidecar config
     await updateFeature(worktreePath, 'knowledge', false);
@@ -79,7 +79,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Check sentinel
     let disabled = false;
     try {
-      await fs.access(path.join(worktreePath, '.features', '.disabled'));
+      await fs.access(getFeaturesDisabledSentinel(worktreePath));
       disabled = true;
     } catch { /* not disabled */ }
 
@@ -90,7 +90,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     p.log.info(`Sidecar: ${enabled ? color.green('enabled') : color.dim('disabled')}`);
     p.log.info(`Knowledge bases: ${kbs.length}`);
     if (disabled) {
-      p.log.info(`Sentinel: ${color.yellow('.features/.disabled present')}`);
+      p.log.info(`Sentinel: ${color.yellow('.devflow/features/.disabled present')}`);
     }
     p.outro('');
   }

@@ -171,23 +171,23 @@ A sixth hook (`session-end-learning`) provides self-learning. Toggleable via `de
 
 | Hook | Event | File | Purpose |
 |------|-------|------|---------|
-| `prompt-capture-memory` | UserPromptSubmit | `.memory/.pending-turns.jsonl` | Captures user prompts to queue. Zero classification overhead. |
-| `stop-update-memory` | Stop | `.memory/.pending-turns.jsonl` | Captures assistant turns to queue. Throttled (skips if <2min fresh). Spawns background updater. |
-| `background-memory-update` | (background) | `.memory/WORKING-MEMORY.md` | Queue-based updater spawned by stop-update-memory. Reads queued turns + git state, writes WORKING-MEMORY.md via `claude -p --model haiku`. |
+| `prompt-capture-memory` | UserPromptSubmit | `.devflow/memory/.pending-turns.jsonl` | Captures user prompts to queue. Zero classification overhead. |
+| `stop-update-memory` | Stop | `.devflow/memory/.pending-turns.jsonl` | Captures assistant turns to queue. Throttled (skips if <2min fresh). Spawns background updater. |
+| `background-memory-update` | (background) | `.devflow/memory/WORKING-MEMORY.md` | Queue-based updater spawned by stop-update-memory. Reads queued turns + git state, writes WORKING-MEMORY.md via `claude -p --model haiku`. |
 | `session-start-memory` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. Injects pre-compact snapshot when compaction occurred mid-session. |
-| `pre-compact-memory` | PreCompact | `.memory/backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
-| `session-end-knowledge-refresh` | SessionEnd | `.features/index.json` | Checks for stale feature knowledge bases. Throttled (<2h). Spawns background-knowledge-refresh. |
-| `background-knowledge-refresh` | (background) | `.features/{slug}/KNOWLEDGE.md` | Knowledge base refresher. Up to 3 stale knowledge bases via `claude -p --model sonnet`. |
+| `pre-compact-memory` | PreCompact | `.devflow/memory/backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
+| `session-end-knowledge-refresh` | SessionEnd | `.devflow/features/index.json` | Checks for stale feature knowledge bases. Throttled (<2h). Spawns background-knowledge-refresh. |
+| `background-knowledge-refresh` | (background) | `.devflow/features/{slug}/KNOWLEDGE.md` | Knowledge base refresher. Up to 3 stale knowledge bases via `claude -p --model sonnet`. |
 
-**Flow**: User sends prompt → UserPromptSubmit hook (prompt-capture-memory) appends user turn to `.memory/.pending-turns.jsonl`. Session ends → Stop hook appends assistant turn to queue, checks throttle (skips if <2min fresh), spawns background updater → background updater reads queued turns + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
+**Flow**: User sends prompt → UserPromptSubmit hook (prompt-capture-memory) appends user turn to `.devflow/memory/.pending-turns.jsonl`. Session ends → Stop hook appends assistant turn to queue, checks throttle (skips if <2min fresh), spawns background updater → background updater reads queued turns + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
 
 `devflow memory --disable` removes all four hooks. Use `devflow memory --clear` to clean up pending queue files (`.pending-turns.jsonl`, `.pending-turns.processing`) across all projects.
 
-Hooks auto-create `.memory/` on first run — no manual setup needed per project.
+Hooks auto-create `.devflow/` on first run — no manual setup needed per project.
 
 ## Project Knowledge
 
-Knowledge files in `.memory/decisions/` capture decisions and pitfalls that agents can't rediscover at runtime:
+Knowledge files in `.devflow/decisions/` capture decisions and pitfalls that agents can't rediscover at runtime:
 
 | File | Format | Source | Purpose |
 |------|--------|--------|---------|

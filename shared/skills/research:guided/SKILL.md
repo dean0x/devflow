@@ -20,5 +20,5 @@ Direct main-session research for GUIDED depth. Load decisions, infer types, spaw
    | technology | devflow:research-technology |
 
 3. **Check tool availability** — If WebSearch/WebFetch are not available, restrict to `codebase` type only. Inform user that external research is not available in this session.
-4. **Spawn 1-2 Researcher agents** with OUTPUT_PATH to `.docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/` and DECISIONS_CONTEXT from step 1.
+4. **Spawn 1-2 Researcher agents** with OUTPUT_PATH to `.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/` and DECISIONS_CONTEXT from step 1.
 5. **Present findings** with trust annotations (trusted/untrusted/mixed per finding).
