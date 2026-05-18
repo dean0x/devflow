@@ -5,6 +5,7 @@
 # Also bootstraps a minimal WORKING-MEMORY.md if none exists yet, so SessionStart
 # has something to inject after compaction.
 # PreCompact hooks cannot block compaction — this is informational only.
+# Paths: .devflow/memory/backup.json, .devflow/memory/WORKING-MEMORY.md
 
 set -e
 
@@ -19,8 +20,9 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-MEMORY_DIR="$CWD/.memory"
-SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 
 # Check sidecar config — single source of truth for memory enabled/disabled (ADR-001 clean break).
 # The legacy .working-memory-disabled sentinel is not checked: sidecar config supersedes it.
@@ -30,8 +32,8 @@ if [ -f "$SIDECAR_CONFIG" ]; then
   [ "$MEMORY_ENABLED" = "false" ] && exit 0
 fi
 
-# Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
-source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore" "$CWD" || exit 0
+# Auto-create .devflow/ and ensure .gitignore entries (idempotent after first run)
+source "$(cd "$(dirname "$0")" && pwd)/ensure-devflow-init" "$CWD" || exit 0
 
 BACKUP_FILE="$MEMORY_DIR/backup.json"
 

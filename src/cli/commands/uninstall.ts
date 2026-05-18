@@ -18,7 +18,6 @@ import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
 import { stripFlags, stripViewMode } from '../utils/flags.js';
-import { getDocsDir, getMemoryDir } from '../utils/project-paths.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -118,7 +117,7 @@ async function isDevFlowInstalled(claudeDir: string): Promise<boolean> {
 
 export const uninstallCommand = new Command('uninstall')
   .description('Uninstall Devflow from Claude Code')
-  .option('--keep-docs', 'Keep .docs/ directory and documentation')
+  .option('--keep-docs', 'Keep .devflow/ directory and project data')
   .option('--scope <type>', 'Uninstall from specific scope only (default: auto-detect all)', /^(user|local)$/i)
   .option('--plugin <names>', 'Uninstall specific plugin(s), comma-separated (e.g., implement,review)')
   .option('--verbose', 'Show detailed uninstall output')
@@ -214,10 +213,8 @@ export const uninstallCommand = new Command('uninstall')
       // Detect extras that would be cleaned up (full uninstall only)
       const extras: string[] = [];
       if (!isSelectiveUninstall) {
-        const docsDir = getDocsDir(process.cwd());
-        const memoryDir = getMemoryDir(process.cwd());
-        try { await fs.access(docsDir); extras.push('.docs/'); } catch { /* noop */ }
-        try { await fs.access(memoryDir); extras.push('.memory/'); } catch { /* noop */ }
+        const devflowDataDir = path.join(process.cwd(), '.devflow');
+        try { await fs.access(devflowDataDir); extras.push('.devflow/'); } catch { /* noop */ }
         extras.push('hooks in settings.json', 'scripts in ~/.devflow/');
       }
 
@@ -299,73 +296,38 @@ export const uninstallCommand = new Command('uninstall')
     if (!isSelectiveUninstall) {
       const gitRoot = await getGitRoot();
 
-      // 1. .docs/ directory
-      const docsDir = getDocsDir(process.cwd());
-      let docsExist = false;
+      // 1. .devflow/ data directory (contains docs/, memory/, decisions/, features/, etc.)
+      const devflowDataDir = path.join(process.cwd(), '.devflow');
+      let devflowDataExists = false;
       try {
-        await fs.access(docsDir);
-        docsExist = true;
-      } catch { /* .docs doesn't exist */ }
+        await fs.access(devflowDataDir);
+        devflowDataExists = true;
+      } catch { /* .devflow doesn't exist */ }
 
-      if (docsExist) {
-        let shouldRemoveDocs = false;
+      if (devflowDataExists) {
+        let shouldRemoveDevflow = false;
 
         if (options.keepDocs) {
-          shouldRemoveDocs = false;
+          shouldRemoveDevflow = false;
         } else if (process.stdin.isTTY) {
-          const removeDocs = await p.confirm({
-            message: '.docs/ directory found. Remove project documentation?',
+          const removeDevflow = await p.confirm({
+            message: '.devflow/ directory found. Remove project data (docs, memory, decisions)?',
             initialValue: false,
           });
 
-          if (p.isCancel(removeDocs)) {
+          if (p.isCancel(removeDevflow)) {
             p.cancel('Uninstall cancelled.');
             process.exit(0);
           }
 
-          shouldRemoveDocs = removeDocs;
+          shouldRemoveDevflow = removeDevflow;
         }
 
-        if (shouldRemoveDocs) {
-          await fs.rm(docsDir, { recursive: true, force: true });
-          p.log.success('.docs/ removed');
+        if (shouldRemoveDevflow) {
+          await fs.rm(devflowDataDir, { recursive: true, force: true });
+          p.log.success('.devflow/ removed');
         } else {
-          p.log.info('.docs/ preserved');
-        }
-      }
-
-      // 2. .memory/ directory
-      const memoryDir = getMemoryDir(process.cwd());
-      let memoryExist = false;
-      try {
-        await fs.access(memoryDir);
-        memoryExist = true;
-      } catch { /* .memory doesn't exist */ }
-
-      if (memoryExist) {
-        let shouldRemoveMemory = false;
-
-        if (options.keepDocs) {
-          shouldRemoveMemory = false;
-        } else if (process.stdin.isTTY) {
-          const removeMemory = await p.confirm({
-            message: '.memory/ directory found. Remove working memory files?',
-            initialValue: false,
-          });
-
-          if (p.isCancel(removeMemory)) {
-            p.cancel('Uninstall cancelled.');
-            process.exit(0);
-          }
-
-          shouldRemoveMemory = removeMemory;
-        }
-
-        if (shouldRemoveMemory) {
-          await fs.rm(memoryDir, { recursive: true, force: true });
-          p.log.success('.memory/ removed');
-        } else {
-          p.log.info('.memory/ preserved');
+          p.log.info('.devflow/ preserved');
         }
       }
 

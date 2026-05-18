@@ -25,7 +25,7 @@ if (!path.isAbsolute(rawCwd)) {
 const cwd = path.resolve(rawCwd);
 
 const memoryDir = getMemoryDir(cwd);
-if (!fs.existsSync(memoryDir)) process.exit(0); // no .memory dir — nothing to scan
+if (!fs.existsSync(memoryDir)) process.exit(0); // no .devflow/memory dir — nothing to scan
 
 // Skip if decisions feature is disabled (sentinel file)
 if (fs.existsSync(getDecisionsDisabledSentinel(cwd))) process.exit(0);

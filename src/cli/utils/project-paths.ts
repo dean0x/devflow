@@ -8,8 +8,9 @@
  * All construction uses `path.join()` — no string concatenation.
  *
  * ARCHITECTURE: This module is the single source of truth for path layout.
- * PR 5b (the directory move) will flip the return values here; every consumer
- * will automatically pick up the new paths without further changes.
+ * PR 5b flipped these return values from the old .memory/.features/.docs layout
+ * to the new consolidated .devflow/ layout. Every consumer automatically picks
+ * up the new paths without further changes.
  *
  * CJS COUNTERPART: scripts/hooks/lib/project-paths.cjs must mirror this file
  * exactly. Keep them in sync when adding or changing functions.
@@ -21,238 +22,238 @@ import * as path from 'path';
 // Core directories
 // ---------------------------------------------------------------------------
 
-/** .memory/ — working memory root */
+/** .devflow/memory/ — working memory root */
 export function getMemoryDir(projectRoot: string): string {
-  return path.join(projectRoot, '.memory');
+  return path.join(projectRoot, '.devflow', 'memory');
 }
 
-/** .memory/.sidecar/ — sidecar state directory */
+/** .devflow/sidecar/ — sidecar state directory (promoted from .memory/.sidecar/) */
 export function getSidecarDir(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.sidecar');
+  return path.join(projectRoot, '.devflow', 'sidecar');
 }
 
-/** .memory/decisions/ — decisions and pitfalls subdirectory */
+/** .devflow/decisions/ — decisions and pitfalls subdirectory (promoted from .memory/decisions/) */
 export function getDecisionsDir(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'decisions');
+  return path.join(projectRoot, '.devflow', 'decisions');
 }
 
-/** .features/ — per-feature knowledge bases */
+/** .devflow/features/ — per-feature knowledge bases (promoted from .features/) */
 export function getFeaturesDir(projectRoot: string): string {
-  return path.join(projectRoot, '.features');
+  return path.join(projectRoot, '.devflow', 'features');
 }
 
-/** .docs/ — generated documentation artifacts */
+/** .devflow/docs/ — generated documentation artifacts (promoted from .docs/) */
 export function getDocsDir(projectRoot: string): string {
-  return path.join(projectRoot, '.docs');
+  return path.join(projectRoot, '.devflow', 'docs');
 }
 
 // ---------------------------------------------------------------------------
 // Sidecar files
 // ---------------------------------------------------------------------------
 
-/** .memory/.sidecar/config.json — sidecar feature config */
+/** .devflow/sidecar/config.json — sidecar feature config */
 export function getSidecarConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.sidecar', 'config.json');
+  return path.join(projectRoot, '.devflow', 'sidecar', 'config.json');
 }
 
 // ---------------------------------------------------------------------------
 // Decisions files
 // ---------------------------------------------------------------------------
 
-/** .memory/decisions/decisions.md */
+/** .devflow/decisions/decisions.md */
 export function getDecisionsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'decisions', 'decisions.md');
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions.md');
 }
 
-/** .memory/decisions/pitfalls.md */
+/** .devflow/decisions/pitfalls.md */
 export function getPitfallsFilePath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'decisions', 'pitfalls.md');
+  return path.join(projectRoot, '.devflow', 'decisions', 'pitfalls.md');
 }
 
-/** .memory/decisions/.disabled — sentinel that gates decisions sections */
+/** .devflow/decisions/.disabled — sentinel that gates decisions sections */
 export function getDecisionsDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'decisions', '.disabled');
+  return path.join(projectRoot, '.devflow', 'decisions', '.disabled');
 }
 
-/** .memory/decisions.json — project-level decisions config */
+/** .devflow/decisions/decisions.json — project-level decisions config */
 export function getDecisionsConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'decisions.json');
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions.json');
 }
 
-/** .memory/decisions-log.jsonl */
+/** .devflow/decisions/decisions-log.jsonl */
 export function getDecisionsLogPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'decisions-log.jsonl');
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.jsonl');
 }
 
-/** .memory/.decisions-manifest.json */
+/** .devflow/decisions/.decisions-manifest.json */
 export function getDecisionsManifestPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.decisions-manifest.json');
+  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-manifest.json');
 }
 
-/** .memory/.decisions.lock — mkdir-based lock directory */
+/** .devflow/decisions/.decisions.lock — mkdir-based lock directory */
 export function getDecisionsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.decisions.lock');
+  return path.join(projectRoot, '.devflow', 'decisions', '.decisions.lock');
 }
 
-/** .memory/.decisions-usage.json */
+/** .devflow/decisions/.decisions-usage.json */
 export function getDecisionsUsagePath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.decisions-usage.json');
+  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.json');
 }
 
-/** .memory/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
+/** .devflow/decisions/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
 export function getDecisionsUsageLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.decisions-usage.lock');
+  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.lock');
 }
 
-/** .memory/.decisions-notifications.json */
+/** .devflow/decisions/.decisions-notifications.json */
 export function getDecisionsNotificationsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.decisions-notifications.json');
+  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-notifications.json');
 }
 
-/** .memory/.decisions-runs-today */
+/** .devflow/decisions/.decisions-runs-today */
 export function getDecisionsRunsTodayPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.decisions-runs-today');
+  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-runs-today');
 }
 
-/** .memory/.decisions-batch-ids */
+/** .devflow/decisions/.decisions-batch-ids */
 export function getDecisionsBatchIdsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.decisions-batch-ids');
+  return path.join(projectRoot, '.devflow', 'decisions', '.decisions-batch-ids');
 }
 
 // ---------------------------------------------------------------------------
 // Learning files
 // ---------------------------------------------------------------------------
 
-/** .memory/learning-log.jsonl */
+/** .devflow/learning/learning-log.jsonl */
 export function getLearningLogPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'learning-log.jsonl');
+  return path.join(projectRoot, '.devflow', 'learning', 'learning-log.jsonl');
 }
 
-/** .memory/learning.json — project-level learning config */
+/** .devflow/learning/learning.json — project-level learning config */
 export function getLearningConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'learning.json');
+  return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
 }
 
-/** .memory/.learning-manifest.json */
+/** .devflow/learning/.learning-manifest.json */
 export function getLearningManifestPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.learning-manifest.json');
+  return path.join(projectRoot, '.devflow', 'learning', '.learning-manifest.json');
 }
 
-/** .memory/.learning-notified-at */
+/** .devflow/learning/.learning-notified-at */
 export function getLearningNotifiedAtPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.learning-notified-at');
+  return path.join(projectRoot, '.devflow', 'learning', '.learning-notified-at');
 }
 
-/** .memory/.learning-notifications.json */
+/** .devflow/learning/.learning-notifications.json */
 export function getLearningNotificationsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.learning-notifications.json');
+  return path.join(projectRoot, '.devflow', 'learning', '.learning-notifications.json');
 }
 
-/** .memory/.learning-runs-today */
+/** .devflow/learning/.learning-runs-today */
 export function getLearningRunsTodayPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.learning-runs-today');
+  return path.join(projectRoot, '.devflow', 'learning', '.learning-runs-today');
 }
 
-/** .memory/.learning-session-count */
+/** .devflow/learning/.learning-session-count */
 export function getLearningSessionCountPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.learning-session-count');
+  return path.join(projectRoot, '.devflow', 'learning', '.learning-session-count');
 }
 
-/** .memory/.learning-batch-ids */
+/** .devflow/learning/.learning-batch-ids */
 export function getLearningBatchIdsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.learning-batch-ids');
+  return path.join(projectRoot, '.devflow', 'learning', '.learning-batch-ids');
 }
 
-/** .memory/.learning-disabled — sentinel that gates learning sections */
+/** .devflow/memory/.learning-disabled — sentinel that gates learning sections */
 export function getLearningDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.learning-disabled');
+  return path.join(projectRoot, '.devflow', 'memory', '.learning-disabled');
 }
 
 // ---------------------------------------------------------------------------
 // Memory / working-memory files
 // ---------------------------------------------------------------------------
 
-/** .memory/.working-memory-disabled — sentinel that gates all 4 memory hooks */
+/** .devflow/memory/.working-memory-disabled — sentinel that gates all 4 memory hooks */
 export function getWorkingMemoryDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.working-memory-disabled');
+  return path.join(projectRoot, '.devflow', 'memory', '.working-memory-disabled');
 }
 
-/** .memory/WORKING-MEMORY.md */
+/** .devflow/memory/WORKING-MEMORY.md */
 export function getWorkingMemoryPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'WORKING-MEMORY.md');
+  return path.join(projectRoot, '.devflow', 'memory', 'WORKING-MEMORY.md');
 }
 
-/** .memory/backup.json — pre-compact git state snapshot */
+/** .devflow/memory/backup.json — pre-compact git state snapshot */
 export function getBackupPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', 'backup.json');
+  return path.join(projectRoot, '.devflow', 'memory', 'backup.json');
 }
 
-/** .memory/.pending-turns.jsonl — queue of captured turns */
+/** .devflow/memory/.pending-turns.jsonl — queue of captured turns */
 export function getPendingTurnsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.pending-turns.jsonl');
+  return path.join(projectRoot, '.devflow', 'memory', '.pending-turns.jsonl');
 }
 
-/** .memory/.pending-turns.processing — atomic handoff during processing */
+/** .devflow/memory/.pending-turns.processing — atomic handoff during processing */
 export function getPendingTurnsProcessingPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.pending-turns.processing');
+  return path.join(projectRoot, '.devflow', 'memory', '.pending-turns.processing');
 }
 
-/** .memory/.pending-turns.lock — mutex for queue operations */
+/** .devflow/memory/.pending-turns.lock — mutex for queue operations */
 export function getPendingTurnsLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.pending-turns.lock');
+  return path.join(projectRoot, '.devflow', 'memory', '.pending-turns.lock');
 }
 
 // ---------------------------------------------------------------------------
 // Features / knowledge files
 // ---------------------------------------------------------------------------
 
-/** .features/index.json */
+/** .devflow/features/index.json */
 export function getFeaturesIndexPath(projectRoot: string): string {
-  return path.join(projectRoot, '.features', 'index.json');
+  return path.join(projectRoot, '.devflow', 'features', 'index.json');
 }
 
-/** .features/{slug}/KNOWLEDGE.md */
+/** .devflow/features/{slug}/KNOWLEDGE.md */
 export function getKnowledgePath(projectRoot: string, slug: string): string {
-  return path.join(projectRoot, '.features', slug, 'KNOWLEDGE.md');
+  return path.join(projectRoot, '.devflow', 'features', slug, 'KNOWLEDGE.md');
 }
 
-/** .features/.disabled — sentinel that gates knowledge phase/refresh */
+/** .devflow/features/.disabled — sentinel that gates knowledge phase/refresh */
 export function getFeaturesDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.features', '.disabled');
+  return path.join(projectRoot, '.devflow', 'features', '.disabled');
 }
 
-/** .features/.knowledge.lock — transient lock directory for concurrent index writes */
+/** .devflow/features/.knowledge.lock — transient lock directory for concurrent index writes */
 export function getFeaturesLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.features', '.knowledge.lock');
+  return path.join(projectRoot, '.devflow', 'features', '.knowledge.lock');
 }
 
-/** .features/.knowledge-last-refresh — timestamp of last auto-refresh */
+/** .devflow/features/.knowledge-last-refresh — timestamp of last auto-refresh */
 export function getFeaturesLastRefreshPath(projectRoot: string): string {
-  return path.join(projectRoot, '.features', '.knowledge-last-refresh');
+  return path.join(projectRoot, '.devflow', 'features', '.knowledge-last-refresh');
 }
 
 // ---------------------------------------------------------------------------
 // Docs files
 // ---------------------------------------------------------------------------
 
-/** .docs/reviews/ */
+/** .devflow/docs/reviews/ */
 export function getReviewsDir(projectRoot: string): string {
-  return path.join(projectRoot, '.docs', 'reviews');
+  return path.join(projectRoot, '.devflow', 'docs', 'reviews');
 }
 
-/** .docs/design/ */
+/** .devflow/docs/design/ */
 export function getDesignDir(projectRoot: string): string {
-  return path.join(projectRoot, '.docs', 'design');
+  return path.join(projectRoot, '.devflow', 'docs', 'design');
 }
 
-/** .docs/research/ */
+/** .devflow/docs/research/ */
 export function getResearchDir(projectRoot: string): string {
-  return path.join(projectRoot, '.docs', 'research');
+  return path.join(projectRoot, '.devflow', 'docs', 'research');
 }
 
-/** .docs/handoff-{branchSlug}.md — coder phase handoff artifact */
+/** .devflow/docs/handoff-{branchSlug}.md — coder phase handoff artifact */
 export function getHandoffPath(projectRoot: string, branchSlug: string): string {
-  return path.join(projectRoot, '.docs', `handoff-${branchSlug}.md`);
+  return path.join(projectRoot, '.devflow', 'docs', `handoff-${branchSlug}.md`);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,17 +262,11 @@ export function getHandoffPath(projectRoot: string, branchSlug: string): string 
 
 /**
  * The canonical list of gitignore entries for a Devflow local-scope install.
- * Centralised here so PR 5b only changes this array, not every call-site.
+ * After PR 5b, .devflow/ is NOT gitignored because it holds committed content
+ * (features/, decisions/decisions.md, decisions/pitfalls.md). Only .claude/
+ * remains as an install-scope gitignore entry. Internal .devflow/ transients
+ * are handled by .devflow/.gitignore.
  */
 export function getGitignoreEntries(): string[] {
-  return [
-    '.claude/',
-    '.devflow/',
-    '.memory/',
-    '.docs/',
-    '.features/.knowledge.lock',
-    '.features/.disabled',
-    '.features/.knowledge-last-refresh',
-    '.features/.knowledge-refresh.lock',
-  ];
+  return ['.claude/'];
 }

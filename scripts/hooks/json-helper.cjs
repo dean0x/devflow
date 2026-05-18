@@ -266,18 +266,17 @@ function countActiveHeadings(content, entryType) {
  * Skips scanning when `logMap` contains no `ready` observations — there is nothing to
  * pair with, so the I/O would be wasted (P2).
  *
- * @param {string} memoryDir - Path to .memory dir
+ * @param {string} projectRoot - Path to project root (cwd)
  * @param {Set<string>} managedAnchors - Anchor IDs already tracked in the manifest
  * @param {Map<string,Object>} logMap - Current observation log keyed by obs ID
  * @returns {Array<{anchorId: string, type: string, path: string, headingText: string, fileContent: string}>}
  */
-function findUnmanagedAnchors(memoryDir, managedAnchors, logMap) {
+function findUnmanagedAnchors(projectRoot, managedAnchors, logMap) {
   // P2: short-circuit when no ready observations exist — nothing can be healed.
   if (!Array.from(logMap.values()).some(o => o.status === 'ready')) return [];
 
   // Use only literal (non-dynamic) regexes to avoid ReDoS surface on tainted data.
   // prefix values are hardcoded: 'ADR' for decisions, 'PF' for pitfalls.
-  const projectRoot = path.dirname(memoryDir);
   const result = [];
   const files = [
     { file: getDecisionsFilePath(projectRoot), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
@@ -305,12 +304,12 @@ function findUnmanagedAnchors(memoryDir, managedAnchors, logMap) {
 }
 
 /**
- * Read .decisions-usage.json from .memory dir. Returns {version, entries} or empty default.
- * @param {string} memoryDir
+ * Read .decisions-usage.json. Returns {version, entries} or empty default.
+ * @param {string} projectRoot - Path to project root (cwd)
  * @returns {{version: number, entries: Object}}
  */
-function readUsageFile(memoryDir) {
-  const filePath = getDecisionsUsagePath(path.dirname(memoryDir));
+function readUsageFile(projectRoot) {
+  const filePath = getDecisionsUsagePath(projectRoot);
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const data = JSON.parse(raw);
@@ -321,29 +320,29 @@ function readUsageFile(memoryDir) {
 
 /**
  * Write .decisions-usage.json atomically.
- * @param {string} memoryDir
+ * @param {string} projectRoot - Path to project root (cwd)
  * @param {{version: number, entries: Object}} data
  */
-function writeUsageFile(memoryDir, data) {
-  writeFileAtomic(getDecisionsUsagePath(path.dirname(memoryDir)), JSON.stringify(data, null, 2) + '\n');
+function writeUsageFile(projectRoot, data) {
+  writeFileAtomic(getDecisionsUsagePath(projectRoot), JSON.stringify(data, null, 2) + '\n');
 }
 
 /**
- * Read .decisions-notifications.json from .memory dir.
- * @param {string} memoryDir
+ * Read .decisions-notifications.json.
+ * @param {string} projectRoot - Path to project root (cwd)
  * @returns {Object}
  */
-function readNotifications(memoryDir) {
-  return readNotificationsFromPath(getDecisionsNotificationsPath(path.dirname(memoryDir)));
+function readNotifications(projectRoot) {
+  return readNotificationsFromPath(getDecisionsNotificationsPath(projectRoot));
 }
 
 /**
  * Write .decisions-notifications.json atomically.
- * @param {string} memoryDir
+ * @param {string} projectRoot - Path to project root (cwd)
  * @param {Object} data
  */
-function writeNotifications(memoryDir, data) {
-  writeNotificationsToPath(getDecisionsNotificationsPath(path.dirname(memoryDir)), data);
+function writeNotifications(projectRoot, data) {
+  writeNotificationsToPath(getDecisionsNotificationsPath(projectRoot), data);
 }
 
 /**
@@ -418,14 +417,14 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
  * D21/D22/D24/D28: Update notifications file after a decisions entry is appended.
  * Handles first-run seed, threshold crossing, severity escalation, and re-fire on dismiss.
  *
- * @param {string} memoryDir - Path to .memory directory
+ * @param {string} projectRoot - Path to project root (cwd)
  * @param {string} notifKey - e.g. 'decisions-capacity-decisions'
  * @param {number} previousCount - Active count before the append
  * @param {number} newCount - Active count after the append
  * @param {string} [notifFilePath] - Optional full path to notifications file.
  */
-function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, notifFilePath) {
-  const effectiveNotifPath = notifFilePath || getDecisionsNotificationsPath(path.dirname(memoryDir));
+function updateCapacityNotification(projectRoot, notifKey, previousCount, newCount, notifFilePath) {
+  const effectiveNotifPath = notifFilePath || getDecisionsNotificationsPath(projectRoot);
   const notifications = readNotificationsFromPath(effectiveNotifPath);
   const existingNotif = notifications[notifKey];
 
@@ -465,38 +464,38 @@ function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount
 
 /**
  * D20: Register an entry in .decisions-usage.json with initial cite count.
- * @param {string} memoryDir
+ * @param {string} projectRoot - Path to project root (cwd)
  * @param {string} anchorId - e.g. 'ADR-001' or 'PF-003'
  */
-function registerUsageEntry(memoryDir, anchorId) {
-  const data = readUsageFile(memoryDir);
+function registerUsageEntry(projectRoot, anchorId) {
+  const data = readUsageFile(projectRoot);
   if (!data.entries[anchorId]) {
     data.entries[anchorId] = {
       cites: 0,
       last_cited: null,
       created: new Date().toISOString(),
     };
-    writeUsageFile(memoryDir, data);
+    writeUsageFile(projectRoot, data);
   }
 }
 
 /**
  * Acquire .decisions-usage.lock with a 2-second timeout.
  * Separate from .decisions.lock to avoid blocking decisions writes.
- * @param {string} memoryDir
+ * @param {string} projectRoot - Path to project root (cwd)
  * @returns {boolean}
  */
-function acquireDecisionsUsageLock(memoryDir) {
-  const lockDir = getDecisionsUsageLockDir(path.dirname(memoryDir));
+function acquireDecisionsUsageLock(projectRoot) {
+  const lockDir = getDecisionsUsageLockDir(projectRoot);
   return acquireMkdirLock(lockDir, 2000, 5000);
 }
 
 /**
  * Release .decisions-usage.lock.
- * @param {string} memoryDir
+ * @param {string} projectRoot - Path to project root (cwd)
  */
-function releaseDecisionsUsageLock(memoryDir) {
-  const lockDir = getDecisionsUsageLockDir(path.dirname(memoryDir));
+function releaseDecisionsUsageLock(projectRoot) {
+  const lockDir = getDecisionsUsageLockDir(projectRoot);
   releaseLock(lockDir);
 }
 
@@ -1381,7 +1380,6 @@ try {
               // D18: count only active (non-deprecated/superseded) headings for capacity check
               const previousCount = countActiveHeadings(existingContent, obs.type);
 
-              const memoryDir = getMemoryDir(baseDir);
               const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
 
               // D17: hard ceiling at DECISIONS_HARD_CEILING (100); softCapExceeded repurposed
@@ -1482,11 +1480,11 @@ try {
               writeFileAtomic(decisionsFile, updatedContent);
 
               // D20: register in usage tracking so cite counts start at 0
-              registerUsageEntry(memoryDir, anchorId);
+              registerUsageEntry(baseDir, anchorId);
 
               // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
               const renderNotifPath = notifPathOverride || undefined;
-              updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, renderNotifPath);
+              updateCapacityNotification(baseDir, notifKey, previousCount, newCount, renderNotifPath);
 
               obs.status = 'created';
               obs.artifact_path = `${decisionsFile}#${anchorId}`;
@@ -1642,10 +1640,9 @@ try {
         // anchors not tracked in the manifest, then matching them against ready log
         // observations with a matching normalised pattern.
         // DESIGN: D-D — skip silently when zero or multiple log entries match (ambiguity guard).
-        const memoryDir = getMemoryDir(cwd);
         const managedAnchors = new Set(keptEntries.filter(e => e.anchorId).map(e => e.anchorId));
         // P2 early-exit is inside findUnmanagedAnchors; pass logMap so it can check.
-        const unmanaged = findUnmanagedAnchors(memoryDir, managedAnchors, logMap);
+        const unmanaged = findUnmanagedAnchors(cwd, managedAnchors, logMap);
         for (const u of unmanaged) {
           const headingNorm = normalizeForDedup(u.headingText);
           const candidates = Array.from(logMap.values()).filter(o =>
@@ -1663,7 +1660,7 @@ try {
             contentHash: contentHash(section ?? u.headingText),
             renderedAt: new Date().toISOString(), anchorId: u.anchorId,
           });
-          registerUsageEntry(memoryDir, u.anchorId);
+          registerUsageEntry(cwd, u.anchorId);
           counters.healed++;
           learningLog(`reconcile: healed ${obs.id} → ${u.anchorId}`);
         }
@@ -1886,13 +1883,13 @@ try {
         writeFileAtomic(decisionsFile, updatedContent);
 
         // D20: register in usage tracking so cite counts start at 0
-        registerUsageEntry(memoryDir, anchorId);
+        registerUsageEntry(projectRoot, anchorId);
 
         // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
         // Write to .decisions-notifications.json — decisions-append owns the decisions/pitfalls pipeline.
         const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
         const decisionsNotifPath = getDecisionsNotificationsPath(projectRoot);
-        updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount, decisionsNotifPath);
+        updateCapacityNotification(projectRoot, notifKey, previousCount, newActiveCount, decisionsNotifPath);
 
         console.log(JSON.stringify({ anchorId, file: decisionsFile }));
       } finally {

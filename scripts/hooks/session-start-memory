@@ -2,7 +2,7 @@
 
 # SessionStart Hook
 # Injects working memory as additionalContext.
-# Memory: restores .memory/WORKING-MEMORY.md + git state + compact recovery.
+# Memory: restores .devflow/memory/WORKING-MEMORY.md + git state + compact recovery.
 
 set -e
 
@@ -18,8 +18,9 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
-MEMORY_DIR="$CWD/.memory"
-SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 
 # Check sidecar config — single source of truth for memory enabled/disabled.
 # The legacy .working-memory-disabled sentinel is intentionally NOT checked here:

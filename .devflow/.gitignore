@@ -1,0 +1,38 @@
+# Per-developer session state (fully transient)
+memory/
+
+# Sidecar dispatch system (fully transient)
+sidecar/
+
+# Per-developer observation logs and transient state
+learning/learning-log.jsonl
+learning/learning-log.v1.jsonl.bak
+learning/.learning-manifest.json
+learning/.learning.lock/
+learning/.learning-notified-at
+learning/.learning-notifications.json
+
+# Per-developer decisions observation log and transient state
+decisions/decisions-log.jsonl
+decisions/.decisions-manifest.json
+decisions/.decisions.lock/
+decisions/.decisions-usage.json
+decisions/.decisions-usage.lock/
+decisions/.decisions-notifications.json
+
+# Ephemeral doc artifacts
+docs/handoff-*.md
+docs/reviews/*/.last-review-head
+
+# Transient files in features
+features/.knowledge.lock/
+features/.knowledge-last-refresh
+features/.knowledge-refresh.lock
+features/.disabled
+features/.gitignore-configured
+
+# Install state (local-scope only)
+manifest.json
+
+# Init marker
+.gitignore-configured

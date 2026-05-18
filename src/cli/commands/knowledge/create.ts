@@ -47,12 +47,12 @@ export async function handleCreate(slug: string): Promise<void> {
     `DECISIONS_CONTEXT: ${decisionsContext}`,
     ``,
     `STEP 1: Load the devflow:feature-knowledge skill using the Skill tool (skill: "devflow:feature-knowledge").`,
-    `STEP 2: Read .features/index.json (if it exists) to see what other knowledge bases exist for cross-referencing.`,
+    `STEP 2: Read .devflow/features/index.json (if it exists) to see what other knowledge bases exist for cross-referencing.`,
     `STEP 3: Execute the skill's 4-phase process (Scan → Extract → Distill → Forge) exactly as specified.`,
     `  - You have no pre-computed exploration outputs — perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract).`,
     `  - Use DECISIONS_CONTEXT to cross-reference ADR/PF entries in the Related section.`,
     ``,
-    `After writing KNOWLEDGE.md, write .features/${slug}/.create-result.json with:`,
+    `After writing KNOWLEDGE.md, write .devflow/features/${slug}/.create-result.json with:`,
     `{`,
     `  "referencedFiles": [<5-10 key files from the explored directories for staleness tracking>],`,
     `  "description": "<one-line description starting with 'Use when' for relevance matching>"`,
@@ -74,7 +74,7 @@ export async function handleCreate(slug: string): Promise<void> {
     });
 
     s.stop('Knowledge base created successfully');
-    p.log.success(`Knowledge base written to .features/${slug}/KNOWLEDGE.md`);
+    p.log.success(`Knowledge base written to .devflow/features/${slug}/KNOWLEDGE.md`);
   } catch (err) {
     s.stop('Knowledge base creation failed');
     p.log.error(`claude exited with error: ${err instanceof Error ? err.message : String(err)}`);

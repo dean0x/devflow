@@ -1122,8 +1122,8 @@ export const initCommand = new Command('init')
     } catch { /* settings.json may not exist yet */ }
 
 
-    // Create .features/ directory with empty index (feature knowledge bases)
-    // .features/ is committed to the project repo (not scope-dependent)
+    // Create .devflow/features/ directory with empty index (feature knowledge bases)
+    // .devflow/features/ is committed to the project repo (not scope-dependent)
     if (gitRoot && knowledgeEnabled) {
       const featuresDir = getFeaturesDir(gitRoot);
       await fs.mkdir(featuresDir, { recursive: true });
@@ -1133,7 +1133,7 @@ export const initCommand = new Command('init')
       } catch {
         await fs.writeFile(featuresIndexPath, JSON.stringify({ version: 1, features: {} }, null, 2) + '\n');
         if (verbose) {
-          p.log.success('.features/index.json created');
+          p.log.success('.devflow/features/index.json created');
         }
       }
     }

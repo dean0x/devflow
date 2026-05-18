@@ -4,9 +4,9 @@
 # Always-on hook that injects decisions TL;DR and learned behaviors as additionalContext.
 # Sections are independently gated by feature sentinels — this hook itself is never disabled.
 #
-# Section 1.4: Learning manifest reconciliation (skipped if .learning-disabled)
-# Section 1.5: Decisions TL;DR (skipped if decisions/.disabled)
-# Section 1.75: Learned behaviors + new artifact notifications (skipped if .learning-disabled)
+# Section 1.4: Learning manifest reconciliation (skipped if .devflow/memory/.learning-disabled)
+# Section 1.5: Decisions TL;DR (skipped if .devflow/decisions/.disabled)
+# Section 1.75: Learned behaviors + new artifact notifications (skipped if .devflow/memory/.learning-disabled)
 
 # set -e intentionally omitted: sections 1.4, 1.5, and 1.75 are independent —
 # a failure in one must not prevent the others from running.
@@ -25,9 +25,11 @@ fi
 
 CONTEXT=""
 
-MEMORY_DIR="$CWD/.memory"
-SIDECAR_DIR="$MEMORY_DIR/.sidecar"
-DECISIONS_CONTENT_DIR="$MEMORY_DIR/decisions"
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+LEARNING_DIR="$DEVFLOW_DIR/learning"
+DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
 
 # Read sidecar config for feature state (primary source of truth)
 _SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
@@ -43,13 +45,13 @@ fi
 # Skipped if learning feature is disabled via sentinel or sidecar config.
 
 if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
-  if [ -f "$MEMORY_DIR/.learning-manifest.json" ] && [ -f "$MEMORY_DIR/learning-log.jsonl" ]; then
+  if [ -f "$LEARNING_DIR/.learning-manifest.json" ] && [ -f "$LEARNING_DIR/learning-log.jsonl" ]; then
     node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
   fi
 
   # Reconcile decisions manifest (still done here even if decisions disabled — manifest is learning's)
-  if [ -f "$MEMORY_DIR/decisions-log.jsonl" ]; then
-    node "$_JSON_HELPER" reconcile-manifest "$CWD" "$MEMORY_DIR/decisions-log.jsonl" "$MEMORY_DIR/.decisions-manifest.json" 2>/dev/null || true
+  if [ -f "$DECISIONS_CONTENT_DIR/decisions-log.jsonl" ]; then
+    node "$_JSON_HELPER" reconcile-manifest "$CWD" "$DECISIONS_CONTENT_DIR/decisions-log.jsonl" "$DECISIONS_CONTENT_DIR/.decisions-manifest.json" 2>/dev/null || true
   fi
 fi
 
@@ -57,8 +59,8 @@ fi
 # Skipped if decisions feature is disabled via sentinel.
 if [ ! -f "$DECISIONS_CONTENT_DIR/.disabled" ]; then
   DECISIONS_DIR="$DECISIONS_CONTENT_DIR"
-  # Heal older installs that have .memory/ but not .memory/decisions/
-  if [ -d "$MEMORY_DIR" ] && [ ! -d "$DECISIONS_DIR" ]; then
+  # Heal older installs that have .devflow/ but not .devflow/decisions/
+  if [ -d "$DEVFLOW_DIR" ] && [ ! -d "$DECISIONS_DIR" ]; then
     mkdir -p "$DECISIONS_DIR" 2>/dev/null || true
   fi
   if [ -d "$DECISIONS_DIR" ]; then
@@ -89,8 +91,8 @@ fi
 # Skipped if learning feature is disabled via sentinel or sidecar config.
 
 if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
-  LEARNING_LOG="$MEMORY_DIR/learning-log.jsonl"
-  NOTIFIED_MARKER="$MEMORY_DIR/.learning-notified-at"
+  LEARNING_LOG="$LEARNING_DIR/learning-log.jsonl"
+  NOTIFIED_MARKER="$LEARNING_DIR/.learning-notified-at"
 
   if [ -f "$LEARNING_LOG" ]; then
     # Single-pass extraction of created artifacts (commands + skills)

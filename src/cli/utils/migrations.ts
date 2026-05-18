@@ -4,6 +4,137 @@ import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { getMemoryDir, getFeaturesDir } from './project-paths.js';
 
+// ---------------------------------------------------------------------------
+// consolidate-to-devflow-dir helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Move src to dest, skipping when src doesn't exist or dest already exists
+ * (idempotent). Falls back to copy+delete on EXDEV (cross-device rename).
+ */
+async function moveFile(src: string, dest: string): Promise<void> {
+  // Check source exists
+  try { await fs.access(src); } catch { return; }
+  // Skip if dest already present
+  try { await fs.access(dest); return; } catch { /* dest absent, proceed */ }
+  // Ensure parent directory exists
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  try {
+    await fs.rename(src, dest);
+  } catch (err) {
+    // Cross-device: fall back to copy+delete
+    if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+      await fs.cp(src, dest, { recursive: true });
+      await fs.rm(src, { recursive: true, force: true });
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
+ * Move a directory entry-by-entry into destDir.
+ * srcDir itself is left in place (emptied); callers remove it after.
+ */
+async function moveDirContents(
+  srcDir: string,
+  destDir: string,
+  skipNames: Set<string>,
+): Promise<void> {
+  let entries: import('fs').Dirent[];
+  try {
+    entries = await fs.readdir(srcDir, { withFileTypes: true }) as import('fs').Dirent[];
+  } catch { return; }
+
+  for (const entry of entries) {
+    if (skipNames.has(entry.name)) continue;
+    const src = path.join(srcDir, entry.name);
+    const dest = path.join(destDir, entry.name);
+    await moveFile(src, dest);
+  }
+}
+
+const DEVFLOW_GITIGNORE_CONTENT = `# Per-developer session state (fully transient)
+memory/
+
+# Sidecar dispatch system (fully transient)
+sidecar/
+
+# Per-developer observation logs and transient state
+learning/learning-log.jsonl
+learning/learning-log.v1.jsonl.bak
+learning/.learning-manifest.json
+learning/.learning.lock/
+learning/.learning-notified-at
+learning/.learning-notifications.json
+
+# Per-developer decisions observation log and transient state
+decisions/decisions-log.jsonl
+decisions/.decisions-manifest.json
+decisions/.decisions.lock/
+decisions/.decisions-usage.json
+decisions/.decisions-usage.lock/
+decisions/.decisions-notifications.json
+
+# Ephemeral doc artifacts
+docs/handoff-*.md
+docs/reviews/*/.last-review-head
+
+# Transient files in features
+features/.knowledge.lock/
+features/.knowledge-last-refresh
+features/.knowledge-refresh.lock
+features/.disabled
+features/.gitignore-configured
+
+# Install state (local-scope only)
+manifest.json
+
+# Init marker
+.gitignore-configured
+`;
+
+/** Known legacy / V1 files in .memory/ that must NOT be migrated. */
+const MEMORY_SKIP_FILES = new Set([
+  'knowledge',                        // pre-rename V1 decisions dir
+  'short',                            // V1 format
+  'index.md',                         // V1 format
+  'candidates.json',                  // V1 format
+  '.knowledge-usage.json',            // pre-rename
+  '.working-memory-last-trigger',     // obsolete
+  '.working-memory-update.log',       // old log
+  '.gitignore-configured',            // replaced
+  // Explicit files handled by mapped moves below — exclude from catch-all
+  'WORKING-MEMORY.md',
+  'backup.json',
+  '.pending-turns.jsonl',
+  '.pending-turns.processing',
+  '.pending-turns.lock',
+  '.learning-disabled',
+  '.working-memory-disabled',
+  '.sidecar',
+  'decisions',
+  'decisions-log.jsonl',
+  'decisions.json',
+  '.decisions-manifest.json',
+  '.decisions.lock',
+  '.decisions-usage.json',
+  '.decisions-usage.lock',
+  '.decisions-notifications.json',
+  '.decisions-runs-today',
+  '.decisions-batch-ids',
+  'learning-log.jsonl',
+  'learning.json',
+  '.learning-manifest.json',
+  '.learning-notified-at',
+  '.learning-notifications.json',
+  '.learning-runs-today',
+  '.learning-session-count',
+  '.learning-batch-ids',
+  'debug',
+  'working',
+]);
+
 /**
  * @file migrations.ts
  *
@@ -181,6 +312,140 @@ const MIGRATION_RENAME_KB_TO_KNOWLEDGE: Migration<'per-project'> = {
 };
 
 /**
+ * Moves .memory/, .features/, and .docs/ into .devflow/ subdirectories.
+ * Idempotent and resumable: each file/dir move skips if destination exists.
+ *
+ * Layout after migration:
+ *   .devflow/memory/    — working memory files
+ *   .devflow/sidecar/   — promoted from .memory/.sidecar/
+ *   .devflow/decisions/ — promoted from .memory/decisions/
+ *   .devflow/learning/  — promoted from .memory/ learning-* files
+ *   .devflow/features/  — promoted from .features/
+ *   .devflow/docs/      — promoted from .docs/
+ */
+const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
+  id: 'consolidate-to-devflow-dir',
+  description: 'Move .memory/, .features/, .docs/ under .devflow/',
+  scope: 'per-project',
+  run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
+    const infos: string[] = [];
+    const r = ctx.projectRoot;
+
+    const devflowDir = path.join(r, '.devflow');
+    const memSrc     = path.join(r, '.memory');
+    const featSrc    = path.join(r, '.features');
+    const docsSrc    = path.join(r, '.docs');
+
+    // 1. Create target subdirectories
+    await fs.mkdir(path.join(devflowDir, 'memory'),    { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'sidecar'),   { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'decisions'), { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'learning'),  { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'features'),  { recursive: true });
+    await fs.mkdir(path.join(devflowDir, 'docs'),      { recursive: true });
+
+    // 2. Explicit mapped moves from .memory/
+    const memMap: Array<[string, string]> = [
+      ['WORKING-MEMORY.md',             path.join(devflowDir, 'memory',    'WORKING-MEMORY.md')],
+      ['backup.json',                   path.join(devflowDir, 'memory',    'backup.json')],
+      ['.pending-turns.jsonl',          path.join(devflowDir, 'memory',    '.pending-turns.jsonl')],
+      ['.pending-turns.processing',     path.join(devflowDir, 'memory',    '.pending-turns.processing')],
+      ['.pending-turns.lock',           path.join(devflowDir, 'memory',    '.pending-turns.lock')],
+      ['.learning-disabled',            path.join(devflowDir, 'memory',    '.learning-disabled')],
+      ['.working-memory-disabled',      path.join(devflowDir, 'memory',    '.working-memory-disabled')],
+      // decisions files
+      ['decisions-log.jsonl',           path.join(devflowDir, 'decisions', 'decisions-log.jsonl')],
+      ['decisions.json',                path.join(devflowDir, 'decisions', 'decisions.json')],
+      ['.decisions-manifest.json',      path.join(devflowDir, 'decisions', '.decisions-manifest.json')],
+      ['.decisions.lock',               path.join(devflowDir, 'decisions', '.decisions.lock')],
+      ['.decisions-usage.json',         path.join(devflowDir, 'decisions', '.decisions-usage.json')],
+      ['.decisions-usage.lock',         path.join(devflowDir, 'decisions', '.decisions-usage.lock')],
+      ['.decisions-notifications.json', path.join(devflowDir, 'decisions', '.decisions-notifications.json')],
+      ['.decisions-runs-today',         path.join(devflowDir, 'decisions', '.decisions-runs-today')],
+      ['.decisions-batch-ids',          path.join(devflowDir, 'decisions', '.decisions-batch-ids')],
+      // learning files
+      ['learning-log.jsonl',            path.join(devflowDir, 'learning',  'learning-log.jsonl')],
+      ['learning.json',                 path.join(devflowDir, 'learning',  'learning.json')],
+      ['.learning-manifest.json',       path.join(devflowDir, 'learning',  '.learning-manifest.json')],
+      ['.learning-notified-at',         path.join(devflowDir, 'learning',  '.learning-notified-at')],
+      ['.learning-notifications.json',  path.join(devflowDir, 'learning',  '.learning-notifications.json')],
+      ['.learning-runs-today',          path.join(devflowDir, 'learning',  '.learning-runs-today')],
+      ['.learning-session-count',       path.join(devflowDir, 'learning',  '.learning-session-count')],
+      ['.learning-batch-ids',           path.join(devflowDir, 'learning',  '.learning-batch-ids')],
+      ['debug',                         path.join(devflowDir, 'learning',  'debug')],
+      ['working',                       path.join(devflowDir, 'memory',    'working')],
+    ];
+
+    for (const [name, dest] of memMap) {
+      await moveFile(path.join(memSrc, name), dest);
+    }
+
+    // 2b. Move .memory/.sidecar/ → .devflow/sidecar/ (directory contents)
+    await moveDirContents(
+      path.join(memSrc, '.sidecar'),
+      path.join(devflowDir, 'sidecar'),
+      new Set(),
+    );
+
+    // 2c. Move .memory/decisions/ contents → .devflow/decisions/
+    await moveDirContents(
+      path.join(memSrc, 'decisions'),
+      path.join(devflowDir, 'decisions'),
+      new Set(),
+    );
+
+    // 2d. Catch-all: move any remaining .memory/ files not already handled
+    await moveDirContents(memSrc, path.join(devflowDir, 'memory'), MEMORY_SKIP_FILES);
+
+    // 3. Move .features/ contents → .devflow/features/
+    await moveDirContents(featSrc, path.join(devflowDir, 'features'), new Set());
+
+    // 4. Move .docs/ contents → .devflow/docs/
+    await moveDirContents(docsSrc, path.join(devflowDir, 'docs'), new Set());
+
+    // 5. Create .devflow/.gitignore if not present
+    const devflowGitignore = path.join(devflowDir, '.gitignore');
+    try { await fs.access(devflowGitignore); } catch {
+      await fs.writeFile(devflowGitignore, DEVFLOW_GITIGNORE_CONTENT, 'utf-8');
+    }
+
+    // 6. Clean up project .gitignore — remove stale entries
+    const gitignorePath = path.join(r, '.gitignore');
+    const staleEntries = [
+      '.memory/',
+      '.docs/',
+      '.features/.knowledge.lock',
+      '.features/.disabled',
+      '.features/.knowledge-last-refresh',
+      '.features/.knowledge-refresh.lock',
+      '.devflow/',
+    ];
+    try {
+      const content = await fs.readFile(gitignorePath, 'utf-8');
+      const lines = content.split('\n');
+      const cleaned = lines.filter(line => !staleEntries.includes(line.trim()));
+      if (cleaned.length !== lines.length) {
+        await fs.writeFile(gitignorePath, cleaned.join('\n'), 'utf-8');
+        infos.push('Cleaned stale entries from .gitignore');
+      }
+    } catch { /* .gitignore may not exist */ }
+
+    // 7. Remove empty old directories (best-effort)
+    for (const oldDir of [memSrc, featSrc, docsSrc]) {
+      try {
+        const remaining = await fs.readdir(oldDir);
+        if (remaining.length === 0) {
+          await fs.rmdir(oldDir);
+        }
+      } catch { /* may already be removed or non-empty — non-fatal */ }
+    }
+
+    infos.push('Consolidated .memory/, .features/, .docs/ under .devflow/');
+    return { infos, warnings: [] };
+  },
+};
+
+/**
  * Migration ID suffix conventions:
  *
  * - `-vN`        A revision of a migration. `-v2`, `-v3`, etc. indicate
@@ -201,6 +466,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
   MIGRATION_RENAME_KB_TO_KNOWLEDGE,
+  MIGRATION_CONSOLIDATE_TO_DEVFLOW,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
