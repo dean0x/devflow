@@ -96,12 +96,10 @@ describe('crossedThresholds', () => {
 
 describe('usage file read/write', () => {
   let tmpDir: string;
-  let memoryDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-test-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
   });
 
   afterEach(() => {
@@ -109,26 +107,24 @@ describe('usage file read/write', () => {
   });
 
   it('returns default when file missing', () => {
-    const data = helpers.readUsageFile(memoryDir);
+    const data = helpers.readUsageFile(tmpDir);
     expect(data).toEqual({ version: 1, entries: {} });
   });
 
   it('round-trips data', () => {
     const data = { version: 1, entries: { 'ADR-001': { cites: 3, last_cited: '2026-01-01', created: '2026-01-01' } } };
-    helpers.writeUsageFile(memoryDir, data);
-    const read = helpers.readUsageFile(memoryDir);
+    helpers.writeUsageFile(tmpDir, data);
+    const read = helpers.readUsageFile(tmpDir);
     expect(read).toEqual(data);
   });
 });
 
 describe('notifications read/write', () => {
   let tmpDir: string;
-  let memoryDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notif-test-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
   });
 
   afterEach(() => {
@@ -136,24 +132,22 @@ describe('notifications read/write', () => {
   });
 
   it('returns empty object when file missing', () => {
-    expect(helpers.readNotifications(memoryDir)).toEqual({});
+    expect(helpers.readNotifications(tmpDir)).toEqual({});
   });
 
   it('round-trips notification data', () => {
     const data = { 'decisions-capacity-decisions': { active: true, threshold: 50, count: 50, ceiling: 100 } };
-    helpers.writeNotifications(memoryDir, data);
-    expect(helpers.readNotifications(memoryDir)).toEqual(data);
+    helpers.writeNotifications(tmpDir, data);
+    expect(helpers.readNotifications(tmpDir)).toEqual(data);
   });
 });
 
 describe('registerUsageEntry', () => {
   let tmpDir: string;
-  let memoryDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-test-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
   });
 
   afterEach(() => {
@@ -161,8 +155,8 @@ describe('registerUsageEntry', () => {
   });
 
   it('creates entry with zero cites', () => {
-    helpers.registerUsageEntry(memoryDir, 'ADR-001');
-    const data = helpers.readUsageFile(memoryDir);
+    helpers.registerUsageEntry(tmpDir, 'ADR-001');
+    const data = helpers.readUsageFile(tmpDir);
     expect(data.entries['ADR-001'].cites).toBe(0);
     expect(data.entries['ADR-001'].last_cited).toBeNull();
     expect(data.entries['ADR-001'].created).toBeTruthy();
@@ -170,9 +164,9 @@ describe('registerUsageEntry', () => {
 
   it('does not overwrite existing entry', () => {
     const existing = { version: 1, entries: { 'ADR-001': { cites: 5, last_cited: '2026-01-01', created: '2026-01-01' } } };
-    helpers.writeUsageFile(memoryDir, existing);
-    helpers.registerUsageEntry(memoryDir, 'ADR-001');
-    const data = helpers.readUsageFile(memoryDir);
+    helpers.writeUsageFile(tmpDir, existing);
+    helpers.registerUsageEntry(tmpDir, 'ADR-001');
+    const data = helpers.readUsageFile(tmpDir);
     expect(data.entries['ADR-001'].cites).toBe(5);
   });
 });
@@ -184,8 +178,9 @@ describe('render-ready capacity integration', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-integ-'));
-    decisionsDir = path.join(tmpDir, '.memory', 'decisions');
+    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.mkdirSync(decisionsDir, { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
     logFile = path.join(tmpDir, 'learning-log.jsonl');
   });
 
@@ -217,7 +212,7 @@ describe('render-ready capacity integration', () => {
     const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
     expect(result.rendered).toHaveLength(1);
 
-    const notifPath = path.join(tmpDir, '.memory', '.decisions-notifications.json');
+    const notifPath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
     expect(notif['decisions-capacity-decisions'].active).toBe(true);
@@ -293,7 +288,7 @@ describe('render-ready capacity integration', () => {
     expect(result.rendered).toHaveLength(1);
 
     // Notification should fire for the highest crossed threshold
-    const notifPath = path.join(tmpDir, '.memory', '.decisions-notifications.json');
+    const notifPath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-notifications.json');
     expect(fs.existsSync(notifPath)).toBe(true);
     const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
     expect(notif['decisions-capacity-decisions'].active).toBe(true);

@@ -34,9 +34,10 @@ describe('render-ready — pitfall type', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'render-pf-test-'));
     logFile = path.join(tmpDir, 'learning-log.jsonl');
-    pitfallsFile = path.join(tmpDir, '.memory', 'decisions', 'pitfalls.md');
-    manifestFile = path.join(tmpDir, '.memory', '.learning-manifest.json');
-    fs.mkdirSync(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
+    pitfallsFile = path.join(tmpDir, '.devflow', 'decisions', 'pitfalls.md');
+    manifestFile = path.join(tmpDir, '.devflow', 'learning', '.learning-manifest.json');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
   });
 
   afterEach(() => {

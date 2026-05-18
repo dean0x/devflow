@@ -231,7 +231,7 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE: Migration<'per-project'> = {
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
     const { purgeLegacyDecisionsEntries } = await import('./legacy-decisions-purge.js');
-    const result = await purgeLegacyDecisionsEntries({ memoryDir: ctx.memoryDir });
+    const result = await purgeLegacyDecisionsEntries({ memoryDir: ctx.memoryDir, projectRoot: ctx.projectRoot });
     const infos = result.removed > 0
       ? [`Purged ${result.removed} legacy decisions entry(ies) in ${result.files.length} file(s)`]
       : [];
@@ -256,7 +256,7 @@ const MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3: Migration<'per-project'> = {
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
     const { purgeAllPreV2DecisionsEntries } = await import('./legacy-decisions-purge.js');
-    const result = await purgeAllPreV2DecisionsEntries({ memoryDir: ctx.memoryDir });
+    const result = await purgeAllPreV2DecisionsEntries({ memoryDir: ctx.memoryDir, projectRoot: ctx.projectRoot });
     const infos = result.removed > 0
       ? [`Purged ${result.removed} pre-v2 decisions entry(ies) in ${result.files.length} file(s)`]
       : [];

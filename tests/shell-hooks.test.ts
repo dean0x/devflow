@@ -20,7 +20,7 @@ const HOOK_SCRIPTS = [
   'preamble',
   'json-parse',
   'get-mtime',
-  'ensure-features-init',
+  'ensure-devflow-init',
   'sidecar-capture',
   'sidecar-evaluate',
   'sidecar-dispatch',
@@ -1199,7 +1199,7 @@ describe('working memory queue behavior', () => {
   // sidecar-capture throttles if WORKING-MEMORY.md was updated <120s ago.
   // We write the file then backdate its mtime to 10 minutes ago.
   function writeStaleWorkingMemory(tmpDir: string): void {
-    const memFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     fs.writeFileSync(memFile, '## Now\n- stale memory');
     // Backdate 10 minutes (600 seconds)
     const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
@@ -1208,7 +1208,7 @@ describe('working memory queue behavior', () => {
 
   it('stop_reason tool_use — no queue append', () => {
     // Create .memory/ so the hook proceeds to the stop_reason check
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1219,13 +1219,13 @@ describe('working memory queue behavior', () => {
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
   it('stop_reason end_turn — appends assistant turn to queue', () => {
     // Create .memory/ directory
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     // Write stale WORKING-MEMORY.md so throttle check passes (no memory.processing marker needed)
     writeStaleWorkingMemory(tmpDir);
 
@@ -1238,7 +1238,7 @@ describe('working memory queue behavior', () => {
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
@@ -1252,7 +1252,7 @@ describe('working memory queue behavior', () => {
 
   it('sidecar-dispatch captures user prompt to queue', () => {
     // Create .memory/ directory so capture is triggered
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1262,7 +1262,7 @@ describe('working memory queue behavior', () => {
 
     execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
 
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
@@ -1274,8 +1274,8 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('sidecar-dispatch with missing .memory/ — creates it via ensure-memory-gitignore, exit 0', () => {
-    // tmpDir exists but has no .memory/ subdirectory — ensure-memory-gitignore creates it
+  it('sidecar-dispatch with missing .devflow/ — creates it via ensure-devflow-init, exit 0', () => {
+    // tmpDir exists but has no .devflow/ subdirectory — ensure-devflow-init creates it
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-004a',
@@ -1287,13 +1287,13 @@ describe('working memory queue behavior', () => {
     }).not.toThrow();
 
     // Hook creates .memory/ and writes to queue
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
   });
 
   it('preamble does NOT write to queue — zero file I/O', () => {
     // Create .memory/ to confirm preamble doesn't touch the queue even when .memory/ exists
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1306,12 +1306,12 @@ describe('working memory queue behavior', () => {
       execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
   it('preamble with slash command — exits 0, no queue write', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -1323,13 +1323,13 @@ describe('working memory queue behavior', () => {
       execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
   it('queue JSONL format — each line is valid JSON with role, content, ts', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
     const now = Math.floor(Date.now() / 1000);
     const entries = [
@@ -1352,10 +1352,10 @@ describe('working memory queue behavior', () => {
   });
 
   it('preserves existing user entries when appending assistant turn', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
     // Pre-populate with user-only entries (from sidecar-dispatch)
     const userLines = Array.from({ length: 5 }, (_, i) =>
@@ -1381,10 +1381,10 @@ describe('working memory queue behavior', () => {
   });
 
   it('empty queue file — assistant entry appended normally', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     fs.writeFileSync(queueFile, '');
 
     const input = JSON.stringify({
@@ -1404,10 +1404,10 @@ describe('working memory queue behavior', () => {
   });
 
   it('single user entry preserved when assistant turn appends', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
     const userEntry = JSON.stringify({ role: 'user', content: 'user prompt', ts: now });
     fs.writeFileSync(queueFile, userEntry + '\n');
@@ -1433,10 +1433,10 @@ describe('working memory queue behavior', () => {
   });
 
   it('queue with mixed entries preserved when assistant turn appends', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
     // Pre-populate with mixed entries (healthy queue)
     const mixedLines = [
@@ -1461,10 +1461,10 @@ describe('working memory queue behavior', () => {
   });
 
   it('queue with only assistant entries preserved when new entry appends', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
     // Pre-populate with assistant-only entries
     const assistantLines = Array.from({ length: 3 }, (_, i) =>
@@ -1490,11 +1490,11 @@ describe('working memory queue behavior', () => {
   });
 
   it('queue overflow — >200 lines truncated to last 100', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     // Write stale WORKING-MEMORY.md so throttle passes
     writeStaleWorkingMemory(tmpDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
 
     // Pre-populate queue with 201 entries (mixed roles to avoid auto-clean)
@@ -1529,10 +1529,10 @@ describe('working memory queue behavior', () => {
   });
 
   it('dispatch then capture preserves user turn in fresh queue', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     writeStaleWorkingMemory(tmpDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
     // Step 1: sidecar-dispatch writes user turn
     execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, {
@@ -1557,7 +1557,7 @@ describe('working memory queue behavior', () => {
   });
 
   it('sidecar-dispatch truncates prompts longer than 2000 chars', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const longPrompt = 'a'.repeat(3000);
     const input = JSON.stringify({
@@ -1568,7 +1568,7 @@ describe('working memory queue behavior', () => {
 
     execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     expect(lines).toHaveLength(1);
 
@@ -1579,7 +1579,7 @@ describe('working memory queue behavior', () => {
   });
 
   it('sidecar-capture truncates assistant content longer than 2000 chars', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     // Write stale WORKING-MEMORY.md so throttle passes
     writeStaleWorkingMemory(tmpDir);
 
@@ -1593,7 +1593,7 @@ describe('working memory queue behavior', () => {
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const lines = fs.readFileSync(queueFile, 'utf-8').trim().split('\n').filter(Boolean);
     expect(lines).toHaveLength(1);
 
@@ -1604,7 +1604,7 @@ describe('working memory queue behavior', () => {
   });
 
   it('sidecar-capture exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     // Hook exits at line 11 before reading stdin, so don't pipe input — would race
     // and EPIPE on Node 20 when bash closes the pipe before execSync flushes.
@@ -1612,24 +1612,24 @@ describe('working memory queue behavior', () => {
       execSync(`DEVFLOW_BG_UPDATER=1 bash "${STOP_HOOK}"`, { stdio: 'ignore' });
     }).not.toThrow();
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
   it('sidecar-dispatch exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     expect(() => {
       execSync(`DEVFLOW_BG_UPDATER=1 bash "${PROMPT_CAPTURE_HOOK}"`, { stdio: 'ignore' });
     }).not.toThrow();
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 });
 
-describe('ensure-features-init behavioral', () => {
-  const ENSURE_FEATURES = path.join(HOOKS_DIR, 'ensure-features-init');
+describe('ensure-devflow-init behavioral', () => {
+  const ENSURE_DEVFLOW = path.join(HOOKS_DIR, 'ensure-devflow-init');
 
   let tmpDir: string;
 
@@ -1641,66 +1641,55 @@ describe('ensure-features-init behavioral', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates .features/ and index.json when absent', () => {
-    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+  it('creates .devflow/features/ and index.json when absent', () => {
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    expect(fs.existsSync(path.join(tmpDir, '.features', 'index.json'))).toBe(true);
-    const content = fs.readFileSync(path.join(tmpDir, '.features', 'index.json'), 'utf-8');
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features', 'index.json'))).toBe(true);
+    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), 'utf-8');
     expect(content).toBe('{"version":1,"features":{}}');
   });
 
   it('does not overwrite existing index.json', () => {
-    fs.mkdirSync(path.join(tmpDir, '.features'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.features', 'index.json'), '{"existing":"data"}');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'features'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), '{"existing":"data"}');
 
-    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    const content = fs.readFileSync(path.join(tmpDir, '.features', 'index.json'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), 'utf-8');
     expect(content).toBe('{"existing":"data"}');
   });
 
-  it('adds gitignore entries when .git exists', () => {
-    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+  it('creates .devflow/.gitignore with transient file entries', () => {
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
-
-    const gitignore = fs.readFileSync(path.join(tmpDir, '.features', '.gitignore'), 'utf-8');
-    expect(gitignore).toContain('.knowledge.lock/');
-    expect(gitignore).toContain('.knowledge-last-refresh');
-    expect(fs.existsSync(path.join(tmpDir, '.features', '.gitignore-configured'))).toBe(true);
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
+    expect(gitignore).toContain('features/.knowledge.lock/');
+    expect(gitignore).toContain('memory/');
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore-configured'))).toBe(true);
   });
 
-  it('skips gitignore when no .git directory', () => {
-    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
-
-    expect(fs.existsSync(path.join(tmpDir, '.features', '.gitignore'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.features', '.gitignore-configured'))).toBe(false);
-  });
-
-  it('is idempotent — marker prevents repeated gitignore checks', () => {
-    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
-
+  it('is idempotent — marker prevents repeated gitignore writes', () => {
     // Run twice
-    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
-    execSync(`bash -c 'source "${ENSURE_FEATURES}" "${tmpDir}"'`, { stdio: 'pipe' });
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    const gitignore = fs.readFileSync(path.join(tmpDir, '.features', '.gitignore'), 'utf-8');
-    const lockEntries = gitignore.split('\n').filter(l => l === '.knowledge.lock/');
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
+    const lockEntries = gitignore.split('\n').filter(l => l === 'features/.knowledge.lock/');
     expect(lockEntries).toHaveLength(1);
   });
 
-  it('returns non-zero and creates no .features/ when called with empty argument (SEC-3 guard)', () => {
-    // The `[ -z "$1" ] && return 1` guard at the top of ensure-features-init prevents
+  it('returns non-zero and creates no .devflow/ when called with empty argument (SEC-3 guard)', () => {
+    // The `[ -z "$1" ] && return 1` guard at the top of ensure-devflow-init prevents
     // accidental directory creation when no project path is supplied.
     const result = execSync(
-      `bash -c 'source "${ENSURE_FEATURES}" ""; echo $?'`,
+      `bash -c 'source "${ENSURE_DEVFLOW}" ""; echo $?'`,
       { stdio: 'pipe' },
     ).toString().trim();
 
     // return 1 from a sourced script propagates as the last exit status
     expect(result).toBe('1');
-    // No .features/ directory should have been created in the test working directory
-    expect(fs.existsSync(path.join(tmpDir, '.features'))).toBe(false);
+    // No .devflow/ directory should have been created in the test working directory
+    expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
 });
 
@@ -1834,7 +1823,7 @@ function createTranscript(
 }
 
 function createSidecarConfig(cwdDir: string, config: Record<string, boolean>): void {
-  const dir = path.join(cwdDir, '.memory', '.sidecar');
+  const dir = path.join(cwdDir, '.devflow', 'sidecar');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
 }
@@ -1875,7 +1864,7 @@ describe('sidecar-evaluate business logic', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-eval-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-eval-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
 
@@ -1909,7 +1898,7 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
@@ -1927,7 +1916,7 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
     expect(fs.existsSync(path.join(sidecarDir, 'decisions.json'))).toBe(false);
   });
@@ -1947,7 +1936,7 @@ describe('sidecar-evaluate business logic', () => {
   });
 
   it('learning batch accumulation triggers at batch_size threshold', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
 
     // Pre-write 2 session IDs (batch_size defaults to 3)
@@ -1973,7 +1962,7 @@ describe('sidecar-evaluate business logic', () => {
   });
 
   it('learning daily cap blocks marker creation', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
 
     // Set daily cap to max
@@ -2003,9 +1992,11 @@ describe('sidecar-evaluate business logic', () => {
     const logLines = Array.from({ length: 16 }, (_, i) =>
       JSON.stringify({ id: `obs_${i}`, type: 'workflow', pattern: `p${i}` }),
     );
-    fs.writeFileSync(path.join(tmpDir, '.memory', 'learning-log.jsonl'), logLines.join('\n') + '\n');
+    const learningDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(learningDir, { recursive: true });
+    fs.writeFileSync(path.join(learningDir, 'learning-log.jsonl'), logLines.join('\n') + '\n');
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
 
     // Pre-fill only 3 sessions (less than adaptive batch_size=5)
@@ -2028,7 +2019,7 @@ describe('sidecar-evaluate business logic', () => {
   });
 
   it('learning session dedup: same ID twice counted once', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
 
     createTranscript(homeDir, tmpDir, 5, 5, 'dup-session');
@@ -2051,7 +2042,7 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     // Per-session marker: decisions.test-session.json
     const decisionsMarker = path.join(sidecarDir, 'decisions.test-session.json');
     expect(fs.existsSync(decisionsMarker)).toBe(true);
@@ -2067,7 +2058,7 @@ describe('sidecar-evaluate business logic', () => {
 
   it('knowledge throttle: recent refresh skips evaluation', () => {
     // Write a recent timestamp to the throttle marker
-    const featuresDir = path.join(tmpDir, '.features');
+    const featuresDir = path.join(tmpDir, '.devflow', 'features');
     fs.mkdirSync(featuresDir, { recursive: true });
     fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
     const now = Math.floor(Date.now() / 1000);
@@ -2079,7 +2070,7 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
@@ -2090,7 +2081,7 @@ describe('sidecar-evaluate business logic', () => {
   });
 
   it('knowledge disabled sentinel skips evaluation', () => {
-    const featuresDir = path.join(tmpDir, '.features');
+    const featuresDir = path.join(tmpDir, '.devflow', 'features');
     fs.mkdirSync(featuresDir, { recursive: true });
     fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
 
@@ -2100,7 +2091,7 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
@@ -2141,7 +2132,8 @@ describe('sidecar-evaluate artifact reinforcement', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
 
@@ -2151,7 +2143,7 @@ describe('sidecar-evaluate artifact reinforcement', () => {
   });
 
   it('reinforcement updates last_seen for matching slugs', () => {
-    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const logFile = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
     const obs = {
       id: 'obs_reinforce_1',
       type: 'workflow',
@@ -2186,7 +2178,7 @@ describe('sidecar-evaluate artifact reinforcement', () => {
   });
 
   it('reinforcement leaves non-matching slugs unchanged', () => {
-    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const logFile = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
     const obs = {
       id: 'obs_reinforce_2',
       type: 'workflow',
@@ -2220,7 +2212,7 @@ describe('sidecar-evaluate artifact reinforcement', () => {
   });
 
   it('reinforcement log is conditional — no message when nothing reinforced', () => {
-    const logFile = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const logFile = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
     const obs = {
       id: 'obs_reinforce_3',
       type: 'workflow',
@@ -2270,7 +2262,8 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.memory', '.sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
 
@@ -2280,7 +2273,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   });
 
   it('tab-less counter file does not crash and returns default', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     const today = localDateString();
     // Write date string with no tab separator — cut -f2 returns the whole line
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\n`);
@@ -2294,7 +2287,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   });
 
   it('empty counter file does not crash', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), '');
 
     fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
@@ -2305,7 +2298,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   });
 
   it('non-numeric count field returns default', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     const today = localDateString();
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\tabc\n`);
 
@@ -2323,11 +2316,11 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
   it('non-numeric config values do not crash', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.memory', 'learning.json'),
+      path.join(tmpDir, '.devflow', 'learning', 'learning.json'),
       JSON.stringify({ max_daily_runs: 'xyz', batch_size: 'abc' }),
     );
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     // Pre-fill enough sessions for any reasonable batch_size default (3)
     fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
 
@@ -2339,7 +2332,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   it('LAST_REFRESH sanitization: non-numeric content in knowledge marker defaults to 0', () => {
     // Write non-numeric content to .knowledge-last-refresh — should sanitize to 0
     // resulting in a stale age calculation (now - 0 > 7200) and triggering evaluation
-    const featuresDir = path.join(tmpDir, '.features');
+    const featuresDir = path.join(tmpDir, '.devflow', 'features');
     fs.mkdirSync(featuresDir, { recursive: true });
     // No stale slugs — so no marker will be written — but hook should not crash
     fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
@@ -2397,7 +2390,7 @@ describe('sidecar-dispatch stale marker recovery', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dispatch-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.memory', '.sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
   });
 
   afterEach(() => {
@@ -2405,7 +2398,7 @@ describe('sidecar-dispatch stale marker recovery', () => {
   });
 
   it('fresh .processing left alone', () => {
-    const procFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.processing');
+    const procFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.processing');
     fs.writeFileSync(procFile, '{}');
 
     execSync(`bash "${DISPATCH_HOOK}"`, {
@@ -2414,11 +2407,11 @@ describe('sidecar-dispatch stale marker recovery', () => {
     });
 
     expect(fs.existsSync(procFile)).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar', 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'learning.json'))).toBe(false);
   });
 
   it('stale .processing retried — renamed back to .json', () => {
-    const procFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.processing');
+    const procFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.processing');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 600);
 
@@ -2428,15 +2421,15 @@ describe('sidecar-dispatch stale marker recovery', () => {
     });
 
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar', 'learning.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'learning.json'))).toBe(true);
 
-    const retryFile = path.join(tmpDir, '.memory', '.sidecar', 'learning.retries');
+    const retryFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.retries');
     expect(fs.existsSync(retryFile)).toBe(true);
     expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
   });
 
   it('retry count increments on repeated stale recovery', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     const procFile = path.join(sidecarDir, 'learning.processing');
     const retryFile = path.join(sidecarDir, 'learning.retries');
 
@@ -2453,7 +2446,7 @@ describe('sidecar-dispatch stale marker recovery', () => {
   });
 
   it('max retries exhausted — marked as .failed', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     const procFile = path.join(sidecarDir, 'learning.processing');
     const retryFile = path.join(sidecarDir, 'learning.retries');
 
@@ -2472,7 +2465,7 @@ describe('sidecar-dispatch stale marker recovery', () => {
   });
 
   it('pending marker directive includes multiple task names', () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
     fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
 
@@ -2502,7 +2495,7 @@ describe('sidecar-capture memory marker', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.memory'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
 
@@ -2512,7 +2505,7 @@ describe('sidecar-capture memory marker', () => {
   });
 
   it('marker written when throttle expired', () => {
-    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    const wmFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     fs.writeFileSync(wmFile, '## Now\n- stale');
     backdateMtime(wmFile, 600);
 
@@ -2523,7 +2516,7 @@ describe('sidecar-capture memory marker', () => {
       response_text: 'test response',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     const memMarker = path.join(sidecarDir, 'memory.json');
     expect(fs.existsSync(memMarker)).toBe(true);
 
@@ -2535,11 +2528,11 @@ describe('sidecar-capture memory marker', () => {
   });
 
   it('marker skipped when .processing exists', () => {
-    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    const wmFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     fs.writeFileSync(wmFile, '## Now\n- stale');
     backdateMtime(wmFile, 600);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'memory.processing'), '{}');
 
@@ -2553,12 +2546,12 @@ describe('sidecar-capture memory marker', () => {
     expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
 
     // Queue append still happens
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
   });
 
   it('marker skipped when memory recently updated', () => {
-    const wmFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    const wmFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     fs.writeFileSync(wmFile, '## Now\n- fresh');
     // mtime is current — within 120s threshold
 
@@ -2569,11 +2562,11 @@ describe('sidecar-capture memory marker', () => {
       response_text: 'test response',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
 
     // Queue append still happens
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
   });
 
@@ -2587,10 +2580,10 @@ describe('sidecar-capture memory marker', () => {
       response_text: 'test response',
     }, homeDir);
 
-    const queueFile = path.join(tmpDir, '.memory', '.pending-turns.jsonl');
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
   });
 });

@@ -70,184 +70,184 @@ const ROOT = '/some/project';
 
 describe('project-paths TypeScript module', () => {
   describe('core directories', () => {
-    it('getMemoryDir returns .memory/', () => {
-      expect(getMemoryDir(ROOT)).toBe('/some/project/.memory');
+    it('getMemoryDir returns .devflow/memory/', () => {
+      expect(getMemoryDir(ROOT)).toBe('/some/project/.devflow/memory');
     });
 
-    it('getSidecarDir returns .memory/.sidecar/', () => {
-      expect(getSidecarDir(ROOT)).toBe('/some/project/.memory/.sidecar');
+    it('getSidecarDir returns .devflow/sidecar/', () => {
+      expect(getSidecarDir(ROOT)).toBe('/some/project/.devflow/sidecar');
     });
 
-    it('getDecisionsDir returns .memory/decisions/', () => {
-      expect(getDecisionsDir(ROOT)).toBe('/some/project/.memory/decisions');
+    it('getDecisionsDir returns .devflow/decisions/', () => {
+      expect(getDecisionsDir(ROOT)).toBe('/some/project/.devflow/decisions');
     });
 
-    it('getFeaturesDir returns .features/', () => {
-      expect(getFeaturesDir(ROOT)).toBe('/some/project/.features');
+    it('getFeaturesDir returns .devflow/features/', () => {
+      expect(getFeaturesDir(ROOT)).toBe('/some/project/.devflow/features');
     });
 
-    it('getDocsDir returns .docs/', () => {
-      expect(getDocsDir(ROOT)).toBe('/some/project/.docs');
+    it('getDocsDir returns .devflow/docs/', () => {
+      expect(getDocsDir(ROOT)).toBe('/some/project/.devflow/docs');
     });
   });
 
   describe('sidecar files', () => {
-    it('getSidecarConfigPath returns .memory/.sidecar/config.json', () => {
-      expect(getSidecarConfigPath(ROOT)).toBe('/some/project/.memory/.sidecar/config.json');
+    it('getSidecarConfigPath returns .devflow/sidecar/config.json', () => {
+      expect(getSidecarConfigPath(ROOT)).toBe('/some/project/.devflow/sidecar/config.json');
     });
   });
 
   describe('decisions files', () => {
-    it('getDecisionsFilePath returns .memory/decisions/decisions.md', () => {
-      expect(getDecisionsFilePath(ROOT)).toBe('/some/project/.memory/decisions/decisions.md');
+    it('getDecisionsFilePath returns .devflow/decisions/decisions.md', () => {
+      expect(getDecisionsFilePath(ROOT)).toBe('/some/project/.devflow/decisions/decisions.md');
     });
 
-    it('getPitfallsFilePath returns .memory/decisions/pitfalls.md', () => {
-      expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.memory/decisions/pitfalls.md');
+    it('getPitfallsFilePath returns .devflow/decisions/pitfalls.md', () => {
+      expect(getPitfallsFilePath(ROOT)).toBe('/some/project/.devflow/decisions/pitfalls.md');
     });
 
-    it('getDecisionsDisabledSentinel returns .memory/decisions/.disabled', () => {
-      expect(getDecisionsDisabledSentinel(ROOT)).toBe('/some/project/.memory/decisions/.disabled');
+    it('getDecisionsDisabledSentinel returns .devflow/decisions/.disabled', () => {
+      expect(getDecisionsDisabledSentinel(ROOT)).toBe('/some/project/.devflow/decisions/.disabled');
     });
 
-    it('getDecisionsConfigPath returns .memory/decisions.json', () => {
-      expect(getDecisionsConfigPath(ROOT)).toBe('/some/project/.memory/decisions.json');
+    it('getDecisionsConfigPath returns .devflow/decisions/decisions.json', () => {
+      expect(getDecisionsConfigPath(ROOT)).toBe('/some/project/.devflow/decisions/decisions.json');
     });
 
-    it('getDecisionsLogPath returns .memory/decisions-log.jsonl', () => {
-      expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.memory/decisions-log.jsonl');
+    it('getDecisionsLogPath returns .devflow/decisions/decisions-log.jsonl', () => {
+      expect(getDecisionsLogPath(ROOT)).toBe('/some/project/.devflow/decisions/decisions-log.jsonl');
     });
 
-    it('getDecisionsManifestPath returns .memory/.decisions-manifest.json', () => {
-      expect(getDecisionsManifestPath(ROOT)).toBe('/some/project/.memory/.decisions-manifest.json');
+    it('getDecisionsManifestPath returns .devflow/decisions/.decisions-manifest.json', () => {
+      expect(getDecisionsManifestPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-manifest.json');
     });
 
-    it('getDecisionsLockDir returns .memory/.decisions.lock', () => {
-      expect(getDecisionsLockDir(ROOT)).toBe('/some/project/.memory/.decisions.lock');
+    it('getDecisionsLockDir returns .devflow/decisions/.decisions.lock', () => {
+      expect(getDecisionsLockDir(ROOT)).toBe('/some/project/.devflow/decisions/.decisions.lock');
     });
 
-    it('getDecisionsUsagePath returns .memory/.decisions-usage.json', () => {
-      expect(getDecisionsUsagePath(ROOT)).toBe('/some/project/.memory/.decisions-usage.json');
+    it('getDecisionsUsagePath returns .devflow/decisions/.decisions-usage.json', () => {
+      expect(getDecisionsUsagePath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-usage.json');
     });
 
-    it('getDecisionsUsageLockDir returns .memory/.decisions-usage.lock', () => {
-      expect(getDecisionsUsageLockDir(ROOT)).toBe('/some/project/.memory/.decisions-usage.lock');
+    it('getDecisionsUsageLockDir returns .devflow/decisions/.decisions-usage.lock', () => {
+      expect(getDecisionsUsageLockDir(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-usage.lock');
     });
 
-    it('getDecisionsNotificationsPath returns .memory/.decisions-notifications.json', () => {
-      expect(getDecisionsNotificationsPath(ROOT)).toBe('/some/project/.memory/.decisions-notifications.json');
+    it('getDecisionsNotificationsPath returns .devflow/decisions/.decisions-notifications.json', () => {
+      expect(getDecisionsNotificationsPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-notifications.json');
     });
 
-    it('getDecisionsRunsTodayPath returns .memory/.decisions-runs-today', () => {
-      expect(getDecisionsRunsTodayPath(ROOT)).toBe('/some/project/.memory/.decisions-runs-today');
+    it('getDecisionsRunsTodayPath returns .devflow/decisions/.decisions-runs-today', () => {
+      expect(getDecisionsRunsTodayPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-runs-today');
     });
 
-    it('getDecisionsBatchIdsPath returns .memory/.decisions-batch-ids', () => {
-      expect(getDecisionsBatchIdsPath(ROOT)).toBe('/some/project/.memory/.decisions-batch-ids');
+    it('getDecisionsBatchIdsPath returns .devflow/decisions/.decisions-batch-ids', () => {
+      expect(getDecisionsBatchIdsPath(ROOT)).toBe('/some/project/.devflow/decisions/.decisions-batch-ids');
     });
   });
 
   describe('learning files', () => {
-    it('getLearningLogPath returns .memory/learning-log.jsonl', () => {
-      expect(getLearningLogPath(ROOT)).toBe('/some/project/.memory/learning-log.jsonl');
+    it('getLearningLogPath returns .devflow/learning/learning-log.jsonl', () => {
+      expect(getLearningLogPath(ROOT)).toBe('/some/project/.devflow/learning/learning-log.jsonl');
     });
 
-    it('getLearningConfigPath returns .memory/learning.json', () => {
-      expect(getLearningConfigPath(ROOT)).toBe('/some/project/.memory/learning.json');
+    it('getLearningConfigPath returns .devflow/learning/learning.json', () => {
+      expect(getLearningConfigPath(ROOT)).toBe('/some/project/.devflow/learning/learning.json');
     });
 
-    it('getLearningManifestPath returns .memory/.learning-manifest.json', () => {
-      expect(getLearningManifestPath(ROOT)).toBe('/some/project/.memory/.learning-manifest.json');
+    it('getLearningManifestPath returns .devflow/learning/.learning-manifest.json', () => {
+      expect(getLearningManifestPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-manifest.json');
     });
 
-    it('getLearningNotifiedAtPath returns .memory/.learning-notified-at', () => {
-      expect(getLearningNotifiedAtPath(ROOT)).toBe('/some/project/.memory/.learning-notified-at');
+    it('getLearningNotifiedAtPath returns .devflow/learning/.learning-notified-at', () => {
+      expect(getLearningNotifiedAtPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-notified-at');
     });
 
-    it('getLearningNotificationsPath returns .memory/.learning-notifications.json', () => {
-      expect(getLearningNotificationsPath(ROOT)).toBe('/some/project/.memory/.learning-notifications.json');
+    it('getLearningNotificationsPath returns .devflow/learning/.learning-notifications.json', () => {
+      expect(getLearningNotificationsPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-notifications.json');
     });
 
-    it('getLearningRunsTodayPath returns .memory/.learning-runs-today', () => {
-      expect(getLearningRunsTodayPath(ROOT)).toBe('/some/project/.memory/.learning-runs-today');
+    it('getLearningRunsTodayPath returns .devflow/learning/.learning-runs-today', () => {
+      expect(getLearningRunsTodayPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-runs-today');
     });
 
-    it('getLearningSessionCountPath returns .memory/.learning-session-count', () => {
-      expect(getLearningSessionCountPath(ROOT)).toBe('/some/project/.memory/.learning-session-count');
+    it('getLearningSessionCountPath returns .devflow/learning/.learning-session-count', () => {
+      expect(getLearningSessionCountPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-session-count');
     });
 
-    it('getLearningBatchIdsPath returns .memory/.learning-batch-ids', () => {
-      expect(getLearningBatchIdsPath(ROOT)).toBe('/some/project/.memory/.learning-batch-ids');
+    it('getLearningBatchIdsPath returns .devflow/learning/.learning-batch-ids', () => {
+      expect(getLearningBatchIdsPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-batch-ids');
     });
 
-    it('getLearningDisabledSentinel returns .memory/.learning-disabled', () => {
-      expect(getLearningDisabledSentinel(ROOT)).toBe('/some/project/.memory/.learning-disabled');
+    it('getLearningDisabledSentinel returns .devflow/memory/.learning-disabled', () => {
+      expect(getLearningDisabledSentinel(ROOT)).toBe('/some/project/.devflow/memory/.learning-disabled');
     });
   });
 
   describe('memory / working-memory files', () => {
-    it('getWorkingMemoryDisabledSentinel returns .memory/.working-memory-disabled', () => {
-      expect(getWorkingMemoryDisabledSentinel(ROOT)).toBe('/some/project/.memory/.working-memory-disabled');
+    it('getWorkingMemoryDisabledSentinel returns .devflow/memory/.working-memory-disabled', () => {
+      expect(getWorkingMemoryDisabledSentinel(ROOT)).toBe('/some/project/.devflow/memory/.working-memory-disabled');
     });
 
-    it('getWorkingMemoryPath returns .memory/WORKING-MEMORY.md', () => {
-      expect(getWorkingMemoryPath(ROOT)).toBe('/some/project/.memory/WORKING-MEMORY.md');
+    it('getWorkingMemoryPath returns .devflow/memory/WORKING-MEMORY.md', () => {
+      expect(getWorkingMemoryPath(ROOT)).toBe('/some/project/.devflow/memory/WORKING-MEMORY.md');
     });
 
-    it('getBackupPath returns .memory/backup.json', () => {
-      expect(getBackupPath(ROOT)).toBe('/some/project/.memory/backup.json');
+    it('getBackupPath returns .devflow/memory/backup.json', () => {
+      expect(getBackupPath(ROOT)).toBe('/some/project/.devflow/memory/backup.json');
     });
 
-    it('getPendingTurnsPath returns .memory/.pending-turns.jsonl', () => {
-      expect(getPendingTurnsPath(ROOT)).toBe('/some/project/.memory/.pending-turns.jsonl');
+    it('getPendingTurnsPath returns .devflow/memory/.pending-turns.jsonl', () => {
+      expect(getPendingTurnsPath(ROOT)).toBe('/some/project/.devflow/memory/.pending-turns.jsonl');
     });
 
-    it('getPendingTurnsProcessingPath returns .memory/.pending-turns.processing', () => {
-      expect(getPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.memory/.pending-turns.processing');
+    it('getPendingTurnsProcessingPath returns .devflow/memory/.pending-turns.processing', () => {
+      expect(getPendingTurnsProcessingPath(ROOT)).toBe('/some/project/.devflow/memory/.pending-turns.processing');
     });
 
-    it('getPendingTurnsLockDir returns .memory/.pending-turns.lock', () => {
-      expect(getPendingTurnsLockDir(ROOT)).toBe('/some/project/.memory/.pending-turns.lock');
+    it('getPendingTurnsLockDir returns .devflow/memory/.pending-turns.lock', () => {
+      expect(getPendingTurnsLockDir(ROOT)).toBe('/some/project/.devflow/memory/.pending-turns.lock');
     });
   });
 
   describe('features / knowledge files', () => {
-    it('getFeaturesIndexPath returns .features/index.json', () => {
-      expect(getFeaturesIndexPath(ROOT)).toBe('/some/project/.features/index.json');
+    it('getFeaturesIndexPath returns .devflow/features/index.json', () => {
+      expect(getFeaturesIndexPath(ROOT)).toBe('/some/project/.devflow/features/index.json');
     });
 
-    it('getKnowledgePath returns .features/{slug}/KNOWLEDGE.md', () => {
-      expect(getKnowledgePath(ROOT, 'my-feature')).toBe('/some/project/.features/my-feature/KNOWLEDGE.md');
+    it('getKnowledgePath returns .devflow/features/{slug}/KNOWLEDGE.md', () => {
+      expect(getKnowledgePath(ROOT, 'my-feature')).toBe('/some/project/.devflow/features/my-feature/KNOWLEDGE.md');
     });
 
-    it('getFeaturesDisabledSentinel returns .features/.disabled', () => {
-      expect(getFeaturesDisabledSentinel(ROOT)).toBe('/some/project/.features/.disabled');
+    it('getFeaturesDisabledSentinel returns .devflow/features/.disabled', () => {
+      expect(getFeaturesDisabledSentinel(ROOT)).toBe('/some/project/.devflow/features/.disabled');
     });
 
-    it('getFeaturesLockDir returns .features/.knowledge.lock', () => {
-      expect(getFeaturesLockDir(ROOT)).toBe('/some/project/.features/.knowledge.lock');
+    it('getFeaturesLockDir returns .devflow/features/.knowledge.lock', () => {
+      expect(getFeaturesLockDir(ROOT)).toBe('/some/project/.devflow/features/.knowledge.lock');
     });
 
-    it('getFeaturesLastRefreshPath returns .features/.knowledge-last-refresh', () => {
-      expect(getFeaturesLastRefreshPath(ROOT)).toBe('/some/project/.features/.knowledge-last-refresh');
+    it('getFeaturesLastRefreshPath returns .devflow/features/.knowledge-last-refresh', () => {
+      expect(getFeaturesLastRefreshPath(ROOT)).toBe('/some/project/.devflow/features/.knowledge-last-refresh');
     });
   });
 
   describe('docs files', () => {
-    it('getReviewsDir returns .docs/reviews/', () => {
-      expect(getReviewsDir(ROOT)).toBe('/some/project/.docs/reviews');
+    it('getReviewsDir returns .devflow/docs/reviews/', () => {
+      expect(getReviewsDir(ROOT)).toBe('/some/project/.devflow/docs/reviews');
     });
 
-    it('getDesignDir returns .docs/design/', () => {
-      expect(getDesignDir(ROOT)).toBe('/some/project/.docs/design');
+    it('getDesignDir returns .devflow/docs/design/', () => {
+      expect(getDesignDir(ROOT)).toBe('/some/project/.devflow/docs/design');
     });
 
-    it('getResearchDir returns .docs/research/', () => {
-      expect(getResearchDir(ROOT)).toBe('/some/project/.docs/research');
+    it('getResearchDir returns .devflow/docs/research/', () => {
+      expect(getResearchDir(ROOT)).toBe('/some/project/.devflow/docs/research');
     });
 
-    it('getHandoffPath returns .docs/handoff-{branchSlug}.md', () => {
-      expect(getHandoffPath(ROOT, 'feat-my-feature')).toBe('/some/project/.docs/handoff-feat-my-feature.md');
+    it('getHandoffPath returns .devflow/docs/handoff-{branchSlug}.md', () => {
+      expect(getHandoffPath(ROOT, 'feat-my-feature')).toBe('/some/project/.devflow/docs/handoff-feat-my-feature.md');
     });
   });
 
@@ -261,19 +261,19 @@ describe('project-paths TypeScript module', () => {
       }
     });
 
-    it('includes .memory/', () => {
-      expect(getGitignoreEntries()).toContain('.memory/');
+    it('includes .claude/', () => {
+      expect(getGitignoreEntries()).toContain('.claude/');
     });
 
-    it('includes .features/.knowledge.lock', () => {
-      expect(getGitignoreEntries()).toContain('.features/.knowledge.lock');
+    it('does not include old .memory/ entry', () => {
+      expect(getGitignoreEntries()).not.toContain('.memory/');
     });
   });
 
   describe('path normalisation', () => {
     it('handles a root path that ends with a slash', () => {
       // path.join strips trailing slashes
-      expect(getMemoryDir('/some/project/')).toBe('/some/project/.memory');
+      expect(getMemoryDir('/some/project/')).toBe('/some/project/.devflow/memory');
     });
 
     it('returns absolute paths', () => {

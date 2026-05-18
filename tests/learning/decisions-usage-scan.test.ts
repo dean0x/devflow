@@ -21,12 +21,14 @@ function runScanner(cwd: string, stdin: string): string {
 
 describe('decisions-usage-scan', () => {
   let tmpDir: string;
-  let memoryDir: string;
+  let decisionsDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-scan-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
+    // Scanner checks getMemoryDir(cwd) = .devflow/memory for existence
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -35,13 +37,13 @@ describe('decisions-usage-scan', () => {
 
   function seedUsage(entries: Record<string, { cites: number; last_cited: string | null; created: string }>) {
     fs.writeFileSync(
-      path.join(memoryDir, '.decisions-usage.json'),
+      path.join(decisionsDir, '.decisions-usage.json'),
       JSON.stringify({ version: 1, entries }, null, 2) + '\n',
     );
   }
 
   function readUsage() {
-    return JSON.parse(fs.readFileSync(path.join(memoryDir, '.decisions-usage.json'), 'utf8'));
+    return JSON.parse(fs.readFileSync(path.join(decisionsDir, '.decisions-usage.json'), 'utf8'));
   }
 
   it('increments cites for registered IDs', () => {
@@ -85,16 +87,16 @@ describe('decisions-usage-scan', () => {
     expect(data.entries['ADR-001'].cites).toBe(0); // unchanged
   });
 
-  it('handles missing .memory directory gracefully', () => {
-    fs.rmSync(memoryDir, { recursive: true, force: true });
+  it('handles missing .devflow/memory directory gracefully', () => {
+    fs.rmSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true, force: true });
     // Should not throw
     runScanner(tmpDir, 'ADR-001 should be ignored');
     // No crash, no file created
-    expect(fs.existsSync(path.join(memoryDir, '.decisions-usage.json'))).toBe(false);
+    expect(fs.existsSync(path.join(decisionsDir, '.decisions-usage.json'))).toBe(false);
   });
 
   it('handles malformed usage JSON gracefully', () => {
-    fs.writeFileSync(path.join(memoryDir, '.decisions-usage.json'), '{bad json');
+    fs.writeFileSync(path.join(decisionsDir, '.decisions-usage.json'), '{bad json');
     // Should not throw, just start fresh (but since no entries are registered, no writes)
     runScanner(tmpDir, 'ADR-001 reference');
     // The file may remain malformed since ADR-001 isn't registered in the bad data
@@ -103,12 +105,14 @@ describe('decisions-usage-scan', () => {
 
 describe('decisions-usage-scan security hardening', () => {
   let tmpDir: string;
-  let memoryDir: string;
+  let decisionsDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-scan-sec-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
+    // Scanner checks getMemoryDir(cwd) = .devflow/memory for existence
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    fs.mkdirSync(decisionsDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -130,7 +134,7 @@ describe('decisions-usage-scan security hardening', () => {
 
   it('does not follow a symlink placed at the .tmp path (TOCTOU hardening)', () => {
     // Arrange: seed a registered entry so the scanner has something to write
-    const usagePath = path.join(memoryDir, '.decisions-usage.json');
+    const usagePath = path.join(decisionsDir, '.decisions-usage.json');
     fs.writeFileSync(
       usagePath,
       JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null, created: '2026-01-01' } } }, null, 2) + '\n',
@@ -169,7 +173,7 @@ describe('decisions-usage-scan security hardening', () => {
     // process pegs a CPU while waiting for the lock. We cannot measure CPU here,
     // but we verify both processes exit with status 0 (or silent-exit) and the
     // final usage count is exactly 2 (serialised, not lost to a race).
-    const usagePath = path.join(memoryDir, '.decisions-usage.json');
+    const usagePath = path.join(decisionsDir, '.decisions-usage.json');
     fs.writeFileSync(
       usagePath,
       JSON.stringify({ version: 1, entries: { 'ADR-001': { cites: 0, last_cited: null, created: '2026-01-01' } } }, null, 2) + '\n',

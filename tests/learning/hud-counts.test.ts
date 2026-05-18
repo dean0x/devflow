@@ -32,14 +32,12 @@ function makeEntry(
 
 describe('getLearningCounts', () => {
   let tmpDir: string;
-  let memoryDir: string;
   let logPath: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-counts-test-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
-    logPath = path.join(memoryDir, 'learning-log.jsonl');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    logPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
   });
 
   afterEach(() => {
@@ -160,14 +158,12 @@ describe('isRawObservation adversarial inputs (via getLearningCounts)', () => {
   // (the entry is skipped, not counted) while valid entries still count correctly.
 
   let tmpDir: string;
-  let memoryDir: string;
   let logPath: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-counts-guard-test-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
-    logPath = path.join(memoryDir, 'learning-log.jsonl');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    logPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
   });
 
   afterEach(() => {
@@ -246,14 +242,12 @@ describe('isRawObservation adversarial inputs (via getLearningCounts)', () => {
 
 describe('getLearningCounts HUD component output', () => {
   let tmpDir: string;
-  let memoryDir: string;
   let logPath: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-counts-component-test-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
-    logPath = path.join(memoryDir, 'learning-log.jsonl');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    logPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
   });
 
   afterEach(() => {
@@ -277,16 +271,15 @@ describe('getLearningCounts HUD component output', () => {
 
 describe('getLearningCounts dual-log merging', () => {
   let tmpDir: string;
-  let memoryDir: string;
   let learningLogPath: string;
   let decisionsLogPath: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-counts-dual-test-'));
-    memoryDir = path.join(tmpDir, '.memory');
-    fs.mkdirSync(memoryDir, { recursive: true });
-    learningLogPath = path.join(memoryDir, 'learning-log.jsonl');
-    decisionsLogPath = path.join(memoryDir, 'decisions-log.jsonl');
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    learningLogPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
+    decisionsLogPath = path.join(tmpDir, '.devflow', 'decisions', 'decisions-log.jsonl');
   });
 
   afterEach(() => {

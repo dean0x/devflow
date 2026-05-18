@@ -53,13 +53,13 @@ describe('loadIndex', () => {
 
   it('returns null for missing directory', () => {
     const tmp = makeTmpFeatureWorktree(); // no index written
-    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+    rmSync(path.join(tmp, '.devflow', 'features'), { recursive: true, force: true });
     expect(loadIndex(tmp)).toBeNull();
   });
 
   it('returns null for invalid JSON', () => {
     const tmp = makeTmpFeatureWorktree();
-    writeFileSync(path.join(tmp, '.features', 'index.json'), 'not-json');
+    writeFileSync(path.join(tmp, '.devflow', 'features', 'index.json'), 'not-json');
     expect(loadIndex(tmp)).toBeNull();
   });
 });
@@ -112,7 +112,7 @@ describe('checkStaleness (positive — git repo)', () => {
   it('detects stale feature knowledge when referenced file changed after lastUpdated', () => {
     const tmp = makeTmpFeatureWorktree();
     // Remove auto-created .features dir — we'll set it up after git init
-    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+    rmSync(path.join(tmp, '.devflow', 'features'), { recursive: true, force: true });
 
     // Initialize git repo with initial commit
     execSync('git init', { cwd: tmp, stdio: 'pipe' });
@@ -130,7 +130,7 @@ describe('checkStaleness (positive — git repo)', () => {
     const lastUpdated = new Date(Date.now() - 5000).toISOString();
 
     // Create the index with a feature knowledge entry that references src/cli/cli.ts
-    const featuresDir = path.join(tmp, '.features');
+    const featuresDir = path.join(tmp, '.devflow', 'features');
     mkdirSync(featuresDir, { recursive: true });
     const index = {
       version: 1,
@@ -216,7 +216,7 @@ describe('updateIndex', () => {
   // T1: Lock failure
   it('throws when lock cannot be acquired within timeout', () => {
     const tmp = makeTmpFeatureWorktree({ version: 1, features: {} });
-    const lockPath = path.join(tmp, '.features', '.knowledge.lock');
+    const lockPath = path.join(tmp, '.devflow', 'features', '.knowledge.lock');
     // Pre-create lock directory to simulate a held lock
     mkdirSync(lockPath);
 
@@ -237,8 +237,8 @@ describe('updateIndex', () => {
   it('creates .features/ directory if missing', () => {
     const tmp = makeTmpFeatureWorktree();
     // Remove the .features dir
-    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
-    expect(existsSync(path.join(tmp, '.features'))).toBe(false);
+    rmSync(path.join(tmp, '.devflow', 'features'), { recursive: true, force: true });
+    expect(existsSync(path.join(tmp, '.devflow', 'features'))).toBe(false);
 
     updateIndex(tmp, {
       slug: 'new-feature',
@@ -247,7 +247,7 @@ describe('updateIndex', () => {
       referencedFiles: ['src/new/index.ts'],
     });
 
-    expect(existsSync(path.join(tmp, '.features'))).toBe(true);
+    expect(existsSync(path.join(tmp, '.devflow', 'features'))).toBe(true);
     const index = loadIndex(tmp);
     expect(index).not.toBeNull();
     expect(index!.features['new-feature']).toBeDefined();
@@ -261,7 +261,7 @@ describe('updateIndex', () => {
 describe('removeEntry', () => {
   it('removes entry from index and deletes its directory', () => {
     const tmp = makeTmpFeatureWorktree(SAMPLE_INDEX, { 'cli-commands': SAMPLE_FEATURE_KNOWLEDGE_CONTENT });
-    const knowledgeDir = path.join(tmp, '.features', 'cli-commands');
+    const knowledgeDir = path.join(tmp, '.devflow', 'features', 'cli-commands');
     expect(existsSync(knowledgeDir)).toBe(true);
 
     removeEntry(tmp, 'cli-commands');
@@ -285,8 +285,8 @@ describe('removeEntry', () => {
   // T5: No-op when .features/ directory is missing
   it('is a no-op when .features/ directory does not exist', () => {
     const tmp = makeTmpFeatureWorktree();
-    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
-    expect(existsSync(path.join(tmp, '.features'))).toBe(false);
+    rmSync(path.join(tmp, '.devflow', 'features'), { recursive: true, force: true });
+    expect(existsSync(path.join(tmp, '.devflow', 'features'))).toBe(false);
 
     // Should not throw
     expect(() => removeEntry(tmp, 'nonexistent')).not.toThrow();
@@ -294,9 +294,9 @@ describe('removeEntry', () => {
 
   it('preserves corrupt index.json on remove instead of overwriting', () => {
     const tmp = makeTmpFeatureWorktree();
-    writeFileSync(path.join(tmp, '.features', 'index.json'), 'not-valid-json');
+    writeFileSync(path.join(tmp, '.devflow', 'features', 'index.json'), 'not-valid-json');
     removeEntry(tmp, 'nonexistent');
-    const raw = readFileSync(path.join(tmp, '.features', 'index.json'), 'utf8');
+    const raw = readFileSync(path.join(tmp, '.devflow', 'features', 'index.json'), 'utf8');
     expect(raw).toBe('not-valid-json');
   });
 });
@@ -399,7 +399,7 @@ describe('checkAllStaleness', () => {
 
   it('does not false-positive newer feature knowledge when shared file changed between timestamps', () => {
     const tmp = makeTmpFeatureWorktree();
-    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+    rmSync(path.join(tmp, '.devflow', 'features'), { recursive: true, force: true });
 
     execSync('git init', { cwd: tmp, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', { cwd: tmp, stdio: 'pipe' });
@@ -423,7 +423,7 @@ describe('checkAllStaleness', () => {
     // knowledge-B: lastUpdated AFTER the change → should NOT be stale
     const knowledgeBTimestamp = new Date(Date.now() + 10000).toISOString();
 
-    const featuresDir = path.join(tmp, '.features');
+    const featuresDir = path.join(tmp, '.devflow', 'features');
     mkdirSync(featuresDir, { recursive: true });
     writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
       version: 1,
@@ -515,7 +515,7 @@ describe('CLI stale-slugs', () => {
   it('outputs stale slugs one per line for a git repo with changes', () => {
     const tmp = makeTmpFeatureWorktree();
     // Remove auto-created .features dir — we'll set it up after git init
-    rmSync(path.join(tmp, '.features'), { recursive: true, force: true });
+    rmSync(path.join(tmp, '.devflow', 'features'), { recursive: true, force: true });
 
     execSync('git init', { cwd: tmp, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', { cwd: tmp, stdio: 'pipe' });
@@ -528,7 +528,7 @@ describe('CLI stale-slugs', () => {
     execSync('git commit -m "initial"', { cwd: tmp, stdio: 'pipe' });
 
     const lastUpdated = new Date(Date.now() - 5000).toISOString();
-    const featuresDir = path.join(tmp, '.features');
+    const featuresDir = path.join(tmp, '.devflow', 'features');
     mkdirSync(featuresDir, { recursive: true });
     writeFileSync(path.join(featuresDir, 'index.json'), JSON.stringify({
       version: 1,

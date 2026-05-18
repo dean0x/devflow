@@ -373,12 +373,12 @@ describe('hasMemoryDir', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns true when .memory/ directory exists', async () => {
-    await fs.mkdir(path.join(tmpDir, '.memory'), { recursive: true });
+  it('returns true when .devflow/memory/ directory exists', async () => {
+    await fs.mkdir(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     expect(await hasMemoryDir(tmpDir)).toBe(true);
   });
 
-  it('returns false when .memory/ directory does not exist', async () => {
+  it('returns false when .devflow/memory/ directory does not exist', async () => {
     expect(await hasMemoryDir(tmpDir)).toBe(false);
   });
 
@@ -402,13 +402,13 @@ describe('filterProjectsWithMemory', () => {
     expect(await filterProjectsWithMemory([])).toEqual([]);
   });
 
-  it('returns only projects that have .memory/', async () => {
+  it('returns only projects that have .devflow/memory/', async () => {
     const projA = path.join(tmpDir, 'projA');
     const projB = path.join(tmpDir, 'projB');
     const projC = path.join(tmpDir, 'projC');
-    await fs.mkdir(path.join(projA, '.memory'), { recursive: true });
-    await fs.mkdir(projB, { recursive: true }); // no .memory/
-    await fs.mkdir(path.join(projC, '.memory'), { recursive: true });
+    await fs.mkdir(path.join(projA, '.devflow', 'memory'), { recursive: true });
+    await fs.mkdir(projB, { recursive: true }); // no .devflow/memory/
+    await fs.mkdir(path.join(projC, '.devflow', 'memory'), { recursive: true });
 
     const result = await filterProjectsWithMemory([projA, projB, projC]);
     expect(result).toEqual([projA, projC]);
@@ -438,7 +438,7 @@ describe('cleanQueueFiles', () => {
   });
 
   it('cleans both queue files when both exist', async () => {
-    const memDir = path.join(tmpDir, '.memory');
+    const memDir = path.join(tmpDir, '.devflow', 'memory');
     await fs.mkdir(memDir, { recursive: true });
     await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
     await fs.writeFile(path.join(memDir, '.pending-turns.processing'), '{"role":"user"}');
@@ -451,7 +451,7 @@ describe('cleanQueueFiles', () => {
   });
 
   it('cleans only .pending-turns.jsonl when only that file exists', async () => {
-    const memDir = path.join(tmpDir, '.memory');
+    const memDir = path.join(tmpDir, '.devflow', 'memory');
     await fs.mkdir(memDir, { recursive: true });
     await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
 
@@ -461,7 +461,7 @@ describe('cleanQueueFiles', () => {
   });
 
   it('returns cleaned=0 when neither queue file exists', async () => {
-    const memDir = path.join(tmpDir, '.memory');
+    const memDir = path.join(tmpDir, '.devflow', 'memory');
     await fs.mkdir(memDir, { recursive: true });
 
     const result = await cleanQueueFiles([tmpDir]);
@@ -469,7 +469,7 @@ describe('cleanQueueFiles', () => {
   });
 
   it('skips projects where lock directory is present', async () => {
-    const memDir = path.join(tmpDir, '.memory');
+    const memDir = path.join(tmpDir, '.devflow', 'memory');
     await fs.mkdir(memDir, { recursive: true });
     await fs.writeFile(path.join(memDir, '.pending-turns.jsonl'), '{"role":"user"}');
     // Create the lock directory to simulate active background updater
@@ -487,8 +487,8 @@ describe('cleanQueueFiles', () => {
     const projC = path.join(tmpDir, 'projC');
 
     for (const proj of [projA, projB, projC]) {
-      await fs.mkdir(path.join(proj, '.memory'), { recursive: true });
-      await fs.writeFile(path.join(proj, '.memory', '.pending-turns.jsonl'), '{"role":"user"}');
+      await fs.mkdir(path.join(proj, '.devflow', 'memory'), { recursive: true });
+      await fs.writeFile(path.join(proj, '.devflow', 'memory', '.pending-turns.jsonl'), '{"role":"user"}');
     }
 
     const result = await cleanQueueFiles([projA, projB, projC]);
@@ -502,11 +502,11 @@ describe('cleanQueueFiles', () => {
     const locked = path.join(tmpDir, 'locked');
     const unlocked = path.join(tmpDir, 'unlocked');
 
-    await fs.mkdir(path.join(locked, '.memory', '.working-memory.lock'), { recursive: true });
-    await fs.writeFile(path.join(locked, '.memory', '.pending-turns.jsonl'), 'data');
+    await fs.mkdir(path.join(locked, '.devflow', 'memory', '.working-memory.lock'), { recursive: true });
+    await fs.writeFile(path.join(locked, '.devflow', 'memory', '.pending-turns.jsonl'), 'data');
 
-    await fs.mkdir(path.join(unlocked, '.memory'), { recursive: true });
-    await fs.writeFile(path.join(unlocked, '.memory', '.pending-turns.jsonl'), 'data');
+    await fs.mkdir(path.join(unlocked, '.devflow', 'memory'), { recursive: true });
+    await fs.writeFile(path.join(unlocked, '.devflow', 'memory', '.pending-turns.jsonl'), 'data');
 
     const result = await cleanQueueFiles([locked, unlocked]);
     expect(result.cleaned).toBe(1);
@@ -570,7 +570,7 @@ describe('session-start-memory hook integration', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hook-test-'));
-    await fs.mkdir(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -581,7 +581,7 @@ describe('session-start-memory hook integration', () => {
     // Decisions TL;DR injection moved from session-start-memory to session-start-context.
     // session-start-memory only handles working memory (WORKING-MEMORY.md).
     await fs.writeFile(
-      path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
       '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
     );
 
@@ -615,7 +615,7 @@ describe('session-start-context hook integration', () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-context-hook-test-'));
-    await fs.mkdir(path.join(tmpDir, '.memory', 'decisions'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -624,11 +624,11 @@ describe('session-start-context hook integration', () => {
 
   it('injects PROJECT DECISIONS TL;DR from decisions files', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
       '<!-- TL;DR: 2 decisions. Key: ADR-001 Result types, ADR-002 Single-coder -->\n# Architectural Decisions',
     );
     await fs.writeFile(
-      path.join(tmpDir, '.memory', 'decisions', 'pitfalls.md'),
+      path.join(tmpDir, '.devflow', 'decisions', 'pitfalls.md'),
       '<!-- TL;DR: 1 pitfall. Key: PF-001 Synthesizer glob -->\n# Known Pitfalls',
     );
 
@@ -643,7 +643,7 @@ describe('session-start-context hook integration', () => {
 
   it('produces no leading newlines when only decisions files exist', async () => {
     await fs.writeFile(
-      path.join(tmpDir, '.memory', 'decisions', 'decisions.md'),
+      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
       '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
     );
 

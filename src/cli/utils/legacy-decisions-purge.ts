@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
 import { acquireMkdirLock } from './mkdir-lock.js';
+import { getDecisionsDir, getDecisionsLockDir } from './project-paths.js';
 
 /**
  * @file legacy-decisions-purge.ts
@@ -76,17 +77,17 @@ const SELF_LEARNING_SOURCE_MARKER = '\n- **Source**: self-learning:';
  * (allowlist-based for v2, source-marker-based for v3), keeping this helper
  * free of policy.
  *
- * @param memoryDir     Absolute path to `.memory/`
+ * @param decisionsDir  Absolute path to the decisions directory (e.g. `.devflow/decisions/`)
+ * @param lockDir       Absolute path to the mkdir-based lock directory
  * @param filePrefixPairs  Files to process with their heading prefix
  * @param rewriteContent  Per-file transform: returns updated content + sections removed
  */
 async function withDecisionsFiles(
-  memoryDir: string,
+  decisionsDir: string,
+  lockDir: string,
   filePrefixPairs: readonly DecisionsFilePair[],
   rewriteContent: (content: string, prefix: 'ADR' | 'PF') => { updated: string; removedCount: number },
 ): Promise<PurgeLegacyDecisionsResult> {
-  const decisionsDir = path.join(memoryDir, 'decisions');
-
   // Bail early: nothing to do if decisions directory doesn't exist
   try {
     await fs.access(decisionsDir);
@@ -94,8 +95,7 @@ async function withDecisionsFiles(
     return { removed: 0, files: [] };
   }
 
-  const decisionsLockDir = path.join(memoryDir, '.decisions.lock');
-  const lockAcquired = await acquireMkdirLock(decisionsLockDir);
+  const lockAcquired = await acquireMkdirLock(lockDir);
   if (!lockAcquired) {
     throw new Error('Decisions files are currently being written. Try again in a moment.');
   }
@@ -131,7 +131,7 @@ async function withDecisionsFiles(
       }
     }
   } finally {
-    try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
+    try { await fs.rmdir(lockDir); } catch { /* already cleaned */ }
   }
 
   return { removed, files: modifiedFiles };
@@ -152,9 +152,12 @@ async function withDecisionsFiles(
  */
 export async function purgeLegacyDecisionsEntries(options: {
   memoryDir: string;
+  /** When provided, uses canonical project-paths for decisions dir and lock (new .devflow/ layout). */
+  projectRoot?: string;
 }): Promise<PurgeLegacyDecisionsResult> {
-  const { memoryDir } = options;
-  const decisionsDir = path.join(memoryDir, 'decisions');
+  const { memoryDir, projectRoot } = options;
+  const decisionsDir = projectRoot ? getDecisionsDir(projectRoot) : path.join(memoryDir, 'decisions');
+  const lockDir = projectRoot ? getDecisionsLockDir(projectRoot) : path.join(memoryDir, '.decisions.lock');
   const decisionsPath = path.join(decisionsDir, 'decisions.md');
   const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
@@ -163,7 +166,7 @@ export async function purgeLegacyDecisionsEntries(options: {
     [pitfallsPath, 'PF'],
   ];
 
-  const result = await withDecisionsFiles(memoryDir, filePrefixPairs, (content, prefix) => {
+  const result = await withDecisionsFiles(decisionsDir, lockDir, filePrefixPairs, (content, prefix) => {
     const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
     let updated = content;
     let removedCount = 0;
@@ -220,9 +223,12 @@ export async function purgeLegacyDecisionsEntries(options: {
  */
 export async function purgeAllPreV2DecisionsEntries(options: {
   memoryDir: string;
+  /** When provided, uses canonical project-paths for decisions dir and lock (new .devflow/ layout). */
+  projectRoot?: string;
 }): Promise<PurgeLegacyDecisionsResult> {
-  const { memoryDir } = options;
-  const decisionsDir = path.join(memoryDir, 'decisions');
+  const { memoryDir, projectRoot } = options;
+  const decisionsDir = projectRoot ? getDecisionsDir(projectRoot) : path.join(memoryDir, 'decisions');
+  const lockDir = projectRoot ? getDecisionsLockDir(projectRoot) : path.join(memoryDir, '.decisions.lock');
   const decisionsPath = path.join(decisionsDir, 'decisions.md');
   const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
 
@@ -231,7 +237,7 @@ export async function purgeAllPreV2DecisionsEntries(options: {
     [pitfallsPath, 'PF'],
   ];
 
-  return withDecisionsFiles(memoryDir, filePrefixPairs, (content) => {
+  return withDecisionsFiles(decisionsDir, lockDir, filePrefixPairs, (content) => {
     // Remove sections lacking the self-learning marker — those are pre-v2 seeded content.
     let removedCount = 0;
     const updated = content.replace(SECTION_REGEX, (section) => {

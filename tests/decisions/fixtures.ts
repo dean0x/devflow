@@ -67,7 +67,7 @@ const createdTmpDirs: string[] = []
 export function makeTmpWorktree(decisions?: string, pitfalls?: string): string {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'decisions-index-test-'))
   createdTmpDirs.push(tmpDir)
-  const decisionsDir = path.join(tmpDir, '.memory', 'decisions')
+  const decisionsDir = path.join(tmpDir, '.devflow', 'decisions')
   mkdirSync(decisionsDir, { recursive: true })
   if (decisions !== undefined) {
     writeFileSync(path.join(decisionsDir, 'decisions.md'), decisions, 'utf8')
