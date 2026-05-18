@@ -65,6 +65,29 @@ const SECTION_REGEX = /\n## (?:ADR|PF)-\d+:[^\n]*(?:\n(?!## )[^\n]*)*/g;
 const SELF_LEARNING_SOURCE_MARKER = '\n- **Source**: self-learning:';
 
 /**
+ * Resolve decisions directory, lock directory, and file-prefix pairs from
+ * either a `projectRoot` (canonical new layout) or a `memoryDir` (legacy
+ * fallback used by pre-migration callers and existing tests).
+ */
+function resolveDecisionsPaths(options: { memoryDir: string; projectRoot?: string }): {
+  decisionsDir: string;
+  lockDir: string;
+  filePrefixPairs: readonly DecisionsFilePair[];
+} {
+  const { memoryDir, projectRoot } = options;
+  const decisionsDir = projectRoot ? getDecisionsDir(projectRoot) : path.join(memoryDir, 'decisions');
+  const lockDir = projectRoot ? getDecisionsLockDir(projectRoot) : path.join(memoryDir, '.decisions.lock');
+  return {
+    decisionsDir,
+    lockDir,
+    filePrefixPairs: [
+      [path.join(decisionsDir, 'decisions.md'), 'ADR'],
+      [path.join(decisionsDir, 'pitfalls.md'), 'PF'],
+    ],
+  };
+}
+
+/**
  * Shared lock-and-loop helper used by both purge functions.
  *
  * Acquires the decisions lock, then for each file in `filePrefixPairs`:
@@ -146,7 +169,9 @@ async function withDecisionsFiles(
  *
  * Returns immediately if `.devflow/decisions/` does not exist.
  *
- * @param options.memoryDir - absolute path to the `.devflow/memory/` directory
+ * @param options.projectRoot - absolute path to the project root (preferred)
+ * @param options.memoryDir - absolute path to the memory directory (`.devflow/memory/` when
+ *   projectRoot is provided; legacy `.memory/` fallback path otherwise)
  * @returns number of sections removed and list of files that were modified
  * @throws if lock acquisition times out
  */
@@ -156,15 +181,7 @@ export async function purgeLegacyDecisionsEntries(options: {
   projectRoot?: string;
 }): Promise<PurgeLegacyDecisionsResult> {
   const { memoryDir, projectRoot } = options;
-  const decisionsDir = projectRoot ? getDecisionsDir(projectRoot) : path.join(memoryDir, 'decisions');
-  const lockDir = projectRoot ? getDecisionsLockDir(projectRoot) : path.join(memoryDir, '.decisions.lock');
-  const decisionsPath = path.join(decisionsDir, 'decisions.md');
-  const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
-
-  const filePrefixPairs: readonly DecisionsFilePair[] = [
-    [decisionsPath, 'ADR'],
-    [pitfallsPath, 'PF'],
-  ];
+  const { decisionsDir, lockDir, filePrefixPairs } = resolveDecisionsPaths(options);
 
   const result = await withDecisionsFiles(decisionsDir, lockDir, filePrefixPairs, (content, prefix) => {
     const legacyInFile = LEGACY_IDS.filter(id => id.startsWith(prefix));
@@ -227,7 +244,9 @@ export async function purgeLegacyDecisionsEntries(options: {
  * Does NOT remove PROJECT-PATTERNS.md — that file is v2's responsibility and
  * has already been handled by `purgeLegacyDecisionsEntries`.
  *
- * @param options.memoryDir - absolute path to the `.devflow/memory/` directory
+ * @param options.projectRoot - absolute path to the project root (preferred)
+ * @param options.memoryDir - absolute path to the memory directory (`.devflow/memory/` when
+ *   projectRoot is provided; legacy `.memory/` fallback path otherwise)
  * @returns number of sections removed and list of files that were modified
  * @throws if lock acquisition times out
  */
@@ -236,16 +255,7 @@ export async function purgeAllPreV2DecisionsEntries(options: {
   /** When provided, uses canonical project-paths for decisions dir and lock (new .devflow/ layout). */
   projectRoot?: string;
 }): Promise<PurgeLegacyDecisionsResult> {
-  const { memoryDir, projectRoot } = options;
-  const decisionsDir = projectRoot ? getDecisionsDir(projectRoot) : path.join(memoryDir, 'decisions');
-  const lockDir = projectRoot ? getDecisionsLockDir(projectRoot) : path.join(memoryDir, '.decisions.lock');
-  const decisionsPath = path.join(decisionsDir, 'decisions.md');
-  const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
-
-  const filePrefixPairs: readonly DecisionsFilePair[] = [
-    [decisionsPath, 'ADR'],
-    [pitfallsPath, 'PF'],
-  ];
+  const { decisionsDir, lockDir, filePrefixPairs } = resolveDecisionsPaths(options);
 
   return withDecisionsFiles(decisionsDir, lockDir, filePrefixPairs, (content) => {
     // Remove sections lacking the self-learning marker — those are pre-v2 seeded content.

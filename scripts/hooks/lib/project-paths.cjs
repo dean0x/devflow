@@ -281,7 +281,7 @@ function getGitignoreEntries() {
  * maintaining an inline copy. The shell hook (ensure-devflow-init) keeps its
  * heredoc in sync manually — a comment in that file points here as canonical.
  *
- * TS COUNTERPART: src/cli/utils/project-paths.ts must mirror this exactly.
+ * CANONICAL SOURCE — TS counterpart at src/cli/utils/project-paths.ts must mirror this exactly.
  */
 function getDevflowGitignoreContent() {
   return `# Per-developer session state (fully transient)
@@ -295,7 +295,6 @@ learning/learning-log.jsonl
 learning/learning-log.v1.jsonl.bak
 learning/learning.json
 learning/.learning-manifest.json
-learning/.learning.lock/
 learning/.learning-notified-at
 learning/.learning-notifications.json
 learning/.learning-runs-today

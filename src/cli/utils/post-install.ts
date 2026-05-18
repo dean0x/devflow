@@ -6,7 +6,6 @@ import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './paths.js';
 import { getGitignoreEntries, getDocsDir } from './project-paths.js';
 
-
 /**
  * Type guard for Node.js system errors with error codes.
  */
@@ -507,9 +506,11 @@ export async function createDocsStructure(verbose: boolean): Promise<void> {
   const docsDir = getDocsDir(process.cwd());
 
   try {
-    await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });
-    await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
-    await fs.mkdir(path.join(docsDir, 'releases'), { recursive: true });
+    await Promise.all([
+      fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true }),
+      fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true }),
+      fs.mkdir(path.join(docsDir, 'releases'), { recursive: true }),
+    ]);
     if (verbose) {
       p.log.success('.devflow/docs/ structure ready');
     }

@@ -284,7 +284,7 @@ export function getGitignoreEntries(): string[] {
  * maintaining an inline copy. The shell hook (ensure-devflow-init) keeps its
  * heredoc in sync manually — a comment in that file points here as canonical.
  *
- * CJS COUNTERPART: scripts/hooks/lib/project-paths.cjs must mirror this exactly.
+ * CJS is canonical source: scripts/hooks/lib/project-paths.cjs — this must mirror it exactly.
  */
 export function getDevflowGitignoreContent(): string {
   return `# Per-developer session state (fully transient)
@@ -298,7 +298,6 @@ learning/learning-log.jsonl
 learning/learning-log.v1.jsonl.bak
 learning/learning.json
 learning/.learning-manifest.json
-learning/.learning.lock/
 learning/.learning-notified-at
 learning/.learning-notifications.json
 learning/.learning-runs-today

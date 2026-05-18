@@ -37,7 +37,7 @@ fi
 # CANONICAL SOURCE: scripts/hooks/lib/project-paths.cjs — getDevflowGitignoreContent()
 # Keep this heredoc in sync with that function when adding or removing entries.
 if [ ! -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
-  cat > "$_DEVFLOW_DIR/.gitignore" << 'EOF'
+  cat > "$_DEVFLOW_DIR/.gitignore.tmp" << 'EOF'
 # Per-developer session state (fully transient)
 memory/
 
@@ -49,7 +49,6 @@ learning/learning-log.jsonl
 learning/learning-log.v1.jsonl.bak
 learning/learning.json
 learning/.learning-manifest.json
-learning/.learning.lock/
 learning/.learning-notified-at
 learning/.learning-notifications.json
 learning/.learning-runs-today
@@ -85,5 +84,6 @@ manifest.json
 # Init marker
 .gitignore-configured
 EOF
-  touch "$_DEVFLOW_DIR/.gitignore-configured"
+  mv "$_DEVFLOW_DIR/.gitignore.tmp" "$_DEVFLOW_DIR/.gitignore" && \
+    touch "$_DEVFLOW_DIR/.gitignore-configured"
 fi
