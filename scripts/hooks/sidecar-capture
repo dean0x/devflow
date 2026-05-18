@@ -80,6 +80,7 @@ fi
 source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
 
 source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-capture: failed to source get-mtime" >&2; exit 1; }
+source "$SCRIPT_DIR/sidecar-lock" || { echo "sidecar-capture: failed to source sidecar-lock" >&2; exit 1; }
 
 # Logging
 source "$SCRIPT_DIR/log-paths" || { echo "sidecar-capture: failed to source log-paths" >&2; exit 1; }
@@ -103,12 +104,19 @@ else
     -- "$RESPONSE_TEXT" "$TS" >> "$QUEUE_FILE"
 fi
 
-# Queue overflow safety: if >200 lines, keep last 100
+# Queue overflow safety: if >200 lines, keep last 100 (locked to prevent multi-session race)
 if [ -f "$QUEUE_FILE" ]; then
   LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
   if [ "$LINE_COUNT" -gt 200 ]; then
-    _TRUNC_TMP="$QUEUE_FILE.tmp.$$" && tail -100 "$QUEUE_FILE" > "$_TRUNC_TMP" && mv "$_TRUNC_TMP" "$QUEUE_FILE" || rm -f "$_TRUNC_TMP"
-    log "Queue overflow: truncated from $LINE_COUNT to 100 lines"
+    _QUEUE_LOCK="$MEMORY_DIR/.pending-turns.lock"
+    if sidecar_lock_acquire "$_QUEUE_LOCK" 2; then
+      LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
+      if [ "$LINE_COUNT" -gt 200 ]; then
+        _TRUNC_TMP="$QUEUE_FILE.tmp.$$" && tail -100 "$QUEUE_FILE" > "$_TRUNC_TMP" && mv "$_TRUNC_TMP" "$QUEUE_FILE" || rm -f "$_TRUNC_TMP"
+        log "Queue overflow: truncated from $LINE_COUNT to 100 lines"
+      fi
+      sidecar_lock_release "$_QUEUE_LOCK"
+    fi
   fi
 fi
 

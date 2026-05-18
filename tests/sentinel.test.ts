@@ -113,9 +113,11 @@ describe('sentinel guard: pre-compact-memory', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('exits cleanly when .working-memory-disabled exists', () => {
+  it('exits cleanly when sidecar config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', '.working-memory-disabled'));
+    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir);
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });

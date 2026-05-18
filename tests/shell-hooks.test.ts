@@ -6,6 +6,11 @@ import * as os from 'os';
 
 const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
 
+function localDateString(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
@@ -1972,7 +1977,7 @@ describe('sidecar-evaluate business logic', () => {
     fs.mkdirSync(sidecarDir, { recursive: true });
 
     // Set daily cap to max
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateString();
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\t5\n`);
 
     // Pre-fill batch to trigger
@@ -2276,7 +2281,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
   it('tab-less counter file does not crash and returns default', () => {
     const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateString();
     // Write date string with no tab separator — cut -f2 returns the whole line
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\n`);
 
@@ -2301,7 +2306,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
   it('non-numeric count field returns default', () => {
     const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateString();
     fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\tabc\n`);
 
     // Pre-fill batch to trigger

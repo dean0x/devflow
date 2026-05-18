@@ -43,7 +43,9 @@ Agent({
   model: "claude-haiku-4-5",
   prompt: "You are a working memory updater. Read .memory/.sidecar/memory.processing for task context.
 
-Read the pending turns queue at .memory/.pending-turns.jsonl (JSONL format, each line is {role, content, ts}).
+Atomically claim the pending turns queue: rename .memory/.pending-turns.jsonl to .memory/.pending-turns.processing (this prevents concurrent sessions from losing appended turns during processing). If the rename fails (file doesn't exist), exit cleanly.
+
+Read the claimed queue at .memory/.pending-turns.processing (JSONL format, each line is {role, content, ts}).
 Read existing memory at .memory/WORKING-MEMORY.md (may not exist yet).
 
 Write an updated .memory/WORKING-MEMORY.md that integrates the new turns into a structured summary.
@@ -54,7 +56,7 @@ Keep under 120 lines. Use sections: ## Now, ## Progress, ## Decisions, ## Contex
 - ## Context: repository context, branch info
 - ## Session Log: one-line-per-session summary
 
-After writing WORKING-MEMORY.md, truncate .memory/.pending-turns.jsonl (write empty string).
+After writing WORKING-MEMORY.md, delete .memory/.pending-turns.processing.
 Then delete .memory/.sidecar/memory.processing.
 
 If any step fails, leave memory.processing in place (it will be retried next dispatch)."
