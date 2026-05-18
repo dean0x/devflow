@@ -1807,7 +1807,7 @@ try {
     // -------------------------------------------------------------------------
     // decisions-append <file> <type> <obsJson>
     // Standalone op for appending to decisions files (decisions.md or pitfalls.md).
-    // Acquires the shared `.memory/.decisions.lock` to serialize against render-ready
+    // Acquires the shared `.devflow/decisions/.decisions.lock` to serialize against render-ready
     // and any CLI updateDecisionsStatus callers. Lock path derivation matches the
     // render-ready handler: sibling of the `decisions/` directory.
     // -------------------------------------------------------------------------

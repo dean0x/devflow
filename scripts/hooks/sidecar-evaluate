@@ -413,7 +413,7 @@ fi
 if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
   log "Evaluating knowledge..."
 
-  # Check .features/.disabled sentinel
+  # Check .devflow/features/.disabled sentinel
   if [ -f "$FEATURES_DIR/.disabled" ]; then
     log "Knowledge disabled by sentinel"
   else
