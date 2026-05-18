@@ -80,7 +80,7 @@ function readConfigFile(filePath: string): string | null {
  * Priority (highest wins): project config → global config → defaults.
  *
  * - Global:  `~/.devflow/decisions.json`
- * - Project: `<cwd>/.memory/decisions.json`
+ * - Project: `<cwd>/.devflow/decisions/decisions.json`
  *
  * Invalid JSON in either file is silently ignored and treated as absent.
  */

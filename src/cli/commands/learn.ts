@@ -312,7 +312,7 @@ export const learnCommand = new Command('learn')
       const scope = await p.select({
         message: 'Configuration scope',
         options: [
-          { value: 'project', label: 'Project', hint: 'This project only (.memory/learning.json)' },
+          { value: 'project', label: 'Project', hint: 'This project only (.devflow/learning/learning.json)' },
           { value: 'global', label: 'Global', hint: 'All projects (~/.devflow/learning.json)' },
         ],
       });

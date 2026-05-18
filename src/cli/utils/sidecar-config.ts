@@ -43,7 +43,7 @@ export async function readConfig(projectRoot: string): Promise<SidecarConfig> {
 
 /**
  * Write the sidecar config for a project root.
- * Creates the .memory/.sidecar/ directory if missing.
+ * Creates the .devflow/sidecar/ directory if missing.
  * Uses an atomic temp+rename pattern to prevent partial reads under concurrent writes.
  */
 export async function writeConfig(projectRoot: string, config: SidecarConfig): Promise<void> {

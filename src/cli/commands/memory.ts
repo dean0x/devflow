@@ -175,7 +175,7 @@ interface MemoryOptions {
 }
 
 /**
- * Returns true if the given project root contains a `.memory/` directory.
+ * Returns true if the given project root contains a `.devflow/memory/` directory.
  * Treats unexpected errors (e.g. EACCES) as absent to avoid false positives.
  */
 export async function hasMemoryDir(root: string): Promise<boolean> {
@@ -188,13 +188,13 @@ export async function hasMemoryDir(root: string): Promise<boolean> {
       return false;
     }
     // Unexpected error (e.g. EACCES) — log and treat as absent to avoid false positives
-    console.warn(`[memory] Unexpected error checking .memory/ in ${root}: ${(err as Error).message}`);
+    console.warn(`[memory] Unexpected error checking .devflow/memory/ in ${root}: ${(err as Error).message}`);
     return false;
   }
 }
 
 /**
- * Filters the provided git root paths to those that contain a `.memory/` directory.
+ * Filters the provided git root paths to those that contain a `.devflow/memory/` directory.
  */
 export async function filterProjectsWithMemory(gitRoots: string[]): Promise<string[]> {
   const checks = await Promise.all(gitRoots.map(async (root) => ({ root, has: await hasMemoryDir(root) })));
@@ -268,7 +268,7 @@ export const memoryCommand = new Command('memory')
         : projectsWithMemory;
 
       if (allProjects.length === 0) {
-        p.log.info('No projects with .memory/ found');
+        p.log.info('No projects with .devflow/memory/ found');
         return;
       }
 

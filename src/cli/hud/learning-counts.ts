@@ -99,7 +99,7 @@ function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
 }
 
 /**
- * Read .memory/learning-log.jsonl and .memory/decisions-log.jsonl, merge counts by type + attention flags.
+ * Read .devflow/learning/learning-log.jsonl and .devflow/decisions/decisions-log.jsonl, merge counts by type + attention flags.
  * Returns null if neither log exists or neither can be parsed (graceful fallback).
  * Only counts entries with status === 'created'.
  *

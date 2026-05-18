@@ -90,7 +90,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     p.log.info(`Sidecar: ${enabled ? color.green('enabled') : color.dim('disabled')}`);
     p.log.info(`Knowledge bases: ${kbs.length}`);
     if (disabled) {
-      p.log.info(`Sentinel: ${color.yellow('.features/.disabled present')}`);
+      p.log.info(`Sentinel: ${color.yellow('.devflow/features/.disabled present')}`);
     }
     p.outro('');
   }

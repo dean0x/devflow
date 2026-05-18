@@ -360,7 +360,7 @@ function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
   const indexPath = getFeaturesIndexPath(worktreePath);
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
-    throw new Error('Failed to acquire .features/.knowledge.lock within timeout');
+    throw new Error('Failed to acquire .devflow/features/.knowledge.lock within timeout');
   }
 
   try {
@@ -425,7 +425,7 @@ function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
   const indexPath = getFeaturesIndexPath(worktreePath);
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
-    throw new Error('Failed to acquire .features/.knowledge.lock within timeout');
+    throw new Error('Failed to acquire .devflow/features/.knowledge.lock within timeout');
   }
 
   try {

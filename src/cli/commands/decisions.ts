@@ -338,7 +338,7 @@ export const decisionsCommand = new Command('decisions')
       const scope = await p.select({
         message: 'Configuration scope',
         options: [
-          { value: 'project', label: 'Project', hint: 'This project only (.memory/decisions.json)' },
+          { value: 'project', label: 'Project', hint: 'This project only (.devflow/decisions/decisions.json)' },
           { value: 'global', label: 'Global', hint: 'All projects (~/.devflow/decisions.json)' },
         ],
       });
