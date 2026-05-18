@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { getMemoryDir, getFeaturesDir } from './project-paths.js';
+import { getMemoryDir, getFeaturesDir, getDevflowGitignoreContent } from './project-paths.js';
 
 // ---------------------------------------------------------------------------
 // consolidate-to-devflow-dir helpers
@@ -55,56 +55,17 @@ async function moveDirContents(
   );
 }
 
-const DEVFLOW_GITIGNORE_CONTENT = `# Per-developer session state (fully transient)
-memory/
-
-# Sidecar dispatch system (fully transient)
-sidecar/
-
-# Per-developer observation logs and transient state
-learning/learning-log.jsonl
-learning/learning-log.v1.jsonl.bak
-learning/learning.json
-learning/.learning-manifest.json
-learning/.learning.lock/
-learning/.learning-notified-at
-learning/.learning-notifications.json
-learning/.learning-runs-today
-learning/.learning-session-count
-learning/.learning-batch-ids
-
-# Per-developer decisions observation log and transient state
-decisions/decisions-log.jsonl
-decisions/decisions.json
-decisions/.decisions-manifest.json
-decisions/.decisions.lock/
-decisions/.decisions-usage.json
-decisions/.decisions-usage.lock/
-decisions/.decisions-notifications.json
-decisions/.decisions-runs-today
-decisions/.decisions-batch-ids
-decisions/.disabled
-
-# Ephemeral doc artifacts
-docs/handoff-*.md
-docs/reviews/*/.last-review-head
-
-# Transient files in features
-features/.knowledge.lock/
-features/.knowledge-last-refresh
-features/.knowledge-refresh.lock
-features/.disabled
-features/.gitignore-configured
-
-# Install state (local-scope only)
-manifest.json
-
-# Init marker
-.gitignore-configured
-`;
-
-/** Known legacy / V1 files in .memory/ that must NOT be migrated. */
-const MEMORY_SKIP_FILES = new Set([
+/**
+ * Legacy / V1 files in .memory/ that no longer exist in any meaningful sense
+ * and must NOT be migrated to .devflow/. These are entries NOT present in the
+ * memMap below — derived programmatically from the mapping.
+ *
+ * The full catch-all skip set is computed inside the migration run function as:
+ *   new Set([...MEMORY_LEGACY_SKIP_FILES, ...memMap.map(([name]) => name)])
+ * This ensures that adding a new entry to memMap automatically excludes it
+ * from the catch-all moveDirContents pass without a manual update here.
+ */
+const MEMORY_LEGACY_SKIP_FILES: readonly string[] = [
   'knowledge',                        // pre-rename V1 decisions dir
   'short',                            // V1 format
   'index.md',                         // V1 format
@@ -113,36 +74,10 @@ const MEMORY_SKIP_FILES = new Set([
   '.working-memory-last-trigger',     // obsolete
   '.working-memory-update.log',       // old log
   '.gitignore-configured',            // replaced
-  // Explicit files handled by mapped moves below — exclude from catch-all
-  'WORKING-MEMORY.md',
-  'backup.json',
-  '.pending-turns.jsonl',
-  '.pending-turns.processing',
-  '.pending-turns.lock',
-  '.learning-disabled',
-  '.working-memory-disabled',
+  // Directories handled by moveDirContents — exclude from catch-all
   '.sidecar',
   'decisions',
-  'decisions-log.jsonl',
-  'decisions.json',
-  '.decisions-manifest.json',
-  '.decisions.lock',
-  '.decisions-usage.json',
-  '.decisions-usage.lock',
-  '.decisions-notifications.json',
-  '.decisions-runs-today',
-  '.decisions-batch-ids',
-  'learning-log.jsonl',
-  'learning.json',
-  '.learning-manifest.json',
-  '.learning-notified-at',
-  '.learning-notifications.json',
-  '.learning-runs-today',
-  '.learning-session-count',
-  '.learning-batch-ids',
-  'debug',
-  'working',
-]);
+];
 
 /**
  * @file migrations.ts
@@ -403,8 +338,14 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       new Set(),
     );
 
-    // 2d. Catch-all: move any remaining .memory/ files not already handled
-    await moveDirContents(memSrc, path.join(devflowDir, 'memory'), MEMORY_SKIP_FILES);
+    // 2d. Catch-all: move any remaining .memory/ files not already handled.
+    // Skip set is derived from memMap keys (already moved above) plus legacy-only
+    // entries, so adding a new memMap entry never needs a manual skip-set update.
+    const memSkipFiles = new Set([
+      ...MEMORY_LEGACY_SKIP_FILES,
+      ...memMap.map(([name]) => name),
+    ]);
+    await moveDirContents(memSrc, path.join(devflowDir, 'memory'), memSkipFiles);
 
     // 3. Move .features/ contents → .devflow/features/
     await moveDirContents(featSrc, path.join(devflowDir, 'features'), new Set());
@@ -415,7 +356,7 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
     // 5. Create .devflow/.gitignore if not present
     const devflowGitignore = path.join(devflowDir, '.gitignore');
     try { await fs.access(devflowGitignore); } catch {
-      await fs.writeFile(devflowGitignore, DEVFLOW_GITIGNORE_CONTENT, 'utf-8');
+      await fs.writeFile(devflowGitignore, getDevflowGitignoreContent(), 'utf-8');
     }
 
     // 6. Clean up project .gitignore — remove stale entries

@@ -273,6 +273,66 @@ function getGitignoreEntries() {
   return ['.claude/'];
 }
 
+/**
+ * The canonical content of .devflow/.gitignore — lists all transient per-developer
+ * files that must NOT be committed.
+ *
+ * Single source of truth: migrations.ts imports this function instead of
+ * maintaining an inline copy. The shell hook (ensure-devflow-init) keeps its
+ * heredoc in sync manually — a comment in that file points here as canonical.
+ *
+ * TS COUNTERPART: src/cli/utils/project-paths.ts must mirror this exactly.
+ */
+function getDevflowGitignoreContent() {
+  return `# Per-developer session state (fully transient)
+memory/
+
+# Sidecar dispatch system (fully transient)
+sidecar/
+
+# Per-developer observation logs and transient state
+learning/learning-log.jsonl
+learning/learning-log.v1.jsonl.bak
+learning/learning.json
+learning/.learning-manifest.json
+learning/.learning.lock/
+learning/.learning-notified-at
+learning/.learning-notifications.json
+learning/.learning-runs-today
+learning/.learning-session-count
+learning/.learning-batch-ids
+
+# Per-developer decisions observation log and transient state
+decisions/decisions-log.jsonl
+decisions/decisions.json
+decisions/.decisions-manifest.json
+decisions/.decisions.lock/
+decisions/.decisions-usage.json
+decisions/.decisions-usage.lock/
+decisions/.decisions-notifications.json
+decisions/.decisions-runs-today
+decisions/.decisions-batch-ids
+decisions/.disabled
+
+# Ephemeral doc artifacts
+docs/handoff-*.md
+docs/reviews/*/.last-review-head
+
+# Transient files in features
+features/.knowledge.lock/
+features/.knowledge-last-refresh
+features/.knowledge-refresh.lock
+features/.disabled
+features/.gitignore-configured
+
+# Install state (local-scope only)
+manifest.json
+
+# Init marker
+.gitignore-configured
+`;
+}
+
 module.exports = {
   // Core directories
   getMemoryDir,
@@ -326,4 +386,5 @@ module.exports = {
   getHandoffPath,
   // Gitignore entries
   getGitignoreEntries,
+  getDevflowGitignoreContent,
 };

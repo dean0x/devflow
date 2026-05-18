@@ -34,6 +34,8 @@ if [ ! -f "$_DEVFLOW_DIR/features/index.json" ]; then
 fi
 
 # One-time .devflow/.gitignore setup (marker prevents repeated checks)
+# CANONICAL SOURCE: scripts/hooks/lib/project-paths.cjs — getDevflowGitignoreContent()
+# Keep this heredoc in sync with that function when adding or removing entries.
 if [ ! -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
   cat > "$_DEVFLOW_DIR/.gitignore" << 'EOF'
 # Per-developer session state (fully transient)
