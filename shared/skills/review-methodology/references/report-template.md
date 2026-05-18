@@ -137,6 +137,6 @@ For individual line comments on PRs:
 ## File Naming
 
 Reports use this naming convention:
-- Directory: `.docs/reviews/{branch-slug}/`
+- Directory: `.devflow/docs/reviews/{branch-slug}/`
 - Filename: `{domain}-report.{YYYY-MM-DD_HHMM}.md`
 - Summary: `review-summary.{YYYY-MM-DD_HHMM}.md`

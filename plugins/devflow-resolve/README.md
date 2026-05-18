@@ -16,7 +16,7 @@ npx devflow-kit init --plugin=resolve
 
 ```
 /resolve                           # Resolve issues from latest review
-/resolve .docs/reviews/feature-x/  # Resolve from specific review
+/resolve .devflow/docs/reviews/feature-x/  # Resolve from specific review
 ```
 
 ## Workflow

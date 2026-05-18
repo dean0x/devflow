@@ -1,6 +1,6 @@
 ---
 name: docs-framework
-description: This skill should be used when the user asks to "create a review report", "write a status log", "add documentation", "name this artifact", or creates files in the .docs/ directory. Provides naming conventions, templates, and directory structure for reviews, debug sessions, design docs, and all persistent Devflow documentation artifacts.
+description: This skill should be used when the user asks to "create a review report", "write a status log", "add documentation", "name this artifact", or creates files in the .devflow/docs/ directory. Provides naming conventions, templates, and directory structure for reviews, debug sessions, design docs, and all persistent Devflow documentation artifacts.
 user-invocable: false
 allowed-tools: Read, Bash, Glob
 ---
@@ -21,10 +21,10 @@ The canonical source for documentation conventions in Devflow. All agents that p
 
 ## Directory Structure
 
-All generated documentation lives under `.docs/` in the project root:
+All generated documentation lives under `.devflow/docs/` in the project root:
 
 ```
-.docs/
+.devflow/docs/
 ├── reviews/{branch-slug}/              # Code review reports per branch
 │   ├── .last-review-head              # HEAD SHA of last completed review (for incremental)
 │   ├── {timestamp}/                   # Timestamped review directory (YYYY-MM-DD_HHMM)
@@ -48,12 +48,13 @@ All generated documentation lives under `.docs/` in the project root:
     ├── state.json
     └── plans/
 
-.memory/
+.devflow/memory/
 ├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
-├── backup.json                         # Pre-compact git state snapshot
-└── decisions/
-    ├── decisions.md                    # Architectural decisions (ADR-NNN format)
-    └── pitfalls.md                     # Known pitfalls (PF-NNN format)
+└── backup.json                         # Pre-compact git state snapshot
+
+.devflow/decisions/
+├── decisions.md                        # Architectural decisions (ADR-NNN format)
+└── pitfalls.md                         # Known pitfalls (PF-NNN format)
 ```
 
 ---
@@ -103,7 +104,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
     get_timestamp() { date +%Y-%m-%d_%H%M; }
     get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
     get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
-    ensure_docs_dir() { mkdir -p ".docs/$1"; }
+    ensure_docs_dir() { mkdir -p ".devflow/docs/"; }
 }
 ```
 
@@ -115,21 +116,21 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 
 | Agent | Output Location | Behavior |
 |-------|-----------------|----------|
-| Reviewer | `.docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
-| Synthesizer (review) | `.docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in timestamped dir |
-| Resolver | `.docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Creates new in timestamped dir |
-| Code-review cmd | `.docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
-| Working Memory | `.memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Decisions | `.memory/decisions/decisions.md` | Append-only (ADR-NNN sequential IDs) |
-| Pitfalls | `.memory/decisions/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
-| Designer (via /plan) | `.docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
-| Researcher | `.docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
-| Synthesizer (research) | `.docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
+| Reviewer | `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
+| Synthesizer (review) | `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` | Creates new in timestamped dir |
+| Resolver | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Creates new in timestamped dir |
+| Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
+| Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
+| Decisions | `.devflow/decisions/decisions.md` | Append-only (ADR-NNN sequential IDs) |
+| Pitfalls | `.devflow/decisions/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
+| Designer (via /plan) | `.devflow/docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
+| Researcher | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
+| Synthesizer (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
 
 ### Agents That Don't Persist
 
 - Git (fetch-issue: read-only, comment-pr: PR comments only)
-- Coder (commits to git, no .docs/ output)
+- Coder (commits to git, no .devflow/docs/ output)
 
 ---
 
@@ -140,7 +141,7 @@ When creating or modifying persisting agents:
 - [ ] Use standard timestamp format (`YYYY-MM-DD_HHMM`)
 - [ ] Sanitize branch names (replace `/` with `-`)
 - [ ] Sanitize topic names (lowercase, dashes, alphanumeric)
-- [ ] Create directory with `mkdir -p .docs/{subdir}`
+- [ ] Create directory with `mkdir -p .devflow/docs/{subdir}`
 - [ ] Document output location in agent's final message
 - [ ] Follow special file naming (UPPERCASE for indexes)
 - [ ] Use helper functions when possible
@@ -152,7 +153,7 @@ When creating or modifying persisting agents:
 
 This framework is used by:
 - **Review agents**: Creates review reports
-- **Working Memory hooks**: Auto-maintains `.memory/WORKING-MEMORY.md`
+- **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
 - **Background extractor**: background-learning via json-helper.cjs render-ready appends ADRs/PFs to `decisions.md` / `pitfalls.md`
 
 All persisting agents should load this skill to ensure consistent documentation.

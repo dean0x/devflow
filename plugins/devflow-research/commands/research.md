@@ -37,9 +37,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 Use `DECISIONS_CONTEXT` locally when framing research — prior decisions and pitfalls suggest areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Researcher agent in Phase 4 so they can cite relevant decisions in findings.
 
 Also load feature knowledge:
-1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
+1. Read `.devflow/features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
 2. Identify relevant feature knowledge entries (match research question against each entry's descriptions and directories).
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** for research framing. Pass to each Researcher agent in Phase 4.
 
 ### Phase 2: Requirements
@@ -49,7 +49,7 @@ Also load feature knowledge:
 Analyze the research question to infer research types needed (min 2, max 5). For each type:
 - `RESEARCH_TYPE`: `codebase | external | market | competitor | technology`
 - `RESEARCH_QUESTION`: Focused sub-question for this type
-- `OUTPUT_PATH`: `.docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`
+- `OUTPUT_PATH`: `.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`
 
 **Tool availability check**: If WebSearch/WebFetch are unavailable, restrict to `codebase` type only.
 
@@ -91,7 +91,7 @@ Spawn `Agent(subagent_type="Synthesizer")` in `research` mode:
 - Merges findings with trust-aware aggregation
 - Writes `research-summary.md` to the same timestamped directory
 
-Output path: `.docs/research/{topic-slug}/{timestamp}/research-summary.md`
+Output path: `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md`
 
 ### Phase 6: Present
 
@@ -109,9 +109,9 @@ If external research was skipped due to tool unavailability: inform user.
 **Requires:** RESEARCH_SUMMARY, DECISIONS_CONTEXT
 **Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
-1. If `.features/.disabled` exists → skip
+1. If `.devflow/features/.disabled` exists → skip
 2. If `codebase` type was not in RESEARCH_PLAN → skip
-3. Read `.features/index.json` (if it exists)
+3. Read `.devflow/features/index.json` (if it exists)
 4. Check if matching feature knowledge already exists. If covered → skip
 5. Use AskUserQuestion: "No feature knowledge exists for {researched area}. Create one?"
 6. If user accepts: spawn Knowledge agent, update index
@@ -125,7 +125,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 ## Output
 
-Research findings saved to `.docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/`:
+Research findings saved to `.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/`:
 - `{type}.md` per research type (codebase.md, external.md, etc.)
 - `research-summary.md` — synthesized findings with trust annotations
 

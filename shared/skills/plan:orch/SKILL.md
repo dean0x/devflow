@@ -32,7 +32,7 @@ If the orchestrator receives a `WORKTREE_PATH` context (e.g., from multi-worktre
 
 Before starting the full pipeline, check for prior planning context:
 
-- **Existing artifact**: `.docs/design/` contains a file matching the current topic
+- **Existing artifact**: `.devflow/docs/design/` contains a file matching the current topic
 - **Accepted plan in session**: A structured plan was already presented and accepted in this conversation
 
 **Override**: If the user explicitly requests a fresh plan ("start from scratch", "ignore the old plan", "new approach"), execute the full pipeline regardless of prior artifacts.
@@ -64,12 +64,12 @@ This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT`
 
 **Produces:** FEATURE_KNOWLEDGE
 
-1. Check if `.features/index.json` exists (Read tool). If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
-2. Read `.features/index.json` to see available feature knowledge entries.
+1. Check if `.devflow/features/index.json` exists (Read tool). If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
+2. Read `.devflow/features/index.json` to see available feature knowledge entries.
 3. Based on the current task description, identify which feature knowledge entries are relevant (LLM judgment — match task intent against each entry's `description` and `directories` fields).
 4. For each relevant feature knowledge entry:
    a. Run `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null` to check staleness
-   b. Read `.features/{slug}/KNOWLEDGE.md`
+   b. Read `.devflow/features/{slug}/KNOWLEDGE.md`
    c. If stale, prefix content with `[STALE — referenced files changed since last update. Verify against current code.]`
 5. Concatenate all relevant feature knowledge content as `FEATURE_KNOWLEDGE`:
    ```
@@ -96,7 +96,7 @@ Before committing to an approach, surface ambiguity through focused Socratic que
 
 **Skip examples** (proceed directly to Phase 4):
 - "Add retry with exponential backoff to HttpClient in src/http.ts, max 3 retries, configurable timeout" — specific files, clear behavior, defined parameters
-- "Implement the design from .docs/design/caching.md" — pre-existing specification
+- "Implement the design from .devflow/docs/design/caching.md" — pre-existing specification
 
 **Discover examples** (run Phase 3):
 - "Add a caching layer" — open-ended, multiple valid approaches
@@ -241,7 +241,7 @@ Use AskUserQuestion for any ambiguous design choices that need user input before
 **Requires:** PLAN_OUTPUT
 
 If the plan is substantial (>10 implementation steps or HIGH/CRITICAL context risk):
-- Write to `.docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md` with YAML frontmatter
+- Write to `.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md` with YAML frontmatter
 - Note the artifact path in the output
 
 Otherwise: plan stays in conversation context, ready for IMPLEMENT to consume directly.
@@ -267,7 +267,7 @@ Before presenting output, verify every phase was announced:
 
 - [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Load Decisions Index → DECISIONS_CONTEXT captured
-- [ ] Phase 2: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.features/` absent)
+- [ ] Phase 2: Load Feature Knowledge → FEATURE_KNOWLEDGE captured (or skipped if `.devflow/features/` absent)
 - [ ] Phase 3: Requirements Discovery → CONSTRAINED_PROBLEM captured (or skipped with stated reason)
 - [ ] Phase 4: Orient → ORIENT_OUTPUT captured
 - [ ] Phase 5: Explore → EXPLORE_OUTPUT captured

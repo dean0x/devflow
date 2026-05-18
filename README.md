@@ -43,9 +43,9 @@ Devflow: IMPLEMENT. Loading: devflow:implement:triage.
 
 **Ambient intelligence.** Devflow classifies every prompt into three tiers — QUICK (zero overhead), GUIDED (skill loading + main session), ORCHESTRATED (full agent pipelines). You never invoke it manually. Init and forget.
 
-**Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.memory/decisions/` and inform every future session. No manual bookkeeping.
+**Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.devflow/decisions/` and inform every future session. No manual bookkeeping.
 
-**It learns how you work.** A self-learning mechanism detects 4 observation types across sessions — workflow patterns, procedural knowledge, architectural decisions, and recurring pitfalls. Workflow and procedural observations create reusable slash commands and skills automatically. Decisions and pitfalls are written directly to `.memory/decisions/decisions.md` and `.memory/decisions/pitfalls.md` — informing every future review and implementation session.
+**It learns how you work.** A self-learning mechanism detects 4 observation types across sessions — workflow patterns, procedural knowledge, architectural decisions, and recurring pitfalls. Workflow and procedural observations create reusable slash commands and skills automatically. Decisions and pitfalls are written directly to `.devflow/decisions/decisions.md` and `.devflow/decisions/pitfalls.md` — informing every future review and implementation session.
 
 **18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
 

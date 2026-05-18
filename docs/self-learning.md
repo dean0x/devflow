@@ -10,8 +10,8 @@ The system extracts **4 observation types** from session transcripts:
 |------|---------------|----------------|
 | **workflow** | USER_SIGNALS | `.claude/commands/self-learning/{slug}.md` |
 | **procedural** | USER_SIGNALS | `.claude/skills/{slug}/SKILL.md` |
-| **decision** | DIALOG_PAIRS | `.memory/decisions/decisions.md` (ADR entry) |
-| **pitfall** | DIALOG_PAIRS | `.memory/decisions/pitfalls.md` (PF entry) |
+| **decision** | DIALOG_PAIRS | `.devflow/decisions/decisions.md` (ADR entry) |
+| **pitfall** | DIALOG_PAIRS | `.devflow/decisions/pitfalls.md` (PF entry) |
 
 ## Architecture
 
@@ -28,7 +28,7 @@ The background `claude -p --model sonnet` agent receives separate USER_SIGNALS a
 
 ### Merge: Per-Type Thresholds + Status Machine
 
-Observations accumulate in `.memory/learning-log.jsonl` (JSONL, one entry per line). Each observation tracks:
+Observations accumulate in `.devflow/learning/learning-log.jsonl` (JSONL, one entry per line). Each observation tracks:
 
 - `confidence` — computed as `min(floor(count * 100 / required), 95) / 100` (per-type required count)
 - `status` — `observing → ready → created → deprecated`
@@ -54,10 +54,10 @@ Confidence is computed as `min(floor(count × 100 / required), 95) / 100`. For w
 
 - **workflow** → generates a slash command file with frontmatter and pattern body
 - **procedural** → generates a skill SKILL.md with Iron Law and step sections
-- **decision** → appends an ADR-NNN entry to `.memory/decisions/decisions.md`
-- **pitfall** → appends a PF-NNN entry to `.memory/decisions/pitfalls.md` (deduped by normalized Area+Issue prefix)
+- **decision** → appends an ADR-NNN entry to `.devflow/decisions/decisions.md`
+- **pitfall** → appends a PF-NNN entry to `.devflow/decisions/pitfalls.md` (deduped by normalized Area+Issue prefix)
 
-All rendered artifacts are recorded in `.memory/.learning-manifest.json`:
+All rendered artifacts are recorded in `.devflow/learning/.learning-manifest.json`:
 
 ```json
 {
@@ -119,8 +119,8 @@ Pitfalls (3):
   PF-004  Background hook scripts become god scripts  [Active]  —  scripts/hooks/
   ...
 
-ADR-NNN entries live in /path/to/project/.memory/decisions/decisions.md
-PF-NNN  entries live in /path/to/project/.memory/decisions/pitfalls.md
+ADR-NNN entries live in /path/to/project/.devflow/decisions/decisions.md
+PF-NNN  entries live in /path/to/project/.devflow/decisions/pitfalls.md
 Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
 ```
 
@@ -176,7 +176,7 @@ The `⚠ N need review` suffix appears when observations have `needsReview: true
 
 ## Configuration
 
-Use `devflow learn --configure` for interactive setup, or edit `.memory/learning.json` directly:
+Use `devflow learn --configure` for interactive setup, or edit `.devflow/learning/learning.json` directly:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -189,15 +189,15 @@ Use `devflow learn --configure` for interactive setup, or edit `.memory/learning
 
 | File | Purpose |
 |------|---------|
-| `.memory/learning-log.jsonl` | All observations (one JSON per line) |
-| `.memory/.learning-manifest.json` | Rendered artifact registry for feedback reconciliation |
-| `.memory/learning.json` | Project-level config (no `enabled` field — hook presence IS the toggle) |
-| `.memory/.learning-runs-today` | Daily run counter (date + count) |
-| `.memory/.learning-session-count` | Session IDs pending batch |
-| `.memory/.learning-batch-ids` | Session IDs for current batch run |
-| `.memory/.learning-notified-at` | New artifact notification marker |
-| `.memory/decisions/decisions.md` | ADR entries (append-only, written by render-ready) |
-| `.memory/decisions/pitfalls.md` | PF entries (append-only, written by render-ready) |
+| `.devflow/learning/learning-log.jsonl` | All observations (one JSON per line) |
+| `.devflow/learning/.learning-manifest.json` | Rendered artifact registry for feedback reconciliation |
+| `.devflow/learning/learning.json` | Project-level config (no `enabled` field — hook presence IS the toggle) |
+| `.devflow/learning/.learning-runs-today` | Daily run counter (date + count) |
+| `.devflow/learning/.learning-session-count` | Session IDs pending batch |
+| `.devflow/learning/.learning-batch-ids` | Session IDs for current batch run |
+| `.devflow/learning/.learning-notified-at` | New artifact notification marker |
+| `.devflow/decisions/decisions.md` | ADR entries (append-only, written by render-ready) |
+| `.devflow/decisions/pitfalls.md` | PF entries (append-only, written by render-ready) |
 | `~/.devflow/logs/{project-slug}/.learning-update.log` | Background agent log |
 
 ## Key Design Decisions

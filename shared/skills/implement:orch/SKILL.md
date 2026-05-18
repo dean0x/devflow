@@ -72,10 +72,10 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 ```
 Pass `DECISIONS_CONTEXT` to Coder (Phase 4) and Scrutinizer (Phase 6).
 
-1. Check if `.features/index.json` exists. If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
-2. Read `.features/index.json`.
+1. Check if `.devflow/features/index.json` exists. If not, set `FEATURE_KNOWLEDGE = (none)` and skip.
+2. Read `.devflow/features/index.json`.
 3. Based on the EXECUTION_PLAN file targets and task description, identify relevant feature knowledge entries.
-4. For each relevant feature knowledge entry: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`, mark stale if needed.
+4. For each relevant feature knowledge entry: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`, mark stale if needed.
 5. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no matches).
 6. Collect slugs where staleness check returned stale → `STALE_FEATURE_KNOWLEDGE_SLUGS`.
 
@@ -111,7 +111,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 - **FEATURE_KNOWLEDGE**: From Phase 2 (or `(none)`)
 - **DECISIONS_CONTEXT**: From Phase 2 (or `(none)`)
 - **PR_DESCRIPTION_GUIDANCE**: From Phase 3 (or `(none)`)
-- **HANDOFF_FILE**: `.docs/handoff-{branch_slug}.md` (substitute actual branch slug from Phase 1)
+- **HANDOFF_FILE**: `.devflow/docs/handoff-{branch_slug}.md` (substitute actual branch slug from Phase 1)
 
 **Execution strategy**: Single sequential Coder by default. Parallel Coders only when tasks are self-contained — zero shared contracts, no integration points, different files/modules with no imports between them.
 
@@ -119,7 +119,7 @@ Spawn `Agent(subagent_type="Coder")` with input variables:
 
 If Coder returns **BLOCKED**, halt the pipeline and report to user.
 
-**Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.docs/handoff-{branch_slug}.md` using the Write tool. The next Coder reads this via HANDOFF_FILE (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
+**Handoff artifact** (when HANDOFF_REQUIRED=true): After Coder completes, write the phase summary to `.devflow/docs/handoff-{branch_slug}.md` using the Write tool. The next Coder reads this via HANDOFF_FILE (see Coder agent Responsibility 1). This survives context compaction — unlike PRIOR_PHASE_SUMMARY which is context-mediated.
 
 ## Phase 5: FILES_CHANGED Detection
 
@@ -169,7 +169,7 @@ If any gate exhausts retries, halt pipeline and report what passed and what fail
 **Requires:** GATE_RESULTS, FILES_CHANGED, CODER_COMMITS, PR_URL
 
 Cleanup:
-- Delete `.docs/handoff-{branch_slug}.md` if it exists (no longer needed after pipeline completes).
+- Delete `.devflow/docs/handoff-{branch_slug}.md` if it exists (no longer needed after pipeline completes).
 
 After quality gates pass, check for overlapping feature knowledge entries whose `referencedFiles` intersect FILES_CHANGED:
 ```bash
@@ -186,11 +186,11 @@ Report results:
 ## Phase 9: Feature Knowledge Generation (Conditional)
 
 **Requires:** FILES_CHANGED, STALE_FEATURE_KNOWLEDGE_SLUGS, OVERLAPPING_SLUGS, DECISIONS_CONTEXT
-**Produces:** Updated `.features/index.json` (or skipped)
+**Produces:** Updated `.devflow/features/index.json` (or skipped)
 
-If `.features/.disabled` exists, skip entirely.
+If `.devflow/features/.disabled` exists, skip entirely.
 
-**New feature knowledge creation**: If FILES_CHANGED touch a feature area that does NOT have matching feature knowledge in `.features/index.json`:
+**New feature knowledge creation**: If FILES_CHANGED touch a feature area that does NOT have matching feature knowledge in `.devflow/features/index.json`:
 
 **Slug derivation**: Derive the slug from the primary directory name using kebab-case. Examples: `src/cli/commands/` → `cli-commands`, `src/payments/stripe/` → `payments-stripe`, `scripts/hooks/` → `hooks`. Strip common prefixes like `src/` and `lib/`. The slug must match `^[a-z0-9][a-z0-9-]*$`.
 
@@ -205,9 +205,9 @@ If `.features/.disabled` exists, skip entirely.
 
    Load the devflow:feature-knowledge skill and follow its 4-phase process exactly.
    Read the FILES_CHANGED to understand the implemented code.
-   Read .features/index.json to see existing feature knowledge entries for cross-referencing."
+   Read .devflow/features/index.json to see existing feature knowledge entries for cross-referencing."
    ```
-3. Read sidecar (`.features/{slug}/.create-result.json`), then run:
+3. Read sidecar (`.devflow/features/{slug}/.create-result.json`), then run:
    ```bash
    node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
      --slug="{slug}" --name="{name}" \
@@ -216,7 +216,7 @@ If `.features/.disabled` exists, skip entirely.
      --description="{description_from_sidecar}" \
      --createdBy="implement" 2>/dev/null
    ```
-   Clean up: `rm -f .features/{slug}/.create-result.json`
+   Clean up: `rm -f .devflow/features/{slug}/.create-result.json`
    If the sidecar file does not exist (agent failed to write it), use empty defaults:
    `referencedFiles='[]'`, `description=""`.
 4. Report: "Created feature knowledge: {slug}"
@@ -225,21 +225,21 @@ Skip if all touched areas already have matching feature knowledge.
 
 **Refresh stale feature knowledge**: Combine STALE_FEATURE_KNOWLEDGE_SLUGS (from Phase 2) and OVERLAPPING_SLUGS (from Phase 8), deduplicate. For each slug, refresh:
 
-1. Read `.features/{slug}/KNOWLEDGE.md` and index entry
+1. Read `.devflow/features/{slug}/KNOWLEDGE.md` and index entry
 2. Spawn Agent(subagent_type="Knowledge"):
    ```
    "FEATURE_SLUG: {slug}
    FEATURE_NAME: {name from index}
    DIRECTORIES: {directories from index}
-   EXISTING_FEATURE_KNOWLEDGE: {content of .features/{slug}/KNOWLEDGE.md}
+   EXISTING_FEATURE_KNOWLEDGE: {content of .devflow/features/{slug}/KNOWLEDGE.md}
    CHANGED_FILES: {FILES_CHANGED that overlap this feature knowledge entry}
    DECISIONS_CONTEXT: {from Phase 2}
 
    Load the devflow:feature-knowledge skill. This is a REFRESH, not a new creation.
    Read the CHANGED_FILES to understand what changed, then update the EXISTING_FEATURE_KNOWLEDGE.
    Maintain quality standards from the skill. Do NOT regenerate from scratch.
-   Write updated feature knowledge to .features/{slug}/KNOWLEDGE.md
-   Write .features/{slug}/.refresh-result.json with referencedFiles and description."
+   Write updated feature knowledge to .devflow/features/{slug}/KNOWLEDGE.md
+   Write .devflow/features/{slug}/.refresh-result.json with referencedFiles and description."
    ```
 3. Read sidecar, update index (same CLI call as step 3 above), clean up sidecar.
 

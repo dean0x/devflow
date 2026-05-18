@@ -34,8 +34,8 @@ Pitfalls (M):
   PF-004  Background hook god scripts  [Active]  —  scripts/hooks/foo.cjs
   PF-011  DECISIONS_CONTEXT fan-out    [Active]  —  plugins/devflow-resolve/...
 
-ADR-NNN entries live in {worktree}/.memory/decisions/decisions.md
-PF-NNN  entries live in {worktree}/.memory/decisions/pitfalls.md
+ADR-NNN entries live in {worktree}/.devflow/decisions/decisions.md
+PF-NNN  entries live in {worktree}/.devflow/decisions/pitfalls.md
 Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
 ```
 
@@ -56,8 +56,8 @@ For each plausibly-relevant entry, use the Read tool to open the decisions file 
 
 ```
 Use the exact paths from the DECISIONS_CONTEXT footer, e.g.:
-  {worktree-from-footer}/.memory/decisions/decisions.md   → find ## ADR-NNN: heading
-  {worktree-from-footer}/.memory/decisions/pitfalls.md    → find ## PF-NNN: heading
+  {worktree-from-footer}/.devflow/decisions/decisions.md   → find ## ADR-NNN: heading
+  {worktree-from-footer}/.devflow/decisions/pitfalls.md    → find ## PF-NNN: heading
 ```
 
 Only cite an entry after you have read its full body and confirmed it applies.
@@ -78,7 +78,7 @@ Cite only IDs that appear verbatim in `DECISIONS_CONTEXT`. Do not guess at IDs t
 
 1. **Scan** — Index shows `PF-004  Background hook god scripts  [Active]  —  scripts/hooks/foo.cjs`
 2. **Identify** — Area field includes `scripts/hooks/` which overlaps with the file under review
-3. **Read** — Open the pitfalls file at the path given in the DECISIONS_CONTEXT footer (e.g., `<worktree>/.memory/decisions/pitfalls.md`), find `## PF-004:` section, read full body
+3. **Read** — Open the pitfalls file at the path given in the DECISIONS_CONTEXT footer (e.g., `<worktree>/.devflow/decisions/pitfalls.md`), find `## PF-004:` section, read full body
 4. **Cite** — If the file shows signs of the god-script pattern, note `avoids PF-004` in reasoning
 5. **Verbatim** — ID `PF-004` appeared in the index; citation is valid
 

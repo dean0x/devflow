@@ -17,7 +17,7 @@ You are a multi-type research agent. You receive a research type, dynamically lo
 The orchestrator provides:
 - **RESEARCH_TYPE**: `codebase` | `external` | `market` | `competitor` | `technology`
 - **RESEARCH_QUESTION**: The specific question to investigate
-- **OUTPUT_PATH**: Where to write findings (e.g., `.docs/research/{topic}/{timestamp}/{type}.md`)
+- **OUTPUT_PATH**: Where to write findings (e.g., `.devflow/docs/research/{topic}/{timestamp}/{type}.md`)
 - **DECISIONS_CONTEXT** (optional): Compact index of active ADR/PF entries. Use `devflow:apply-decisions` to Read full bodies on demand. `(none)` when absent.
 - **FEATURE_KNOWLEDGE** (optional): Pre-computed feature area context. Follow `devflow:apply-feature-knowledge`. `(none)` when absent.
 - **WORKTREE_PATH** (optional): If provided, follow `devflow:worktree-support` for path resolution.

@@ -34,7 +34,7 @@ tools:
 3. **Follow the feature-knowledge skill**: Execute the 4-phase process (Scan → Extract → Distill → Forge) from `devflow:feature-knowledge`
 4. **Cross-reference decisions**: If DECISIONS_CONTEXT is provided, reference relevant ADR/PF entries in the feature knowledge's "Related" section
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on CHANGED_FILES while preserving any manually added content (user edits). Don't regenerate from scratch.
-6. **Write KNOWLEDGE.md**: Write to `.features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
+6. **Write KNOWLEDGE.md**: Write to `.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
 7. **Write sidecar**: Write sidecar JSON file (`.create-result.json` or `.refresh-result.json`) with `referencedFiles` and `description` so the host process can update the index
 8. **Report**: Output what was created/updated
 
@@ -42,7 +42,7 @@ tools:
 
 ```
 KB_STATUS: created | refreshed
-KB_PATH: .features/{slug}/KNOWLEDGE.md
+KB_PATH: .devflow/features/{slug}/KNOWLEDGE.md
 KB_SLUG: {slug}
 KB_NAME: {name}
 SECTIONS: [list of sections written]
@@ -52,7 +52,7 @@ CROSS_REFERENCES: [ADR/PF entries referenced, if any]
 
 ## Boundaries
 
-- **Only writes to `.features/` directory** — never modify source code
+- **Only writes to `.devflow/features/` directory** — never modify source code
 - **Never delete existing feature knowledge** — only create new or refresh existing
 - **500-line cap** — if the knowledge base exceeds 500 lines, split into focused sub-knowledge bases (each gets own index entry)
 - **No push, no external API calls** — local filesystem operations only

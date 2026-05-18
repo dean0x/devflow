@@ -13,7 +13,7 @@ Common violations of documentation conventions with detection patterns and fixes
 | Unsanitized branch slug | `feature/auth` | `feature-auth` | Replace `/` with `-` |
 | Wrong case for artifacts | `Status-2025-01-05.md` | `2025-01-05_1430.md` | Use lowercase except special indexes |
 | Wrong case for indexes | `index.md` | `INDEX.md` | UPPERCASE for special indexes |
-| Files outside .docs | `docs/status.md` | `.docs/status/2025-01-05_1430.md` | Use `.docs/` root |
+| Files outside .docs | `docs/status.md` | `.devflow/docs/status/2025-01-05_1430.md` | Use `.devflow/docs/` root |
 | Missing INDEX.md | Status files without index | Create `INDEX.md` | Every directory needs index |
 | Special chars in slug | `oauth-2.0-auth` | `oauth-20-auth` | Strip non-alphanumeric except `-` |
 
@@ -33,7 +33,7 @@ project/
 ### Wrong: Non-standard Subdirectories
 
 ```
-.docs/
+.devflow/docs/
 ├── logs/                   # Should be status/
 ├── reports/                # Should be reviews/{branch-slug}/
 └── notes.md                # Should be in appropriate subdir
@@ -198,20 +198,20 @@ Implemented user authentication feature.
 Use these patterns to find violations:
 
 ```bash
-# Find files outside .docs/
-find . -name "*.md" -path "*/docs/*" ! -path "*/.docs/*"
+# Find files outside .devflow/docs/
+find . -name "*.md" -path "*/docs/*" ! -path "*/.devflow/docs/*"
 
 # Find wrong timestamp format (missing underscore)
-grep -r "^\d{4}-\d{2}-\d{2}[^_]" .docs/
+grep -r "..." .devflow/docs/
 
 # Find lowercase special indexes
-ls .docs/**/index.md .docs/**/catch_up.md 2>/dev/null
+ls .devflow/docs/**/index.md .devflow/docs/**/catch_up.md 2>/dev/null
 
 # Find uppercase artifacts (excluding special files)
 find .docs -name "*.md" | grep -v "INDEX\|CATCH_UP\|KNOWLEDGE_BASE" | xargs -I {} basename {} | grep "^[A-Z]"
 
 # Find unsanitized branch names in paths
-find .docs/reviews -type d -name "*/*" 2>/dev/null
+find .devflow/docs/reviews -type d -name "*/*" 2>/dev/null
 ```
 
 ---

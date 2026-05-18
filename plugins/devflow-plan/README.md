@@ -33,7 +33,7 @@ Unified design planning plugin. Combines requirements discovery, gap analysis, i
 
 ## Output
 
-Design artifacts written to `.docs/design/` with YAML frontmatter consumable by `/implement`.
+Design artifacts written to `.devflow/docs/design/` with YAML frontmatter consumable by `/implement`.
 
 ## Next Step
 
