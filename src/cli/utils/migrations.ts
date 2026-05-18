@@ -308,7 +308,7 @@ async function cleanStaleGitignoreEntries(projectRoot: string): Promise<string[]
   const gitignorePath = path.join(projectRoot, '.gitignore');
   try {
     const content = await fs.readFile(gitignorePath, 'utf-8');
-    const lines   = content.split('\n');
+    const lines = content.split('\n');
     const cleaned = lines.filter(
       line => !CONSOLIDATE_STALE_GITIGNORE_ENTRIES.includes(
         line.trim() as typeof CONSOLIDATE_STALE_GITIGNORE_ENTRIES[number],

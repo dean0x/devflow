@@ -206,12 +206,11 @@ export async function purgeLegacyDecisionsEntries(options: {
   // and the new path (.devflow/memory/PROJECT-PATTERNS.md, present on fresh installs or
   // post-migration projects). projectRoot is always provided by migrations.ts so memoryDir
   // already resolves to .devflow/memory/ — the old path is derived from projectRoot directly.
-  const oldProjectPatternsPath = projectRoot
-    ? path.join(projectRoot, '.memory', 'PROJECT-PATTERNS.md')
-    : null;
-  const newProjectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
-  for (const candidatePath of [oldProjectPatternsPath, newProjectPatternsPath]) {
-    if (candidatePath === null) continue;
+  const candidates: string[] = [
+    ...(projectRoot ? [path.join(projectRoot, '.memory', 'PROJECT-PATTERNS.md')] : []),
+    path.join(memoryDir, 'PROJECT-PATTERNS.md'),
+  ];
+  for (const candidatePath of candidates) {
     try {
       const stat = await fs.lstat(candidatePath);
       if (stat.isFile()) {
