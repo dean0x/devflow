@@ -252,7 +252,7 @@ function getResearchDir(projectRoot) {
 
 /** .devflow/docs/handoff-{branchSlug}.md — coder phase handoff artifact */
 function getHandoffPath(projectRoot, branchSlug) {
-  return path.join(projectRoot, '.devflow', 'docs', 'handoff-' + branchSlug + '.md');
+  return path.join(projectRoot, '.devflow', 'docs', `handoff-${branchSlug}.md`);
 }
 
 // ---------------------------------------------------------------------------

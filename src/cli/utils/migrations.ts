@@ -329,12 +329,12 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
   scope: 'per-project',
   run: async (ctx: PerProjectMigrationContext): Promise<MigrationRunResult> => {
     const infos: string[] = [];
-    const r = ctx.projectRoot;
+    const { projectRoot } = ctx;
 
-    const devflowDir = path.join(r, '.devflow');
-    const memSrc     = path.join(r, '.memory');
-    const featSrc    = path.join(r, '.features');
-    const docsSrc    = path.join(r, '.docs');
+    const devflowDir = path.join(projectRoot, '.devflow');
+    const memSrc     = path.join(projectRoot, '.memory');
+    const featSrc    = path.join(projectRoot, '.features');
+    const docsSrc    = path.join(projectRoot, '.docs');
 
     // 1. Create target subdirectories
     await fs.mkdir(path.join(devflowDir, 'memory'),    { recursive: true });
@@ -410,7 +410,7 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
     }
 
     // 6. Clean up project .gitignore — remove stale entries
-    const gitignorePath = path.join(r, '.gitignore');
+    const gitignorePath = path.join(projectRoot, '.gitignore');
     const staleEntries = [
       '.memory/',
       '.docs/',
