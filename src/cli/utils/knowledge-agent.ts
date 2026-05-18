@@ -49,7 +49,7 @@ export interface RunKnowledgeAgentResult {
  * Spawn the Knowledge agent via `claude -p`, then read and clean up the sidecar file.
  *
  * The agent is expected to write a sidecar JSON file at
- * `.features/{slug}/{sidecarName}` with `referencedFiles` and optionally `description`.
+ * `.devflow/features/{slug}/{sidecarName}` with `referencedFiles` and optionally `description`.
  * If the sidecar is absent (agent failure), an empty SidecarData is returned.
  *
  * Using async execFile keeps the event loop free so the clack spinner can
@@ -62,7 +62,7 @@ export interface RunKnowledgeAgentResult {
  */
 export async function runKnowledgeAgent(opts: RunKnowledgeAgentOptions): Promise<RunKnowledgeAgentResult> {
   const { worktreePath, slug, prompt, sidecarName } = opts;
-  // Build sidecar path in .features/{slug}/ (same directory as KNOWLEDGE.md)
+  // Build sidecar path in .devflow/features/{slug}/ (same directory as KNOWLEDGE.md)
   const sidecarPath = path.join(path.dirname(getKnowledgePath(worktreePath, slug)), sidecarName);
 
   // Pre-clean any leftover sidecar from a previous run

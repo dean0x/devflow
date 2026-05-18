@@ -202,13 +202,13 @@ Use these patterns to find violations:
 find . -name "*.md" -path "*/docs/*" ! -path "*/.devflow/docs/*"
 
 # Find wrong timestamp format (missing underscore)
-grep -r "..." .devflow/docs/
+grep -r "^\d{4}-\d{2}-\d{2}[^_]" .devflow/docs/
 
 # Find lowercase special indexes
 ls .devflow/docs/**/index.md .devflow/docs/**/catch_up.md 2>/dev/null
 
 # Find uppercase artifacts (excluding special files)
-find .docs -name "*.md" | grep -v "INDEX\|CATCH_UP\|KNOWLEDGE_BASE" | xargs -I {} basename {} | grep "^[A-Z]"
+find .devflow/docs -name "*.md" | grep -v "INDEX\|CATCH_UP\|KNOWLEDGE_BASE" | xargs -I {} basename {} | grep "^[A-Z]"
 
 # Find unsanitized branch names in paths
 find .devflow/docs/reviews -type d -name "*/*" 2>/dev/null

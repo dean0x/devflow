@@ -104,7 +104,7 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
     get_timestamp() { date +%Y-%m-%d_%H%M; }
     get_branch_slug() { git branch --show-current 2>/dev/null | sed 's/\//-/g' || echo "standalone"; }
     get_topic_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | cut -c1-50; }
-    ensure_docs_dir() { mkdir -p ".devflow/docs/"; }
+    ensure_docs_dir() { mkdir -p ".devflow/docs/$1"; }
 }
 ```
 

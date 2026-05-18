@@ -1,8 +1,8 @@
 // scripts/hooks/lib/feature-knowledge.cjs
 // Runtime module for per-feature knowledge base management.
 //
-// DESIGN: Feature knowledge bases live under .features/{slug}/KNOWLEDGE.md with a central
-// index at .features/index.json (keyed by slug). This module is the single
+// DESIGN: Feature knowledge bases live under .devflow/features/{slug}/KNOWLEDGE.md with a central
+// index at .devflow/features/index.json (keyed by slug). This module is the single
 // source of truth for all knowledge base operations — loading, staleness detection, index
 // mutation, and listing. A mkdir-based lock guards concurrent index writes.
 //
@@ -105,7 +105,7 @@ function validateSlug(slug) {
  */
 
 /**
- * Load and parse .features/index.json from a worktree path.
+ * Load and parse .devflow/features/index.json from a worktree path.
  * Returns null when the file is absent or contains invalid JSON.
  *
  * @param {string} worktreePath
@@ -411,7 +411,7 @@ function findOverlapping(worktreePath, changedFiles) {
 
 /**
  * Remove a knowledge entry from index.json and delete its directory.
- * No-op if the slug does not exist in the index or if .features/ is absent.
+ * No-op if the slug does not exist in the index or if .devflow/features/ is absent.
  *
  * @param {string} worktreePath
  * @param {string} slug
