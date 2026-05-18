@@ -432,6 +432,386 @@ describe('runMigrations', () => {
   });
 });
 
+describe('rename-kb-to-knowledge migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let featuresDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-rename-kb-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    featuresDir = path.join(projectRoot, '.devflow', 'features');
+    await fs.mkdir(featuresDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'rename-kb-to-knowledge');
+    if (!m) throw new Error('rename-kb-to-knowledge migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(projectRoot, '.devflow', 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('renames .kb.lock to .knowledge.lock when it exists', async () => {
+    await fs.writeFile(path.join(featuresDir, '.kb.lock'), '', 'utf-8');
+    await getMigration().run(makeCtx());
+    await expect(fs.access(path.join(featuresDir, '.kb.lock'))).rejects.toThrow();
+    await expect(fs.access(path.join(featuresDir, '.knowledge.lock'))).resolves.toBeUndefined();
+  });
+
+  it('renames .kb-last-refresh to .knowledge-last-refresh when it exists', async () => {
+    await fs.writeFile(path.join(featuresDir, '.kb-last-refresh'), '1234567890', 'utf-8');
+    await getMigration().run(makeCtx());
+    await expect(fs.access(path.join(featuresDir, '.kb-last-refresh'))).rejects.toThrow();
+    await expect(fs.access(path.join(featuresDir, '.knowledge-last-refresh'))).resolves.toBeUndefined();
+    const content = await fs.readFile(path.join(featuresDir, '.knowledge-last-refresh'), 'utf-8');
+    expect(content).toBe('1234567890');
+  });
+
+  it('renames .kb-refresh.lock to .knowledge-refresh.lock when it exists', async () => {
+    await fs.writeFile(path.join(featuresDir, '.kb-refresh.lock'), '', 'utf-8');
+    await getMigration().run(makeCtx());
+    await expect(fs.access(path.join(featuresDir, '.kb-refresh.lock'))).rejects.toThrow();
+    await expect(fs.access(path.join(featuresDir, '.knowledge-refresh.lock'))).resolves.toBeUndefined();
+  });
+
+  it('is a no-op when old files do not exist (missing files handled gracefully)', async () => {
+    // No old files created — migration should succeed without errors
+    const result = await getMigration().run(makeCtx());
+    // No infos since no renames occurred
+    expect(result?.infos ?? []).toHaveLength(0);
+  });
+
+  it('updates .gitignore entries from kb to knowledge names', async () => {
+    const gitignorePath = path.join(projectRoot, '.gitignore');
+    await fs.writeFile(gitignorePath, [
+      '.features/.kb.lock',
+      '.features/.kb-last-refresh',
+      '.features/.kb-refresh.lock',
+      '.devflow/',
+    ].join('\n'), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const updated = await fs.readFile(gitignorePath, 'utf-8');
+    expect(updated).toContain('.features/.knowledge.lock');
+    expect(updated).toContain('.features/.knowledge-last-refresh');
+    expect(updated).toContain('.features/.knowledge-refresh.lock');
+    expect(updated).not.toContain('.features/.kb.lock');
+    expect(updated).not.toContain('.features/.kb-last-refresh');
+    expect(updated).not.toContain('.features/.kb-refresh.lock');
+    // Unrelated entries are preserved
+    expect(updated).toContain('.devflow/');
+  });
+
+  it('does not modify .gitignore when no kb entries are present', async () => {
+    const gitignorePath = path.join(projectRoot, '.gitignore');
+    const original = '.devflow/\nnode_modules/\n';
+    await fs.writeFile(gitignorePath, original, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const unchanged = await fs.readFile(gitignorePath, 'utf-8');
+    expect(unchanged).toBe(original);
+  });
+
+  it('does not fail when .gitignore does not exist', async () => {
+    // No .gitignore created — migration should be a no-op, not throw
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('is idempotent — running twice produces same result', async () => {
+    await fs.writeFile(path.join(featuresDir, '.kb.lock'), '', 'utf-8');
+    const gitignorePath = path.join(projectRoot, '.gitignore');
+    await fs.writeFile(gitignorePath, '.features/.kb.lock\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+    // Second run: .kb.lock is gone, .knowledge.lock exists — should not throw
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    // State is the same after second run
+    await expect(fs.access(path.join(featuresDir, '.knowledge.lock'))).resolves.toBeUndefined();
+    const gitignore = await fs.readFile(gitignorePath, 'utf-8');
+    expect(gitignore).toContain('.features/.knowledge.lock');
+  });
+});
+
+describe('consolidate-to-devflow-dir migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-consolidate-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    await fs.mkdir(projectRoot, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'consolidate-to-devflow-dir');
+    if (!m) throw new Error('consolidate-to-devflow-dir migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('moves WORKING-MEMORY.md from .memory/ to .devflow/memory/', async () => {
+    const src = path.join(projectRoot, '.memory');
+    await fs.mkdir(src, { recursive: true });
+    await fs.writeFile(path.join(src, 'WORKING-MEMORY.md'), '# Now\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(src, 'WORKING-MEMORY.md'))).rejects.toThrow();
+    const content = await fs.readFile(path.join(devflowDir, 'memory', 'WORKING-MEMORY.md'), 'utf-8');
+    expect(content).toBe('# Now\n');
+  });
+
+  it('moves learning-log.jsonl from .memory/ to .devflow/learning/', async () => {
+    const src = path.join(projectRoot, '.memory');
+    await fs.mkdir(src, { recursive: true });
+    const logContent = '{"type":"workflow"}\n';
+    await fs.writeFile(path.join(src, 'learning-log.jsonl'), logContent, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(src, 'learning-log.jsonl'))).rejects.toThrow();
+    const content = await fs.readFile(path.join(devflowDir, 'learning', 'learning-log.jsonl'), 'utf-8');
+    expect(content).toBe(logContent);
+  });
+
+  it('moves decisions-log.jsonl from .memory/ to .devflow/decisions/', async () => {
+    const src = path.join(projectRoot, '.memory');
+    await fs.mkdir(src, { recursive: true });
+    const logContent = '{"type":"decision"}\n';
+    await fs.writeFile(path.join(src, 'decisions-log.jsonl'), logContent, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(src, 'decisions-log.jsonl'))).rejects.toThrow();
+    const content = await fs.readFile(path.join(devflowDir, 'decisions', 'decisions-log.jsonl'), 'utf-8');
+    expect(content).toBe(logContent);
+  });
+
+  it('moves .memory/decisions/ subdirectory contents to .devflow/decisions/', async () => {
+    const decisionsDir = path.join(projectRoot, '.memory', 'decisions');
+    await fs.mkdir(decisionsDir, { recursive: true });
+    await fs.writeFile(path.join(decisionsDir, 'decisions.md'), '# Decisions\n', 'utf-8');
+    await fs.writeFile(path.join(decisionsDir, 'pitfalls.md'), '# Pitfalls\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const dm = await fs.readFile(path.join(devflowDir, 'decisions', 'decisions.md'), 'utf-8');
+    const pm = await fs.readFile(path.join(devflowDir, 'decisions', 'pitfalls.md'), 'utf-8');
+    expect(dm).toBe('# Decisions\n');
+    expect(pm).toBe('# Pitfalls\n');
+  });
+
+  it('moves .features/ contents to .devflow/features/', async () => {
+    const featSrc = path.join(projectRoot, '.features');
+    await fs.mkdir(path.join(featSrc, 'my-feature'), { recursive: true });
+    await fs.writeFile(path.join(featSrc, 'my-feature', 'KNOWLEDGE.md'), '# Knowledge\n', 'utf-8');
+    await fs.writeFile(path.join(featSrc, 'index.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const km = await fs.readFile(path.join(devflowDir, 'features', 'my-feature', 'KNOWLEDGE.md'), 'utf-8');
+    expect(km).toBe('# Knowledge\n');
+    const idx = await fs.readFile(path.join(devflowDir, 'features', 'index.json'), 'utf-8');
+    expect(idx).toBe('{}');
+  });
+
+  it('moves .docs/ contents to .devflow/docs/', async () => {
+    const docsSrc = path.join(projectRoot, '.docs');
+    await fs.mkdir(path.join(docsSrc, 'reviews', 'feat-my-branch'), { recursive: true });
+    await fs.writeFile(
+      path.join(docsSrc, 'reviews', 'feat-my-branch', 'review-summary.md'),
+      '# Review\n',
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    const review = await fs.readFile(
+      path.join(devflowDir, 'docs', 'reviews', 'feat-my-branch', 'review-summary.md'),
+      'utf-8',
+    );
+    expect(review).toBe('# Review\n');
+  });
+
+  it('creates .devflow/.gitignore with correct content when not present', async () => {
+    await getMigration().run(makeCtx());
+
+    const gitignorePath = path.join(devflowDir, '.gitignore');
+    const content = await fs.readFile(gitignorePath, 'utf-8');
+    // Spot-check key entries from DEVFLOW_GITIGNORE_CONTENT
+    expect(content).toContain('memory/');
+    expect(content).toContain('sidecar/');
+    expect(content).toContain('learning/learning-log.jsonl');
+    expect(content).toContain('decisions/decisions-log.jsonl');
+    expect(content).toContain('features/.knowledge.lock/');
+  });
+
+  it('does not overwrite an existing .devflow/.gitignore', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    const existing = '# custom\nfeatures/\n';
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), existing, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(existing);
+  });
+
+  it('removes stale .gitignore entries from the root .gitignore', async () => {
+    const gitignorePath = path.join(projectRoot, '.gitignore');
+    await fs.writeFile(gitignorePath, [
+      'node_modules/',
+      '.memory/',
+      '.docs/',
+      '.features/.knowledge.lock',
+      '.features/.disabled',
+      '.features/.knowledge-last-refresh',
+      '.features/.knowledge-refresh.lock',
+      '.devflow/',
+      'dist/',
+    ].join('\n'), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const updated = await fs.readFile(gitignorePath, 'utf-8');
+    expect(updated).not.toContain('.memory/');
+    expect(updated).not.toContain('.docs/');
+    expect(updated).not.toContain('.features/.knowledge.lock');
+    expect(updated).not.toContain('.features/.disabled');
+    expect(updated).not.toContain('.features/.knowledge-last-refresh');
+    expect(updated).not.toContain('.features/.knowledge-refresh.lock');
+    expect(updated).not.toContain('.devflow/');
+    // Non-stale entries are preserved
+    expect(updated).toContain('node_modules/');
+    expect(updated).toContain('dist/');
+  });
+
+  it('removes empty old directories after migration', async () => {
+    const memorySrc = path.join(projectRoot, '.memory');
+    const featuresSrc = path.join(projectRoot, '.features');
+    const docsSrc = path.join(projectRoot, '.docs');
+
+    // Create the old dirs with one file each
+    await fs.mkdir(memorySrc, { recursive: true });
+    await fs.mkdir(featuresSrc, { recursive: true });
+    await fs.mkdir(docsSrc, { recursive: true });
+    await fs.writeFile(path.join(memorySrc, 'WORKING-MEMORY.md'), '# Now\n', 'utf-8');
+    await fs.writeFile(path.join(featuresSrc, 'index.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(docsSrc, 'design.md'), '# Design\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // All old dirs should be removed (they're now empty)
+    await expect(fs.access(memorySrc)).rejects.toThrow();
+    await expect(fs.access(featuresSrc)).rejects.toThrow();
+    await expect(fs.access(docsSrc)).rejects.toThrow();
+  });
+
+  it('leaves non-empty old directories in place', async () => {
+    const memorySrc = path.join(projectRoot, '.memory');
+    await fs.mkdir(memorySrc, { recursive: true });
+    // A skip-listed legacy file that the migration deliberately does not move
+    await fs.writeFile(path.join(memorySrc, 'index.md'), '# V1 index\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // .memory/ still present because index.md was not moved (MEMORY_SKIP_FILES)
+    await expect(fs.access(memorySrc)).resolves.toBeUndefined();
+    await expect(fs.access(path.join(memorySrc, 'index.md'))).resolves.toBeUndefined();
+  });
+
+  it('is idempotent — running twice produces the same result', async () => {
+    const memorySrc = path.join(projectRoot, '.memory');
+    await fs.mkdir(memorySrc, { recursive: true });
+    await fs.writeFile(path.join(memorySrc, 'WORKING-MEMORY.md'), '# Now\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+    // Second run: src file is gone, dest exists — should not throw
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    // State unchanged after second run
+    const content = await fs.readFile(path.join(devflowDir, 'memory', 'WORKING-MEMORY.md'), 'utf-8');
+    expect(content).toBe('# Now\n');
+  });
+
+  it('is a no-op when old directories do not exist', async () => {
+    // No .memory/, .features/, .docs/ created — should succeed without errors
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('handles partial state — files not yet migrated are moved, already-absent sources are skipped', async () => {
+    const memorySrc = path.join(projectRoot, '.memory');
+    await fs.mkdir(memorySrc, { recursive: true });
+    // Only backup.json remains in the source (WORKING-MEMORY.md was already moved in a previous partial run)
+    await fs.writeFile(path.join(memorySrc, 'backup.json'), '{}', 'utf-8');
+
+    // Pre-place WORKING-MEMORY.md in the destination (simulates partial migration)
+    await fs.mkdir(path.join(devflowDir, 'memory'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'memory', 'WORKING-MEMORY.md'), '# Already migrated\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // Pre-existing dest file stays (source was absent — ENOENT path)
+    const content = await fs.readFile(path.join(devflowDir, 'memory', 'WORKING-MEMORY.md'), 'utf-8');
+    expect(content).toBe('# Already migrated\n');
+
+    // File that was still in source should be migrated
+    const backup = await fs.readFile(path.join(devflowDir, 'memory', 'backup.json'), 'utf-8');
+    expect(backup).toBe('{}');
+  });
+});
+
 describe('reportMigrationResult', () => {
   // Exercises the extracted reporter helper — verifies that each branch of the
   // reporting logic (failures, infos, warnings, newlyApplied, verbose) calls
