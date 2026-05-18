@@ -6,8 +6,8 @@
  */
 
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import type { LearningCountsData } from './types.js';
+import { getLearningLogPath, getDecisionsLogPath } from '../utils/project-paths.js';
 
 /** Canonical list of valid observation types — drives both the guard and the switch. */
 const VALID_OBSERVATION_TYPES = ['workflow', 'procedural', 'decision', 'pitfall'] as const;
@@ -107,8 +107,6 @@ function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
  * decisions-log.jsonl: decision + pitfall observations (written by `devflow decisions`)
  */
 export function getLearningCounts(cwd: string): LearningCountsData | null {
-  const memoryDir = path.join(cwd, '.memory');
-
   const counts: LearningCountsData = {
     workflows: 0,
     procedural: 0,
@@ -117,8 +115,8 @@ export function getLearningCounts(cwd: string): LearningCountsData | null {
     needReview: 0,
   };
 
-  const learningParsed = parseLogInto(path.join(memoryDir, 'learning-log.jsonl'), counts);
-  const decisionsParsed = parseLogInto(path.join(memoryDir, 'decisions-log.jsonl'), counts);
+  const learningParsed = parseLogInto(getLearningLogPath(cwd), counts);
+  const decisionsParsed = parseLogInto(getDecisionsLogPath(cwd), counts);
 
   // Return null only if neither file yielded any valid observations
   if (!learningParsed && !decisionsParsed) return null;

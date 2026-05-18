@@ -18,6 +18,7 @@ import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
 import { stripFlags, stripViewMode } from '../utils/flags.js';
+import { getDocsDir, getMemoryDir } from '../utils/project-paths.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -213,8 +214,8 @@ export const uninstallCommand = new Command('uninstall')
       // Detect extras that would be cleaned up (full uninstall only)
       const extras: string[] = [];
       if (!isSelectiveUninstall) {
-        const docsDir = path.join(process.cwd(), '.docs');
-        const memoryDir = path.join(process.cwd(), '.memory');
+        const docsDir = getDocsDir(process.cwd());
+        const memoryDir = getMemoryDir(process.cwd());
         try { await fs.access(docsDir); extras.push('.docs/'); } catch { /* noop */ }
         try { await fs.access(memoryDir); extras.push('.memory/'); } catch { /* noop */ }
         extras.push('hooks in settings.json', 'scripts in ~/.devflow/');
@@ -299,7 +300,7 @@ export const uninstallCommand = new Command('uninstall')
       const gitRoot = await getGitRoot();
 
       // 1. .docs/ directory
-      const docsDir = path.join(process.cwd(), '.docs');
+      const docsDir = getDocsDir(process.cwd());
       let docsExist = false;
       try {
         await fs.access(docsDir);
@@ -334,7 +335,7 @@ export const uninstallCommand = new Command('uninstall')
       }
 
       // 2. .memory/ directory
-      const memoryDir = path.join(process.cwd(), '.memory');
+      const memoryDir = getMemoryDir(process.cwd());
       let memoryExist = false;
       try {
         await fs.access(memoryDir);

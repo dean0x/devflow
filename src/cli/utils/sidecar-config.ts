@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import * as path from 'path';
+import { getSidecarConfigPath as _getSidecarConfigPath, getSidecarDir } from './project-paths.js';
 
 export interface SidecarConfig {
   memory: boolean;
@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: SidecarConfig = {
 };
 
 export function getConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.memory', '.sidecar', 'config.json');
+  return _getSidecarConfigPath(projectRoot);
 }
 
 /**
@@ -48,7 +48,7 @@ export async function readConfig(projectRoot: string): Promise<SidecarConfig> {
  */
 export async function writeConfig(projectRoot: string, config: SidecarConfig): Promise<void> {
   const configPath = getConfigPath(projectRoot);
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.mkdir(getSidecarDir(projectRoot), { recursive: true });
   const tmpPath = configPath + '.tmp.' + process.pid;
   await fs.writeFile(tmpPath, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
   await fs.rename(tmpPath, configPath);

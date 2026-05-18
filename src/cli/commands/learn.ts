@@ -4,6 +4,21 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getDevFlowDirectory, getClaudeDirectory } from '../utils/paths.js';
+import {
+  getMemoryDir,
+  getSidecarDir,
+  getLearningLogPath,
+  getLearningConfigPath,
+  getLearningManifestPath,
+  getLearningNotifiedAtPath,
+  getLearningNotificationsPath,
+  getLearningRunsTodayPath,
+  getLearningSessionCountPath,
+  getLearningBatchIdsPath,
+  getLearningDisabledSentinel,
+  getDecisionsUsagePath,
+  getDecisionsUsageLockDir,
+} from '../utils/project-paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
@@ -163,7 +178,7 @@ export const learnCommand = new Command('learn')
     }
 
     // Shared log path for --status, --list, --purge, --clear
-    const logPath = path.join(process.cwd(), '.memory', 'learning-log.jsonl');
+    const logPath = getLearningLogPath(process.cwd());
 
     // --- --status ---
     if (options.status) {
@@ -323,10 +338,11 @@ export const learnCommand = new Command('learn')
         p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'learning.json'))}`);
       } else {
         const cwd = process.cwd();
-        const memoryDir = path.join(cwd, '.memory');
-        await fs.mkdir(memoryDir, { recursive: true });
-        await fs.writeFile(path.join(memoryDir, 'learning.json'), configJson, 'utf-8');
-        p.log.success(`Project config written to ${color.dim(path.join(memoryDir, 'learning.json'))}`);
+        const memDir = getMemoryDir(cwd);
+        const projectLearningConfigPath = getLearningConfigPath(cwd);
+        await fs.mkdir(memDir, { recursive: true });
+        await fs.writeFile(projectLearningConfigPath, configJson, 'utf-8');
+        p.log.success(`Project config written to ${color.dim(projectLearningConfigPath)}`);
       }
 
       p.outro(color.green('Configuration saved.'));
@@ -358,7 +374,7 @@ export const learnCommand = new Command('learn')
 
     // --- --reset ---
     if (options.reset) {
-      const memoryDir = path.join(process.cwd(), '.memory');
+      const memoryDir = getMemoryDir(process.cwd());
       const lockDir = path.join(memoryDir, '.learning.lock');
 
       // Acquire lock to prevent conflict with running background-learning
@@ -405,19 +421,20 @@ export const learnCommand = new Command('learn')
           }
         } catch { /* commands dir doesn't exist */ }
 
-        const transientFiles = [
-          '.learning-session-count',
-          '.learning-batch-ids',
-          '.learning-runs-today',
-          '.learning-notified-at',
-          '.learning-notifications.json',
-          '.decisions-usage.json',
-          '.learning-manifest.json',
+        const cwd = process.cwd();
+        const transientFilePaths = [
+          getLearningSessionCountPath(cwd),
+          getLearningBatchIdsPath(cwd),
+          getLearningRunsTodayPath(cwd),
+          getLearningNotifiedAtPath(cwd),
+          getLearningNotificationsPath(cwd),
+          getDecisionsUsagePath(cwd),
+          getLearningManifestPath(cwd),
         ];
         let transientCount = 0;
-        for (const f of transientFiles) {
+        for (const filePath of transientFilePaths) {
           try {
-            await fs.access(path.join(memoryDir, f));
+            await fs.access(filePath);
             transientCount++;
           } catch { /* doesn't exist */ }
         }
@@ -455,19 +472,19 @@ export const learnCommand = new Command('learn')
         } catch { /* file may not exist */ }
 
         // Remove transient state files
-        for (const f of transientFiles) {
+        for (const filePath of transientFilePaths) {
           try {
-            await fs.unlink(path.join(memoryDir, f));
+            await fs.unlink(filePath);
           } catch { /* file may not exist */ }
         }
 
         // Clean up decisions-usage lock directory if stale
         try {
-          await fs.rmdir(path.join(memoryDir, '.decisions-usage.lock'));
+          await fs.rmdir(getDecisionsUsageLockDir(cwd));
         } catch { /* doesn't exist or already cleaned */ }
 
         // Clean sidecar state files
-        const sidecarDir = path.join(memoryDir, '.sidecar');
+        const sidecarDir = getSidecarDir(cwd);
         for (const f of ['.learning-runs-today', '.learning-sessions']) {
           try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* may not exist */ }
         }
@@ -486,16 +503,16 @@ export const learnCommand = new Command('learn')
         }
 
         // Remove stale `enabled` field from learning.json (migration)
-        const configPath = path.join(memoryDir, 'learning.json');
+        const learningConfigPath = getLearningConfigPath(cwd);
         try {
-          const configContent = await fs.readFile(configPath, 'utf-8');
+          const configContent = await fs.readFile(learningConfigPath, 'utf-8');
           const config = JSON.parse(configContent) as Record<string, unknown>;
           if ('enabled' in config) {
             delete config.enabled;
             if (Object.keys(config).length === 0) {
-              await fs.unlink(configPath);
+              await fs.unlink(learningConfigPath);
             } else {
-              await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+              await fs.writeFile(learningConfigPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
             }
           }
         } catch { /* config may not exist */ }
@@ -558,8 +575,7 @@ export const learnCommand = new Command('learn')
       // Acquire .learning.lock so we don't race with background-learning during the
       // interactive loop. The internal updateDecisionsStatus call still takes its own
       // .decisions.lock — different lock directories, no deadlock.
-      const memoryDir = path.join(process.cwd(), '.memory');
-      const learningLockDir = path.join(memoryDir, '.learning.lock');
+      const learningLockDir = path.join(getMemoryDir(process.cwd()), '.learning.lock');
       const lockAcquired = await acquireMkdirLock(learningLockDir);
       if (!lockAcquired) {
         p.log.error('Learning system is currently running. Try again in a moment.');
@@ -662,8 +678,7 @@ export const learnCommand = new Command('learn')
 
     // --- --dismiss-capacity ---
     if (options.dismissCapacity) {
-      const memoryDir = path.join(process.cwd(), '.memory');
-      const notifPath = path.join(memoryDir, '.learning-notifications.json');
+      const notifPath = getLearningNotificationsPath(process.cwd());
 
       let notifications: Record<string, NotificationFileEntry>;
       try {
@@ -706,7 +721,7 @@ export const learnCommand = new Command('learn')
         await updateFeature(gitRoot, 'learning', true);
         // Remove .learning-disabled sentinel (defense-in-depth with sidecar config)
         try {
-          await fs.unlink(path.join(gitRoot, '.memory', '.learning-disabled'));
+          await fs.unlink(getLearningDisabledSentinel(gitRoot));
         } catch { /* may not exist */ }
         p.log.success('Self-learning enabled — sidecar config updated');
         p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
@@ -721,9 +736,9 @@ export const learnCommand = new Command('learn')
       if (gitRoot) {
         await updateFeature(gitRoot, 'learning', false);
         // Create .learning-disabled sentinel (gates session-start-context)
-        const memDir = path.join(gitRoot, '.memory');
+        const memDir = getMemoryDir(gitRoot);
         await fs.mkdir(memDir, { recursive: true });
-        await fs.writeFile(path.join(memDir, '.learning-disabled'), '', 'utf-8');
+        await fs.writeFile(getLearningDisabledSentinel(gitRoot), '', 'utf-8');
         p.log.success('Self-learning disabled — sidecar config updated');
       } else {
         p.log.warn('Could not resolve git root — sidecar config not updated');

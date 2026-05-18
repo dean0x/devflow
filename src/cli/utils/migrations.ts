@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import { getMemoryDir, getFeaturesDir } from './project-paths.js';
 
 /**
  * @file migrations.ts
@@ -140,7 +141,7 @@ const MIGRATION_RENAME_KB_TO_KNOWLEDGE: Migration<'per-project'> = {
     const infos: string[] = [];
     const warnings: string[] = [];
 
-    const featuresDir = path.join(ctx.projectRoot, '.features');
+    const featuresDir = getFeaturesDir(ctx.projectRoot);
     const renames: Array<[string, string]> = [
       ['.kb.lock', '.knowledge.lock'],
       ['.kb-last-refresh', '.knowledge-last-refresh'],
@@ -411,7 +412,7 @@ async function runPerProjectMigration(
     discoveredProjects,
     16,
     (projectRoot) => {
-      const memoryDir = path.join(projectRoot, '.memory');
+      const memoryDir = getMemoryDir(projectRoot);
       return migration.run({
         scope: 'per-project',
         devflowDir: ctx.devflowDir,

@@ -27,6 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { getFeaturesDir, getFeaturesIndexPath, getFeaturesLockDir, getKnowledgePath } = require('./project-paths.cjs');
 
 /** Sentinel returned whenever a knowledge entry is confirmed non-stale or a fallback is needed. */
 const NOT_STALE = Object.freeze({ stale: false, changedFiles: [] });
@@ -111,7 +112,7 @@ function validateSlug(slug) {
  * @returns {{ version: number, features: Record<string, FeatureEntry> } | null}
  */
 function loadIndex(worktreePath) {
-  const indexPath = path.join(worktreePath, '.features', 'index.json');
+  const indexPath = getFeaturesIndexPath(worktreePath);
   try {
     const raw = fs.readFileSync(indexPath, 'utf8');
     return JSON.parse(raw);
@@ -130,7 +131,7 @@ function loadIndex(worktreePath) {
  */
 function loadKnowledgeContent(worktreePath, slug) {
   validateSlug(slug);
-  const kbPath = path.join(worktreePath, '.features', slug, 'KNOWLEDGE.md');
+  const kbPath = getKnowledgePath(worktreePath, slug);
   try {
     return fs.readFileSync(kbPath, 'utf8');
   } catch {
@@ -353,10 +354,10 @@ function releaseLock(lockPath) {
  */
 function updateIndex(worktreePath, entry, lockTimeoutMs = 30000) {
   validateSlug(entry.slug);
-  const featuresDir = path.join(worktreePath, '.features');
+  const featuresDir = getFeaturesDir(worktreePath);
   fs.mkdirSync(featuresDir, { recursive: true });
-  const lockPath = path.join(featuresDir, '.knowledge.lock');
-  const indexPath = path.join(featuresDir, 'index.json');
+  const lockPath = getFeaturesLockDir(worktreePath);
+  const indexPath = getFeaturesIndexPath(worktreePath);
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
     throw new Error('Failed to acquire .features/.knowledge.lock within timeout');
@@ -418,10 +419,10 @@ function findOverlapping(worktreePath, changedFiles) {
  */
 function removeEntry(worktreePath, slug, lockTimeoutMs = 30000) {
   validateSlug(slug);
-  const featuresDir = path.join(worktreePath, '.features');
+  const featuresDir = getFeaturesDir(worktreePath);
   if (!fs.existsSync(featuresDir)) return;
-  const lockPath = path.join(featuresDir, '.knowledge.lock');
-  const indexPath = path.join(featuresDir, 'index.json');
+  const lockPath = getFeaturesLockDir(worktreePath);
+  const indexPath = getFeaturesIndexPath(worktreePath);
 
   if (!acquireLock(lockPath, lockTimeoutMs)) {
     throw new Error('Failed to acquire .features/.knowledge.lock within timeout');

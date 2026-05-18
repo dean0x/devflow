@@ -23,6 +23,7 @@ CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 MEMORY_DIR="$CWD/.memory"
 [ ! -d "$MEMORY_DIR" ] && exit 0
 
+FEATURES_DIR="$CWD/.features"
 SIDECAR_DIR="$MEMORY_DIR/.sidecar"
 
 # Read sidecar config
@@ -410,11 +411,11 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
   log "Evaluating knowledge..."
 
   # Check .features/.disabled sentinel
-  if [ -f "$CWD/.features/.disabled" ]; then
+  if [ -f "$FEATURES_DIR/.disabled" ]; then
     log "Knowledge disabled by sentinel"
   else
     # Throttle: skip if refreshed within last 2 hours
-    KNOWLEDGE_MARKER="$CWD/.features/.knowledge-last-refresh"
+    KNOWLEDGE_MARKER="$FEATURES_DIR/.knowledge-last-refresh"
     LAST_REFRESH=$(cat "$KNOWLEDGE_MARKER" 2>/dev/null | tr -dc '0-9' || true)
     LAST_REFRESH="${LAST_REFRESH:-0}"
     AGE=$(( NOW - LAST_REFRESH ))

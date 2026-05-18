@@ -65,7 +65,7 @@ fi
 # --- Decisions usage scanner (independent of memory state) ---
 # D29: Supplementary — skip Node spawn when no ADR/PF citations present (~50-100ms savings).
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
-if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
+if [ -f "$SCANNER" ] && [ ! -f "$MEMORY_DIR/decisions/.disabled" ]; then
   if printf '%s' "$RESPONSE_TEXT" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
     printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
   fi

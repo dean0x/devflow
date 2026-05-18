@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './paths.js';
+import { getGitignoreEntries, getDocsDir } from './project-paths.js';
 
 
 /**
@@ -473,7 +474,7 @@ export async function updateGitignore(
 ): Promise<void> {
   try {
     const gitignorePath = path.join(gitRoot, '.gitignore');
-    const entriesToAdd = ['.claude/', '.devflow/', '.memory/', '.docs/', '.features/.knowledge.lock', '.features/.disabled', '.features/.knowledge-last-refresh', '.features/.knowledge-refresh.lock'];
+    const entriesToAdd = getGitignoreEntries();
 
     let gitignoreContent = '';
     try {
@@ -503,7 +504,7 @@ export async function updateGitignore(
  * Create .docs/ directory structure for Devflow artifacts.
  */
 export async function createDocsStructure(verbose: boolean): Promise<void> {
-  const docsDir = path.join(process.cwd(), '.docs');
+  const docsDir = getDocsDir(process.cwd());
 
   try {
     await fs.mkdir(path.join(docsDir, 'status', 'compact'), { recursive: true });

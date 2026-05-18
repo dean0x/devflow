@@ -45,6 +45,18 @@ const op = process.argv[2];
 const args = process.argv.slice(3);
 
 const { safePath } = require('./lib/safe-path.cjs');
+const {
+  getMemoryDir,
+  getDecisionsDir,
+  getDecisionsFilePath,
+  getPitfallsFilePath,
+  getDecisionsUsagePath,
+  getDecisionsUsageLockDir,
+  getDecisionsNotificationsPath,
+  getDecisionsLockDir,
+  getLearningLogPath,
+  getLearningManifestPath,
+} = require('./lib/project-paths.cjs');
 
 function readStdin() {
   try {
@@ -265,10 +277,11 @@ function findUnmanagedAnchors(memoryDir, managedAnchors, logMap) {
 
   // Use only literal (non-dynamic) regexes to avoid ReDoS surface on tainted data.
   // prefix values are hardcoded: 'ADR' for decisions, 'PF' for pitfalls.
+  const projectRoot = path.dirname(memoryDir);
   const result = [];
   const files = [
-    { file: path.join(memoryDir, 'decisions', 'decisions.md'), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
-    { file: path.join(memoryDir, 'decisions', 'pitfalls.md'),  type: 'pitfall',  re: /^## (PF-\d+):\s*([^\n]+)/gm },
+    { file: getDecisionsFilePath(projectRoot), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
+    { file: getPitfallsFilePath(projectRoot),  type: 'pitfall',  re: /^## (PF-\d+):\s*([^\n]+)/gm },
   ];
   for (const { file, type, re } of files) {
     if (!fs.existsSync(file)) continue;
@@ -297,7 +310,7 @@ function findUnmanagedAnchors(memoryDir, managedAnchors, logMap) {
  * @returns {{version: number, entries: Object}}
  */
 function readUsageFile(memoryDir) {
-  const filePath = path.join(memoryDir, '.decisions-usage.json');
+  const filePath = getDecisionsUsagePath(path.dirname(memoryDir));
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const data = JSON.parse(raw);
@@ -312,7 +325,7 @@ function readUsageFile(memoryDir) {
  * @param {{version: number, entries: Object}} data
  */
 function writeUsageFile(memoryDir, data) {
-  writeFileAtomic(path.join(memoryDir, '.decisions-usage.json'), JSON.stringify(data, null, 2) + '\n');
+  writeFileAtomic(getDecisionsUsagePath(path.dirname(memoryDir)), JSON.stringify(data, null, 2) + '\n');
 }
 
 /**
@@ -321,7 +334,7 @@ function writeUsageFile(memoryDir, data) {
  * @returns {Object}
  */
 function readNotifications(memoryDir) {
-  return readNotificationsFromPath(path.join(memoryDir, '.decisions-notifications.json'));
+  return readNotificationsFromPath(getDecisionsNotificationsPath(path.dirname(memoryDir)));
 }
 
 /**
@@ -330,7 +343,7 @@ function readNotifications(memoryDir) {
  * @param {Object} data
  */
 function writeNotifications(memoryDir, data) {
-  writeNotificationsToPath(path.join(memoryDir, '.decisions-notifications.json'), data);
+  writeNotificationsToPath(getDecisionsNotificationsPath(path.dirname(memoryDir)), data);
 }
 
 /**
@@ -412,7 +425,7 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
  * @param {string} [notifFilePath] - Optional full path to notifications file.
  */
 function updateCapacityNotification(memoryDir, notifKey, previousCount, newCount, notifFilePath) {
-  const effectiveNotifPath = notifFilePath || path.join(memoryDir, '.decisions-notifications.json');
+  const effectiveNotifPath = notifFilePath || getDecisionsNotificationsPath(path.dirname(memoryDir));
   const notifications = readNotificationsFromPath(effectiveNotifPath);
   const existingNotif = notifications[notifKey];
 
@@ -474,7 +487,7 @@ function registerUsageEntry(memoryDir, anchorId) {
  * @returns {boolean}
  */
 function acquireDecisionsUsageLock(memoryDir) {
-  const lockDir = path.join(memoryDir, '.decisions-usage.lock');
+  const lockDir = getDecisionsUsageLockDir(path.dirname(memoryDir));
   return acquireMkdirLock(lockDir, 2000, 5000);
 }
 
@@ -483,7 +496,7 @@ function acquireDecisionsUsageLock(memoryDir) {
  * @param {string} memoryDir
  */
 function releaseDecisionsUsageLock(memoryDir) {
-  const lockDir = path.join(memoryDir, '.decisions-usage.lock');
+  const lockDir = getDecisionsUsageLockDir(path.dirname(memoryDir));
   releaseLock(lockDir);
 }
 
@@ -1221,7 +1234,7 @@ try {
 
       const entries = parseJsonl(logFile);
       const logMap = new Map(entries.map(e => [e.id, e]));
-      const manifestPath = manifestPathOverride || path.join(baseDir, '.memory', '.learning-manifest.json');
+      const manifestPath = manifestPathOverride || getLearningManifestPath(baseDir);
       const artDate = new Date().toISOString().slice(0, 10);
 
       // Load or init manifest (schemaVersion 1)
@@ -1236,7 +1249,7 @@ try {
 
       const rendered = [];
       let skipped = 0;
-      const decisionsLockDir = path.join(baseDir, '.memory', '.decisions.lock');
+      const decisionsLockDir = getDecisionsLockDir(baseDir);
 
       for (const obs of entries) {
         if (obs.status !== 'ready') continue;
@@ -1344,8 +1357,8 @@ try {
           } else if (obs.type === 'decision' || obs.type === 'pitfall') {
             // --- Decision / Pitfall: append to decisions file ---
             const isDecision = obs.type === 'decision';
-            const decisionsDir = path.join(baseDir, '.memory', 'decisions');
-            const decisionsFile = path.join(decisionsDir, isDecision ? 'decisions.md' : 'pitfalls.md');
+            const decisionsDir = getDecisionsDir(baseDir);
+            const decisionsFile = isDecision ? getDecisionsFilePath(baseDir) : getPitfallsFilePath(baseDir);
             const entryPrefix = isDecision ? 'ADR' : 'PF';
             const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
 
@@ -1368,7 +1381,7 @@ try {
               // D18: count only active (non-deprecated/superseded) headings for capacity check
               const previousCount = countActiveHeadings(existingContent, obs.type);
 
-              const memoryDir = path.join(baseDir, '.memory');
+              const memoryDir = getMemoryDir(baseDir);
               const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
 
               // D17: hard ceiling at DECISIONS_HARD_CEILING (100); softCapExceeded repurposed
@@ -1378,7 +1391,7 @@ try {
                 // so the user can decide which entry to deprecate before a new one lands.
                 obs.softCapExceeded = true;
                 // Write error-level notification for hard ceiling
-                const notifFilePath = notifPathOverride || path.join(memoryDir, '.decisions-notifications.json');
+                const notifFilePath = notifPathOverride || getDecisionsNotificationsPath(baseDir);
                 const notifications = readNotificationsFromPath(notifFilePath);
                 notifications[notifKey] = {
                   active: true,
@@ -1519,9 +1532,9 @@ try {
     // -------------------------------------------------------------------------
     case 'reconcile-manifest': {
       const cwd = safePath(args[0]);
-      const logFile = args[1] ? safePath(args[1]) : path.join(cwd, '.memory', 'learning-log.jsonl');
-      const manifestPath = args[2] ? safePath(args[2]) : path.join(cwd, '.memory', '.learning-manifest.json');
-      const lockDir = path.join(cwd, '.memory', '.learning.lock');
+      const logFile = args[1] ? safePath(args[1]) : getLearningLogPath(cwd);
+      const manifestPath = args[2] ? safePath(args[2]) : getLearningManifestPath(cwd);
+      const lockDir = path.join(getMemoryDir(cwd), '.learning.lock');
 
       // A1: require only the log file (not the manifest) before proceeding.
       // The heal path must be able to run even when the manifest has never been written
@@ -1629,7 +1642,7 @@ try {
         // anchors not tracked in the manifest, then matching them against ready log
         // observations with a matching normalised pattern.
         // DESIGN: D-D — skip silently when zero or multiple log entries match (ambiguity guard).
-        const memoryDir = path.join(cwd, '.memory');
+        const memoryDir = getMemoryDir(cwd);
         const managedAnchors = new Set(keptEntries.filter(e => e.anchorId).map(e => e.anchorId));
         // P2 early-exit is inside findUnmanagedAnchors; pass logMap so it can check.
         const unmanaged = findUnmanagedAnchors(memoryDir, managedAnchors, logMap);
@@ -1817,7 +1830,8 @@ try {
 
       const decisionsDir = path.dirname(decisionsFile);
       const memoryDir = path.dirname(decisionsDir);
-      const decisionsLockDir = path.join(memoryDir, '.decisions.lock');
+      const projectRoot = path.dirname(memoryDir);
+      const decisionsLockDir = getDecisionsLockDir(projectRoot);
 
       fs.mkdirSync(decisionsDir, { recursive: true });
 
@@ -1877,7 +1891,7 @@ try {
         // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
         // Write to .decisions-notifications.json — decisions-append owns the decisions/pitfalls pipeline.
         const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
-        const decisionsNotifPath = path.join(memoryDir, '.decisions-notifications.json');
+        const decisionsNotifPath = getDecisionsNotificationsPath(projectRoot);
         updateCapacityNotification(memoryDir, notifKey, previousCount, newActiveCount, decisionsNotifPath);
 
         console.log(JSON.stringify({ anchorId, file: decisionsFile }));

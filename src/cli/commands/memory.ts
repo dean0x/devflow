@@ -6,6 +6,11 @@ import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
 import { discoverProjectGitRoots } from '../utils/post-install.js';
 import { getGitRoot } from '../utils/git.js';
+import {
+  getMemoryDir,
+  getPendingTurnsPath,
+  getPendingTurnsProcessingPath,
+} from '../utils/project-paths.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
 
@@ -175,7 +180,7 @@ interface MemoryOptions {
  */
 export async function hasMemoryDir(root: string): Promise<boolean> {
   try {
-    await fs.access(path.join(root, '.memory'));
+    await fs.access(getMemoryDir(root));
     return true;
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
@@ -204,7 +209,7 @@ export async function filterProjectsWithMemory(gitRoots: string[]): Promise<stri
 export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned: number; projects: string[] }> {
   const results = await Promise.all(
     projectPaths.map(async (project) => {
-      const memDir = path.join(project, '.memory');
+      const memDir = getMemoryDir(project);
       const lockDir = path.join(memDir, '.working-memory.lock');
       try {
         await fs.access(lockDir);
@@ -214,8 +219,8 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
         // No lock — safe to proceed
       }
       const [q, pr] = await Promise.all([
-        fs.unlink(path.join(memDir, '.pending-turns.jsonl')).then(() => true).catch(() => false),
-        fs.unlink(path.join(memDir, '.pending-turns.processing')).then(() => true).catch(() => false),
+        fs.unlink(getPendingTurnsPath(project)).then(() => true).catch(() => false),
+        fs.unlink(getPendingTurnsProcessingPath(project)).then(() => true).catch(() => false),
       ]);
       return (q || pr) ? project : null;
     }),
@@ -374,10 +379,9 @@ export const memoryCommand = new Command('memory')
       if (gitRoot) {
         await updateFeature(gitRoot, 'memory', false);
         // Drain orphaned queue files so stale turns don't process on re-enable
-        const memDir = path.join(gitRoot, '.memory');
         await Promise.all([
-          fs.unlink(path.join(memDir, '.pending-turns.jsonl')).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
-          fs.unlink(path.join(memDir, '.pending-turns.processing')).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+          fs.unlink(getPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+          fs.unlink(getPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
         ]);
         p.log.success('Working memory disabled — sidecar config updated');
       } else {
