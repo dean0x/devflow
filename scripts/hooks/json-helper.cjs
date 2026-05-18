@@ -1826,8 +1826,8 @@ try {
       const artDate = new Date().toISOString().slice(0, 10);
 
       const decisionsDir = path.dirname(decisionsFile);
-      const memoryDir = path.dirname(decisionsDir);
-      const projectRoot = path.dirname(memoryDir);
+      const devflowDir = path.dirname(decisionsDir);
+      const projectRoot = path.dirname(devflowDir);
       const decisionsLockDir = getDecisionsLockDir(projectRoot);
 
       fs.mkdirSync(decisionsDir, { recursive: true });

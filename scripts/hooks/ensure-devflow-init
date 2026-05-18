@@ -9,6 +9,14 @@
 
 _DEVFLOW_DIR="$1/.devflow"
 
+# Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup
+if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
+   [ -d "$_DEVFLOW_DIR/sidecar" ] && [ -d "$_DEVFLOW_DIR/learning" ] && \
+   [ -d "$_DEVFLOW_DIR/decisions" ] && [ -d "$_DEVFLOW_DIR/features" ] && \
+   [ -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
+  return 0
+fi
+
 # Create all subdirectories
 mkdir -p \
   "$_DEVFLOW_DIR/memory" \
@@ -21,7 +29,8 @@ mkdir -p \
 
 # Bootstrap features/index.json if missing
 if [ ! -f "$_DEVFLOW_DIR/features/index.json" ]; then
-  printf '{"version":1,"features":{}}' > "$_DEVFLOW_DIR/features/index.json"
+  printf '{"version":1,"features":{}}' > "$_DEVFLOW_DIR/features/index.json.tmp" && \
+    mv "$_DEVFLOW_DIR/features/index.json.tmp" "$_DEVFLOW_DIR/features/index.json"
 fi
 
 # One-time .devflow/.gitignore setup (marker prevents repeated checks)
