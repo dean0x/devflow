@@ -144,9 +144,9 @@ async function withDecisionsFiles(
  *   - ADR-002  (decisions.md)
  *   - PF-001, PF-003, PF-005  (pitfalls.md)
  *
- * Returns immediately if `.memory/decisions/` does not exist.
+ * Returns immediately if `.devflow/decisions/` does not exist.
  *
- * @param options.memoryDir - absolute path to the `.memory/` directory
+ * @param options.memoryDir - absolute path to the `.devflow/memory/` directory
  * @returns number of sections removed and list of files that were modified
  * @throws if lock acquisition times out
  */
@@ -183,17 +183,27 @@ export async function purgeLegacyDecisionsEntries(options: {
     return { updated, removedCount };
   });
 
-  // Remove orphan PROJECT-PATTERNS.md — stale artifact, nothing generates/reads it
-  // D39-consistent: lstat guard ensures we only unlink regular files (defense-in-depth)
-  const projectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
-  try {
-    const stat = await fs.lstat(projectPatternsPath);
-    if (stat.isFile()) {
-      await fs.unlink(projectPatternsPath);
-      result.removed++;
-      result.files.push(projectPatternsPath);
-    }
-  } catch { /* File doesn't exist — fine */ }
+  // Remove orphan PROJECT-PATTERNS.md — stale artifact, nothing generates/reads it.
+  // D39-consistent: lstat guard ensures we only unlink regular files (defense-in-depth).
+  // Check both the old path (.memory/PROJECT-PATTERNS.md, present on upgrading projects)
+  // and the new path (.devflow/memory/PROJECT-PATTERNS.md, present on fresh installs or
+  // post-migration projects). projectRoot is always provided by migrations.ts so memoryDir
+  // already resolves to .devflow/memory/ — the old path is derived from projectRoot directly.
+  const oldProjectPatternsPath = projectRoot
+    ? path.join(projectRoot, '.memory', 'PROJECT-PATTERNS.md')
+    : null;
+  const newProjectPatternsPath = path.join(memoryDir, 'PROJECT-PATTERNS.md');
+  for (const candidatePath of [oldProjectPatternsPath, newProjectPatternsPath]) {
+    if (candidatePath === null) continue;
+    try {
+      const stat = await fs.lstat(candidatePath);
+      if (stat.isFile()) {
+        await fs.unlink(candidatePath);
+        result.removed++;
+        result.files.push(candidatePath);
+      }
+    } catch { /* File doesn't exist — fine */ }
+  }
 
   return result;
 }
@@ -212,12 +222,12 @@ export async function purgeLegacyDecisionsEntries(options: {
  * ALL seeded entries, fixing the gap where 7 of the original 10 seed entries
  * survived the v2 purge on upgraded projects.
  *
- * Returns immediately if `.memory/decisions/` does not exist.
+ * Returns immediately if `.devflow/decisions/` does not exist.
  *
  * Does NOT remove PROJECT-PATTERNS.md — that file is v2's responsibility and
  * has already been handled by `purgeLegacyDecisionsEntries`.
  *
- * @param options.memoryDir - absolute path to the `.memory/` directory
+ * @param options.memoryDir - absolute path to the `.devflow/memory/` directory
  * @returns number of sections removed and list of files that were modified
  * @throws if lock acquisition times out
  */

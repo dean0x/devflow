@@ -11,19 +11,21 @@ import { getMemoryDir, getFeaturesDir } from './project-paths.js';
 /**
  * Move src to dest, skipping when src doesn't exist or dest already exists
  * (idempotent). Falls back to copy+delete on EXDEV (cross-device rename).
+ *
+ * Avoids the TOCTOU race of access(src)+access(dest)+rename by attempting
+ * rename directly and handling ENOENT/EEXIST from the syscall itself.
  */
 async function moveFile(src: string, dest: string): Promise<void> {
-  // Check source exists
-  try { await fs.access(src); } catch { return; }
-  // Skip if dest already present
-  try { await fs.access(dest); return; } catch { /* dest absent, proceed */ }
-  // Ensure parent directory exists
+  // Ensure parent directory exists before attempting rename
   await fs.mkdir(path.dirname(dest), { recursive: true });
   try {
     await fs.rename(src, dest);
   } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return;    // src gone — already moved or never existed
+    if (code === 'EEXIST') return;    // dest already present — idempotent skip
     // Cross-device: fall back to copy+delete
-    if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+    if (code === 'EXDEV') {
       await fs.cp(src, dest, { recursive: true });
       await fs.rm(src, { recursive: true, force: true });
     } else {
@@ -43,15 +45,14 @@ async function moveDirContents(
 ): Promise<void> {
   let entries: import('fs').Dirent[];
   try {
-    entries = await fs.readdir(srcDir, { withFileTypes: true }) as import('fs').Dirent[];
+    entries = await fs.readdir(srcDir, { withFileTypes: true });
   } catch { return; }
 
-  for (const entry of entries) {
-    if (skipNames.has(entry.name)) continue;
-    const src = path.join(srcDir, entry.name);
-    const dest = path.join(destDir, entry.name);
-    await moveFile(src, dest);
-  }
+  await Promise.all(
+    entries
+      .filter(entry => !skipNames.has(entry.name))
+      .map(entry => moveFile(path.join(srcDir, entry.name), path.join(destDir, entry.name))),
+  );
 }
 
 const DEVFLOW_GITIGNORE_CONTENT = `# Per-developer session state (fully transient)
@@ -344,13 +345,15 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
     const featSrc    = path.join(projectRoot, '.features');
     const docsSrc    = path.join(projectRoot, '.docs');
 
-    // 1. Create target subdirectories
-    await fs.mkdir(path.join(devflowDir, 'memory'),    { recursive: true });
-    await fs.mkdir(path.join(devflowDir, 'sidecar'),   { recursive: true });
-    await fs.mkdir(path.join(devflowDir, 'decisions'), { recursive: true });
-    await fs.mkdir(path.join(devflowDir, 'learning'),  { recursive: true });
-    await fs.mkdir(path.join(devflowDir, 'features'),  { recursive: true });
-    await fs.mkdir(path.join(devflowDir, 'docs'),      { recursive: true });
+    // 1. Create target subdirectories (independent — run in parallel)
+    await Promise.all([
+      fs.mkdir(path.join(devflowDir, 'memory'),    { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'sidecar'),   { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'decisions'), { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'learning'),  { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'features'),  { recursive: true }),
+      fs.mkdir(path.join(devflowDir, 'docs'),      { recursive: true }),
+    ]);
 
     // 2. Explicit mapped moves from .memory/
     const memMap: Array<[string, string]> = [
@@ -384,9 +387,7 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       ['working',                       path.join(devflowDir, 'memory',    'working')],
     ];
 
-    for (const [name, dest] of memMap) {
-      await moveFile(path.join(memSrc, name), dest);
-    }
+    await Promise.all(memMap.map(([name, dest]) => moveFile(path.join(memSrc, name), dest)));
 
     // 2b. Move .memory/.sidecar/ → .devflow/sidecar/ (directory contents)
     await moveDirContents(

@@ -501,7 +501,7 @@ export async function updateGitignore(
 }
 
 /**
- * Create .docs/ directory structure for Devflow artifacts.
+ * Create .devflow/docs/ directory structure for Devflow artifacts.
  */
 export async function createDocsStructure(verbose: boolean): Promise<void> {
   const docsDir = getDocsDir(process.cwd());
@@ -511,7 +511,7 @@ export async function createDocsStructure(verbose: boolean): Promise<void> {
     await fs.mkdir(path.join(docsDir, 'reviews'), { recursive: true });
     await fs.mkdir(path.join(docsDir, 'releases'), { recursive: true });
     if (verbose) {
-      p.log.success('.docs/ structure ready');
+      p.log.success('.devflow/docs/ structure ready');
     }
   } catch { /* may already exist */ }
 }
