@@ -16,6 +16,7 @@ import {
   getLearningSessionCountPath,
   getLearningBatchIdsPath,
   getLearningDisabledSentinel,
+  getLearningLockDir,
   getDecisionsUsagePath,
   getDecisionsUsageLockDir,
 } from '../utils/project-paths.js';
@@ -374,8 +375,7 @@ export const learnCommand = new Command('learn')
 
     // --- --reset ---
     if (options.reset) {
-      const memoryDir = getMemoryDir(process.cwd());
-      const lockDir = path.join(memoryDir, '.learning.lock');
+      const lockDir = getLearningLockDir(process.cwd());
 
       // Acquire lock to prevent conflict with running background-learning
       try {
@@ -575,7 +575,7 @@ export const learnCommand = new Command('learn')
       // Acquire .learning.lock so we don't race with background-learning during the
       // interactive loop. The internal updateDecisionsStatus call still takes its own
       // .decisions.lock — different lock directories, no deadlock.
-      const learningLockDir = path.join(getMemoryDir(process.cwd()), '.learning.lock');
+      const learningLockDir = getLearningLockDir(process.cwd());
       const lockAcquired = await acquireMkdirLock(learningLockDir);
       if (!lockAcquired) {
         p.log.error('Learning system is currently running. Try again in a moment.');

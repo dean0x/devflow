@@ -55,6 +55,7 @@ const {
   getDecisionsNotificationsPath,
   getDecisionsLockDir,
   getLearningLogPath,
+  getLearningLockDir,
   getLearningManifestPath,
 } = require('./lib/project-paths.cjs');
 
@@ -1532,7 +1533,7 @@ try {
       const cwd = safePath(args[0]);
       const logFile = args[1] ? safePath(args[1]) : getLearningLogPath(cwd);
       const manifestPath = args[2] ? safePath(args[2]) : getLearningManifestPath(cwd);
-      const lockDir = path.join(getMemoryDir(cwd), '.learning.lock');
+      const lockDir = getLearningLockDir(cwd);
 
       // A1: require only the log file (not the manifest) before proceeding.
       // The heal path must be able to run even when the manifest has never been written

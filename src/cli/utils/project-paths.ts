@@ -169,6 +169,11 @@ export function getLearningDisabledSentinel(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'memory', '.learning-disabled');
 }
 
+/** .devflow/memory/.learning.lock — mkdir-based lock directory for learning agent */
+export function getLearningLockDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'memory', '.learning.lock');
+}
+
 // ---------------------------------------------------------------------------
 // Memory / working-memory files
 // ---------------------------------------------------------------------------

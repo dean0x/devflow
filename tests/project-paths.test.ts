@@ -42,6 +42,7 @@ import {
   getLearningSessionCountPath,
   getLearningBatchIdsPath,
   getLearningDisabledSentinel,
+  getLearningLockDir,
   getWorkingMemoryDisabledSentinel,
   getWorkingMemoryPath,
   getBackupPath,
@@ -183,6 +184,10 @@ describe('project-paths TypeScript module', () => {
     it('getLearningDisabledSentinel returns .devflow/memory/.learning-disabled', () => {
       expect(getLearningDisabledSentinel(ROOT)).toBe('/some/project/.devflow/memory/.learning-disabled');
     });
+
+    it('getLearningLockDir returns .devflow/memory/.learning.lock', () => {
+      expect(getLearningLockDir(ROOT)).toBe('/some/project/.devflow/memory/.learning.lock');
+    });
   });
 
   describe('memory / working-memory files', () => {
@@ -321,6 +326,7 @@ describe('CJS project-paths parity', () => {
     { name: 'getLearningSessionCountPath', ts: getLearningSessionCountPath, cjs: cjsPaths.getLearningSessionCountPath },
     { name: 'getLearningBatchIdsPath', ts: getLearningBatchIdsPath, cjs: cjsPaths.getLearningBatchIdsPath },
     { name: 'getLearningDisabledSentinel', ts: getLearningDisabledSentinel, cjs: cjsPaths.getLearningDisabledSentinel },
+    { name: 'getLearningLockDir', ts: getLearningLockDir, cjs: cjsPaths.getLearningLockDir },
     { name: 'getWorkingMemoryDisabledSentinel', ts: getWorkingMemoryDisabledSentinel, cjs: cjsPaths.getWorkingMemoryDisabledSentinel },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },
