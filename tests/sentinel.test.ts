@@ -193,7 +193,7 @@ describe('sentinel guard: sidecar-evaluate', () => {
     }).not.toThrow();
   });
 
-  it('exits cleanly when .memory/ does not exist (no markers written)', () => {
+  it('exits cleanly when .devflow/memory/ does not exist (no markers written)', () => {
     const input = sessionInput(tmpDir);
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });

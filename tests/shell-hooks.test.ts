@@ -1207,7 +1207,7 @@ describe('working memory queue behavior', () => {
   }
 
   it('stop_reason tool_use — no queue append', () => {
-    // Create .memory/ so the hook proceeds to the stop_reason check
+    // Create .devflow/memory/ so the hook proceeds to the stop_reason check
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
@@ -1224,7 +1224,7 @@ describe('working memory queue behavior', () => {
   });
 
   it('stop_reason end_turn — appends assistant turn to queue', () => {
-    // Create .memory/ directory
+    // Create .devflow/memory/ directory
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     // Write stale WORKING-MEMORY.md so throttle check passes (no memory.processing marker needed)
     writeStaleWorkingMemory(tmpDir);
@@ -1251,7 +1251,7 @@ describe('working memory queue behavior', () => {
   });
 
   it('sidecar-dispatch captures user prompt to queue', () => {
-    // Create .memory/ directory so capture is triggered
+    // Create .devflow/memory/ directory so capture is triggered
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
@@ -1286,13 +1286,13 @@ describe('working memory queue behavior', () => {
       execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
 
-    // Hook creates .memory/ and writes to queue
+    // Hook creates .devflow/memory/ and writes to queue
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(true);
   });
 
   it('preamble does NOT write to queue — zero file I/O', () => {
-    // Create .memory/ to confirm preamble doesn't touch the queue even when .memory/ exists
+    // Create .devflow/memory/ to confirm preamble doesn't touch the queue even when it exists
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
@@ -1676,6 +1676,21 @@ describe('ensure-devflow-init behavioral', () => {
     const gitignore = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
     const lockEntries = gitignore.split('\n').filter(l => l === 'features/.knowledge.lock/');
     expect(lockEntries).toHaveLength(1);
+  });
+
+  it('heredoc matches getDevflowGitignoreContent() from project-paths.cjs', () => {
+    // Source ensure-devflow-init in a fresh temp dir, then compare the resulting
+    // .devflow/.gitignore to the canonical CJS function output.
+    const PROJECT_PATHS_CJS = path.join(HOOKS_DIR, 'lib', 'project-paths.cjs');
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const hookContent = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
+    const canonical = execSync(
+      `node -e "process.stdout.write(require('${PROJECT_PATHS_CJS}').getDevflowGitignoreContent())"`,
+      { stdio: 'pipe' },
+    ).toString();
+
+    expect(hookContent).toBe(canonical);
   });
 
   it('returns non-zero and creates no .devflow/ when called with empty argument (SEC-3 guard)', () => {

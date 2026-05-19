@@ -157,7 +157,7 @@ describe('staleness — via json-helper process-observations integration', () =>
         id: 'obs_base001',
         type: 'procedural',
         pattern: 'check lock files',
-        evidence: ['check .memory/.learning.lock first'],
+        evidence: ['check .devflow/learning/.learning.lock first'],
         details: 'When debugging: check scripts/hooks/json-helper.cjs for errors',
         quality_ok: true,
       }],

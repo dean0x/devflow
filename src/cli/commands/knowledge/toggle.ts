@@ -19,7 +19,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   if (options.enable) {
     p.intro(color.cyan('Enable Feature Knowledge Bases'));
 
-    // Create .features/index.json if missing
+    // Create .devflow/features/index.json if missing
     const featuresDir = getFeaturesDir(worktreePath);
     await fs.mkdir(featuresDir, { recursive: true });
     const indexPath = getFeaturesIndexPath(worktreePath);

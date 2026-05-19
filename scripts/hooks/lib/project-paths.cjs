@@ -300,6 +300,7 @@ learning/.learning-notifications.json
 learning/.learning-runs-today
 learning/.learning-session-count
 learning/.learning-batch-ids
+learning/debug/
 
 # Per-developer decisions observation log and transient state
 decisions/decisions-log.jsonl

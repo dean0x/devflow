@@ -420,8 +420,8 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
     // 3. Move .features/ contents → .devflow/features/
     await moveDirContents(featSrc, path.join(devflowDir, 'features'), new Set());
 
-    // 4. Move .docs/ contents → .devflow/docs/
-    await moveDirContents(docsSrc, path.join(devflowDir, 'docs'), new Set());
+    // 4. Move .docs/ contents → .devflow/docs/ (skip WORKING-MEMORY.md — belongs in memory/)
+    await moveDirContents(docsSrc, path.join(devflowDir, 'docs'), new Set(['WORKING-MEMORY.md']));
 
     // 5. Create .devflow/.gitignore if not present (atomic exclusive create — no TOCTOU)
     await createDevflowGitignoreIfAbsent(devflowDir);
@@ -429,20 +429,77 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
     // 6. Clean up project .gitignore — remove stale entries (atomic temp+rename write)
     const gitignoreInfos = await cleanStaleGitignoreEntries(projectRoot);
 
-    // 7. Remove empty old directories (best-effort)
-    for (const oldDir of [memSrc, featSrc, docsSrc]) {
+    // 7. Clean up legacy/leftover files and remove old directories (best-effort)
+
+    // 7a. Delete legacy skip files from old .memory/ — these were intentionally
+    // not migrated (obsolete V1 artifacts)
+    await Promise.all(
+      MEMORY_LEGACY_SKIP_FILES.map(name =>
+        fs.rm(path.join(memSrc, name), { recursive: true, force: true }).catch(() => {}),
+      ),
+    );
+
+    // 7b. Delete leftover entries in .features/ and .docs/ — after moveDirContents,
+    // any remaining entries are duplicates whose dest already existed
+    for (const oldDir of [featSrc, docsSrc]) {
       try {
         const remaining = await fs.readdir(oldDir);
-        if (remaining.length === 0) {
-          await fs.rmdir(oldDir);
-        }
-      } catch { /* may already be removed or non-empty — non-fatal */ }
+        await Promise.all(
+          remaining.map(name =>
+            fs.rm(path.join(oldDir, name), { recursive: true, force: true }).catch(() => {}),
+          ),
+        );
+      } catch { /* dir may not exist */ }
+    }
+
+    // 7c. Attempt rmdir on all three old directories — if .memory/ has user files
+    // not in the legacy skip list, the dir survives
+    for (const oldDir of [memSrc, featSrc, docsSrc]) {
+      try { await fs.rmdir(oldDir); } catch { /* non-empty or already removed */ }
     }
 
     return {
       infos: [...gitignoreInfos, 'Consolidated .memory/, .features/, .docs/ under .devflow/'],
       warnings: [],
     };
+  },
+};
+
+/** D38: The consolidation migration moved .docs/ → .devflow/docs/ without excluding
+ * WORKING-MEMORY.md, which belongs in .devflow/memory/. Projects that already ran
+ * the consolidation have a stale copy at .devflow/docs/WORKING-MEMORY.md.
+ */
+const MIGRATION_CLEANUP_STALE_WORKING_MEMORY: Migration<'per-project'> = {
+  id: 'cleanup-stale-working-memory',
+  description: 'Remove WORKING-MEMORY.md from .devflow/docs/ (belongs in memory/)',
+  scope: 'per-project',
+  async run(ctx) {
+    const stale = path.join(ctx.projectRoot, '.devflow', 'docs', 'WORKING-MEMORY.md');
+    try {
+      await fs.rm(stale, { force: true });
+    } catch { /* already removed or doesn't exist */ }
+    return { infos: [], warnings: [] };
+  },
+};
+
+const MIGRATION_SYNC_DEVFLOW_GITIGNORE: Migration<'per-project'> = {
+  id: 'sync-devflow-gitignore-v1',
+  description: 'Sync .devflow/.gitignore to latest canonical template',
+  scope: 'per-project',
+  async run(ctx) {
+    const devflowDir = path.join(ctx.projectRoot, '.devflow');
+    try { await fs.access(devflowDir); } catch { return { infos: [], warnings: [] }; }
+
+    const canonical = getDevflowGitignoreContent();
+    const gitignorePath = path.join(devflowDir, '.gitignore');
+
+    try {
+      const existing = await fs.readFile(gitignorePath, 'utf-8');
+      if (existing === canonical) return { infos: [], warnings: [] };
+    } catch { /* file missing — will be created below */ }
+
+    await writeFileAtomicExclusive(gitignorePath, canonical);
+    return { infos: ['Synced .devflow/.gitignore to latest template'], warnings: [] };
   },
 };
 
@@ -468,6 +525,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_LEGACY_KNOWLEDGE_V3,
   MIGRATION_RENAME_KB_TO_KNOWLEDGE,
   MIGRATION_CONSOLIDATE_TO_DEVFLOW,
+  MIGRATION_CLEANUP_STALE_WORKING_MEMORY,
+  MIGRATION_SYNC_DEVFLOW_GITIGNORE,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

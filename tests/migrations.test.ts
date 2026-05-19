@@ -12,6 +12,7 @@ import {
   type MigrationLogger,
   type RunMigrationsResult,
 } from '../src/cli/utils/migrations.js';
+import { getDevflowGitignoreContent } from '../src/cli/utils/project-paths.js';
 
 describe('readAppliedMigrations', () => {
   let tmpDir: string;
@@ -162,6 +163,19 @@ describe('MIGRATIONS', () => {
     const consolidateIdx = MIGRATIONS.findIndex(m => m.id === 'consolidate-to-devflow-dir');
     expect(renameIdx).toBeGreaterThanOrEqual(0);
     expect(consolidateIdx).toBeGreaterThan(renameIdx);
+  });
+
+  it('contains sync-devflow-gitignore-v1 with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('sync-devflow-gitignore-v1 follows cleanup-stale-working-memory in array', () => {
+    const cleanupIdx = MIGRATIONS.findIndex(m => m.id === 'cleanup-stale-working-memory');
+    const syncIdx = MIGRATIONS.findIndex(m => m.id === 'sync-devflow-gitignore-v1');
+    expect(cleanupIdx).toBeGreaterThanOrEqual(0);
+    expect(syncIdx).toBeGreaterThan(cleanupIdx);
   });
 });
 
@@ -775,17 +789,60 @@ describe('consolidate-to-devflow-dir migration', () => {
     await expect(fs.access(docsSrc)).rejects.toThrow();
   });
 
-  it('leaves non-empty old directories in place', async () => {
+  it('leaves .memory/ in place when unrecognized user files remain', async () => {
     const memorySrc = path.join(projectRoot, '.memory');
     await fs.mkdir(memorySrc, { recursive: true });
-    // A skip-listed legacy file that the migration deliberately does not move
-    await fs.writeFile(path.join(memorySrc, 'index.md'), '# V1 index\n', 'utf-8');
+    // Pre-create dest so catch-all moveDirContents skips the source
+    await fs.mkdir(path.join(devflowDir, 'memory'), { recursive: true });
+    await fs.writeFile(path.join(devflowDir, 'memory', 'user-notes.txt'), 'existing', 'utf-8');
+    // Source file — not in MEMORY_LEGACY_SKIP_FILES, not in memMap, dest already exists
+    await fs.writeFile(path.join(memorySrc, 'user-notes.txt'), 'my notes', 'utf-8');
 
     await getMigration().run(makeCtx());
 
-    // .memory/ still present because index.md was not moved (MEMORY_SKIP_FILES)
+    // .memory/ survives because user-notes.txt couldn't be moved (dest exists)
+    // and wasn't cleaned (not a legacy skip file)
     await expect(fs.access(memorySrc)).resolves.toBeUndefined();
-    await expect(fs.access(path.join(memorySrc, 'index.md'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(memorySrc, 'user-notes.txt'))).resolves.toBeUndefined();
+  });
+
+  it('deletes legacy skip files from .memory/ and removes the directory', async () => {
+    const memorySrc = path.join(projectRoot, '.memory');
+    await fs.mkdir(path.join(memorySrc, 'knowledge'), { recursive: true });
+    await fs.writeFile(path.join(memorySrc, 'knowledge', 'old-data.json'), '{}', 'utf-8');
+    await fs.mkdir(path.join(memorySrc, 'short'), { recursive: true });
+    await fs.writeFile(path.join(memorySrc, 'short', 'old.md'), '', 'utf-8');
+    await fs.writeFile(path.join(memorySrc, 'index.md'), '# V1\n', 'utf-8');
+    await fs.writeFile(path.join(memorySrc, 'candidates.json'), '[]', 'utf-8');
+    await fs.writeFile(path.join(memorySrc, '.gitignore-configured'), '', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // All legacy files deleted, .memory/ removed
+    await expect(fs.access(path.join(memorySrc, 'knowledge'))).rejects.toThrow();
+    await expect(fs.access(path.join(memorySrc, 'index.md'))).rejects.toThrow();
+    await expect(fs.access(memorySrc)).rejects.toThrow();
+  });
+
+  it('removes .features/ after cleaning leftover duplicates', async () => {
+    const featSrc = path.join(projectRoot, '.features');
+    await fs.mkdir(featSrc, { recursive: true });
+    await fs.writeFile(path.join(featSrc, 'index.json'), '{"version":1,"features":{}}', 'utf-8');
+    // Pre-create dest so moveDirContents skips the source
+    await fs.mkdir(path.join(devflowDir, 'features'), { recursive: true });
+    await fs.writeFile(
+      path.join(devflowDir, 'features', 'index.json'),
+      '{"version":1,"features":{"existing":{}}}',
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    // .features/ removed after cleaning leftover index.json
+    await expect(fs.access(featSrc)).rejects.toThrow();
+    // Dest content preserved (not overwritten by src)
+    const dest = await fs.readFile(path.join(devflowDir, 'features', 'index.json'), 'utf-8');
+    expect(dest).toContain('existing');
   });
 
   it('is idempotent — running twice produces the same result', async () => {
@@ -954,5 +1011,111 @@ describe('reportMigrationResult', () => {
     reportMigrationResult(result, logger, false);
     const infoCalls = calls.filter(c => c.method === 'info');
     expect(infoCalls.length).toBe(0);
+  });
+});
+
+describe('sync-devflow-gitignore-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-sync-gitignore-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v1');
+    if (!m) throw new Error('sync-devflow-gitignore-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('overwrites stale .devflow/.gitignore with canonical content', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# old stale content\nmemory/\n', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
+    expect(result?.infos).toContain('Synced .devflow/.gitignore to latest template');
+  });
+
+  it('is a no-op when content already matches', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), getDevflowGitignoreContent(), 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
+    expect(result?.infos ?? []).toHaveLength(0);
+  });
+
+  it('skips when .devflow/ directory does not exist', async () => {
+    // projectRoot exists but .devflow/ does not
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    const result = await getMigration().run(makeCtx());
+
+    expect(fs.access(devflowDir)).rejects.toThrow();
+    expect(result?.infos ?? []).toHaveLength(0);
+  });
+
+  it('creates .devflow/.gitignore when file is missing but directory exists', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+
+    await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
+  });
+
+  it('is idempotent — running twice produces same result', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# stale\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+    await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
+  });
+
+  it('returns structured MigrationRunResult', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# stale\n', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    expect(result).toBeDefined();
+    expect(Array.isArray(result?.infos)).toBe(true);
+    expect(Array.isArray(result?.warnings)).toBe(true);
+    expect(result?.warnings).toHaveLength(0);
   });
 });

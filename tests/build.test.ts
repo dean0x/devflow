@@ -95,7 +95,7 @@ describe('rule references', () => {
 describe('no orphaned declarations', () => {
   // Skills that intentionally exist in shared/skills/ but are not distributed to any plugin.
   // These are format specifications consumed by background processes, not by agents or commands.
-  // See D9 in .memory/decisions/decisions.md for rationale.
+  // See D9 in .devflow/decisions/decisions.md for rationale.
   const FORMAT_SPEC_SKILLS = new Set(['decisions-format']);
 
   it('all skills in shared/skills/ are referenced by at least one plugin', async () => {
