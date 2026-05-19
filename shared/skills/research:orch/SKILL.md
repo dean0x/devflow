@@ -30,9 +30,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 Use `DECISIONS_CONTEXT` locally to frame research — prior decisions and pitfalls suggest areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. Pass `DECISIONS_CONTEXT` to each Researcher agent in Phase 4 so they can cite relevant decisions in findings.
 
 Also load feature knowledge:
-1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
+1. Read `.devflow/features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
 2. Identify relevant feature knowledge entries (match research question against each entry's descriptions and directories).
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** — feature-specific patterns guide what the codebase researcher should look for.
 5. Pass `FEATURE_KNOWLEDGE` to each Researcher agent in Phase 4.
 
@@ -48,7 +48,7 @@ Analyze the user's prompt to infer research types needed:
 For each research type in RESEARCH_PLAN, determine:
 - `RESEARCH_TYPE`: One of `codebase | external | market | competitor | technology`
 - `RESEARCH_QUESTION`: Focused sub-question for this type
-- `OUTPUT_PATH`: `.docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`
+- `OUTPUT_PATH`: `.devflow/docs/research/{topic-slug}/{YYYY-MM-DD_HHMM}/{type}.md`
 
 Generate topic slug from the research question: kebab-case, lowercase, no articles.
 
@@ -100,7 +100,7 @@ Spawn `Agent(subagent_type="Synthesizer")` in `research` mode:
   - Findings confirmed across both trusted and untrusted sources = high confidence
 - Writes `research-summary.md` to the same timestamped directory
 
-Output path: `.docs/research/{topic-slug}/{timestamp}/research-summary.md`
+Output path: `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md`
 
 ### Phase 6: Present
 
@@ -120,9 +120,9 @@ If external research types were skipped due to tool unavailability: inform user 
 **Requires:** RESEARCH_SUMMARY, DECISIONS_CONTEXT
 **Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
-1. If `.features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
+1. If `.devflow/features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
 2. If `codebase` type was not in RESEARCH_PLAN → skip (no local code was examined)
-3. Read `.features/index.json` (if it exists)
+3. Read `.devflow/features/index.json` (if it exists)
 4. Based on the codebase areas touched by research, check if matching feature knowledge already exists. If covered → skip
 5. Use AskUserQuestion: "No feature knowledge exists for {researched area}. Create one to capture these patterns?"
 6. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
@@ -139,16 +139,16 @@ If external research types were skipped due to tool unavailability: inform user 
       DECISIONS_CONTEXT: {from Phase 1}
       WORKTREE_PATH: {worktree path, if in a worktree}
       Load the devflow:feature-knowledge skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
-      exploring from scratch. Read .features/index.json for cross-referencing."
+      exploring from scratch. Read .devflow/features/index.json for cross-referencing."
       ```
-   e. Read sidecar (`.features/{slug}/.create-result.json`), then run:
+   e. Read sidecar (`.devflow/features/{slug}/.create-result.json`), then run:
       ```bash
       node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
         --slug="{slug}" --name="{name}" --directories='[...]' \
         --referencedFiles='{from_sidecar}' --description="{from_sidecar}" \
         --createdBy="research" 2>/dev/null
       ```
-      Clean up: `rm -f .features/{slug}/.create-result.json`
+      Clean up: `rm -f .devflow/features/{slug}/.create-result.json`
       If sidecar missing (agent failed), use empty defaults: `referencedFiles='[]'`, `description=""`.
    f. Report: "Created feature knowledge: {slug}"
    g. Set FEATURE_KNOWLEDGE_STATUS = created

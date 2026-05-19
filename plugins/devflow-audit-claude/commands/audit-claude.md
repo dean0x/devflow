@@ -85,7 +85,7 @@ Combine all agent outputs into a single report:
 - Estimated token cost per session: ~{N} tokens
 ```
 
-Present the report directly to the user. Do NOT write to `.docs/` — this is a diagnostic command.
+Present the report directly to the user. Do NOT write to `.devflow/docs/` — this is a diagnostic command.
 
 ## Output Format
 

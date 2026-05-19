@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getMemoryDir, getDecisionsDisabledSentinel, getDecisionsUsagePath, getDecisionsUsageLockDir } = require('./lib/project-paths.cjs');
 
 // Parse --cwd argument
 const cwdIdx = process.argv.indexOf('--cwd');
@@ -23,11 +24,11 @@ if (!path.isAbsolute(rawCwd)) {
 }
 const cwd = path.resolve(rawCwd);
 
-const memoryDir = path.join(cwd, '.memory');
-if (!fs.existsSync(memoryDir)) process.exit(0); // no .memory dir — nothing to scan
+const memoryDir = getMemoryDir(cwd);
+if (!fs.existsSync(memoryDir)) process.exit(0); // no .devflow/memory dir — nothing to scan
 
 // Skip if decisions feature is disabled (sentinel file)
-if (fs.existsSync(path.join(memoryDir, 'decisions', '.disabled'))) process.exit(0);
+if (fs.existsSync(getDecisionsDisabledSentinel(cwd))) process.exit(0);
 
 // Read stdin synchronously
 let input = '';
@@ -50,8 +51,8 @@ while ((match = pattern.exec(input)) !== null) {
 if (matches.size === 0) process.exit(0);
 
 // Read usage file
-const usagePath = path.join(memoryDir, '.decisions-usage.json');
-const lockDir = path.join(memoryDir, '.decisions-usage.lock');
+const usagePath = getDecisionsUsagePath(cwd);
+const lockDir = getDecisionsUsageLockDir(cwd);
 
 // Yield the current thread for the given number of milliseconds without spinning.
 // Atomics.wait on a freshly allocated SharedArrayBuffer never resolves (value never

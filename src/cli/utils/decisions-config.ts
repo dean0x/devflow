@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getDevFlowDirectory } from './paths.js';
+import { getDecisionsConfigPath } from './project-paths.js';
 
 /**
  * Merged decisions agent configuration from global and project-level config files.
@@ -79,13 +80,13 @@ function readConfigFile(filePath: string): string | null {
  * Priority (highest wins): project config → global config → defaults.
  *
  * - Global:  `~/.devflow/decisions.json`
- * - Project: `<cwd>/.memory/decisions.json`
+ * - Project: `<cwd>/.devflow/decisions/decisions.json`
  *
  * Invalid JSON in either file is silently ignored and treated as absent.
  */
 export function loadDecisionsConfig(cwd: string): DecisionsConfig {
   const globalConfigPath = path.join(getDevFlowDirectory(), 'decisions.json');
-  const projectConfigPath = path.join(cwd, '.memory', 'decisions.json');
+  const projectConfigPath = getDecisionsConfigPath(cwd);
 
   let config: DecisionsConfig = { ...DEFAULTS };
 

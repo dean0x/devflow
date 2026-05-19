@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Sidecar System: sidecar-dispatch (UserPromptSubmit Hook)
-# 1. Captures user turn to .memory/.pending-turns.jsonl
-# 2. Checks for pending sidecar markers in .memory/.sidecar/
+# 1. Captures user turn to .devflow/memory/.pending-turns.jsonl
+# 2. Checks for pending sidecar markers in .devflow/sidecar/
 # 3. If markers found, injects SIDECAR directive via additionalContext
 
 set -e
@@ -25,8 +25,9 @@ PROMPT="${FIELDS#*$'\001'}"
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
-MEMORY_DIR="$CWD/.memory"
-SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 
 # Read sidecar config — skip user turn capture if memory: false; gate marker dispatch per feature
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
@@ -43,7 +44,7 @@ fi
 
 # --- Capture user turn ---
 if [ "$MEMORY_ENABLED" = "true" ] && [ -n "$PROMPT" ]; then
-  source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
+  source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
   # Truncate to 2000 chars
   if [ ${#PROMPT} -gt 2000 ]; then

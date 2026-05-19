@@ -40,7 +40,7 @@ When creating a new plugin:
 
 - **Orchestration-only**: Commands spawn agents, never do agent work in main session
 - **Actionable output**: Specific problems with file/line references, clear severity, concrete fixes
-- **Context preservation**: Create historical records in `.docs/`
+- **Context preservation**: Create historical records in `.devflow/docs/`
 - **Fail-safe defaults**: Err on the side of flagging issues
 
 ## Conventions

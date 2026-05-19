@@ -38,9 +38,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 The orchestrator uses `DECISIONS_CONTEXT` locally when generating hypotheses (Phase 2) — prior pitfalls and decisions can suggest specific root causes to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to investigator teammates** — decisions context stays in the orchestrator; teammates examine code directly.
 
 **Load Feature Knowledge:**
-1. Read `.features/index.json` if it exists
+1. Read `.devflow/features/index.json` if it exists
 2. Based on the bug description, identify relevant feature knowledge
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
 4. Use `FEATURE_KNOWLEDGE` **locally only** for hypothesis generation — feature-specific gotchas and anti-patterns suggest root causes. **Do NOT pass to investigator teammates.**
 
 ### Phase 2: Context Gathering

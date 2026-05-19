@@ -62,7 +62,7 @@ The plugin spawns 7-11 parallel Reviewer agents, each with a specific focus:
 
 ## Output
 
-- Review summary in `.docs/reviews/{branch-slug}/`
+- Review summary in `.devflow/docs/reviews/{branch-slug}/`
 - Individual reports per focus area
 - Issues categorized as P0/P1/P2 with file:line references
 - Actionable fixes for each issue

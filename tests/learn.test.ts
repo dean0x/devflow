@@ -168,8 +168,8 @@ describe('formatLearningStatus', () => {
 
   it('counts decision and pitfall promoted entries', () => {
     const observations: LearningObservation[] = [
-      { id: 'obs_1', type: 'decision', pattern: 'use Result types', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/decisions/decisions.md#adr-001' },
-      { id: 'obs_2', type: 'pitfall', pattern: 'avoid mutating state', confidence: 0.90, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.memory/decisions/pitfalls.md#pf-001' },
+      { id: 'obs_1', type: 'decision', pattern: 'use Result types', confidence: 0.95, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.devflow/decisions/decisions.md#adr-001' },
+      { id: 'obs_2', type: 'pitfall', pattern: 'avoid mutating state', confidence: 0.90, observations: 3, first_seen: 't', last_seen: 't', status: 'created', evidence: [], details: 'd', artifact_path: '.devflow/decisions/pitfalls.md#pf-001' },
       { id: 'obs_3', type: 'workflow', pattern: 'w1', confidence: 0.50, observations: 1, first_seen: 't', last_seen: 't', status: 'observing', evidence: [], details: 'd' },
     ];
     const result = formatLearningStatus(observations, true);
@@ -525,16 +525,16 @@ describe('cleanSelfLearningArtifacts', () => {
 
 describe('learn --enable / --disable sentinel management', () => {
   it('--disable sidecar state file targets include .learning-disabled sentinel path', () => {
-    // Verify the sentinel path is under .memory (matching learn.ts code)
-    const memoryDir = path.join('/project', '.memory');
+    // Verify the sentinel path is under .devflow/memory (matching learn.ts code)
+    const memoryDir = path.join('/project', '.devflow', 'memory');
     const sentinelPath = path.join(memoryDir, '.learning-disabled');
-    expect(sentinelPath).toBe('/project/.memory/.learning-disabled');
+    expect(sentinelPath).toBe('/project/.devflow/memory/.learning-disabled');
   });
 
   it('--enable sidecar integration removes .learning-disabled sentinel', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
     try {
-      const memDir = path.join(tmpDir, '.memory');
+      const memDir = path.join(tmpDir, '.devflow', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       const sentinelPath = path.join(memDir, '.learning-disabled');
       // Simulate a disabled state
@@ -552,7 +552,7 @@ describe('learn --enable / --disable sentinel management', () => {
   it('--disable sidecar integration creates .learning-disabled sentinel', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
     try {
-      const memDir = path.join(tmpDir, '.memory');
+      const memDir = path.join(tmpDir, '.devflow', 'memory');
       fs.mkdirSync(memDir, { recursive: true });
       const sentinelPath = path.join(memDir, '.learning-disabled');
       expect(fs.existsSync(sentinelPath)).toBe(false);
@@ -589,7 +589,7 @@ describe('learn --reset sidecar state cleanup', () => {
   it('sidecar cleanup removes lock directories (.reinforce.lock, .learning-batch.lock)', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
     try {
-      const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+      const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
       fs.mkdirSync(sidecarDir, { recursive: true });
 
       // Create mock lock directories

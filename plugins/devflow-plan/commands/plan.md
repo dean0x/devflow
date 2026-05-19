@@ -97,9 +97,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 This produces a compact index of active ADR/PF entries. Pass Skimmer context and `DECISIONS_CONTEXT` to all subsequent agents — prior decisions constrain design, known pitfalls inform gap analysis. Agents use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 **Load Feature Knowledge:**
-1. Read `.features/index.json` if it exists
+1. Read `.devflow/features/index.json` if it exists
 2. Based on the planning task description, identify relevant feature knowledge
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none are relevant)
 
 Pass `FEATURE_KNOWLEDGE` alongside `DECISIONS_CONTEXT` to Explorer and Designer agents.
@@ -348,9 +348,9 @@ User can:
 **Store design artifact:**
 
 Write design artifact to disk:
-- If issue number: `.docs/design/{issue-number}-{topic-slug}.{YYYY-MM-DD_HHMM}.md`
-- If multi-issue: `.docs/design/{first-issue-number}-multi.{YYYY-MM-DD_HHMM}.md`
-- If no issue: `.docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
+- If issue number: `.devflow/docs/design/{issue-number}-{topic-slug}.{YYYY-MM-DD_HHMM}.md`
+- If multi-issue: `.devflow/docs/design/{first-issue-number}-multi.{YYYY-MM-DD_HHMM}.md`
+- If no issue: `.devflow/docs/design/{topic-slug}.{YYYY-MM-DD_HHMM}.md`
 
 Create parent directory if needed.
 
@@ -480,7 +480,7 @@ Display completion summary:
 │
 ├─ Block 6: Output
 │  └─ Phase 14: Output
-│     ├─ Store design artifact (.docs/design/)
+│     ├─ Store design artifact (.devflow/docs/design/)
 │     ├─ Create GitHub issue (optional)
 │     └─ Report summary + next step
 │
@@ -501,4 +501,4 @@ Display completion summary:
 - If any agent fails, report the phase, agent type, and error
 - If user selects "Revise" at Gate 2, loop back to Phase 10 with user's constraints
 - If user selects "Cancel" at any gate, stop gracefully without writing artifact
-- If `.docs/design/` does not exist, create it in Phase 14
+- If `.devflow/docs/design/` does not exist, create it in Phase 14

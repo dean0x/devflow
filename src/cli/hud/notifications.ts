@@ -3,9 +3,9 @@
  * Returns NotificationData or null.
  */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import type { NotificationData } from './types.js';
 import { type NotificationEntry, isNotificationMap } from '../utils/notifications-shape.js';
+import { getDecisionsNotificationsPath } from '../utils/project-paths.js';
 
 const SEVERITY_VALUES = ['dim', 'warning', 'error'] as const;
 type Severity = typeof SEVERITY_VALUES[number];
@@ -21,7 +21,7 @@ function isSeverity(v: unknown): v is Severity {
  * Returns null when no active notifications exist or the file is missing/malformed.
  */
 export function getActiveNotification(cwd: string): NotificationData | null {
-  const decisionsNotifPath = path.join(cwd, '.memory', '.decisions-notifications.json');
+  const decisionsNotifPath = getDecisionsNotificationsPath(cwd);
 
   let raw: string;
   try {

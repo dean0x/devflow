@@ -13,7 +13,7 @@ Unified design planning from requirements discovery through implementation desig
 5. **Implementation Design** — Parallel planning agents design the approach
 6. **Design Review + Gate 2** — Review the design artifact, user approves the final plan
 
-Produces a machine-readable design artifact in `.docs/design/` consumed by `/implement`.
+Produces a machine-readable design artifact in `.devflow/docs/design/` consumed by `/implement`.
 
 ```
 /plan add JWT auth           # From description
@@ -36,7 +36,7 @@ Executes a single task through the complete development lifecycle. Accepts plan 
 Creates a PR when complete.
 
 ```
-/implement .docs/design/42-jwt-auth.2026-04-07_1430.md  # From plan document
+/implement .devflow/docs/design/42-jwt-auth.2026-04-07_1430.md  # From plan document
 /implement #42               # From GitHub issue
 /implement add JWT auth      # From description
 /implement                   # From conversation context

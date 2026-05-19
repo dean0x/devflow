@@ -36,9 +36,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 
 Also load feature knowledge:
-1. Read `.features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
+1. Read `.devflow/features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
 2. Identify relevant feature knowledge entries (match task intent against each entry's descriptions and directories).
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`.
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`.
 4. Use `FEATURE_KNOWLEDGE` **locally** for exploration framing — feature-specific patterns and integration points guide where to focus.
 5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as DECISIONS_CONTEXT).
 
@@ -95,8 +95,8 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 **Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
 **Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
-1. If `.features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
-2. Read `.features/index.json` (if it exists)
+1. If `.devflow/features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
+2. Read `.devflow/features/index.json` (if it exists)
 3. Based on the explored area (user's question + MERGED_FINDINGS scope), check if matching feature knowledge
    already exists (match against each entry's `directories` and `description`). If covered → skip
 4. Use AskUserQuestion: "No feature knowledge exists for {explored area}. Create one to capture these patterns?"
@@ -115,16 +115,16 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
       DECISIONS_CONTEXT: {from Phase 1}
       WORKTREE_PATH: {worktree path, if in a worktree}
       Load the devflow:feature-knowledge skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
-      exploring from scratch. Read .features/index.json for cross-referencing."
+      exploring from scratch. Read .devflow/features/index.json for cross-referencing."
       ```
-   e. Read sidecar (`.features/{slug}/.create-result.json`), then run:
+   e. Read sidecar (`.devflow/features/{slug}/.create-result.json`), then run:
       ```bash
       node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
         --slug="{slug}" --name="{name}" --directories='[...]' \
         --referencedFiles='{from_sidecar}' --description="{from_sidecar}" \
         --createdBy="explore" 2>/dev/null
       ```
-      Clean up: `rm -f .features/{slug}/.create-result.json`
+      Clean up: `rm -f .devflow/features/{slug}/.create-result.json`
       If sidecar missing (agent failed), use empty defaults: `referencedFiles='[]'`, `description=""`.
    f. Report: "Created feature knowledge: {slug}"
    g. Set FEATURE_KNOWLEDGE_STATUS = created

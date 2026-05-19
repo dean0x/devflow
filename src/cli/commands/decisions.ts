@@ -5,6 +5,22 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getDevFlowDirectory } from '../utils/paths.js';
+import {
+  getMemoryDir,
+  getSidecarDir,
+  getDecisionsDir,
+  getDecisionsFilePath,
+  getPitfallsFilePath,
+  getDecisionsConfigPath,
+  getDecisionsLogPath,
+  getDecisionsManifestPath,
+  getDecisionsLockDir,
+  getDecisionsNotificationsPath,
+  getDecisionsRunsTodayPath,
+  getDecisionsBatchIdsPath,
+  getDecisionsUsagePath,
+  getDecisionsDisabledSentinel,
+} from '../utils/project-paths.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
 import { loadDecisionsConfig } from '../utils/decisions-config.js';
@@ -181,10 +197,10 @@ export const decisionsCommand = new Command('decisions')
       return;
     }
 
-    const memoryDir = path.join(process.cwd(), '.memory');
+    const memoryDir = getMemoryDir(process.cwd());
 
     // Shared log path for --status, --list, --purge, --clear
-    const logPath = path.join(process.cwd(), '.memory', 'decisions-log.jsonl');
+    const logPath = getDecisionsLogPath(process.cwd());
 
     // --- --status ---
     if (options.status) {
@@ -322,7 +338,7 @@ export const decisionsCommand = new Command('decisions')
       const scope = await p.select({
         message: 'Configuration scope',
         options: [
-          { value: 'project', label: 'Project', hint: 'This project only (.memory/decisions.json)' },
+          { value: 'project', label: 'Project', hint: 'This project only (.devflow/decisions/decisions.json)' },
           { value: 'global', label: 'Global', hint: 'All projects (~/.devflow/decisions.json)' },
         ],
       });
@@ -347,8 +363,9 @@ export const decisionsCommand = new Command('decisions')
         p.log.success(`Global config written to ${color.dim(path.join(globalDir, 'decisions.json'))}`);
       } else {
         await fs.mkdir(memoryDir, { recursive: true });
-        await fs.writeFile(path.join(memoryDir, 'decisions.json'), configJson, 'utf-8');
-        p.log.success(`Project config written to ${color.dim(path.join(memoryDir, 'decisions.json'))}`);
+        const projectConfigPath = getDecisionsConfigPath(process.cwd());
+        await fs.writeFile(projectConfigPath, configJson, 'utf-8');
+        p.log.success(`Project config written to ${color.dim(projectConfigPath)}`);
       }
 
       p.outro(color.green('Configuration saved.'));
@@ -391,7 +408,7 @@ export const decisionsCommand = new Command('decisions')
 
     // --- --reset ---
     if (options.reset) {
-      const lockDir = path.join(memoryDir, '.decisions.lock');
+      const lockDir = getDecisionsLockDir(process.cwd());
 
       // Acquire lock to prevent conflict with running background decisions agent.
       try {
@@ -402,14 +419,14 @@ export const decisionsCommand = new Command('decisions')
       }
 
       try {
-        const stateFiles = [
-          'decisions-log.jsonl',
-          '.decisions-manifest.json',
-          '.decisions-notifications.json',
-          '.decisions-runs-today',
-          '.decisions-batch-ids',
+        const stateFilePaths = [
+          getDecisionsLogPath(process.cwd()),
+          getDecisionsManifestPath(process.cwd()),
+          getDecisionsNotificationsPath(process.cwd()),
+          getDecisionsRunsTodayPath(process.cwd()),
+          getDecisionsBatchIdsPath(process.cwd()),
+          getDecisionsConfigPath(process.cwd()),
         ];
-        const configFiles = ['decisions.json'];
 
         if (process.stdin.isTTY) {
           const confirm = await p.confirm({
@@ -423,20 +440,20 @@ export const decisionsCommand = new Command('decisions')
         }
 
         let removed = 0;
-        for (const f of [...stateFiles, ...configFiles]) {
+        for (const filePath of stateFilePaths) {
           try {
-            await fs.unlink(path.join(memoryDir, f));
+            await fs.unlink(filePath);
             removed++;
           } catch { /* may not exist */ }
         }
 
         // Remove decisions sentinel directory if present (may contain .disabled or other files).
         try {
-          await fs.rm(path.join(memoryDir, 'decisions'), { recursive: true, force: true });
+          await fs.rm(getDecisionsDir(process.cwd()), { recursive: true, force: true });
         } catch { /* best effort */ }
 
         // Clean sidecar state files
-        const sidecarDir = path.join(memoryDir, '.sidecar');
+        const sidecarDir = getSidecarDir(process.cwd());
         for (const f of ['.decisions-runs-today']) {
           try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* may not exist */ }
         }
@@ -510,7 +527,7 @@ export const decisionsCommand = new Command('decisions')
           return;
         }
 
-        const decisionsLockDir = path.join(memoryDir, '.decisions.lock');
+        const decisionsLockDir = getDecisionsLockDir(process.cwd());
         const lockAcquired = await acquireMkdirLock(decisionsLockDir);
         if (!lockAcquired) {
           p.log.error('Decisions system is currently running. Try again in a moment.');
@@ -570,7 +587,7 @@ export const decisionsCommand = new Command('decisions')
                   const absPath = path.isAbsolute(decisionsFilePath)
                     ? decisionsFilePath
                     : path.join(process.cwd(), decisionsFilePath);
-                  const decisionsDir = path.join(memoryDir, 'decisions') + path.sep;
+                  const decisionsDir = getDecisionsDir(process.cwd()) + path.sep;
                   if (!absPath.startsWith(decisionsDir)) {
                     p.log.warn(`Skipping status update — artifact_path outside decisions directory: ${absPath}`);
                   } else {
@@ -609,9 +626,8 @@ export const decisionsCommand = new Command('decisions')
       }
 
       if (mode === 'capacity') {
-        const decisionsDir = path.join(memoryDir, 'decisions');
-        const decisionsPath = path.join(decisionsDir, 'decisions.md');
-        const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
+        const decisionsPath = getDecisionsFilePath(process.cwd());
+        const pitfallsPath = getPitfallsFilePath(process.cwd());
 
         // D23: parse decisions entries from both files
         const allEntries: DecisionsEntry[] = [];
@@ -674,7 +690,7 @@ export const decisionsCommand = new Command('decisions')
         // Load usage data for sorting
         let usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {};
         try {
-          const raw = await fs.readFile(path.join(memoryDir, '.decisions-usage.json'), 'utf-8');
+          const raw = await fs.readFile(getDecisionsUsagePath(process.cwd()), 'utf-8');
           const parsed = JSON.parse(raw);
           // D-SEC2: Guard against non-object/null/array shapes before narrowing into typed record.
           if (
@@ -737,7 +753,7 @@ export const decisionsCommand = new Command('decisions')
 
         // D28: Check if counts dropped below soft start, clear notifications if so
         let notifications: Record<string, NotificationFileEntry> = {};
-        const notifPath = path.join(memoryDir, '.decisions-notifications.json');
+        const notifPath = getDecisionsNotificationsPath(process.cwd());
         try {
           const raw = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
           if (isNotificationMap(raw)) {
@@ -783,7 +799,7 @@ export const decisionsCommand = new Command('decisions')
 
     // --- --dismiss-capacity ---
     if (options.dismissCapacity) {
-      const notifPath = path.join(memoryDir, '.decisions-notifications.json');
+      const notifPath = getDecisionsNotificationsPath(process.cwd());
 
       let notifications: Record<string, NotificationFileEntry>;
       try {
@@ -826,7 +842,7 @@ export const decisionsCommand = new Command('decisions')
         await updateFeature(gitRoot, 'decisions', true);
         // Remove decisions/.disabled sentinel if present (kept for session-start-context gating)
         try {
-          await fs.unlink(path.join(gitRoot, '.memory', 'decisions', '.disabled'));
+          await fs.unlink(getDecisionsDisabledSentinel(gitRoot));
         } catch { /* may not exist */ }
         p.log.success('Decisions learning enabled — sidecar config updated');
         p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
@@ -841,9 +857,9 @@ export const decisionsCommand = new Command('decisions')
       if (gitRoot) {
         await updateFeature(gitRoot, 'decisions', false);
         // Create decisions/.disabled sentinel (gates session-start-context decisions section)
-        const decisionsDir = path.join(gitRoot, '.memory', 'decisions');
+        const decisionsDir = getDecisionsDir(gitRoot);
         await fs.mkdir(decisionsDir, { recursive: true });
-        await fs.writeFile(path.join(decisionsDir, '.disabled'), '', 'utf-8');
+        await fs.writeFile(getDecisionsDisabledSentinel(gitRoot), '', 'utf-8');
         p.log.success('Decisions learning disabled — sidecar config updated');
       } else {
         p.log.warn('Could not resolve git root — sidecar config not updated');

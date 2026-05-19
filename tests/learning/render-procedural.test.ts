@@ -19,7 +19,7 @@ function makeReadyProcedural(id: string, pattern: string, details?: string): obj
     last_seen: now,
     status: 'ready',
     evidence: ['when debugging hooks, check lock first', 'to debug hooks, tail the log file'],
-    details: details || 'When debugging hook failures: 1. Check .memory/.learning.lock. 2. Tail the log file. 3. Look for stale locks.',
+    details: details || 'When debugging hook failures: 1. Check .devflow/learning/.learning.lock. 2. Tail the log file. 3. Look for stale locks.',
     quality_ok: true,
   };
 }
@@ -100,7 +100,7 @@ describe('render-ready — procedural type (D5 snapshot tests)', () => {
     fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
     runHelper(`render-ready "${logFile}" "${tmpDir}"`);
 
-    const manifestFile = path.join(tmpDir, '.memory', '.learning-manifest.json');
+    const manifestFile = path.join(tmpDir, '.devflow', 'learning', '.learning-manifest.json');
     const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
     expect(manifest.entries[0].type).toBe('procedural');
     expect(manifest.entries[0].anchorId).toBeUndefined();

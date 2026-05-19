@@ -31,6 +31,7 @@ import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, 
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { manageSentinel } from '../utils/sentinel.js';
 import { writeConfig as writeSidecarConfig } from '../utils/sidecar-config.js';
+import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel, getDecisionsDisabledSentinel } from '../utils/project-paths.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -1121,26 +1122,26 @@ export const initCommand = new Command('init')
     } catch { /* settings.json may not exist yet */ }
 
 
-    // Create .features/ directory with empty index (feature knowledge bases)
-    // .features/ is committed to the project repo (not scope-dependent)
+    // Create .devflow/features/ directory with empty index (feature knowledge bases)
+    // .devflow/features/ is committed to the project repo (not scope-dependent)
     if (gitRoot && knowledgeEnabled) {
-      const featuresDir = path.join(gitRoot, '.features');
+      const featuresDir = getFeaturesDir(gitRoot);
       await fs.mkdir(featuresDir, { recursive: true });
-      const featuresIndexPath = path.join(featuresDir, 'index.json');
+      const featuresIndexPath = getFeaturesIndexPath(gitRoot);
       try {
         await fs.access(featuresIndexPath);
       } catch {
         await fs.writeFile(featuresIndexPath, JSON.stringify({ version: 1, features: {} }, null, 2) + '\n');
         if (verbose) {
-          p.log.success('.features/index.json created');
+          p.log.success('.devflow/features/index.json created');
         }
       }
     }
 
     // Manage runtime-disable sentinels for session-start-context gating
     if (gitRoot) {
-      await manageSentinel(path.join(gitRoot, '.features', '.disabled'), knowledgeEnabled);
-      await manageSentinel(path.join(gitRoot, '.memory', 'decisions', '.disabled'), decisionsEnabled);
+      await manageSentinel(getFeaturesDisabledSentinel(gitRoot), knowledgeEnabled);
+      await manageSentinel(getDecisionsDisabledSentinel(gitRoot), decisionsEnabled);
     }
 
     // Write sidecar config.json to manage per-feature enable/disable at runtime.

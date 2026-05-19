@@ -23,8 +23,8 @@ describe('knowledge agent', () => {
     expect(content).toContain('DIRECTORIES');
     expect(content).toContain('DECISIONS_CONTEXT');
   });
-  it('constrains writes to .features/', () => {
-    expect(content).toContain('.features/');
+  it('constrains writes to .devflow/features/', () => {
+    expect(content).toContain('.devflow/features/');
     expect(content).toContain('Boundaries');
   });
 });

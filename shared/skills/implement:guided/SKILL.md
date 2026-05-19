@@ -26,6 +26,6 @@ Direct main-session implementation for GUIDED depth. Load skills, follow TDD, im
 
    If a skill fails to load, continue without it — do not halt the workflow.
 
-2. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.features/index.json`, load relevant feature knowledge.
+2. **Load Decisions** — Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` for DECISIONS_CONTEXT. Read `.devflow/features/index.json`, load relevant feature knowledge.
 3. **Implement** — Follow loaded skills (TDD cycle, codebase patterns). Implement directly in main session.
 4. **Simplify** — Spawn `Agent(subagent_type="Simplifier")` on changed files.

@@ -2,7 +2,7 @@
 
 # SessionStart Hook
 # Injects working memory as additionalContext.
-# Memory: restores .memory/WORKING-MEMORY.md + git state + compact recovery.
+# Memory: restores .devflow/memory/WORKING-MEMORY.md + git state + compact recovery.
 
 set -e
 
@@ -18,11 +18,15 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+
 # Check sidecar config — single source of truth for memory enabled/disabled.
 # The legacy .working-memory-disabled sentinel is intentionally NOT checked here:
 # sidecar config supersedes it per ADR-001 (clean break). Users who previously
 # disabled via sentinel have it replaced by config.json on first sidecar init.
-SIDECAR_CONFIG="$CWD/.memory/.sidecar/config.json"
+SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
   [ "$MEMORY_ENABLED" = "false" ] && exit 0
@@ -32,7 +36,7 @@ CONTEXT=""
 
 # --- Section 1: Working Memory ---
 
-MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
+MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 
 if [ -f "$MEMORY_FILE" ]; then
   MEMORY_CONTENT=$(cat "$MEMORY_FILE")
@@ -44,7 +48,7 @@ if [ -f "$MEMORY_FILE" ]; then
   AGE=$(( NOW - FILE_MTIME ))
 
   # Check for pre-compact memory snapshot (compaction recovery)
-  BACKUP_FILE="$CWD/.memory/backup.json"
+  BACKUP_FILE="$MEMORY_DIR/backup.json"
   COMPACT_NOTE=""
   if [ -f "$BACKUP_FILE" ]; then
     BACKUP_MEMORY=$(json_field_file "$BACKUP_FILE" "memory_snapshot" "")

@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Sidecar System: sidecar-capture (Stop Hook)
-# Captures assistant responses to .memory/.pending-turns.jsonl queue.
-# Writes .memory/.sidecar/memory.json marker when throttle has expired (>2 min).
+# Captures assistant responses to .devflow/memory/.pending-turns.jsonl queue.
+# Writes .devflow/sidecar/memory.json marker when throttle has expired (>2 min).
 # On failure: does nothing (stale memory is better than fake data).
 
 set -e
@@ -36,8 +36,9 @@ RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f3-)
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
-MEMORY_DIR="$CWD/.memory"
-SIDECAR_DIR="$MEMORY_DIR/.sidecar"
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 
 # Read sidecar config — memory:false gates memory-specific sections only.
 # The decisions usage scanner runs independently of memory state.
@@ -65,7 +66,7 @@ fi
 # --- Decisions usage scanner (independent of memory state) ---
 # D29: Supplementary — skip Node spawn when no ADR/PF citations present (~50-100ms savings).
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
-if [ -f "$SCANNER" ] && [ ! -f "$CWD/.memory/decisions/.disabled" ]; then
+if [ -f "$SCANNER" ] && [ ! -f "$DEVFLOW_DIR/decisions/.disabled" ]; then
   if printf '%s' "$RESPONSE_TEXT" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
     printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
   fi
@@ -76,8 +77,8 @@ if [ "$MEMORY_ENABLED" = "false" ]; then
   exit 0
 fi
 
-# Auto-create .memory/ and ensure .gitignore entries
-source "$SCRIPT_DIR/ensure-memory-gitignore" "$CWD" || exit 0
+# Auto-create .devflow/ and ensure .gitignore entries
+source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
 source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-capture: failed to source get-mtime" >&2; exit 1; }
 source "$SCRIPT_DIR/sidecar-lock" || { echo "sidecar-capture: failed to source sidecar-lock" >&2; exit 1; }

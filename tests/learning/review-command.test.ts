@@ -100,10 +100,10 @@ describe('updateDecisionsStatus', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-cmd-test-'));
-    // Mirror the production layout (`.memory/decisions/{file}.md`) so the lock
+    // Mirror the production layout (`.devflow/decisions/{file}.md`) so the lock
     // directory computed by updateDecisionsStatus lands inside tmpDir rather
     // than the system temp root shared across tests.
-    decisionsDir = path.join(tmpDir, '.memory', 'decisions');
+    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.mkdirSync(decisionsDir, { recursive: true });
   });
 

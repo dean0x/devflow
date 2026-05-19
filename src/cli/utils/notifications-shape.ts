@@ -1,8 +1,8 @@
 /**
  * @file notifications-shape.ts
  *
- * Shared type definitions and runtime guard for `.memory/.learning-notifications.json`
- * and `.memory/.decisions-notifications.json`.
+ * Shared type definitions and runtime guard for `.devflow/learning/.learning-notifications.json`
+ * and `.devflow/decisions/.decisions-notifications.json`.
  *
  * Consolidated from two divergent definitions:
  *   - `src/cli/commands/learn.ts`      (STRONGER — validated entries are objects)

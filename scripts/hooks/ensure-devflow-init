@@ -1,0 +1,90 @@
+#!/bin/bash
+# Ensures .devflow/ and all subdirectories exist, .devflow/.gitignore is configured,
+# and .devflow/features/index.json is bootstrapped.
+# Merges functionality of the former ensure-memory-gitignore and ensure-features-init.
+# Called from sidecar-capture, sidecar-dispatch, and pre-compact-memory. Idempotent.
+# Usage: source ensure-devflow-init "$CWD"
+
+[ -z "$1" ] && return 1
+
+_DEVFLOW_DIR="$1/.devflow"
+
+# Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup
+if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
+   [ -d "$_DEVFLOW_DIR/sidecar" ] && [ -d "$_DEVFLOW_DIR/learning" ] && \
+   [ -d "$_DEVFLOW_DIR/decisions" ] && [ -d "$_DEVFLOW_DIR/features" ] && \
+   [ -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
+  return 0
+fi
+
+# Create all subdirectories
+mkdir -p \
+  "$_DEVFLOW_DIR/memory" \
+  "$_DEVFLOW_DIR/sidecar" \
+  "$_DEVFLOW_DIR/decisions" \
+  "$_DEVFLOW_DIR/learning" \
+  "$_DEVFLOW_DIR/features" \
+  "$_DEVFLOW_DIR/docs" \
+  2>/dev/null || return 1
+
+# Bootstrap features/index.json if missing
+if [ ! -f "$_DEVFLOW_DIR/features/index.json" ]; then
+  printf '{"version":1,"features":{}}' > "$_DEVFLOW_DIR/features/index.json.tmp" && \
+    mv "$_DEVFLOW_DIR/features/index.json.tmp" "$_DEVFLOW_DIR/features/index.json"
+fi
+
+# One-time .devflow/.gitignore setup (marker prevents repeated checks)
+# CANONICAL SOURCE: scripts/hooks/lib/project-paths.cjs — getDevflowGitignoreContent()
+# Keep this heredoc in sync with that function when adding or removing entries.
+if [ ! -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
+  cat > "$_DEVFLOW_DIR/.gitignore.tmp" << 'EOF'
+# Per-developer session state (fully transient)
+memory/
+
+# Sidecar dispatch system (fully transient)
+sidecar/
+
+# Per-developer observation logs and transient state
+learning/learning-log.jsonl
+learning/learning-log.v1.jsonl.bak
+learning/learning.json
+learning/.learning-manifest.json
+learning/.learning-notified-at
+learning/.learning-notifications.json
+learning/.learning-runs-today
+learning/.learning-session-count
+learning/.learning-batch-ids
+learning/debug/
+
+# Per-developer decisions observation log and transient state
+decisions/decisions-log.jsonl
+decisions/decisions.json
+decisions/.decisions-manifest.json
+decisions/.decisions.lock/
+decisions/.decisions-usage.json
+decisions/.decisions-usage.lock/
+decisions/.decisions-notifications.json
+decisions/.decisions-runs-today
+decisions/.decisions-batch-ids
+decisions/.disabled
+
+# Ephemeral doc artifacts
+docs/handoff-*.md
+docs/reviews/*/.last-review-head
+
+# Transient files in features
+features/.knowledge.lock/
+features/.knowledge-last-refresh
+features/.knowledge-refresh.lock
+features/.disabled
+features/.gitignore-configured
+
+# Install state (local-scope only)
+manifest.json
+
+# Init marker
+.gitignore-configured
+EOF
+  mv "$_DEVFLOW_DIR/.gitignore.tmp" "$_DEVFLOW_DIR/.gitignore" && \
+    touch "$_DEVFLOW_DIR/.gitignore-configured"
+fi

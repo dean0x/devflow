@@ -18,6 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getDecisionsFilePath, getPitfallsFilePath } = require('./project-paths.cjs');
 
 /** @typedef {{ id: string, title: string, status: string, area: string|null }} IndexEntry */
 
@@ -143,11 +144,11 @@ function formatEntryLine(entry) {
 function loadDecisionsIndex(worktreePath, opts = {}) {
   const decisionsFile = opts.decisionsFile
     ? path.resolve(worktreePath, opts.decisionsFile)
-    : path.join(worktreePath, '.memory', 'decisions', 'decisions.md');
+    : getDecisionsFilePath(worktreePath);
 
   const pitfallsFile = opts.pitfallsFile
     ? path.resolve(worktreePath, opts.pitfallsFile)
-    : path.join(worktreePath, '.memory', 'decisions', 'pitfalls.md');
+    : getPitfallsFilePath(worktreePath);
 
   /** @type {IndexEntry[]} */
   let adrEntries = [];

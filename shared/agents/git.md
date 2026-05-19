@@ -82,7 +82,7 @@ Pre-flight validation for `/resolve`. Checks branch state without modifications.
 2. Verify working directory is clean - error if uncommitted changes
 3. Get current branch name
 4. Derive branch-slug (replace `/` with `-`)
-5. Check if reviews exist at `{WORKTREE_PATH}/.docs/reviews/{branch-slug}/` (or `.docs/reviews/{branch-slug}/` if no WORKTREE_PATH)
+5. Check if reviews exist at `{WORKTREE_PATH}/.devflow/docs/reviews/{branch-slug}/` (or `.devflow/docs/reviews/{branch-slug}/` if no WORKTREE_PATH)
 6. If PR# context provided, fetch PR details
 
 **Output:**

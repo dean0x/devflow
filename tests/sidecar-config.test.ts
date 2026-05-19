@@ -12,9 +12,9 @@ import {
 } from '../src/cli/utils/sidecar-config.js';
 
 describe('getConfigPath', () => {
-  it('returns .memory/.sidecar/config.json under project root', () => {
+  it('returns .devflow/sidecar/config.json under project root', () => {
     const result = getConfigPath('/some/project');
-    expect(result).toBe('/some/project/.memory/.sidecar/config.json');
+    expect(result).toBe('/some/project/.devflow/sidecar/config.json');
   });
 });
 
@@ -38,7 +38,7 @@ describe('readConfig', () => {
   });
 
   it('reads a valid config file', async () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(
       path.join(sidecarDir, 'config.json'),
@@ -53,7 +53,7 @@ describe('readConfig', () => {
   });
 
   it('falls back to defaults for missing keys', async () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(
       path.join(sidecarDir, 'config.json'),
@@ -68,7 +68,7 @@ describe('readConfig', () => {
   });
 
   it('returns defaults for malformed JSON', async () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), 'not json at all');
 
@@ -80,7 +80,7 @@ describe('readConfig', () => {
   });
 
   it('returns defaults when config is a non-object JSON value', async () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), '"just a string"');
 
@@ -89,7 +89,7 @@ describe('readConfig', () => {
   });
 
   it('returns defaults when config is a JSON array', async () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), '[false, true]');
 
@@ -128,7 +128,7 @@ describe('writeConfig', () => {
   });
 
   it('overwrites an existing config', async () => {
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(
       path.join(sidecarDir, 'config.json'),
@@ -256,7 +256,7 @@ describe('writeConfig atomic pattern', () => {
     const config: SidecarConfig = { memory: true, learning: false, decisions: true, knowledge: false };
     await writeConfig(tmpDir, config);
 
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     const files = fs.readdirSync(sidecarDir);
     const tmpFiles = files.filter(f => f.includes('.tmp.'));
     expect(tmpFiles).toHaveLength(0);

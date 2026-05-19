@@ -20,7 +20,10 @@ function mkTmpDir(): string {
 }
 
 function mkMemoryDir(base: string): void {
-  fs.mkdirSync(path.join(base, '.memory'), { recursive: true });
+  fs.mkdirSync(path.join(base, '.devflow', 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(base, '.devflow', 'sidecar'), { recursive: true });
+  fs.mkdirSync(path.join(base, '.devflow', 'decisions'), { recursive: true });
+  fs.mkdirSync(path.join(base, '.devflow', 'learning'), { recursive: true });
 }
 
 function writeDisabledSentinel(sentinelPath: string): void {
@@ -62,17 +65,17 @@ describe('sentinel guard: sidecar-dispatch', () => {
     mkMemoryDir(tmpDir);
     const input = sessionInput(tmpDir, { prompt: 'test prompt' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
   });
 
   it('exits early and writes nothing when config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir, { prompt: 'test prompt' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
 });
 
@@ -86,23 +89,23 @@ describe('sentinel guard: sidecar-capture', () => {
   it('appends assistant turn normally when memory enabled (no config)', () => {
     mkMemoryDir(tmpDir);
     // Write stale WORKING-MEMORY.md so throttle passes
-    const memFile = path.join(tmpDir, '.memory', 'WORKING-MEMORY.md');
+    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     fs.writeFileSync(memFile, '## Now\n- testing');
     const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
     fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
     const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'hello' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
   });
 
   it('exits early when config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'hello' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.pending-turns.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
 });
 
@@ -115,7 +118,7 @@ describe('sentinel guard: pre-compact-memory', () => {
 
   it('exits cleanly when sidecar config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir);
@@ -123,7 +126,7 @@ describe('sentinel guard: pre-compact-memory', () => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // backup.json must NOT be written when disabled
-    expect(fs.existsSync(path.join(tmpDir, '.memory', 'backup.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
   });
 
   it('writes backup.json when sentinel absent', () => {
@@ -133,7 +136,7 @@ describe('sentinel guard: pre-compact-memory', () => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // pre-compact-memory creates backup.json
-    expect(fs.existsSync(path.join(tmpDir, '.memory', 'backup.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(true);
   });
 });
 
@@ -146,10 +149,10 @@ describe('sentinel guard: session-start-memory', () => {
 
   it('outputs nothing when sidecar config has memory: false (even with WORKING-MEMORY.md present)', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.memory', '.sidecar');
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
-    fs.writeFileSync(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     expect(output).toBe('');
@@ -157,7 +160,7 @@ describe('sentinel guard: session-start-memory', () => {
 
   it('outputs context when sentinel absent and WORKING-MEMORY.md exists', () => {
     mkMemoryDir(tmpDir);
-    fs.writeFileSync(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // Should output the session JSON envelope
@@ -190,13 +193,13 @@ describe('sentinel guard: sidecar-evaluate', () => {
     }).not.toThrow();
   });
 
-  it('exits cleanly when .memory/ does not exist (no markers written)', () => {
+  it('exits cleanly when .devflow/memory/ does not exist (no markers written)', () => {
     const input = sessionInput(tmpDir);
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
     // Should not create any sidecar marker files
-    expect(fs.existsSync(path.join(tmpDir, '.memory', '.sidecar'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar'))).toBe(false);
   });
 });
 
@@ -211,7 +214,7 @@ describe('sentinel guard: decisions-usage-scan.cjs', () => {
 
   it('exits 0 when decisions/.disabled exists', () => {
     mkMemoryDir(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', 'decisions', '.disabled'));
+    writeDisabledSentinel(path.join(tmpDir, '.devflow', 'decisions', '.disabled'));
     // Even with ADR-001 in input, scanner should skip
     const response = 'applies ADR-001 and avoids PF-001';
     expect(() => {
@@ -222,7 +225,7 @@ describe('sentinel guard: decisions-usage-scan.cjs', () => {
   it('processes citations when decisions/.disabled absent', () => {
     mkMemoryDir(tmpDir);
     // Create usage file with a known entry
-    const usagePath = path.join(tmpDir, '.memory', '.decisions-usage.json');
+    const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
@@ -242,7 +245,7 @@ describe('sentinel guard: sidecar-capture decisions scanner gating', () => {
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   function writeStaleWorkingMemory(dir: string): void {
-    const memFile = path.join(dir, '.memory', 'WORKING-MEMORY.md');
+    const memFile = path.join(dir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     fs.writeFileSync(memFile, '## Now\n- stale memory');
     const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
     fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
@@ -251,9 +254,9 @@ describe('sentinel guard: sidecar-capture decisions scanner gating', () => {
   it('does NOT run scanner when decisions/.disabled exists', () => {
     mkMemoryDir(tmpDir);
     writeStaleWorkingMemory(tmpDir);
-    writeDisabledSentinel(path.join(tmpDir, '.memory', 'decisions', '.disabled'));
+    writeDisabledSentinel(path.join(tmpDir, '.devflow', 'decisions', '.disabled'));
     // Create usage file to detect if scanner would have run
-    const usagePath = path.join(tmpDir, '.memory', '.decisions-usage.json');
+    const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
@@ -269,7 +272,7 @@ describe('sentinel guard: sidecar-capture decisions scanner gating', () => {
     mkMemoryDir(tmpDir);
     writeStaleWorkingMemory(tmpDir);
     // Create usage file to detect scanner run
-    const usagePath = path.join(tmpDir, '.memory', '.decisions-usage.json');
+    const usagePath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-usage.json');
     fs.writeFileSync(usagePath, JSON.stringify({
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
@@ -312,8 +315,7 @@ describe('sentinel guard: session-start-context', () => {
 
   it('outputs decisions TL;DR when decisions enabled and decisions.md exists', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.memory', 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
@@ -324,8 +326,7 @@ describe('sentinel guard: session-start-context', () => {
 
   it('skips decisions TL;DR when decisions/.disabled exists', () => {
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.memory', 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
     writeDisabledSentinel(path.join(decisionsDir, '.disabled'));
     const input = sessionInput(tmpDir);
@@ -336,7 +337,7 @@ describe('sentinel guard: session-start-context', () => {
 
   it('outputs learned behaviors when learning enabled and learning-log.jsonl exists', () => {
     mkMemoryDir(tmpDir);
-    const logPath = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const logPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify({
       id: 'obs_abc123', type: 'workflow', status: 'created',
       artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95,
@@ -351,13 +352,13 @@ describe('sentinel guard: session-start-context', () => {
 
   it('skips learned behaviors when .learning-disabled exists', () => {
     mkMemoryDir(tmpDir);
-    const logPath = path.join(tmpDir, '.memory', 'learning-log.jsonl');
+    const logPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify({
       id: 'obs_abc123', type: 'workflow', status: 'created',
       artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95,
       last_seen: new Date().toISOString(),
     }) + '\n');
-    writeDisabledSentinel(path.join(tmpDir, '.memory', '.learning-disabled'));
+    writeDisabledSentinel(path.join(tmpDir, '.devflow', 'memory', '.learning-disabled'));
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // The hook must produce no output when the only injectable section is disabled.
@@ -376,10 +377,9 @@ describe('sentinel guard: session-start-context', () => {
   it('session-start-memory no longer outputs decisions TL;DR', () => {
     const SESSION_START_MEMORY = path.join(HOOKS_DIR, 'session-start-memory');
     mkMemoryDir(tmpDir);
-    const decisionsDir = path.join(tmpDir, '.memory', 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
-    fs.writeFileSync(path.join(tmpDir, '.memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${SESSION_START_MEMORY}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
     // WORKING-MEMORY.md exists so the hook always produces output here.
@@ -460,40 +460,40 @@ describe('manageSentinel utility', () => {
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('creates sentinel file when disabled=false', async () => {
-    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
     await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
 
   it('creates parent directories when they do not exist', async () => {
-    const sentinelPath = path.join(tmpDir, '.memory', 'decisions', '.disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
     await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
 
   it('removes sentinel file when enabled=true', async () => {
-    const sentinelPath = path.join(tmpDir, '.memory', '.learning-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.learning-disabled');
     writeDisabledSentinel(sentinelPath);
     await manageSentinel(sentinelPath, true);
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 
   it('is idempotent when enabling with no sentinel present', async () => {
-    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
     // No sentinel exists — enabling again should not throw
     await expect(manageSentinel(sentinelPath, true)).resolves.toBeUndefined();
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 
   it('is idempotent when disabling with sentinel already present', async () => {
-    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
     writeDisabledSentinel(sentinelPath);
     await expect(manageSentinel(sentinelPath, false)).resolves.toBeUndefined();
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
 
   it('disable then enable removes the sentinel', async () => {
-    const sentinelPath = path.join(tmpDir, '.memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
     await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
     await manageSentinel(sentinelPath, true);

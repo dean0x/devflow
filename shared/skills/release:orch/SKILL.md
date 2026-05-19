@@ -53,7 +53,7 @@ Read `.release/RELEASE-FLOW.md`:
 DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "." 2>/dev/null || echo "(none)")
 ```
 
-Load feature knowledge: Read `.features/index.json`, match release-relevant files, read relevant KNOWLEDGE.md entries. Set `FEATURE_KNOWLEDGE` (or `(none)`).
+Load feature knowledge: Read `.devflow/features/index.json`, match release-relevant files, read relevant KNOWLEDGE.md entries. Set `FEATURE_KNOWLEDGE` (or `(none)`).
 
 Pass both to all subsequent agents via their input contracts.
 

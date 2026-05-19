@@ -5,6 +5,7 @@
 # Also bootstraps a minimal WORKING-MEMORY.md if none exists yet, so SessionStart
 # has something to inject after compaction.
 # PreCompact hooks cannot block compaction — this is informational only.
+# Paths: .devflow/memory/backup.json, .devflow/memory/WORKING-MEMORY.md
 
 set -e
 
@@ -19,18 +20,22 @@ if [ -z "$CWD" ]; then
   exit 0
 fi
 
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+
 # Check sidecar config — single source of truth for memory enabled/disabled (ADR-001 clean break).
 # The legacy .working-memory-disabled sentinel is not checked: sidecar config supersedes it.
-SIDECAR_CONFIG="$CWD/.memory/.sidecar/config.json"
+SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
   [ "$MEMORY_ENABLED" = "false" ] && exit 0
 fi
 
-# Auto-create .memory/ and ensure .gitignore entries (idempotent after first run)
-source "$(cd "$(dirname "$0")" && pwd)/ensure-memory-gitignore" "$CWD" || exit 0
+# Auto-create .devflow/ and ensure .gitignore entries (idempotent after first run)
+source "$(cd "$(dirname "$0")" && pwd)/ensure-devflow-init" "$CWD" || exit 0
 
-BACKUP_FILE="$CWD/.memory/backup.json"
+BACKUP_FILE="$MEMORY_DIR/backup.json"
 
 # Capture git state
 GIT_BRANCH=""
@@ -48,8 +53,8 @@ fi
 
 # Snapshot current WORKING-MEMORY.md (preserves session context through compaction)
 MEMORY_SNAPSHOT=""
-if [ -f "$CWD/.memory/WORKING-MEMORY.md" ]; then
-  MEMORY_SNAPSHOT=$(cat "$CWD/.memory/WORKING-MEMORY.md")
+if [ -f "$MEMORY_DIR/WORKING-MEMORY.md" ]; then
+  MEMORY_SNAPSHOT=$(cat "$MEMORY_DIR/WORKING-MEMORY.md")
 fi
 
 # Write backup JSON
@@ -64,7 +69,7 @@ json_backup_construct \
 
 # Bootstrap minimal WORKING-MEMORY.md if none exists yet
 # This ensures SessionStart has context to inject after compaction
-MEMORY_FILE="$CWD/.memory/WORKING-MEMORY.md"
+MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_BRANCH" ]; then
   {
     echo "# Working Memory"

@@ -28,7 +28,7 @@ Load via Skill tool: `devflow:quality-gates`, `devflow:software-design`. If a sk
 **Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION, PR_DESCRIPTION_GUIDANCE
 
 Discover PR description guidance from plan artifact:
-1. List `.docs/design/*.md` files
+1. List `.devflow/docs/design/*.md` files
 2. Sort by timestamp in filename (descending — timestamps are YYYY-MM-DD_HHMM, naturally sortable)
 3. Read the most recent file, extract `## PR Description Guidance` section
 4. If no plan files exist or section not found → set `PR_DESCRIPTION_GUIDANCE` to `(none)`
@@ -50,13 +50,13 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Produces:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP
 **Requires:** BRANCH_INFO
 
-Check `.docs/reviews/{branch_slug}/.last-review-head`:
+Check `.devflow/docs/reviews/{branch_slug}/.last-review-head`:
 - If file exists and SHA matches HEAD: "No new commits since last review. Nothing to do." → stop
 - If file exists and SHA differs: set `DIFF_RANGE={sha}...HEAD` (incremental)
 - If file doesn't exist: set `DIFF_RANGE={base_branch}...HEAD` (full review)
 
 Generate timestamp: `YYYY-MM-DD_HHMM`
-Create directory: `mkdir -p .docs/reviews/{branch_slug}/{timestamp}`
+Create directory: `mkdir -p .devflow/docs/reviews/{branch_slug}/{timestamp}`
 
 ## Phase 3: Load Decisions Index
 
@@ -72,9 +72,9 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 This produces a compact index of active ADR/PF entries. Pass `DECISIONS_CONTEXT` to all Reviewer agents. Reviewers use `devflow:apply-decisions` to Read full entry bodies on demand.
 
 Also load feature knowledge:
-1. Read `.features/index.json` if it exists
+1. Read `.devflow/features/index.json` if it exists
 2. Run `git diff --name-only {DIFF_RANGE}` to get changed files; identify relevant feature knowledge entries (match file paths against each entry's `directories` and `referencedFiles`)
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.features/{slug}/KNOWLEDGE.md`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 4: File Analysis
@@ -116,7 +116,7 @@ Spawn all reviewers in a single message (parallel execution):
 Each reviewer receives:
 - **Focus**: Their review type
 - **Branch context**: branch → base_branch
-- **Output path**: `.docs/reviews/{branch_slug}/{timestamp}/{focus}.md`
+- **Output path**: `.devflow/docs/reviews/{branch_slug}/{timestamp}/{focus}.md`
 - **DIFF_COMMAND**: `git diff {DIFF_RANGE}` (incremental or full)
 - **DECISIONS_CONTEXT**: compact index from Phase 3 (or `(none)` when absent) — follow `devflow:apply-decisions` to Read full ADR/PF bodies on demand
 - **FEATURE_KNOWLEDGE**: feature area context from Phase 3 (or `(none)`) — follow `devflow:apply-feature-knowledge` for consumption algorithm
@@ -135,7 +135,7 @@ After all reviewers complete, spawn in parallel:
 
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
-Write HEAD SHA to `.docs/reviews/{branch_slug}/.last-review-head` for next incremental review.
+Write HEAD SHA to `.devflow/docs/reviews/{branch_slug}/.last-review-head` for next incremental review.
 
 Report to user:
 - Merge recommendation (from Synthesizer)
@@ -157,7 +157,7 @@ Before reporting results, verify every phase was announced:
 - [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured, PR_DESCRIPTION fetched (or `(none)`), PR_DESCRIPTION_GUIDANCE discovered (or `(none)`)
 - [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
-- [ ] Phase 3: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.features/` absent)
+- [ ] Phase 3: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.devflow/features/` absent)
 - [ ] Phase 4: File Analysis → REVIEWER_LIST captured
 - [ ] Phase 5: Reviews → REVIEWER_OUTPUTS written to disk
 - [ ] Phase 6: Synthesis → review-summary.md written

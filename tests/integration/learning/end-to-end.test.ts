@@ -2,7 +2,7 @@
 // Full end-to-end test for the self-learning pipeline.
 //
 // Flow:
-//   1. Creates a tmpdir project with .memory/ and .claude/ structure
+//   1. Creates a tmpdir project with .devflow/ and .claude/ structure
 //   2. Plants 3 synthetic session JSONL files in the Claude project directory
 //   3. Creates a claude shim that echoes canned observations (bypasses LLM)
 //   4. Invokes `devflow learn --run-background` via the compiled CLI
