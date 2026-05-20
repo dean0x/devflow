@@ -96,7 +96,7 @@ For each worktree:
 
 #### Step 0d-ii: Convergence Assessment
 
-**Produces:** CYCLE_NUMBER, CONVERGENCE_ACTION
+**Produces:** CYCLE_NUMBER
 **Requires:** PRIOR_RESOLUTIONS, BRANCH_INFO
 
 1. Count timestamped directories containing resolution-summary.md. Set CYCLE_NUMBER = count + 1.
@@ -112,7 +112,7 @@ For each worktree:
    - Review anyway: proceed with PRIOR_RESOLUTIONS loaded
 4. If `--full`: skip this sub-step entirely (bypass convergence warning)
 
-NOTE: Convergence logic mirrored in code-review.md — changes must sync.
+NOTE: Convergence logic mirrored in code-review.md — parity enforced by tests/review/convergence-detection.test.ts (Group 6: Cross-cutting consistency).
 
 ### Phase 1: Analyze Changed Files
 

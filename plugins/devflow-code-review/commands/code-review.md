@@ -96,7 +96,7 @@ For each worktree:
 
 #### Step 0d-ii: Convergence Assessment
 
-**Produces:** CYCLE_NUMBER, CONVERGENCE_ACTION
+**Produces:** CYCLE_NUMBER
 **Requires:** PRIOR_RESOLUTIONS, BRANCH_INFO
 
 1. Count timestamped directories containing resolution-summary.md. Set CYCLE_NUMBER = count + 1.
@@ -111,6 +111,8 @@ For each worktree:
    - Merge or Stop: skip Phase 2 onward
    - Review anyway: proceed with PRIOR_RESOLUTIONS loaded
 4. If `--full`: skip this sub-step entirely (bypass convergence warning)
+
+NOTE: Convergence logic mirrored in code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts (Group 6: Cross-cutting consistency).
 
 ### Phase 1: Analyze Changed Files
 
@@ -198,7 +200,7 @@ DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
-Compare findings against prior resolutions. See Cross-Cycle Awareness in your instructions.
+If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in reviewer.md.
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
