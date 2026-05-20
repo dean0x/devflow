@@ -181,7 +181,7 @@ Before reporting results, verify every phase was announced:
 - [ ] Companion Skills → loaded (or continued without on failure)
 - [ ] Phase 1: Pre-flight → BRANCH_INFO, PR_INFO captured, PR_DESCRIPTION fetched (or `(none)`), PR_DESCRIPTION_GUIDANCE discovered (or `(none)`)
 - [ ] Phase 2: Incremental Detection → DIFF_RANGE, REVIEW_DIR, TIMESTAMP captured
-- [ ] Phase 2b: Convergence Check → PRIOR_RESOLUTIONS and CYCLE_NUMBER captured (or skipped if no prior resolution)
+- [ ] Phase 2b: Convergence Check → PRIOR_RESOLUTIONS and CYCLE_NUMBER captured (PRIOR_RESOLUTIONS=(none) on first cycle)
 - [ ] Phase 3: Load Decisions Index → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or skipped if `.devflow/features/` absent)
 - [ ] Phase 4: File Analysis → REVIEWER_LIST captured
 - [ ] Phase 5: Reviews → REVIEWER_OUTPUTS written to disk
