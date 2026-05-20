@@ -1,4 +1,4 @@
-<!-- TL;DR: 3 pitfalls. Key: PF-001, PF-002, PF-003 -->
+<!-- TL;DR: 4 pitfalls. Key: PF-001, PF-002, PF-003, PF-004 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
@@ -29,3 +29,12 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: Any hook path refactor requires explicit rebuild and reinstall before hooks write to the correct new location. Document this dependency in migration notes. Add a post-migration validation step that checks hook install timestamps vs build timestamps.
 - **Status**: Active
 - **Source**: self-learning:obs_6rp5ri
+
+## PF-004: Migration idempotency means buggy-run projects are never re-swept — manual cross-project cleanup required when fixing migration bugs after first run
+
+- **Area**: `migrations.ts` idempotency, `consolidate-to-devflow-dir`, cross-project sweeps
+- **Issue**: Migration idempotency (tracked in `~/.devflow/migrations.json`) correctly prevents re-running migrations, but projects that ran a buggy migration version are never automatically re-swept when the bug is fixed. Legacy data including decisions/pitfalls stored in `.memory/knowledge/decisions.md` must be manually merged into `.devflow/decisions/`.
+- **Impact**: 15+ projects required a manual cleanup sweep after the `consolidate-to-devflow-dir` migration bug was fixed — legacy `.memory/` directories persisted and legacy ADR/PF content had to be manually merged into the new structure per-project.
+- **Resolution**: When fixing a migration bug post-release, either bump the migration version to force a re-sweep (e.g., `consolidate-to-devflow-dir-v2`) or document and execute a manual sweep script. Include a legacy decisions/pitfalls merge step in the sweep runbook.
+- **Status**: Active
+- **Source**: self-learning:obs_qmt7kz
