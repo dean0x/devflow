@@ -238,6 +238,7 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 2. Extract confidence percentages from each finding
 3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%)
 4. Maintain ≥80% confidence threshold in final output
+4b. If CYCLE_NUMBER provided (>1): cross-reference findings against PRIOR_RESOLUTIONS to note recurring vs new issues
 5. Categorize issues into 3 buckets (from devflow:review-methodology)
 6. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
 7. Determine merge recommendation based on blocking issues
@@ -289,7 +290,15 @@ Report format:
 ## Action Plan
 1. {Priority fix}
 2. {Next fix}
+
+## Convergence Status
+**Cycle**: {cycle_number}
+**Prior Resolution**: {available/none}
+**Prior FP Ratio**: {n}% ({fp_count} of {total})
+**Assessment**: {First cycle | Converging — most issues resolved | High FP ratio — possible hallucination loop}
 ```
+
+If CYCLE_NUMBER >= 2 and prior FP ratio > 70%: append "Note: High false-positive ratio detected. Consider manual verification of remaining findings."
 
 ---
 

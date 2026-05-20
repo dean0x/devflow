@@ -83,6 +83,35 @@ For each worktree:
    - **If no (first review), or `--full`:**
      - Set `DIFF_RANGE` to `{base_branch}...HEAD`
 
+#### Step 0d-i: Load Prior Resolution
+
+**Produces:** PRIOR_RESOLUTIONS
+**Requires:** BRANCH_INFO
+
+For each worktree:
+1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending
+2. Find most recent directory containing `resolution-summary.md`. If none: set PRIOR_RESOLUTIONS=(none), proceed.
+3. Read the resolution-summary.md content. Set as PRIOR_RESOLUTIONS.
+4. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness) but skip Step 0d-ii.
+
+#### Step 0d-ii: Convergence Assessment
+
+**Produces:** CYCLE_NUMBER, CONVERGENCE_ACTION
+**Requires:** PRIOR_RESOLUTIONS, BRANCH_INFO
+
+1. Count timestamped directories containing resolution-summary.md. Set CYCLE_NUMBER = count + 1.
+2. Parse Statistics table from PRIOR_RESOLUTIONS:
+   - Extract False Positive, Fixed, Deferred counts
+   - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
+   - If denominator = 0: fp_ratio = 0, skip warning
+   - If parsing fails: treat as CYCLE_NUMBER=1, skip warning
+3. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
+   Warn via AskUserQuestion:
+   "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Options: Merge / Review anyway / Stop"
+   - Merge or Stop: skip Phase 2 onward
+   - Review anyway: proceed with PRIOR_RESOLUTIONS loaded
+4. If `--full`: skip this sub-step entirely (bypass convergence warning)
+
 ### Phase 1: Analyze Changed Files
 
 **Produces:** REVIEWER_LIST
@@ -168,6 +197,8 @@ DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORK
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
+Compare findings against prior resolutions. See Cross-Cycle Awareness in your instructions.
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
@@ -201,6 +232,8 @@ Agent(subagent_type="Synthesizer", run_in_background=false):
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 REVIEW_BASE_DIR: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}
 TIMESTAMP: {timestamp}
+CYCLE_NUMBER: {cycle_number}
+Include Convergence Status section in review-summary.md.
 Aggregate findings, determine merge recommendation
 Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
 ```
@@ -227,7 +260,9 @@ In multi-worktree mode, report results per worktree.
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter reviewable
 │  ├─ Step 0b: Git agent (ensure-pr-ready) per worktree [parallel]
-│  └─ Step 0c: Incremental detection + timestamp setup per worktree
+│  ├─ Step 0c: Incremental detection + timestamp setup per worktree
+│  ├─ Step 0d-i: Load prior resolution-summary.md
+│  └─ Step 0d-ii: Convergence assessment (warn if FP ratio > 70%)
 │
 ├─ Phase 1: Analyze changed files per worktree
 │  └─ Detect file types for conditional reviews
@@ -265,6 +300,11 @@ In multi-worktree mode, report results per worktree.
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Many worktrees (5+) | Report count and proceed — user manages their worktree count |
 | Duplicate PR comments | Git agent checks for existing comments at same file:line before creating |
+| First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
+| fp_ratio denominator = 0 | fp_ratio = 0, no warning |
+| `--full` flag | Bypass convergence warning, still load PRIOR_RESOLUTIONS |
+| Parsing failure on resolution-summary.md | Treat as first cycle, proceed normally |
+| Concurrent sessions | Advisory only, each session computes independently |
 
 ## Backwards Compatibility
 
