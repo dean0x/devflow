@@ -63,19 +63,23 @@ Create directory: `mkdir -p .devflow/docs/reviews/{branch_slug}/{timestamp}`
 **Produces:** PRIOR_RESOLUTIONS, CYCLE_NUMBER
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
-1. Find most recent resolution-summary.md in `.devflow/docs/reviews/{branch_slug}/`:
-   - List timestamped directories sorted descending
-   - Find first directory containing `resolution-summary.md`
-   - If none: PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
-2. Read resolution-summary.md content as PRIOR_RESOLUTIONS.
-3. Count directories containing resolution-summary.md → CYCLE_NUMBER = count + 1
-4. Parse Statistics table: fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
+MAX_REVIEW_CYCLES = 10
+
+Perform a single pass over timestamped directories:
+1. List timestamped directories in `.devflow/docs/reviews/{branch_slug}/` sorted descending
+2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
+3. If CYCLE_NUMBER = 0: PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
+4. Otherwise: CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
+5. Parse Statistics table: fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
    If denominator=0 or parsing fails: fp_ratio=0
-5. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
+6. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
+   Halt with output: "Review pipeline has run {CYCLE_NUMBER-1} cycles. Halting to prevent infinite review-resolve loop."
+   (Ambient hard-stop — no user override available; caller must use interactive command with --full to bypass.)
+7. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
    Warn in output (ambient — non-interactive, no AskUserQuestion):
    "⚠️ Convergence: {ratio}% false positives in prior cycle ({N-1}). Consider merging or manual inspection."
-   Continue with review (do NOT halt).
-6. Set PRIOR_RESOLUTIONS for downstream phases.
+   Continue with review (do NOT halt on soft threshold).
+8. Set PRIOR_RESOLUTIONS for downstream phases.
 
 ## Phase 3: Load Decisions Index
 

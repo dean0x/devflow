@@ -83,28 +83,34 @@ For each worktree:
    - **If no (first review), or `--full`:**
      - Set `DIFF_RANGE` to `{base_branch}...HEAD`
 
-#### Step 0d-i: Load Prior Resolution
+#### Step 0d-i: Load Prior Resolution and Count Cycles
 
-**Produces:** PRIOR_RESOLUTIONS
+**Produces:** PRIOR_RESOLUTIONS, CYCLE_NUMBER
 **Requires:** BRANCH_INFO
 
-For each worktree:
+For each worktree, perform a single pass over timestamped directories:
 1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending
-2. Find most recent directory containing `resolution-summary.md`. If none: set PRIOR_RESOLUTIONS=(none), proceed.
-3. Read the resolution-summary.md content. Set as PRIOR_RESOLUTIONS.
-4. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness) but skip Step 0d-ii.
+2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
+3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
+4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
+5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness) but skip Step 0d-ii.
 
 #### Step 0d-ii: Convergence Assessment
 
-**Produces:** CYCLE_NUMBER
+**Produces:** (refines CYCLE_NUMBER)
 **Requires:** PRIOR_RESOLUTIONS, BRANCH_INFO
 
-1. Count timestamped directories containing resolution-summary.md. Set CYCLE_NUMBER = count + 1.
+MAX_REVIEW_CYCLES = 10
+
+1. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
+   Halt via AskUserQuestion:
+   "Review pipeline has run {CYCLE_NUMBER-1} cycles. Halting to prevent infinite review-resolve loop. Use --full to override."
+   - If user confirms override (--full): proceed; otherwise abort.
 2. Parse Statistics table from PRIOR_RESOLUTIONS:
    - Extract False Positive, Fixed, Deferred counts
    - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
    - If denominator = 0: fp_ratio = 0, skip warning
-   - If parsing fails: treat as CYCLE_NUMBER=1, skip warning
+   - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
 3. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
    Warn via AskUserQuestion:
    "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Options: Merge / Review anyway / Stop"
