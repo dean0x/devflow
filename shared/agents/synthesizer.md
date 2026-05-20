@@ -19,6 +19,8 @@ The orchestrator provides:
 - **Agent outputs**: Results from parallel agents to synthesize
 - **Output path**: Where to save synthesis (if applicable)
 - **Research outputs** (research mode): Paths to researcher output files on disk + RESEARCH_BASE_DIR for writing summary
+- **CYCLE_NUMBER** (review mode, optional): Current review cycle number; 1 on first review. Used for convergence reporting. Omit or pass `(none)` when absent.
+- **PRIOR_RESOLUTIONS** (review mode, optional): Content of the prior `resolution-summary.md` for cross-referencing recurring vs new issues. Pass `(none)` when absent.
 
 **Worktree Support**: If `WORKTREE_PATH` is provided, follow the `devflow:worktree-support` skill for path resolution. If omitted, use cwd.
 
@@ -238,10 +240,10 @@ Synthesize outputs from multiple Reviewer agents. Apply strict merge rules.
 2. Extract confidence percentages from each finding
 3. Apply confidence-aware aggregation: when multiple reviewers flag the same file:line, boost confidence by 10% per additional reviewer (cap at 100%)
 4. Maintain ≥80% confidence threshold in final output
-4b. If CYCLE_NUMBER provided (>1): cross-reference findings against PRIOR_RESOLUTIONS to note recurring vs new issues
-5. Categorize issues into 3 buckets (from devflow:review-methodology)
-6. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
-7. Determine merge recommendation based on blocking issues
+5. If CYCLE_NUMBER > 1 and PRIOR_RESOLUTIONS is not (none): cross-reference findings against PRIOR_RESOLUTIONS to note recurring vs new issues
+6. Categorize issues into 3 buckets (from devflow:review-methodology)
+7. Count by severity (CRITICAL, HIGH, MEDIUM, LOW)
+8. Determine merge recommendation based on blocking issues
 
 **Issue Categories:**
 - **Blocking** (Category 1): Issues in YOUR changes - CRITICAL/HIGH must block
