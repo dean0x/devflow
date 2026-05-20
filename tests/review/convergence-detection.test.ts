@@ -42,6 +42,16 @@ describe('reviewer.md — convergence inputs', () => {
     const crossCycle = extractSection(content, '## Cross-Cycle Awareness', '## Issue Categories')
     expect(crossCycle).toMatch(/[Ff]alse [Pp]ositive/)
   })
+
+  it('Cross-Cycle Awareness documents fallback when PRIOR_RESOLUTIONS cannot be parsed', () => {
+    const crossCycle = extractSection(content, '## Cross-Cycle Awareness', '## Issue Categories')
+    expect(crossCycle).toMatch(/cannot be parsed|parse.*fail/i)
+  })
+
+  it('Cross-Cycle Awareness requires verifying prior resolutions against current code', () => {
+    const crossCycle = extractSection(content, '## Cross-Cycle Awareness', '## Issue Categories')
+    expect(crossCycle).toMatch(/verify.*current.*code|current.*code.*verify/i)
+  })
 })
 
 // -------------------------------------------------------------------------
@@ -65,6 +75,9 @@ describe('code-review.md — convergence gate', () => {
     const idx0c = content.indexOf('Step 0c')
     const idx0d = content.indexOf('Step 0d')
     const idxPhase1 = content.indexOf('### Phase 1:')
+    expect(idx0c).not.toBe(-1)
+    expect(idx0d).not.toBe(-1)
+    expect(idxPhase1).not.toBe(-1)
     expect(idx0d).toBeGreaterThan(idx0c)
     expect(idx0d).toBeLessThan(idxPhase1)
   })
@@ -84,6 +97,8 @@ describe('code-review.md — convergence gate', () => {
     expect(step0d).toContain('(none)')
   })
 
+  // Intentional overlap with Group 6 all-surfaces check: this test pins PRIOR_RESOLUTIONS
+  // to Phase 2 specifically, while Group 6 verifies whole-file presence across all surfaces.
   it('Phase 2 passes PRIOR_RESOLUTIONS to Reviewer agents with containment markers', () => {
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 3:')
     expect(phase2).toContain('PRIOR_RESOLUTIONS')
@@ -112,10 +127,15 @@ describe('code-review-teams.md — convergence parity', () => {
     const idx0c = content.indexOf('Step 0c')
     const idx0d = content.indexOf('Step 0d')
     const idxPhase1 = content.indexOf('### Phase 1:')
+    expect(idx0c).not.toBe(-1)
+    expect(idx0d).not.toBe(-1)
+    expect(idxPhase1).not.toBe(-1)
     expect(idx0d).toBeGreaterThan(idx0c)
     expect(idx0d).toBeLessThan(idxPhase1)
   })
 
+  // Intentional overlap with Group 6 all-surfaces check: this test pins PRIOR_RESOLUTIONS
+  // to Phase 2 specifically, while Group 6 verifies whole-file presence across all surfaces.
   it('passes PRIOR_RESOLUTIONS to reviewer teammates', () => {
     const phase2 = extractSection(content, '### Phase 2:', '### Phase 2b:')
     expect(phase2).toContain('PRIOR_RESOLUTIONS')
@@ -148,6 +168,9 @@ describe('review:orch SKILL.md — convergence phase', () => {
     const idx2 = content.indexOf('## Phase 2:')
     const idx2b = content.indexOf('## Phase 2b')
     const idx3 = content.indexOf('## Phase 3:')
+    expect(idx2).not.toBe(-1)
+    expect(idx2b).not.toBe(-1)
+    expect(idx3).not.toBe(-1)
     expect(idx2b).toBeGreaterThan(idx2)
     expect(idx2b).toBeLessThan(idx3)
   })
