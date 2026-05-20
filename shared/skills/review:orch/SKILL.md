@@ -122,7 +122,7 @@ Detect conditional reviewers from file types:
 ## Phase 5: Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEWER_LIST
 
 Spawn all reviewers in a single message (parallel execution):
 

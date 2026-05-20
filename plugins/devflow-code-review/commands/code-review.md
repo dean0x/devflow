@@ -160,7 +160,7 @@ Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
 ### Phase 2: Run Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEWER_LIST
 
 Spawn Reviewer agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types:
 
@@ -263,9 +263,6 @@ In multi-worktree mode, report results per worktree.
 │  ├─ Step 0c: Incremental detection + timestamp setup per worktree
 │  ├─ Step 0d-i: Load prior resolution-summary.md
 │  └─ Step 0d-ii: Convergence assessment (warn if FP ratio > 70%)
-│
-├─ Phase 1: Analyze changed files per worktree
-│  └─ Detect file types for conditional reviews
 │
 ├─ Per worktree (SEQUENTIAL — one worktree at a time):
 │  │

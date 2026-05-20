@@ -145,13 +145,11 @@ describe('review:orch SKILL.md — convergence phase', () => {
   const content = loadFile('shared/skills/review:orch/SKILL.md')
 
   it('has Phase 2b between Phase 2 and Phase 3', () => {
-    expect(content).toMatch(/## Phase 2b/)
     const idx2 = content.indexOf('## Phase 2:')
     const idx2b = content.indexOf('## Phase 2b')
     const idx3 = content.indexOf('## Phase 3:')
-    const phase3idx = idx3 !== -1 ? idx3 : content.indexOf('## Phase 3')
     expect(idx2b).toBeGreaterThan(idx2)
-    expect(idx2b).toBeLessThan(phase3idx)
+    expect(idx2b).toBeLessThan(idx3)
   })
 
   it('Phase 2b has Produces/Requires annotations', () => {
@@ -251,6 +249,10 @@ describe('Cross-cutting convergence consistency', () => {
     expect(codeReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
     expect(teamsReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
     expect(reviewOrch).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
+  })
+
+  it('synthesizer FP note threshold matches orchestration surfaces (>= 3)', () => {
+    expect(synthesizer).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
   })
 
   it('reviewer.md and synthesizer.md both reference convergence concepts', () => {

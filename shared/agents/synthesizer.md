@@ -298,7 +298,7 @@ Report format:
 **Assessment**: {First cycle | Converging — most issues resolved | High FP ratio — possible hallucination loop}
 ```
 
-If CYCLE_NUMBER >= 2 and prior FP ratio > 70%: append "Note: High false-positive ratio detected. Consider manual verification of remaining findings."
+If CYCLE_NUMBER >= 3 and prior FP ratio > 70%: append "Note: High false-positive ratio detected. Consider manual verification of remaining findings."
 
 ---
 
