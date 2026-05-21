@@ -118,6 +118,15 @@ MAX_REVIEW_CYCLES = 10
    - Review anyway: proceed with PRIOR_RESOLUTIONS loaded
 4. If `--full`: skip this sub-step entirely (bypass convergence warning)
 
+**Decision table — Step 0d-ii paths:**
+
+| Condition | Outcome |
+|-----------|---------|
+| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Halt (AskUserQuestion), abort unless user overrides |
+| denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
+| fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn (AskUserQuestion): Merge / Review anyway / Stop |
+| `--full` flag set | Skip entire sub-step, bypass convergence warning |
+
 NOTE: Convergence logic mirrored in code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts (Group 6: Cross-cutting consistency).
 
 ### Phase 1: Analyze Changed Files
@@ -308,7 +317,7 @@ In multi-worktree mode, report results per worktree.
 | First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
 | fp_ratio denominator = 0 | fp_ratio = 0, no warning |
 | `--full` flag | Bypass convergence warning, still load PRIOR_RESOLUTIONS |
-| Parsing failure on resolution-summary.md | Treat as first cycle, proceed normally |
+| Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0d-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
 
 ## Backwards Compatibility
