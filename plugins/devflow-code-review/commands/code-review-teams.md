@@ -89,7 +89,7 @@ For each worktree:
 **Requires:** BRANCH_INFO
 
 For each worktree, perform a single pass over timestamped directories:
-1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending
+1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
@@ -106,6 +106,7 @@ MAX_REVIEW_CYCLES = 10
    Halt via AskUserQuestion:
    "Review pipeline has run {CYCLE_NUMBER-1} cycles. Halting to prevent infinite review-resolve loop. Use --full to override."
    - If user confirms override (--full): proceed; otherwise abort.
+   (Design intent: interactive commands allow user override of hard cap; ambient review:orch enforces a non-overridable hard-stop. Asymmetry is intentional.)
 2. Parse Statistics table from PRIOR_RESOLUTIONS:
    - Extract False Positive, Fixed, Deferred counts
    - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
@@ -116,7 +117,14 @@ MAX_REVIEW_CYCLES = 10
    "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Options: Merge / Review anyway / Stop"
    - Merge or Stop: skip Phase 2 onward
    - Review anyway: proceed with PRIOR_RESOLUTIONS loaded
-4. If `--full`: skip this sub-step entirely (bypass convergence warning)
+
+**Decision table — Step 0d-ii paths:**
+
+| Condition | Outcome |
+|-----------|---------|
+| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Halt (AskUserQuestion), abort unless user overrides |
+| denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
+| fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn (AskUserQuestion): Merge / Review anyway / Stop |
 
 NOTE: Convergence logic mirrored in code-review.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
 
