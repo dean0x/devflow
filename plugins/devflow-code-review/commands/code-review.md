@@ -93,7 +93,7 @@ For each worktree, perform a single pass over timestamped directories:
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
-5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness) but skip Step 0d-ii.
+5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness).
 
 #### Step 0d-ii: Convergence Assessment
 
@@ -103,28 +103,24 @@ For each worktree, perform a single pass over timestamped directories:
 MAX_REVIEW_CYCLES = 10
 
 1. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
-   Halt via AskUserQuestion:
-   "Review pipeline has run {CYCLE_NUMBER-1} cycles. Halting to prevent infinite review-resolve loop. Use --full to override."
-   - If user confirms override (--full): proceed; otherwise abort.
-   (Design intent: interactive commands allow user override of hard cap; ambient review:orch enforces a non-overridable hard-stop. Asymmetry is intentional.)
+   Warn in output: "⚠️ Review pipeline has run {CYCLE_NUMBER-1} cycles (exceeds MAX_REVIEW_CYCLES=10). Consider merging or manual inspection."
+   Continue with review.
 2. Parse Statistics table from PRIOR_RESOLUTIONS:
    - Extract False Positive, Fixed, Deferred counts
    - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
    - If denominator = 0: fp_ratio = 0, skip warning
    - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
 3. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
-   Warn via AskUserQuestion:
-   "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Options: Merge / Review anyway / Stop"
-   - Merge or Stop: skip Phase 2 onward
-   - Review anyway: proceed with PRIOR_RESOLUTIONS loaded
+   Warn in output: "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Consider merging or manual inspection."
+   Continue with review.
 
 **Decision table — Step 0d-ii paths:**
 
 | Condition | Outcome |
 |-----------|---------|
-| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Halt (AskUserQuestion), abort unless user overrides |
+| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Warn in output, continue |
 | denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
-| fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn (AskUserQuestion): Merge / Review anyway / Stop |
+| fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn in output, continue |
 
 NOTE: Convergence logic mirrored in code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
 
@@ -316,7 +312,7 @@ In multi-worktree mode, report results per worktree.
 | Duplicate PR comments | Git agent checks for existing comments at same file:line before creating |
 | First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
 | fp_ratio denominator = 0 | fp_ratio = 0, no warning |
-| `--full` flag | Bypass convergence warning, still load PRIOR_RESOLUTIONS |
+| `--full` flag | Bypass incremental detection (Step 0c), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
 | Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0d-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
 

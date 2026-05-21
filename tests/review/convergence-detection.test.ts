@@ -87,8 +87,8 @@ describe('code-review.md — convergence gate', () => {
     expect(step0d).toMatch(/fp_count\s*\/\s*\(fp_count\s*\+\s*fixed_count\s*\+\s*deferred_count\)/)
   })
 
-  it('Step 0d-ii documents --full bypass', () => {
-    const step0d = extractSection(content, 'Step 0d-ii', '### Phase 1:')
+  it('Step 0d-i documents --full loading PRIOR_RESOLUTIONS', () => {
+    const step0d = extractSection(content, 'Step 0d-i', 'Step 0d-ii')
     expect(step0d).toContain('--full')
   })
 
@@ -146,8 +146,8 @@ describe('code-review-teams.md — convergence parity', () => {
     expect(phase3).toContain('CYCLE_NUMBER')
   })
 
-  it('documents --full bypass', () => {
-    const step0d = extractSection(content, 'Step 0d-ii', '### Phase 1:')
+  it('Step 0d-i documents --full loading PRIOR_RESOLUTIONS', () => {
+    const step0d = extractSection(content, 'Step 0d-i', 'Step 0d-ii')
     expect(step0d).toContain('--full')
   })
 
@@ -275,7 +275,6 @@ describe('Cross-cutting convergence consistency', () => {
   })
 
   it('hard maximum cycle bound (MAX_REVIEW_CYCLES = 10) documented in review:orch', () => {
-    // Hard stop is ambient-only (review:orch); interactive commands use --full bypass instead.
     expect(reviewOrch).toMatch(/MAX_REVIEW_CYCLES\s*=\s*10/)
   })
 
@@ -288,19 +287,20 @@ describe('Cross-cutting convergence consistency', () => {
     expect(synthesizer).toMatch(/[Cc]onvergence/)
   })
 
-  it('--full bypass documented in both command files', () => {
-    const crStep0d = extractSection(codeReview, 'Step 0d', '### Phase 1:')
-    const trStep0d = extractSection(teamsReview, 'Step 0d', '### Phase 1:')
-    expect(crStep0d).toContain('--full')
-    expect(trStep0d).toContain('--full')
+  it('--full documented in Step 0d-i of both command files', () => {
+    const crStep0di = extractSection(codeReview, 'Step 0d-i', 'Step 0d-ii')
+    const trStep0di = extractSection(teamsReview, 'Step 0d-i', 'Step 0d-ii')
+    expect(crStep0di).toContain('--full')
+    expect(trStep0di).toContain('--full')
   })
 
-  it('review:orch documents non-interactive constraint (no AskUserQuestion) for ambient mode', () => {
-    // Intentional divergence: interactive commands (code-review.md, code-review-teams.md) may
-    // use AskUserQuestion for user confirmation; review:orch is ambient and must explicitly
-    // prohibit it. The skill documents this as "no AskUserQuestion" in the warning step.
-    expect(reviewOrch).toMatch(/no AskUserQuestion/i)
-    expect(reviewOrch).toMatch(/non-interactive|ambient/)
+  it('no AskUserQuestion in convergence sections across all surfaces', () => {
+    const crStep0dii = extractSection(codeReview, 'Step 0d-ii', '### Phase 1:')
+    const trStep0dii = extractSection(teamsReview, 'Step 0d-ii', '### Phase 1:')
+    const orchPhase2b = extractSection(reviewOrch, '## Phase 2b', '## Phase 3')
+    expect(crStep0dii).not.toContain('AskUserQuestion')
+    expect(trStep0dii).not.toContain('AskUserQuestion')
+    expect(orchPhase2b).not.toContain('AskUserQuestion')
   })
 })
 

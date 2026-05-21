@@ -63,8 +63,6 @@ Create directory: `mkdir -p .devflow/docs/reviews/{branch_slug}/{timestamp}`
 **Produces:** PRIOR_RESOLUTIONS, CYCLE_NUMBER
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
-Note: No `--full` bypass — ambient mode uses a non-interactive hard-stop that cannot be overridden. To bypass, use the interactive `/code-review` command instead.
-
 MAX_REVIEW_CYCLES = 10
 
 Perform a single pass over timestamped directories:
@@ -73,17 +71,16 @@ Perform a single pass over timestamped directories:
 3. If CYCLE_NUMBER = 0: PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
 5. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
-   Halt with output: "Review pipeline has run {CYCLE_NUMBER-1} cycles. Halting to prevent infinite review-resolve loop."
-   (Ambient hard-stop — no user override available; caller must use interactive command with --full to bypass.)
+   Warn in output: "⚠️ Review pipeline has run {CYCLE_NUMBER-1} cycles (exceeds MAX_REVIEW_CYCLES=10). Consider merging or manual inspection."
+   Continue with review.
 6. Parse Statistics table from PRIOR_RESOLUTIONS:
    - Extract False Positive, Fixed, Deferred counts
    - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
    - If denominator = 0: fp_ratio = 0, skip warning
    - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
 7. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
-   Warn in output (ambient — non-interactive, no AskUserQuestion):
-   "⚠️ Convergence: {ratio}% false positives in prior cycle ({N-1}). Consider merging or manual inspection."
-   Continue with review (do NOT halt on soft threshold).
+   Warn in output: "⚠️ Convergence: {ratio}% false positives in prior cycle ({N-1}). Consider merging or manual inspection."
+   Continue with review.
 8. Set PRIOR_RESOLUTIONS for downstream phases.
 
 NOTE: Convergence logic also present in code-review.md and code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
