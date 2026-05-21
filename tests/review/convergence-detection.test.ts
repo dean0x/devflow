@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, extractSection } from '../decisions/helpers'
+import { loadFile, extractSection } from '../helpers'
 
 // -------------------------------------------------------------------------
 // Group 1: reviewer.md — convergence inputs

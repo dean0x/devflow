@@ -301,6 +301,7 @@ Check for existing inline comments at same file:line before creating new ones."
 **Lead synthesizes review summary** (written to `{worktree_path}/.devflow/docs/reviews/{branch_slug}/{timestamp}/review-summary.md`):
 
 CYCLE_NUMBER: {cycle_number}
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 Include Convergence Status section.
 
 ```markdown

@@ -158,7 +158,7 @@ Each reviewer receives:
 After all reviewers complete, spawn in parallel:
 
 1. `Agent(subagent_type="Git")` with action `comment-pr` — post review summary as PR comment (deduplicate: check existing comments first)
-2. `Agent(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`. Pass **CYCLE_NUMBER** for convergence reporting in output.
+2. `Agent(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`. Pass **CYCLE_NUMBER** and **PRIOR_RESOLUTIONS** for convergence reporting in output.
 
 ## Phase 7: Finalize
 

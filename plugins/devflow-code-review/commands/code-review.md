@@ -250,6 +250,7 @@ WORKTREE_PATH: {worktree_path}  (omit if cwd)
 REVIEW_BASE_DIR: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}
 TIMESTAMP: {timestamp}
 CYCLE_NUMBER: {cycle_number}
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 Include Convergence Status section in review-summary.md.
 Aggregate findings, determine merge recommendation
 Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
