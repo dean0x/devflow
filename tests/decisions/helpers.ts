@@ -1,3 +1,5 @@
-// Re-export from shared test utilities. Kept for backward compatibility
-// with tests/decisions/helpers.test.ts which imports from './helpers'.
-export { ROOT, loadFile, extractSection } from '../helpers'
+/**
+ * @deprecated Import directly from '../helpers' (tests/helpers.ts) instead.
+ * This shim exists only for backward compatibility with tests/decisions/helpers.test.ts.
+ */
+export { ROOT, loadFile, extractSection, computeFpRatio } from '../helpers'

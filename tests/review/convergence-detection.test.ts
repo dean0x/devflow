@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadFile, extractSection } from '../helpers'
+import { loadFile, extractSection, computeFpRatio } from '../helpers'
 
 // -------------------------------------------------------------------------
 // Group 1: reviewer.md — convergence inputs
@@ -268,10 +268,15 @@ describe('Cross-cutting convergence consistency', () => {
     expect(reviewOrch).toMatch(formula)
   })
 
-  it('maximum cycle bound documented in all orchestration surfaces', () => {
+  it('soft convergence threshold documented in all orchestration surfaces', () => {
     expect(codeReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
     expect(teamsReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
     expect(reviewOrch).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
+  })
+
+  it('hard maximum cycle bound (MAX_REVIEW_CYCLES = 10) documented in review:orch', () => {
+    // Hard stop is ambient-only (review:orch); interactive commands use --full bypass instead.
+    expect(reviewOrch).toMatch(/MAX_REVIEW_CYCLES\s*=\s*10/)
   })
 
   it('synthesizer FP note threshold matches orchestration surfaces (>= 3)', () => {
@@ -288,5 +293,51 @@ describe('Cross-cutting convergence consistency', () => {
     const trStep0d = extractSection(teamsReview, 'Step 0d', '### Phase 1:')
     expect(crStep0d).toContain('--full')
     expect(trStep0d).toContain('--full')
+  })
+
+  it('review:orch documents non-interactive constraint (no AskUserQuestion) for ambient mode', () => {
+    // Intentional divergence: interactive commands (code-review.md, code-review-teams.md) may
+    // use AskUserQuestion for user confirmation; review:orch is ambient and must explicitly
+    // prohibit it. The skill documents this as "no AskUserQuestion" in the warning step.
+    expect(reviewOrch).toMatch(/no AskUserQuestion/i)
+    expect(reviewOrch).toMatch(/non-interactive|ambient/)
+  })
+})
+
+// -------------------------------------------------------------------------
+// Group 7: computeFpRatio — pure formula behavioral tests
+// -------------------------------------------------------------------------
+
+describe('computeFpRatio — pure fp_ratio formula', () => {
+  it('computes correct ratio for typical resolution (7 FP, 1 fixed, 2 deferred)', () => {
+    expect(computeFpRatio(7, 1, 2)).toBeCloseTo(0.7)
+  })
+
+  it('returns 0 when denominator is 0 (no issues resolved)', () => {
+    expect(computeFpRatio(0, 0, 0)).toBe(0)
+  })
+
+  it('returns 0 on NaN inputs (parse failure path)', () => {
+    expect(computeFpRatio(NaN, 1, 2)).toBe(0)
+    expect(computeFpRatio(7, NaN, 2)).toBe(0)
+    expect(computeFpRatio(7, 1, NaN)).toBe(0)
+  })
+
+  it('returns 0 on Infinity inputs (overflow parse failure)', () => {
+    expect(computeFpRatio(Infinity, 1, 2)).toBe(0)
+  })
+
+  it('returns 1.0 when all issues are false positives', () => {
+    expect(computeFpRatio(10, 0, 0)).toBe(1.0)
+  })
+
+  it('returns 0 when no false positives exist', () => {
+    expect(computeFpRatio(0, 5, 3)).toBe(0)
+  })
+
+  it('triggers warning threshold at > 0.7 (strict, not >=)', () => {
+    // Threshold is fp_ratio > 0.7, so exactly 0.7 should NOT trigger it
+    expect(computeFpRatio(7, 3, 0)).toBeCloseTo(0.7)  // boundary: no warning
+    expect(computeFpRatio(8, 2, 0)).toBeCloseTo(0.8)  // above boundary: warning
   })
 })

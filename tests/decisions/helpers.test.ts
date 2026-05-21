@@ -59,4 +59,13 @@ describe('extractSection', () => {
     expect(result).toContain('second')
     expect(result).not.toContain('end')
   })
+
+  it('matches substring anchors within longer heading lines', () => {
+    // Convergence tests use anchors like 'Step 0d-i' that appear inside
+    // '#### Step 0d-i: Load Prior' — indexOf substring matching must work.
+    const content = '#### Step 0d-i: Load Prior\nstep content\n#### Step 0d-ii: Convergence\nmore'
+    const result = extractSection(content, 'Step 0d-i', 'Step 0d-ii')
+    expect(result).toContain('step content')
+    expect(result).not.toContain('more')
+  })
 })
