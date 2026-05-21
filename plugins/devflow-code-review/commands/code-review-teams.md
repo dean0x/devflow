@@ -206,7 +206,7 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
     FEATURE_KNOWLEDGE: {feature_knowledge}
     PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
     PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
-    If PRIOR_RESOLUTIONS is not (none), check Cross-Cycle Awareness in reviewer.md.
+    If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in reviewer.md.
     1. Read your skill(s): `Read {SKILL_PATHS}`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Follow devflow:apply-decisions to scan DECISIONS_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
@@ -411,7 +411,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
 | fp_ratio denominator = 0 | fp_ratio = 0, no warning |
 | `--full` flag | Bypass convergence warning, still load PRIOR_RESOLUTIONS |
-| Parsing failure on resolution-summary.md | Treat as first cycle, proceed normally |
+| Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0d-ii) |
 | Concurrent sessions | Advisory only, each session computes independently |
 
 ## Backwards Compatibility
