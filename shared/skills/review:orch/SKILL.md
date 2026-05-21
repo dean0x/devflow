@@ -84,7 +84,7 @@ Perform a single pass over timestamped directories:
    Continue with review (do NOT halt on soft threshold).
 8. Set PRIOR_RESOLUTIONS for downstream phases.
 
-NOTE: Convergence logic also present in code-review.md and code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts (Group 6: Cross-cutting consistency).
+NOTE: Convergence logic also present in code-review.md and code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
 
 ## Phase 3: Load Decisions Index
 

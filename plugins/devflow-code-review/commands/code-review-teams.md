@@ -118,7 +118,7 @@ MAX_REVIEW_CYCLES = 10
    - Review anyway: proceed with PRIOR_RESOLUTIONS loaded
 4. If `--full`: skip this sub-step entirely (bypass convergence warning)
 
-NOTE: Convergence logic mirrored in code-review.md — parity enforced by tests/review/convergence-detection.test.ts (Group 6: Cross-cutting consistency).
+NOTE: Convergence logic mirrored in code-review.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
 
 ### Phase 1: Analyze Changed Files
 

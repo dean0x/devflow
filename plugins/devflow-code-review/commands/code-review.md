@@ -127,7 +127,7 @@ MAX_REVIEW_CYCLES = 10
 | fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn (AskUserQuestion): Merge / Review anyway / Stop |
 | `--full` flag set | Skip entire sub-step, bypass convergence warning |
 
-NOTE: Convergence logic mirrored in code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts (Group 6: Cross-cutting consistency).
+NOTE: Convergence logic mirrored in code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
 
 ### Phase 1: Analyze Changed Files
 
