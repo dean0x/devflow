@@ -83,6 +83,47 @@ For each worktree:
    - **If no (first review), or `--full`:**
      - Set `DIFF_RANGE` to `{base_branch}...HEAD`
 
+#### Step 0d-i: Load Prior Resolution and Count Cycles
+
+**Produces:** PRIOR_RESOLUTIONS, CYCLE_NUMBER
+**Requires:** BRANCH_INFO
+
+For each worktree, perform a single pass over timestamped directories:
+1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
+2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
+3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
+4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
+5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness).
+
+#### Step 0d-ii: Convergence Assessment
+
+**Produces:** (refines CYCLE_NUMBER)
+**Requires:** PRIOR_RESOLUTIONS, BRANCH_INFO
+
+MAX_REVIEW_CYCLES = 10
+
+1. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
+   Warn in output: "⚠️ Review pipeline has run {CYCLE_NUMBER-1} cycles (exceeds MAX_REVIEW_CYCLES=10). Consider merging or manual inspection."
+   Continue with review.
+2. Parse Statistics table from PRIOR_RESOLUTIONS:
+   - Extract False Positive, Fixed, Deferred counts
+   - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
+   - If denominator = 0: fp_ratio = 0, skip warning
+   - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
+3. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
+   Warn in output: "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Consider merging or manual inspection."
+   Continue with review.
+
+**Decision table — Step 0d-ii paths:**
+
+| Condition | Outcome |
+|-----------|---------|
+| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Warn in output, continue |
+| denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
+| fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn in output, continue |
+
+NOTE: Convergence logic mirrored in code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
+
 ### Phase 1: Analyze Changed Files
 
 **Produces:** REVIEWER_LIST
@@ -131,7 +172,7 @@ Pass `FEATURE_KNOWLEDGE` to all Reviewer agents alongside `DECISIONS_CONTEXT`.
 ### Phase 2: Run Reviews (Parallel)
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEWER_LIST
 
 Spawn Reviewer agents **in a single message**. Always run 8 core reviews; conditionally add more based on changed file types:
 
@@ -168,6 +209,8 @@ DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORK
 DECISIONS_CONTEXT: {decisions_context}
 FEATURE_KNOWLEDGE: {feature_knowledge}
 PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
+If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in reviewer.md.
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
 IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
@@ -201,6 +244,9 @@ Agent(subagent_type="Synthesizer", run_in_background=false):
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
 REVIEW_BASE_DIR: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}
 TIMESTAMP: {timestamp}
+CYCLE_NUMBER: {cycle_number}
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
+Include Convergence Status section in review-summary.md.
 Aggregate findings, determine merge recommendation
 Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
 ```
@@ -227,10 +273,9 @@ In multi-worktree mode, report results per worktree.
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter reviewable
 │  ├─ Step 0b: Git agent (ensure-pr-ready) per worktree [parallel]
-│  └─ Step 0c: Incremental detection + timestamp setup per worktree
-│
-├─ Phase 1: Analyze changed files per worktree
-│  └─ Detect file types for conditional reviews
+│  ├─ Step 0c: Incremental detection + timestamp setup per worktree
+│  ├─ Step 0d-i: Load prior resolution-summary.md
+│  └─ Step 0d-ii: Convergence assessment (warn if FP ratio > 70%)
 │
 ├─ Per worktree (SEQUENTIAL — one worktree at a time):
 │  │
@@ -265,6 +310,11 @@ In multi-worktree mode, report results per worktree.
 | `--full` in multi-worktree mode | Applies to all worktrees (global modifier) |
 | Many worktrees (5+) | Report count and proceed — user manages their worktree count |
 | Duplicate PR comments | Git agent checks for existing comments at same file:line before creating |
+| First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
+| fp_ratio denominator = 0 | fp_ratio = 0, no warning |
+| `--full` flag | Bypass incremental detection (Step 0c), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
+| Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0d-ii) |
+| Concurrent sessions | Advisory only, each session computes independently |
 
 ## Backwards Compatibility
 

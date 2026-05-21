@@ -33,8 +33,14 @@ Run a comprehensive code review of the current branch by spawning a review team 
 
 #### Step 0b: Per-Worktree Pre-Flight (Git Agent)
 
-**Produces:** BRANCH_INFO, PR_INFO
+**Produces:** BRANCH_INFO, PR_INFO, PR_DESCRIPTION, PR_DESCRIPTION_GUIDANCE
 **Requires:** WORKTREES
+
+Discover PR description guidance from plan artifact (per worktree):
+1. List `{worktree}/.devflow/docs/design/*.md` files
+2. Sort by timestamp in filename (descending -- timestamps are YYYY-MM-DD_HHMM, naturally sortable)
+3. Read the most recent file, extract `## PR Description Guidance` section
+4. If no plan files exist or section not found, set `PR_DESCRIPTION_GUIDANCE` to `(none)`
 
 For each reviewable worktree, spawn Git agent:
 
@@ -42,6 +48,7 @@ For each reviewable worktree, spawn Git agent:
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
 WORKTREE_PATH: {worktree_path}  (omit if cwd)
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, branch-slug, PR#"
 ```
@@ -51,6 +58,12 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 **If BLOCKED:** In single-worktree mode, stop and report. In multi-worktree mode, report the failure but continue with other worktrees.
 
 **Extract from response:** `branch`, `base_branch`, `branch_slug`, `pr_number` per worktree.
+
+**Fetch PR body** (after extracting `pr_number`):
+```bash
+PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
+```
+If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
 #### Step 0c: Incremental Detection & Timestamp Setup
 
@@ -69,6 +82,47 @@ For each worktree:
      - Set `DIFF_RANGE` to `{last-review-sha}...HEAD`
    - **If no (first review), or `--full`:**
      - Set `DIFF_RANGE` to `{base_branch}...HEAD`
+
+#### Step 0d-i: Load Prior Resolution and Count Cycles
+
+**Produces:** PRIOR_RESOLUTIONS, CYCLE_NUMBER
+**Requires:** BRANCH_INFO
+
+For each worktree, perform a single pass over timestamped directories:
+1. List timestamped directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/` sorted descending: `ls -1d {worktree}/.devflow/docs/reviews/{branch-slug}/20* 2>/dev/null | sort -r`
+2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
+3. If CYCLE_NUMBER = 0: set PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
+4. Otherwise: set CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
+5. If `--full`: still load PRIOR_RESOLUTIONS (valuable for reviewer cross-cycle awareness).
+
+#### Step 0d-ii: Convergence Assessment
+
+**Produces:** (refines CYCLE_NUMBER)
+**Requires:** PRIOR_RESOLUTIONS, BRANCH_INFO
+
+MAX_REVIEW_CYCLES = 10
+
+1. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
+   Warn in output: "⚠️ Review pipeline has run {CYCLE_NUMBER-1} cycles (exceeds MAX_REVIEW_CYCLES=10). Consider merging or manual inspection."
+   Continue with review.
+2. Parse Statistics table from PRIOR_RESOLUTIONS:
+   - Extract False Positive, Fixed, Deferred counts
+   - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
+   - If denominator = 0: fp_ratio = 0, skip warning
+   - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
+3. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
+   Warn in output: "⚠️ Convergence: {ratio}% false positives in cycle {N-1}. Consider merging or manual inspection."
+   Continue with review.
+
+**Decision table — Step 0d-ii paths:**
+
+| Condition | Outcome |
+|-----------|---------|
+| CYCLE_NUMBER > MAX_REVIEW_CYCLES | Warn in output, continue |
+| denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
+| fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn in output, continue |
+
+NOTE: Convergence logic mirrored in code-review.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
 
 ### Phase 1: Analyze Changed Files
 
@@ -118,7 +172,7 @@ Pass `FEATURE_KNOWLEDGE` to each reviewer teammate alongside `DECISIONS_CONTEXT`
 ### Phase 2: Spawn Review Team
 
 **Produces:** REVIEWER_OUTPUTS
-**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, REVIEWER_LIST
+**Requires:** DIFF_RANGE, REVIEW_DIR, TIMESTAMP, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION, PRIOR_RESOLUTIONS, REVIEWER_LIST
 
 **Per worktree**, create an agent team for adversarial review. Always include 4 core perspectives; conditionally add more based on Phase 1 analysis.
 
@@ -154,6 +208,9 @@ Spawn review teammates. For each teammate, compose a self-contained prompt using
     WORKTREE_PATH: {worktree_path}  (omit if cwd)
     DECISIONS_CONTEXT: {decisions_context}
     FEATURE_KNOWLEDGE: {feature_knowledge}
+    PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
+    PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
+    If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in reviewer.md.
     1. Read your skill(s): `Read {SKILL_PATHS}`
     2. Read review methodology: `Read ~/.claude/skills/devflow:review-methodology/SKILL.md`
     3. Follow devflow:apply-decisions to scan DECISIONS_CONTEXT index and Read full ADR/PF bodies on demand. Skip if (none).
@@ -247,6 +304,10 @@ Check for existing inline comments at same file:line before creating new ones."
 
 **Lead synthesizes review summary** (written to `{worktree_path}/.devflow/docs/reviews/{branch_slug}/{timestamp}/review-summary.md`):
 
+CYCLE_NUMBER: {cycle_number}
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
+Include Convergence Status section.
+
 ```markdown
 ## Review Summary: {branch}
 
@@ -310,7 +371,9 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 0: Worktree Discovery & Pre-flight
 │  ├─ Step 0a: git worktree list → filter reviewable
 │  ├─ Step 0b: Git agent (ensure-pr-ready) per worktree [parallel]
-│  └─ Step 0c: Incremental detection + timestamp setup per worktree
+│  ├─ Step 0c: Incremental detection + timestamp setup per worktree
+│  ├─ Step 0d-i: Load prior resolution-summary.md
+│  └─ Step 0d-ii: Convergence assessment (warn if FP ratio > 70%)
 │
 ├─ Phase 1: Analyze changed files per worktree
 │  └─ Detect file types for conditional perspectives
@@ -350,6 +413,11 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Multi-worktree with Agent Teams | Process worktrees sequentially (one team per session) |
 | Many worktrees (5+) | Report count and proceed — user manages their worktree count |
 | Duplicate PR comments | Git agent checks for existing comments at same file:line before creating |
+| First review (no prior resolution) | PRIOR_RESOLUTIONS=(none), no convergence check |
+| fp_ratio denominator = 0 | fp_ratio = 0, no warning |
+| `--full` flag | Bypass incremental detection (Step 0c), still load PRIOR_RESOLUTIONS for cross-cycle awareness |
+| Parsing failure on resolution-summary.md | fp_ratio = 0, convergence tracking degraded (see Step 0d-ii) |
+| Concurrent sessions | Advisory only, each session computes independently |
 
 ## Backwards Compatibility
 
