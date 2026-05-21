@@ -70,16 +70,21 @@ Perform a single pass over timestamped directories:
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
-5. Parse Statistics table: fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
-   If denominator=0 or parsing fails: fp_ratio=0
-6. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
+5. If CYCLE_NUMBER > MAX_REVIEW_CYCLES:
    Halt with output: "Review pipeline has run {CYCLE_NUMBER-1} cycles. Halting to prevent infinite review-resolve loop."
    (Ambient hard-stop — no user override available; caller must use interactive command with --full to bypass.)
+6. Parse Statistics table from PRIOR_RESOLUTIONS:
+   - Extract False Positive, Fixed, Deferred counts
+   - fp_ratio = fp_count / (fp_count + fixed_count + deferred_count)
+   - If denominator = 0: fp_ratio = 0, skip warning
+   - If parsing fails: fp_ratio = 0, skip warning; note in output: "Warning: Could not parse Statistics table from prior resolution. FP ratio unavailable — convergence tracking degraded."
 7. If fp_ratio > 0.7 AND CYCLE_NUMBER >= 3:
    Warn in output (ambient — non-interactive, no AskUserQuestion):
    "⚠️ Convergence: {ratio}% false positives in prior cycle ({N-1}). Consider merging or manual inspection."
    Continue with review (do NOT halt on soft threshold).
 8. Set PRIOR_RESOLUTIONS for downstream phases.
+
+NOTE: Convergence logic also present in code-review.md and code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts (Group 6: Cross-cutting consistency).
 
 ## Phase 3: Load Decisions Index
 
