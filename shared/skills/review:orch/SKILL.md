@@ -63,10 +63,12 @@ Create directory: `mkdir -p .devflow/docs/reviews/{branch_slug}/{timestamp}`
 **Produces:** PRIOR_RESOLUTIONS, CYCLE_NUMBER
 **Requires:** BRANCH_INFO, REVIEW_DIR
 
+Note: No `--full` bypass — ambient mode uses a non-interactive hard-stop that cannot be overridden. To bypass, use the interactive `/code-review` command instead.
+
 MAX_REVIEW_CYCLES = 10
 
 Perform a single pass over timestamped directories:
-1. List timestamped directories in `.devflow/docs/reviews/{branch_slug}/` sorted descending
+1. List timestamped directories in `.devflow/docs/reviews/{branch_slug}/` sorted descending: `ls -1d .devflow/docs/reviews/{branch_slug}/20* 2>/dev/null | sort -r`
 2. Iterate once: accumulate CYCLE_NUMBER count for each directory containing `resolution-summary.md`; capture the first (most-recent) such directory as PRIOR_DIR.
 3. If CYCLE_NUMBER = 0: PRIOR_RESOLUTIONS=(none), CYCLE_NUMBER=1, proceed.
 4. Otherwise: CYCLE_NUMBER = count + 1. Read `{PRIOR_DIR}/resolution-summary.md` as PRIOR_RESOLUTIONS.
@@ -158,7 +160,7 @@ Each reviewer receives:
 After all reviewers complete, spawn in parallel:
 
 1. `Agent(subagent_type="Git")` with action `comment-pr` — post review summary as PR comment (deduplicate: check existing comments first)
-2. `Agent(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`. Pass **CYCLE_NUMBER** and **PRIOR_RESOLUTIONS** for convergence reporting in output.
+2. `Agent(subagent_type="Synthesizer")` in review mode — reads all `{focus}.md` files from disk, writes `review-summary.md`. Pass **CYCLE_NUMBER** and **PRIOR_RESOLUTIONS** (wrapped in `<prior-resolution-summary>...</prior-resolution-summary>` containment markers, or `(none)`) for convergence reporting in output.
 
 ## Phase 7: Finalize
 
