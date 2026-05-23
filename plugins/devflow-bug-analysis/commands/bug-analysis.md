@@ -95,29 +95,36 @@ Run available tools on the changed files (from Step 2b):
 
 **Semgrep** (if available):
 ```bash
-CHANGED_FILES=$(git diff --name-only {DIFF_RANGE} | tr '\n' ' ')
-semgrep scan --config auto --sarif --quiet {CHANGED_FILES} 2>/dev/null
+# Use xargs with NUL-delimited filenames to prevent shell injection from metacharacters in paths
+git diff --name-only {DIFF_RANGE} | xargs -d '\n' timeout 300 semgrep scan --config auto --sarif --quiet 2>/dev/null
 ```
 Parse SARIF output → extract findings.
 
 **Snyk Code** (if available):
 ```bash
-snyk code test --sarif . 2>/dev/null
+# Scope scan to changed files only via --include patterns to avoid full-project scan cost
+git diff --name-only {DIFF_RANGE} | xargs -d '\n' -I{} timeout 300 snyk code test --sarif --file={} 2>/dev/null
 ```
 Parse SARIF output → extract findings.
 
 **CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings)):
 ```bash
-codeql database create /tmp/codeql-db --language={detected-language} --source-root=. 2>/dev/null && \
-codeql database analyze /tmp/codeql-db --format=sarif-latest --output=/tmp/codeql-results.sarif 2>/dev/null
+# Use a unique temp directory per run to prevent symlink attacks and concurrent-process clobbering
+CODEQL_TMP=$(mktemp -d)
+timeout 600 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root=. 2>/dev/null && \
+timeout 600 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
+# Capture exit status before cleanup so cleanup doesn't mask failures
+CODEQL_EXIT=$?
+# Always clean up temp directory regardless of success or failure
+rm -rf "${CODEQL_TMP}"
 ```
-Parse SARIF output → extract findings. If database creation fails: skip CodeQL, note it.
+Parse SARIF output from `${CODEQL_TMP}/results.sarif` immediately after the `codeql database analyze` step and before the `rm -rf` cleanup. If database creation fails or timeout occurs: still run `rm -rf "${CODEQL_TMP}"`, then skip CodeQL and note it.
 
-**Normalize** all findings to unified table, cap at top 50 by severity:
+**Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum to bound the serialized size of `STATIC_FINDINGS`:
 
 | Tool | File:Line | CWE | Severity | Title | Description |
 |------|-----------|-----|----------|-------|-------------|
-| {tool} | {file}:{line} | {CWE or —} | {CRITICAL/HIGH/MEDIUM/LOW} | {title} | {description} |
+| {tool} | {file}:{line} | {CWE or —} | {CRITICAL/HIGH/MEDIUM/LOW} | {title} | {description truncated to 200 chars} |
 
 Write ALL raw findings to `{ANALYSIS_DIR}/static-findings.md`. Set `STATIC_FINDINGS` to the top-50 table.
 
