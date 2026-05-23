@@ -5,6 +5,9 @@ model: opus
 skills:
   - devflow:security
   - devflow:reliability
+  - devflow:regression
+  - devflow:consistency
+  - devflow:complexity
   - devflow:worktree-support
   - devflow:apply-decisions
   - devflow:apply-feature-knowledge
@@ -95,6 +98,7 @@ For each candidate finding with ≥60% confidence:
 Assign to each verified finding:
 - **Severity**: CRITICAL (data loss/security breach) | HIGH (wrong behavior, user impact) | MEDIUM (degraded experience, edge case) | LOW (cosmetic, minor UX)
 - **Confidence**: 0-100% based on certainty the issue is real
+- **Category** (for `/resolve` compatibility): CRITICAL/HIGH → Blocking; MEDIUM → Should Fix; LOW → Pre-existing
 
 ## Confidence Scale
 
@@ -105,7 +109,12 @@ Assign to each verified finding:
 | 60-79% | Medium | Plausible issue, depends on context |
 | < 60% | Low | Dropped entirely |
 
-**Threshold**: ≥80% → main `## Bugs Found` section. 60-79% → `## Suggestions`. <60% → dropped.
+**Threshold**: ≥80% → main issue sections. 60-79% → `## Suggestions`. <60% → dropped.
+
+**Category mapping** (for `/resolve` compatibility):
+- CRITICAL / HIGH severity → `## Issues in Your Changes (BLOCKING)` — must fix before merge
+- MEDIUM severity → `## Issues in Code You Touched (Should Fix)` — fix while here
+- LOW severity → `## Pre-existing Issues (Not Blocking)` — informational
 
 **Plan-context modifier**: +10% confidence if the finding directly cites an `ACCEPTANCE_RULE` ID that is unmet. -15% confidence ceiling if `PLAN_CONTEXT` is `(none)` (semantic-only analysis is less certain).
 
@@ -130,7 +139,9 @@ Report format for `{OUTPUT_PATH}`:
 **Branch**: {current} -> {base}
 **Date**: {timestamp}
 
-## Bugs Found
+## Issues in Your Changes (BLOCKING)
+
+(CRITICAL and HIGH severity bugs — must fix before merge)
 
 ### CRITICAL
 **{Bug Title}** — `file.ts:123`
@@ -147,13 +158,19 @@ Report format for `{OUTPUT_PATH}`:
 - Fix: {fix that applies to all occurrences}
 
 ### HIGH
-{bugs with Confidence: {n}% each...}
+{bugs with **Confidence**: {n}% each...}
 
-### MEDIUM
-{bugs with Confidence: {n}% each...}
+## Issues in Code You Touched (Should Fix)
 
-### LOW
-{bugs with Confidence: {n}% each...}
+(MEDIUM severity bugs — fix while here)
+
+{bugs with **Confidence**: {n}% each...}
+
+## Pre-existing Issues (Not Blocking)
+
+(LOW severity bugs — informational only)
+
+{bugs with **Confidence**: {n}% each...}
 
 ## Acceptance Criteria Coverage
 
