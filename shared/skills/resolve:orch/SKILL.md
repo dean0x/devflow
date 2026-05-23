@@ -28,7 +28,13 @@ Find the latest timestamped directory under `.devflow/docs/reviews/` that:
 1. Contains a `review-summary.md` (has been reviewed)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
-If no unresolved review found: halt with "No unresolved review found. Run a review first."
+If no unresolved review found in `.devflow/docs/reviews/`: check `.devflow/docs/bug-analysis/{branch_slug}/` for the latest timestamped directory that:
+1. Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
+2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
+
+If a bug-analysis directory qualifies, set `REVIEW_DIR` to that path and proceed — Resolver agents parse the same per-focus `.md` format.
+
+If neither reviews nor bug-analysis directories qualify: halt with "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
 
 Extract branch slug from the directory path.
 

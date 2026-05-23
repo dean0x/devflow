@@ -125,6 +125,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     rules: [],
   },
   {
+    name: 'devflow-bug-analysis',
+    description: 'Proactive bug finding with static and semantic analysis',
+    commands: ['/bug-analysis'],
+    agents: ['git', 'bug-analyzer', 'synthesizer'],
+    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge'],
+    rules: [],
+  },
+  {
     name: 'devflow-ambient',
     description: 'Ambient mode — intent classification with proportional agent orchestration',
     commands: ['/ambient'],

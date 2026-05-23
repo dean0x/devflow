@@ -12,7 +12,7 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 20 plugins (11 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 21 plugins (12 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose | Teams Variant |
 |--------|---------|---------------|
@@ -25,6 +25,7 @@ Plugin marketplace with 20 plugins (11 core + 9 optional language/ecosystem), ea
 | `devflow-research` | Multi-type research with trust-aware synthesis | Optional |
 | `devflow-release` | Adaptive project release with learned configuration | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
+| `devflow-bug-analysis` | Proactive bug finding with static and semantic analysis | No |
 | `devflow-ambient` | Ambient mode — four-layer intent classification with per-intent triage | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |

@@ -69,10 +69,18 @@ For each worktree:
 1. List directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`
 2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
 3. **Otherwise:** sort directories by name (timestamps are naturally sortable), select the latest that contains `review-summary.md` (complete review)
-4. **If latest directory already has `resolution-summary.md`:** skip worktree — already resolved. Report: "Latest review already resolved. Run /code-review for a new review first."
-5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly (backwards compatible)
+4. **If latest directory already has `resolution-summary.md`:** the review is resolved — check bug-analysis fallback (step 5b).
+5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly (backwards compatible).
 
-Set `TARGET_DIR` to the selected review directory path.
+**5b. Bug analysis fallback** — if no qualifying review directory found (no reviews exist, or all resolved):
+- List directories in `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/`
+- Sort by name (timestamps are naturally sortable), select the latest that:
+  - Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
+  - Does NOT contain a `resolution-summary.md`
+- If found: set `TARGET_DIR` to that path. Reviews take priority — bug analysis is only used when no qualifying review exists.
+- If not found: skip worktree — report "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
+
+Set `TARGET_DIR` to the selected review or bug-analysis directory path.
 
 #### Step 0d: Load Project Decisions
 
@@ -311,7 +319,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 
 | Case | Handling |
 |------|----------|
-| No reviews exist | Error message, suggest `/code-review` first |
+| No reviews exist | Check bug-analysis fallback (Step 0c-5b); if also absent, error and suggest `/code-review` or `/bug-analysis` |
 | All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
