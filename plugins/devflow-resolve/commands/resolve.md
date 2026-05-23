@@ -49,7 +49,7 @@ Return: branch, branch-slug, PR#, review count"
 
 In multi-worktree mode, spawn all pre-flight agents **in a single message** (parallel).
 
-**If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` first. In multi-worktree mode, report the failure but continue with other worktrees.
+**If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` or `/bug-analysis` first. In multi-worktree mode, report the failure but continue with other worktrees.
 
 **Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` per worktree.
 
@@ -74,11 +74,11 @@ For each worktree:
 
 **5b. Bug analysis fallback** — if no qualifying review directory found (no reviews exist, or all resolved):
 - List directories in `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/`
-- Sort by name (timestamps are naturally sortable), select the latest that:
+- Sort by name descending (timestamps are naturally sortable), scan the 10 most recent directories only. Select the latest that:
   - Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
   - Does NOT contain a `resolution-summary.md`
 - If found: set `TARGET_DIR` to that path. Reviews take priority — bug analysis is only used when no qualifying review exists.
-- If not found: skip worktree — report "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
+- If not found within those 10 directories: skip worktree — report "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
 
 Set `TARGET_DIR` to the selected review or bug-analysis directory path.
 
@@ -112,6 +112,8 @@ Read review reports from `{TARGET_DIR}/*.md` and extract:
 **Exclude from issue extraction:**
 - `review-summary.md` (synthesizer output, not individual findings)
 - `resolution-summary.md` (if it exists from a previous partial run)
+- `bug-analysis-summary.md` (synthesizer output for bug-analysis runs)
+- `static-findings.md` (raw static analysis tool output, not individual findings)
 
 **Include:** ALL issues from all categories and severities, including Suggestions.
 

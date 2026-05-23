@@ -30,7 +30,7 @@ Find the latest timestamped directory under `.devflow/docs/reviews/{BRANCH_SLUG}
 1. Contains a `review-summary.md` (has been reviewed)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
-If no unresolved review found: check `.devflow/docs/bug-analysis/{BRANCH_SLUG}/` for the latest timestamped directory that:
+If no unresolved review found: check `.devflow/docs/bug-analysis/{BRANCH_SLUG}/` for the latest timestamped directory. Sort by name descending and scan the 10 most recent directories only. Select the first that:
 1. Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
@@ -62,7 +62,7 @@ Also load feature knowledge:
 **Produces:** ISSUES
 **Requires:** REVIEW_DIR
 
-Read all `{focus}.md` files in the timestamped directory (exclude `review-summary.md` and `resolution-summary.md`).
+Read all `{focus}.md` files in the timestamped directory (exclude `review-summary.md`, `resolution-summary.md`, `bug-analysis-summary.md`, and `static-findings.md`).
 
 Extract **ALL** issues from all categories and severities, including Suggestions.
 
