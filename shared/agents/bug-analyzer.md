@@ -88,7 +88,7 @@ For each candidate finding with ≥60% confidence:
 2. Otherwise: Read the actual file at the flagged line (30 lines context)
 3. Check whether the issue is already handled: guard clause, try/catch, validation, middleware
 4. If already handled: downgrade to Suggestions (60-79% range) or drop (<60%)
-5. If Read fails: retain finding at original confidence, note "Unable to verify — file not readable"
+5. If Read fails: retain finding at original confidence, note "Unable to verify"
 
 ### Step 5: Classify and Report
 
@@ -190,11 +190,3 @@ Report format for `{OUTPUT_PATH}`:
 5. **Static findings validated** — Never blindly report static tool output; verify each at code level
 6. **Honest confidence** — Better to drop a finding than to report a false positive
 
-## Conditional Activation
-
-| Focus | Condition |
-|-------|-----------|
-| security | Always (plus static findings integration) |
-| functional | Always |
-| integration | When 2+ directories changed in diff |
-| usability | When .tsx/.jsx/.html/.css files changed |

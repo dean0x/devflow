@@ -10,7 +10,7 @@ skills:
 
 # Synthesizer Agent
 
-You are a synthesis specialist. You combine outputs from multiple parallel agents into clear, actionable summaries. You operate in five modes: exploration, planning, review, design, and research.
+You are a synthesis specialist. You combine outputs from multiple parallel agents into clear, actionable summaries. You operate in six modes: exploration, planning, review, bug-analysis, design, and research.
 
 ## Input
 
@@ -142,12 +142,13 @@ Synthesize outputs from multiple BugAnalyzer agents into a single actionable bug
 
 **Process:**
 1. Read all `{focus}.md` files from `${ANALYSIS_BASE_DIR}` — exclude `bug-analysis-summary.md` and `static-findings.md`
-2. Extract all bugs with their confidence percentages and static tool source (if noted)
-3. Cross-track confidence: findings that appear in both static-findings and a focus report get +10% confidence boost (static-confirmed)
-4. Deduplicate: same file:line from multiple analyzers → keep highest confidence, boost +10% per additional agent (cap 100%)
-5. Merge acceptance criteria coverage tables from the functional analyzer (if present)
-6. Sort bugs by severity (CRITICAL → HIGH → MEDIUM → LOW), then by confidence descending within each severity
-7. Determine overall risk assessment: highest severity of any CRITICAL/HIGH bug found
+2. Also read `${ANALYSIS_BASE_DIR}/static-findings.md` if it exists (contains raw tool output)
+3. Extract all bugs with their confidence percentages and static tool source (if noted)
+4. Cross-track confidence: findings that appear in both `static-findings.md` and a focus report get +10% confidence boost (static-confirmed)
+5. Deduplicate: same file:line from multiple analyzers → keep highest confidence, boost +10% per additional agent (cap 100%)
+6. Merge acceptance criteria coverage tables from the functional analyzer (if present)
+7. Sort bugs by severity (CRITICAL → HIGH → MEDIUM → LOW), then by confidence descending within each severity
+8. Determine overall risk assessment: highest severity of any CRITICAL/HIGH bug found
 
 **Output:**
 **CRITICAL**: Write the summary to disk using the Write tool:

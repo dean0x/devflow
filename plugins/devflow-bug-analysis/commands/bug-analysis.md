@@ -46,10 +46,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Produces:** DIFF_RANGE, ANALYSIS_DIR
 **Requires:** BRANCH_INFO
 
-1. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
-2. Create timestamped analysis directory: `mkdir -p .devflow/docs/bug-analysis/{branch-slug}/{timestamp}/`
-3. Set `ANALYSIS_DIR` to that path.
-4. Check `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
+1. Check `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
    - **If exists AND `--full` NOT set:**
      - Read the SHA from the file
      - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), fall through to full
@@ -57,6 +54,9 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
      - Set `DIFF_RANGE` to `{sha}...HEAD`
    - **If not exists, unreachable SHA, or `--full`:**
      - Set `DIFF_RANGE` to `{base_branch}...HEAD`
+2. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
+3. Create timestamped analysis directory: `mkdir -p .devflow/docs/bug-analysis/{branch-slug}/{timestamp}/`
+4. Set `ANALYSIS_DIR` to that path.
 
 #### Step 2b: Check Changed Files
 
@@ -304,11 +304,6 @@ Run `/resolve` to process and fix these findings.
 | `usability` focus skipped | Not spawned when no UI files changed |
 
 ## Resolve Compatibility
-
-Bug analysis reports are compatible with `/resolve`. Each per-focus `.md` file follows the same finding format that Resolver agents expect:
-- `file:line` references for each bug
-- Severity classifications (CRITICAL/HIGH/MEDIUM/LOW)
-- Suggested fix for each bug
 
 Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automatically detects and uses bug analysis reports when no code review report exists.
 

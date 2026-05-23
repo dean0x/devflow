@@ -74,9 +74,9 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 ```
 devflow/
 ├── shared/skills/          # 58 skills (single source of truth)
-├── shared/agents/          # 14 shared agents (single source of truth)
+├── shared/agents/          # 15 shared agents (single source of truth)
 ├── shared/rules/           # 12 rules (single source of truth; flat .md files)
-├── plugins/devflow-*/      # 20 plugins (11 core + 9 optional language/ecosystem)
+├── plugins/devflow-*/      # 21 plugins (12 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Sidecar + ambient + memory hooks (sidecar-capture, sidecar-dispatch, sidecar-evaluate, sidecar-lock, session-start-memory, session-start-context, session-start-classification, pre-compact-memory, preamble, get-mtime)
@@ -129,6 +129,12 @@ All generated docs live under `.devflow/docs/` in the project root:
 │       ├── {focus}.md                 # Reviewer reports (security.md, etc.)
 │       ├── review-summary.md          # Synthesizer output
 │       └── resolution-summary.md      # Written by /resolve
+├── bug-analysis/{branch-slug}/         # Bug analysis reports per branch
+│   ├── .last-analysis-head            # HEAD SHA for incremental analysis
+│   └── {timestamp}/                   # Timestamped analysis directory
+│       ├── {focus}.md                 # Analyzer reports (security.md, functional.md, etc.)
+│       ├── static-findings.md         # Raw static analysis tool output
+│       └── bug-analysis-summary.md    # Synthesizer output
 ├── design/                            # Design artifacts from /plan
 └── research/{topic-slug}/             # Research artifacts per topic
     └── {YYYY-MM-DD_HHMM}/            # Timestamped research directory
@@ -182,7 +188,7 @@ Per-project runtime files live under `.devflow/`:
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.
 
-**Persisting agents**: Reviewer → `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md`, Synthesizer → `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` (review mode) / `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` (research mode), Researcher → `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md`, Resolver → `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md`, Working Memory → `.devflow/memory/WORKING-MEMORY.md` (automatic)
+**Persisting agents**: Reviewer → `.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md`, Synthesizer → `.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md` (review mode) / `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` (research mode) / `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` (bug-analysis mode), Researcher → `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md`, BugAnalyzer → `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md`, Resolver → `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md`, Working Memory → `.devflow/memory/WORKING-MEMORY.md` (automatic)
 
 **Incremental Reviews**: `/code-review` writes reports into timestamped subdirectories (`YYYY-MM-DD_HHMM`) and tracks HEAD SHA in `.last-review-head` for incremental diffs. Second review only diffs from last reviewed commit. `/resolve` defaults to latest timestamped directory. Both commands auto-discover git worktrees and process all reviewable branches in parallel. Multi-cycle convergence detection: loads the prior `resolution-summary.md` as `PRIOR_RESOLUTIONS` so reviewers avoid re-raising resolved false positives; at cycle 3+ the FP ratio is computed and a warning is emitted when it exceeds 70% (suggesting merge or manual inspection). At MAX_REVIEW_CYCLES (10) a warning is emitted but the pipeline continues — convergence info is surfaced in the Synthesizer's Convergence Status section, never blocking.
 
@@ -190,7 +196,7 @@ Per-project runtime files live under `.devflow/`:
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `shared/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
-**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher, bug-analyzer), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
 
 ## Agent & Command Roster
 
@@ -204,9 +210,10 @@ Per-project runtime files live under `.devflow/`:
 - `/self-review` — Simplifier then Scrutinizer (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/research` — Researcher agents + Skimmer + Synthesizer + Knowledge; multi-type research with trust-aware synthesis
 - `/release` — Git agent + Validator + Synthesizer; adaptive release with learned configuration
+- `/bug-analysis` — BugAnalyzer agents + Git + Synthesizer; proactive bug finding with static and semantic analysis, incremental by default
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
-**Shared agents** (14): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher
+**Shared agents** (15): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher, bug-analyzer
 
 **Plugin-specific agents** (1): claude-md-auditor
 

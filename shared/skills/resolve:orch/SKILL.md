@@ -24,19 +24,19 @@ This is a lightweight variant of `/resolve` for ambient mode. Excluded: pitfall 
 
 **Produces:** REVIEW_DIR, BRANCH_SLUG, PR_DESCRIPTION
 
-Find the latest timestamped directory under `.devflow/docs/reviews/` that:
+Derive `BRANCH_SLUG` from the current branch name: `git rev-parse --abbrev-ref HEAD` and replace `/` with `-`.
+
+Find the latest timestamped directory under `.devflow/docs/reviews/{BRANCH_SLUG}/` that:
 1. Contains a `review-summary.md` (has been reviewed)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
-If no unresolved review found in `.devflow/docs/reviews/`: check `.devflow/docs/bug-analysis/{branch_slug}/` for the latest timestamped directory that:
+If no unresolved review found: check `.devflow/docs/bug-analysis/{BRANCH_SLUG}/` for the latest timestamped directory that:
 1. Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
 If a bug-analysis directory qualifies, set `REVIEW_DIR` to that path and proceed — Resolver agents parse the same per-focus `.md` format.
 
 If neither reviews nor bug-analysis directories qualify: halt with "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
-
-Extract branch slug from the directory path.
 
 **Detect PR and fetch body**: Check for open PR on current branch:
 ```bash
@@ -149,7 +149,7 @@ Report to user:
 
 ## Error Handling
 
-- **No review directory**: Halt, suggest running review first
+- **No review directory**: Halt, suggest running `/code-review` or `/bug-analysis` first
 - **All issues false positive**: Report findings, write resolution-summary noting no changes needed
 - **Resolver BLOCKED**: Report which batch blocked, continue with remaining
 - **Simplifier fails**: Resolution still valid — report that simplification was skipped
@@ -165,6 +165,6 @@ Before reporting results, verify every phase was announced:
 - [ ] Phase 5: Resolve → RESOLUTION_RESULTS captured per batch
 - [ ] Phase 6: Collect & Simplify → SIMPLIFICATION_RESULTS captured
 - [ ] Phase 7: CI Status Gate → CI_STATUS captured (or skipped if no fixes/no PR/no CI)
-- [ ] Phase 8: Report → resolution-summary.md written
+- [ ] Phase 8: Report → results displayed to user
 
 If any phase is unchecked, execute it before proceeding.
