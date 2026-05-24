@@ -68,7 +68,7 @@ For each worktree:
 
 1. List directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`
 2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
-3. **Otherwise:** sort directories by name (timestamps are naturally sortable), select the latest that contains `review-summary.md` (complete review)
+3. **Otherwise:** sort directories by name descending (timestamps are naturally sortable), scan the 10 most recent directories only. Select the first that contains `review-summary.md` (complete review)
 4. **If latest directory already has `resolution-summary.md`:** the review is resolved — check bug-analysis fallback (step 5b).
 5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly (backwards compatible).
 

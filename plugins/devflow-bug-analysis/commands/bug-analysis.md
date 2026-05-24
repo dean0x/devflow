@@ -156,7 +156,7 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 
 #### Plan Artifact
 
-1. List `.devflow/docs/design/*.md` — sort descending by filename (timestamps are naturally sortable)
+1. List `.devflow/docs/design/*.md` — sort descending by filename (timestamps are naturally sortable), scan the 10 most recent
 2. Read the most recent file if it exists
 3. Extract `## Acceptance Criteria` section → parse into table: `| ID | Criterion | Type | Testable Condition |`
 4. Set `PLAN_CONTEXT` to plan summary; `ACCEPTANCE_RULES` to the table

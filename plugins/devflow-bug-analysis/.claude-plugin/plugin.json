@@ -24,7 +24,13 @@
   ],
   "skills": [
     "agent-teams",
-    "worktree-support",
-    "apply-feature-knowledge"
+    "apply-decisions",
+    "apply-feature-knowledge",
+    "complexity",
+    "consistency",
+    "regression",
+    "reliability",
+    "security",
+    "worktree-support"
   ]
 }
