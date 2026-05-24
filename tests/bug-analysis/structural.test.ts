@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { loadFile, extractSection } from '../helpers';
 
 const content = loadFile('plugins/devflow-bug-analysis/commands/bug-analysis.md');
+const agentContent = loadFile('shared/agents/bug-analyzer.md');
 
 // ---------------------------------------------------------------------------
 // Group 1: Phase ordering — Produces/Requires annotations
@@ -255,8 +256,6 @@ describe('bug-analysis.md — resolve compatibility', () => {
 // ---------------------------------------------------------------------------
 
 describe('bug-analyzer.md — output format section headers', () => {
-  const agentContent = loadFile('shared/agents/bug-analyzer.md');
-
   it('output template contains "Issues in Your Changes (BLOCKING)" section header', () => {
     expect(agentContent).toContain('## Issues in Your Changes (BLOCKING)');
   });
@@ -297,21 +296,17 @@ describe('bug-analyzer.md — output format section headers', () => {
 // ---------------------------------------------------------------------------
 
 describe('bug-analyzer.md — frontmatter skill declarations', () => {
-  const agentContent = loadFile('shared/agents/bug-analyzer.md');
+  const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
 
   it('frontmatter declares devflow:regression skill', () => {
-    // Extract YAML frontmatter (between --- delimiters)
-    const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
     expect(frontmatter).toContain('devflow:regression');
   });
 
   it('frontmatter declares devflow:consistency skill', () => {
-    const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
     expect(frontmatter).toContain('devflow:consistency');
   });
 
   it('frontmatter declares devflow:complexity skill', () => {
-    const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
     expect(frontmatter).toContain('devflow:complexity');
   });
 });
