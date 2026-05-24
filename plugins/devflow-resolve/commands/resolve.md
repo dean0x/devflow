@@ -314,7 +314,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 9: Write resolution-summary.md + display results
+└─ Phase 9: Display results (resolution-summary.md written in Phase 5)
 ```
 
 ## Edge Cases
@@ -327,7 +327,7 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
 | No actionable issues | Report "No issues to resolve" |
 | Incomplete review directory (no review-summary.md) | Skip — resolve only targets complete reviews |
-| Latest review already resolved | Skip worktree, report suggestion to run /code-review or /bug-analysis first |
+| Latest review already resolved | Check bug-analysis fallback (Step 0c-5b); if also absent, skip worktree and suggest `/code-review` or `/bug-analysis` |
 | Legacy flat layout (no subdirectories) | Read flat *.md files directly (backwards compatible) |
 | `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
 | Worktree pre-flight fails | Report failure, continue with other worktrees |

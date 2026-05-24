@@ -98,7 +98,6 @@ For each candidate finding with ≥60% confidence:
 Assign to each verified finding:
 - **Severity**: CRITICAL (data loss/security breach) | HIGH (wrong behavior, user impact) | MEDIUM (degraded experience, edge case) | LOW (cosmetic, minor UX)
 - **Confidence**: 0-100% based on certainty the issue is real
-- **Category** (for `/resolve` compatibility): CRITICAL/HIGH → Blocking; MEDIUM → Should Fix; LOW → Pre-existing
 
 ## Confidence Scale
 

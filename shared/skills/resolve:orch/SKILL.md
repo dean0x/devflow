@@ -26,11 +26,11 @@ This is a lightweight variant of `/resolve` for ambient mode. Excluded: pitfall 
 
 Derive `BRANCH_SLUG` from the current branch name: `git rev-parse --abbrev-ref HEAD` and replace `/` with `-`.
 
-Find the latest timestamped directory under `.devflow/docs/reviews/{BRANCH_SLUG}/` that:
+Sort directories under `.devflow/docs/reviews/{BRANCH_SLUG}/` by name descending, scan the 10 most recent. Select the first that:
 1. Contains a `review-summary.md` (has been reviewed)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
-If no unresolved review found: check `.devflow/docs/bug-analysis/{BRANCH_SLUG}/` for the latest timestamped directory. Sort by name descending and scan the 10 most recent directories only. Select the first that:
+If no unresolved review found: check `.devflow/docs/bug-analysis/{BRANCH_SLUG}/`. Sort by name descending, scan the 10 most recent directories only. Select the first that:
 1. Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
 2. Does NOT contain a `resolution-summary.md` (hasn't been resolved yet)
 
@@ -49,12 +49,16 @@ If no PR exists or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
 **Requires:** REVIEW_DIR
 
-Run `node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}"` to produce a compact index of active ADR/PF entries from `decisions.md` and `pitfalls.md`, with Deprecated/Superseded entries already stripped. Falls back to `(none)` when both files are absent or all entries are filtered. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 4. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
+```bash
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "." 2>/dev/null || echo "(none)")
+```
+
+Produces a compact index of active ADR/PF entries with Deprecated/Superseded entries stripped. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 5. Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
 
 Also load feature knowledge:
 1. Read `.devflow/features/index.json` if it exists
 2. Based on file paths from review report issue entries, identify relevant feature knowledge entries
-3. Read matching `.devflow/features/{slug}/KNOWLEDGE.md` files, check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`
+3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "." {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
 4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
 
 ## Phase 3: Parse Issues
