@@ -259,6 +259,13 @@ describe('optional plugin flag', () => {
     expect(bugAnalysis!.skills).toContain('agent-teams');
     expect(bugAnalysis!.skills).toContain('worktree-support');
     expect(bugAnalysis!.skills).toContain('apply-feature-knowledge');
+    // Skills added in batch-2: apply-decisions + the 5 bug-analyzer category skills
+    expect(bugAnalysis!.skills).toContain('apply-decisions');
+    expect(bugAnalysis!.skills).toContain('security');
+    expect(bugAnalysis!.skills).toContain('reliability');
+    expect(bugAnalysis!.skills).toContain('regression');
+    expect(bugAnalysis!.skills).toContain('consistency');
+    expect(bugAnalysis!.skills).toContain('complexity');
     // Single command
     expect(bugAnalysis!.commands).toContain('/bug-analysis');
     // Not optional — ships as a core plugin

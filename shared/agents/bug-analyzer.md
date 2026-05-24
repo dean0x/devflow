@@ -110,12 +110,13 @@ Assign to each verified finding:
 
 **Threshold**: ≥80% → main issue sections. 60-79% → `## Suggestions`. <60% → dropped.
 
-**Category mapping** (for `/resolve` compatibility — approximation since BugAnalyzer focuses on diff-changed code):
+**Category mapping** (for `/resolve` compatibility — severity-based approximation):
+
+> **Trade-off**: The Reviewer uses location-based categories (lines you added / lines you touched / unchanged lines). BugAnalyzer focuses on diff-changed code and lacks per-line location context, so it approximates using severity as a proxy. This means a LOW-severity bug in newly-added code is placed in Pre-existing — not because it predates the change, but to signal lower urgency. Resolvers should treat Pre-existing findings from BugAnalyzer as low-urgency, not as assertions about code origin.
+
 - CRITICAL / HIGH severity → `## Issues in Your Changes (BLOCKING)` — must fix before merge
 - MEDIUM severity → `## Issues in Code You Touched (Should Fix)` — fix while here
-- LOW severity → `## Pre-existing Issues (Not Blocking)` — informational
-
-> Note: BugAnalyzer's diff-first principle means findings are almost always in changed code. The category mapping approximates the reviewer's location-based categories using severity as a proxy. LOW findings in changed code are placed in Pre-existing to signal lower urgency, not to assert the bug predates the change.
+- LOW severity → `## Pre-existing Issues (Not Blocking)` — lower urgency (not necessarily pre-existing)
 
 **Plan-context modifier**: +10% confidence if the finding directly cites an `ACCEPTANCE_RULE` ID that is unmet. -15% confidence ceiling if `PLAN_CONTEXT` is `(none)` (semantic-only analysis is less certain).
 
@@ -193,7 +194,6 @@ Report format for `{OUTPUT_PATH}`:
 | Blocking | {n} | {n} | - | - |
 | Should Fix | - | - | {n} | - |
 | Pre-existing | - | - | - | {n} |
-| Suggestions | - | - | - | {n} |
 
 **{Focus} Risk**: {CRITICAL | HIGH | MEDIUM | LOW | CLEAN}
 **Recommendation**: {BLOCK | CHANGES_REQUESTED | APPROVED_WITH_CONDITIONS | APPROVED}
