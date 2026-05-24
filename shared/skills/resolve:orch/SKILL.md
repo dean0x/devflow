@@ -50,7 +50,7 @@ If no PR exists or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Requires:** REVIEW_DIR
 
 ```bash
-DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "{worktree}" 2>/dev/null || echo "(none)")
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "." 2>/dev/null || echo "(none)")
 ```
 
 Produces a compact index of active ADR/PF entries with Deprecated/Superseded entries stripped. Pass `DECISIONS_CONTEXT` to every Resolver agent in Phase 5 (Resolve). Resolver agents use `devflow:apply-decisions` to Read full entry bodies on demand — no fan-out of the full corpus.
