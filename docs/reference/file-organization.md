@@ -9,18 +9,18 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (44 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (66 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
 │   │   ├── software-design/
 │   │   └── ...
-│   └── agents/                       # SINGLE SOURCE OF TRUTH (13 shared agents)
+│   └── agents/                       # SINGLE SOURCE OF TRUTH (15 shared agents)
 │       ├── git.md
 │       ├── synthesizer.md
 │       ├── coder.md
 │       └── ...
-├── plugins/                          # Plugin collection (17 plugins)
+├── plugins/                          # Plugin collection (21 plugins)
 │   ├── devflow-plan/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
@@ -32,7 +32,12 @@ devflow/
 │   ├── devflow-code-review/
 │   ├── devflow-resolve/
 │   ├── devflow-debug/
+│   ├── devflow-explore/
+│   ├── devflow-research/
+│   ├── devflow-release/
 │   ├── devflow-self-review/
+│   ├── devflow-bug-analysis/
+│   ├── devflow-ambient/
 │   ├── devflow-core-skills/
 │   └── devflow-audit-claude/
 ├── docs/
@@ -42,22 +47,24 @@ devflow/
 │   ├── build-hud.js                  # Copies dist/hud/ → scripts/hud/
 │   ├── hud.sh                        # Thin wrapper: exec node hud/index.js
 │   ├── hud/                          # GENERATED — compiled HUD module (gitignored)
-│   └── hooks/                        # Working Memory + ambient + learning + knowledge base hooks
-│       ├── stop-update-memory       # Stop hook: writes WORKING-MEMORY.md
+│   └── hooks/                        # Sidecar + ambient + memory hooks
+│       ├── sidecar-capture          # Stop hook: captures turns to queue, writes markers
+│       ├── sidecar-dispatch         # UserPromptSubmit hook: captures turn, scans markers, injects SIDECAR
+│       ├── sidecar-evaluate         # SessionEnd hook: evaluates learning/decisions/knowledge triggers
+│       ├── sidecar-lock             # Shared helper: mkdir-based locking
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
+│       ├── session-start-context    # SessionStart hook: injects decisions TL;DR + learned behaviors
+│       ├── session-start-classification # SessionStart hook: injects ambient classification rules
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
-│       ├── prompt-capture-memory   # UserPromptSubmit hook: captures prompts to queue
-│       ├── background-memory-update # Background: queue-based WORKING-MEMORY.md updater
-│       ├── preamble                # UserPromptSubmit hook: ambient skill injection (zero file I/O)
-│       ├── session-end-learning      # SessionEnd hook: batched learning trigger
-│       ├── stop-update-learning     # Stop hook: deprecated stub (upgrade via devflow learn)
-│       ├── background-learning      # Background: pattern detection via Sonnet
-│       ├── session-end-knowledge-refresh   # SessionEnd hook: stale knowledge base detection + background spawn
-│       ├── background-knowledge-refresh    # Background: knowledge base refresher via Sonnet
+│       ├── preamble                 # UserPromptSubmit hook: ambient skill injection (zero file I/O)
 │       ├── get-mtime                # Shared helper: portable mtime (BSD/GNU stat)
-│       ├── json-helper.cjs           # Node.js jq-equivalent operations
+│       ├── run-hook                 # Shared helper: hook runner with logging
+│       ├── log-paths                # Shared helper: per-project log path resolution
+│       ├── ensure-devflow-init      # Shared helper: lazy .devflow/ directory creation
+│       ├── decisions-usage-scan.cjs # Decisions usage scanning
+│       ├── json-helper.cjs          # Node.js jq-equivalent operations
 │       ├── json-parse               # Shell wrapper: jq with node fallback
-│       └── lib/                      # Node.js helper modules
+│       └── lib/                     # Node.js helper modules
 │           ├── feature-knowledge.cjs  # Feature knowledge base index operations (CRUD, staleness)
 │           ├── decisions-index.cjs    # Decisions index builder
 │           ├── staleness.cjs          # Code reference staleness checker
@@ -69,7 +76,12 @@ devflow/
         │   ├── list.ts
         │   ├── memory.ts
         │   ├── learn.ts
+        │   ├── decisions.ts
         │   ├── ambient.ts
+        │   ├── flags.ts
+        │   ├── rules.ts
+        │   ├── skills.ts
+        │   ├── context.ts
         │   ├── hud.ts
         │   └── uninstall.ts
         ├── hud/                          # HUD module (TypeScript source)
@@ -145,7 +157,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 ### Shared vs Plugin-Specific Agents
 
-- **Shared** (13): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`
+- **Shared** (15): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`
 - **Plugin-specific** (1): `claude-md-auditor` — committed directly in its plugin
 
 ## Settings Override
@@ -154,34 +166,31 @@ Skills and agents are **not duplicated** in git. Instead:
 
 Included settings:
 - `statusLine` - Configurable HUD with presets (replaces legacy statusline.sh)
-- `hooks` - Working Memory hooks (UserPromptSubmit, Stop, SessionStart, PreCompact) + Learning SessionEnd hook + knowledge base SessionEnd hook
+- `hooks` - Sidecar hooks (UserPromptSubmit, Stop, SessionStart, SessionEnd, PreCompact)
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
 - `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
 - `extraKnownMarketplaces` - Devflow plugin marketplace (`dean0x/devflow`)
 - `permissions.deny` - Security deny list (140 blocked operations) + sensitive file patterns
 
-## Working Memory Hooks
+## Sidecar Hooks
 
-Four hooks in `scripts/hooks/` provide automatic session continuity. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
+Three shell-script hooks replace the old 8-hook system with a sidecar architecture. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
 
-A fifth hook (`session-end-knowledge-refresh`) provides feature knowledge base maintenance. Toggleable via `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`.
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `sidecar-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue, writes sidecar markers when throttle expires |
+| `sidecar-dispatch` | UserPromptSubmit | Captures user turn to queue, scans `.devflow/sidecar/` for pending markers, injects SIDECAR directive |
+| `sidecar-evaluate` | SessionEnd | Evaluates whether to trigger learning, decisions, or knowledge refresh; writes per-session markers |
+| `session-start-memory` | SessionStart | Injects previous memory + git state as `additionalContext`. Warns if >1h stale |
+| `session-start-context` | SessionStart | Injects decisions TL;DR + learned behaviors |
+| `session-start-classification` | SessionStart | Injects ambient classification rules |
+| `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
+| `preamble` | UserPromptSubmit | Ambient skill injection (zero file I/O) |
 
-A sixth hook (`session-end-learning`) provides self-learning. Toggleable via `devflow learn --enable/--disable/--status` or `devflow init --learn/--no-learn`:
+**Flow**: User sends prompt → `sidecar-dispatch` captures turn to queue and scans for pending sidecar markers → session ends → `sidecar-capture` appends assistant turn to queue, writes markers when throttle has expired (>2min) → `sidecar-evaluate` triggers background agents for memory/learning/decisions/knowledge. On `/clear` or new session → `session-start-memory` injects memory as `additionalContext` with staleness warning if >1h old.
 
-| Hook | Event | File | Purpose |
-|------|-------|------|---------|
-| `prompt-capture-memory` | UserPromptSubmit | `.devflow/memory/.pending-turns.jsonl` | Captures user prompts to queue. Zero classification overhead. |
-| `stop-update-memory` | Stop | `.devflow/memory/.pending-turns.jsonl` | Captures assistant turns to queue. Throttled (skips if <2min fresh). Spawns background updater. |
-| `background-memory-update` | (background) | `.devflow/memory/WORKING-MEMORY.md` | Queue-based updater spawned by stop-update-memory. Reads queued turns + git state, writes WORKING-MEMORY.md via `claude -p --model haiku`. |
-| `session-start-memory` | SessionStart | reads WORKING-MEMORY.md | Injects previous memory + git state as `additionalContext`. Warns if >1h stale. Injects pre-compact snapshot when compaction occurred mid-session. |
-| `pre-compact-memory` | PreCompact | `.devflow/memory/backup.json` | Saves git state + WORKING-MEMORY.md snapshot. Bootstraps minimal WORKING-MEMORY.md if none exists. |
-| `session-end-knowledge-refresh` | SessionEnd | `.devflow/features/index.json` | Checks for stale feature knowledge bases. Throttled (<2h). Spawns background-knowledge-refresh. |
-| `background-knowledge-refresh` | (background) | `.devflow/features/{slug}/KNOWLEDGE.md` | Knowledge base refresher. Up to 3 stale knowledge bases via `claude -p --model sonnet`. |
-
-**Flow**: User sends prompt → UserPromptSubmit hook (prompt-capture-memory) appends user turn to `.devflow/memory/.pending-turns.jsonl`. Session ends → Stop hook appends assistant turn to queue, checks throttle (skips if <2min fresh), spawns background updater → background updater reads queued turns + git state → fresh `claude -p --model haiku` writes WORKING-MEMORY.md. On `/clear` or new session → SessionStart injects memory as `additionalContext` (system context, not user-visible) with staleness warning if >1h old.
-
-`devflow memory --disable` removes all four hooks. Use `devflow memory --clear` to clean up pending queue files (`.pending-turns.jsonl`, `.pending-turns.processing`) across all projects.
+`devflow memory --disable` disables the memory sidecar. Use `devflow memory --clear` to clean up pending queue files across all projects.
 
 Hooks auto-create `.devflow/` on first run — no manual setup needed per project.
 

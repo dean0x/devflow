@@ -1,6 +1,6 @@
 # Commands
 
-Devflow provides six commands that orchestrate specialized agents. Commands spawn agents — they never do the work themselves.
+Devflow provides commands that orchestrate specialized agents. Commands spawn agents — they never do the work themselves.
 
 ## /plan
 
@@ -106,6 +106,66 @@ Self-review workflow that runs two sequential quality passes:
 
 ```
 /self-review                 # Review recent changes
+```
+
+## /explore
+
+Structured codebase exploration with optional feature knowledge base creation:
+
+1. **Orient** — Skimmer identifies relevant files and patterns
+2. **Deep Dive** — Explore agents analyze architecture, flows, and conventions
+3. **Synthesize** — Combine findings into a structured summary
+4. **Persist** — Optionally create a feature knowledge base in `.devflow/features/`
+
+```
+/explore "how does the auth middleware work"
+/explore "map the data pipeline"
+```
+
+## /research
+
+Multi-type research with parallel investigators and trust-aware synthesis:
+
+1. **Classify** — Determine research types needed (codebase, external, competitor, market, technology)
+2. **Investigate** — Parallel researcher agents explore each domain
+3. **Synthesize** — Trust-aware synthesis weights sources by reliability
+4. **Report** — Structured findings in `.devflow/docs/research/`
+
+```
+/research "what rate limiting libraries exist for Node.js"
+/research "how do competitors handle file uploads"
+```
+
+## /release
+
+Adaptive project release with learned configuration:
+
+1. **Pre-flight** — Validate branch state, changelog, and version
+2. **Execute** — Run release steps (version bump, tag, publish)
+3. **Report** — Summary of release outcome
+
+Configuration is learned from prior releases and stored in `.release/RELEASE-FLOW.md`.
+
+```
+/release                     # Release using learned config
+/release patch               # Specify version bump type
+```
+
+## /bug-analysis
+
+Proactive bug finding with static and semantic analysis. Runs specialized analyzers in parallel to find bugs before code review:
+
+1. **Setup** — Determine branch diff, check for incremental analysis via `.last-analysis-head`
+2. **Static Analysis** — Run available static analysis tools (Snyk, CodeQL, etc.)
+3. **Semantic Analysis** — Parallel BugAnalyzer agents examine code for functional, security, performance, and reliability issues
+4. **Synthesize** — Combine static and semantic findings into actionable report
+5. **Report** — Write findings to `.devflow/docs/bug-analysis/`
+
+Incremental by default — only analyzes commits since the last run. Findings are compatible with `/resolve` for automatic issue resolution.
+
+```
+/bug-analysis                # Analyze current branch (incremental)
+/bug-analysis --full         # Full analysis (ignore previous runs)
 ```
 
 ## Ambient Mode
