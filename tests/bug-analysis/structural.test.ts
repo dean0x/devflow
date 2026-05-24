@@ -251,7 +251,73 @@ describe('bug-analysis.md — resolve compatibility', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 7: Cross-cutting structural consistency
+// Group 7: bug-analyzer.md — output format section headers
+// ---------------------------------------------------------------------------
+
+describe('bug-analyzer.md — output format section headers', () => {
+  const agentContent = loadFile('shared/agents/bug-analyzer.md');
+
+  it('output template contains "Issues in Your Changes (BLOCKING)" section header', () => {
+    expect(agentContent).toContain('## Issues in Your Changes (BLOCKING)');
+  });
+
+  it('output template contains "Issues in Code You Touched (Should Fix)" section header', () => {
+    expect(agentContent).toContain('## Issues in Code You Touched (Should Fix)');
+  });
+
+  it('output template contains "Pre-existing Issues (Not Blocking)" section header', () => {
+    expect(agentContent).toContain('## Pre-existing Issues (Not Blocking)');
+  });
+
+  it('severity-to-category mapping documents CRITICAL/HIGH → BLOCKING', () => {
+    expect(agentContent).toMatch(/CRITICAL.*BLOCKING|HIGH.*BLOCKING/s);
+  });
+
+  it('severity-to-category mapping documents MEDIUM → Should Fix', () => {
+    expect(agentContent).toMatch(/MEDIUM.*[Ss]hould [Ff]ix/s);
+  });
+
+  it('severity-to-category mapping documents LOW → Pre-existing', () => {
+    expect(agentContent).toMatch(/LOW.*[Pp]re.existing/s);
+  });
+
+  it('output template contains summary matrix table with Category × Severity columns', () => {
+    // The summary section must have a table with both Category and severity columns
+    const summarySection = extractSection(agentContent, '## Summary', '## Principles');
+    expect(summarySection).toMatch(/Category.*CRITICAL.*HIGH.*MEDIUM.*LOW/s);
+  });
+
+  it('output template contains Recommendation footer line', () => {
+    expect(agentContent).toContain('**Recommendation**');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 8: bug-analyzer.md — frontmatter skill declarations
+// ---------------------------------------------------------------------------
+
+describe('bug-analyzer.md — frontmatter skill declarations', () => {
+  const agentContent = loadFile('shared/agents/bug-analyzer.md');
+
+  it('frontmatter declares devflow:regression skill', () => {
+    // Extract YAML frontmatter (between --- delimiters)
+    const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
+    expect(frontmatter).toContain('devflow:regression');
+  });
+
+  it('frontmatter declares devflow:consistency skill', () => {
+    const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
+    expect(frontmatter).toContain('devflow:consistency');
+  });
+
+  it('frontmatter declares devflow:complexity skill', () => {
+    const frontmatter = agentContent.slice(0, agentContent.indexOf('\n---\n', 1) + 1);
+    expect(frontmatter).toContain('devflow:complexity');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 9: Cross-cutting structural consistency
 // ---------------------------------------------------------------------------
 
 describe('bug-analysis.md — cross-cutting consistency', () => {

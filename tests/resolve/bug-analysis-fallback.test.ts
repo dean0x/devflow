@@ -31,8 +31,7 @@ describe('resolve.md — bug-analysis fallback (Step 0c-5b)', () => {
   });
 
   it('fallback scans bug-analysis directory under {worktree}/.devflow/docs/bug-analysis/', () => {
-    const content_ = loadFile('plugins/devflow-resolve/commands/resolve.md');
-    expect(content_).toContain('.devflow/docs/bug-analysis/');
+    expect(content).toContain('.devflow/docs/bug-analysis/');
   });
 
   it('fallback selects directory containing at least one focus report', () => {
@@ -110,18 +109,56 @@ describe('resolve.md — Edge Cases table covers bug-analysis scenarios', () => 
   const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
 
   it('Edge Cases table covers "No reviews exist" with bug-analysis fallback note', () => {
-    // After the main phases there is an Edge Cases section
-    const afterPhases = content.slice(content.indexOf('## ') + 3);
-    // Look for edge cases section anywhere in the file
-    const edgeCasesIdx = content.search(/## Edge Cases|### Edge Cases/);
-    if (edgeCasesIdx !== -1) {
-      const edgeCases = content.slice(edgeCasesIdx);
-      expect(edgeCases).toMatch(/[Nn]o reviews exist|no.*review.*found/i);
-      expect(edgeCases).toMatch(/bug.analysis/i);
-    } else {
-      // The edge case may be inline in Step 0c — verify the fallback exists there
-      const step0c = extractSection(content, 'Step 0c:', 'Step 0d:');
-      expect(step0c).toMatch(/bug.analysis/i);
-    }
+    // resolve.md has a dedicated ## Edge Cases section — assert it unconditionally
+    const edgeCases = extractSection(content, '## Edge Cases', '## Principles');
+    expect(edgeCases).toMatch(/[Nn]o reviews exist|no.*review.*found/i);
+    expect(edgeCases).toMatch(/bug.analysis/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Group 5: resolve:orch SKILL.md — bug-analysis fallback (Phase 1)
+// ---------------------------------------------------------------------------
+
+describe('resolve:orch SKILL.md — bug-analysis fallback (Phase 1)', () => {
+  const content = loadFile('shared/skills/resolve:orch/SKILL.md');
+
+  it('Phase 1 contains bug-analysis fallback path', () => {
+    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
+    expect(phase1).toMatch(/bug.analysis/i);
+  });
+
+  it('Phase 1 reviews path scans at most 10 most recent directories', () => {
+    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
+    expect(phase1).toMatch(/10\s+(most recent|directories)|scan.*10|10.*scan/i);
+  });
+
+  it('Phase 1 bug-analysis fallback also scans at most 10 most recent directories', () => {
+    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
+    // The scan limit must be mentioned in the bug-analysis fallback sub-path too
+    const bugAnalysisPart = phase1.slice(phase1.search(/bug.analysis/i));
+    expect(bugAnalysisPart).toMatch(/10\s+(most recent|directories)|scan.*10|10.*scan/i);
+  });
+
+  it('Phase 3 excludes bug-analysis-summary.md from issue extraction', () => {
+    const phase3 = extractSection(content, '## Phase 3:', '## Phase 4:');
+    expect(phase3).toContain('bug-analysis-summary.md');
+  });
+
+  it('Phase 3 excludes static-findings.md from issue extraction', () => {
+    const phase3 = extractSection(content, '## Phase 3:', '## Phase 4:');
+    expect(phase3).toContain('static-findings.md');
+  });
+
+  it('error handling mentions both /code-review and /bug-analysis', () => {
+    const errorHandling = extractSection(content, '## Error Handling', '## Phase Completion Checklist');
+    expect(errorHandling).toContain('/code-review');
+    expect(errorHandling).toContain('/bug-analysis');
+  });
+
+  it('Phase 1 halt message mentions both /code-review and /bug-analysis', () => {
+    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
+    expect(phase1).toContain('/code-review');
+    expect(phase1).toContain('/bug-analysis');
   });
 });

@@ -129,7 +129,17 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Proactive bug finding with static and semantic analysis',
     commands: ['/bug-analysis'],
     agents: ['git', 'bug-analyzer', 'synthesizer'],
-    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge'],
+    skills: [
+      'agent-teams',
+      'apply-decisions',
+      'apply-feature-knowledge',
+      'complexity',
+      'consistency',
+      'regression',
+      'reliability',
+      'security',
+      'worktree-support',
+    ],
     rules: [],
   },
   {
