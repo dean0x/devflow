@@ -63,8 +63,10 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Requires:** DIFF_RANGE
 
 ```bash
-git diff --name-only {DIFF_RANGE}
+CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})
 ```
+
+Store result as `CHANGED_FILES` — used throughout Steps 2d and Phase 4 to avoid repeated git invocations and ensure consistency.
 
 If output is empty → "No changes to analyze." Stop.
 
@@ -91,21 +93,24 @@ If some are available: note which tools will run.
 
 Skip if `--no-static` flag provided or all tools unavailable.
 
-Run available tools on the changed files (from Step 2b):
+Run available tools on the changed files (from `CHANGED_FILES` computed in Step 2b).
+
+**Semgrep and Snyk run in parallel** — launch both in the background, then wait for both before proceeding to CodeQL. CodeQL is conditional and sequential (it needs Semgrep/Snyk results to decide whether to run).
 
 **Semgrep** (if available):
 ```bash
-# Use xargs with NUL-delimited filenames to prevent shell injection from metacharacters in paths
-git diff --name-only {DIFF_RANGE} | xargs -d '\n' timeout 300 semgrep scan --config auto --sarif --quiet 2>/dev/null
+# tr '\n' '\0' + xargs -0 is portable across GNU and BSD xargs (macOS ships BSD xargs, which lacks -d)
+echo "$CHANGED_FILES" | tr '\n' '\0' | xargs -0 timeout 300 semgrep scan --config auto --sarif --quiet 2>/dev/null
 ```
 Parse SARIF output → extract findings.
 
 **Snyk Code** (if available):
 ```bash
-# Scope scan to changed files only via --include patterns to avoid full-project scan cost
-git diff --name-only {DIFF_RANGE} | xargs -d '\n' -I{} timeout 300 snyk code test --sarif --file={} 2>/dev/null
+# Run a single project-level scan; filter SARIF results to CHANGED_FILES afterward.
+# Per-file invocation via xargs would invoke snyk O(n) times and --file is for dependency scanning, not source code.
+timeout 300 snyk code test --sarif 2>/dev/null
 ```
-Parse SARIF output → extract findings.
+Parse SARIF output → filter findings to only those whose file path appears in `CHANGED_FILES` → extract findings.
 
 **CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings)):
 ```bash
@@ -115,10 +120,12 @@ timeout 600 codeql database create "${CODEQL_TMP}/db" --language={detected-langu
 timeout 600 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
 # Capture exit status before cleanup so cleanup doesn't mask failures
 CODEQL_EXIT=$?
+# Parse SARIF output BEFORE cleanup — rm -rf destroys results.sarif
+CODEQL_SARIF=$(cat "${CODEQL_TMP}/results.sarif" 2>/dev/null || echo "")
 # Always clean up temp directory regardless of success or failure
 rm -rf "${CODEQL_TMP}"
 ```
-Parse SARIF output from `${CODEQL_TMP}/results.sarif` immediately after the `codeql database analyze` step and before the `rm -rf` cleanup. If database creation fails or timeout occurs: still run `rm -rf "${CODEQL_TMP}"`, then skip CodeQL and note it.
+Parse `CODEQL_SARIF` → extract findings. If database creation fails, `codeql_exit` is non-zero — skip CodeQL findings and note it. If timeout occurs: still run `rm -rf "${CODEQL_TMP}"` in a `finally`-equivalent step, then skip CodeQL and note it.
 
 **Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum to bound the serialized size of `STATIC_FINDINGS`:
 
@@ -160,11 +167,7 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 **Produces:** ACTIVE_FOCUSES
 **Requires:** DIFF_RANGE
 
-Determine which focus analyzers to run:
-
-```bash
-CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})
-```
+Determine which focus analyzers to run using `CHANGED_FILES` (already computed in Step 2b — do not re-run `git diff`):
 
 | Focus | Condition |
 |-------|-----------|
