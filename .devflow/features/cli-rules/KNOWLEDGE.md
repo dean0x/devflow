@@ -17,7 +17,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-05-19
+updated: 2026-05-24
 ---
 
 # Rules System CLI
@@ -26,7 +26,7 @@ updated: 2026-05-19
 
 Rules are ultra-condensed, always-on engineering principle files (~10 lines each) installed as flat `.md` files to `~/.claude/rules/devflow/`. Claude Code loads them automatically on every prompt, filling the guidance gap for quick edits that don't trigger a full skill pipeline. The system mirrors the skill build pipeline exactly: rules live in `shared/rules/`, are declared in `plugin.json` manifests and `DEVFLOW_PLUGINS`, distributed to plugins at build time, and installed (or shadowed) at runtime.
 
-Unlike skills, which install universally from all plugins, rules are **plugin-scoped**: only rules belonging to the currently installed plugins are installed. This keeps core rules (security, engineering, quality, reliability) always present and optional-plugin rules (typescript, react, go, etc.) only present when the user has that plugin installed.
+Unlike skills, which install universally from all plugins, rules are **plugin-scoped**: only rules belonging to the currently installed plugins are installed. This keeps core rules (security, engineering, quality, reliability) always present and optional-plugin rules (typescript, react, accessibility, ui-design, go, java, python, rust) only present when the user has that plugin installed. There are currently 12 rules total: 4 core + 8 language/ecosystem.
 
 ## System Context
 
@@ -73,7 +73,7 @@ Rules must be ultra-concise — ~10-15 lines total. Longer explanations belong i
 
 ### Plugin Declaration
 
-Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `rules` field (`string[]`). Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust:
+Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `rules` field (`string[]`). Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust. Non-language optional plugins (devflow-audit-claude) and all workflow plugins (devflow-implement, devflow-plan, devflow-code-review, devflow-resolve, devflow-debug, devflow-explore, devflow-research, devflow-release, devflow-self-review, devflow-bug-analysis, devflow-ambient) have `rules: []`. Only `devflow-core-skills` and the 8 language/UI plugins carry rules:
 
 ```typescript
 // In DEVFLOW_PLUGINS:
@@ -196,7 +196,7 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 
 ## Gotchas
 
-- **Rules are not cleaned between partial installs via init**: On `devflow init --plugin=typescript` (partial install), the existing `~/.claude/rules/devflow/` directory is NOT wiped first (only commands and agents directories are wiped on full install). Use `devflow rules --enable` to get a clean reinstall of the current plugin set — it always wipes first.
+- **Rules ARE wiped on full install but not on partial**: `installViaFileCopy` wipes `~/.claude/rules/devflow/` at the start of a full install (alongside commands and agents). On a partial install (`devflow init --plugin=typescript`), the rules directory is NOT wiped — only per-plugin assets are overwritten. Use `devflow rules --enable` to get a clean reinstall of the current plugin set — it always wipes first regardless of install mode.
 - **`devflow rules --enable` resolves plugin dirs from dist/**: The command computes the plugins directory as `path.resolve(__dirname, '../..', 'plugins')` relative to the compiled CLI file. In development, this means running the command against `dist/plugins/`, so you must build before running.
 - **Shadow files are flat, not directories**: Skills shadow at `~/.devflow/skills/{name}/` (a directory). Rules shadow at `~/.devflow/rules/{name}.md` (a flat file). The `isShadowed` check uses `fs.access()` on the flat path, not `fs.stat()` for a directory.
 - **Manifest defaults `rules: true` on read**: Old manifests without the `rules` field are read as `rules: true`. This means upgrading users get rules enabled automatically, which is the desired behavior but worth knowing when reading the manifest.

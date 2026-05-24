@@ -1,4 +1,4 @@
-<!-- TL;DR: 3 decisions. Key: ADR-001, ADR-002, ADR-003 -->
+<!-- TL;DR: 6 decisions. Key: ADR-001, ADR-002, ADR-003, ADR-004, ADR-005, ADR-006 -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.
@@ -29,3 +29,30 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: The `.devflow/.gitignore` template (applied at `devflow init` time) must explicitly exclude all transient per-developer artifacts (`learning/debug/`, runtime logs, in-progress state files) while still tracking project-level artifacts (`features/` knowledge bases, `decisions/`, sidecar markers).
 - **Consequences**: Clean git status after init across all projects. No accidental commits of session-transient data. Template is the single place to maintain this exclusion list.
 - **Source**: self-learning:obs_okp1fh
+
+## ADR-004: /bug-analysis must be a completely separate workflow from the Evaluator
+
+- **Date**: 2026-05-23
+- **Status**: Accepted
+- **Context**: The Evaluator agent already performs intent-vs-implementation comparison inside the implement pipeline (receives ORIGINAL_REQUEST, EXECUTION_PLAN, FILES_CHANGED, ACCEPTANCE_CRITERIA and performs goal-backward verification). When designing /bug-analysis, the question arose whether to integrate with the Evaluator or build a separate workflow.
+- **Decision**: Create `/bug-analysis` as a completely independent post-pipeline workflow rather than extending the Evaluator.
+- **Consequences**: Three non-substitutable properties make them distinct — (1) Timing: Evaluator sees pre-review code, bug-analysis sees the final post-resolve code; (2) Persistence: Evaluator findings are ephemeral (not written to disk), bug-analysis writes reports to `.devflow/docs/bug-analysis/`; (3) Circularity: Evaluator shares session/model with the Coder, while bug-analysis is fully independent. Separation avoids conflating mid-pipeline quality checks with final-state bug detection.
+- **Source**: self-learning:obs_686xoq
+
+## ADR-005: Bug analysis scope includes business logic bugs via upstream plan/PRD intent
+
+- **Date**: 2026-05-23
+- **Status**: Accepted
+- **Context**: Initial research scoped out business logic bugs as undetectable by static analysis tools. Devflow's post-pipeline position (after plan→implement→review→resolve) means bug-analysis agents can access plan documents and PRD intent — information no general-purpose static tool has.
+- **Decision**: Bug analysis must include business logic bugs, functional usability bugs, and integration bugs by providing LLM agents with upstream plan/PRD context alongside the code, enabling plan-intent vs implementation comparison.
+- **Consequences**: Devflow gains a unique capability not present in any surveyed tool — LLM agents compare "the plan says X should happen when Y" against "the code does Z when Y". This is only possible because bug-analysis runs post-pipeline with access to the full artifact chain. Bug categories: security, functional, integration, usability, and business logic.
+- **Source**: self-learning:obs_3pp5sq
+
+## ADR-006: Bug analysis uses hybrid static analysis + LLM semantic reasoning architecture
+
+- **Date**: 2026-05-23
+- **Status**: Accepted
+- **Context**: Three independent research streams (codebase, external, academic) converged on the same architecture. Semgrep (~10s, single-file pattern matching) and CodeQL (minutes, cross-file data flow) each cover different threat classes. LLM semantic reasoning alone without static candidates has high false-negative rates.
+- **Decision**: Use a hybrid approach: Semgrep and CodeQL run in parallel as static candidate generators producing structured alerts, which are then fed to LLM semantic reasoning agents that filter false positives and reason about business logic, feasibility, and intent.
+- **Consequences**: Static tools provide speed and breadth of coverage while LLM agents handle semantic reasoning neither tool can do alone. Multi-agent consensus prevents model-specific error amplification. Production deployment (Tencent LLM4PFA) reports 94-98% false positive reduction using this pattern.
+- **Source**: self-learning:obs_dwm8fa
