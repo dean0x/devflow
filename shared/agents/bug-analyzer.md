@@ -110,10 +110,12 @@ Assign to each verified finding:
 
 **Threshold**: ≥80% → main issue sections. 60-79% → `## Suggestions`. <60% → dropped.
 
-**Category mapping** (for `/resolve` compatibility):
+**Category mapping** (for `/resolve` compatibility — approximation since BugAnalyzer focuses on diff-changed code):
 - CRITICAL / HIGH severity → `## Issues in Your Changes (BLOCKING)` — must fix before merge
 - MEDIUM severity → `## Issues in Code You Touched (Should Fix)` — fix while here
 - LOW severity → `## Pre-existing Issues (Not Blocking)` — informational
+
+> Note: BugAnalyzer's diff-first principle means findings are almost always in changed code. The category mapping approximates the reviewer's location-based categories using severity as a proxy. LOW findings in changed code are placed in Pre-existing to signal lower urgency, not to assert the bug predates the change.
 
 **Plan-context modifier**: +10% confidence if the finding directly cites an `ACCEPTANCE_RULE` ID that is unmet. -15% confidence ceiling if `PLAN_CONTEXT` is `(none)` (semantic-only analysis is less certain).
 
@@ -186,15 +188,15 @@ Report format for `{OUTPUT_PATH}`:
 - **{Issue}** — `file.ts:456` (Confidence: {n}%) — {brief description}
 
 ## Summary
-| Severity | Count |
-|----------|-------|
-| CRITICAL | {n} |
-| HIGH | {n} |
-| MEDIUM | {n} |
-| LOW | {n} |
-| Suggestions | {n} |
+| Category | CRITICAL | HIGH | MEDIUM | LOW |
+|----------|----------|------|--------|-----|
+| Blocking | {n} | {n} | - | - |
+| Should Fix | - | - | {n} | - |
+| Pre-existing | - | - | - | {n} |
+| Suggestions | - | - | - | {n} |
 
 **{Focus} Risk**: {CRITICAL | HIGH | MEDIUM | LOW | CLEAN}
+**Recommendation**: {BLOCK | CHANGES_REQUESTED | APPROVED_WITH_CONDITIONS | APPROVED}
 ```
 
 ## Principles
