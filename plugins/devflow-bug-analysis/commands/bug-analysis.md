@@ -106,26 +106,35 @@ Parse SARIF output → extract findings.
 
 **Snyk Code** (if available):
 ```bash
-# Run a single project-level scan; filter SARIF results to CHANGED_FILES afterward.
+# Run a single project-level scan; filter SARIF results programmatically to CHANGED_FILES before LLM processing.
 # Per-file invocation via xargs would invoke snyk O(n) times and --file is for dependency scanning, not source code.
-timeout 300 snyk code test --sarif 2>/dev/null
+SNYK_SARIF=$(timeout 300 snyk code test --sarif 2>/dev/null)
+# Programmatic filter: keep only results whose file path appears in CHANGED_FILES.
+# This is defense-in-depth — filtering at the data layer before the LLM agent sees any output.
+SNYK_FILTERED=$(echo "$SNYK_SARIF" | jq --argjson files "$(echo "$CHANGED_FILES" | jq -R . | jq -s .)" \
+  '.runs[].results |= map(select(.locations[].physicalLocation.artifactLocation.uri as $uri | $files | index($uri) != null))' \
+  2>/dev/null || echo "$SNYK_SARIF")
 ```
-Parse SARIF output → filter findings to only those whose file path appears in `CHANGED_FILES` → extract findings.
+Parse `SNYK_FILTERED` SARIF → extract findings. If `jq` is unavailable, fall back to the raw `SNYK_SARIF` and note the limitation.
 
 **CodeQL** (if available AND (`--full` OR Semgrep/Snyk found HIGH/CRITICAL findings)):
 ```bash
 # Use a unique temp directory per run to prevent symlink attacks and concurrent-process clobbering
 CODEQL_TMP=$(mktemp -d)
+# Register cleanup trap immediately after mktemp — ensures rm -rf runs on EXIT, SIGTERM, and SIGINT
+# even if the session is interrupted before reaching the explicit rm -rf below
+trap 'rm -rf "${CODEQL_TMP}"' EXIT INT TERM
 timeout 600 codeql database create "${CODEQL_TMP}/db" --language={detected-language} --source-root=. 2>/dev/null && \
 timeout 600 codeql database analyze "${CODEQL_TMP}/db" --format=sarif-latest --output="${CODEQL_TMP}/results.sarif" 2>/dev/null
 # Capture exit status before cleanup so cleanup doesn't mask failures
 CODEQL_EXIT=$?
 # Parse SARIF output BEFORE cleanup — rm -rf destroys results.sarif
 CODEQL_SARIF=$(cat "${CODEQL_TMP}/results.sarif" 2>/dev/null || echo "")
-# Always clean up temp directory regardless of success or failure
+# Explicit cleanup (trap also covers this path; explicit rm is belt-and-suspenders)
 rm -rf "${CODEQL_TMP}"
+trap - EXIT INT TERM
 ```
-Parse `CODEQL_SARIF` → extract findings. If database creation fails, `codeql_exit` is non-zero — skip CodeQL findings and note it. If timeout occurs: still run `rm -rf "${CODEQL_TMP}"` in a `finally`-equivalent step, then skip CodeQL and note it.
+Parse `CODEQL_SARIF` → extract findings. If database creation fails, `CODEQL_EXIT` is non-zero — skip CodeQL findings and note it. The `trap` guarantees cleanup on SIGTERM/SIGINT/EXIT so orphaned temp directories do not accumulate across interrupted sessions.
 
 **Normalize** all findings to unified table, cap at top 50 by severity. Truncate each Description entry to 200 characters maximum to bound the serialized size of `STATIC_FINDINGS`:
 
@@ -325,3 +334,17 @@ Run `/resolve` after `/bug-analysis` to fix identified bugs. `/resolve` automati
 4. **Incremental by default** — Only analyze new changes unless `--full` specified
 5. **Verify before reporting** — BugAnalyzer agents self-verify every finding
 6. **Honest reporting** — Display risk level and counts directly from synthesis
+
+## Phase Completion Checklist
+
+Before reporting results, verify every phase was executed:
+
+- [ ] Phase 1: Pre-flight → BRANCH_INFO captured, PR_DESCRIPTION fetched (or `(none)`)
+- [ ] Phase 2: Static Analysis → STATIC_FINDINGS captured (or `(none)` if skipped/no tools/no findings); ANALYSIS_DIR created; CHANGED_FILES populated
+- [ ] Phase 3: Context Loading → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
+- [ ] Phase 4: File Analysis → ACTIVE_FOCUSES determined (security + functional always present)
+- [ ] Phase 5: Parallel Bug Analysis → ANALYZER_OUTPUTS captured per active focus; all reports written to ANALYSIS_DIR
+- [ ] Phase 6: Synthesis → BUG_ANALYSIS_SUMMARY written to `{ANALYSIS_DIR}/bug-analysis-summary.md`
+- [ ] Phase 7: Finalize → `.last-analysis-head` updated; results displayed to user
+
+If any phase is unchecked, execute it before proceeding.
