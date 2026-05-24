@@ -247,6 +247,30 @@ describe('optional plugin flag', () => {
       expect(coreSkills!.skills, `core-skills should not contain '${skill}'`).not.toContain(skill);
     }
   });
+
+  it('devflow-bug-analysis declares correct agents, skills, and command', () => {
+    const bugAnalysis = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-bug-analysis');
+    expect(bugAnalysis, 'devflow-bug-analysis should exist in registry').toBeDefined();
+    // Core orchestration agents: git (pre-flight), bug-analyzer (semantic analysis), synthesizer (reporting)
+    expect(bugAnalysis!.agents).toContain('git');
+    expect(bugAnalysis!.agents).toContain('bug-analyzer');
+    expect(bugAnalysis!.agents).toContain('synthesizer');
+    // Skills: agent-teams for parallel spawning, worktree-support for discovery, apply-feature-knowledge for context
+    expect(bugAnalysis!.skills).toContain('agent-teams');
+    expect(bugAnalysis!.skills).toContain('worktree-support');
+    expect(bugAnalysis!.skills).toContain('apply-feature-knowledge');
+    // Skills added in batch-2: apply-decisions + the 5 bug-analyzer category skills
+    expect(bugAnalysis!.skills).toContain('apply-decisions');
+    expect(bugAnalysis!.skills).toContain('security');
+    expect(bugAnalysis!.skills).toContain('reliability');
+    expect(bugAnalysis!.skills).toContain('regression');
+    expect(bugAnalysis!.skills).toContain('consistency');
+    expect(bugAnalysis!.skills).toContain('complexity');
+    // Single command
+    expect(bugAnalysis!.commands).toContain('/bug-analysis');
+    // Not optional — ships as a core plugin
+    expect(bugAnalysis!.optional).toBeFalsy();
+  });
 });
 
 describe('SHADOW_RENAMES consistency', () => {

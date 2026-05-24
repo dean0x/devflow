@@ -17,12 +17,13 @@
         "src/cli/plugins.ts",
         "src/cli/utils/installer.ts",
         "src/cli/utils/manifest.ts",
-        "src/cli/utils/sidecar-config.ts",
         "scripts/build-plugins.ts",
         "shared/rules/security.md",
-        "shared/rules/engineering.md"
+        "shared/rules/engineering.md",
+        "shared/rules/quality.md",
+        "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-05-19T18:51:39.189Z",
+      "lastUpdated": "2026-05-23T21:18:21.912Z",
       "createdBy": "devflow-knowledge"
     }
   }

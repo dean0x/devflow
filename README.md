@@ -37,6 +37,7 @@ Devflow: IMPLEMENT. Loading: devflow:implement:triage.
 ```
 /code-review     → 18 reviewers examine your changes in parallel
 /resolve         → all issues validated and fixed automatically
+/bug-analysis    → proactive bug finding before review
 ```
 
 ## What you get
@@ -53,11 +54,11 @@ Devflow: IMPLEMENT. Loading: devflow:implement:triage.
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
-**Always-on rules.** 11 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md`.
+**Always-on rules.** 12 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md`.
 
 **Full lifecycle.** `/plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/implement`. `/implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
 
-**Everything is composable.** 17 plugins (8 core + 9 language/ecosystem). Install only what you need. Six commands cover the entire development lifecycle.
+**Everything is composable.** 21 plugins (12 core + 9 language/ecosystem). Install only what you need.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
 
@@ -87,6 +88,10 @@ That's it. The interactive wizard handles plugin selection, feature configuratio
 | `/resolve` | Validate and fix all review issues |
 | `/debug` | Competing hypothesis investigation |
 | `/self-review` | Simplifier + Scrutinizer quality pass |
+| `/explore` | Codebase exploration with optional knowledge base creation |
+| `/research` | Multi-type research with trust-aware synthesis |
+| `/release` | Adaptive release with learned configuration |
+| `/bug-analysis` | Proactive bug finding with static and semantic analysis |
 
 See [docs/commands.md](docs/commands.md) for detailed usage.
 

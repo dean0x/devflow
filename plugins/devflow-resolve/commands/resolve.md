@@ -49,7 +49,7 @@ Return: branch, branch-slug, PR#, review count"
 
 In multi-worktree mode, spawn all pre-flight agents **in a single message** (parallel).
 
-**If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` first. In multi-worktree mode, report the failure but continue with other worktrees.
+**If BLOCKED:** In single-worktree mode, stop and report the blocker to user. If no reviews found, suggest `/code-review` or `/bug-analysis` first. In multi-worktree mode, report the failure but continue with other worktrees.
 
 **Extract from response:** `branch`, `branch_slug`, `pr_number`, `review_count` per worktree.
 
@@ -68,11 +68,19 @@ For each worktree:
 
 1. List directories in `{worktree}/.devflow/docs/reviews/{branch-slug}/`
 2. **If `--review {timestamp}` provided:** use that specific directory (not supported in multi-worktree mode)
-3. **Otherwise:** sort directories by name (timestamps are naturally sortable), select the latest that contains `review-summary.md` (complete review)
-4. **If latest directory already has `resolution-summary.md`:** skip worktree — already resolved. Report: "Latest review already resolved. Run /code-review for a new review first."
-5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly (backwards compatible)
+3. **Otherwise:** sort directories by name descending (timestamps are naturally sortable), scan the 10 most recent directories only. Select the first that contains `review-summary.md` (complete review)
+4. **If latest directory already has `resolution-summary.md`:** the review is resolved — check bug-analysis fallback (step 5b).
+5. **Legacy fallback:** if no timestamped subdirectories exist but flat `*.md` files do in `{worktree}/.devflow/docs/reviews/{branch-slug}/`, read them directly (backwards compatible).
 
-Set `TARGET_DIR` to the selected review directory path.
+**5b. Bug analysis fallback** — if no qualifying review directory found (no reviews exist, or all resolved):
+- List directories in `{worktree}/.devflow/docs/bug-analysis/{branch-slug}/`
+- Sort by name descending (timestamps are naturally sortable), scan the 10 most recent directories only. Select the latest that:
+  - Contains at least one focus report (`security.md`, `functional.md`, `integration.md`, or `usability.md`)
+  - Does NOT contain a `resolution-summary.md`
+- If found: set `TARGET_DIR` to that path. Reviews take priority — bug analysis is only used when no qualifying review exists.
+- If not found within those 10 directories: skip worktree — report "No unresolved review or bug analysis found. Run `/code-review` or `/bug-analysis` first."
+
+Set `TARGET_DIR` to the selected review or bug-analysis directory path.
 
 #### Step 0d: Load Project Decisions
 
@@ -104,6 +112,8 @@ Read review reports from `{TARGET_DIR}/*.md` and extract:
 **Exclude from issue extraction:**
 - `review-summary.md` (synthesizer output, not individual findings)
 - `resolution-summary.md` (if it exists from a previous partial run)
+- `bug-analysis-summary.md` (synthesizer output for bug-analysis runs)
+- `static-findings.md` (raw static analysis tool output, not individual findings)
 
 **Include:** ALL issues from all categories and severities, including Suggestions.
 
@@ -304,20 +314,20 @@ In multi-worktree mode, report results per worktree with aggregate summary.
 ├─ Phase 8: Git agent (manage-debt) — SEQUENTIAL across worktrees
 │  └─ Add deferred items to Tech Debt Backlog
 │
-└─ Phase 9: Write resolution-summary.md + display results
+└─ Phase 9: Display results (resolution-summary.md written in Phase 5)
 ```
 
 ## Edge Cases
 
 | Case | Handling |
 |------|----------|
-| No reviews exist | Error message, suggest `/code-review` first |
+| No reviews exist | Check bug-analysis fallback (Step 0c-5b); if also absent, error and suggest `/code-review` or `/bug-analysis` |
 | All false positives | Normal completion, report shows 0 fixes |
 | Fix attempt fails | Revert changes, mark BLOCKED, continue others |
 | Issue dependencies | Sequential chain, skip dependents if predecessor blocked |
 | No actionable issues | Report "No issues to resolve" |
 | Incomplete review directory (no review-summary.md) | Skip — resolve only targets complete reviews |
-| Latest review already resolved | Skip worktree, report suggestion to run /code-review first |
+| Latest review already resolved | Check bug-analysis fallback (Step 0c-5b); if also absent, skip worktree and suggest `/code-review` or `/bug-analysis` |
 | Legacy flat layout (no subdirectories) | Read flat *.md files directly (backwards compatible) |
 | `--review {timestamp}` in multi-worktree mode | Not supported — use `--path` + `--review` to target specific worktree + review |
 | Worktree pre-flight fails | Report failure, continue with other worktrees |

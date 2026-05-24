@@ -89,6 +89,52 @@
       ]
     },
     {
+      "name": "devflow-explore",
+      "source": "./plugins/devflow-explore",
+      "description": "Codebase exploration with optional feature knowledge base creation",
+      "version": "1.8.3",
+      "keywords": [
+        "explore",
+        "codebase",
+        "knowledge",
+        "architecture"
+      ]
+    },
+    {
+      "name": "devflow-research",
+      "source": "./plugins/devflow-research",
+      "description": "Multi-type research with trust-aware synthesis",
+      "version": "1.8.3",
+      "keywords": [
+        "research",
+        "analysis",
+        "synthesis"
+      ]
+    },
+    {
+      "name": "devflow-release",
+      "source": "./plugins/devflow-release",
+      "description": "Adaptive project release with learned configuration",
+      "version": "1.8.3",
+      "keywords": [
+        "release",
+        "publish",
+        "versioning"
+      ]
+    },
+    {
+      "name": "devflow-bug-analysis",
+      "source": "./plugins/devflow-bug-analysis",
+      "description": "Proactive bug finding with static and semantic analysis",
+      "version": "1.8.3",
+      "keywords": [
+        "bugs",
+        "static-analysis",
+        "security",
+        "reliability"
+      ]
+    },
+    {
       "name": "devflow-ambient",
       "source": "./plugins/devflow-ambient",
       "description": "Ambient mode — classifies intent and applies proportional effort (skills for guided work, agent orchestration for complex tasks)",

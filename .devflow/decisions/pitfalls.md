@@ -1,4 +1,4 @@
-<!-- TL;DR: 4 pitfalls. Key: PF-001, PF-002, PF-003, PF-004 -->
+<!-- TL;DR: 5 pitfalls. Key: PF-001, PF-002, PF-003, PF-004, PF-005 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
@@ -38,3 +38,12 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: When fixing a migration bug post-release, either bump the migration version to force a re-sweep (e.g., `consolidate-to-devflow-dir-v2`) or document and execute a manual sweep script. Include a legacy decisions/pitfalls merge step in the sweep runbook.
 - **Status**: Active
 - **Source**: self-learning:obs_qmt7kz
+
+## PF-005: Assuming a capability doesn't exist without checking the existing agent roster first
+
+- **Area**: Workflow design, research phase, new feature planning (bug-analysis, any new orch command)
+- **Issue**: Research concluded "no tool performs plan-intent vs implementation comparison" and proceeded to design this as a novel capability — without first checking devflow's own Evaluator agent, which already does exactly this (receives ORIGINAL_REQUEST, EXECUTION_PLAN, FILES_CHANGED, ACCEPTANCE_CRITERIA and performs goal-backward verification). The gap was only caught by user pushback.
+- **Impact**: Wasted design effort framing a capability as unique when it already existed. Risk of implementing a duplicate agent or workflow that conflicts with existing ones.
+- **Resolution**: Before designing any new capability that conceptually overlaps with existing agents (Evaluator, Scrutinizer, Reviewer, Resolver), explicitly read the existing agent roster and their input/output contracts. Check `shared/agents/` and the agent roster section of CLAUDE.md before claiming a gap exists.
+- **Status**: Active
+- **Source**: self-learning:obs_3vt99r

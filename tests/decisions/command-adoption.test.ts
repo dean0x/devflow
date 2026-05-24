@@ -31,19 +31,25 @@ describe('Command surfaces — decisions-index.cjs index invocation', () => {
 // -------------------------------------------------------------------------
 
 describe('Orch skill surfaces — decisions-index.cjs index invocation', () => {
-  const orchSkills: Array<[string, string]> = [
+  // Multi-worktree orch skills use {worktree} as a runtime-substituted placeholder
+  const multiWorktreeOrchSkills: Array<[string, string]> = [
     ['plan:orch', 'shared/skills/plan:orch/SKILL.md'],
-    ['resolve:orch', 'shared/skills/resolve:orch/SKILL.md'],
     ['review:orch', 'shared/skills/review:orch/SKILL.md'],
     ['debug:orch', 'shared/skills/debug:orch/SKILL.md'],
   ]
 
-  for (const [label, relPath] of orchSkills) {
+  for (const [label, relPath] of multiWorktreeOrchSkills) {
     it(`${label} SKILL.md invokes decisions-index.cjs index with {worktree} placeholder`, () => {
       const content = loadFile(relPath)
       expect(content).toContain('decisions-index.cjs index "{worktree}"')
     })
   }
+
+  // resolve:orch is single-worktree only (ambient-mode, always runs in cwd), so it uses "." directly
+  it('resolve:orch SKILL.md invokes decisions-index.cjs index with literal "." (single-worktree)', () => {
+    const content = loadFile('shared/skills/resolve:orch/SKILL.md')
+    expect(content).toContain('decisions-index.cjs index "."')
+  })
 })
 
 // -------------------------------------------------------------------------

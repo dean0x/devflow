@@ -34,6 +34,13 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 │   └── {timestamp}/                   # Second review (incremental)
 │       ├── {focus}.md
 │       └── review-summary.md
+├── bug-analysis/{branch-slug}/          # Bug analysis reports per branch
+│   ├── .last-analysis-head            # HEAD SHA of last analysis (for incremental)
+│   └── {timestamp}/                   # Timestamped analysis directory (YYYY-MM-DD_HHMM)
+│       ├── {focus}.md                 # Analyzer report (e.g., security.md, functional.md)
+│       ├── static-findings.md         # Raw static analysis tool output
+│       ├── bug-analysis-summary.md    # Synthesizer output
+│       └── resolution-summary.md      # Written by /resolve (if run)
 ├── design/                             # Design artifacts from /plan
 │   └── {issue}-{topic-slug}.{timestamp}.md  # Design document
 ├── research/{topic-slug}/              # Research artifacts per topic
@@ -92,6 +99,10 @@ TOPIC_SLUG=$(echo "$TOPIC" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^
 | Design documents | `{issue}-{topic-slug}.{timestamp}.md` | `42-jwt-auth.2026-04-07_1430.md` |
 | Research outputs | `{type}.md` in timestamped dir | `2025-12-26_1430/codebase.md` |
 | Research summary | `research-summary.md` in timestamped dir | `2025-12-26_1430/research-summary.md` |
+| Bug analysis reports | `{focus}.md` in timestamped dir | `2025-12-26_1430/security.md` |
+| Bug analysis summary | `bug-analysis-summary.md` in timestamped dir | `2025-12-26_1430/bug-analysis-summary.md` |
+| Static findings | `static-findings.md` in timestamped dir | `2025-12-26_1430/static-findings.md` |
+| Analysis head marker | `.last-analysis-head` | Plain text file with SHA |
 
 ---
 
@@ -126,6 +137,9 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Designer (via /plan) | `.devflow/docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 | Researcher | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
 | Synthesizer (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
+| BugAnalyzer | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/{focus}.md` | Creates new in timestamped dir |
+| Synthesizer (bug-analysis) | `.devflow/docs/bug-analysis/{branch-slug}/{timestamp}/bug-analysis-summary.md` | Creates new in timestamped dir |
+| Bug-analysis cmd | `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head` | Overwrites with HEAD SHA |
 
 ### Agents That Don't Persist
 
@@ -153,6 +167,7 @@ When creating or modifying persisting agents:
 
 This framework is used by:
 - **Review agents**: Creates review reports
+- **Bug analysis agents**: Creates bug analysis reports
 - **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
 - **Background extractor**: background-learning via json-helper.cjs render-ready appends ADRs/PFs to `decisions.md` / `pitfalls.md`
 
