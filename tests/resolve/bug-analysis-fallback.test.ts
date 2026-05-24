@@ -39,7 +39,9 @@ describe('resolve.md — bug-analysis fallback (Step 0c-5b)', () => {
 
   it('fallback excludes directories that already have resolution-summary.md', () => {
     // The fallback must skip already-resolved bug-analysis dirs
-    const fallbackSection = step0c.slice(step0c.search(/5b|bug.analysis fallback/i));
+    const idx = step0c.search(/5b|bug.analysis fallback/i);
+    expect(idx).not.toBe(-1);
+    const fallbackSection = step0c.slice(idx);
     expect(fallbackSection).toContain('resolution-summary.md');
   });
 
@@ -109,31 +111,30 @@ describe('resolve.md — Edge Cases table covers bug-analysis scenarios', () => 
 
 describe('resolve:orch SKILL.md — bug-analysis fallback (Phase 1)', () => {
   const content = loadFile('shared/skills/resolve:orch/SKILL.md');
+  const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
+  const phase3 = extractSection(content, '## Phase 3:', '## Phase 4:');
 
   it('Phase 1 contains bug-analysis fallback path', () => {
-    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
     expect(phase1).toMatch(/bug.analysis/i);
   });
 
   it('Phase 1 reviews path scans at most 10 most recent directories', () => {
-    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
     expect(phase1).toMatch(/10\s+(most recent|directories)|scan.*10|10.*scan/i);
   });
 
   it('Phase 1 bug-analysis fallback also scans at most 10 most recent directories', () => {
-    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
     // The scan limit must be mentioned in the bug-analysis fallback sub-path too
-    const bugAnalysisPart = phase1.slice(phase1.search(/bug.analysis/i));
+    const idx = phase1.search(/bug.analysis/i);
+    expect(idx).not.toBe(-1);
+    const bugAnalysisPart = phase1.slice(idx);
     expect(bugAnalysisPart).toMatch(/10\s+(most recent|directories)|scan.*10|10.*scan/i);
   });
 
   it('Phase 3 excludes bug-analysis-summary.md from issue extraction', () => {
-    const phase3 = extractSection(content, '## Phase 3:', '## Phase 4:');
     expect(phase3).toContain('bug-analysis-summary.md');
   });
 
   it('Phase 3 excludes static-findings.md from issue extraction', () => {
-    const phase3 = extractSection(content, '## Phase 3:', '## Phase 4:');
     expect(phase3).toContain('static-findings.md');
   });
 
@@ -144,7 +145,6 @@ describe('resolve:orch SKILL.md — bug-analysis fallback (Phase 1)', () => {
   });
 
   it('Phase 1 halt message mentions both /code-review and /bug-analysis', () => {
-    const phase1 = extractSection(content, '## Phase 1:', '## Phase 2:');
     expect(phase1).toContain('/code-review');
     expect(phase1).toContain('/bug-analysis');
   });
