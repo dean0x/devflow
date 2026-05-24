@@ -38,10 +38,8 @@ describe('resolve.md — bug-analysis fallback (Step 0c-5b)', () => {
   });
 
   it('fallback excludes directories that already have resolution-summary.md', () => {
-    // The fallback must skip already-resolved bug-analysis dirs
-    const idx = step0c.search(/5b|bug.analysis fallback/i);
-    expect(idx).not.toBe(-1);
-    const fallbackSection = step0c.slice(idx);
+    // The fallback must skip already-resolved bug-analysis dirs — narrow to the fallback sub-section
+    const fallbackSection = extractSection(step0c, '5b.', null);
     expect(fallbackSection).toContain('resolution-summary.md');
   });
 
@@ -123,10 +121,8 @@ describe('resolve:orch SKILL.md — bug-analysis fallback (Phase 1)', () => {
   });
 
   it('Phase 1 bug-analysis fallback also scans at most 10 most recent directories', () => {
-    // The scan limit must be mentioned in the bug-analysis fallback sub-path too
-    const idx = phase1.search(/bug.analysis/i);
-    expect(idx).not.toBe(-1);
-    const bugAnalysisPart = phase1.slice(idx);
+    // Narrow to the fallback sub-section to verify the scan limit is documented there specifically
+    const bugAnalysisPart = extractSection(phase1, 'If no unresolved review found:', null);
     expect(bugAnalysisPart).toMatch(/10\s+(most recent|directories)|scan.*10|10.*scan/i);
   });
 
