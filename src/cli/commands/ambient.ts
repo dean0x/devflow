@@ -69,7 +69,7 @@ function filterHookEntries(
   if (settings.hooks[eventName].length === 0) {
     delete settings.hooks[eventName];
   }
-  if (settings.hooks && Object.keys(settings.hooks).length === 0) {
+  if (Object.keys(settings.hooks).length === 0) {
     delete settings.hooks;
   }
   return true;

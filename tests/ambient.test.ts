@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { addAmbientHook, removeAmbientHook, hasAmbientHook, COMMANDS_RULE_CONTENT, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
+import { addAmbientHook, removeAmbientHook, hasAmbientHook, COMMANDS_RULE_CONTENT } from '../src/cli/commands/ambient.js';
 import type { StreamResult } from './integration/helpers.js';
 import {
   hasSkillInvocations,
