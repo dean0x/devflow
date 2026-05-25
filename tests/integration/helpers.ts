@@ -152,46 +152,10 @@ export function runClaudeStreaming(
   });
 }
 
-/**
- * Run a prompt with single-shot model fallback.
- *
- * One attempt with Haiku. If predicate fails, one attempt with Sonnet.
- * No retries — if the prompt doesn't work first try, the prompt needs fixing.
- */
-export async function runClaudeStreamingWithRetry(
-  prompt: string,
-  predicate: (result: StreamResult) => boolean,
-  options?: { timeout?: number; model?: string },
-): Promise<{ result: StreamResult; attempts: number; passed: boolean; model: string }> {
-  const timeout = options?.timeout ?? 45000;
-  const primaryModel = options?.model ?? 'haiku';
-
-  // Single shot with primary model
-  const primaryResult = await runClaudeStreaming(prompt, { timeout, model: primaryModel });
-  if (predicate(primaryResult)) {
-    return { result: primaryResult, attempts: 1, passed: true, model: primaryModel };
-  }
-
-  // Single shot fallback to sonnet
-  if (primaryModel === 'haiku') {
-    const fallbackResult = await runClaudeStreaming(prompt, { timeout, model: 'sonnet' });
-    if (predicate(fallbackResult)) {
-      return { result: fallbackResult, attempts: 2, passed: true, model: 'sonnet' };
-    }
-    return { result: fallbackResult, attempts: 2, passed: false, model: 'sonnet' };
-  }
-
-  return { result: primaryResult, attempts: 1, passed: false, model: primaryModel };
-}
-
 // --- Detection helpers ---
 
 export function hasSkillInvocations(result: StreamResult): boolean {
   return result.skills.length > 0;
-}
-
-export function getSkillInvocations(result: StreamResult): string[] {
-  return result.skills;
 }
 
 /**

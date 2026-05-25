@@ -1033,6 +1033,8 @@ export const initCommand = new Command('init')
     // Clean up legacy hook scripts and lib files (paths relative to hooksDir)
     const LEGACY_HOOK_FILES = [
       'ambient-prompt',
+      // Ambient simplification: session-start-classification removed (plan detection + commands rule)
+      'session-start-classification',
       // kb → knowledge rename: hook scripts replaced by session-end-knowledge-refresh / background-knowledge-refresh
       'session-end-kb-refresh',
       'background-kb-refresh',

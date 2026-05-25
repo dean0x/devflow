@@ -160,14 +160,11 @@ export async function removeAmbientHook(settingsJson: string): Promise<string> {
  */
 export function hasAmbientHook(input: string | Settings): boolean {
   const settings: Settings = typeof input === 'string' ? JSON.parse(input) : input;
-
-  const hasPreamble = settings.hooks?.UserPromptSubmit?.some((matcher) =>
+  return settings.hooks?.UserPromptSubmit?.some((matcher) =>
     matcher.hooks.some((h) =>
       h.command.includes(PREAMBLE_HOOK_MARKER) || h.command.includes(LEGACY_HOOK_MARKER),
     ),
   ) ?? false;
-
-  return hasPreamble;
 }
 
 interface AmbientOptions {
