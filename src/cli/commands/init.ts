@@ -975,16 +975,12 @@ export const initCommand = new Command('init')
     // Clean up stale skills from previous installations
     s.message('Cleaning up');
     const skillsDir = path.join(claudeDir, 'skills');
-    let staleRemoved = 0;
-    for (const legacy of LEGACY_SKILL_NAMES) {
-      const legacyPath = path.join(skillsDir, legacy);
-      try {
-        await fs.rm(legacyPath, { recursive: true });
-        staleRemoved++;
-      } catch {
-        // Doesn't exist — expected for most entries
-      }
-    }
+    const skillRemoveResults = await Promise.allSettled(
+      LEGACY_SKILL_NAMES.map(legacy =>
+        fs.rm(path.join(skillsDir, legacy), { recursive: true })
+      )
+    );
+    const staleRemoved = skillRemoveResults.filter(r => r.status === 'fulfilled').length;
     if (staleRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleRemoved} legacy skill(s)`);
     }

@@ -296,8 +296,12 @@ export const LEGACY_AGENT_NAMES: string[] = [
  *
  * Pruning: entries can be removed after 2 major versions.
  * Users who skip major versions should run uninstall + reinstall.
+ *
+ * Organized by era to make scanning for duplicates tractable.
  */
-export const LEGACY_SKILL_NAMES: string[] = [
+
+/** Pre-v1.0.0: devflow- prefixed skill names from the original install scheme. */
+const LEGACY_SKILLS_PRE_V1: string[] = [
   'devflow-core-patterns',
   'devflow-review-methodology',
   'devflow-docs-framework',
@@ -337,6 +341,10 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'commit',
   'pull-request',
   'tests-patterns',
+];
+
+/** v2.0.0: bare names and prefixed old names from the namespace migration. */
+const LEGACY_SKILLS_V2: string[] = [
   // v2.0.0 namespace migration: bare names from pre-namespace installs
   'core-patterns',
   'docs-framework',
@@ -455,6 +463,10 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'pipeline:orch',
   // v2.0.0 quality-gates: bare name for pre-namespace installs
   'quality-gates',
+];
+
+/** v2.x: incremental additions across the v2 minor series. */
+const LEGACY_SKILLS_V2X: string[] = [
   // v2.x plan plugin: new skills bare names for pre-namespace installs
   'gap-analysis',
   'design-review',
@@ -521,6 +533,12 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'devflow:research:guided',
   'devflow:release:triage',
   'devflow:release:guided',
+];
+
+export const LEGACY_SKILL_NAMES: string[] = [
+  ...LEGACY_SKILLS_PRE_V1,
+  ...LEGACY_SKILLS_V2,
+  ...LEGACY_SKILLS_V2X,
 ];
 
 /**
