@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { addAmbientHook, removeAmbientHook, hasAmbientHook, COMMANDS_RULE_CONTENT, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
@@ -14,6 +14,17 @@ function textResult(text: string, skills: string[] = []): StreamResult {
 }
 
 describe('addAmbientHook', () => {
+  beforeEach(() => {
+    // installCommandsRule() writes to COMMANDS_RULE_PATH — stub out the underlying
+    // fs operations so unit tests produce no real filesystem side-effects.
+    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
+    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('adds hook to empty settings', async () => {
     const result = await addAmbientHook('{}', '/home/user/.devflow');
     const settings = JSON.parse(result);
@@ -141,6 +152,18 @@ describe('addAmbientHook', () => {
 });
 
 describe('removeAmbientHook', () => {
+  beforeEach(() => {
+    // removeCommandsRule() unlinks COMMANDS_RULE_PATH; installCommandsRule() used by
+    // addAmbientHook in shared setup — stub all fs side-effects to keep tests pure.
+    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
+    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('removes ambient hook — clears UserPromptSubmit', async () => {
     const withHook = await addAmbientHook('{}', '/home/user/.devflow');
     const result = await removeAmbientHook(withHook);
@@ -268,9 +291,38 @@ describe('removeAmbientHook', () => {
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe('other-hook.sh');
   });
+
+  it('removes stale classification hook when no UserPromptSubmit hooks exist', async () => {
+    // Edge case: user only has a stale SessionStart classification hook from a previous
+    // install, with no UserPromptSubmit ambient hooks. removeAmbientHook must still clean
+    // up the stale classification hook and return a changed JSON.
+    const input = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          { hooks: [{ type: 'command', command: '/path/to/run-hook session-start-classification' }] },
+        ],
+      },
+    });
+    const result = await removeAmbientHook(input);
+    const settings = JSON.parse(result);
+
+    expect(settings.hooks).toBeUndefined();
+    // Returned JSON must differ from input — change was detected via removedClassification
+    expect(result).not.toBe(input);
+  });
 });
 
 describe('hasAmbientHook', () => {
+  beforeEach(() => {
+    // addAmbientHook (called in one test) triggers installCommandsRule — stub fs side-effects.
+    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
+    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('returns true when current preamble hook present', async () => {
     const withHook = await addAmbientHook('{}', '/home/user/.devflow');
     expect(hasAmbientHook(withHook)).toBe(true);
@@ -328,6 +380,14 @@ describe('hasAmbientHook', () => {
 });
 
 describe('COMMANDS_RULE_CONTENT', () => {
+  it('matches shared/rules/commands.md source file', async () => {
+    // Dual-source guard: COMMANDS_RULE_CONTENT in ambient.ts and shared/rules/commands.md
+    // must stay in sync. This test detects drift so either source can be updated confidently.
+    const sourceFile = path.resolve(__dirname, '../shared/rules/commands.md');
+    const diskContent = await fs.readFile(sourceFile, 'utf-8');
+    expect(COMMANDS_RULE_CONTENT).toBe(diskContent);
+  });
+
   it('has paths: [] frontmatter for global application', () => {
     expect(COMMANDS_RULE_CONTENT).toContain('paths: []');
   });
