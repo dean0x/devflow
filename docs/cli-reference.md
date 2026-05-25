@@ -56,7 +56,7 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 | `devflow-release` | Core | Adaptive release with learned configuration |
 | `devflow-self-review` | Core | Simplifier + Scrutinizer |
 | `devflow-bug-analysis` | Core | Proactive bug finding with static and semantic analysis |
-| `devflow-ambient` | Core | Ambient mode (always-on intent classification) |
+| `devflow-ambient` | Core | Ambient mode (plan auto-detection and command awareness) |
 | `devflow-core-skills` | Core | Auto-activating quality skills |
 | `devflow-audit-claude` | Optional | CLAUDE.md file audit |
 | `devflow-typescript` | Language | TypeScript patterns |

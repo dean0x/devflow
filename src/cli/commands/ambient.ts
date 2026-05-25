@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
@@ -8,7 +9,47 @@ import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 const PREAMBLE_HOOK_MARKER = 'preamble';
 const LEGACY_HOOK_MARKER = 'ambient-prompt';
+/** Stale marker from previous installs — cleaned on disable/re-enable */
 const CLASSIFICATION_HOOK_MARKER = 'session-start-classification';
+
+/**
+ * Path where the commands rule is installed.
+ * Managed by ambient.ts directly — NOT by the rules plugin system.
+ */
+export const COMMANDS_RULE_PATH = path.join(os.homedir(), '.claude', 'rules', 'devflow', 'commands.md');
+
+/**
+ * D1: Content of the commands awareness rule.
+ * Installed to COMMANDS_RULE_PATH when ambient mode is enabled.
+ * The `paths: []` frontmatter signals Claude Code to apply this rule globally.
+ */
+export const COMMANDS_RULE_CONTENT = `---
+name: commands
+description: Available devflow workflow commands and plan auto-execution
+paths: []
+---
+
+# Devflow Workflow Commands
+
+Use \`/devflow:<name>\` to trigger a workflow:
+
+- \`plan\` — Design implementation plans with gap analysis and design review
+- \`implement\` — Execute tasks through implementation, quality gates, and PR creation
+- \`code-review\` — Branch review with specialized parallel reviewers
+- \`resolve\` — Process review/analysis issues — validate, fix, or defer
+- \`debug\` — Competing hypothesis investigation with parallel agents
+- \`explore\` — Codebase exploration with structured analysis
+- \`research\` — Multi-type research with trust-aware synthesis
+- \`release\` — Adaptive release with learned configuration
+- \`self-review\` — Simplifier (code clarity) then Scrutinizer (9-pillar quality)
+- \`bug-analysis\` — Proactive bug finding in changed code
+
+## Plan Auto-Execution
+
+When the first message in a session is a structured implementation plan (contains
+\`## Goal\`, \`## Steps\`, and \`## Files\` sections), this is a plan handoff from a
+prior planning session. Invoke \`devflow:implement\` via the Skill tool to execute it.
+`;
 
 /** Filter hook entries from a parsed Settings object for a given event. Returns true if any were removed. */
 function filterHookEntries(
@@ -46,22 +87,12 @@ const isClassification = (matcher: HookMatcher) =>
   matcher.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER));
 
 /**
- * Remove only the legacy `ambient-prompt` hook entries.
- * Used by `addAmbientHook` to clean before adding the new preamble hook.
- */
-export function removeLegacyAmbientHook(settingsJson: string): string {
-  const settings: Settings = JSON.parse(settingsJson);
-  if (!filterHookEntries(settings, 'UserPromptSubmit', isLegacy)) return settingsJson;
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Add the ambient UserPromptSubmit hook and SessionStart classification hook to settings JSON.
+ * Add the ambient UserPromptSubmit hook and write the commands awareness rule.
  * Removes any legacy `ambient-prompt` hook first, then adds the new `preamble` hook.
- * Also adds the SessionStart classification hook (reads router SKILL.md).
- * Idempotent — each hook checked independently.
+ * Writes COMMANDS_RULE_CONTENT to COMMANDS_RULE_PATH for passive command awareness.
+ * Idempotent — hook checked before adding, rule always overwritten.
  */
-export function addAmbientHook(settingsJson: string, devflowDir: string): string {
+export async function addAmbientHook(settingsJson: string, devflowDir: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
   let changed = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
 
@@ -69,7 +100,7 @@ export function addAmbientHook(settingsJson: string, devflowDir: string): string
     settings.hooks = {};
   }
 
-  // --- UserPromptSubmit: preamble hook ---
+  // --- UserPromptSubmit: preamble hook (plan detection) ---
   const hasPreamble = settings.hooks.UserPromptSubmit?.some((m) =>
     m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
   );
@@ -91,44 +122,36 @@ export function addAmbientHook(settingsJson: string, devflowDir: string): string
     changed = true;
   }
 
-  // --- SessionStart: classification hook ---
-  const hasClassificationHook = settings.hooks.SessionStart?.some((m) =>
-    m.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER)),
-  );
-
-  if (!hasClassificationHook) {
-    if (!settings.hooks.SessionStart) {
-      settings.hooks.SessionStart = [];
-    }
-
-    settings.hooks.SessionStart.push({
-      hooks: [
-        {
-          type: 'command',
-          command: path.join(devflowDir, 'scripts', 'hooks', 'run-hook') + ' session-start-classification',
-          timeout: 5,
-        },
-      ],
-    });
-    changed = true;
-  }
+  // --- Write commands awareness rule ---
+  await fs.mkdir(path.dirname(COMMANDS_RULE_PATH), { recursive: true });
+  await fs.writeFile(COMMANDS_RULE_PATH, COMMANDS_RULE_CONTENT, 'utf-8');
 
   if (!changed) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * Remove the ambient hooks from settings JSON.
- * Removes preamble + legacy from UserPromptSubmit, and classification from SessionStart.
+ * Remove the ambient hooks from settings JSON and delete the commands rule.
+ * Removes preamble + legacy from UserPromptSubmit.
+ * Also removes stale SessionStart classification hook from previous installs.
+ * Deletes COMMANDS_RULE_PATH if present.
  * Idempotent — returns unchanged JSON if hooks not present.
  * Preserves other hooks. Cleans empty arrays/objects.
  */
-export function removeAmbientHook(settingsJson: string): string {
+export async function removeAmbientHook(settingsJson: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
   const removedPrompt = filterHookEntries(settings, 'UserPromptSubmit', isAmbient);
-  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
+  // Clean up stale classification hooks from previous installs (no longer registered)
+  filterHookEntries(settings, 'SessionStart', isClassification);
 
-  if (!removedPrompt && !removedClassification) return settingsJson;
+  // Delete commands rule if it exists
+  try {
+    await fs.unlink(COMMANDS_RULE_PATH);
+  } catch {
+    // File may not exist — not an error
+  }
+
+  if (!removedPrompt) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -144,11 +167,7 @@ export function hasAmbientHook(input: string | Settings): boolean {
     ),
   ) ?? false;
 
-  const hasClassificationHook = settings.hooks?.SessionStart?.some((matcher) =>
-    isClassification(matcher),
-  ) ?? false;
-
-  return hasPreamble || hasClassificationHook;
+  return hasPreamble;
 }
 
 interface AmbientOptions {
@@ -158,21 +177,20 @@ interface AmbientOptions {
 }
 
 export const ambientCommand = new Command('ambient')
-  .description('Enable or disable ambient mode (always-on quality enforcement)')
-  .option('--enable', 'Register ambient mode hooks')
-  .option('--disable', 'Remove ambient mode hooks')
+  .description('Enable or disable ambient mode (plan auto-detection and command awareness)')
+  .option('--enable', 'Register ambient mode hooks and install commands rule')
+  .option('--disable', 'Remove ambient mode hooks and uninstall commands rule')
   .option('--status', 'Check if ambient mode is enabled')
   .action(async (options: AmbientOptions) => {
     const hasFlag = options.enable || options.disable || options.status;
     if (!hasFlag) {
       p.intro(color.bgMagenta(color.white(' Ambient Mode ')));
       p.note(
-        `${color.cyan('devflow ambient --enable')}   Register always-on hook\n` +
-        `${color.cyan('devflow ambient --disable')}  Remove always-on hook\n` +
+        `${color.cyan('devflow ambient --enable')}   Register plan detection hook\n` +
+        `${color.cyan('devflow ambient --disable')}  Remove plan detection hook\n` +
         `${color.cyan('devflow ambient --status')}   Check current state`,
         'Usage',
       );
-      p.outro(color.dim('Or use /ambient <prompt> for one-shot classification'));
       return;
     }
 
@@ -214,18 +232,19 @@ export const ambientCommand = new Command('ambient')
     }
 
     if (options.enable) {
-      const updated = addAmbientHook(settingsContent, devflowDir);
+      const updated = await addAmbientHook(settingsContent, devflowDir);
       if (updated === settingsContent) {
+        // Hook already exists but rule may still need writing — addAmbientHook writes it anyway
         p.log.info('Ambient mode already enabled');
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('Ambient mode enabled — hooks registered');
-      p.log.info(color.dim('Skills auto-load and agents orchestrate based on each prompt'));
+      p.log.success('Ambient mode enabled — plan detection hook registered');
+      p.log.info(color.dim('Structured plans auto-execute; command listing available as a rule'));
     }
 
     if (options.disable) {
-      const updated = removeAmbientHook(settingsContent);
+      const updated = await removeAmbientHook(settingsContent);
       if (updated === settingsContent) {
         p.log.info('Ambient mode already disabled');
         return;

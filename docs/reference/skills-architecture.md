@@ -19,7 +19,6 @@ Shared patterns used by multiple agents.
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
 | `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
 | `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug, /plan, /research, /release |
-| `router` | Intent classification and proportional skill loading for Devflow mode (unrestricted tools — orchestrator) | Ambient UserPromptSubmit hook |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
 ### Tier 1b: Pattern Skills
@@ -54,7 +53,7 @@ Listed in Claude Code's skill catalog. May auto-invoke based on description matc
 
 #### Research Skills (Agent-Loaded)
 
-Domain expertise for Researcher agent focus areas. Loaded dynamically by Researcher agent based on RESEARCH_TYPE parameter — not router-loaded.
+Domain expertise for Researcher agent focus areas. Loaded dynamically by Researcher agent based on RESEARCH_TYPE parameter.
 
 | Skill | Purpose | Trust Tier |
 |-------|---------|------------|
@@ -66,7 +65,7 @@ Domain expertise for Researcher agent focus areas. Loaded dynamically by Researc
 
 ### Orchestration Skills
 
-Ambient intent classification skills that orchestrate agent pipelines. Activated by the `router` skill via the ambient UserPromptSubmit hook for GUIDED/ORCHESTRATED depth. Each follows the Phase Protocol with `**Produces:**`/`**Requires:**` annotations and a `## Phase Completion Checklist`.
+Skills that orchestrate agent pipelines for specific workflows. Each follows the Phase Protocol with `**Produces:**`/`**Requires:**` annotations and a `## Phase Completion Checklist`.
 
 | Skill | Purpose |
 |-------|---------|

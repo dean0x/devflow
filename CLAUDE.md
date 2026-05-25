@@ -26,7 +26,7 @@ Plugin marketplace with 21 plugins (12 core + 9 optional language/ecosystem), ea
 | `devflow-release` | Adaptive project release with learned configuration | Optional |
 | `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
 | `devflow-bug-analysis` | Proactive bug finding with static and semantic analysis | No |
-| `devflow-ambient` | Ambient mode — four-layer intent classification with per-intent triage | No |
+| `devflow-ambient` | Ambient mode — plan auto-detection and command awareness | No |
 | `devflow-core-skills` | Auto-activating quality enforcement | No |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
 | `devflow-typescript` | TypeScript language patterns (optional) | No |
@@ -44,7 +44,7 @@ Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}
 
 **Working Memory**: Three shell-script hooks (`scripts/hooks/`) replace the old 8-hook system with a sidecar architecture. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`. Feature state is stored in `.devflow/sidecar/config.json` (primary source of truth); runtime sentinels (`.devflow/memory/.working-memory-disabled`, `.devflow/memory/.learning-disabled`) provide defense-in-depth for hooks that read files directly. `sidecar-capture` (Stop hook) — captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue and writes `.devflow/sidecar/memory.json` marker when throttle has expired (>2 min); uses atomic temp+mv for marker writes, PID-unique temp files to prevent concurrent clobbering, and mkdir-based locking for queue overflow truncation across concurrent sessions. `sidecar-dispatch` (UserPromptSubmit hook) — captures user turn to queue, then scans `.devflow/sidecar/` for pending marker files; supports per-session marker filenames (`{type}.{session_id}.json`) for concurrency safety, deduplicates types before injecting SIDECAR directive, expires markers older than 24h, and uses `json_field_file` (node fallback) for timestamp reads. `sidecar-evaluate` (SessionEnd hook) — evaluates whether to trigger learning batching, decisions detection, or knowledge refresh; writes per-session marker files (e.g., `learning.{session_id}.json`) using atomic temp+mv; uses mkdir-based locking (`sidecar-lock`) to serialize reinforcement and batch-trigger operations across concurrent sessions; caps `.learning-sessions` at 50 lines under the batch lock to prevent multi-session truncation races. SessionStart hook (`session-start-memory`) → injects previous memory + git state as `additionalContext` on `/clear`, startup, or compact; gated by `.working-memory-disabled` sentinel. Always-on SessionStart hook (`session-start-context`) → injects cross-feature context (decisions TL;DR, learned behaviors); sections gated by both sidecar config and sentinels. PreCompact hook → saves git state + WORKING-MEMORY.md snapshot. Updates `.devflow/memory/WORKING-MEMORY.md` with structured sections (`## Now`, `## Progress`, `## Decisions`, `## Modified Files`, `## Context`, `## Session Log`). Memory agent uses rename-to-claim pattern for queue consumption (atomically renames `.pending-turns.jsonl` → `.pending-turns.processing`) to prevent concurrent session appends from being lost during processing. Disabling memory writes `memory: false` to sidecar config — hooks remain registered (shared across features). `removeMemoryHooks` (used by `devflow init --no-memory`) also removes pre-sidecar legacy hooks (`prompt-capture-memory`, `stop-update-memory`, `stop-update-learning`, `session-end-learning`, `session-end-decisions`, `session-end-knowledge-refresh`) from upgrading users. Use `devflow memory --clear` to clean up pending queue files across projects. Zero-ceremony context preservation.
 
-**Ambient Mode**: Four-layer architecture for always-on intent classification. SessionStart hook (`session-start-classification`) reads lean classification rules (`~/.claude/skills/devflow:router/classification-rules.md`, ~30 lines) and injects as `additionalContext` — once per session, deterministic, zero model overhead. UserPromptSubmit hook (`preamble`) injects a one-sentence prompt per message triggering intent classification + conditional router loading via Skill tool. Router SKILL.md is a pure intent dispatcher loaded on-demand for non-QUICK intents — maps intent to a triage skill (scope assessment) or directly to an orch skill (for orch-only intents like RESOLVE/PIPELINE). Triage skills (~30-40 lines each) assess scope with actual context (file counts, issue content, commit count) and route to either a guided skill (short, focused, loads companion skills) or an orch skill (full agent pipeline). Default-to-GUIDED bias inverts the previous default-to-ORCHESTRATED behavior. Users can force orchestration with hint keywords ("orchestrate", "full pipeline", "deep", "thorough"). Toggleable via `devflow ambient --enable/--disable/--status` or `devflow init`.
+**Ambient Mode**: Two-component system for zero-overhead session enhancement. UserPromptSubmit hook (`preamble`) detects structured implementation plans — when a prompt contains `## Goal`, `## Steps`, and `## Files` markers, it outputs a directive to invoke `devflow:implement` via the Skill tool. Zero overhead for normal prompts — hook outputs nothing. Commands awareness rule (`~/.claude/rules/devflow/commands.md`) lists available `/devflow:<name>` commands and documents the plan auto-execution trigger for passive reference. The rule is installed/removed by `devflow ambient --enable/--disable`; it is managed by `ambient.ts` directly, not by the rules plugin system. Toggleable via `devflow ambient --enable/--disable/--status` or `devflow init`.
 
 **Self-Learning**: Two independent agents detect patterns from session transcripts. Transcript content is split into two channels by `scripts/hooks/lib/transcript-filter.cjs`: `USER_SIGNALS` (plain user messages) and `DIALOG_PAIRS` (prior-assistant + user turns).
 
@@ -79,7 +79,7 @@ devflow/
 ├── plugins/devflow-*/      # 21 plugins (12 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Sidecar + ambient + memory hooks (sidecar-capture, sidecar-dispatch, sidecar-evaluate, sidecar-lock, session-start-memory, session-start-context, session-start-classification, pre-compact-memory, preamble, get-mtime)
+│   └── hooks/              # Sidecar + ambient + memory hooks (sidecar-capture, sidecar-dispatch, sidecar-evaluate, sidecar-lock, session-start-memory, session-start-context, pre-compact-memory, preamble, get-mtime)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, decisions, flags, knowledge, rules)
 ├── .claude-plugin/         # Marketplace registry
 ├── .devflow/               # All per-project runtime data (docs, memory, learning, decisions, features)
@@ -218,7 +218,7 @@ Per-project runtime files live under `.devflow/`:
 
 **Plugin-specific agents** (1): claude-md-auditor
 
-**Workflow skills** (23): 9 orch skills (implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch, research:orch, release:orch) + 7 guided skills (implement:guided, debug:guided, explore:guided, plan:guided, review:guided, research:guided, release:guided) + 7 triage skills (implement:triage, debug:triage, explore:triage, plan:triage, review:triage, research:triage, release:triage). Router dispatches by intent to a triage skill (which assesses scope and routes to guided or orch) or directly to an orch skill (for orch-only intents).
+**Workflow skills** (9): implement:orch, explore:orch, debug:orch, plan:orch, review:orch, resolve:orch, pipeline:orch, research:orch, release:orch. Each orchestrates an agent pipeline for its intent domain.
 
 **Agent Teams**: 8 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/explore`, `/debug`, `/resolve`, `/research`, `/release`). One-team-per-session constraint — must TeamDelete before creating next team.
 
@@ -229,9 +229,9 @@ Per-project runtime files live under `.devflow/`:
 - 3-tier system: Foundation (shared patterns), Specialized (auto-activate), Domain (language/framework)
 - Each skill has one non-negotiable **Iron Law** in its `SKILL.md`
 - Target: ~120-150 lines per SKILL.md with progressive disclosure to `references/`
-- Skills default to read-only (`allowed-tools: Read, Grep, Glob`); exceptions: git/review skills add `Bash`, interactive skills add `AskUserQuestion`, `quality-gates` adds `Write` for state persistence, and `router` omits `allowed-tools` entirely (unrestricted, as the main-session orchestrator)
+- Skills default to read-only (`allowed-tools: Read, Grep, Glob`); exceptions: git/review skills add `Bash`, interactive skills add `AskUserQuestion`, `quality-gates` adds `Write` for state persistence
 - All skills live in `shared/skills/` — add to plugin `plugin.json` `skills` array, then `npm run build`
-- Orchestration skills (`*:orch`) follow the Phase Protocol (defined in `router/SKILL.md`) — each phase needs `**Produces:**`/`**Requires:**` annotations and a `## Phase Completion Checklist`
+- Orchestration skills (`*:orch`) follow the Phase Protocol — each phase needs `**Produces:**`/`**Requires:**` annotations and a `## Phase Completion Checklist`
 
 ### Agents
 

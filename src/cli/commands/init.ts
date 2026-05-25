@@ -36,7 +36,7 @@ import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
 export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
-export { addAmbientHook, removeAmbientHook, removeLegacyAmbientHook, hasAmbientHook } from './ambient.js';
+export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
 // Re-export migrateShadowOverrides under its original name for backward compatibility
@@ -147,7 +147,7 @@ export const initCommand = new Command('init')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
   .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
-  .option('--ambient', 'Enable ambient mode (classifies intent, loads skills, orchestrates agents)')
+  .option('--ambient', 'Enable ambient mode (plan auto-detection and command awareness)')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
@@ -496,10 +496,10 @@ export const initCommand = new Command('init')
         ambientEnabled = options.ambient;
       } else {
         p.note(
-          'Auto-classifies every prompt by intent and depth. Loads relevant\n' +
-          'skills automatically and escalates to full agent pipelines\n' +
-          '(review, debug, implement) when the task warrants it.\n\n' +
-          'Adds a small amount of context to each prompt for classification.',
+          'Detects implementation plans and provides command awareness.\n' +
+          'When the first message is a structured plan, automatically\n' +
+          'invokes the implement workflow to execute it.\n\n' +
+          'Zero overhead for normal prompts.',
           'Ambient Mode',
         );
         const ambientChoice = await p.select({
@@ -1074,8 +1074,8 @@ export const initCommand = new Command('init')
       const original = content;
 
       // Ambient hook — always remove-then-add to upgrade from legacy ambient-prompt → preamble
-      const cleanedForAmbient = removeAmbientHook(content);
-      content = ambientEnabled ? addAmbientHook(cleanedForAmbient, devflowDir) : cleanedForAmbient;
+      const cleanedForAmbient = await removeAmbientHook(content);
+      content = ambientEnabled ? await addAmbientHook(cleanedForAmbient, devflowDir) : cleanedForAmbient;
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
       // Memory hooks include the unified sidecar hooks (sidecar-dispatch, sidecar-capture,

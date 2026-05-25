@@ -22,9 +22,8 @@ It watches every prompt, classifies intent, and orchestrates the right workflow 
 
 ```
 you: add rate limiting to the /api/upload endpoint
+     (or use /implement for the full agent pipeline)
 
-Devflow: IMPLEMENT. Loading: devflow:implement:triage.
-         Scope: ORCHESTRATED
          → Created branch feat/42-rate-limit-upload
          → Exploring codebase... Planning... Coding...
          → Validator: build ✓ typecheck ✓ lint ✓ tests ✓

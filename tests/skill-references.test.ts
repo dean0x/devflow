@@ -700,42 +700,6 @@ describe('Test infrastructure skill references', () => {
     }
   });
 
-  it('DEVFLOW_PREAMBLE reads classification-rules.md which has valid refs', () => {
-    // helpers.ts loads DEVFLOW_PREAMBLE from classification-rules.md at runtime.
-    // Verify the classification rules reference devflow:router (loaded via Skill tool).
-    const rulesPath = path.join(ROOT, 'shared', 'skills', 'router', 'classification-rules.md');
-    const rulesContent = readFileSync(rulesPath, 'utf-8');
-
-    const rulesRefs = extractPrefixedRefs(rulesContent);
-    const skillRefs = filterNonSkillRefs(rulesRefs);
-    const canonicalSkills = new Set(getAllSkillNames());
-
-    for (const ref of skillRefs) {
-      expect(
-        canonicalSkills.has(ref),
-        `classification-rules.md has 'devflow:${ref}' but it is not in canonical skill set`,
-      ).toBe(true);
-    }
-  });
-
-  it('router SKILL.md skill refs match canonical set', () => {
-    // The lean router SKILL.md contains skill lookup tables.
-    const canonicalSkills = new Set(getAllSkillNames());
-    const routerPath = path.join(ROOT, 'shared', 'skills', 'router', 'SKILL.md');
-    const routerContent = readFileSync(routerPath, 'utf-8');
-
-    const routerRefs = extractPrefixedRefs(routerContent);
-    expect(routerRefs.length, 'router SKILL.md should have devflow: skill refs').toBeGreaterThan(0);
-
-    const skillRefs = filterNonSkillRefs(routerRefs);
-    for (const ref of skillRefs) {
-      expect(
-        canonicalSkills.has(ref),
-        `router SKILL.md has 'devflow:${ref}' but it is not in canonical skill set`,
-      ).toBe(true);
-    }
-  });
-
   it('no old V2-renamed skill names appear as string literals in test data', () => {
     const testsDir = path.join(ROOT, 'tests');
     const testFiles = collectTsFiles(testsDir, testsDir).filter(f =>

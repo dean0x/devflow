@@ -1,6 +1,6 @@
 {
   "name": "devflow-ambient",
-  "description": "Ambient mode — intent classification with proportional agent orchestration",
+  "description": "Plan auto-detection and command awareness",
   "author": {
     "name": "Dean0x"
   },
@@ -10,10 +10,10 @@
   "license": "MIT",
   "keywords": [
     "ambient",
-    "intent",
-    "classification",
-    "orchestration",
-    "agents"
+    "plan",
+    "detection",
+    "commands",
+    "awareness"
   ],
   "agents": [
     "coder",
@@ -32,28 +32,13 @@
     "researcher"
   ],
   "skills": [
-    "router",
-    "implement:triage",
     "implement:orch",
-    "implement:guided",
-    "debug:triage",
     "debug:orch",
-    "debug:guided",
-    "explore:triage",
     "explore:orch",
-    "explore:guided",
-    "research:triage",
     "research:orch",
-    "research:guided",
-    "release:triage",
     "release:orch",
-    "release:guided",
-    "plan:triage",
     "plan:orch",
-    "plan:guided",
-    "review:triage",
     "review:orch",
-    "review:guided",
     "resolve:orch",
     "pipeline:orch",
     "review-methodology",
