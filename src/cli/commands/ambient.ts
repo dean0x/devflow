@@ -214,7 +214,8 @@ export const ambientCommand = new Command('ambient')
     let settingsContent: string;
     try {
       settingsContent = await fs.readFile(settingsPath, 'utf-8');
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       if (options.status) {
         p.log.info('Ambient mode: disabled (no settings.json found)');
         return;
@@ -229,20 +230,26 @@ export const ambientCommand = new Command('ambient')
       return;
     }
 
-    // Resolve devflow scripts directory from settings.json hooks or default
-    let devflowDir: string;
+    // Resolve devflow scripts directory.
+    // Primary: getDevFlowDirectory() — purpose-built, not coupled to hook path layout.
+    // Fallback: infer from Stop hook command path (legacy installs where getDevFlowDirectory
+    //   may not yet reflect the correct location).
+    let devflowDir: string = getDevFlowDirectory();
     try {
       const settings: Settings = JSON.parse(settingsContent);
-      // Try to extract devflowDir from existing hooks (e.g., Stop hook path)
       const stopHook = settings.hooks?.Stop?.[0]?.hooks?.[0]?.command;
       if (stopHook) {
         const hookBinary = stopHook.split(' ')[0];
-        devflowDir = path.resolve(hookBinary, '..', '..', '..');
-      } else {
-        devflowDir = getDevFlowDirectory();
+        const inferred = path.resolve(hookBinary, '..', '..', '..');
+        // Only use inferred path when it differs from the canonical default —
+        // this handles legacy installs where the hook was installed to a non-standard location.
+        if (inferred !== devflowDir) {
+          devflowDir = inferred;
+        }
       }
-    } catch {
-      devflowDir = getDevFlowDirectory();
+    } catch (err) {
+      // JSON.parse can fail on a corrupt settings file; log and keep canonical default.
+      p.log.warn(`Could not parse settings.json for devflow directory resolution: ${(err as Error).message}`);
     }
 
     if (options.enable) {

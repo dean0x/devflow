@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { addAmbientHook, removeAmbientHook, hasAmbientHook, COMMANDS_RULE_CONTENT } from '../src/cli/commands/ambient.js';
+import { addAmbientHook, removeAmbientHook, hasAmbientHook, installCommandsRule, removeCommandsRule, COMMANDS_RULE_CONTENT, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
 import type { StreamResult } from './integration/helpers.js';
 import {
   hasSkillInvocations,
@@ -309,6 +309,60 @@ describe('removeAmbientHook', () => {
     expect(settings.hooks).toBeUndefined();
     // Returned JSON must differ from input — change was detected via removedClassification
     expect(result).not.toBe(input);
+  });
+});
+
+describe('installCommandsRule', () => {
+  beforeEach(() => {
+    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
+    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('creates the parent directory recursively', async () => {
+    await installCommandsRule();
+    expect(fs.mkdir).toHaveBeenCalledWith(
+      expect.stringContaining('rules/devflow'),
+      { recursive: true },
+    );
+  });
+
+  it('writes COMMANDS_RULE_CONTENT to COMMANDS_RULE_PATH', async () => {
+    await installCommandsRule();
+    expect(fs.writeFile).toHaveBeenCalledWith(COMMANDS_RULE_PATH, COMMANDS_RULE_CONTENT, 'utf-8');
+  });
+
+  it('is idempotent — overwrites existing file without error', async () => {
+    await expect(installCommandsRule()).resolves.toBeUndefined();
+    await expect(installCommandsRule()).resolves.toBeUndefined();
+    expect(fs.writeFile).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('removeCommandsRule', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('unlinks COMMANDS_RULE_PATH when file exists', async () => {
+    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+    await removeCommandsRule();
+    expect(fs.unlink).toHaveBeenCalledWith(COMMANDS_RULE_PATH);
+  });
+
+  it('swallows ENOENT — idempotent when file does not exist', async () => {
+    const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    vi.spyOn(fs, 'unlink').mockRejectedValue(enoent);
+    await expect(removeCommandsRule()).resolves.toBeUndefined();
+  });
+
+  it('re-throws non-ENOENT errors — e.g. EACCES', async () => {
+    const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    vi.spyOn(fs, 'unlink').mockRejectedValue(eacces);
+    await expect(removeCommandsRule()).rejects.toMatchObject({ code: 'EACCES' });
   });
 });
 
