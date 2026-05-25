@@ -87,6 +87,28 @@ const isClassification = (matcher: HookMatcher) =>
   matcher.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER));
 
 /**
+ * Install the commands awareness rule file.
+ * Idempotent — always overwrites with current content.
+ */
+export async function installCommandsRule(): Promise<void> {
+  await fs.mkdir(path.dirname(COMMANDS_RULE_PATH), { recursive: true });
+  await fs.writeFile(COMMANDS_RULE_PATH, COMMANDS_RULE_CONTENT, 'utf-8');
+}
+
+/**
+ * Remove the commands awareness rule file.
+ * Idempotent — no-op if the file does not exist.
+ * Only swallows ENOENT; other errors (e.g. EACCES) propagate.
+ */
+export async function removeCommandsRule(): Promise<void> {
+  try {
+    await fs.unlink(COMMANDS_RULE_PATH);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
+
+/**
  * Add the ambient UserPromptSubmit hook and write the commands awareness rule.
  * Removes any legacy `ambient-prompt` hook first, then adds the new `preamble` hook.
  * Writes COMMANDS_RULE_CONTENT to COMMANDS_RULE_PATH for passive command awareness.
@@ -123,8 +145,7 @@ export async function addAmbientHook(settingsJson: string, devflowDir: string): 
   }
 
   // --- Write commands awareness rule ---
-  await fs.mkdir(path.dirname(COMMANDS_RULE_PATH), { recursive: true });
-  await fs.writeFile(COMMANDS_RULE_PATH, COMMANDS_RULE_CONTENT, 'utf-8');
+  await installCommandsRule();
 
   if (!changed) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
@@ -135,23 +156,19 @@ export async function addAmbientHook(settingsJson: string, devflowDir: string): 
  * Removes preamble + legacy from UserPromptSubmit.
  * Also removes stale SessionStart classification hook from previous installs.
  * Deletes COMMANDS_RULE_PATH if present.
- * Idempotent — returns unchanged JSON if hooks not present.
+ * Idempotent — returns unchanged JSON if neither prompt hook nor stale classification was present.
  * Preserves other hooks. Cleans empty arrays/objects.
  */
 export async function removeAmbientHook(settingsJson: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
   const removedPrompt = filterHookEntries(settings, 'UserPromptSubmit', isAmbient);
   // Clean up stale classification hooks from previous installs (no longer registered)
-  filterHookEntries(settings, 'SessionStart', isClassification);
+  const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
 
   // Delete commands rule if it exists
-  try {
-    await fs.unlink(COMMANDS_RULE_PATH);
-  } catch {
-    // File may not exist — not an error
-  }
+  await removeCommandsRule();
 
-  if (!removedPrompt) return settingsJson;
+  if (!removedPrompt && !removedClassification) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 

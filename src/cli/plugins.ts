@@ -505,6 +505,22 @@ export const LEGACY_SKILL_NAMES: string[] = [
   'release:triage',
   // v2.x sidecar system: bare name for pre-namespace installs
   'sidecar',
+  // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
+  'devflow:router',
+  'devflow:implement:triage',
+  'devflow:implement:guided',
+  'devflow:debug:triage',
+  'devflow:debug:guided',
+  'devflow:explore:triage',
+  'devflow:explore:guided',
+  'devflow:plan:triage',
+  'devflow:plan:guided',
+  'devflow:review:triage',
+  'devflow:review:guided',
+  'devflow:research:triage',
+  'devflow:research:guided',
+  'devflow:release:triage',
+  'devflow:release:guided',
 ];
 
 /**
