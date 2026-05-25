@@ -16,7 +16,7 @@ Claude Code is powerful. But every session starts from scratch. Context evaporat
 
 Devflow fixes this. Install once, forget about it. Your code gets better automatically.
 
-It watches every prompt, classifies intent, and orchestrates the right workflow — plan, implement, review, debug — loading the relevant skills. Simple questions get zero overhead. Complex tasks get an advanced TDD and EDD harness with quality gates at every step.
+It provides passive command awareness via always-on rules, and detects when you paste a structured plan so it can auto-execute — no classification overhead for normal prompts. Complex tasks get an advanced TDD and EDD harness with quality gates at every step.
 
 ## See it work
 
@@ -41,7 +41,7 @@ you: add rate limiting to the /api/upload endpoint
 
 ## What you get
 
-**Ambient intelligence.** Devflow classifies every prompt into three tiers — QUICK (zero overhead), GUIDED (skill loading + main session), ORCHESTRATED (full agent pipelines). You never invoke it manually. Init and forget.
+**Ambient intelligence.** Devflow gives commands passive awareness via always-on rules, and detects structured plans for automatic execution — normal prompts get zero overhead, no classification step. You never invoke it manually. Init and forget.
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.devflow/decisions/` and inform every future session. No manual bookkeeping.
 
