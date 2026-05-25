@@ -21,6 +21,6 @@ Use `/devflow:<name>` to trigger a workflow:
 
 ## Plan Auto-Execution
 
-When the first message in a session is a structured implementation plan (contains
-`## Goal`, `## Steps`, and `## Files` sections), this is a plan handoff from a
-prior planning session. Invoke `devflow:implement` via the Skill tool to execute it.
+When a prompt is a structured implementation plan (contains `## Goal`, `## Steps`,
+and `## Files` sections), this is a plan handoff from a prior planning session.
+Invoke `devflow:implement` via the Skill tool to execute it.

@@ -12,7 +12,7 @@ devflow ambient --status    # Check if enabled
 
 ## How It Works
 
-1. **Plan detection** — When the first message contains `## Goal`, `## Steps`, and `## Files` sections, the preamble hook outputs a directive to invoke `devflow:implement` via the Skill tool
+1. **Plan detection** — When a prompt contains `## Goal`, `## Steps`, and `## Files` sections, the preamble hook outputs a directive to invoke `devflow:implement` via the Skill tool
 2. **Command awareness** — The `~/.claude/rules/devflow/commands.md` rule lists all available `/devflow:<name>` commands and documents the plan auto-execution trigger
 
 Normal prompts produce zero overhead — the hook exits without output.
@@ -36,7 +36,9 @@ Description of what to implement.
 
 ## Skills
 
-- `implement:orch` — Agent pipeline for IMPLEMENT tasks
+The ambient plugin distributes these skills. Only `implement:orch` is triggered automatically by plan detection — the rest are invoked via explicit slash commands (e.g. `/devflow:debug`, `/devflow:review`).
+
+- `implement:orch` — Agent pipeline for IMPLEMENT tasks (auto-triggered by plan detection)
 - `debug:orch` — Agent pipeline for DEBUG tasks
 - `explore:orch` — Agent pipeline for EXPLORE tasks
 - `plan:orch` — Agent pipeline for PLAN tasks
