@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (66 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (42 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -54,9 +54,8 @@ devflow/
 │       ├── sidecar-lock             # Shared helper: mkdir-based locking
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── session-start-context    # SessionStart hook: injects decisions TL;DR + learned behaviors
-│       ├── session-start-classification # SessionStart hook: injects ambient classification rules
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
-│       ├── preamble                 # UserPromptSubmit hook: ambient skill injection (zero file I/O)
+│       ├── preamble                 # UserPromptSubmit hook: plan auto-detection (zero overhead for normal prompts)
 │       ├── get-mtime                # Shared helper: portable mtime (BSD/GNU stat)
 │       ├── run-hook                 # Shared helper: hook runner with logging
 │       ├── log-paths                # Shared helper: per-project log path resolution
@@ -184,9 +183,8 @@ Three shell-script hooks replace the old 8-hook system with a sidecar architectu
 | `sidecar-evaluate` | SessionEnd | Evaluates whether to trigger learning, decisions, or knowledge refresh; writes per-session markers |
 | `session-start-memory` | SessionStart | Injects previous memory + git state as `additionalContext`. Warns if >1h stale |
 | `session-start-context` | SessionStart | Injects decisions TL;DR + learned behaviors |
-| `session-start-classification` | SessionStart | Injects ambient classification rules |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
-| `preamble` | UserPromptSubmit | Ambient skill injection (zero file I/O) |
+| `preamble` | UserPromptSubmit | Plan auto-detection (fires only for structured plan handoffs) |
 
 **Flow**: User sends prompt → `sidecar-dispatch` captures turn to queue and scans for pending sidecar markers → session ends → `sidecar-capture` appends assistant turn to queue, writes markers when throttle has expired (>2min) → `sidecar-evaluate` triggers background agents for memory/learning/decisions/knowledge. On `/clear` or new session → `session-start-memory` injects memory as `additionalContext` with staleness warning if >1h old.
 

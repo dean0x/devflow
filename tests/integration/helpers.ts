@@ -2,9 +2,6 @@ import { execSync, spawn, ChildProcess } from 'child_process';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { resolve } from 'path';
 
-const CLASSIFICATION_PATTERN = /devflow:\s*(EXPLORE|PLAN|IMPLEMENT|DEBUG|REVIEW|RESOLVE|PIPELINE|RESEARCH|RELEASE)\s*[.]/i;
-const SCOPE_PATTERN = /scope:\s*(GUIDED|ORCHESTRATED)/i;
-
 /**
  * Check if the `claude` CLI is available on this machine.
  */
@@ -16,19 +13,6 @@ export function isClaudeAvailable(): boolean {
     return false;
   }
 }
-
-/**
- * Read classification-rules.md from disk.
- * Simulates SessionStart injection for integration tests.
- */
-function loadRouterContext(): string {
-  const rulesPath = resolve(import.meta.dirname, '../../shared/skills/router/classification-rules.md');
-  return readFileSync(rulesPath, 'utf-8').trim();
-}
-
-// Simulates SessionStart injection (classification rules) + per-message preamble
-const DEVFLOW_PREAMBLE = loadRouterContext() +
-  '\nClassify this request\'s intent. If not QUICK, load devflow:router via Skill tool.';
 
 /** Parsed fields from a single streaming event */
 export interface ParsedStreamEvent {
@@ -93,7 +77,7 @@ export function runClaudeStreaming(
   const timeout = options?.timeout ?? 45000;
   const model = options?.model ?? 'haiku';
   const allowedTools = options?.allowedTools ?? 'Skill';
-  const systemPrompt = options?.systemPrompt !== undefined ? options.systemPrompt : DEVFLOW_PREAMBLE;
+  const systemPrompt = options?.systemPrompt !== undefined ? options.systemPrompt : false;
 
   return new Promise((resolve) => {
     const startTime = Date.now();
@@ -168,63 +152,10 @@ export function runClaudeStreaming(
   });
 }
 
-/**
- * Run a prompt with single-shot model fallback.
- *
- * One attempt with Haiku. If predicate fails, one attempt with Sonnet.
- * No retries — if the prompt doesn't work first try, the prompt needs fixing.
- */
-export async function runClaudeStreamingWithRetry(
-  prompt: string,
-  predicate: (result: StreamResult) => boolean,
-  options?: { timeout?: number; model?: string },
-): Promise<{ result: StreamResult; attempts: number; passed: boolean; model: string }> {
-  const timeout = options?.timeout ?? 45000;
-  const primaryModel = options?.model ?? 'haiku';
-
-  // Single shot with primary model
-  const primaryResult = await runClaudeStreaming(prompt, { timeout, model: primaryModel });
-  if (predicate(primaryResult)) {
-    return { result: primaryResult, attempts: 1, passed: true, model: primaryModel };
-  }
-
-  // Single shot fallback to sonnet
-  if (primaryModel === 'haiku') {
-    const fallbackResult = await runClaudeStreaming(prompt, { timeout, model: 'sonnet' });
-    if (predicate(fallbackResult)) {
-      return { result: fallbackResult, attempts: 2, passed: true, model: 'sonnet' };
-    }
-    return { result: fallbackResult, attempts: 2, passed: false, model: 'sonnet' };
-  }
-
-  return { result: primaryResult, attempts: 1, passed: false, model: primaryModel };
-}
-
 // --- Detection helpers ---
 
 export function hasSkillInvocations(result: StreamResult): boolean {
   return result.skills.length > 0;
-}
-
-export function getSkillInvocations(result: StreamResult): string[] {
-  return result.skills;
-}
-
-export function hasClassification(result: StreamResult): boolean {
-  const text = result.textFragments.join(' ');
-  return CLASSIFICATION_PATTERN.test(text);
-}
-
-export function extractIntent(result: StreamResult): string | null {
-  const text = result.textFragments.join(' ');
-  const match = text.match(CLASSIFICATION_PATTERN);
-  return match ? match[1].toUpperCase() : null;
-}
-
-export function extractDepth(result: StreamResult): string | null {
-  const text = result.textFragments.join(' ');
-  const match = text.match(SCOPE_PATTERN);
-  return match ? match[1].toUpperCase() : null;
 }
 
 /**

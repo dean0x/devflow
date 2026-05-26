@@ -22,7 +22,7 @@ export function extractSection(content: string, startAnchor: string, endAnchor: 
 }
 
 /**
- * Pure function mirroring the fp_ratio formula documented in orchestration surfaces.
+ * Pure function mirroring the fp_ratio formula documented in command surfaces.
  * Denominator = fp_count + fixed_count + deferred_count.
  * Returns 0 when denominator is 0 or any input is NaN/non-finite (parse failure path).
  */

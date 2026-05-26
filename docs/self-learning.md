@@ -100,7 +100,7 @@ The `healed` field is present in all three reconcile-manifest output shapes (mai
 
 ## Decisions Index + On-Demand Read Pattern
 
-Decisions consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
+Decisions consumers (slash commands) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
 
 ### Step 1: Load compact index at orchestrator
 
@@ -137,13 +137,13 @@ Agents that receive `DECISIONS_CONTEXT` follow the `devflow:apply-decisions` ski
 
 ### Commands using this pattern
 
-| Command / Orch | Agents that consume |
-|----------------|---------------------|
-| `/resolve`, `resolve:orch` | Resolver |
-| `/plan`, `plan:orch` | Designer, Explore |
+| Command | Agents that consume |
+|---------|---------------------|
+| `/resolve` | Resolver |
+| `/plan` | Designer, Explore |
 | `/self-review` | Simplifier, Scrutinizer |
-| `/code-review`, `review:orch` | Reviewer |
-| `debug:orch` | Orchestrator-local (not fanned to Explore) |
+| `/code-review` | Reviewer |
+| `/debug` | Orchestrator-local (not fanned to Explore) |
 
 ## CLI Commands
 

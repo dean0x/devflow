@@ -66,7 +66,7 @@ describe('extractChannels — pollution rejection (D2)', () => {
 
   it('rejects string user content matching <command-name> wrapper', () => {
     const input = [
-      userMsg('<command-name>devflow:router</command-name> loaded context'),
+      userMsg('<command-name>devflow:implement</command-name> loaded context'),
       userMsg('plain user message that is fine'),
     ].join('\n');
 

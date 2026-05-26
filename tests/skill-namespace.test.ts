@@ -38,8 +38,8 @@ describe('prefixSkillName', () => {
   });
 
   it('handles colon-containing skill names', () => {
-    expect(prefixSkillName('implement:orch')).toBe('devflow:implement:orch');
-    expect(prefixSkillName('review:orch')).toBe('devflow:review:orch');
+    expect(prefixSkillName('feature-knowledge')).toBe('devflow:feature-knowledge');
+    expect(prefixSkillName('apply-feature-knowledge')).toBe('devflow:apply-feature-knowledge');
   });
 
   it('handles empty string', () => {
@@ -59,8 +59,8 @@ describe('unprefixSkillName', () => {
   });
 
   it('handles colon-containing skill names', () => {
-    expect(unprefixSkillName('devflow:implement:orch')).toBe('implement:orch');
-    expect(unprefixSkillName('devflow:pipeline:orch')).toBe('pipeline:orch');
+    expect(unprefixSkillName('devflow:feature-knowledge')).toBe('feature-knowledge');
+    expect(unprefixSkillName('devflow:apply-feature-knowledge')).toBe('apply-feature-knowledge');
   });
 
   it('handles empty string', () => {
@@ -72,7 +72,7 @@ describe('unprefixSkillName', () => {
   });
 
   it('roundtrips with prefixSkillName', () => {
-    const names = ['software-design', 'security', 'go', 'react', 'implement:orch', 'debug:orch', 'review:orch'];
+    const names = ['software-design', 'security', 'go', 'react', 'feature-knowledge', 'apply-feature-knowledge'];
     for (const name of names) {
       expect(unprefixSkillName(prefixSkillName(name))).toBe(name);
     }

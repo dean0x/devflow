@@ -27,6 +27,18 @@ Orchestrate a single task through implementation by spawning specialized agents.
 
 ## Phases
 
+### Re-validation Continuation Path
+
+When the user explicitly asks to re-validate, re-check, or re-run quality gates after making their own changes:
+
+1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1.
+2. **Skip Phase 2** — no Coder needed, user already made changes.
+3. **Detect FILES_CHANGED**: `git diff --name-only {base_branch}...HEAD`
+4. **Run Phases 3-8** — full quality gate pipeline on detected changes.
+5. **Proceed to Phase 10** (Create PR) / **Phase 11** (Report).
+
+If the user prompt does NOT match re-validation, proceed with the full pipeline below.
+
 ### Phase 1: Setup
 
 **Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_FEATURE_KNOWLEDGE_SLUGS, PR_DESCRIPTION_GUIDANCE
@@ -364,7 +376,23 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    - If Validator PASS: Loop back to Phase 8 (re-run Tester)
 4. If `qa_retry_count > 2`: Report QA failures to user for decision
 
-### Phase 9: Create PR
+### Phase 9: CI Status Gate
+
+**Produces:** CI_STATUS
+**Requires:** PR_URL, FILES_CHANGED
+
+Strategy-conditional: run for **SINGLE_CODER** (PR exists from Phase 2), skip for **SEQUENTIAL_CODERS** / **PARALLEL_CODERS** (PR not yet created).
+
+<!-- PATTERN: ci-status-gate -->
+1. Spawn `Agent(subagent_type="Git")` with `OPERATION: check-ci-status` and `PR_NUMBER` from PR_URL.
+2. **If PASSING** → proceed to Phase 10.
+3. **If NO_PR or NO_CI** → skip: "No PR/CI configured, skipping CI validation." Proceed to Phase 10.
+4. **If PENDING** → poll every 60 seconds (global budget, see step 6). Re-spawn Git agent each poll. If PASSING → proceed. If still PENDING after budget exhausted → report "CI still running — verify manually before merging" and proceed.
+5. **If FAILING** → report failing checks. Spawn `Agent(subagent_type="Coder")` to fix CI failures based on check names and failure context. After fix, push and re-check. Max 2 fix attempts. If still failing → report failures and proceed.
+6. **Total budget**: max 10 polls and max 2 fix attempts across all check/fix cycles combined. If budget exhausted, report current status and proceed.
+<!-- /PATTERN: ci-status-gate -->
+
+### Phase 10: Create PR
 
 **Produces:** PR_URL
 **Requires:** BASE_BRANCH, TASK_ID
@@ -375,7 +403,7 @@ If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see
 
 **For SINGLE_CODER**: PR is created by the Coder agent (CREATE_PR: true).
 
-### Phase 10: Report
+### Phase 11: Report
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
 
@@ -383,11 +411,11 @@ Compute overlapping feature knowledge:
 ```bash
 OVERLAPPING_SLUGS=$(node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs find-overlapping "{worktree}" {files_changed...} 2>/dev/null)
 ```
-Parse the JSON array output. Pass `OVERLAPPING_SLUGS` to Phase 11.
+Parse the JSON array output. Pass `OVERLAPPING_SLUGS` to Phase 12.
 
 Display completion summary with phase status, PR info, and next steps.
 
-### Phase 11: Feature Knowledge Generation (Conditional)
+### Phase 12: Feature Knowledge Generation (Conditional)
 
 **Requires:** FILES_CHANGED, STALE_FEATURE_KNOWLEDGE_SLUGS, OVERLAPPING_SLUGS, DECISIONS_CONTEXT
 **Produces:** Updated `.devflow/features/index.json` (or skipped)
@@ -427,7 +455,7 @@ If `.devflow/features/.disabled` exists, skip entirely.
 
 Skip if all touched areas already have matching feature knowledge.
 
-**Refresh stale feature knowledge**: Combine STALE_FEATURE_KNOWLEDGE_SLUGS (from Phase 1) and OVERLAPPING_SLUGS (from Phase 10), deduplicate. For each slug, refresh:
+**Refresh stale feature knowledge**: Combine STALE_FEATURE_KNOWLEDGE_SLUGS (from Phase 1) and OVERLAPPING_SLUGS (from Phase 11), deduplicate. For each slug, refresh:
 
 1. Read `.devflow/features/{slug}/KNOWLEDGE.md` and index entry
 2. Spawn Agent(subagent_type="Knowledge"):
@@ -453,6 +481,9 @@ Skip if all touched areas already have matching feature knowledge.
 
 ```
 /implement (orchestrator - spawns agents only)
+│
+├─ Re-validation Path (when user says "re-validate"/"re-check"/"re-run gates")
+│  └─ Branch safety → skip Phase 2 → detect FILES_CHANGED → Phases 3-8 → Phase 10-11
 │
 ├─ Phase 1: Setup
 │  └─ Git agent (operation: setup-task) - creates feature branch, fetches issue
@@ -484,14 +515,17 @@ Skip if all touched areas already have matching feature knowledge.
 │  └─ Tester agent (scenario-based acceptance tests)
 │  └─ If FAIL: Coder fix loop (max 2 retries) → Validator → re-test
 │
-├─ Phase 9: Create PR (if needed)
+├─ Phase 9: CI Status Gate (SINGLE_CODER only)
+│  └─ Git agent (check-ci-status) → poll/fix cycle (10 polls + 2 fix budget)
+│
+├─ Phase 10: Create PR (if needed)
 │  └─ SINGLE_CODER: handled by Coder
 │  └─ SEQUENTIAL: handled by last Coder
 │  └─ PARALLEL: orchestrator creates unified PR
 │
-├─ Phase 10: Report
+├─ Phase 11: Report
 │
-└─ Phase 11: Feature Knowledge Generation (Conditional)
+└─ Phase 12: Feature Knowledge Generation (Conditional)
    └─ Knowledge agent (if new/stale feature area)
 ```
 
@@ -508,6 +542,7 @@ Skip if all touched areas already have matching feature knowledge.
 9. **Validator owns validation** - Never run `npm test`, `npm run build`, or similar in main session; always delegate to Validator agent
 10. **Coder owns fixes** - Never implement fixes in main session; spawn Coder for validation failures and alignment fixes
 11. **Loop limits** - Max 2 validation retries, max 2 alignment fix iterations before escalating to user
+12. **CI awareness** - CI status is checked before merge for SINGLE_CODER strategy
 
 ## Error Handling
 

@@ -170,10 +170,7 @@ Incremental by default — only analyzes commits since the last run. Findings ar
 
 ## Ambient Mode
 
-Not a command — an always-on hook that classifies every prompt and loads proportional skill sets:
+Not a command — a zero-overhead enhancement with two components:
 
-| Depth | When | What happens |
-|-------|------|-------------|
-| **QUICK** | Chat, git ops, trivial edits | Zero overhead — respond normally |
-| **GUIDED** | Small implementations, focused debugging | Skills loaded, main session implements |
-| **ORCHESTRATED** | Complex tasks, multi-file changes | Full agent pipeline (same as slash commands) |
+1. **Plan auto-detection** — A `UserPromptSubmit` hook detects structured plans (containing `## Goal`, `## Steps`, and `## Files`) and auto-invokes `/implement`. Normal prompts produce zero output.
+2. **Command awareness** — An always-on rule (`~/.claude/rules/devflow/commands.md`) lists available `/devflow:<name>` commands for passive reference.

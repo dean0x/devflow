@@ -272,7 +272,7 @@ export const uninstallCommand = new Command('uninstall')
             const settingsPath = path.join(claudeDir, 'settings.json');
             try {
               const settings = await fs.readFile(settingsPath, 'utf-8');
-              const updated = removeAmbientHook(settings);
+              const updated = await removeAmbientHook(settings);
               if (updated !== settings) {
                 await fs.writeFile(settingsPath, updated, 'utf-8');
                 if (verbose) {
@@ -368,7 +368,7 @@ export const uninstallCommand = new Command('uninstall')
           const originalContent = await fs.readFile(settingsPath, 'utf-8');
 
           // Remove all Devflow hooks and flags in one pass (idempotent)
-          let settingsContent = removeAmbientHook(originalContent);
+          let settingsContent = await removeAmbientHook(originalContent);
           settingsContent = removeMemoryHooks(settingsContent);
           settingsContent = removeHudStatusLine(settingsContent);
           settingsContent = removeContextHook(settingsContent);

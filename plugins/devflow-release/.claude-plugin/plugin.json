@@ -23,7 +23,6 @@
   "skills": [
     "agent-teams",
     "git",
-    "worktree-support",
-    "release:orch"
+    "worktree-support"
   ]
 }

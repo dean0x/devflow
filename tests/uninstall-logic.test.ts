@@ -105,11 +105,11 @@ describe('computeAssetsToRemove', () => {
 describe('formatDryRunPlan', () => {
   it('lists skills, agents, and commands', () => {
     const plan = formatDryRunPlan({
-      skills: ['router', 'test-driven-development'],
+      skills: ['security', 'test-driven-development'],
       agents: ['coder'],
       commands: ['/implement'],
     });
-    expect(plan).toContain('router');
+    expect(plan).toContain('security');
     expect(plan).toContain('test-driven-development');
     expect(plan).toContain('coder');
     expect(plan).toContain('/implement');
