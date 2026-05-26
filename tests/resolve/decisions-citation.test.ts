@@ -13,9 +13,7 @@
 //      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
 //   4. Structural tests: resolve-teams.md — parity with base
 //      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
-//   5. Structural tests: resolve:orch SKILL.md — Phase 1.5 parity
-//      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
-//   6. Structural tests: resolver.md — Input Context + Apply Decisions
+//   5. Structural tests: resolver.md — Input Context + Apply Decisions
 //      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
 //   7. Cross-cutting: all four surfaces reference DECISIONS_CONTEXT
 
@@ -154,28 +152,6 @@ describe('resolve-teams.md — teams variant parity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: resolve:orch SKILL.md (ambient mode)
-// ---------------------------------------------------------------------------
-
-describe('resolve:orch SKILL.md — ambient mode parity', () => {
-  const content = loadFile('shared/skills/resolve:orch/SKILL.md');
-
-  it('contains Phase 2: Load Project Decisions between Phase 1 and Phase 3', () => {
-    expect(content).toMatch(/Phase 2.*Load Project Decisions/i);
-  });
-
-  it('Phase 5 spawn block includes DECISIONS_CONTEXT', () => {
-    const phase5Section = extractSection(content, '## Phase 5', '## Phase 6');
-    expect(phase5Section).toContain('DECISIONS_CONTEXT');
-  });
-
-  it('Phase 6 (Collect & Simplify) mentions Decisions Citations (D-B)', () => {
-    const phase6Section = extractSection(content, '## Phase 6', '## Phase 7');
-    expect(phase6Section).toContain('Decisions Citations');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Structural tests: shared/agents/resolver.md
 // ---------------------------------------------------------------------------
 
@@ -223,11 +199,6 @@ describe('cross-cutting — DECISIONS_CONTEXT on all four surfaces', () => {
 
   it('resolve-teams.md contains DECISIONS_CONTEXT', () => {
     const content = loadFile('plugins/devflow-resolve/commands/resolve-teams.md');
-    expect(content).toContain('DECISIONS_CONTEXT');
-  });
-
-  it('resolve:orch SKILL.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('shared/skills/resolve:orch/SKILL.md');
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 

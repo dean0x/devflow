@@ -105,7 +105,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Multi-type research with parallel researchers and trust-aware synthesis',
     commands: ['/research'],
     agents: ['researcher', 'skimmer', 'synthesizer', 'knowledge'],
-    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology', 'research:orch'],
+    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology'],
     rules: [],
   },
   {
@@ -113,7 +113,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Adaptive project release with learned configuration',
     commands: ['/release'],
     agents: ['git', 'synthesizer', 'validator'],
-    skills: ['agent-teams', 'git', 'worktree-support', 'release:orch'],
+    skills: ['agent-teams', 'git', 'worktree-support'],
     rules: [],
   },
   {
@@ -148,15 +148,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/ambient'],
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
     skills: [
-      'implement:orch',
-      'debug:orch',
-      'explore:orch',
-      'research:orch',
-      'release:orch',
-      'plan:orch',
-      'review:orch',
-      'resolve:orch',
-      'pipeline:orch',
       'review-methodology',
       'security',
       'architecture',
@@ -517,6 +508,16 @@ const LEGACY_SKILLS_V2X: string[] = [
   'release:triage',
   // v2.x sidecar system: bare name for pre-namespace installs
   'sidecar',
+  // v2.x ambient simplification: devflow:-prefixed orch names for cleanup
+  'devflow:implement:orch',
+  'devflow:debug:orch',
+  'devflow:explore:orch',
+  'devflow:plan:orch',
+  'devflow:review:orch',
+  'devflow:resolve:orch',
+  'devflow:pipeline:orch',
+  'devflow:research:orch',
+  'devflow:release:orch',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
   'devflow:router',
   'devflow:implement:triage',
@@ -564,19 +565,6 @@ export const SHADOW_RENAMES: [string, string][] = [
   ['database-patterns', 'database'],
   ['dependencies-patterns', 'dependencies'],
   ['documentation-patterns', 'documentation'],
-  ['implementation-orchestration', 'implement:orch'],
-  ['debug-orchestration', 'debug:orch'],
-  ['plan-orchestration', 'plan:orch'],
-  ['review-orchestration', 'review:orch'],
-  ['resolve-orchestration', 'resolve:orch'],
-  ['pipeline-orchestration', 'pipeline:orch'],
-  ['implement', 'implement:orch'],
-  ['debug', 'debug:orch'],
-  ['explore', 'explore:orch'],
-  ['plan', 'plan:orch'],
-  ['review', 'review:orch'],
-  ['resolve', 'resolve:orch'],
-  ['pipeline', 'pipeline:orch'],
   ['self-review', 'quality-gates'],
   ['implementation-patterns', 'patterns'],
   ['search-first', 'dependency-research'],
@@ -636,9 +624,8 @@ export function buildAssetMaps(plugins: PluginDefinition[]): {
 
 /**
  * Build a skills map from ALL plugins (regardless of selection).
- * Skills are tiny markdown files — always install all of them so orchestration
- * skills (review, resolve) can spawn agents that
- * depend on skills from other plugins.
+ * Skills are tiny markdown files — always install all of them so commands
+ * (review, resolve) can spawn agents that depend on skills from other plugins.
  */
 export function buildFullSkillsMap(): Map<string, string> {
   const skillsMap = new Map<string, string>();

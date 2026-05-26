@@ -21,7 +21,7 @@ tools:
 - **FEATURE_SLUG** (required): Kebab-case identifier for the feature area (e.g., `cli-commands`)
 - **FEATURE_NAME** (required): Human-readable name (e.g., "CLI Command System")
 - **DIRECTORIES** (required): Directory prefixes defining the feature area scope
-- **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skimmer + Explore agents. When provided (e.g., from plan:orch), synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract) using the tools available.
+- **EXPLORATION_OUTPUTS** (optional): Pre-computed findings from Skimmer + Explore agents. When provided (e.g., from /plan), synthesize these instead of exploring from scratch. When absent, perform your own exploration in Phase 1 (Scan) and Phase 2 (Extract) using the tools available.
 - **DECISIONS_CONTEXT** (optional): Compact ADR/PF index for cross-referencing in the Related section. When `(none)`, skip citing decisions in the Related section.
 - **EXISTING_KB** (optional): Current KNOWLEDGE.md content when refreshing stale feature knowledge
 - **CHANGED_FILES** (optional): Files that changed since last feature knowledge update (for refresh)

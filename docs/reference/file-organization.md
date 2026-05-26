@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (51 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (42 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/

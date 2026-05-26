@@ -44,6 +44,19 @@ Read `.release/RELEASE-FLOW.md`:
 - If exists → parse as structured config, set CONFIG_STATE = learned, skip to Phase 4
 - If missing → set CONFIG_STATE = fresh, continue to Phase 2
 
+### Phase 1b: Load Context
+
+**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+
+Load the decisions index:
+```bash
+DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "." 2>/dev/null || echo "(none)")
+```
+
+Load feature knowledge: Read `.devflow/features/index.json`, match release-relevant files, read relevant KNOWLEDGE.md entries. Set `FEATURE_KNOWLEDGE` (or `(none)`).
+
+Pass both to all subsequent agents via their input contracts.
+
 ### Phase 2: Detect Release Process (First Run Only)
 
 **Produces:** RELEASE_SIGNALS
@@ -145,6 +158,9 @@ On completion:
 │
 ├─ Phase 1: Load Config
 │  └─ Read .release/RELEASE-FLOW.md (learned) or proceed to detect (fresh)
+│
+├─ Phase 1b: Load Context
+│  └─ Load DECISIONS_CONTEXT and FEATURE_KNOWLEDGE for downstream agents
 │
 ├─ Phase 2: Detect Release Process (first run only)
 │  └─ Tiered scan: package.json, CI workflows, git history

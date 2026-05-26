@@ -27,51 +27,6 @@ describe('Command surfaces — decisions-index.cjs index invocation', () => {
 })
 
 // -------------------------------------------------------------------------
-// Orch skill surfaces — must reference decisions-index.cjs index
-// -------------------------------------------------------------------------
-
-describe('Orch skill surfaces — decisions-index.cjs index invocation', () => {
-  // Multi-worktree orch skills use {worktree} as a runtime-substituted placeholder
-  const multiWorktreeOrchSkills: Array<[string, string]> = [
-    ['plan:orch', 'shared/skills/plan:orch/SKILL.md'],
-    ['review:orch', 'shared/skills/review:orch/SKILL.md'],
-    ['debug:orch', 'shared/skills/debug:orch/SKILL.md'],
-  ]
-
-  for (const [label, relPath] of multiWorktreeOrchSkills) {
-    it(`${label} SKILL.md invokes decisions-index.cjs index with {worktree} placeholder`, () => {
-      const content = loadFile(relPath)
-      expect(content).toContain('decisions-index.cjs index "{worktree}"')
-    })
-  }
-
-  // resolve:orch is single-worktree only (ambient-mode, always runs in cwd), so it uses "." directly
-  it('resolve:orch SKILL.md invokes decisions-index.cjs index with literal "." (single-worktree)', () => {
-    const content = loadFile('shared/skills/resolve:orch/SKILL.md')
-    expect(content).toContain('decisions-index.cjs index "."')
-  })
-})
-
-// -------------------------------------------------------------------------
-// debug:orch — decisions loads orchestrator-locally, NOT fanned to Explore
-// -------------------------------------------------------------------------
-
-describe('debug:orch — decisions is orchestrator-local, not fanned to Explore spawns', () => {
-  it('debug:orch SKILL.md contains DECISIONS_CONTEXT (orchestrator uses it)', () => {
-    const content = loadFile('shared/skills/debug:orch/SKILL.md')
-    expect(content).toContain('DECISIONS_CONTEXT')
-  })
-
-  it('debug:orch Explore spawn blocks do NOT pass DECISIONS_CONTEXT to sub-agents', () => {
-    const content = loadFile('shared/skills/debug:orch/SKILL.md')
-    // Find the Phase 3 Investigate section (Explore spawns)
-    const phase3Section = extractSection(content, 'Phase 3: Investigate', '## Phase 4')
-    // DECISIONS_CONTEXT should NOT appear in Explore spawn block parameters
-    expect(phase3Section).not.toContain('DECISIONS_CONTEXT')
-  })
-})
-
-// -------------------------------------------------------------------------
 // debug.md & debug-teams.md — decisions orchestrator-local, not fanned
 // -------------------------------------------------------------------------
 
@@ -114,7 +69,6 @@ describe('DECISIONS_CONTEXT template — uses canonical {decisions_context} form
     ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
     ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
     ['code-review-teams.md', 'plugins/devflow-code-review/commands/code-review-teams.md'],
-    ['plan:orch', 'shared/skills/plan:orch/SKILL.md'],
   ]
 
   for (const [label, relPath] of templateSurfaces) {
@@ -201,16 +155,12 @@ describe('DECISIONS_CONTEXT variable — present in all four command surfaces', 
     expect(loadFile('plugins/devflow-code-review/commands/code-review.md')).toContain('DECISIONS_CONTEXT')
   })
 
-  it('plan:orch SKILL.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('shared/skills/plan:orch/SKILL.md')).toContain('DECISIONS_CONTEXT')
+  it('debug.md contains DECISIONS_CONTEXT', () => {
+    expect(loadFile('plugins/devflow-debug/commands/debug.md')).toContain('DECISIONS_CONTEXT')
   })
 
-  it('review:orch SKILL.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('shared/skills/review:orch/SKILL.md')).toContain('DECISIONS_CONTEXT')
-  })
-
-  it('debug:orch SKILL.md contains DECISIONS_CONTEXT', () => {
-    expect(loadFile('shared/skills/debug:orch/SKILL.md')).toContain('DECISIONS_CONTEXT')
+  it('resolve.md contains DECISIONS_CONTEXT', () => {
+    expect(loadFile('plugins/devflow-resolve/commands/resolve.md')).toContain('DECISIONS_CONTEXT')
   })
 })
 
@@ -227,37 +177,23 @@ describe('reviewer.md — Apply Decisions section', () => {
 })
 
 // -------------------------------------------------------------------------
-// plan:orch — decisions loading phase present
+// plan.md — decisions loading phase present
 // -------------------------------------------------------------------------
 
-describe('plan:orch — decisions loading phase', () => {
+describe('plan.md — decisions loading phase', () => {
   it('contains a decisions-loading step (load decisions index)', () => {
-    const content = loadFile('shared/skills/plan:orch/SKILL.md')
-    // Should have a phase that loads decisions
+    const content = loadFile('plugins/devflow-plan/commands/plan.md')
     expect(content).toMatch(/[Ll]oad.*[Dd]ecisions|[Dd]ecisions.*[Ll]oad/i)
-  })
-
-  it('Explore spawn blocks receive DECISIONS_CONTEXT', () => {
-    const content = loadFile('shared/skills/plan:orch/SKILL.md')
-    // The Explore phase section should mention DECISIONS_CONTEXT
-    const phase5 = extractSection(content, 'Phase 5: Explore', '## Phase 6')
-    expect(phase5).toContain('DECISIONS_CONTEXT')
   })
 })
 
 // -------------------------------------------------------------------------
-// review:orch — decisions loading phase present
+// code-review.md — decisions loading phase present
 // -------------------------------------------------------------------------
 
-describe('review:orch — decisions loading phase', () => {
+describe('code-review.md — decisions loading phase', () => {
   it('contains a decisions-loading step', () => {
-    const content = loadFile('shared/skills/review:orch/SKILL.md')
+    const content = loadFile('plugins/devflow-code-review/commands/code-review.md')
     expect(content).toMatch(/[Ll]oad.*[Dd]ecisions|[Dd]ecisions.*[Ll]oad/i)
-  })
-
-  it('Phase 5 Reviews section receives DECISIONS_CONTEXT', () => {
-    const content = loadFile('shared/skills/review:orch/SKILL.md')
-    const phase5 = extractSection(content, 'Phase 5: Reviews', '## Phase 6')
-    expect(phase5).toContain('DECISIONS_CONTEXT')
   })
 })

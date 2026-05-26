@@ -63,22 +63,6 @@ Domain expertise for Researcher agent focus areas. Loaded dynamically by Researc
 | `research-competitor` | Feature comparison, gap analysis | Mixed |
 | `research-technology` | Library/framework evaluation | Mixed |
 
-### Orchestration Skills
-
-Skills that orchestrate agent pipelines for specific workflows. Each follows the Phase Protocol with `**Produces:**`/`**Requires:**` annotations and a `## Phase Completion Checklist`.
-
-| Skill | Purpose |
-|-------|---------|
-| `implement:orch` | Full implementation pipeline — pre-flight, Coder, quality gates, PR |
-| `explore:orch` | Codebase analysis, flow mapping, optional knowledge base creation |
-| `debug:orch` | Competing hypothesis investigation with parallel agents |
-| `plan:orch` | Requirements discovery, gap analysis, design artifact creation |
-| `review:orch` | Branch code review with specialized reviewer agents |
-| `resolve:orch` | Review issue resolution with risk-proportional fixes |
-| `pipeline:orch` | End-to-end meta-orchestrator chaining implement → review → resolve |
-| `research:orch` | Multi-type research with trust-aware synthesis |
-| `release:orch` | Adaptive release pipeline with learned project configuration |
-
 ### Tier 3: Domain-Specific Skills
 
 Language and framework patterns. Referenced by agents via frontmatter and conditionally activated by Reviewer.

@@ -916,7 +916,7 @@ export const initCommand = new Command('init')
     }
 
     // Skills: install ALL from ALL plugins (skills are tiny markdown files;
-    // orchestration skills need skills from other plugins to function)
+    // commands need skills from other plugins to function)
     const skillsMap = buildFullSkillsMap();
     // Agents: install only from selected plugins
     const { agentsMap } = buildAssetMaps(pluginsToInstall);

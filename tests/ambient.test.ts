@@ -470,11 +470,11 @@ describe('parseStreamEvent', () => {
     const event = {
       type: 'assistant',
       message: { content: [
-        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:implement:orch' } },
+        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:implement' } },
       ] },
     };
     const parsed = parseStreamEvent(event);
-    expect(parsed.skills).toEqual(['devflow:implement:orch']);
+    expect(parsed.skills).toEqual(['devflow:implement']);
     expect(parsed.textFragments).toEqual([]);
   });
 
@@ -508,12 +508,12 @@ describe('parseStreamEvent', () => {
       type: 'assistant',
       message: { content: [
         { type: 'text', text: 'EXECUTION_PLAN detected.' },
-        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:implement:orch' } },
+        { type: 'tool_use', name: 'Skill', input: { skill: 'devflow:implement' } },
         { type: 'text', text: 'Executing plan.' },
       ] },
     };
     const parsed = parseStreamEvent(event);
-    expect(parsed.skills).toEqual(['devflow:implement:orch']);
+    expect(parsed.skills).toEqual(['devflow:implement']);
     expect(parsed.textFragments).toEqual(['EXECUTION_PLAN detected.', 'Executing plan.']);
   });
 });
@@ -525,83 +525,6 @@ describe('skill invocation helpers', () => {
 
   it('returns false when no skills', () => {
     expect(hasSkillInvocations(textResult('some text'))).toBe(false);
-  });
-});
-
-describe('phase protocol structural validation', () => {
-  const sharedSkillsDir = path.resolve(__dirname, '../shared/skills');
-
-  async function discoverOrchSkills(): Promise<string[]> {
-    const entries = await fs.readdir(sharedSkillsDir);
-    return entries.filter(e => e.endsWith(':orch')).sort();
-  }
-
-  it('every orch skill has a Phase Completion Checklist', async () => {
-    for (const skill of await discoverOrchSkills()) {
-      const content = await fs.readFile(
-        path.join(sharedSkillsDir, skill, 'SKILL.md'),
-        'utf-8',
-      );
-      expect(content, `${skill} missing Phase Completion Checklist`).toContain(
-        '## Phase Completion Checklist',
-      );
-    }
-  });
-
-  it('every orch skill has Produces: annotations', async () => {
-    for (const skill of await discoverOrchSkills()) {
-      const content = await fs.readFile(
-        path.join(sharedSkillsDir, skill, 'SKILL.md'),
-        'utf-8',
-      );
-      expect(content, `${skill} missing Produces: annotations`).toContain(
-        '**Produces:**',
-      );
-    }
-  });
-
-  it('every orch skill has Requires: annotations', async () => {
-    for (const skill of await discoverOrchSkills()) {
-      const content = await fs.readFile(
-        path.join(sharedSkillsDir, skill, 'SKILL.md'),
-        'utf-8',
-      );
-      expect(content, `${skill} missing Requires: annotations`).toContain(
-        '**Requires:**',
-      );
-    }
-  });
-
-  it('plan:orch and implement:orch have Continuation Detection', async () => {
-    for (const skill of ['plan:orch', 'implement:orch']) {
-      const content = await fs.readFile(
-        path.join(sharedSkillsDir, skill, 'SKILL.md'),
-        'utf-8',
-      );
-      expect(content, `${skill} missing Continuation Detection`).toContain(
-        '## Continuation Detection',
-      );
-    }
-  });
-
-  it('checklist item count matches phase count in each orch skill', async () => {
-    for (const skill of await discoverOrchSkills()) {
-      const content = await fs.readFile(
-        path.join(sharedSkillsDir, skill, 'SKILL.md'),
-        'utf-8',
-      );
-
-      // Count phase headings (## Phase N or ### Phase N — digit distinguishes from ## Phase Completion Checklist)
-      const phaseHeadings = content.match(/^#{2,3}\s+Phase\s+\d/gm) ?? [];
-
-      // Count checklist items (- [ ] Phase)
-      const checklistItems = content.match(/^- \[ \] Phase/gm) ?? [];
-
-      expect(
-        checklistItems.length,
-        `${skill}: ${checklistItems.length} checklist items but ${phaseHeadings.length} phases`,
-      ).toBe(phaseHeadings.length);
-    }
   });
 });
 

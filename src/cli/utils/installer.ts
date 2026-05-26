@@ -251,7 +251,7 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   }
 
   // Install skills from ALL plugins (skillsMap covers all plugins, not just selected).
-  // Skills are tiny markdown files — universal install ensures orchestration skills
+  // Skills are tiny markdown files — universal install ensures commands
   // can spawn agents that depend on skills from other plugins.
   spinner.message('Installing skills...');
   for (const [skillName, ownerPlugin] of skillsMap) {

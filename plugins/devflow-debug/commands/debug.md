@@ -108,10 +108,21 @@ Focus area: {specific code area, mechanism, or condition}
 (Add more investigators if bug complexity warrants 4-5 hypotheses)
 ```
 
-### Phase 4: Synthesize
+### Phase 4: Converge
+
+**Produces:** CONVERGENCE_DECISION
+**Requires:** INVESTIGATION_RESULTS
+
+Evaluate investigation verdicts before synthesis:
+
+- **One CONFIRMED**: Spawn 1-2 additional `Agent(subagent_type="Explore")` agents to validate from different angles (prevent confirmation bias)
+- **Multiple PARTIAL**: Look for a unifying root cause that explains all partial evidence
+- **All DISPROVED**: Report honestly — "No root cause identified from initial hypotheses." Generate 2-3 second-round hypotheses if conversation context suggests avenues not yet explored. Loop back to Phase 3.
+
+### Phase 5: Synthesize
 
 **Produces:** ROOT_CAUSE_SYNTHESIS
-**Requires:** INVESTIGATION_RESULTS
+**Requires:** INVESTIGATION_RESULTS, CONVERGENCE_DECISION
 
 Once all investigators return, spawn a Synthesizer agent to aggregate findings:
 
@@ -129,7 +140,7 @@ Instructions:
 5. Assess confidence level based on evidence strength"
 ```
 
-### Phase 5: Report
+### Phase 6: Report
 
 **Requires:** ROOT_CAUSE_SYNTHESIS
 
@@ -160,6 +171,15 @@ Produce the final report:
 {HIGH/MEDIUM/LOW based on evidence strength and investigator agreement}
 ```
 
+### Phase 7: Offer Fix
+
+**Requires:** ROOT_CAUSE_SYNTHESIS
+
+Ask user via AskUserQuestion: "Want me to implement this fix?"
+
+- **YES** → Load `devflow:patterns` and `devflow:test-driven-development` skills, implement the fix, then spawn `Agent(subagent_type="Simplifier")` on changed files.
+- **NO** → Done. Report stands as documentation.
+
 ## Architecture
 
 ```
@@ -173,10 +193,16 @@ Produce the final report:
 ├─ Phase 3: Parallel investigation
 │  └─ 3-5 Explore agents, one per hypothesis (single message)
 │
-├─ Phase 4: Synthesize
+├─ Phase 4: Converge
+│  └─ Validate confirmed hypotheses, unify partials, or generate second-round
+│
+├─ Phase 5: Synthesize
 │  └─ Synthesizer aggregates and compares findings
 │
-└─ Phase 5: Root cause report with confidence level
+├─ Phase 6: Root cause report with confidence level
+│
+└─ Phase 7: Offer Fix
+   └─ AskUserQuestion → implement fix + Simplifier, or done
 ```
 
 ## Principles
@@ -185,9 +211,12 @@ Produce the final report:
 2. **Parallel execution** - All investigators run simultaneously for speed
 3. **Evidence-based** - Every claim requires file:line references
 4. **Honest uncertainty** - If no hypothesis survives, report that clearly
+5. **Convergence validation** - Confirmed hypotheses get additional validation to prevent confirmation bias
 
 ## Error Handling
 
 - If fewer than 3 hypotheses can be generated: proceed with 2, note limited scope
 - If all hypotheses are disproved: report "No root cause identified" with investigation summary
 - If an investigator errors: continue with remaining results, note the gap
+- If convergence validation contradicts the original confirmation: downgrade confidence and report contradicting evidence
+- If user declines fix: done — report stands as documentation

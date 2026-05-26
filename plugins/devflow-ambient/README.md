@@ -36,14 +36,9 @@ Description of what to implement.
 
 ## Skills
 
-The ambient plugin distributes these skills. Only `implement:orch` is triggered automatically by plan detection — the rest are invoked via explicit slash commands (e.g. `/devflow:debug`, `/devflow:review`).
+The ambient plugin distributes shared skills used by commands. Plan detection triggers `/implement` automatically — other commands are invoked via explicit slash commands (e.g. `/devflow:debug`, `/devflow:code-review`).
 
-- `implement:orch` — Agent pipeline for IMPLEMENT tasks (auto-triggered by plan detection)
-- `debug:orch` — Agent pipeline for DEBUG tasks
-- `explore:orch` — Agent pipeline for EXPLORE tasks
-- `plan:orch` — Agent pipeline for PLAN tasks
-- `review:orch` — Agent pipeline for REVIEW tasks
-- `resolve:orch` — Agent pipeline for RESOLVE tasks
-- `research:orch` — Agent pipeline for RESEARCH tasks
-- `release:orch` — Agent pipeline for RELEASE tasks
-- `pipeline:orch` — End-to-end meta-orchestrator (implement → review → resolve)
+- `review-methodology` — Review process patterns
+- `security` — Security analysis patterns
+- `architecture` — Architecture analysis patterns
+- `patterns` — Implementation patterns

@@ -1,24 +1,23 @@
 # Skill Catalog
 
-Reference for companion skills loaded by orchestration workflows. Orch skills and commands load always-on companion skills before their first phase.
+Reference for companion skills loaded by commands. Commands load always-on companion skills before their first phase.
 
-## Orchestrated Companion Skills
+## Command Companion Skills
 
-| Intent | Orch Skill / Command | Companions |
-|--------|---------------------|------------|
-| IMPLEMENT | implement:orch, /implement | `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research` |
-| DEBUG | debug:orch, /debug | `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing` |
-| PLAN | plan:orch, /plan | `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review` |
-| REVIEW | review:orch, /code-review | `devflow:quality-gates`, `devflow:software-design` |
-| RELEASE | release:orch, /release | `devflow:git` |
-| EXPLORE | explore:orch, /explore | (none) |
-| RESEARCH | research:orch, /research | (none — agents load type-specific skills internally) |
-| RESOLVE | resolve:orch, /resolve | (none) |
-| PIPELINE | pipeline:orch | (none — delegates to sub-orchestrators) |
+| Intent | Command | Companions |
+|--------|---------|------------|
+| IMPLEMENT | /implement | `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research` |
+| DEBUG | /debug | `devflow:test-driven-development`, `devflow:software-design`, `devflow:testing` |
+| PLAN | /plan | `devflow:test-driven-development`, `devflow:patterns`, `devflow:software-design`, `devflow:security`, `devflow:design-review` |
+| REVIEW | /code-review | `devflow:quality-gates`, `devflow:software-design` |
+| RELEASE | /release | `devflow:git` |
+| EXPLORE | /explore | (none) |
+| RESEARCH | /research | (none — agents load type-specific skills internally) |
+| RESOLVE | /resolve | (none) |
 
 ## File-Type Conditional Skills
 
-Orch skills and Coder agents load language/framework skills based on files touched:
+Commands and Coder agents load language/framework skills based on files touched:
 
 | Pattern | Skill |
 |---------|-------|

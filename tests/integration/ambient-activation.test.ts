@@ -39,7 +39,7 @@ Add rate limiting to the upload endpoint.
       timeout: 30000,
       systemPrompt: 'EXECUTION_PLAN detected. Invoke `devflow:implement` via the Skill tool to execute this plan.',
     });
-    expect(hasRequiredSkills(result, ['implement:orch'])).toBe(true);
+    expect(hasRequiredSkills(result, ['implement'])).toBe(true);
     console.log(`plan detection: ${result.durationMs}ms. Skills: [${result.skills.join(', ')}]`);
   });
 

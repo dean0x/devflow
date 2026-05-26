@@ -158,52 +158,7 @@ describe('code-review-teams.md — convergence parity', () => {
 })
 
 // -------------------------------------------------------------------------
-// Group 4: review:orch SKILL.md — convergence phase
-// -------------------------------------------------------------------------
-
-describe('review:orch SKILL.md — convergence phase', () => {
-  const content = loadFile('shared/skills/review:orch/SKILL.md')
-
-  it('has Phase 2b between Phase 2 and Phase 3', () => {
-    const idx2 = content.indexOf('## Phase 2:')
-    const idx2b = content.indexOf('## Phase 2b')
-    const idx3 = content.indexOf('## Phase 3:')
-    expect(idx2).not.toBe(-1)
-    expect(idx2b).not.toBe(-1)
-    expect(idx3).not.toBe(-1)
-    expect(idx2b).toBeGreaterThan(idx2)
-    expect(idx2b).toBeLessThan(idx3)
-  })
-
-  it('Phase 2b has Produces/Requires annotations', () => {
-    const phase2b = extractSection(content, '## Phase 2b', '## Phase 3')
-    expect(phase2b).toContain('**Produces:**')
-    expect(phase2b).toContain('**Requires:**')
-  })
-
-  it('Phase 2b references fp_ratio computation', () => {
-    const phase2b = extractSection(content, '## Phase 2b', '## Phase 3')
-    expect(phase2b).toMatch(/fp_ratio/)
-  })
-
-  it('Phase 5 passes PRIOR_RESOLUTIONS to reviewers', () => {
-    const phase5 = extractSection(content, '## Phase 5:', '## Phase 6:')
-    expect(phase5).toContain('PRIOR_RESOLUTIONS')
-  })
-
-  it('Phase 6 passes CYCLE_NUMBER to Synthesizer', () => {
-    const phase6 = extractSection(content, '## Phase 6:', '## Phase 7:')
-    expect(phase6).toContain('CYCLE_NUMBER')
-  })
-
-  it('Phase Completion Checklist includes Phase 2b', () => {
-    const checklist = extractSection(content, '## Phase Completion Checklist', null)
-    expect(checklist).toContain('Phase 2b')
-  })
-})
-
-// -------------------------------------------------------------------------
-// Group 5: synthesizer.md — convergence status
+// Group 4: synthesizer.md — convergence status
 // -------------------------------------------------------------------------
 
 describe('synthesizer.md — convergence status', () => {
@@ -240,45 +195,35 @@ describe('Cross-cutting convergence consistency', () => {
   const reviewer = loadFile('shared/agents/reviewer.md')
   const codeReview = loadFile('plugins/devflow-code-review/commands/code-review.md')
   const teamsReview = loadFile('plugins/devflow-code-review/commands/code-review-teams.md')
-  const reviewOrch = loadFile('shared/skills/review:orch/SKILL.md')
   const synthesizer = loadFile('shared/agents/synthesizer.md')
 
-  it('all 3 orchestration surfaces contain PRIOR_RESOLUTIONS', () => {
+  it('both command surfaces contain PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')
     expect(teamsReview).toContain('PRIOR_RESOLUTIONS')
-    expect(reviewOrch).toContain('PRIOR_RESOLUTIONS')
   })
 
-  it('all 3 surfaces use <prior-resolution-summary> containment markers', () => {
+  it('both surfaces use <prior-resolution-summary> containment markers', () => {
     expect(codeReview).toContain('prior-resolution-summary')
     expect(teamsReview).toContain('prior-resolution-summary')
-    expect(reviewOrch).toContain('prior-resolution-summary')
   })
 
-  it('all 3 surfaces document (none) default', () => {
+  it('both surfaces document (none) default', () => {
     expect(codeReview).toMatch(/PRIOR_RESOLUTIONS.*\(none\)|set.*PRIOR_RESOLUTIONS.*\(none\)/is)
     expect(teamsReview).toMatch(/PRIOR_RESOLUTIONS.*\(none\)|set.*PRIOR_RESOLUTIONS.*\(none\)/is)
-    expect(reviewOrch).toMatch(/PRIOR_RESOLUTIONS.*\(none\)|set.*PRIOR_RESOLUTIONS.*\(none\)/is)
   })
 
   it('FP ratio formula consistent across surfaces that compute it', () => {
     const formula = /fp_count\s*\/\s*\(fp_count\s*\+\s*fixed_count\s*\+\s*deferred_count\)/
     expect(codeReview).toMatch(formula)
     expect(teamsReview).toMatch(formula)
-    expect(reviewOrch).toMatch(formula)
   })
 
-  it('soft convergence threshold documented in all orchestration surfaces', () => {
+  it('soft convergence threshold documented in command surfaces', () => {
     expect(codeReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
     expect(teamsReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
-    expect(reviewOrch).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
   })
 
-  it('hard maximum cycle bound (MAX_REVIEW_CYCLES = 10) documented in review:orch', () => {
-    expect(reviewOrch).toMatch(/MAX_REVIEW_CYCLES\s*=\s*10/)
-  })
-
-  it('synthesizer FP note threshold matches orchestration surfaces (>= 3)', () => {
+  it('synthesizer FP note threshold matches command surfaces (>= 3)', () => {
     expect(synthesizer).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
   })
 
@@ -294,13 +239,11 @@ describe('Cross-cutting convergence consistency', () => {
     expect(trStep0di).toContain('--full')
   })
 
-  it('no AskUserQuestion in convergence sections across all surfaces', () => {
+  it('no AskUserQuestion in convergence sections across command surfaces', () => {
     const crStep0dii = extractSection(codeReview, 'Step 0d-ii', '### Phase 1:')
     const trStep0dii = extractSection(teamsReview, 'Step 0d-ii', '### Phase 1:')
-    const orchPhase2b = extractSection(reviewOrch, '## Phase 2b', '## Phase 3')
     expect(crStep0dii).not.toContain('AskUserQuestion')
     expect(trStep0dii).not.toContain('AskUserQuestion')
-    expect(orchPhase2b).not.toContain('AskUserQuestion')
   })
 })
 

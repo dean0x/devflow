@@ -32,15 +32,6 @@
     "researcher"
   ],
   "skills": [
-    "implement:orch",
-    "debug:orch",
-    "explore:orch",
-    "research:orch",
-    "release:orch",
-    "plan:orch",
-    "review:orch",
-    "resolve:orch",
-    "pipeline:orch",
     "review-methodology",
     "security",
     "architecture",

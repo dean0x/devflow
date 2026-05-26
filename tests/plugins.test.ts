@@ -97,10 +97,10 @@ describe('buildFullSkillsMap', () => {
     expect(fullMap.has('accessibility')).toBe(true);
     expect(fullMap.has('typescript')).toBe(true);
     expect(fullMap.has('go')).toBe(true);
-    // Must include all orchestration skills
-    expect(fullMap.has('review:orch')).toBe(true);
-    expect(fullMap.has('resolve:orch')).toBe(true);
-    expect(fullMap.has('pipeline:orch')).toBe(true);
+    // Must include shared skills from core plugins
+    expect(fullMap.has('review-methodology')).toBe(true);
+    expect(fullMap.has('patterns')).toBe(true);
+    expect(fullMap.has('worktree-support')).toBe(true);
   });
 
   it('covers more skills than buildAssetMaps with only non-optional plugins', () => {
@@ -206,10 +206,6 @@ describe('optional plugin flag', () => {
     // Ambient must declare review skills so uninstalling code-review doesn't break ambient review
     expect(ambient!.skills).toContain('review-methodology');
     expect(ambient!.skills).toContain('security');
-    // Ambient must declare orchestration skills
-    expect(ambient!.skills).toContain('review:orch');
-    expect(ambient!.skills).toContain('resolve:orch');
-    expect(ambient!.skills).toContain('pipeline:orch');
     // Ambient must declare resolve dependencies
     expect(ambient!.skills).toContain('patterns');
     // decisions-format removed per D9 — format-spec only, not plugin-distributed

@@ -194,4 +194,4 @@ When skipping TDD, never rationalize. State clearly: "Skipping TDD because: [spe
 - **DEBUG** → TDD applies to the fix: write a test that reproduces the bug first, then fix.
 - **PLAN** → TDD shapes the plan: test strategy section, test-first file ordering, RED-GREEN-REFACTOR cycle awareness.
 - **RESOLVE** → TDD enforced via Resolver agent. Every fix needs a regression test first.
-- **PIPELINE** → TDD inherited transitively through devflow:implement:orch → Coder.
+- **PIPELINE** → TDD inherited transitively through `/implement` → Coder.

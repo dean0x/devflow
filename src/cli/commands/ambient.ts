@@ -118,20 +118,14 @@ export async function addAmbientHook(settingsJson: string, devflowDir: string): 
   const settings: Settings = JSON.parse(settingsJson);
   let changed = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
 
-  if (!settings.hooks) {
-    settings.hooks = {};
-  }
-
   // --- UserPromptSubmit: preamble hook (plan detection) ---
-  const hasPreamble = settings.hooks.UserPromptSubmit?.some((m) =>
+  const hasPreamble = settings.hooks?.UserPromptSubmit?.some((m) =>
     m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
   );
 
   if (!hasPreamble) {
-    if (!settings.hooks.UserPromptSubmit) {
-      settings.hooks.UserPromptSubmit = [];
-    }
-
+    settings.hooks ??= {};
+    settings.hooks.UserPromptSubmit ??= [];
     settings.hooks.UserPromptSubmit.push({
       hooks: [
         {

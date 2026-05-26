@@ -725,12 +725,6 @@ describe('Test infrastructure skill references', () => {
       ['git-workflow', /(?<!devflow-)(?<![\w])git-workflow(?![\w])/g],
       ['github-patterns', /(?<!devflow-)(?<![\w])github-patterns(?![\w])/g],
       // track3 ambient refinements: old long names
-      ['implementation-orchestration', /(?<![\w])implementation-orchestration(?![\w])/g],
-      ['debug-orchestration', /(?<![\w])debug-orchestration(?![\w])/g],
-      ['plan-orchestration', /(?<![\w])plan-orchestration(?![\w])/g],
-      ['review-orchestration', /(?<![\w])review-orchestration(?![\w])/g],
-      ['resolve-orchestration', /(?<![\w])resolve-orchestration(?![\w])/g],
-      ['pipeline-orchestration', /(?<![\w])pipeline-orchestration(?![\w])/g],
       ['ambient-router', /(?<![\w])ambient-router(?![\w])/g],
       ['implementation-patterns', /(?<!devflow-)(?<![\w])implementation-patterns(?![\w])/g],
       ['search-first', /(?<![\w])search-first(?![\w])/g],
@@ -891,51 +885,6 @@ describe('Cross-component runtime alignment', () => {
     }
   });
 
-  it('review orchestration core reviewers exist in reviewer Focus Areas', () => {
-    const orchContent = readFileSync(
-      path.join(ROOT, 'shared', 'skills', 'review:orch', 'SKILL.md'),
-      'utf-8',
-    );
-
-    // Extract core reviewer list: "- security, architecture, performance, ..."
-    const coreMatch = orchContent.match(/^\*\*8 core reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
-    if (!coreMatch) {
-      expect.unreachable('review skill should list 8 core reviewers');
-    }
-
-    const coreReviewers = coreMatch[1].split(',').map(s => s.trim());
-    expect(coreReviewers.length, 'should have 8 core reviewers').toBe(8);
-
-    for (const focus of coreReviewers) {
-      expect(
-        reviewerFocusAreas.has(focus),
-        `review skill lists core reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
-      ).toBe(true);
-    }
-  });
-
-  it('review orchestration conditional reviewers exist in reviewer Focus Areas', () => {
-    const orchContent = readFileSync(
-      path.join(ROOT, 'shared', 'skills', 'review:orch', 'SKILL.md'),
-      'utf-8',
-    );
-
-    // Extract conditional reviewer list: "- typescript, react, database, ..."
-    const condMatch = orchContent.match(/^\*\*Conditional reviewers\*\*[^:]*:\s*\n-\s*(.+)$/m);
-    if (!condMatch) {
-      expect.unreachable('review skill should list conditional reviewers');
-    }
-
-    const condReviewers = condMatch[1].split(',').map(s => s.trim());
-
-    for (const focus of condReviewers) {
-      expect(
-        reviewerFocusAreas.has(focus),
-        `review skill lists conditional reviewer '${focus}' but reviewer Focus Areas has no entry for it`,
-      ).toBe(true);
-    }
-  });
-
   it('code-review command has no stale devflow:{focus}-patterns template', () => {
     const commandContent = readFileSync(
       path.join(ROOT, 'plugins', 'devflow-code-review', 'commands', 'code-review.md'),
@@ -968,33 +917,24 @@ describe('Cross-component runtime alignment', () => {
     }
   });
 
-  it('companion skill lists are consistent across catalog, orch skills, and commands', () => {
+  it('companion skill lists are consistent across catalog and commands', () => {
     const catalogContent = readFileSync(
       path.join(ROOT, 'docs', 'reference', 'skill-catalog.md'),
       'utf-8',
     );
 
-    // Parse the ORCHESTRATED Companion Skills table rows:
-    // | INTENT | orch-skill, /command | `devflow:a`, `devflow:b` |
-    const orchTable = new Map<string, string[]>();
-    const orchTableRegex =
+    // Parse the Command Companion Skills table rows:
+    // | INTENT | /command | `devflow:a`, `devflow:b` |
+    const catalogTable = new Map<string, string[]>();
+    const catalogTableRegex =
       /^\|\s*(IMPLEMENT|DEBUG|PLAN|REVIEW|RELEASE)\s*\|[^|]+\|\s*(.+?)\s*\|$/gm;
-    for (const match of catalogContent.matchAll(orchTableRegex)) {
+    for (const match of catalogContent.matchAll(catalogTableRegex)) {
       const intent = match[1];
       const companions = [...match[2].matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]);
-      if (companions.length > 0) orchTable.set(intent, companions.sort());
+      if (companions.length > 0) catalogTable.set(intent, companions.sort());
     }
 
-    expect(orchTable.size).toBeGreaterThanOrEqual(5);
-
-    // Map intent → orch skill file path
-    const intentOrchMap: Record<string, string> = {
-      IMPLEMENT: 'implement:orch',
-      DEBUG: 'debug:orch',
-      PLAN: 'plan:orch',
-      REVIEW: 'review:orch',
-      RELEASE: 'release:orch',
-    };
+    expect(catalogTable.size).toBeGreaterThanOrEqual(5);
 
     // Map intent → command files (base + teams)
     const intentCommandMap: Record<string, string[]> = {
@@ -1027,16 +967,7 @@ describe('Cross-component runtime alignment', () => {
       return [...lineMatch[1].matchAll(/`devflow:([\w-]+)`/g)].map(m => m[1]).sort();
     };
 
-    for (const [intent, expectedSkills] of orchTable) {
-      // Check orch skill
-      const orchSkillPath = path.join(ROOT, 'shared', 'skills', intentOrchMap[intent], 'SKILL.md');
-      const orchContent = readFileSync(orchSkillPath, 'utf-8');
-      const orchSkills = parseCompanionLine(orchContent);
-      expect(
-        orchSkills,
-        `${intentOrchMap[intent]} companions must match catalog for ${intent}`,
-      ).toEqual(expectedSkills);
-
+    for (const [intent, expectedSkills] of catalogTable) {
       // Check command files (base + teams)
       for (const cmdRelPath of intentCommandMap[intent]) {
         const cmdPath = path.join(ROOT, cmdRelPath);
@@ -1052,20 +983,6 @@ describe('Cross-component runtime alignment', () => {
           `${cmdRelPath} companions must match catalog for ${intent}`,
         ).toEqual(expectedSkills);
       }
-    }
-
-    // Verify section ordering: Load Companion Skills must precede Worktree Support in orch skills
-    const orchSkillsWithBoth = ['implement:orch', 'debug:orch', 'plan:orch', 'release:orch'];
-    for (const skill of orchSkillsWithBoth) {
-      const content = readFileSync(path.join(ROOT, 'shared', 'skills', skill, 'SKILL.md'), 'utf-8');
-      const companionIdx = content.indexOf('## Load Companion Skills');
-      const worktreeIdx = content.indexOf('## Worktree Support');
-      expect(companionIdx, `${skill}: missing ## Load Companion Skills section`).toBeGreaterThanOrEqual(0);
-      expect(worktreeIdx, `${skill}: missing ## Worktree Support section`).toBeGreaterThanOrEqual(0);
-      expect(
-        companionIdx,
-        `${skill}: Load Companion Skills must appear before Worktree Support`,
-      ).toBeLessThan(worktreeIdx);
     }
   });
 
