@@ -100,7 +100,7 @@ The `healed` field is present in all three reconcile-manifest output shapes (mai
 
 ## Decisions Index + On-Demand Read Pattern
 
-Decisions consumers (slash commands and orch skills) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
+Decisions consumers (slash commands) do not fan the full ADR/PF corpus to spawned agents. Instead they use a two-step pattern:
 
 ### Step 1: Load compact index at orchestrator
 
