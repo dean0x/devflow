@@ -4,10 +4,18 @@
 # Injects working memory as additionalContext.
 # Memory: restores .devflow/memory/WORKING-MEMORY.md + git state + compact recovery.
 
+# Safe no-op fallback: must exist before set -e and before debug-trace is sourced.
+dbg() { :; }
+
 set -e
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/debug-trace" || true
+devflow_debug_init "session-start-memory"
+dbg "=== HOOK START ==="
+
 source "$SCRIPT_DIR/json-parse" || { echo "session-start-memory: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
@@ -15,12 +23,22 @@ INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
+  dbg "EXIT: no CWD"
   exit 0
 fi
+
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+
+# Normal logging
+source "$SCRIPT_DIR/log-paths" || true
+LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "/tmp")
+LOG_FILE="$LOG_DIR/.session-start-memory.log"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [session-start-memory] $1" >> "$LOG_FILE" 2>/dev/null || true; }
 
 # Check sidecar config — single source of truth for memory enabled/disabled.
 # The legacy .working-memory-disabled sentinel is intentionally NOT checked here:
@@ -29,7 +47,10 @@ SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
-  [ "$MEMORY_ENABLED" = "false" ] && exit 0
+  if [ "$MEMORY_ENABLED" = "false" ]; then
+    dbg "EXIT: memory disabled in sidecar config"
+    exit 0
+  fi
 fi
 
 CONTEXT=""
@@ -39,6 +60,7 @@ CONTEXT=""
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 
 if [ -f "$MEMORY_FILE" ]; then
+  dbg "MEMORY_FILE exists: $MEMORY_FILE"
   MEMORY_CONTENT=$(cat "$MEMORY_FILE")
 
   # Compute staleness warning
@@ -46,6 +68,7 @@ if [ -f "$MEMORY_FILE" ]; then
   FILE_MTIME=$(get_mtime "$MEMORY_FILE")
   NOW=$(date +%s)
   AGE=$(( NOW - FILE_MTIME ))
+  dbg "MEMORY_FILE AGE=${AGE}s"
 
   # Check for pre-compact memory snapshot (compaction recovery)
   BACKUP_FILE="$MEMORY_DIR/backup.json"
@@ -61,6 +84,7 @@ if [ -f "$MEMORY_FILE" ]; then
           || echo "0")
       fi
       if [ "$BACKUP_EPOCH" -gt "$FILE_MTIME" ]; then
+        dbg "Compact recovery available: BACKUP_TS=$BACKUP_TS"
         COMPACT_NOTE="
 --- PRE-COMPACT SNAPSHOT ($BACKUP_TS) ---
 Context was compacted. This snapshot may contain decisions or progress not yet in working memory.
@@ -74,6 +98,7 @@ $BACKUP_MEMORY
   STALE_WARNING=""
   if [ "$AGE" -gt 3600 ]; then
     HOURS=$(( AGE / 3600 ))
+    dbg "Memory is stale: AGE=${AGE}s HOURS=${HOURS}"
     STALE_WARNING="⚠ This working memory is ${HOURS}h old. Verify before relying on it.
 
 "
@@ -88,6 +113,7 @@ $BACKUP_MEMORY
     GIT_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
     GIT_STATUS=$(git status --porcelain 2>/dev/null | head -20)
     GIT_LOG=$(git log --oneline -5 2>/dev/null || echo "")
+    dbg "GIT_BRANCH=$GIT_BRANCH"
   fi
 
   # Build memory context
@@ -112,14 +138,21 @@ ${GIT_STATUS}"
     CONTEXT="${CONTEXT}
 ${COMPACT_NOTE}"
   fi
+else
+  dbg "MEMORY_FILE not found: $MEMORY_FILE"
 fi
 
 # --- Output ---
 
 # Only output if we have something to inject
 if [ -z "$CONTEXT" ]; then
+  dbg "EXIT: no context to inject"
   exit 0
 fi
+
+dbg "OUTPUT_LENGTH=${#CONTEXT}"
+log "Injecting memory context (${#CONTEXT} chars)"
+dbg "=== HOOK COMPLETE ==="
 
 # Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
 json_session_output "$CONTEXT"

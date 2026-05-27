@@ -93,7 +93,7 @@ describe('sentinel guard: sidecar-capture', () => {
     fs.writeFileSync(memFile, '## Now\n- testing');
     const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
     fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
-    const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'hello' });
+    const input = sessionInput(tmpDir, { last_assistant_message: 'hello' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
   });
@@ -103,7 +103,7 @@ describe('sentinel guard: sidecar-capture', () => {
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
-    const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'hello' });
+    const input = sessionInput(tmpDir, { last_assistant_message: 'hello' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
@@ -261,7 +261,7 @@ describe('sentinel guard: sidecar-capture decisions scanner gating', () => {
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
     }, null, 2));
-    const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'applies ADR-001' });
+    const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
     // Scanner should not have run — cites stays at 0
@@ -277,7 +277,7 @@ describe('sentinel guard: sidecar-capture decisions scanner gating', () => {
       version: 1,
       entries: { 'ADR-001': { cites: 0, last_cited: null } },
     }, null, 2));
-    const input = sessionInput(tmpDir, { stop_reason: 'end_turn', response_text: 'applies ADR-001' });
+    const input = sessionInput(tmpDir, { last_assistant_message: 'applies ADR-001' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     const updated = JSON.parse(fs.readFileSync(usagePath, 'utf-8'));
     // Scanner ran — cites incremented

@@ -5,6 +5,9 @@
 # 2. Checks for pending sidecar markers in .devflow/sidecar/
 # 3. If markers found, injects SIDECAR directive via additionalContext
 
+# Safe no-op fallback: must exist before set -e and before debug-trace is sourced.
+dbg() { :; }
+
 set -e
 
 # Break feedback loop from background sidecar sessions
@@ -13,6 +16,11 @@ if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
 if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/debug-trace" || true
+devflow_debug_init "sidecar-dispatch"
+dbg "=== HOOK START ==="
+
 source "$SCRIPT_DIR/json-parse" || { echo "sidecar-dispatch: failed to source json-parse" >&2; exit 1; }
 source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-dispatch: failed to source get-mtime" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
@@ -23,11 +31,22 @@ FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
 CWD="${FIELDS%%$'\001'*}"
 PROMPT="${FIELDS#*$'\001'}"
 
+dbg "CWD=$CWD PROMPT_LENGTH=${#PROMPT}"
+
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
+
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+
+# Normal logging
+source "$SCRIPT_DIR/log-paths" || true
+LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "/tmp")
+LOG_FILE="$LOG_DIR/.sidecar-dispatch.log"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-dispatch] $1" >> "$LOG_FILE" 2>/dev/null || true; }
 
 # Read sidecar config — skip user turn capture if memory: false; gate marker dispatch per feature
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
@@ -42,7 +61,10 @@ if [ -f "$SIDECAR_CONFIG" ]; then
   KNOWLEDGE_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "knowledge" "true")
 fi
 
+dbg "memory=$MEMORY_ENABLED learning=$LEARNING_ENABLED decisions=$DECISIONS_ENABLED knowledge=$KNOWLEDGE_ENABLED"
+
 # --- Capture user turn ---
+dbg "PROMPT_LENGTH=${#PROMPT} MEMORY_ENABLED=$MEMORY_ENABLED"
 if [ "$MEMORY_ENABLED" = "true" ] && [ -n "$PROMPT" ]; then
   source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
@@ -71,6 +93,7 @@ fi
 # --- Check for pending sidecar markers ---
 # Skip if sidecar dir doesn't exist
 if [ ! -d "$SIDECAR_DIR" ]; then
+  dbg "EXIT: no sidecar dir"
   exit 0
 fi
 
@@ -124,12 +147,16 @@ if compgen -G "$SIDECAR_DIR/*.processing" > /dev/null 2>&1; then
         # Too many retries — mark as permanently failed to stop cycling
         mv "$PROC_FILE" "${BASE}.failed" 2>/dev/null || true
         rm -f "$RETRY_FILE" 2>/dev/null || true
+        dbg "Stale marker permanently failed after $RETRY_COUNT retries: $(basename "$PROC_FILE")"
+        log "Stale marker permanently failed after $RETRY_COUNT retries: $(basename "$PROC_FILE")"
       else
         # Stale processing file — rename back to .json for retry; record basename so the
         # collection loop knows not to clean the .retries file for this marker in this call.
         echo $(( RETRY_COUNT + 1 )) > "$RETRY_FILE"
         mv "$PROC_FILE" "${BASE}.json" 2>/dev/null || true
         JUST_RECOVERED="$JUST_RECOVERED $(basename "$BASE")"
+        dbg "Stale marker recovered (retry $((RETRY_COUNT + 1))/$MAX_RETRIES): $(basename "$BASE")"
+        log "Stale marker recovered (retry $((RETRY_COUNT + 1))/$MAX_RETRIES): $(basename "$BASE")"
       fi
     fi
   done
@@ -186,11 +213,16 @@ fi
 
 # If no pending tasks, exit silently (no additionalContext output)
 if [ -z "$PENDING_TASKS" ]; then
+  dbg "EXIT: no pending tasks"
   exit 0
 fi
+
+dbg "PENDING_TASKS=$PENDING_TASKS — injecting SIDECAR directive"
+log "Dispatching tasks: $PENDING_TASKS"
 
 # Output SIDECAR directive
 DIRECTIVE="SIDECAR: ${PENDING_TASKS}. Spawn background agents — load devflow:sidecar skill."
 json_prompt_output "$DIRECTIVE"
+dbg "=== HOOK COMPLETE ==="
 
 exit 0

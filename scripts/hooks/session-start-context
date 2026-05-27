@@ -8,11 +8,19 @@
 # Section 1.5: Decisions TL;DR (skipped if .devflow/decisions/.disabled)
 # Section 1.75: Learned behaviors + new artifact notifications (skipped if .devflow/memory/.learning-disabled)
 
+# Safe no-op fallback: must exist before set -e (which is intentionally omitted) and before debug-trace is sourced.
+dbg() { :; }
+
 # set -e intentionally omitted: sections 1.4, 1.5, and 1.75 are independent —
 # a failure in one must not prevent the others from running.
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/debug-trace" || true
+devflow_debug_init "session-start-context"
+dbg "=== HOOK START ==="
+
 source "$SCRIPT_DIR/json-parse" || { echo "session-start-context: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
@@ -20,8 +28,12 @@ INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ]; then
+  dbg "EXIT: no CWD"
   exit 0
 fi
+
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
 
 CONTEXT=""
 
@@ -31,12 +43,20 @@ SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 LEARNING_DIR="$DEVFLOW_DIR/learning"
 DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
 
+# Normal logging
+source "$SCRIPT_DIR/log-paths" || true
+LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "/tmp")
+LOG_FILE="$LOG_DIR/.session-start-context.log"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [session-start-context] $1" >> "$LOG_FILE" 2>/dev/null || true; }
+
 # Read sidecar config for feature state (primary source of truth)
 _SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
 _LEARNING_SIDECAR="true"
 if [ -f "$_SIDECAR_CONFIG" ]; then
   _LEARNING_SIDECAR=$(json_field_file "$_SIDECAR_CONFIG" "learning" "true")
 fi
+
+dbg "LEARNING_SIDECAR=$_LEARNING_SIDECAR"
 
 # --- Section 1.4: Learning Manifest Reconciliation ---
 # DESIGN: D6 — reconciler runs at session-start to amortize filesystem checks
@@ -45,6 +65,7 @@ fi
 # Skipped if learning feature is disabled via sentinel or sidecar config.
 
 if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
+  dbg "Running learning manifest reconciliation"
   if [ -f "$LEARNING_DIR/.learning-manifest.json" ] && [ -f "$LEARNING_DIR/learning-log.jsonl" ]; then
     node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
   fi
@@ -74,6 +95,7 @@ if [ ! -f "$DECISIONS_CONTENT_DIR/.disabled" ]; then
       fi
     done
     if [ -n "$DECISIONS_TLDR" ]; then
+      dbg "Decisions TL;DR found"
       DECISIONS_SECTION="--- PROJECT DECISIONS (TL;DR) ---
 $(printf '%b' "$DECISIONS_TLDR")"
       if [ -n "$CONTEXT" ]; then
@@ -117,6 +139,7 @@ if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" 
       fi
     fi
 
+    dbg "Learned artifacts: commands=$(echo "$LEARNED_COMMANDS" | grep -c , 2>/dev/null || echo 0) skills=$(echo "$LEARNED_SKILLS" | grep -c , 2>/dev/null || echo 0)"
     if [ -n "$LEARNED_COMMANDS" ] || [ -n "$LEARNED_SKILLS" ]; then
       LEARNED_SECTION="--- LEARNED BEHAVIORS ---"
       if [ -n "$LEARNED_COMMANDS" ]; then
@@ -165,8 +188,13 @@ fi
 
 # Only output if we have something to inject
 if [ -z "$CONTEXT" ]; then
+  dbg "EXIT: no context to inject"
   exit 0
 fi
+
+dbg "OUTPUT_LENGTH=${#CONTEXT}"
+log "Injecting context (${#CONTEXT} chars)"
+dbg "=== HOOK COMPLETE ==="
 
 # Output as additionalContext JSON envelope (Claude sees it as system context, not user-visible)
 json_session_output "$CONTEXT"

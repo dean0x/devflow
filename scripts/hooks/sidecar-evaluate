@@ -4,6 +4,9 @@
 # Evaluates session-level features: learning batching, decisions detection, knowledge refresh.
 # Writes marker files to .devflow/sidecar/ for sidecar-dispatch to pick up.
 
+# Safe no-op fallback: must exist before set -e and before debug-trace is sourced.
+dbg() { :; }
+
 set -e
 
 # Break feedback loop from background sidecar sessions
@@ -12,6 +15,11 @@ set -e
 [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ] && exit 0
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/debug-trace" || true
+devflow_debug_init "sidecar-evaluate"
+dbg "=== HOOK START ==="
+
 source "$SCRIPT_DIR/json-parse" || { echo "sidecar-evaluate: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
@@ -19,6 +27,9 @@ INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 [ -z "$CWD" ] && exit 0
+
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
 
 DEVFLOW_DIR="$CWD/.devflow"
 [ ! -d "$DEVFLOW_DIR" ] && exit 0
@@ -49,12 +60,14 @@ log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-evaluate] $1" >> "$LOG
 source "$SCRIPT_DIR/sidecar-lock" || { log "failed to source sidecar-lock"; exit 1; }
 
 log "SessionEnd hook triggered"
+dbg "LEARNING=$LEARNING_ENABLED DECISIONS=$DECISIONS_ENABLED KNOWLEDGE=$KNOWLEDGE_ENABLED"
 
 # --- Find transcript ---
 ENCODED_CWD=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
 PROJECTS_DIR="$HOME/.claude/projects/-${ENCODED_CWD}"
 
 SESSION_ID=$(printf '%s' "$INPUT" | json_field "session_id" "")
+dbg "SESSION_ID=$SESSION_ID"
 TRANSCRIPT=""
 
 if [ -d "$PROJECTS_DIR" ]; then
@@ -80,11 +93,14 @@ if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
   if [ "$USER_TURNS" -ge 3 ]; then
     SESSION_DEEP="true"
     log "Session depth: $USER_TURNS turns"
+    dbg "SESSION_DEEP=true USER_TURNS=$USER_TURNS TRANSCRIPT=$TRANSCRIPT"
   else
     log "Shallow session ($USER_TURNS turns)"
+    dbg "SESSION_DEEP=false USER_TURNS=$USER_TURNS"
   fi
 else
   log "No transcript found"
+  dbg "No transcript found"
 fi
 
 mkdir -p "$SIDECAR_DIR"
@@ -258,8 +274,10 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   RUNS_FILE="$SIDECAR_DIR/.learning-runs-today"
   RUNS_TODAY=$(read_daily_cap "$RUNS_FILE" 0)
 
+  dbg "Learning: RUNS_TODAY=$RUNS_TODAY MAX_DAILY=$MAX_DAILY BATCH_SIZE=$BATCH_SIZE"
   if [ "$RUNS_TODAY" -ge "$MAX_DAILY" ]; then
     log "Learning daily cap reached ($RUNS_TODAY/$MAX_DAILY)"
+    dbg "Learning daily cap reached — skipping"
   else
     # Batch counting — accumulate session IDs
     SESSION_COUNT_FILE="$SIDECAR_DIR/.learning-sessions"
@@ -279,6 +297,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
       CURRENT_COUNT=$(wc -l < "$SESSION_COUNT_FILE" | tr -d ' ')
     fi
     log "Learning batch: $CURRENT_COUNT/$BATCH_SIZE sessions"
+    dbg "Learning batch: $CURRENT_COUNT/$BATCH_SIZE sessions"
 
     if [ "$CURRENT_COUNT" -ge "$BATCH_SIZE" ] && [ -f "$SESSION_COUNT_FILE" ]; then
       if sidecar_lock_acquire "$SIDECAR_DIR/.learning-batch.lock" 3; then
@@ -330,8 +349,10 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
             rm -f "$SESSION_COUNT_FILE"
 
             log "Wrote learning marker (batch of $CURRENT_COUNT sessions)"
+            dbg "Wrote learning marker: $_LEARN_MARKER"
           else
             log "Learning: no user signals extracted from transcript"
+            dbg "Learning: no user signals in transcript"
           fi
         fi
         sidecar_lock_release "$SIDECAR_DIR/.learning-batch.lock"
@@ -363,8 +384,10 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   MAX_DEC_RUNS=$(echo "$MAX_DEC_RUNS" | tr -dc '0-9')
   MAX_DEC_RUNS="${MAX_DEC_RUNS:-3}"
 
+  dbg "Decisions: RUNS_TODAY=$DEC_RUNS_TODAY MAX_RUNS=$MAX_DEC_RUNS"
   if [ "$DEC_RUNS_TODAY" -ge "$MAX_DEC_RUNS" ]; then
     log "Decisions daily cap reached ($DEC_RUNS_TODAY/$MAX_DEC_RUNS)"
+    dbg "Decisions daily cap reached — skipping"
   else
     # Extract dialog pairs from transcript
     DIALOG_PAIRS=""
@@ -400,8 +423,10 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
       atomic_increment_daily "$DEC_RUNS_FILE" "$TODAY"
 
       log "Wrote decisions marker"
+      dbg "Wrote decisions marker: $_DEC_MARKER"
     else
       log "Decisions: no dialog pairs extracted"
+      dbg "Decisions: no dialog pairs in transcript"
     fi
   fi
 fi
@@ -423,8 +448,10 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
     LAST_REFRESH="${LAST_REFRESH:-0}"
     AGE=$(( NOW - LAST_REFRESH ))
 
+    dbg "Knowledge: AGE=${AGE}s (throttle=7200s)"
     if [ "$AGE" -lt 7200 ]; then
       log "Knowledge throttled: refreshed ${AGE}s ago"
+      dbg "Knowledge throttled: AGE=${AGE}s"
     else
       # Query stale slugs
       FEATURE_KNOWLEDGE_LIB="$SCRIPT_DIR/lib/feature-knowledge.cjs"
@@ -433,6 +460,7 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
         STALE_SLUGS=$(node "$FEATURE_KNOWLEDGE_LIB" stale-slugs "$CWD" 2>/dev/null || true)
       fi
 
+      dbg "Knowledge stale_slugs=$(echo "$STALE_SLUGS" | wc -l | tr -d ' ')"
       if [ -n "$STALE_SLUGS" ]; then
         # Write knowledge marker (per-session name for concurrency safety)
         _KNOW_MARKER="$SIDECAR_DIR/knowledge.${MARKER_SUFFIX}.json"
@@ -455,11 +483,14 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
         # on the next session end — the sidecar agent will do the actual refresh.
         echo "$NOW" > "$KNOWLEDGE_MARKER"
         log "Wrote knowledge marker: $(echo "$STALE_SLUGS" | wc -l | tr -d ' ') stale slug(s)"
+        dbg "Wrote knowledge marker: $_KNOW_MARKER"
       else
         log "Knowledge: no stale slugs found"
+        dbg "Knowledge: no stale slugs found"
       fi
     fi
   fi
 fi
 
+dbg "=== HOOK COMPLETE ==="
 exit 0

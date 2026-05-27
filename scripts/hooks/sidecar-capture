@@ -5,40 +5,60 @@
 # Writes .devflow/sidecar/memory.json marker when throttle has expired (>2 min).
 # On failure: does nothing (stale memory is better than fake data).
 
-set -e
+# Safe no-op fallback: must exist before set -e and before debug-trace is sourced.
+dbg() { :; }
 
-# Break feedback loop: sidecar subagents trigger stop hook on exit.
-if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
-if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
-if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
+set -e
 
 # Resolve script directory once
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+source "$SCRIPT_DIR/debug-trace" || true
+devflow_debug_init "sidecar-capture"
+dbg "=== HOOK START ==="
+
+# Break feedback loop: sidecar subagents trigger stop hook on exit.
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then dbg "EXIT: bg_learner"; exit 0; fi
+if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then dbg "EXIT: bg_knowledge"; exit 0; fi
+
 # JSON parsing (jq with node fallback)
 source "$SCRIPT_DIR/json-parse" || { echo "sidecar-capture: failed to source json-parse" >&2; exit 1; }
-if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
+
+dbg "json available, has_jq=$_HAS_JQ"
 
 INPUT=$(cat)
+dbg "INPUT length=${#INPUT}"
+dbg "INPUT keys=$(printf '%s' "$INPUT" | jq -r 'keys | join(", ")' 2>/dev/null || echo 'jq-failed')"
 
-# Resolve project directory, stop reason, and response text in one subprocess.
+# Resolve project directory and assistant response in one subprocess.
+# Stop hook fields: cwd, last_assistant_message, session_id, transcript_path, etc.
 # Uses ASCII SOH (0x01) as delimiter for bash 3.2 compatibility with cut.
 if [ "$_HAS_JQ" = "true" ]; then
-  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.stop_reason // "") + "" + (.response_text // "")')
+  _FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.last_assistant_message // "")') || { dbg "EXIT: jq failed"; exit 0; }
 else
   _FIELDS=$(printf '%s' "$INPUT" | node -e "
     const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-    process.stdout.write((j.cwd||'')+'\x01'+(j.stop_reason||'')+'\x01'+(j.response_text||''))")
+    process.stdout.write((j.cwd||'')+'\x01'+(j.last_assistant_message||''))") || { dbg "EXIT: node failed"; exit 0; }
 fi
 CWD=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f1)
-STOP_REASON=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f2)
-RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f3-)
+RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f2-)
 
-if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
+dbg "RESPONSE_TEXT length=${#RESPONSE_TEXT}"
+
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then dbg "EXIT: bad CWD"; exit 0; fi
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+
+# Logging (needs CWD — source log-paths early so log() is available for all sections below)
+source "$SCRIPT_DIR/log-paths" || { echo "sidecar-capture: failed to source log-paths" >&2; exit 1; }
+LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-capture] $1" >> "$LOG_FILE"; }
 
 # Read sidecar config — memory:false gates memory-specific sections only.
 # The decisions usage scanner runs independently of memory state.
@@ -48,15 +68,16 @@ if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
 fi
 
-# --- Filter: only process end_turn stops ---
-if [ "$STOP_REASON" != "end_turn" ]; then
+dbg "MEMORY_ENABLED=$MEMORY_ENABLED"
+
+# Skip if empty response
+if [ -z "$RESPONSE_TEXT" ]; then
+  dbg "EXIT: empty RESPONSE_TEXT"
   exit 0
 fi
 
-# Skip if empty
-if [ -z "$RESPONSE_TEXT" ]; then
-  exit 0
-fi
+dbg "RESPONSE_TEXT length=${#RESPONSE_TEXT}"
+dbg "PASSED all checks, proceeding to capture"
 
 # Truncate to 2000 chars
 if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
@@ -68,12 +89,14 @@ fi
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
 if [ -f "$SCANNER" ] && [ ! -f "$DEVFLOW_DIR/decisions/.disabled" ]; then
   if printf '%s' "$RESPONSE_TEXT" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
+    dbg "Running decisions usage scanner"
     printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
   fi
 fi
 
 # --- Memory-specific sections (gated by memory:false in sidecar config) ---
 if [ "$MEMORY_ENABLED" = "false" ]; then
+  dbg "EXIT: memory disabled"
   exit 0
 fi
 
@@ -82,11 +105,6 @@ source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
 source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-capture: failed to source get-mtime" >&2; exit 1; }
 source "$SCRIPT_DIR/sidecar-lock" || { echo "sidecar-capture: failed to source sidecar-lock" >&2; exit 1; }
-
-# Logging
-source "$SCRIPT_DIR/log-paths" || { echo "sidecar-capture: failed to source log-paths" >&2; exit 1; }
-LOG_FILE="$(devflow_log_dir "$CWD")/.working-memory-update.log"
-log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-capture] $1" >> "$LOG_FILE"; }
 
 # --- Append to queue ---
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
@@ -105,6 +123,8 @@ else
     -- "$RESPONSE_TEXT" "$TS" >> "$QUEUE_FILE"
 fi
 
+dbg "Appended to queue: QUEUE_FILE=$QUEUE_FILE"
+
 # Queue overflow safety: if >200 lines, keep last 100 (locked to prevent multi-session race)
 if [ -f "$QUEUE_FILE" ]; then
   LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
@@ -115,6 +135,7 @@ if [ -f "$QUEUE_FILE" ]; then
       if [ "$LINE_COUNT" -gt 200 ]; then
         _TRUNC_TMP="$QUEUE_FILE.tmp.$$" && tail -100 "$QUEUE_FILE" > "$_TRUNC_TMP" && mv "$_TRUNC_TMP" "$QUEUE_FILE" || rm -f "$_TRUNC_TMP"
         log "Queue overflow: truncated from $LINE_COUNT to 100 lines"
+        dbg "Queue overflow: truncated from $LINE_COUNT to 100 lines"
       fi
       sidecar_lock_release "$_QUEUE_LOCK"
     fi
@@ -128,6 +149,7 @@ log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
 PROCESSING_MARKER="$SIDECAR_DIR/memory.processing"
 if [ -f "$PROCESSING_MARKER" ]; then
   log "Throttled: memory.processing exists (in-flight sidecar update)"
+  dbg "EXIT: memory.processing exists"
   exit 0
 fi
 
@@ -144,8 +166,11 @@ LAST_UPDATE="${LAST_UPDATE:-0}"
 AGE=$(( NOW - LAST_UPDATE ))
 if [ "$AGE" -lt 120 ]; then
   log "Throttled: WORKING-MEMORY.md updated ${AGE}s ago"
+  dbg "EXIT: throttled AGE=${AGE}s"
   exit 0
 fi
+
+dbg "Throttle passed: AGE=${AGE}s >= 120s — writing memory marker"
 
 # Write memory marker
 mkdir -p "$SIDECAR_DIR"
@@ -171,5 +196,6 @@ else
 fi
 
 log "Wrote memory marker: $SIDECAR_DIR/memory.json"
+dbg "=== HOOK COMPLETE ==="
 
 exit 0

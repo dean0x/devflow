@@ -1206,15 +1206,14 @@ describe('working memory queue behavior', () => {
     fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
   }
 
-  it('stop_reason tool_use — no queue append', () => {
-    // Create .devflow/memory/ so the hook proceeds to the stop_reason check
+  it('empty last_assistant_message — no queue append', () => {
+    // Hook exits early when last_assistant_message is absent/empty
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-001',
-      stop_reason: 'tool_use',
-      response_text: 'test response',
+      last_assistant_message: '',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1223,7 +1222,7 @@ describe('working memory queue behavior', () => {
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
-  it('stop_reason end_turn — appends assistant turn to queue', () => {
+  it('last_assistant_message present — appends assistant turn to queue', () => {
     // Create .devflow/memory/ directory
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     // Write stale WORKING-MEMORY.md so throttle check passes (no memory.processing marker needed)
@@ -1232,8 +1231,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-002',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1366,8 +1364,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean',
-      stop_reason: 'end_turn',
-      response_text: 'first real assistant response',
+      last_assistant_message: 'first real assistant response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1390,8 +1387,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-empty',
-      stop_reason: 'end_turn',
-      response_text: 'response after empty queue',
+      last_assistant_message: 'response after empty queue',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1415,8 +1411,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-single',
-      stop_reason: 'end_turn',
-      response_text: 'response after user prompt',
+      last_assistant_message: 'response after user prompt',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1449,8 +1444,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-no-autoclean',
-      stop_reason: 'end_turn',
-      response_text: 'another response',
+      last_assistant_message: 'another response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1475,8 +1469,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-assistant-only',
-      stop_reason: 'end_turn',
-      response_text: 'new assistant response',
+      last_assistant_message: 'new assistant response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1507,8 +1500,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-006',
-      stop_reason: 'end_turn',
-      response_text: 'overflow trigger response',
+      last_assistant_message: 'overflow trigger response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1542,7 +1534,7 @@ describe('working memory queue behavior', () => {
 
     // Step 2: sidecar-capture writes assistant turn
     execSync(`bash "${STOP_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', stop_reason: 'end_turn', response_text: 'done' }),
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', last_assistant_message: 'done' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -1587,8 +1579,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-trunc-002',
-      stop_reason: 'end_turn',
-      response_text: longMessage,
+      last_assistant_message: longMessage,
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -2381,7 +2372,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
     const exitCode = (() => {
       try {
         execSyncLocal(`bash "${CAPTURE_HOOK}"`, {
-          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', stop_reason: 'end_turn', response_text: 'response text here' }),
+          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', last_assistant_message: 'response text here' }),
           stdio: ['pipe', 'pipe', 'pipe'],
           env: { ...process.env, HOME: homeDir },
         });
@@ -2527,8 +2518,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
@@ -2554,8 +2544,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
@@ -2573,8 +2562,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
@@ -2591,8 +2579,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
