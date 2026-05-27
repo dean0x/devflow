@@ -36,8 +36,13 @@ SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 
 # Normal logging
 source "$SCRIPT_DIR/log-paths" || true
-LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "/tmp")
+LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "${TMPDIR:-/tmp}")
 LOG_FILE="$LOG_DIR/.session-start-memory.log"
+# Size guard: truncate log to tail 1MB when it exceeds 2MB (runs once per hook invocation)
+if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)" -gt 2097152 ]; then
+  _LTMP="$LOG_FILE.tmp.$$"
+  tail -c 1048576 "$LOG_FILE" > "$_LTMP" 2>/dev/null && mv "$_LTMP" "$LOG_FILE" 2>/dev/null || rm -f "$_LTMP" 2>/dev/null || true
+fi
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [session-start-memory] $1" >> "$LOG_FILE" 2>/dev/null || true; }
 
 # Check sidecar config — single source of truth for memory enabled/disabled.
