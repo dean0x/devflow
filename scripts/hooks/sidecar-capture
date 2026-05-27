@@ -5,7 +5,7 @@
 # Writes .devflow/sidecar/memory.json marker when throttle has expired (>2 min).
 # On failure: does nothing (stale memory is better than fake data).
 
-# Safe no-op fallback: must exist before set -e and before debug-trace is sourced.
+# Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
 
 set -e
@@ -13,9 +13,7 @@ set -e
 # Resolve script directory once
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/debug-trace" || true
-devflow_debug_init "sidecar-capture"
-dbg "=== HOOK START ==="
+source "$SCRIPT_DIR/hook-bootstrap" "sidecar-capture"
 
 # Break feedback loop: sidecar subagents trigger stop hook on exit.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
@@ -96,15 +94,7 @@ fi
 
 # Logging (needs CWD and memory-enabled path — source after memory gate so log-paths
 # subprocess overhead (~15-20ms) is only paid when memory is actually enabled)
-source "$SCRIPT_DIR/log-paths" || true
-LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "${TMPDIR:-/tmp}")
-LOG_FILE="$LOG_DIR/.working-memory-update.log"
-# Size guard: truncate log to tail 1MB when it exceeds 2MB (runs once per hook invocation)
-if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)" -gt 2097152 ]; then
-  _LTMP="$LOG_FILE.tmp.$$"
-  tail -c 1048576 "$LOG_FILE" > "$_LTMP" 2>/dev/null && mv "$_LTMP" "$LOG_FILE" 2>/dev/null || rm -f "$_LTMP" 2>/dev/null || true
-fi
-log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-capture] $1" >> "$LOG_FILE" 2>/dev/null || true; }
+source "$SCRIPT_DIR/hook-log-init" "sidecar-capture"
 
 # Auto-create .devflow/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0

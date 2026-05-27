@@ -1,0 +1,25 @@
+#!/bin/bash
+# Shared debug bootstrap helper for Devflow hooks.
+# Source this file AFTER setting SCRIPT_DIR and defining dbg() no-op fallback.
+#
+# Usage:
+#   dbg() { :; }
+#   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+#   source "$SCRIPT_DIR/hook-bootstrap" "hook-name"
+#
+# What this does:
+#   1. Sources debug-trace from $SCRIPT_DIR (soft-fail — hook still runs if absent)
+#   2. Calls devflow_debug_init with the hook name passed as $1
+#   3. Emits "=== HOOK START ===" debug trace
+#
+# What this does NOT do:
+#   - set -e   (per-hook policy; caller must set it before or after)
+#   - Compute SCRIPT_DIR (must be set by caller before sourcing)
+#
+# Requires: $SCRIPT_DIR set by caller; fails fast with clear error if missing.
+
+: "${SCRIPT_DIR:?hook-bootstrap: SCRIPT_DIR must be set by caller}"
+
+source "$SCRIPT_DIR/debug-trace" || true
+devflow_debug_init "${1:-hook}"
+dbg "=== HOOK START ==="

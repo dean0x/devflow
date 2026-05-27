@@ -184,7 +184,7 @@ Per-project runtime files live under `.devflow/`:
 ~/.devflow/logs/{project-slug}/
 ├── .learning-update.log      # Background learning agent log
 ├── .decisions-update.log     # Background decisions agent log
-└── .working-memory-update.log # Background memory updater log
+└── .sidecar-capture.log       # sidecar-capture (Stop hook) log
 ```
 
 **Naming conventions**: Timestamps as `YYYY-MM-DD_HHMM`, branch slugs replace `/` with `-`, topic slugs are lowercase-dashes.

@@ -1,0 +1,58 @@
+#!/bin/bash
+# Shared utility functions for sidecar-evaluate feature modules.
+# Source this file from the sidecar-evaluate orchestrator before sourcing eval-* modules.
+#
+# Exports: read_daily_cap(), atomic_increment_daily(), load_existing_ids()
+#
+# Requires: $TODAY, sidecar_lock_acquire/sidecar_lock_release (from sidecar-lock),
+#           $_HAS_JQ, json_field_file (from json-parse).
+
+# read_daily_cap FILE DEFAULT → echoes today's run count (0 if file absent or dated yesterday)
+read_daily_cap() {
+  local runs_file="$1" default="${2:-0}"
+  local count=0
+  if [ -f "$runs_file" ]; then
+    local date_field
+    date_field=$(cut -f1 "$runs_file" 2>/dev/null || true)
+    if [ "$date_field" = "$TODAY" ]; then
+      if grep -q "$(printf '\t')" "$runs_file" 2>/dev/null; then
+        count=$(cut -f2 "$runs_file" 2>/dev/null | tr -dc '0-9')
+        count="${count:-$default}"
+      fi
+    fi
+  fi
+  echo "$count"
+}
+
+# atomic_increment_daily RUNS_FILE TODAY_VAL — increment daily counter under lock
+atomic_increment_daily() {
+  local runs_file="$1" today_val="$2"
+  local lock_dir="${runs_file}.lock"
+  if sidecar_lock_acquire "$lock_dir" 3; then
+    # Re-read under lock for accurate count
+    local actual
+    actual=$(read_daily_cap "$runs_file" 0)
+    printf '%s\t%d\n' "$today_val" "$((actual + 1))" > "$runs_file"
+    sidecar_lock_release "$lock_dir"
+  fi
+}
+
+# load_existing_ids LOG_FILE → echoes JSON array of .id values ([] when absent/empty)
+load_existing_ids() {
+  local log_file="$1"
+  if [ ! -f "$log_file" ]; then
+    echo "[]"
+    return
+  fi
+  if [ "$_HAS_JQ" = "true" ]; then
+    # Stream line-by-line then collect — avoids slurping entire file into memory
+    jq -c '.id // empty' "$log_file" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]"
+  else
+    node -e "
+      const fs=require('fs');
+      const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
+      const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
+      process.stdout.write(JSON.stringify(ids));
+    " -- "$log_file" 2>/dev/null || echo "[]"
+  fi
+}

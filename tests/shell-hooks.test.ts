@@ -15,6 +15,8 @@ const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
   'debug-trace',
+  'hook-bootstrap',
+  'hook-log-init',
   'session-start-memory',
   'session-start-context',
   'pre-compact-memory',
@@ -25,6 +27,11 @@ const HOOK_SCRIPTS = [
   'sidecar-capture',
   'sidecar-evaluate',
   'sidecar-dispatch',
+  'eval-helpers',
+  'eval-reinforce',
+  'eval-learning',
+  'eval-decisions',
+  'eval-knowledge',
 ];
 
 describe('shell hook syntax checks', () => {

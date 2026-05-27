@@ -1,0 +1,84 @@
+#!/bin/bash
+# sidecar-evaluate: Artifact reinforcement module.
+# Updates last_seen for self-learning artifacts loaded during this session.
+# Source from sidecar-evaluate orchestrator after eval-helpers.
+#
+# Requires (from orchestrator namespace):
+#   LEARNING_ENABLED, TRANSCRIPT, SIDECAR_DIR, LEARNING_DIR,
+#   _HAS_JQ, log(), dbg(), sidecar_lock_acquire(), sidecar_lock_release()
+
+if [ "$LEARNING_ENABLED" = "true" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  LEARNING_LOG="$LEARNING_DIR/learning-log.jsonl"
+  if [ -f "$LEARNING_LOG" ]; then
+    # Extract slugs of self-learning artifacts used in this session
+    LOADED_SLUGS=$(grep -oE 'self-learning[:/][a-z0-9-]+' "$TRANSCRIPT" 2>/dev/null | \
+      sed 's|self-learning[:/]||' | sort -u || true)
+    if [ -n "$LOADED_SLUGS" ]; then
+      NOW_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+      SLUGS_PATTERN=$(echo "$LOADED_SLUGS" | paste -sd '|' -)
+      if sidecar_lock_acquire "$SIDECAR_DIR/.reinforce.lock" 3; then
+        trap 'sidecar_lock_release "$SIDECAR_DIR/.reinforce.lock"' EXIT
+        TEMP_LOG="${LEARNING_LOG}.tmp.$$"
+        rm -f "$TEMP_LOG" 2>/dev/null || true
+        if [ "$_HAS_JQ" = "true" ]; then
+          if jq -c --arg now "$NOW_ISO" --arg slugs "$SLUGS_PATTERN" '
+            def extract_slug:
+              .artifact_path as $p |
+              if ($p | contains("/commands/")) then ($p | split("/") | last | rtrimstr(".md"))
+              else ($p | split("/") | .[-2])
+              end;
+            if .status == "created" and .artifact_path != null and .artifact_path != "" then
+              extract_slug as $slug |
+              if ($slugs | split("|") | any(. == $slug)) then .last_seen = $now
+              else .
+              end
+            else .
+            end
+          ' "$LEARNING_LOG" > "$TEMP_LOG" 2>/dev/null; then
+            if ! cmp -s "$LEARNING_LOG" "$TEMP_LOG"; then
+              mv "$TEMP_LOG" "$LEARNING_LOG"
+              log "Reinforced artifacts for slugs: $SLUGS_PATTERN"
+            else
+              rm -f "$TEMP_LOG"
+            fi
+          else
+            rm -f "$TEMP_LOG"
+          fi
+        else
+          _REINFORCE_RESULT=$(node -e "
+            const fs = require('fs');
+            const lines = fs.readFileSync(process.argv[1], 'utf8').trim().split('\n').filter(Boolean);
+            const slugs = process.argv[2].split('|');
+            const now = process.argv[3];
+            const tmpPath = process.argv[1] + '.tmp.' + process.pid;
+            let reinforced = false;
+            const result = lines.map(line => {
+              try {
+                const obj = JSON.parse(line);
+                if (obj.status === 'created' && obj.artifact_path) {
+                  const slug = obj.artifact_path.includes('/commands/')
+                    ? obj.artifact_path.split('/').pop().replace(/\.md$/, '')
+                    : obj.artifact_path.split('/').slice(-2, -1)[0];
+                  if (slugs.includes(slug)) { obj.last_seen = now; reinforced = true; }
+                }
+                return JSON.stringify(obj);
+              } catch (e) { return line; }
+            });
+            if (reinforced) {
+              fs.writeFileSync(tmpPath, result.join('\n') + '\n');
+              fs.renameSync(tmpPath, process.argv[1]);
+            }
+            process.stdout.write(reinforced ? 'true' : 'false');
+          " -- "$LEARNING_LOG" "$SLUGS_PATTERN" "$NOW_ISO" 2>/dev/null || echo "false")
+          if [ "$_REINFORCE_RESULT" = "true" ]; then
+            log "Reinforced artifacts for slugs: $SLUGS_PATTERN (node)"
+          fi
+        fi
+        sidecar_lock_release "$SIDECAR_DIR/.reinforce.lock"
+        trap - EXIT
+      else
+        log "Reinforcement skipped: could not acquire lock"
+      fi
+    fi
+  fi
+fi

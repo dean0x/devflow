@@ -4,7 +4,7 @@
 # Detects structured implementation plans and injects a directive to execute them.
 # Zero overhead for normal prompts — only fires when all three plan markers are present.
 
-# Safe no-op fallback: must exist before set -e and before debug-trace is sourced.
+# Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
 
 set -e
@@ -12,9 +12,7 @@ set -e
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/debug-trace" || true
-devflow_debug_init "preamble"
-dbg "=== HOOK START ==="
+source "$SCRIPT_DIR/hook-bootstrap" "preamble"
 
 source "$SCRIPT_DIR/json-parse" || { echo "preamble: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi

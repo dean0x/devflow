@@ -142,7 +142,7 @@ describe('sentinel guard: sidecar-capture', () => {
         env: { ...process.env, HOME: tmpHome },
       });
       const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
-      const logFile = path.join(tmpHome, '.devflow', 'logs', slug, '.working-memory-update.log');
+      const logFile = path.join(tmpHome, '.devflow', 'logs', slug, '.sidecar-capture.log');
       expect(fs.existsSync(logFile)).toBe(true);
       const content = fs.readFileSync(logFile, 'utf-8');
       expect(content).toContain('[sidecar-capture]');

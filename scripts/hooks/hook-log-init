@@ -1,0 +1,36 @@
+#!/bin/bash
+# Shared log initialisation helper for Devflow hooks.
+# Source this file AFTER hook-bootstrap (so dbg() is available) and after CWD is validated.
+#
+# Usage:
+#   source "$SCRIPT_DIR/hook-log-init" "hook-name"
+#
+# What this does:
+#   1. Sources log-paths from $SCRIPT_DIR (soft-fail)
+#   2. Computes LOG_DIR via devflow_log_dir "$CWD" with ${TMPDIR:-/tmp} fallback
+#   3. Sets LOG_FILE to $LOG_DIR/.<hook-name>.log
+#   4. Applies 2MB→1MB tail size guard on LOG_FILE
+#   5. Defines log() function with ISO timestamp and hook name label
+#
+# Exports: LOG_DIR, LOG_FILE, log()
+#
+# Requires:
+#   $SCRIPT_DIR — set by caller (needed to locate log-paths)
+#   $CWD        — set and validated by caller; fails fast with clear error if missing
+
+: "${SCRIPT_DIR:?hook-log-init: SCRIPT_DIR must be set by caller}"
+: "${CWD:?hook-log-init: CWD must be set by caller}"
+
+_HOOK_LOG_NAME="${1:-hook}"
+
+source "$SCRIPT_DIR/log-paths" || true
+LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "${TMPDIR:-/tmp}")
+LOG_FILE="$LOG_DIR/.${_HOOK_LOG_NAME}.log"
+
+# Size guard: truncate log to tail 1MB when it exceeds 2MB (runs once per hook invocation)
+if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)" -gt 2097152 ]; then
+  _LTMP="$LOG_FILE.tmp.$$"
+  tail -c 1048576 "$LOG_FILE" > "$_LTMP" 2>/dev/null && mv "$_LTMP" "$LOG_FILE" 2>/dev/null || rm -f "$_LTMP" 2>/dev/null || true
+fi
+
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [${_HOOK_LOG_NAME}] $1" >> "$LOG_FILE" 2>/dev/null || true; }
