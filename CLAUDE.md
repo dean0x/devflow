@@ -79,7 +79,7 @@ devflow/
 ├── plugins/devflow-*/      # 21 plugins (12 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
-│   └── hooks/              # Sidecar + ambient + memory hooks (sidecar-capture, sidecar-dispatch, sidecar-evaluate, sidecar-lock, session-start-memory, session-start-context, pre-compact-memory, preamble, get-mtime)
+│   └── hooks/              # Sidecar + ambient + memory hooks (sidecar-capture, sidecar-dispatch, sidecar-evaluate, sidecar-lock, session-start-memory, session-start-context, pre-compact-memory, preamble, get-mtime, hook-bootstrap, hook-log-init, eval-helpers, eval-reinforce, eval-learning, eval-decisions, eval-knowledge)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, learn, decisions, flags, knowledge, rules)
 ├── .claude-plugin/         # Marketplace registry
 ├── .devflow/               # All per-project runtime data (docs, memory, learning, decisions, features)
