@@ -30,7 +30,7 @@ dbg "json available, has_jq=$_HAS_JQ"
 
 INPUT=$(cat)
 dbg "INPUT length=${#INPUT}"
-dbg "INPUT keys=$(printf '%s' "$INPUT" | jq -r 'keys | join(", ")' 2>/dev/null || echo 'jq-failed')"
+if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "INPUT keys=$(printf '%s' "$INPUT" | jq -r 'keys | join(", ")' 2>/dev/null || echo 'jq-failed')"; fi
 
 # Resolve project directory and assistant response in one subprocess.
 # Stop hook fields: cwd, last_assistant_message, session_id, transcript_path, etc.
@@ -76,7 +76,6 @@ if [ -z "$RESPONSE_TEXT" ]; then
   exit 0
 fi
 
-dbg "RESPONSE_TEXT length=${#RESPONSE_TEXT}"
 dbg "PASSED all checks, proceeding to capture"
 
 # Truncate to 2000 chars

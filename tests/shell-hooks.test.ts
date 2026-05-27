@@ -14,6 +14,7 @@ function localDateString(): string {
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
+  'debug-trace',
   'session-start-memory',
   'session-start-context',
   'pre-compact-memory',

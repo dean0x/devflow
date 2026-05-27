@@ -36,7 +36,6 @@ dbg "CWD=$CWD PROMPT_LENGTH=${#PROMPT}"
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
 devflow_debug_set_cwd "$CWD"
-dbg "CWD=$CWD"
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"

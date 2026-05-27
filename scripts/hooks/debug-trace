@@ -20,33 +20,29 @@ _DEVFLOW_DBG_LOG=""
 
 devflow_debug_init() {
   _DEVFLOW_DBG_HOOK="${1:-hook}"
+  if [ "${DEVFLOW_HOOK_DEBUG:-}" != "1" ]; then
+    dbg() { :; }
+    return
+  fi
   # Phase 1: global fallback log (before CWD is known)
   local global_log_dir="$HOME/.devflow/logs"
   mkdir -p "$global_log_dir" 2>/dev/null || true
   _DEVFLOW_DBG_LOG="$global_log_dir/.hook-debug.log"
-
-  if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then
-    dbg() {
-      echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
-    }
-  else
-    dbg() { :; }
-  fi
+  dbg() {
+    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
+  }
 }
 
 devflow_debug_set_cwd() {
   local cwd="$1"
-  if [ -z "$cwd" ]; then return; fi
-  # Phase 2: switch to per-project log
+  if [ -z "$cwd" ] || [ "${DEVFLOW_HOOK_DEBUG:-}" != "1" ]; then return; fi
+  # Phase 2: switch to per-project log (only when debug is active)
   local slug
   slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
   local project_log_dir="$HOME/.devflow/logs/$slug"
   mkdir -p "$project_log_dir" 2>/dev/null || true
   _DEVFLOW_DBG_LOG="$project_log_dir/.hook-debug.log"
-
-  if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then
-    dbg() {
-      echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
-    }
-  fi
+  dbg() {
+    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
+  }
 }
