@@ -45,21 +45,15 @@ fi
 CWD=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f1)
 RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f2-)
 
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then dbg "EXIT: bad CWD"; exit 0; fi
+
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 dbg "RESPONSE_TEXT length=${#RESPONSE_TEXT}"
 
-if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then dbg "EXIT: bad CWD"; exit 0; fi
-
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
-
-# Logging (needs CWD — source log-paths early so log() is available for all sections below)
-source "$SCRIPT_DIR/log-paths" || true
-LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "/tmp")
-LOG_FILE="$LOG_DIR/.working-memory-update.log"
-log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-capture] $1" >> "$LOG_FILE" 2>/dev/null || true; }
 
 # Read sidecar config — memory:false gates memory-specific sections only.
 # The decisions usage scanner runs independently of memory state.
@@ -99,6 +93,18 @@ if [ "$MEMORY_ENABLED" = "false" ]; then
   dbg "EXIT: memory disabled"
   exit 0
 fi
+
+# Logging (needs CWD and memory-enabled path — source after memory gate so log-paths
+# subprocess overhead (~15-20ms) is only paid when memory is actually enabled)
+source "$SCRIPT_DIR/log-paths" || true
+LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "${TMPDIR:-/tmp}")
+LOG_FILE="$LOG_DIR/.working-memory-update.log"
+# Size guard: truncate log to tail 1MB when it exceeds 2MB (runs once per hook invocation)
+if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)" -gt 2097152 ]; then
+  _LTMP="$LOG_FILE.tmp.$$"
+  tail -c 1048576 "$LOG_FILE" > "$_LTMP" 2>/dev/null && mv "$_LTMP" "$LOG_FILE" 2>/dev/null || rm -f "$_LTMP" 2>/dev/null || true
+fi
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-capture] $1" >> "$LOG_FILE" 2>/dev/null || true; }
 
 # Auto-create .devflow/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
