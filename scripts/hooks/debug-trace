@@ -32,7 +32,11 @@ devflow_debug_init() {
   # Size guard: if log exceeds 5MB, keep the tail 2.5MB to prevent unbounded growth.
   if [ -f "$_DEVFLOW_DBG_LOG" ] && [ "$(wc -c < "$_DEVFLOW_DBG_LOG" 2>/dev/null || echo 0)" -gt 5242880 ]; then
     local _TAIL_TMP="$_DEVFLOW_DBG_LOG.tmp.$$"
-    tail -c 2621440 "$_DEVFLOW_DBG_LOG" > "$_TAIL_TMP" 2>/dev/null && mv "$_TAIL_TMP" "$_DEVFLOW_DBG_LOG" 2>/dev/null || rm -f "$_TAIL_TMP" 2>/dev/null || true
+    if tail -c 2621440 "$_DEVFLOW_DBG_LOG" > "$_TAIL_TMP" 2>/dev/null; then
+      mv "$_TAIL_TMP" "$_DEVFLOW_DBG_LOG" 2>/dev/null || rm -f "$_TAIL_TMP" 2>/dev/null || true
+    else
+      rm -f "$_TAIL_TMP" 2>/dev/null || true
+    fi
   fi
   dbg() {
     echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true

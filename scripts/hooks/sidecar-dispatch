@@ -63,7 +63,6 @@ fi
 dbg "memory=$MEMORY_ENABLED learning=$LEARNING_ENABLED decisions=$DECISIONS_ENABLED knowledge=$KNOWLEDGE_ENABLED"
 
 # --- Capture user turn ---
-dbg "PROMPT_LENGTH=${#PROMPT} MEMORY_ENABLED=$MEMORY_ENABLED"
 if [ "$MEMORY_ENABLED" = "true" ] && [ -n "$PROMPT" ]; then
   source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 

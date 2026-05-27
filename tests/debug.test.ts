@@ -11,8 +11,6 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-const HOOKS_DIR = path.resolve(__dirname, '..', 'scripts', 'hooks');
-
 // These tests bypass the commander layer and directly exercise the settings.json
 // read/write behavior expected from the debug command. This keeps tests pure and
 // avoids commander singleton bleed-through between test cases.
