@@ -27,7 +27,13 @@ devflow_debug_init() {
   # Phase 1: global fallback log (before CWD is known)
   local global_log_dir="$HOME/.devflow/logs"
   mkdir -p "$global_log_dir" 2>/dev/null || true
+  chmod 700 "$global_log_dir" 2>/dev/null || true
   _DEVFLOW_DBG_LOG="$global_log_dir/.hook-debug.log"
+  # Size guard: if log exceeds 5MB, keep the tail 2.5MB to prevent unbounded growth.
+  if [ -f "$_DEVFLOW_DBG_LOG" ] && [ "$(wc -c < "$_DEVFLOW_DBG_LOG" 2>/dev/null || echo 0)" -gt 5242880 ]; then
+    local _TAIL_TMP="$_DEVFLOW_DBG_LOG.tmp.$$"
+    tail -c 2621440 "$_DEVFLOW_DBG_LOG" > "$_TAIL_TMP" 2>/dev/null && mv "$_TAIL_TMP" "$_DEVFLOW_DBG_LOG" 2>/dev/null || rm -f "$_TAIL_TMP" 2>/dev/null || true
+  fi
   dbg() {
     echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
   }
@@ -41,6 +47,7 @@ devflow_debug_set_cwd() {
   slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
   local project_log_dir="$HOME/.devflow/logs/$slug"
   mkdir -p "$project_log_dir" 2>/dev/null || true
+  chmod 700 "$project_log_dir" 2>/dev/null || true
   _DEVFLOW_DBG_LOG="$project_log_dir/.hook-debug.log"
   dbg() {
     echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true

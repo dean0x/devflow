@@ -146,7 +146,7 @@ if compgen -G "$SIDECAR_DIR/*.processing" > /dev/null 2>&1; then
         # Too many retries — mark as permanently failed to stop cycling
         mv "$PROC_FILE" "${BASE}.failed" 2>/dev/null || true
         rm -f "$RETRY_FILE" 2>/dev/null || true
-        dbg "Stale marker permanently failed after $RETRY_COUNT retries: $(basename "$PROC_FILE")"
+        if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Stale marker permanently failed after $RETRY_COUNT retries: $(basename "$PROC_FILE")"; fi
         log "Stale marker permanently failed after $RETRY_COUNT retries: $(basename "$PROC_FILE")"
       else
         # Stale processing file — rename back to .json for retry; record basename so the
@@ -154,7 +154,7 @@ if compgen -G "$SIDECAR_DIR/*.processing" > /dev/null 2>&1; then
         echo $(( RETRY_COUNT + 1 )) > "$RETRY_FILE"
         mv "$PROC_FILE" "${BASE}.json" 2>/dev/null || true
         JUST_RECOVERED="$JUST_RECOVERED $(basename "$BASE")"
-        dbg "Stale marker recovered (retry $((RETRY_COUNT + 1))/$MAX_RETRIES): $(basename "$BASE")"
+        if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Stale marker recovered (retry $((RETRY_COUNT + 1))/$MAX_RETRIES): $(basename "$BASE")"; fi
         log "Stale marker recovered (retry $((RETRY_COUNT + 1))/$MAX_RETRIES): $(basename "$BASE")"
       fi
     fi

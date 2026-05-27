@@ -42,3 +42,5 @@ if [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PRO
 else
   dbg "No plan markers detected — no output"
 fi
+
+dbg "=== HOOK COMPLETE ==="

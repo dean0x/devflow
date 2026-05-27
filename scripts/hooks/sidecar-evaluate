@@ -53,10 +53,10 @@ if [ -f "$SIDECAR_CONFIG" ]; then
 fi
 
 # Log
-source "$SCRIPT_DIR/log-paths" || { echo "sidecar-evaluate: failed to source log-paths" >&2; exit 1; }
-LOG_FILE="$(devflow_log_dir "$CWD")/.sidecar-evaluate.log"
-mkdir -p "$(dirname "$LOG_FILE")"
-log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-evaluate] $1" >> "$LOG_FILE"; }
+source "$SCRIPT_DIR/log-paths" || true
+LOG_DIR=$(devflow_log_dir "$CWD" 2>/dev/null || echo "/tmp")
+LOG_FILE="$LOG_DIR/.sidecar-evaluate.log"
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [sidecar-evaluate] $1" >> "$LOG_FILE" 2>/dev/null || true; }
 source "$SCRIPT_DIR/sidecar-lock" || { log "failed to source sidecar-lock"; exit 1; }
 
 log "SessionEnd hook triggered"
@@ -460,7 +460,7 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
         STALE_SLUGS=$(node "$FEATURE_KNOWLEDGE_LIB" stale-slugs "$CWD" 2>/dev/null || true)
       fi
 
-      dbg "Knowledge stale_slugs=$(echo "$STALE_SLUGS" | wc -l | tr -d ' ')"
+      if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Knowledge stale_slugs=$(echo "$STALE_SLUGS" | wc -l | tr -d ' ')"; fi
       if [ -n "$STALE_SLUGS" ]; then
         # Write knowledge marker (per-session name for concurrency safety)
         _KNOW_MARKER="$SIDECAR_DIR/knowledge.${MARKER_SUFFIX}.json"

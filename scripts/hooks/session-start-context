@@ -139,7 +139,7 @@ if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" 
       fi
     fi
 
-    dbg "Learned artifacts: commands=$(echo "$LEARNED_COMMANDS" | grep -c , 2>/dev/null || echo 0) skills=$(echo "$LEARNED_SKILLS" | grep -c , 2>/dev/null || echo 0)"
+    if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Learned artifacts: commands=$(echo "$LEARNED_COMMANDS" | grep -c , 2>/dev/null || echo 0) skills=$(echo "$LEARNED_SKILLS" | grep -c , 2>/dev/null || echo 0)"; fi
     if [ -n "$LEARNED_COMMANDS" ] || [ -n "$LEARNED_SKILLS" ]; then
       LEARNED_SECTION="--- LEARNED BEHAVIORS ---"
       if [ -n "$LEARNED_COMMANDS" ]; then
