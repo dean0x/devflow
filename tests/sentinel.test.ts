@@ -107,6 +107,49 @@ describe('sentinel guard: sidecar-capture', () => {
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
+
+  it('captures when stop_reason is "tool_use" and last_assistant_message is present', () => {
+    // Regression: the old code filtered on stop_reason=end_turn, which meant tool_use
+    // stops with a valid last_assistant_message were silently dropped. After the rename,
+    // stop_reason is ignored — only last_assistant_message presence gates capture.
+    mkMemoryDir(tmpDir);
+    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, '## Now\n- testing');
+    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
+    const input = sessionInput(tmpDir, {
+      stop_reason: 'tool_use',
+      last_assistant_message: 'response with tool call',
+    });
+    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    // Capture must proceed regardless of stop_reason value
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
+  });
+
+  it('creates log file on successful capture', () => {
+    mkMemoryDir(tmpDir);
+    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, '## Now\n- testing');
+    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
+    const input = sessionInput(tmpDir, { last_assistant_message: 'hello' });
+    // Create a temp home so log writes land in our temp dir
+    const tmpHome = fs.mkdtempSync(os.tmpdir() + '/devflow-log-home-');
+    try {
+      execSync(`bash "${HOOK}"`, {
+        input,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, HOME: tmpHome },
+      });
+      const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
+      const logFile = path.join(tmpHome, '.devflow', 'logs', slug, '.working-memory-update.log');
+      expect(fs.existsSync(logFile)).toBe(true);
+      const content = fs.readFileSync(logFile, 'utf-8');
+      expect(content).toContain('[sidecar-capture]');
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('sentinel guard: pre-compact-memory', () => {

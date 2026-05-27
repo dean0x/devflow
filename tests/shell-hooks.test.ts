@@ -42,6 +42,102 @@ describe('shell hook syntax checks', () => {
   }
 });
 
+// =============================================================================
+// debug-trace behavioral tests
+// =============================================================================
+
+describe('debug-trace helper behaviors', () => {
+  const DEBUG_TRACE = path.join(HOOKS_DIR, 'debug-trace');
+
+  it('dbg is a no-op when DEVFLOW_HOOK_DEBUG is unset', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-test-'));
+    try {
+      const logFile = path.join(tmpDir, '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpDir}"
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        dbg "should not appear"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      // No log file should be created when debug is disabled
+      expect(fs.existsSync(logFile)).toBe(false);
+      // Also no ~/.devflow/logs directory created for the log
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', 'logs'))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('dbg writes to global log when DEVFLOW_HOOK_DEBUG=1', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-test-'));
+    try {
+      const globalLog = path.join(tmpDir, '.devflow', 'logs', '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpDir}"
+        DEVFLOW_HOOK_DEBUG=1
+        export HOME DEVFLOW_HOOK_DEBUG
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        dbg "hello from test"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      expect(fs.existsSync(globalLog)).toBe(true);
+      const content = fs.readFileSync(globalLog, 'utf-8');
+      expect(content).toContain('test-hook: hello from test');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('devflow_debug_set_cwd switches to per-project log', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-home-'));
+    const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-cwd-'));
+    try {
+      const slug = tmpCwd.replace(/^\//, '').replace(/\//g, '-');
+      const projectLog = path.join(tmpHome, '.devflow', 'logs', slug, '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpHome}"
+        DEVFLOW_HOOK_DEBUG=1
+        export HOME DEVFLOW_HOOK_DEBUG
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        devflow_debug_set_cwd "${tmpCwd}"
+        dbg "per-project message"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      expect(fs.existsSync(projectLog)).toBe(true);
+      const content = fs.readFileSync(projectLog, 'utf-8');
+      expect(content).toContain('test-hook: per-project message');
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+
+  it('devflow_debug_set_cwd is a no-op when DEVFLOW_HOOK_DEBUG is unset', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-home-'));
+    const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-cwd-'));
+    try {
+      const slug = tmpCwd.replace(/^\//, '').replace(/\//g, '-');
+      const projectLog = path.join(tmpHome, '.devflow', 'logs', slug, '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpHome}"
+        export HOME
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        devflow_debug_set_cwd "${tmpCwd}"
+        dbg "should not appear"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      expect(fs.existsSync(projectLog)).toBe(false);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('learning hook pure functions', () => {
   it('check_daily_cap respects counter file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
