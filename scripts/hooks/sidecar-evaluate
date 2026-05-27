@@ -9,10 +9,10 @@ dbg() { :; }
 
 set -e
 
-# Break feedback loop from background sidecar sessions
-[ "${DEVFLOW_BG_LEARNER:-}" = "1" ] && exit 0
-[ "${DEVFLOW_BG_UPDATER:-}" = "1" ] && exit 0
-[ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ] && exit 0
+# Feedback-loop guards — before debug-trace to minimize background session overhead
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -26,7 +26,7 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
-[ -z "$CWD" ] && exit 0
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
 
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
