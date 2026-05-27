@@ -136,6 +136,37 @@ describe('debug-trace helper behaviors', () => {
       fs.rmSync(tmpCwd, { recursive: true, force: true });
     }
   });
+
+  it('devflow_debug_set_cwd truncates per-project log when it exceeds 5MB', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-home-'));
+    const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-cwd-'));
+    try {
+      const slug = tmpCwd.replace(/^\//, '').replace(/\//g, '-');
+      const logDir = path.join(tmpHome, '.devflow', 'logs', slug);
+      fs.mkdirSync(logDir, { recursive: true });
+      const projectLog = path.join(logDir, '.hook-debug.log');
+      // Write 6MB of data to exceed the 5MB threshold
+      fs.writeFileSync(projectLog, 'x'.repeat(6 * 1024 * 1024));
+      const script = `bash -c '
+        HOME="${tmpHome}"
+        DEVFLOW_HOOK_DEBUG=1
+        export HOME DEVFLOW_HOOK_DEBUG
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        devflow_debug_set_cwd "${tmpCwd}"
+        dbg "after truncation"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      const size = fs.statSync(projectLog).size;
+      // After truncation the log must be smaller than 5MB (kept 2.5MB tail + new line)
+      expect(size).toBeLessThan(5 * 1024 * 1024);
+      const content = fs.readFileSync(projectLog, 'utf-8');
+      expect(content).toContain('after truncation');
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('learning hook pure functions', () => {
