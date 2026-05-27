@@ -25,11 +25,19 @@ export const debugCommand = new Command('debug')
     try {
       const raw = await fs.readFile(settingsPath, 'utf-8');
       settings = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
+    } catch (err: unknown) {
+      if (err instanceof SyntaxError) {
+        p.log.error('settings.json is malformed — fix it before modifying env vars');
+        return;
+      }
       settings = {};
     }
 
-    const env = (settings.env as Record<string, string> | undefined) ?? {};
+    const rawEnv = settings.env;
+    const env: Record<string, string> =
+      (typeof rawEnv === 'object' && rawEnv !== null && !Array.isArray(rawEnv))
+        ? rawEnv as Record<string, string>
+        : {};
 
     if (options.enable) {
       env.DEVFLOW_HOOK_DEBUG = '1';
