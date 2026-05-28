@@ -23,7 +23,7 @@ _DEVFLOW_DBG_LOG=""
 # unbounded growth.  Uses `stat` to read the file size without forking `wc`.
 _devflow_dbg_size_guard() {
   local log_file="$1"
-  [ -f "$log_file" ] || return
+  [ -f "$log_file" ] || return 0
   local size
   # stat -f%z (macOS/BSD) with stat -c%s (GNU/Linux) fallback; last resort: wc -c
   size=$(stat -f%z "$log_file" 2>/dev/null) \
