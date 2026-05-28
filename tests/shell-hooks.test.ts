@@ -268,6 +268,60 @@ describe('eval-helpers: atomic_increment_daily', () => {
   });
 });
 
+describe('eval-helpers: load_existing_ids', () => {
+  it('returns empty array when log file is absent', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    try {
+      const missingFile = path.join(tmpDir, 'nonexistent.jsonl');
+      const result = execSync(`bash -c '
+        source "${EVAL_HELPERS}"
+        load_existing_ids "${missingFile}"
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(JSON.parse(result)).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns empty array when log file is empty', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const logFile = path.join(tmpDir, 'empty.jsonl');
+    try {
+      fs.writeFileSync(logFile, '');
+      const result = execSync(`bash -c '
+        source "${EVAL_HELPERS}"
+        load_existing_ids "${logFile}"
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(JSON.parse(result)).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns ids from valid JSONL as JSON array', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, [
+        JSON.stringify({ id: 'obs_aaa', type: 'workflow', confidence: 0.9 }),
+        JSON.stringify({ id: 'obs_bbb', type: 'procedural', confidence: 0.7 }),
+        JSON.stringify({ id: 'obs_ccc', type: 'decision', confidence: 0.8 }),
+      ].join('\n') + '\n');
+      const result = execSync(`bash -c '
+        source "${EVAL_HELPERS}"
+        load_existing_ids "${logFile}"
+      '`, { stdio: 'pipe' }).toString().trim();
+      const ids = JSON.parse(result);
+      expect(ids).toContain('obs_aaa');
+      expect(ids).toContain('obs_bbb');
+      expect(ids).toContain('obs_ccc');
+      expect(ids).toHaveLength(3);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('json-helper.js operations', () => {
   it('get-field extracts a field with default', () => {
     const result = execSync(

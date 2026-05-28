@@ -114,6 +114,10 @@ describe('readDebugStatus', () => {
     expect(readDebugStatus(JSON.stringify({ env: { DEVFLOW_HOOK_DEBUG: 'true' } }))).toBe(false);
     expect(readDebugStatus(JSON.stringify({ env: { DEVFLOW_HOOK_DEBUG: '0' } }))).toBe(false);
   });
+
+  it('throws on malformed JSON', () => {
+    expect(() => readDebugStatus('not json')).toThrow(SyntaxError);
+  });
 });
 
 // ─── apply→strip roundtrip ───────────────────────────────────────────────────
@@ -163,7 +167,7 @@ describe('I/O integration — missing settings.json', () => {
     expect((settings.env as Record<string, string>).DEVFLOW_HOOK_DEBUG).toBe('1');
   });
 
-  it('disable from missing file — no-op (no file written)', async () => {
+  it('disable from missing file — stripDebugTrace({}) produces no env key', async () => {
     const settingsPath = path.join(tmpDir, 'settings.json');
     // Simulate the command: ENOENT → settingsJson = '{}' → stripDebugTrace
     const updated = stripDebugTrace('{}');
