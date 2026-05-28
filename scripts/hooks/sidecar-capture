@@ -10,15 +10,15 @@ dbg() { :; }
 
 set -e
 
+# Feedback-loop guards — before hook-bootstrap to minimize background session overhead
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
+
 # Resolve script directory once
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 source "$SCRIPT_DIR/hook-bootstrap" "sidecar-capture"
-
-# Break feedback loop: sidecar subagents trigger stop hook on exit.
-if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
-if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then dbg "EXIT: bg_learner"; exit 0; fi
-if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then dbg "EXIT: bg_knowledge"; exit 0; fi
 
 # JSON parsing (jq with node fallback)
 source "$SCRIPT_DIR/json-parse" || { echo "sidecar-capture: failed to source json-parse" >&2; exit 1; }
@@ -41,13 +41,15 @@ else
     process.stdout.write((j.cwd||'')+'\x01'+(j.last_assistant_message||''))") || { dbg "EXIT: node failed"; exit 0; }
 fi
 CWD=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f1)
-RESPONSE_TEXT=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f2-)
+ASSISTANT_MSG=$(printf '%s' "$_FIELDS" | cut -d$'\001' -f2-)
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then dbg "EXIT: bad CWD"; exit 0; fi
 
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
-dbg "RESPONSE_TEXT length=${#RESPONSE_TEXT}"
+# SECURITY: Never log ASSISTANT_MSG or INPUT content — may contain secrets.
+# Only log metadata (length, keys, presence checks).
+dbg "ASSISTANT_MSG length=${#ASSISTANT_MSG}"
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
@@ -64,25 +66,25 @@ fi
 dbg "MEMORY_ENABLED=$MEMORY_ENABLED"
 
 # Skip if empty response
-if [ -z "$RESPONSE_TEXT" ]; then
-  dbg "EXIT: empty RESPONSE_TEXT"
+if [ -z "$ASSISTANT_MSG" ]; then
+  dbg "EXIT: empty ASSISTANT_MSG"
   exit 0
 fi
 
 dbg "PASSED all checks, proceeding to capture"
 
 # Truncate to 2000 chars
-if [ ${#RESPONSE_TEXT} -gt 2000 ]; then
-  RESPONSE_TEXT="${RESPONSE_TEXT:0:2000}... [truncated]"
+if [ ${#ASSISTANT_MSG} -gt 2000 ]; then
+  ASSISTANT_MSG="${ASSISTANT_MSG:0:2000}... [truncated]"
 fi
 
 # --- Decisions usage scanner (independent of memory state) ---
 # D29: Supplementary — skip Node spawn when no ADR/PF citations present (~50-100ms savings).
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
 if [ -f "$SCANNER" ] && [ ! -f "$DEVFLOW_DIR/decisions/.disabled" ]; then
-  if printf '%s' "$RESPONSE_TEXT" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
+  if printf '%s' "$ASSISTANT_MSG" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
     dbg "Running decisions usage scanner"
-    printf '%s' "$RESPONSE_TEXT" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
+    printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
   fi
 fi
 
@@ -112,11 +114,11 @@ fi
 
 TS=$(date +%s)
 if [ "$_HAS_JQ" = "true" ]; then
-  jq -n -c --arg role "assistant" --arg content "$RESPONSE_TEXT" --argjson ts "$TS" \
+  jq -n -c --arg role "assistant" --arg content "$ASSISTANT_MSG" --argjson ts "$TS" \
     '{role: $role, content: $content, ts: $ts}' >> "$QUEUE_FILE"
 else
   node -e "process.stdout.write(JSON.stringify({role:'assistant',content:process.argv[1],ts:parseInt(process.argv[2])})+'\n')" \
-    -- "$RESPONSE_TEXT" "$TS" >> "$QUEUE_FILE"
+    -- "$ASSISTANT_MSG" "$TS" >> "$QUEUE_FILE"
 fi
 
 dbg "Appended to queue: QUEUE_FILE=$QUEUE_FILE"
@@ -138,7 +140,7 @@ if [ -f "$QUEUE_FILE" ]; then
   fi
 fi
 
-log "Captured assistant turn (${#RESPONSE_TEXT} chars)"
+log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
 
 # --- Write memory marker if throttle expired ---
 # Skip if a .processing file already exists (in-flight update)
