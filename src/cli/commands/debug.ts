@@ -20,18 +20,8 @@ interface DebugOptions {
  */
 export function applyDebugTrace(settingsJson: string): string {
   const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  const rawEnv = settings.env;
-  const env: Record<string, string> = (
-    typeof rawEnv === 'object' && rawEnv !== null && !Array.isArray(rawEnv)
-      ? Object.fromEntries(
-          Object.entries(rawEnv as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === 'string',
-          ),
-        )
-      : {}
-  );
-  env.DEVFLOW_HOOK_DEBUG = '1';
-  settings.env = env;
+  settings.env ??= {};
+  (settings.env as Record<string, string>).DEVFLOW_HOOK_DEBUG = '1';
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
@@ -43,21 +33,12 @@ export function applyDebugTrace(settingsJson: string): string {
  */
 export function stripDebugTrace(settingsJson: string): string {
   const settings = JSON.parse(settingsJson) as Record<string, unknown>;
-  const rawEnv = settings.env;
-  const env: Record<string, string> = (
-    typeof rawEnv === 'object' && rawEnv !== null && !Array.isArray(rawEnv)
-      ? Object.fromEntries(
-          Object.entries(rawEnv as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === 'string',
-          ),
-        )
-      : {}
-  );
-  delete env.DEVFLOW_HOOK_DEBUG;
-  if (Object.keys(env).length === 0) {
-    delete settings.env;
-  } else {
-    settings.env = env;
+  const env = settings.env as Record<string, unknown> | undefined;
+  if (env) {
+    delete env.DEVFLOW_HOOK_DEBUG;
+    if (Object.keys(env).length === 0) {
+      delete settings.env;
+    }
   }
   return JSON.stringify(settings, null, 2) + '\n';
 }
@@ -116,11 +97,7 @@ export const debugCommand = new Command('debug')
     let settingsJson: string;
     try {
       settingsJson = await fs.readFile(settingsPath, 'utf-8');
-    } catch (err: unknown) {
-      if (err instanceof SyntaxError) {
-        p.log.error('settings.json is malformed — fix it before modifying env vars');
-        return;
-      }
+    } catch {
       settingsJson = '{}';
     }
 

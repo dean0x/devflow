@@ -1,4 +1,4 @@
-<!-- TL;DR: 6 decisions. Key: ADR-001, ADR-002, ADR-003, ADR-004, ADR-005, ADR-006 -->
+<!-- TL;DR: 7 decisions. Key: ADR-001, ADR-002, ADR-003, ADR-004, ADR-005, ADR-006, ADR-007 -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.
@@ -56,3 +56,12 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: Use a hybrid approach: Semgrep and CodeQL run in parallel as static candidate generators producing structured alerts, which are then fed to LLM semantic reasoning agents that filter false positives and reason about business logic, feasibility, and intent.
 - **Consequences**: Static tools provide speed and breadth of coverage while LLM agents handle semantic reasoning neither tool can do alone. Multi-agent consensus prevents model-specific error amplification. Production deployment (Tencent LLM4PFA) reports 94-98% false positive reduction using this pattern.
 - **Source**: self-learning:obs_dwm8fa
+
+## ADR-007: Hook debug tracing must be a single global toggle (devflow debug) covering all hooks
+
+- **Date**: 2026-05-27
+- **Status**: Accepted
+- **Context**: Adding debug tracing to `sidecar-capture` raised the question of whether the toggle should be per-feature (e.g., `devflow memory --debug`) or a single global flag. The system has 7 hooks across 4 feature areas (memory, learning, decisions, knowledge).
+- **Decision**: Implement a single global `DEVFLOW_HOOK_DEBUG=1` env var toggle exposed as `devflow debug --enable/--disable/--status`, covering ALL hooks via a shared `scripts/hooks/debug-trace` helper script. Stored in `~/.claude/settings.json` env block so it survives reinstalls.
+- **Consequences**: When debugging any hook issue, all hooks emit traces simultaneously — enabling cross-hook interaction visibility. Per-feature toggles would require enabling multiple flags and could miss interactions between hooks (e.g., sidecar-capture writing a queue entry that sidecar-dispatch reads). The shared helper means debug tracing is consistent across all hooks and can be updated in one place.
+- **Source**: self-learning:obs_h9bw3c

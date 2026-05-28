@@ -176,79 +176,92 @@ describe('debug-trace helper behaviors', () => {
   });
 });
 
-describe('learning hook pure functions', () => {
-  it('check_daily_cap respects counter file', () => {
+const EVAL_HELPERS = path.join(HOOKS_DIR, 'eval-helpers');
+const SIDECAR_LOCK = path.join(HOOKS_DIR, 'sidecar-lock');
+
+describe('eval-helpers: read_daily_cap', () => {
+  it('returns 0 when counter file absent', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const counterFile = path.join(tmpDir, '.learning-runs-today');
-    // Get today's date from bash to avoid timezone mismatches
-    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
-
-    const makeScript = (cf: string) => `bash -c '
-      check_daily_cap() {
-        local COUNTER_FILE="${cf}"
-        local MAX_DAILY_RUNS=10
-        local TODAY=$(date +%Y-%m-%d)
-        if [ -f "$COUNTER_FILE" ]; then
-          local COUNTER_DATE=$(cut -f1 "$COUNTER_FILE")
-          local COUNTER_COUNT=$(cut -f2 "$COUNTER_FILE")
-          if [ "$COUNTER_DATE" = "$TODAY" ] && [ "$COUNTER_COUNT" -ge "$MAX_DAILY_RUNS" ]; then
-            return 1
-          fi
-        fi
-        return 0
-      }
-      check_daily_cap && echo "ok" || echo "capped"
-    '`;
-
     try {
-      // Under cap — should succeed
-      fs.writeFileSync(counterFile, `${today}\t5\n`);
-      const underCap = execSync(makeScript(counterFile), { stdio: 'pipe' }).toString().trim();
-      expect(underCap).toBe('ok');
-
-      // At cap — should return capped
-      fs.writeFileSync(counterFile, `${today}\t10\n`);
-      const atCap = execSync(makeScript(counterFile), { stdio: 'pipe' }).toString().trim();
-      expect(atCap).toBe('capped');
-
-      // Old date — should not be capped
-      fs.writeFileSync(counterFile, `2020-01-01\t99\n`);
-      const oldDate = execSync(makeScript(counterFile), { stdio: 'pipe' }).toString().trim();
-      expect(oldDate).toBe('ok');
+      const counterFile = path.join(tmpDir, '.runs-today');
+      const result = execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${EVAL_HELPERS}"
+        read_daily_cap "${counterFile}" 0
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('0');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('increment_daily_counter creates and increments counter', () => {
+  it('returns count when date matches today', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const counterFile = path.join(tmpDir, '.learning-runs-today');
-    // Get today's date from bash to avoid timezone mismatches
+    const counterFile = path.join(tmpDir, '.runs-today');
     const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
-
-    const makeScript = (cf: string) => `bash -c '
-      COUNTER_FILE="${cf}"
-      increment_daily_counter() {
-        local TODAY=$(date +%Y-%m-%d)
-        local COUNT=1
-        if [ -f "$COUNTER_FILE" ] && [ "$(cut -f1 "$COUNTER_FILE")" = "$TODAY" ]; then
-          COUNT=$(( $(cut -f2 "$COUNTER_FILE") + 1 ))
-        fi
-        printf "%s\\t%d\\n" "$TODAY" "$COUNT" > "$COUNTER_FILE"
-      }
-      increment_daily_counter
-    '`;
-
     try {
-      // First call — creates file with count 1
-      execSync(makeScript(counterFile), { stdio: 'pipe' });
-      const content1 = fs.readFileSync(counterFile, 'utf-8').trim();
-      expect(content1).toBe(`${today}\t1`);
+      fs.writeFileSync(counterFile, `${today}\t5\n`);
+      const result = execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${EVAL_HELPERS}"
+        read_daily_cap "${counterFile}" 0
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('5');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 
-      // Second call — increments to 2
-      execSync(makeScript(counterFile), { stdio: 'pipe' });
-      const content2 = fs.readFileSync(counterFile, 'utf-8').trim();
-      expect(content2).toBe(`${today}\t2`);
+  it('returns 0 when counter file has a stale date', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const counterFile = path.join(tmpDir, '.runs-today');
+    try {
+      fs.writeFileSync(counterFile, `2020-01-01\t99\n`);
+      const result = execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${EVAL_HELPERS}"
+        read_daily_cap "${counterFile}" 0
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('0');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('eval-helpers: atomic_increment_daily', () => {
+  it('creates counter file with count 1 on first call', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const counterFile = path.join(tmpDir, '.runs-today');
+    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
+    try {
+      execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${SIDECAR_LOCK}"
+        source "${EVAL_HELPERS}"
+        atomic_increment_daily "${counterFile}" "$TODAY"
+      '`, { stdio: 'pipe' });
+      const content = fs.readFileSync(counterFile, 'utf-8').trim();
+      expect(content).toBe(`${today}\t1`);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('increments existing count on subsequent call', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const counterFile = path.join(tmpDir, '.runs-today');
+    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
+    try {
+      fs.writeFileSync(counterFile, `${today}\t3\n`);
+      execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${SIDECAR_LOCK}"
+        source "${EVAL_HELPERS}"
+        atomic_increment_daily "${counterFile}" "$TODAY"
+      '`, { stdio: 'pipe' });
+      const content = fs.readFileSync(counterFile, 'utf-8').trim();
+      expect(content).toBe(`${today}\t4`);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

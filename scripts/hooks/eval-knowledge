@@ -16,7 +16,7 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
   else
     # Throttle: skip if refreshed within last 2 hours
     _KNOW_MARKER_FILE="$FEATURES_DIR/.knowledge-last-refresh"
-    _KNOW_LAST_REFRESH=$(cat "$_KNOW_MARKER_FILE" 2>/dev/null | tr -dc '0-9' || true)
+    _KNOW_LAST_REFRESH=$(tr -dc '0-9' < "$_KNOW_MARKER_FILE" 2>/dev/null || true)
     _KNOW_LAST_REFRESH="${_KNOW_LAST_REFRESH:-0}"
     _KNOW_AGE=$(( NOW - _KNOW_LAST_REFRESH ))
 

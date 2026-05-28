@@ -68,7 +68,6 @@ devflow_debug_set_cwd() {
   mkdir -p "$project_log_dir" 2>/dev/null || true
   chmod 700 "$project_log_dir" 2>/dev/null || true
   _DEVFLOW_DBG_LOG="$project_log_dir/.hook-debug.log"
-  # Size guard: if log exceeds 5MB, keep the tail 2.5MB to prevent unbounded growth.
   _devflow_dbg_size_guard "$_DEVFLOW_DBG_LOG"
   dbg() {
     echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
