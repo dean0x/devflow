@@ -166,6 +166,8 @@ describe('debug-trace helper behaviors', () => {
       execSync(script, { stdio: 'pipe' });
       const size = fs.statSync(projectLog).size;
       // After truncation the log must be smaller than 5MB (kept 2.5MB tail + new line)
+      // Lower bound guards against a bug that truncates to 0 bytes
+      expect(size).toBeGreaterThan(2 * 1024 * 1024);
       expect(size).toBeLessThan(5 * 1024 * 1024);
       const content = fs.readFileSync(projectLog, 'utf-8');
       expect(content).toContain('after truncation');

@@ -126,6 +126,24 @@ describe('sentinel guard: sidecar-capture', () => {
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(true);
   });
 
+  it('ignores legacy response_text field (avoids PF-006)', () => {
+    // Regression guard: when input carries only the old field name (response_text)
+    // and NOT the new field (last_assistant_message), ASSISTANT_MSG is empty and
+    // the hook must exit without creating the queue file.
+    mkMemoryDir(tmpDir);
+    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, '## Now\n- testing');
+    const tenMinutesAgo = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
+    const input = sessionInput(tmpDir, {
+      stop_reason: 'end_turn',
+      response_text: 'this should be ignored',
+    });
+    execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    // Queue must NOT be created — old field name carries no capture value
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
+  });
+
   it('creates log file on successful capture', () => {
     mkMemoryDir(tmpDir);
     const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');

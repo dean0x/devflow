@@ -21,7 +21,7 @@ interface DebugOptions {
 export function applyDebugTrace(settingsJson: string): string {
   const settings = JSON.parse(settingsJson) as Record<string, unknown>;
   settings.env ??= {};
-  (settings.env as Record<string, string>).DEVFLOW_HOOK_DEBUG = '1';
+  (settings.env as Record<string, unknown>).DEVFLOW_HOOK_DEBUG = '1';
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
