@@ -23,8 +23,8 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
-if [ -z "$CWD" ]; then
-  dbg "EXIT: no CWD"
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
+  dbg "EXIT: bad CWD"
   exit 0
 fi
 
