@@ -7,6 +7,14 @@
 #   KNOWLEDGE_ENABLED, FEATURES_DIR, CWD, SIDECAR_DIR, NOW, MARKER_SUFFIX,
 #   SCRIPT_DIR, _HAS_JQ, log(), dbg()
 
+: "${FEATURES_DIR:?eval-knowledge: FEATURES_DIR must be set by orchestrator}"
+: "${CWD:?eval-knowledge: CWD must be set by orchestrator}"
+: "${SIDECAR_DIR:?eval-knowledge: SIDECAR_DIR must be set by orchestrator}"
+: "${NOW:?eval-knowledge: NOW must be set by orchestrator}"
+: "${MARKER_SUFFIX:?eval-knowledge: MARKER_SUFFIX must be set by orchestrator}"
+: "${SCRIPT_DIR:?eval-knowledge: SCRIPT_DIR must be set by orchestrator}"
+: "${_HAS_JQ:?eval-knowledge: _HAS_JQ must be set by orchestrator}"
+
 if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
   log "Evaluating knowledge..."
 

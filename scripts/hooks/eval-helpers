@@ -2,7 +2,8 @@
 # Shared utility functions for sidecar-evaluate feature modules.
 # Source this file from the sidecar-evaluate orchestrator before sourcing eval-* modules.
 #
-# Exports: read_daily_cap(), atomic_increment_daily(), load_existing_ids()
+# Exports: read_daily_cap(), atomic_increment_daily(), load_existing_ids(),
+#          _eval_release_lock()
 #
 # Requires: $TODAY, sidecar_lock_acquire/sidecar_lock_release (from sidecar-lock),
 #           $_HAS_JQ, json_field_file (from json-parse).
@@ -55,4 +56,13 @@ load_existing_ids() {
       process.stdout.write(JSON.stringify(ids));
     " -- "$log_file" 2>/dev/null || echo "[]"
   fi
+}
+
+# _eval_release_lock LOCK_DIR — shared EXIT trap target for eval-* modules.
+# Each module sets: trap '_eval_release_lock "$SIDECAR_DIR/.<name>.lock"' EXIT
+# and clears with: trap - EXIT   in its normal path.
+# Using a shared function prevents the second sourced module from silently
+# overwriting the first module's lock-specific trap string.
+_eval_release_lock() {
+  sidecar_lock_release "${1:-}"
 }

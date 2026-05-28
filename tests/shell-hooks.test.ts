@@ -322,6 +322,44 @@ describe('eval-helpers: load_existing_ids', () => {
   });
 });
 
+describe('eval-helpers: _eval_release_lock', () => {
+  it('releases a held lock dir by removing it', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const lockDir = path.join(tmpDir, 'test.lock');
+    try {
+      // Create the lock directory (simulating an acquired lock)
+      fs.mkdirSync(lockDir);
+      expect(fs.existsSync(lockDir)).toBe(true);
+
+      execSync(`bash -c '
+        source "${SIDECAR_LOCK}"
+        source "${EVAL_HELPERS}"
+        _eval_release_lock "${lockDir}"
+      '`, { stdio: 'pipe' });
+
+      expect(fs.existsSync(lockDir)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('is a no-op when lock dir does not exist', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const lockDir = path.join(tmpDir, 'nonexistent.lock');
+    try {
+      expect(() => {
+        execSync(`bash -c '
+          source "${SIDECAR_LOCK}"
+          source "${EVAL_HELPERS}"
+          _eval_release_lock "${lockDir}"
+        '`, { stdio: 'pipe' });
+      }).not.toThrow();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('json-helper.js operations', () => {
   it('get-field extracts a field with default', () => {
     const result = execSync(

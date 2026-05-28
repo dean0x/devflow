@@ -9,6 +9,13 @@
 #   _HAS_JQ, json_field_file(), log(), dbg(),
 #   read_daily_cap(), atomic_increment_daily(), load_existing_ids()
 
+: "${SIDECAR_DIR:?eval-decisions: SIDECAR_DIR must be set by orchestrator}"
+: "${DECISIONS_DIR_DATA:?eval-decisions: DECISIONS_DIR_DATA must be set by orchestrator}"
+: "${NOW:?eval-decisions: NOW must be set by orchestrator}"
+: "${TODAY:?eval-decisions: TODAY must be set by orchestrator}"
+: "${MARKER_SUFFIX:?eval-decisions: MARKER_SUFFIX must be set by orchestrator}"
+: "${_HAS_JQ:?eval-decisions: _HAS_JQ must be set by orchestrator}"
+
 if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   log "Evaluating decisions..."
 

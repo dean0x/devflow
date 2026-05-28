@@ -8,7 +8,14 @@
 #   FILTER_LIB, TRANSCRIPT, NOW, TODAY, MARKER_SUFFIX,
 #   _HAS_JQ, json_field_file(), log(), dbg(),
 #   read_daily_cap(), atomic_increment_daily(), load_existing_ids(),
-#   sidecar_lock_acquire(), sidecar_lock_release()
+#   sidecar_lock_acquire(), sidecar_lock_release(), _eval_release_lock()
+
+: "${SIDECAR_DIR:?eval-learning: SIDECAR_DIR must be set by orchestrator}"
+: "${LEARNING_DIR:?eval-learning: LEARNING_DIR must be set by orchestrator}"
+: "${NOW:?eval-learning: NOW must be set by orchestrator}"
+: "${TODAY:?eval-learning: TODAY must be set by orchestrator}"
+: "${MARKER_SUFFIX:?eval-learning: MARKER_SUFFIX must be set by orchestrator}"
+: "${_HAS_JQ:?eval-learning: _HAS_JQ must be set by orchestrator}"
 
 if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   log "Evaluating learning..."
@@ -67,7 +74,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
 
     if [ "$_LEARN_CURRENT_COUNT" -ge "$_LEARN_BATCH_SIZE" ] && [ -f "$_LEARN_SESSION_COUNT_FILE" ]; then
       if sidecar_lock_acquire "$SIDECAR_DIR/.learning-batch.lock" 3; then
-        trap 'sidecar_lock_release "$SIDECAR_DIR/.learning-batch.lock"' EXIT
+        trap '_eval_release_lock "$SIDECAR_DIR/.learning-batch.lock"' EXIT
         # Re-read count under lock
         if [ -f "$_LEARN_SESSION_COUNT_FILE" ]; then
           _LEARN_CURRENT_COUNT=$(wc -l < "$_LEARN_SESSION_COUNT_FILE" | tr -d ' ')
