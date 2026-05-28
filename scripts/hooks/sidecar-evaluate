@@ -12,21 +12,23 @@ dbg() { :; }
 set -e
 
 # Feedback-loop guards — before hook-bootstrap to minimize background session overhead
-if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
-if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
-if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
+# Order: UPDATER, LEARNER, KNOWLEDGE — consistent with sidecar-capture and sidecar-dispatch.
+# dbg() is the pre-bootstrap no-op here; annotations are safe but silent without debug active.
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then dbg "EXIT: bg_learner"; exit 0; fi
+if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then dbg "EXIT: bg_knowledge"; exit 0; fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 source "$SCRIPT_DIR/hook-bootstrap" "sidecar-evaluate"
 
 source "$SCRIPT_DIR/json-parse" || { echo "sidecar-evaluate: failed to source json-parse" >&2; exit 1; }
-if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
+if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
-if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then dbg "EXIT: bad CWD"; exit 0; fi
 
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
