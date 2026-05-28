@@ -2607,11 +2607,9 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
     // Deliberately do NOT create WORKING-MEMORY.md
     // We call sidecar-capture (not sidecar-evaluate) for this one since it does the get_mtime check
     const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
-    // Use execSync to avoid wrapping in runHook abstraction
-    const { execSync: execSyncLocal } = require('child_process');
     const exitCode = (() => {
       try {
-        execSyncLocal(`bash "${CAPTURE_HOOK}"`, {
+        execSync(`bash "${CAPTURE_HOOK}"`, {
           input: JSON.stringify({ cwd: tmpDir, session_id: 'test', last_assistant_message: 'response text here' }),
           stdio: ['pipe', 'pipe', 'pipe'],
           env: { ...process.env, HOME: homeDir },

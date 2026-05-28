@@ -33,7 +33,7 @@ _LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null) \
   || _LOG_SIZE=$(stat -c%s "$LOG_FILE" 2>/dev/null) \
   || _LOG_SIZE=$(wc -c < "$LOG_FILE" 2>/dev/null) \
   || _LOG_SIZE=0
-if [ -f "$LOG_FILE" ] && [ "${_LOG_SIZE:-0}" -gt 2097152 ]; then
+if [ -f "$LOG_FILE" ] && [ "$_LOG_SIZE" -gt 2097152 ]; then
   _LTMP="$LOG_FILE.tmp.$$"
   tail -c 1048576 "$LOG_FILE" > "$_LTMP" 2>/dev/null && mv "$_LTMP" "$LOG_FILE" 2>/dev/null || rm -f "$_LTMP" 2>/dev/null || true
 fi

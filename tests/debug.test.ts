@@ -132,19 +132,6 @@ describe('applyDebugTrace → stripDebugTrace roundtrip', () => {
   });
 });
 
-// ─── log path slug convention ────────────────────────────────────────────────
-
-describe('debug --status log path slug', () => {
-  it('follows slug convention (cwd → slug)', () => {
-    // The debug --status command builds: ~/.devflow/logs/{slug}/.hook-debug.log
-    // where slug = cwd.replace(/^\//, '').replace(/\//g, '-')
-    const cwd = '/Users/dean/Sandbox/devflow';
-    const expected = 'Users-dean-Sandbox-devflow';
-    const actual = cwd.replace(/^\//, '').replace(/\//g, '-');
-    expect(actual).toBe(expected);
-  });
-});
-
 // ─── I/O integration: missing file, malformed JSON ───────────────────────────
 
 describe('I/O integration — missing settings.json', () => {
