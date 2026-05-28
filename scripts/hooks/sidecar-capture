@@ -11,9 +11,9 @@ dbg() { :; }
 set -e
 
 # Feedback-loop guards — before hook-bootstrap to minimize background session overhead
-if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then exit 0; fi
-if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then exit 0; fi
-if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then exit 0; fi
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then dbg "EXIT: bg_learner"; exit 0; fi
+if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then dbg "EXIT: bg_knowledge"; exit 0; fi
 
 # Resolve script directory once
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

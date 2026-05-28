@@ -135,7 +135,7 @@ _build_learned_section() {
     fi
   fi
 
-  if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Learned artifacts: commands=$(echo "$learned_commands" | grep -c , 2>/dev/null || echo 0) skills=$(echo "$learned_skills" | grep -c , 2>/dev/null || echo 0)"; fi
+  if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Learned artifacts: commands='$learned_commands' skills='$learned_skills'"; fi
   [ -z "$learned_commands" ] && [ -z "$learned_skills" ] && return 0
 
   local section="--- LEARNED BEHAVIORS ---"

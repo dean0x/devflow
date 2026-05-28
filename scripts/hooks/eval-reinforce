@@ -88,7 +88,6 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT
       if sidecar_lock_acquire "$SIDECAR_DIR/.reinforce.lock" 3; then
         trap '_eval_release_lock "$SIDECAR_DIR/.reinforce.lock"' EXIT
         _REINF_TEMP_LOG="${_REINF_LEARNING_LOG}.tmp.$$"
-        rm -f "$_REINF_TEMP_LOG" 2>/dev/null || true
         if [ "$_HAS_JQ" = "true" ]; then
           if _reinforce_via_jq "$_REINF_LEARNING_LOG" "$_REINF_NOW_ISO" "$_REINF_SLUGS_PATTERN" "$_REINF_TEMP_LOG"; then
             log "Reinforced artifacts for slugs: $_REINF_SLUGS_PATTERN"
