@@ -16,6 +16,7 @@ import { flagsCommand } from './commands/flags.js';
 import { knowledgeCommand } from './commands/knowledge/index.js';
 import { decisionsCommand } from './commands/decisions.js';
 import { rulesCommand } from './commands/rules.js';
+import { debugCommand } from './commands/debug.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,6 +48,7 @@ program.addCommand(flagsCommand);
 program.addCommand(knowledgeCommand);
 program.addCommand(decisionsCommand);
 program.addCommand(rulesCommand);
+program.addCommand(debugCommand);
 
 // Handle no command
 program.action(() => {

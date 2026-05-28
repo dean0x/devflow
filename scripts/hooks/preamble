@@ -4,10 +4,16 @@
 # Detects structured implementation plans and injects a directive to execute them.
 # Zero overhead for normal prompts — only fires when all three plan markers are present.
 
+# Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
+dbg() { :; }
+
 set -e
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/hook-bootstrap" "preamble"
+
 source "$SCRIPT_DIR/json-parse" || { echo "preamble: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
@@ -17,11 +23,22 @@ FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
 CWD="${FIELDS%%$'\001'*}"
 PROMPT="${FIELDS#*$'\001'}"
 
+dbg "PROMPT_LENGTH=${#PROMPT}"
+
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
+  dbg "EXIT: bad CWD"
   exit 0
 fi
 
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
+
 # Detect structured plan handoff: all three section markers must be present
 if [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PROMPT" == *"## Files"* ]]; then
+  dbg "EXECUTION_PLAN detected — injecting directive"
   json_prompt_output "EXECUTION_PLAN detected. Invoke \`devflow:implement\` via the Skill tool to execute this plan."
+else
+  dbg "No plan markers detected — no output"
 fi
+
+dbg "=== HOOK COMPLETE ==="

@@ -17,7 +17,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-05-24
+updated: 2026-05-27
 ---
 
 # Rules System CLI
@@ -26,7 +26,9 @@ updated: 2026-05-24
 
 Rules are ultra-condensed, always-on engineering principle files (~10 lines each) installed as flat `.md` files to `~/.claude/rules/devflow/`. Claude Code loads them automatically on every prompt, filling the guidance gap for quick edits that don't trigger a full skill pipeline. The system mirrors the skill build pipeline exactly: rules live in `shared/rules/`, are declared in `plugin.json` manifests and `DEVFLOW_PLUGINS`, distributed to plugins at build time, and installed (or shadowed) at runtime.
 
-Unlike skills, which install universally from all plugins, rules are **plugin-scoped**: only rules belonging to the currently installed plugins are installed. This keeps core rules (security, engineering, quality, reliability) always present and optional-plugin rules (typescript, react, accessibility, ui-design, go, java, python, rust) only present when the user has that plugin installed. There are currently 12 rules total: 4 core + 8 language/ecosystem.
+Unlike skills, which install universally from all plugins, rules are **plugin-scoped**: only rules belonging to the currently installed plugins are installed. This keeps core rules (security, engineering, quality, reliability) always present and optional-plugin rules (typescript, react, accessibility, ui-design, go, java, python, rust) only present when the user has that plugin installed. There are currently 13 rules total: 4 core + 8 language/ecosystem + 1 ambient-managed (`commands`).
+
+The `commands` rule is special: its source file lives in `shared/rules/commands.md` (added in v2.x ambient simplification), but it is managed by `ambient.ts` directly — NOT by the plugin rules system. `devflow ambient --enable` writes it to `~/.claude/rules/devflow/commands.md` and `devflow ambient --disable` removes it. It is not declared in any plugin's `rules` array, not returned by `getAllRuleNames()`, not affected by `devflow rules --enable/--disable`, and not cleaned up by `LEGACY_RULE_NAMES`. The `shared/rules/commands.md` file exists purely as a canonical copy for `ambient.ts` to reference its stable content hash.
 
 ## System Context
 
@@ -73,7 +75,7 @@ Rules must be ultra-concise — ~10-15 lines total. Longer explanations belong i
 
 ### Plugin Declaration
 
-Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `rules` field (`string[]`). Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust. Non-language optional plugins (devflow-audit-claude) and all workflow plugins (devflow-implement, devflow-plan, devflow-code-review, devflow-resolve, devflow-debug, devflow-explore, devflow-research, devflow-release, devflow-self-review, devflow-bug-analysis, devflow-ambient) have `rules: []`. Only `devflow-core-skills` and the 8 language/UI plugins carry rules:
+Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `rules` field (`string[]`). Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust. Non-language optional plugins (devflow-audit-claude) and all workflow plugins (devflow-implement, devflow-plan, devflow-code-review, devflow-resolve, devflow-debug, devflow-explore, devflow-research, devflow-release, devflow-self-review, devflow-bug-analysis, devflow-ambient) have `rules: []`. Only `devflow-core-skills` and the 8 language/UI plugins carry rules through the plugin system (the `commands` rule is managed by `ambient.ts` separately):
 
 ```typescript
 // In DEVFLOW_PLUGINS:
@@ -201,15 +203,17 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 - **Shadow files are flat, not directories**: Skills shadow at `~/.devflow/skills/{name}/` (a directory). Rules shadow at `~/.devflow/rules/{name}.md` (a flat file). The `isShadowed` check uses `fs.access()` on the flat path, not `fs.stat()` for a directory.
 - **Manifest defaults `rules: true` on read**: Old manifests without the `rules` field are read as `rules: true`. This means upgrading users get rules enabled automatically, which is the desired behavior but worth knowing when reading the manifest.
 - **`buildRulesMap` throws on invalid names**: If a `plugin.json` declares a rule name with uppercase letters, dots, or slashes, `buildRulesMap` throws immediately. This is intentional — catch misconfiguration early rather than silently writing a path-traversal-susceptible file.
+- **`commands.md` is ambient-managed, not plugin-managed**: `shared/rules/commands.md` exists in the source tree but is NOT declared in any plugin's `rules` array. It is installed/removed exclusively by `ambient.ts` (`devflow ambient --enable/--disable`). Calling `devflow rules --enable` will NOT install `commands.md`. Calling `devflow rules --disable` will NOT remove it. `devflow rules --list` will NOT show it. This is intentional — commands awareness is an ambient mode feature, not a rules-system feature. The `shared/rules/commands.md` file exists so `ambient.ts` can embed its content as a constant (`COMMANDS_RULE_CONTENT`) with a stable source of truth.
 - **Rules have no runtime sentinel**: Unlike knowledge (`.devflow/features/.disabled`), decisions (`.devflow/decisions/.disabled`), memory (`.devflow/memory/.working-memory-disabled`), and learn (`.devflow/memory/.learning-disabled`), rules have no `.disabled` file sentinel. Both `manageSentinel` and `writeSidecarConfig` calls in `init.ts` conspicuously omit rules — this is intentional. The sidecar system (which writes `.devflow/sidecar/config.json` entries for memory, learning, decisions, and knowledge to coordinate background agents) has no entry for rules because rules have no background agent: they are static files loaded by Claude Code directly. Disabling rules is a destructive operation: `devflow rules --disable` removes `~/.claude/rules/devflow/` entirely, and `devflow init --no-rules` does the same. There is no way to temporarily suppress rules without removing the files themselves.
 - **Core vs language rules have different token behavior**: Core rules (security, engineering, quality, reliability) load on every prompt regardless of file type. Language rules only activate when Claude is working with a matching file. A user without the TypeScript plugin pays zero cost for TypeScript rules — but a user with it only pays the cost when editing `.ts`/`.tsx` files.
 - **manifest.ts contains a `kb → knowledge` migration self-heal**: `readManifest` detects `features.kb` and migrates it to `features.knowledge` in-place (ADR-001 clean-break applies to install-time assets like rules, skills, commands — not to disk data that users cannot easily migrate themselves). This is the only backward-compat code in `manifest.ts`; do not add more. For rules, `LEGACY_RULE_NAMES` in `plugins.ts` is the correct pattern when renaming rule files — no manifest migration needed.
 
 ## Key Files
 
-- `shared/rules/` — source of truth for all rule content; flat `.md` files
+- `shared/rules/` — source of truth for all rule content; flat `.md` files (13 total, including `commands.md`)
 - `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
+- `src/cli/commands/ambient.ts` — manages `commands.md` rule via `COMMANDS_RULE_PATH` / `COMMANDS_RULE_CONTENT` / `installCommandsRule()` / `removeCommandsRule()`; this is the ONLY manager for that rule
 - `src/cli/utils/installer.ts` — `installRuleFile` (exported); `installViaFileCopy` rules section
 - `src/cli/commands/init.ts` — `rulesEnabled` flag (default `true`); Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; post-install removal of rules dir when disabled
 - `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files

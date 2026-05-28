@@ -1,0 +1,75 @@
+#!/bin/bash
+# Devflow Hook Debug Tracing
+# Source this file to get debug tracing helpers.
+#
+# Usage:
+#   dbg() { :; }                         # Safe no-op fallback before sourcing
+#   source "$SCRIPT_DIR/debug-trace" || true
+#   devflow_debug_init "hook-name"
+#   dbg "=== HOOK START ==="
+#   ...
+#   devflow_debug_set_cwd "$CWD"         # switches to per-project log
+#   dbg "CWD=$CWD"
+#
+# Toggle: DEVFLOW_HOOK_DEBUG=1 in ~/.claude/settings.json > env
+# Logs:   Phase 1 (pre-CWD)  → ~/.devflow/logs/.hook-debug.log
+#         Phase 2 (post-CWD) → ~/.devflow/logs/{project-slug}/.hook-debug.log
+
+_DEVFLOW_DBG_HOOK=""
+_DEVFLOW_DBG_LOG=""
+
+# _devflow_dbg_size_guard <log_file>
+# If the log file exceeds 5MB, truncate it to the tail 2.5MB to prevent
+# unbounded growth.  Uses `stat` to read the file size without forking `wc`.
+_devflow_dbg_size_guard() {
+  local log_file="$1"
+  [ -f "$log_file" ] || return
+  local size
+  # stat -f%z (macOS/BSD) with stat -c%s (GNU/Linux) fallback; last resort: wc -c
+  size=$(stat -f%z "$log_file" 2>/dev/null) \
+    || size=$(stat -c%s "$log_file" 2>/dev/null) \
+    || size=$(wc -c < "$log_file" 2>/dev/null) \
+    || size=0
+  if [ "${size:-0}" -gt 5242880 ]; then
+    local _TAIL_TMP="$log_file.tmp.$$"
+    if tail -c 2621440 "$log_file" > "$_TAIL_TMP" 2>/dev/null; then
+      mv "$_TAIL_TMP" "$log_file" 2>/dev/null || rm -f "$_TAIL_TMP" 2>/dev/null || true
+    else
+      rm -f "$_TAIL_TMP" 2>/dev/null || true
+    fi
+  fi
+}
+
+devflow_debug_init() {
+  _DEVFLOW_DBG_HOOK="${1:-hook}"
+  if [ "${DEVFLOW_HOOK_DEBUG:-}" != "1" ]; then
+    dbg() { :; }
+    return
+  fi
+  # Phase 1: global fallback log (before CWD is known)
+  local global_log_dir="$HOME/.devflow/logs"
+  mkdir -p "$global_log_dir" 2>/dev/null || true
+  chmod 700 "$global_log_dir" 2>/dev/null || true
+  _DEVFLOW_DBG_LOG="$global_log_dir/.hook-debug.log"
+  # Size guard: if log exceeds 5MB, keep the tail 2.5MB to prevent unbounded growth.
+  _devflow_dbg_size_guard "$_DEVFLOW_DBG_LOG"
+  dbg() {
+    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
+  }
+}
+
+devflow_debug_set_cwd() {
+  local cwd="$1"
+  if [ -z "$cwd" ] || [ "${DEVFLOW_HOOK_DEBUG:-}" != "1" ]; then return; fi
+  # Phase 2: switch to per-project log (only when debug is active)
+  local slug
+  slug=$(echo "$cwd" | sed 's|^/||' | tr '/' '-')
+  local project_log_dir="$HOME/.devflow/logs/$slug"
+  mkdir -p "$project_log_dir" 2>/dev/null || true
+  chmod 700 "$project_log_dir" 2>/dev/null || true
+  _DEVFLOW_DBG_LOG="$project_log_dir/.hook-debug.log"
+  _devflow_dbg_size_guard "$_DEVFLOW_DBG_LOG"
+  dbg() {
+    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $_DEVFLOW_DBG_HOOK: $1" >> "$_DEVFLOW_DBG_LOG" 2>/dev/null || true
+  }
+}

@@ -14,6 +14,9 @@ function localDateString(): string {
 const JSON_HELPER = path.join(HOOKS_DIR, 'json-helper.cjs');
 
 const HOOK_SCRIPTS = [
+  'debug-trace',
+  'hook-bootstrap',
+  'hook-log-init',
   'session-start-memory',
   'session-start-context',
   'pre-compact-memory',
@@ -24,6 +27,11 @@ const HOOK_SCRIPTS = [
   'sidecar-capture',
   'sidecar-evaluate',
   'sidecar-dispatch',
+  'eval-helpers',
+  'eval-reinforce',
+  'eval-learning',
+  'eval-decisions',
+  'eval-knowledge',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -41,79 +49,313 @@ describe('shell hook syntax checks', () => {
   }
 });
 
-describe('learning hook pure functions', () => {
-  it('check_daily_cap respects counter file', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const counterFile = path.join(tmpDir, '.learning-runs-today');
-    // Get today's date from bash to avoid timezone mismatches
-    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
+// =============================================================================
+// debug-trace behavioral tests
+// =============================================================================
 
-    const makeScript = (cf: string) => `bash -c '
-      check_daily_cap() {
-        local COUNTER_FILE="${cf}"
-        local MAX_DAILY_RUNS=10
-        local TODAY=$(date +%Y-%m-%d)
-        if [ -f "$COUNTER_FILE" ]; then
-          local COUNTER_DATE=$(cut -f1 "$COUNTER_FILE")
-          local COUNTER_COUNT=$(cut -f2 "$COUNTER_FILE")
-          if [ "$COUNTER_DATE" = "$TODAY" ] && [ "$COUNTER_COUNT" -ge "$MAX_DAILY_RUNS" ]; then
-            return 1
-          fi
-        fi
-        return 0
-      }
-      check_daily_cap && echo "ok" || echo "capped"
-    '`;
+describe('debug-trace helper behaviors', () => {
+  const DEBUG_TRACE = path.join(HOOKS_DIR, 'debug-trace');
 
+  it('dbg is a no-op when DEVFLOW_HOOK_DEBUG is unset', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-test-'));
     try {
-      // Under cap — should succeed
-      fs.writeFileSync(counterFile, `${today}\t5\n`);
-      const underCap = execSync(makeScript(counterFile), { stdio: 'pipe' }).toString().trim();
-      expect(underCap).toBe('ok');
-
-      // At cap — should return capped
-      fs.writeFileSync(counterFile, `${today}\t10\n`);
-      const atCap = execSync(makeScript(counterFile), { stdio: 'pipe' }).toString().trim();
-      expect(atCap).toBe('capped');
-
-      // Old date — should not be capped
-      fs.writeFileSync(counterFile, `2020-01-01\t99\n`);
-      const oldDate = execSync(makeScript(counterFile), { stdio: 'pipe' }).toString().trim();
-      expect(oldDate).toBe('ok');
+      const logFile = path.join(tmpDir, '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpDir}"
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        dbg "should not appear"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      // No log file should be created when debug is disabled
+      expect(fs.existsSync(logFile)).toBe(false);
+      // Also no ~/.devflow/logs directory created for the log
+      expect(fs.existsSync(path.join(tmpDir, '.devflow', 'logs'))).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('increment_daily_counter creates and increments counter', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const counterFile = path.join(tmpDir, '.learning-runs-today');
-    // Get today's date from bash to avoid timezone mismatches
-    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
-
-    const makeScript = (cf: string) => `bash -c '
-      COUNTER_FILE="${cf}"
-      increment_daily_counter() {
-        local TODAY=$(date +%Y-%m-%d)
-        local COUNT=1
-        if [ -f "$COUNTER_FILE" ] && [ "$(cut -f1 "$COUNTER_FILE")" = "$TODAY" ]; then
-          COUNT=$(( $(cut -f2 "$COUNTER_FILE") + 1 ))
-        fi
-        printf "%s\\t%d\\n" "$TODAY" "$COUNT" > "$COUNTER_FILE"
-      }
-      increment_daily_counter
-    '`;
-
+  it('dbg writes to global log when DEVFLOW_HOOK_DEBUG=1', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-test-'));
     try {
-      // First call — creates file with count 1
-      execSync(makeScript(counterFile), { stdio: 'pipe' });
-      const content1 = fs.readFileSync(counterFile, 'utf-8').trim();
-      expect(content1).toBe(`${today}\t1`);
+      const globalLog = path.join(tmpDir, '.devflow', 'logs', '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpDir}"
+        DEVFLOW_HOOK_DEBUG=1
+        export HOME DEVFLOW_HOOK_DEBUG
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        dbg "hello from test"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      expect(fs.existsSync(globalLog)).toBe(true);
+      const content = fs.readFileSync(globalLog, 'utf-8');
+      expect(content).toContain('test-hook: hello from test');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 
-      // Second call — increments to 2
-      execSync(makeScript(counterFile), { stdio: 'pipe' });
-      const content2 = fs.readFileSync(counterFile, 'utf-8').trim();
-      expect(content2).toBe(`${today}\t2`);
+  it('devflow_debug_set_cwd switches to per-project log', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-home-'));
+    const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-cwd-'));
+    try {
+      const slug = tmpCwd.replace(/^\//, '').replace(/\//g, '-');
+      const projectLog = path.join(tmpHome, '.devflow', 'logs', slug, '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpHome}"
+        DEVFLOW_HOOK_DEBUG=1
+        export HOME DEVFLOW_HOOK_DEBUG
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        devflow_debug_set_cwd "${tmpCwd}"
+        dbg "per-project message"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      expect(fs.existsSync(projectLog)).toBe(true);
+      const content = fs.readFileSync(projectLog, 'utf-8');
+      expect(content).toContain('test-hook: per-project message');
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+
+  it('devflow_debug_set_cwd is a no-op when DEVFLOW_HOOK_DEBUG is unset', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-home-'));
+    const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-cwd-'));
+    try {
+      const slug = tmpCwd.replace(/^\//, '').replace(/\//g, '-');
+      const projectLog = path.join(tmpHome, '.devflow', 'logs', slug, '.hook-debug.log');
+      const script = `bash -c '
+        HOME="${tmpHome}"
+        export HOME
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        devflow_debug_set_cwd "${tmpCwd}"
+        dbg "should not appear"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      expect(fs.existsSync(projectLog)).toBe(false);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+
+  it('devflow_debug_set_cwd truncates per-project log when it exceeds 5MB', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-home-'));
+    const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-debug-cwd-'));
+    try {
+      const slug = tmpCwd.replace(/^\//, '').replace(/\//g, '-');
+      const logDir = path.join(tmpHome, '.devflow', 'logs', slug);
+      fs.mkdirSync(logDir, { recursive: true });
+      const projectLog = path.join(logDir, '.hook-debug.log');
+      // Write 6MB of data to exceed the 5MB threshold
+      fs.writeFileSync(projectLog, 'x'.repeat(6 * 1024 * 1024));
+      const script = `bash -c '
+        HOME="${tmpHome}"
+        DEVFLOW_HOOK_DEBUG=1
+        export HOME DEVFLOW_HOOK_DEBUG
+        source "${DEBUG_TRACE}" || true
+        devflow_debug_init "test-hook"
+        devflow_debug_set_cwd "${tmpCwd}"
+        dbg "after truncation"
+      '`;
+      execSync(script, { stdio: 'pipe' });
+      const size = fs.statSync(projectLog).size;
+      // After truncation the log must be smaller than 5MB (kept 2.5MB tail + new line)
+      // Lower bound guards against a bug that truncates to 0 bytes
+      expect(size).toBeGreaterThan(2 * 1024 * 1024);
+      expect(size).toBeLessThan(5 * 1024 * 1024);
+      const content = fs.readFileSync(projectLog, 'utf-8');
+      expect(content).toContain('after truncation');
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+});
+
+const EVAL_HELPERS = path.join(HOOKS_DIR, 'eval-helpers');
+const SIDECAR_LOCK = path.join(HOOKS_DIR, 'sidecar-lock');
+
+describe('eval-helpers: read_daily_cap', () => {
+  it('returns 0 when counter file absent', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    try {
+      const counterFile = path.join(tmpDir, '.runs-today');
+      const result = execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${EVAL_HELPERS}"
+        read_daily_cap "${counterFile}" 0
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('0');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns count when date matches today', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const counterFile = path.join(tmpDir, '.runs-today');
+    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
+    try {
+      fs.writeFileSync(counterFile, `${today}\t5\n`);
+      const result = execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${EVAL_HELPERS}"
+        read_daily_cap "${counterFile}" 0
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('5');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 0 when counter file has a stale date', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const counterFile = path.join(tmpDir, '.runs-today');
+    try {
+      fs.writeFileSync(counterFile, `2020-01-01\t99\n`);
+      const result = execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${EVAL_HELPERS}"
+        read_daily_cap "${counterFile}" 0
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(result).toBe('0');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('eval-helpers: atomic_increment_daily', () => {
+  it('creates counter file with count 1 on first call', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const counterFile = path.join(tmpDir, '.runs-today');
+    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
+    try {
+      execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${SIDECAR_LOCK}"
+        source "${EVAL_HELPERS}"
+        atomic_increment_daily "${counterFile}" "$TODAY"
+      '`, { stdio: 'pipe' });
+      const content = fs.readFileSync(counterFile, 'utf-8').trim();
+      expect(content).toBe(`${today}\t1`);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('increments existing count on subsequent call', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const counterFile = path.join(tmpDir, '.runs-today');
+    const today = execSync('date +%Y-%m-%d', { stdio: 'pipe' }).toString().trim();
+    try {
+      fs.writeFileSync(counterFile, `${today}\t3\n`);
+      execSync(`bash -c '
+        TODAY=$(date +%Y-%m-%d)
+        source "${SIDECAR_LOCK}"
+        source "${EVAL_HELPERS}"
+        atomic_increment_daily "${counterFile}" "$TODAY"
+      '`, { stdio: 'pipe' });
+      const content = fs.readFileSync(counterFile, 'utf-8').trim();
+      expect(content).toBe(`${today}\t4`);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('eval-helpers: load_existing_ids', () => {
+  it('returns empty array when log file is absent', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    try {
+      const missingFile = path.join(tmpDir, 'nonexistent.jsonl');
+      const result = execSync(`bash -c '
+        source "${EVAL_HELPERS}"
+        load_existing_ids "${missingFile}"
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(JSON.parse(result)).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns empty array when log file is empty', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const logFile = path.join(tmpDir, 'empty.jsonl');
+    try {
+      fs.writeFileSync(logFile, '');
+      const result = execSync(`bash -c '
+        source "${EVAL_HELPERS}"
+        load_existing_ids "${logFile}"
+      '`, { stdio: 'pipe' }).toString().trim();
+      expect(JSON.parse(result)).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns ids from valid JSONL as JSON array', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const logFile = path.join(tmpDir, 'learning.jsonl');
+    try {
+      fs.writeFileSync(logFile, [
+        JSON.stringify({ id: 'obs_aaa', type: 'workflow', confidence: 0.9 }),
+        JSON.stringify({ id: 'obs_bbb', type: 'procedural', confidence: 0.7 }),
+        JSON.stringify({ id: 'obs_ccc', type: 'decision', confidence: 0.8 }),
+      ].join('\n') + '\n');
+      const result = execSync(`bash -c '
+        source "${EVAL_HELPERS}"
+        load_existing_ids "${logFile}"
+      '`, { stdio: 'pipe' }).toString().trim();
+      const ids = JSON.parse(result);
+      expect(ids).toContain('obs_aaa');
+      expect(ids).toContain('obs_bbb');
+      expect(ids).toContain('obs_ccc');
+      expect(ids).toHaveLength(3);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('eval-helpers: _eval_release_lock', () => {
+  it('releases a held lock dir by removing it', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const lockDir = path.join(tmpDir, 'test.lock');
+    try {
+      // Create the lock directory (simulating an acquired lock)
+      fs.mkdirSync(lockDir);
+      expect(fs.existsSync(lockDir)).toBe(true);
+
+      execSync(`bash -c '
+        source "${SIDECAR_LOCK}"
+        source "${EVAL_HELPERS}"
+        _eval_release_lock "${lockDir}"
+      '`, { stdio: 'pipe' });
+
+      expect(fs.existsSync(lockDir)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('is a no-op when lock dir does not exist', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
+    const lockDir = path.join(tmpDir, 'nonexistent.lock');
+    try {
+      expect(() => {
+        execSync(`bash -c '
+          source "${SIDECAR_LOCK}"
+          source "${EVAL_HELPERS}"
+          _eval_release_lock "${lockDir}"
+        '`, { stdio: 'pipe' });
+      }).not.toThrow();
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1206,15 +1448,14 @@ describe('working memory queue behavior', () => {
     fs.utimesSync(memFile, tenMinutesAgo, tenMinutesAgo);
   }
 
-  it('stop_reason tool_use — no queue append', () => {
-    // Create .devflow/memory/ so the hook proceeds to the stop_reason check
+  it('empty last_assistant_message — no queue append', () => {
+    // Hook exits early when last_assistant_message is absent/empty
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-001',
-      stop_reason: 'tool_use',
-      response_text: 'test response',
+      last_assistant_message: '',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1223,7 +1464,7 @@ describe('working memory queue behavior', () => {
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
-  it('stop_reason end_turn — appends assistant turn to queue', () => {
+  it('last_assistant_message present — appends assistant turn to queue', () => {
     // Create .devflow/memory/ directory
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     // Write stale WORKING-MEMORY.md so throttle check passes (no memory.processing marker needed)
@@ -1232,8 +1473,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-002',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1366,8 +1606,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean',
-      stop_reason: 'end_turn',
-      response_text: 'first real assistant response',
+      last_assistant_message: 'first real assistant response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1390,8 +1629,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-empty',
-      stop_reason: 'end_turn',
-      response_text: 'response after empty queue',
+      last_assistant_message: 'response after empty queue',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1415,8 +1653,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-single',
-      stop_reason: 'end_turn',
-      response_text: 'response after user prompt',
+      last_assistant_message: 'response after user prompt',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1449,8 +1686,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-no-autoclean',
-      stop_reason: 'end_turn',
-      response_text: 'another response',
+      last_assistant_message: 'another response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1475,8 +1711,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-autoclean-assistant-only',
-      stop_reason: 'end_turn',
-      response_text: 'new assistant response',
+      last_assistant_message: 'new assistant response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1507,8 +1742,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-session-006',
-      stop_reason: 'end_turn',
-      response_text: 'overflow trigger response',
+      last_assistant_message: 'overflow trigger response',
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -1542,7 +1776,7 @@ describe('working memory queue behavior', () => {
 
     // Step 2: sidecar-capture writes assistant turn
     execSync(`bash "${STOP_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', stop_reason: 'end_turn', response_text: 'done' }),
+      input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', last_assistant_message: 'done' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -1587,8 +1821,7 @@ describe('working memory queue behavior', () => {
     const input = JSON.stringify({
       cwd: tmpDir,
       session_id: 'test-trunc-002',
-      stop_reason: 'end_turn',
-      response_text: longMessage,
+      last_assistant_message: longMessage,
     });
 
     execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -2376,12 +2609,10 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
     // Deliberately do NOT create WORKING-MEMORY.md
     // We call sidecar-capture (not sidecar-evaluate) for this one since it does the get_mtime check
     const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
-    // Use execSync to avoid wrapping in runHook abstraction
-    const { execSync: execSyncLocal } = require('child_process');
     const exitCode = (() => {
       try {
-        execSyncLocal(`bash "${CAPTURE_HOOK}"`, {
-          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', stop_reason: 'end_turn', response_text: 'response text here' }),
+        execSync(`bash "${CAPTURE_HOOK}"`, {
+          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', last_assistant_message: 'response text here' }),
           stdio: ['pipe', 'pipe', 'pipe'],
           env: { ...process.env, HOME: homeDir },
         });
@@ -2527,8 +2758,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
@@ -2554,8 +2784,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
@@ -2573,8 +2802,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
@@ -2591,8 +2819,7 @@ describe('sidecar-capture memory marker', () => {
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
       session_id: 'test',
-      stop_reason: 'end_turn',
-      response_text: 'test response',
+      last_assistant_message: 'test response',
     }, homeDir);
 
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');

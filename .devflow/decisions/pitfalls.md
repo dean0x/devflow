@@ -1,4 +1,4 @@
-<!-- TL;DR: 5 pitfalls. Key: PF-001, PF-002, PF-003, PF-004, PF-005 -->
+<!-- TL;DR: 7 pitfalls. Key: PF-001, PF-002, PF-003, PF-004, PF-005, PF-006, PF-007 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
@@ -47,3 +47,21 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: Before designing any new capability that conceptually overlaps with existing agents (Evaluator, Scrutinizer, Reviewer, Resolver), explicitly read the existing agent roster and their input/output contracts. Check `shared/agents/` and the agent roster section of CLAUDE.md before claiming a gap exists.
 - **Status**: Active
 - **Source**: self-learning:obs_3vt99r
+
+## PF-006: Claude Code hook API changed silently — Stop hook field rename broke working memory across all projects
+
+- **Area**: `sidecar-capture` Stop hook, Claude Code hook API compatibility, `scripts/hooks/sidecar-capture`
+- **Issue**: Claude Code renamed `response_text` → `last_assistant_message` and removed `stop_reason` from Stop hook JSON input (mid-May 2026). `sidecar-capture` silently exited on every turn because (a) the absent `stop_reason` caused the `!= end_turn` guard to always exit, and (b) absent `response_text` meant assistant turns were captured as empty strings. No errors were emitted.
+- **Impact**: Systemic — working memory frozen across all 3+ projects for weeks. Pending queues accumulated 1,640 user-only entries with zero assistant turns captured. Background memory agent never dispatched. Projects stuck at sessions from 6+ weeks earlier.
+- **Resolution**: Changed `sidecar-capture` to read `last_assistant_message` instead of `response_text`; removed the dead `stop_reason` guard. After any Claude Code version update, verify hook input schemas against current docs. Add startup validation of required hook fields so failures surface immediately rather than silently.
+- **Status**: Active
+- **Source**: self-learning:obs_k7mx2p
+
+## PF-007: Editing globally installed hook scripts directly instead of source + rebuild + reinstall
+
+- **Area**: `scripts/hooks/` (source), `~/.devflow/scripts/hooks/` (installed), devflow development workflow
+- **Issue**: When debugging hook failures, the assistant repeatedly edited globally installed hook files (`~/.devflow/scripts/hooks/`) instead of source files (`scripts/hooks/`). Changes to installed copies are silently overwritten on the next `devflow init`, and they are never committed to the repository.
+- **Impact**: Debug changes appeared to work but were not committed to source. Required an additional rebuild+reinstall cycle after the user caught the error. Creates divergence between what is installed and what is in source control.
+- **Resolution**: Always edit source files (`scripts/hooks/`), run `npm run build`, then run `devflow init` to reinstall. Never directly edit installed copies at `~/.devflow/scripts/` or `~/.claude/`. The same rule applies to any other installed artifact (commands, agents, skills).
+- **Status**: Active
+- **Source**: self-learning:obs_n4rs8t

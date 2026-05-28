@@ -7,33 +7,50 @@
 # PreCompact hooks cannot block compaction — this is informational only.
 # Paths: .devflow/memory/backup.json, .devflow/memory/WORKING-MEMORY.md
 
+# Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
+dbg() { :; }
+
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+source "$SCRIPT_DIR/hook-bootstrap" "pre-compact-memory"
+
 # JSON parsing (jq with node fallback) — silently no-op if neither available
-source "$(cd "$(dirname "$0")" && pwd)/json-parse" || { echo "pre-compact-memory: failed to source json-parse" >&2; exit 1; }
+source "$SCRIPT_DIR/json-parse" || { echo "pre-compact-memory: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then exit 0; fi
 
 INPUT=$(cat)
 
 CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
-if [ -z "$CWD" ]; then
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
+  dbg "EXIT: bad CWD"
   exit 0
 fi
+
+devflow_debug_set_cwd "$CWD"
+dbg "CWD=$CWD"
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+
+# Normal logging
+source "$SCRIPT_DIR/hook-log-init" "pre-compact-memory"
 
 # Check sidecar config — single source of truth for memory enabled/disabled (ADR-001 clean break).
 # The legacy .working-memory-disabled sentinel is not checked: sidecar config supersedes it.
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
-  [ "$MEMORY_ENABLED" = "false" ] && exit 0
+  if [ "$MEMORY_ENABLED" = "false" ]; then
+    dbg "EXIT: memory disabled in sidecar config"
+    exit 0
+  fi
 fi
 
 # Auto-create .devflow/ and ensure .gitignore entries (idempotent after first run)
-source "$(cd "$(dirname "$0")" && pwd)/ensure-devflow-init" "$CWD" || exit 0
+source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
 BACKUP_FILE="$MEMORY_DIR/backup.json"
 
@@ -49,12 +66,14 @@ if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
   GIT_STATUS=$(git status --porcelain 2>/dev/null | head -30 || echo "")
   GIT_LOG=$(git log --oneline -10 2>/dev/null || echo "")
   GIT_DIFF_STAT=$(git diff --stat HEAD 2>/dev/null || echo "")
+  dbg "GIT_BRANCH=$GIT_BRANCH"
 fi
 
 # Snapshot current WORKING-MEMORY.md (preserves session context through compaction)
 MEMORY_SNAPSHOT=""
 if [ -f "$MEMORY_DIR/WORKING-MEMORY.md" ]; then
-  MEMORY_SNAPSHOT=$(cat "$MEMORY_DIR/WORKING-MEMORY.md")
+  MEMORY_SNAPSHOT=$(head -c 65536 "$MEMORY_DIR/WORKING-MEMORY.md")
+  dbg "MEMORY_SNAPSHOT_LENGTH=${#MEMORY_SNAPSHOT}"
 fi
 
 # Write backup JSON
@@ -66,6 +85,9 @@ json_backup_construct \
   --arg diff "$GIT_DIFF_STAT" \
   --arg memory "$MEMORY_SNAPSHOT" \
   > "$BACKUP_FILE"
+
+log "Wrote backup: $BACKUP_FILE"
+dbg "Wrote backup: $BACKUP_FILE"
 
 # Bootstrap minimal WORKING-MEMORY.md if none exists yet
 # This ensures SessionStart has context to inject after compaction
@@ -88,4 +110,8 @@ if [ ! -f "$MEMORY_FILE" ] && [ -n "$GIT_BRANCH" ]; then
       [ -n "$line" ] && echo "- $(echo "$line" | awk '{print $2}')"
     done
   } > "$MEMORY_FILE"
+  dbg "Bootstrapped minimal WORKING-MEMORY.md"
 fi
+
+log "PreCompact complete"
+dbg "=== HOOK COMPLETE ==="

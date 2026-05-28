@@ -1,0 +1,81 @@
+#!/bin/bash
+# sidecar-evaluate: Decisions evaluation module.
+# Extracts dialog pairs from transcript and writes decisions marker.
+# Source from sidecar-evaluate orchestrator after eval-helpers.
+#
+# Requires (from orchestrator namespace):
+#   DECISIONS_ENABLED, SESSION_DEEP, SIDECAR_DIR, DECISIONS_DIR_DATA,
+#   FILTER_LIB, TRANSCRIPT, NOW, TODAY, MARKER_SUFFIX,
+#   _HAS_JQ, json_field_file(), log(), dbg(),
+#   read_daily_cap(), atomic_increment_daily(), load_existing_ids()
+
+: "${SIDECAR_DIR:?eval-decisions: SIDECAR_DIR must be set by orchestrator}"
+: "${DECISIONS_DIR_DATA:?eval-decisions: DECISIONS_DIR_DATA must be set by orchestrator}"
+: "${NOW:?eval-decisions: NOW must be set by orchestrator}"
+: "${TODAY:?eval-decisions: TODAY must be set by orchestrator}"
+: "${MARKER_SUFFIX:?eval-decisions: MARKER_SUFFIX must be set by orchestrator}"
+: "${_HAS_JQ:?eval-decisions: _HAS_JQ must be set by orchestrator}"
+
+if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
+  log "Evaluating decisions..."
+
+  # Note: .devflow/decisions/.disabled is for session-start-context only — this hook uses DECISIONS_ENABLED.
+
+  # Daily cap check
+  _DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
+  _DEC_RUNS_TODAY=$(read_daily_cap "$_DEC_RUNS_FILE" 0)
+
+  _DEC_MAX_RUNS=3
+  _DEC_CONFIG="$DECISIONS_DIR_DATA/decisions.json"
+  if [ -f "$_DEC_CONFIG" ]; then
+    _DEC_MAX_RUNS=$(json_field_file "$_DEC_CONFIG" "max_daily_runs" "3")
+  fi
+  _DEC_MAX_RUNS=$(echo "$_DEC_MAX_RUNS" | tr -dc '0-9')
+  _DEC_MAX_RUNS="${_DEC_MAX_RUNS:-3}"
+
+  dbg "Decisions: RUNS_TODAY=$_DEC_RUNS_TODAY MAX_RUNS=$_DEC_MAX_RUNS"
+  if [ "$_DEC_RUNS_TODAY" -ge "$_DEC_MAX_RUNS" ]; then
+    log "Decisions daily cap reached ($_DEC_RUNS_TODAY/$_DEC_MAX_RUNS)"
+    dbg "Decisions daily cap reached — skipping"
+  else
+    # Extract dialog pairs from transcript
+    _DEC_DIALOG_PAIRS=""
+    if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+      _DEC_DIALOG_PAIRS=$(node "$FILTER_LIB" dialog-pairs "$TRANSCRIPT" 2>/dev/null || true)
+    fi
+
+    if [ -n "$_DEC_DIALOG_PAIRS" ]; then
+      # Load existing observation IDs
+      _DEC_EXISTING_IDS=$(load_existing_ids "$DECISIONS_DIR_DATA/decisions-log.jsonl")
+
+      # Write decisions marker (per-session name for concurrency safety)
+      _DEC_MARKER="$SIDECAR_DIR/decisions.${MARKER_SUFFIX}.json"
+      _DEC_TMP="${_DEC_MARKER}.tmp.$$"
+      if [ "$_HAS_JQ" = "true" ]; then
+        jq -n \
+          --arg dialogPairs "$_DEC_DIALOG_PAIRS" \
+          --argjson existingObservationIds "$_DEC_EXISTING_IDS" \
+          --argjson timestamp "$NOW" \
+          '{dialogPairs: $dialogPairs, existingObservationIds: $existingObservationIds, timestamp: $timestamp}' \
+          > "$_DEC_TMP" && mv "$_DEC_TMP" "$_DEC_MARKER" || rm -f "$_DEC_TMP"
+      else
+        node -e "
+          process.stdout.write(JSON.stringify({
+            dialogPairs: process.argv[1],
+            existingObservationIds: JSON.parse(process.argv[2]),
+            timestamp: parseInt(process.argv[3])
+          }) + '\n')
+        " -- "$_DEC_DIALOG_PAIRS" "$_DEC_EXISTING_IDS" "$NOW" > "$_DEC_TMP" && mv "$_DEC_TMP" "$_DEC_MARKER" || rm -f "$_DEC_TMP"
+      fi
+
+      # Update daily cap
+      atomic_increment_daily "$_DEC_RUNS_FILE" "$TODAY"
+
+      log "Wrote decisions marker"
+      dbg "Wrote decisions marker: $_DEC_MARKER"
+    else
+      log "Decisions: no dialog pairs extracted"
+      dbg "Decisions: no dialog pairs in transcript"
+    fi
+  fi
+fi
