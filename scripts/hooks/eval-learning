@@ -71,6 +71,47 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
     fi
     log "Learning batch: $_LEARN_CURRENT_COUNT/$_LEARN_BATCH_SIZE sessions"
 
+    # _learn_write_marker: called under lock with validated count >= batch_size.
+    # Extracts user signals and writes a per-session learning marker.
+    # Returns 0 if marker written, 1 if no user signals found.
+    _learn_write_marker() {
+      local count="$1" session_count_file="$2"
+      # Extract user signals from transcript
+      local user_signals=""
+      if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+        user_signals=$(node "$FILTER_LIB" user-signals "$TRANSCRIPT" 2>/dev/null || true)
+      fi
+      if [ -z "$user_signals" ]; then
+        log "Learning: no user signals extracted from transcript"
+        dbg "Learning: no user signals in transcript"
+        return 1
+      fi
+      local existing_ids
+      existing_ids=$(load_existing_ids "$LEARNING_DIR/learning-log.jsonl")
+      local marker="$SIDECAR_DIR/learning.${MARKER_SUFFIX}.json"
+      local tmp="${marker}.tmp.$$"
+      if [ "$_HAS_JQ" = "true" ]; then
+        jq -n \
+          --arg userSignals "$user_signals" \
+          --argjson existingObservationIds "$existing_ids" \
+          --argjson timestamp "$NOW" \
+          '{userSignals: $userSignals, existingObservationIds: $existingObservationIds, timestamp: $timestamp}' \
+          > "$tmp" && mv "$tmp" "$marker" || rm -f "$tmp"
+      else
+        node -e "
+          process.stdout.write(JSON.stringify({
+            userSignals: process.argv[1],
+            existingObservationIds: JSON.parse(process.argv[2]),
+            timestamp: parseInt(process.argv[3])
+          }) + '\n')
+        " -- "$user_signals" "$existing_ids" "$NOW" > "$tmp" && mv "$tmp" "$marker" || rm -f "$tmp"
+      fi
+      atomic_increment_daily "$_LEARN_RUNS_FILE" "$TODAY"
+      rm -f "$session_count_file"
+      log "Wrote learning marker (batch of $count sessions)"
+      dbg "Wrote learning marker: $marker"
+    }
+
     if [ "$_LEARN_CURRENT_COUNT" -ge "$_LEARN_BATCH_SIZE" ] && [ -f "$_LEARN_SESSION_COUNT_FILE" ]; then
       if sidecar_lock_acquire "$SIDECAR_DIR/.learning-batch.lock" 3; then
         trap '_eval_release_lock "$SIDECAR_DIR/.learning-batch.lock"' EXIT
@@ -85,48 +126,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
           _LEARN_CURRENT_COUNT=50
         fi
         if [ "$_LEARN_CURRENT_COUNT" -ge "$_LEARN_BATCH_SIZE" ] && [ -f "$_LEARN_SESSION_COUNT_FILE" ]; then
-          # Extract user signals from transcript
-          _LEARN_USER_SIGNALS=""
-          if [ -f "$FILTER_LIB" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
-            _LEARN_USER_SIGNALS=$(node "$FILTER_LIB" user-signals "$TRANSCRIPT" 2>/dev/null || true)
-          fi
-
-          if [ -n "$_LEARN_USER_SIGNALS" ]; then
-            # Load existing observation IDs for deduplication
-            _LEARN_EXISTING_IDS=$(load_existing_ids "$LEARNING_DIR/learning-log.jsonl")
-
-            # Write learning marker (per-session name for concurrency safety)
-            _LEARN_MARKER="$SIDECAR_DIR/learning.${MARKER_SUFFIX}.json"
-            _LEARN_TMP="${_LEARN_MARKER}.tmp.$$"
-            if [ "$_HAS_JQ" = "true" ]; then
-              jq -n \
-                --arg userSignals "$_LEARN_USER_SIGNALS" \
-                --argjson existingObservationIds "$_LEARN_EXISTING_IDS" \
-                --argjson timestamp "$NOW" \
-                '{userSignals: $userSignals, existingObservationIds: $existingObservationIds, timestamp: $timestamp}' \
-                > "$_LEARN_TMP" && mv "$_LEARN_TMP" "$_LEARN_MARKER" || rm -f "$_LEARN_TMP"
-            else
-              node -e "
-                process.stdout.write(JSON.stringify({
-                  userSignals: process.argv[1],
-                  existingObservationIds: JSON.parse(process.argv[2]),
-                  timestamp: parseInt(process.argv[3])
-                }) + '\n')
-              " -- "$_LEARN_USER_SIGNALS" "$_LEARN_EXISTING_IDS" "$NOW" > "$_LEARN_TMP" && mv "$_LEARN_TMP" "$_LEARN_MARKER" || rm -f "$_LEARN_TMP"
-            fi
-
-            # Update daily cap under lock
-            atomic_increment_daily "$_LEARN_RUNS_FILE" "$TODAY"
-
-            # Clear session count file (atomically via mv on same filesystem)
-            rm -f "$_LEARN_SESSION_COUNT_FILE"
-
-            log "Wrote learning marker (batch of $_LEARN_CURRENT_COUNT sessions)"
-            dbg "Wrote learning marker: $_LEARN_MARKER"
-          else
-            log "Learning: no user signals extracted from transcript"
-            dbg "Learning: no user signals in transcript"
-          fi
+          _learn_write_marker "$_LEARN_CURRENT_COUNT" "$_LEARN_SESSION_COUNT_FILE"
         fi
         sidecar_lock_release "$SIDECAR_DIR/.learning-batch.lock"
         trap - EXIT

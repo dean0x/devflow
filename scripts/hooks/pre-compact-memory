@@ -72,7 +72,7 @@ fi
 # Snapshot current WORKING-MEMORY.md (preserves session context through compaction)
 MEMORY_SNAPSHOT=""
 if [ -f "$MEMORY_DIR/WORKING-MEMORY.md" ]; then
-  MEMORY_SNAPSHOT=$(cat "$MEMORY_DIR/WORKING-MEMORY.md")
+  MEMORY_SNAPSHOT=$(head -c 65536 "$MEMORY_DIR/WORKING-MEMORY.md")
   dbg "MEMORY_SNAPSHOT_LENGTH=${#MEMORY_SNAPSHOT}"
 fi
 

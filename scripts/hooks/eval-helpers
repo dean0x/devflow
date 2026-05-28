@@ -50,10 +50,12 @@ load_existing_ids() {
     jq -c '.id // empty' "$log_file" 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]"
   else
     node -e "
+      const readline=require('readline');
       const fs=require('fs');
-      const lines=fs.readFileSync(process.argv[1],'utf8').trim().split('\n').filter(Boolean);
-      const ids=lines.map(l=>{try{return JSON.parse(l).id}catch{return null}}).filter(Boolean);
-      process.stdout.write(JSON.stringify(ids));
+      const rl=readline.createInterface({input:fs.createReadStream(process.argv[1]),crlfDelay:Infinity});
+      const ids=[];
+      rl.on('line',l=>{if(!l.trim())return;try{const id=JSON.parse(l).id;if(id)ids.push(id);}catch{}});
+      rl.on('close',()=>process.stdout.write(JSON.stringify(ids)));
     " -- "$log_file" 2>/dev/null || echo "[]"
   fi
 }

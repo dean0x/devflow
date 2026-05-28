@@ -56,7 +56,7 @@ MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 
 if [ -f "$MEMORY_FILE" ]; then
   dbg "MEMORY_FILE exists: $MEMORY_FILE"
-  MEMORY_CONTENT=$(cat "$MEMORY_FILE")
+  MEMORY_CONTENT=$(head -c 65536 "$MEMORY_FILE")
 
   # Compute staleness warning
   source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }

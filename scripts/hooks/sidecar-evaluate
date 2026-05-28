@@ -74,6 +74,9 @@ if [ -d "$PROJECTS_DIR" ]; then
   if [ -n "$SESSION_ID" ] && echo "$SESSION_ID" | grep -qE '^[a-zA-Z0-9_-]+$' && [ -f "$PROJECTS_DIR/${SESSION_ID}.jsonl" ]; then
     TRANSCRIPT="$PROJECTS_DIR/${SESSION_ID}.jsonl"
   else
+    # Fallback: sort all session JSONL files by mtime and pick the newest.
+    # Assumption: PROJECTS_DIR contains O(hundreds) of files at most — bounded by
+    # Claude Code's own session retention policy, so ls -t overhead is acceptable.
     TRANSCRIPT=$(ls -t "$PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1 || true)
     [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ] && TRANSCRIPT=""
     [ -n "$TRANSCRIPT" ] && SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
@@ -110,6 +113,23 @@ FILTER_LIB="$SCRIPT_DIR/lib/transcript-filter.cjs"
 MARKER_SUFFIX="${SESSION_ID:-$$}"
 
 # --- Feature modules ---
+#
+# Orchestrator-exported contract: the following shell variables are set before
+# eval-* modules are sourced and are consumed by one or more of them.
+#   NOW            — epoch seconds (date +%s)
+#   TODAY          — YYYY-MM-DD (date '+%Y-%m-%d')
+#   SESSION_ID     — transcript session identifier (string)
+#   TRANSCRIPT     — absolute path to session JSONL file (may be empty)
+#   SESSION_DEEP   — "true" if session has ≥3 user turns
+#   FILTER_LIB     — absolute path to transcript-filter.cjs
+#   MARKER_SUFFIX  — suffix for per-session marker filenames (SESSION_ID or $$)
+#   SIDECAR_DIR    — absolute path to .devflow/sidecar/
+#   LEARNING_DIR   — absolute path to .devflow/learning/
+#   DECISIONS_DIR_DATA — absolute path to .devflow/decisions/
+#   FEATURES_DIR   — absolute path to .devflow/features/
+#   LEARNING_ENABLED / DECISIONS_ENABLED / KNOWLEDGE_ENABLED — "true"/"false"
+#   _HAS_JQ        — "true" if jq is available on PATH
+#
 source "$SCRIPT_DIR/eval-helpers"
 source "$SCRIPT_DIR/eval-reinforce"
 source "$SCRIPT_DIR/eval-learning"

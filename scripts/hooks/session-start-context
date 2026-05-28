@@ -106,68 +106,74 @@ fi
 
 # --- Section 1.75: Learned Behaviors ---
 # Skipped if learning feature is disabled via sentinel or sidecar config.
+#
+# _build_learned_section LEARNING_LOG NOTIFIED_MARKER
+#   Prints the LEARNED BEHAVIORS block to stdout, or nothing if no artifacts exist.
+#   Side-effect: updates NOTIFIED_MARKER when new artifacts are present.
+_build_learned_section() {
+  local log_file="$1" notified_marker="$2"
+
+  # Single-pass extraction of created artifacts (commands + skills)
+  local learned_json
+  learned_json=$(json_learning_created "$log_file")
+
+  local learned_commands="" learned_skills=""
+  if [ -n "$learned_json" ]; then
+    if [ "$_HAS_JQ" = "true" ]; then
+      learned_commands=$(echo "$learned_json" | jq -r '.commands | map("/self-learning/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
+      learned_skills=$(echo "$learned_json" | jq -r '.skills | map("\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
+    else
+      # Node fallback: parse the JSON and format
+      learned_commands=$(echo "$learned_json" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        console.log(d.commands.map(c=>\"/self-learning/\"+c.name+\" (\"+c.conf+\")\").join(', '));
+      " 2>/dev/null)
+      learned_skills=$(echo "$learned_json" | node -e "
+        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        console.log(d.skills.map(s=>s.name+\" (\"+s.conf+\")\").join(', '));
+      " 2>/dev/null)
+    fi
+  fi
+
+  if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Learned artifacts: commands=$(echo "$learned_commands" | grep -c , 2>/dev/null || echo 0) skills=$(echo "$learned_skills" | grep -c , 2>/dev/null || echo 0)"; fi
+  [ -z "$learned_commands" ] && [ -z "$learned_skills" ] && return 0
+
+  local section="--- LEARNED BEHAVIORS ---"
+  [ -n "$learned_commands" ] && section="${section}
+Commands: $learned_commands"
+  [ -n "$learned_skills" ] && section="${section}
+Skills: $learned_skills"
+  section="${section}
+Edit or delete: .claude/commands/self-learning/ and .claude/skills/"
+
+  # Check for new artifacts since last notification (single jq -s pass)
+  local last_notified=0
+  [ -f "$notified_marker" ] && last_notified=$(cat "$notified_marker" 2>/dev/null || echo "0")
+
+  local new_artifacts
+  new_artifacts=$(json_learning_new "$log_file" "$last_notified")
+
+  if [ -n "$new_artifacts" ]; then
+    section="${section}
+
+--- NEW LEARNED BEHAVIORS ---
+${new_artifacts}
+TIP: Type the command name to use it. Rename to shorter path for quicker access.
+Run \`devflow learn --list\` to see all."
+    # Only update notified marker when new artifacts exist
+    date +%s > "$notified_marker" 2>/dev/null || true
+  fi
+
+  printf '%s' "$section"
+}
 
 if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
   LEARNING_LOG="$LEARNING_DIR/learning-log.jsonl"
   NOTIFIED_MARKER="$LEARNING_DIR/.learning-notified-at"
 
   if [ -f "$LEARNING_LOG" ]; then
-    # Single-pass extraction of created artifacts (commands + skills)
-    LEARNED_JSON=$(json_learning_created "$LEARNING_LOG")
-
-    LEARNED_COMMANDS=""
-    LEARNED_SKILLS=""
-    if [ -n "$LEARNED_JSON" ]; then
-      if [ "$_HAS_JQ" = "true" ]; then
-        LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | jq -r '.commands | map("/self-learning/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
-        LEARNED_SKILLS=$(echo "$LEARNED_JSON" | jq -r '.skills | map("\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
-      else
-        # Node fallback: parse the JSON and format
-        LEARNED_COMMANDS=$(echo "$LEARNED_JSON" | node -e "
-          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-          console.log(d.commands.map(c=>\"/self-learning/\"+c.name+\" (\"+c.conf+\")\").join(', '));
-        " 2>/dev/null)
-        LEARNED_SKILLS=$(echo "$LEARNED_JSON" | node -e "
-          const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-          console.log(d.skills.map(s=>s.name+\" (\"+s.conf+\")\").join(', '));
-        " 2>/dev/null)
-      fi
-    fi
-
-    if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Learned artifacts: commands=$(echo "$LEARNED_COMMANDS" | grep -c , 2>/dev/null || echo 0) skills=$(echo "$LEARNED_SKILLS" | grep -c , 2>/dev/null || echo 0)"; fi
-    if [ -n "$LEARNED_COMMANDS" ] || [ -n "$LEARNED_SKILLS" ]; then
-      LEARNED_SECTION="--- LEARNED BEHAVIORS ---"
-      if [ -n "$LEARNED_COMMANDS" ]; then
-        LEARNED_SECTION="$LEARNED_SECTION
-Commands: $LEARNED_COMMANDS"
-      fi
-      if [ -n "$LEARNED_SKILLS" ]; then
-        LEARNED_SECTION="$LEARNED_SECTION
-Skills: $LEARNED_SKILLS"
-      fi
-      LEARNED_SECTION="$LEARNED_SECTION
-Edit or delete: .claude/commands/self-learning/ and .claude/skills/"
-
-      # Check for new artifacts since last notification (single jq -s pass)
-      LAST_NOTIFIED=0
-      if [ -f "$NOTIFIED_MARKER" ]; then
-        LAST_NOTIFIED=$(cat "$NOTIFIED_MARKER" 2>/dev/null || echo "0")
-      fi
-
-      NEW_ARTIFACTS=$(json_learning_new "$LEARNING_LOG" "$LAST_NOTIFIED")
-
-      if [ -n "$NEW_ARTIFACTS" ]; then
-        LEARNED_SECTION="$LEARNED_SECTION
-
---- NEW LEARNED BEHAVIORS ---
-${NEW_ARTIFACTS}
-TIP: Type the command name to use it. Rename to shorter path for quicker access.
-Run \`devflow learn --list\` to see all."
-
-        # Only update notified marker when new artifacts exist
-        date +%s > "$NOTIFIED_MARKER" 2>/dev/null || true
-      fi
-
+    LEARNED_SECTION=$(_build_learned_section "$LEARNING_LOG" "$NOTIFIED_MARKER")
+    if [ -n "$LEARNED_SECTION" ]; then
       if [ -n "$CONTEXT" ]; then
         CONTEXT="${CONTEXT}
 
