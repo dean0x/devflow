@@ -137,6 +137,41 @@ else
   dbg "MEMORY_FILE not found: $MEMORY_FILE"
 fi
 
+# --- Section 2: Unprocessed turns from previous session ---
+# If the queue has entries that haven't been summarized into WORKING-MEMORY.md yet,
+# inject them as raw context so the assistant starts with full information.
+
+QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
+if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+  QUEUE_LINES=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
+  dbg "Pending queue: $QUEUE_LINES entries"
+
+  if [ "$QUEUE_LINES" -gt 0 ]; then
+    if [ "$_HAS_JQ" = "true" ]; then
+      QUEUE_SUMMARY=$(tail -20 "$QUEUE_FILE" | jq -r '"[\(.role)]: \(.content[0:200])"' 2>/dev/null)
+    else
+      QUEUE_SUMMARY=$(tail -20 "$QUEUE_FILE" | node -e "
+        const lines = require('fs').readFileSync('/dev/stdin','utf8').trim().split('\n');
+        lines.forEach(l => { try { const o = JSON.parse(l); console.log('[' + o.role + ']: ' + (o.content||'').slice(0,200)); } catch(e) {} });
+      " 2>/dev/null)
+    fi
+
+    if [ -n "$QUEUE_SUMMARY" ]; then
+      TRUNCATION_NOTE=""
+      if [ "$QUEUE_LINES" -gt 20 ]; then
+        TRUNCATION_NOTE="(showing last 20 of $QUEUE_LINES entries)
+"
+      fi
+
+      CONTEXT="${CONTEXT}
+
+--- UNPROCESSED TURNS (not yet in working memory) ---
+${TRUNCATION_NOTE}${QUEUE_SUMMARY}"
+      dbg "Injected $QUEUE_LINES pending queue entries"
+    fi
+  fi
+fi
+
 # --- Output ---
 
 # Only output if we have something to inject
