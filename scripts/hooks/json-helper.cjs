@@ -622,7 +622,7 @@ try {
       }
 
       // D54 (E1): self-create parent directory on first write (fresh project, file+dir absent).
-      // process-observations had this; merge-observation now matches its behavior so callers
+      // The prior batch-merge op created the dir; merge-observation matches that so callers
       // do not need to pre-create the log directory.
       const logDir = path.dirname(logFile);
       if (!fs.existsSync(logDir)) {

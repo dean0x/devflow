@@ -12,14 +12,14 @@
  *
  * Originally this module was wired into the background-learning shell script
  * (via `node lib/staleness.cjs`) for direct file annotation, and the CLI
- * displayed `⚠ N flagged` counts from the needsReview/softCapExceeded fields.
+ * displayed `⚠ N flagged` counts from per-observation review flags.
  *
  * After the LLM-driven sidecar refactor (Part B):
  * - The sole live caller is the SessionStart LLM sidecar-processor agent,
  *   which invokes `node staleness.cjs <logFile> <cwd>` during the learning
  *   and curation phases to annotate log entries with mayBeStale before
  *   deciding whether to reinforce or deprecate them.
- * - The CLI display surface (needsReview/softCapExceeded flags, `⚠ flagged`
+ * - The CLI display surface (the per-observation review flags and `⚠ flagged`
  *   output lines) has been removed; staleness is now a SIGNAL to the LLM, not
  *   a user-facing count.
  * - The module contract is unchanged: input = JSONL log path + cwd;
