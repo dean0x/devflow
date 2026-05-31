@@ -1,0 +1,159 @@
+#!/bin/bash
+# Sidecar helper: sidecar-collect-tasks (sourced helper)
+# Collects pending sidecar task types from .devflow/sidecar/*.json markers.
+#
+# Source this file to get the sidecar_collect_tasks function.
+#
+# Function: sidecar_collect_tasks SIDECAR_DIR MEMORY_ENABLED LEARNING_ENABLED DECISIONS_ENABLED KNOWLEDGE_ENABLED
+#
+# Inputs (positional args):
+#   $1  SIDECAR_DIR      — path to .devflow/sidecar/
+#   $2  MEMORY_ENABLED   — "true"/"false"
+#   $3  LEARNING_ENABLED — "true"/"false"
+#   $4  DECISIONS_ENABLED — "true"/"false"
+#   $5  KNOWLEDGE_ENABLED — "true"/"false"
+#
+# Outputs (exported variable):
+#   _SIDECAR_TASKS — comma-separated, deduped, sorted list of pending task types.
+#                    Empty string if no pending tasks.
+#
+# Behaviour:
+#   - Skips config.json (reserved).
+#   - Skips AND deletes markers whose feature is disabled.
+#   - Does NOT expire/delete markers by wall-clock age (markers persist until consumed).
+#   - COLLECT_LIMIT=50: when >50 markers exist, orders by mtime OLDEST-FIRST (FIFO)
+#     and takes the first 50. Markers beyond the cap are RETAINED (never deleted).
+#   - Requires: get_mtime() (source get-mtime before calling), _HAS_JQ, dbg(), log()
+#   - Uses JUST_RECOVERED (if set) to preserve .retries files for just-recovered markers.
+#
+# No set -e: every path exits cleanly.
+
+# _SIDECAR_TASKS is the output variable
+_SIDECAR_TASKS=""
+
+sidecar_collect_tasks() {
+  local sidecar_dir="${1:?sidecar_collect_tasks: sidecar_dir required}"
+  local mem_enabled="${2:-true}"
+  local learn_enabled="${3:-true}"
+  local dec_enabled="${4:-true}"
+  local know_enabled="${5:-true}"
+
+  _SIDECAR_TASKS=""
+
+  # Guard: sidecar dir must exist
+  if [ ! -d "$sidecar_dir" ]; then
+    dbg "sidecar_collect_tasks: no sidecar dir — skip"
+    return 0
+  fi
+
+  # Guard: no .json markers at all — fast exit
+  if ! compgen -G "$sidecar_dir/*.json" > /dev/null 2>&1; then
+    dbg "sidecar_collect_tasks: no .json markers — skip"
+    return 0
+  fi
+
+  # Build candidate list, applying COLLECT_LIMIT with FIFO ordering.
+  # Strategy: collect all .json filenames with their mtime, sort oldest-first,
+  # then take up to COLLECT_LIMIT.
+  local collect_limit=50
+
+  # Gather all .json files and their mtimes into a sortable list
+  # Format: MTIME<TAB>FILEPATH
+  local candidates=""
+  for _f in "$sidecar_dir"/*.json; do
+    [ -f "$_f" ] || continue
+    # Skip config
+    case "$(basename "$_f")" in config.json) continue ;; esac
+    local _mt
+    _mt=$(get_mtime "$_f" 2>/dev/null || true)
+    _mt="${_mt:-0}"
+    if [ -n "$candidates" ]; then
+      candidates="${candidates}
+${_mt}	${_f}"
+    else
+      candidates="${_mt}	${_f}"
+    fi
+  done
+
+  if [ -z "$candidates" ]; then
+    dbg "sidecar_collect_tasks: no non-config .json markers"
+    return 0
+  fi
+
+  # Sort by mtime (oldest first), take up to COLLECT_LIMIT
+  local selected
+  selected=$(printf '%s\n' "$candidates" | sort -t'	' -k1,1n | head -n "$collect_limit" | cut -f2-)
+
+  # Process selected markers
+  local raw_tasks=""
+  while IFS= read -r _marker_file; do
+    [ -f "$_marker_file" ] || continue
+    local _full_basename
+    _full_basename=$(basename "$_marker_file" .json)
+    # Extract type from session-scoped filename: learning.abc123 → learning
+    local _type
+    case "$_full_basename" in
+      *.*) _type="${_full_basename%%.*}" ;;
+      *)   _type="$_full_basename" ;;
+    esac
+
+    # Skip disabled features — delete marker to prevent indefinite accumulation
+    case "$_type" in
+      memory)
+        if [ "$mem_enabled" != "true" ]; then
+          rm -f "$_marker_file" 2>/dev/null || true
+          dbg "sidecar_collect_tasks: deleted disabled-feature marker: $( basename "$_marker_file" )"
+          continue
+        fi
+        ;;
+      learning)
+        if [ "$learn_enabled" != "true" ]; then
+          rm -f "$_marker_file" 2>/dev/null || true
+          dbg "sidecar_collect_tasks: deleted disabled-feature marker: $(basename "$_marker_file")"
+          continue
+        fi
+        ;;
+      decisions)
+        if [ "$dec_enabled" != "true" ]; then
+          rm -f "$_marker_file" 2>/dev/null || true
+          dbg "sidecar_collect_tasks: deleted disabled-feature marker: $(basename "$_marker_file")"
+          continue
+        fi
+        ;;
+      knowledge)
+        if [ "$know_enabled" != "true" ]; then
+          rm -f "$_marker_file" 2>/dev/null || true
+          dbg "sidecar_collect_tasks: deleted disabled-feature marker: $(basename "$_marker_file")"
+          continue
+        fi
+        ;;
+    esac
+
+    # Clean up any stale .retries file for this marker, unless it was just recovered
+    # in this same run (JUST_RECOVERED guard from sidecar-recover).
+    case " ${JUST_RECOVERED:-} " in
+      *" $_full_basename "*) ;;  # Just recovered — leave .retries in place
+      *) rm -f "${_marker_file%.json}.retries" 2>/dev/null || true ;;
+    esac
+
+    # Accumulate type
+    if [ -n "$raw_tasks" ]; then
+      raw_tasks="${raw_tasks}
+${_type}"
+    else
+      raw_tasks="${_type}"
+    fi
+  done <<EOF
+$selected
+EOF
+
+  if [ -z "$raw_tasks" ]; then
+    dbg "sidecar_collect_tasks: no enabled markers found"
+    return 0
+  fi
+
+  # Deduplicate and sort
+  _SIDECAR_TASKS=$(printf '%s\n' "$raw_tasks" | sort -u | paste -sd ',' - 2>/dev/null || printf '%s\n' "$raw_tasks" | sort -u | tr '\n' ',' | sed 's/,$//')
+  dbg "sidecar_collect_tasks: _SIDECAR_TASKS=$_SIDECAR_TASKS"
+  return 0
+}
