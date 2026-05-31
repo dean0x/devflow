@@ -2509,10 +2509,227 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 });
 
 // =============================================================================
-// sidecar-dispatch stale marker recovery
+// sidecar-recover stale marker recovery
 // =============================================================================
 
-describe('sidecar-dispatch stale marker recovery', () => {
+// Bash harness that stubs dbg/log, sources get-mtime + sidecar-recover, then
+// calls sidecar_recover_stale and echoes JUST_RECOVERED so tests can assert it.
+const SIDECAR_RECOVER = path.join(HOOKS_DIR, 'sidecar-recover');
+const GET_MTIME = path.join(HOOKS_DIR, 'get-mtime');
+
+function runRecover(sidecarDir: string, memoryDir: string): { justRecovered: string } {
+  const result = execSync(`bash -c '
+    dbg() { :; }
+    log() { :; }
+    source "${GET_MTIME}"
+    source "${SIDECAR_RECOVER}"
+    sidecar_recover_stale "${sidecarDir}" "${memoryDir}"
+    printf "%s" "$JUST_RECOVERED"
+  '`, { stdio: 'pipe' }).toString();
+  return { justRecovered: result };
+}
+
+describe('sidecar-recover stale marker recovery', () => {
+  let tmpDir: string;
+  let sidecarDir: string;
+  let memoryDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-recover-test-'));
+    sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    memoryDir = path.join(tmpDir, '.devflow', 'memory');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.mkdirSync(memoryDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // sidecar-dispatch still handles the capture-only path — fresh .processing is
+  // left alone by sidecar-recover (it checks age, not presence).
+  it('fresh .processing left alone (age below threshold)', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+    // mtime is current — well below 1800s threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(true);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+  });
+
+  it('stale .processing retried — renamed back to .json', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000); // older than 1800s threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(true);
+
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+    expect(fs.existsSync(retryFile)).toBe(true);
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
+  });
+
+  it('retry count increments on repeated stale recovery', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+    fs.writeFileSync(retryFile, '1');
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('2');
+  });
+
+  it('max retries exhausted — marked as .failed', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+    fs.writeFileSync(retryFile, '3');
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.failed'))).toBe(true);
+    expect(fs.existsSync(retryFile)).toBe(false);
+  });
+
+  // T2(a): per-type stale thresholds
+  it('memory type recovers after 300s but NOT before', () => {
+    const procFile = path.join(sidecarDir, 'memory.abc123.processing');
+    // Fresh — should NOT recover
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 200); // below 300s memory threshold
+
+    runRecover(sidecarDir, memoryDir);
+    expect(fs.existsSync(procFile)).toBe(true); // still .processing
+
+    // Now age it past threshold
+    backdateMtime(procFile, 400);
+    runRecover(sidecarDir, memoryDir);
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.abc123.json'))).toBe(true);
+  });
+
+  it('learning type does NOT recover at 300s (needs 1800s)', () => {
+    const procFile = path.join(sidecarDir, 'learning.abc123.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 400); // past memory threshold but below learning threshold (1800s)
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(true); // should still be .processing
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.abc123.json'))).toBe(false);
+  });
+
+  it('decisions type recovers after 1800s', () => {
+    const procFile = path.join(sidecarDir, 'decisions.abc123.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000); // past 1800s threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'decisions.abc123.json'))).toBe(true);
+  });
+
+  it('knowledge type recovers after 1800s', () => {
+    const procFile = path.join(sidecarDir, 'knowledge.abc123.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.abc123.json'))).toBe(true);
+  });
+
+  // T2(b): JUST_RECOVERED guard — recovered markers have .retries preserved, not reset
+  it('JUST_RECOVERED guard: recovered marker basename is included in JUST_RECOVERED output', () => {
+    const procFile = path.join(sidecarDir, 'learning.sess1.processing');
+    const retryFile = path.join(sidecarDir, 'learning.sess1.retries');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+    fs.writeFileSync(retryFile, '2'); // pre-existing retry count
+
+    const { justRecovered } = runRecover(sidecarDir, memoryDir);
+
+    // Marker should be recovered
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.sess1.json'))).toBe(true);
+    // JUST_RECOVERED should contain the basename (without .processing)
+    expect(justRecovered).toContain('learning.sess1');
+    // Retry count should be bumped to 3, not reset to 1
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('3');
+  });
+
+  // T2(c): orphaned .pending-turns.processing recovery
+  it('orphaned .pending-turns.processing older than 300s is renamed back to .pending-turns.jsonl', () => {
+    const ptProc = path.join(memoryDir, '.pending-turns.processing');
+    fs.writeFileSync(ptProc, 'some queued data\n');
+    backdateMtime(ptProc, 400);
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(ptProc)).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl'))).toBe(true);
+    expect(fs.readFileSync(path.join(memoryDir, '.pending-turns.jsonl'), 'utf-8')).toBe('some queued data\n');
+  });
+
+  it('orphaned .pending-turns.processing left alone when .pending-turns.jsonl already exists', () => {
+    const ptProc = path.join(memoryDir, '.pending-turns.processing');
+    const ptJsonl = path.join(memoryDir, '.pending-turns.jsonl');
+    fs.writeFileSync(ptProc, 'processing data\n');
+    backdateMtime(ptProc, 400);
+    fs.writeFileSync(ptJsonl, 'existing jsonl data\n');
+
+    runRecover(sidecarDir, memoryDir);
+
+    // .processing should remain (non-destructive when .jsonl already exists)
+    expect(fs.existsSync(ptProc)).toBe(true);
+    // .jsonl should be unchanged
+    expect(fs.readFileSync(ptJsonl, 'utf-8')).toBe('existing jsonl data\n');
+  });
+
+  it('fresh .pending-turns.processing (below 300s) is NOT yanked', () => {
+    const ptProc = path.join(memoryDir, '.pending-turns.processing');
+    fs.writeFileSync(ptProc, 'active data\n');
+    backdateMtime(ptProc, 100); // below 300s memory threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(ptProc)).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl'))).toBe(false);
+  });
+
+  // T2(d): heartbeat — a .processing whose mtime was just refreshed is NOT yanked
+  it('recently heartbeated .processing is not recovered (mtime is fresh)', () => {
+    const procFile = path.join(sidecarDir, 'knowledge.live.processing');
+    fs.writeFileSync(procFile, '{}');
+    // Touch to current mtime — simulates a live heartbeat
+    const now = new Date();
+    fs.utimesSync(procFile, now, now);
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(true);
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.live.json'))).toBe(false);
+  });
+});
+
+// =============================================================================
+// sidecar-dispatch: capture-only (no directive emission)
+// session-start-context: pending-work directive emission (Section 2)
+// =============================================================================
+
+describe('sidecar-dispatch capture-only (no directive emitted)', () => {
   const DISPATCH_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
 
   let tmpDir: string;
@@ -2520,13 +2737,36 @@ describe('sidecar-dispatch stale marker recovery', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dispatch-test-'));
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('fresh .processing left alone', () => {
+  // sidecar-dispatch is now capture-only; it must never emit a directive
+  it('emits no additionalContext even when pending .json markers exist (T6)', () => {
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
+    fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
+
+    // Dispatch should exit 0 and produce no JSON output (capture-only)
+    let stdout = '';
+    try {
+      stdout = execSync(`bash "${DISPATCH_HOOK}"`, {
+        input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).toString().trim();
+    } catch (e: unknown) {
+      const err = e as { stdout?: Buffer; status?: number };
+      stdout = err.stdout?.toString().trim() ?? '';
+    }
+
+    // Dispatch produces no output (it is capture-only)
+    expect(stdout).toBe('');
+  });
+
+  it('fresh .processing is left alone by sidecar-dispatch (dispatch does not recover)', () => {
     const procFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.processing');
     fs.writeFileSync(procFile, '{}');
 
@@ -2538,76 +2778,69 @@ describe('sidecar-dispatch stale marker recovery', () => {
     expect(fs.existsSync(procFile)).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'learning.json'))).toBe(false);
   });
+});
 
-  it('stale .processing retried — renamed back to .json', () => {
-    const procFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.processing');
-    fs.writeFileSync(procFile, '{}');
-    backdateMtime(procFile, 600);
+describe('session-start-context pending-work directive', () => {
+  const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
-    execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  let tmpDir: string;
+  let homeDir: string;
 
-    expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'learning.json'))).toBe(true);
-
-    const retryFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.retries');
-    expect(fs.existsSync(retryFile)).toBe(true);
-    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-context-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-context-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    // Do NOT disable learning/decisions sentinels here — doing so would also
+    // cause sidecar-collect-tasks to delete those marker types. Instead we
+    // rely on the absence of decisions.md, pitfalls.md, and learning-log.jsonl
+    // to keep Sections 1.5 and 1.75 silent (no file → no output).
   });
 
-  it('retry count increments on repeated stale recovery', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    const procFile = path.join(sidecarDir, 'learning.processing');
-    const retryFile = path.join(sidecarDir, 'learning.retries');
-
-    fs.writeFileSync(procFile, '{}');
-    backdateMtime(procFile, 600);
-    fs.writeFileSync(retryFile, '1');
-
-    execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('2');
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it('max retries exhausted — marked as .failed', () => {
+  // T5: directive lists expected task names from pending {type}.{session}.json markers
+  it('pending marker directive includes multiple task names (T5)', () => {
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    const procFile = path.join(sidecarDir, 'learning.processing');
-    const retryFile = path.join(sidecarDir, 'learning.retries');
+    fs.writeFileSync(path.join(sidecarDir, 'learning.sess1.json'), '{}');
+    fs.writeFileSync(path.join(sidecarDir, 'decisions.sess1.json'), '{}');
 
-    fs.writeFileSync(procFile, '{}');
-    backdateMtime(procFile, 600);
-    fs.writeFileSync(retryFile, '3');
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
 
-    execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.failed'))).toBe(true);
-    expect(fs.existsSync(retryFile)).toBe(false);
-  });
-
-  it('pending marker directive includes multiple task names', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
-    fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
-
-    const result = execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).toString();
-
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(stdout.trim());
     const context = parsed.hookSpecificOutput.additionalContext;
-    expect(context).toContain('SIDECAR:');
+    expect(context).toContain('SIDECAR MAINTENANCE');
     expect(context).toContain('learning');
     expect(context).toContain('decisions');
+  });
+
+  it('no directive emitted when no pending markers present', () => {
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    // No pending markers — hook should produce no output
+    expect(stdout.trim()).toBe('');
+  });
+
+  it('stale .processing recovered and included in directive', () => {
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    // Seed a stale learning .processing — should be recovered then emitted
+    const procFile = path.join(sidecarDir, 'learning.stale.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000); // past 1800s threshold
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    const parsed = JSON.parse(stdout.trim());
+    const context = parsed.hookSpecificOutput.additionalContext;
+    expect(context).toContain('SIDECAR MAINTENANCE');
+    expect(context).toContain('learning');
+    // The .processing should have been renamed to .json
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.stale.json'))).toBe(true);
   });
 });
 
