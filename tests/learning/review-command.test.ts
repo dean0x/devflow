@@ -62,8 +62,6 @@ describe('parseLearningLog v2 type support', () => {
       pattern: 'stale workflow',
       mayBeStale: true,
       staleReason: 'code-ref-missing:src/foo.ts',
-      needsReview: false,
-      softCapExceeded: false,
     });
     const parsed = parseLearningLog(JSON.stringify(obs) + '\n');
     expect(parsed).toHaveLength(1);
@@ -215,13 +213,11 @@ describe('observation attention flags detection', () => {
     const obs: LearningObservation[] = [
       makeObs({ id: '1', type: 'workflow', pattern: 'normal' }),
       makeObs({ id: '2', type: 'decision', pattern: 'stale', mayBeStale: true }),
-      makeObs({ id: '3', type: 'pitfall', pattern: 'missing', needsReview: true }),
-      makeObs({ id: '4', type: 'procedural', pattern: 'capped', softCapExceeded: true }),
     ];
 
-    const flagged = obs.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
-    expect(flagged).toHaveLength(3);
-    expect(flagged.map(o => o.id)).toEqual(['2', '3', '4']);
+    const flagged = obs.filter(o => o.mayBeStale);
+    expect(flagged).toHaveLength(1);
+    expect(flagged.map(o => o.id)).toEqual(['2']);
   });
 
   it('produces correct log after deprecation update', () => {
@@ -230,14 +226,12 @@ describe('observation attention flags detection', () => {
       makeObs({ id: '2', type: 'decision', pattern: 'to-deprecate', mayBeStale: true }),
     ];
 
-    // Simulate what --review does when user chooses 'deprecate' on obs id='2'
+    // Simulate what curation does when deprecating obs id='2'
     const updated = original.map(o => {
       if (o.id === '2') {
         const copy = { ...o };
         copy.status = 'deprecated';
         delete copy.mayBeStale;
-        delete copy.needsReview;
-        delete copy.softCapExceeded;
         return copy;
       }
       return o;
@@ -255,29 +249,27 @@ describe('observation attention flags detection', () => {
     expect(parsed[1].mayBeStale).toBeUndefined();
   });
 
-  it('produces correct log after keep update (flags cleared)', () => {
+  it('produces correct log after staleness flag cleared', () => {
     const original: LearningObservation[] = [
-      makeObs({ id: '1', type: 'pitfall', pattern: 'keep this', needsReview: true }),
+      makeObs({ id: '1', type: 'pitfall', pattern: 'keep this', mayBeStale: true }),
     ];
 
-    // Simulate what --review does when user chooses 'keep'
+    // Simulate curation clearing staleness flag after file is restored
     const updated = original.map(o => {
       if (o.id === '1') {
         const copy = { ...o };
         delete copy.mayBeStale;
-        delete copy.needsReview;
-        delete copy.softCapExceeded;
         return copy;
       }
       return o;
     });
 
     expect(updated[0].status).toBe('created');
-    expect(updated[0].needsReview).toBeUndefined();
+    expect(updated[0].mayBeStale).toBeUndefined();
 
     const logContent = serializeLog(updated);
     const parsed = parseLearningLog(logContent);
-    expect(parsed[0].needsReview).toBeUndefined();
+    expect(parsed[0].mayBeStale).toBeUndefined();
   });
 });
 
@@ -387,32 +379,33 @@ describe('--dismiss-capacity notification', () => {
   });
 });
 
-describe('learn --review simplified (no mode picker)', () => {
-  it('learn --review flagged filter only includes mayBeStale/needsReview/softCapExceeded', () => {
-    // After the port, learn --review goes straight to observations.
-    // Verify that the filtering logic only surfaces the three attention flags.
+describe('staleness filter (mayBeStale only)', () => {
+  // After removal of needsReview and softCapExceeded, only mayBeStale remains as a
+  // stale-detection flag. The LLM sidecar processor uses staleness.cjs output as a
+  // signal (not auto-deletion) to deprioritize reinforcing observations whose
+  // referenced files are missing.
+
+  it('flagged filter only includes mayBeStale observations', () => {
     const obs: LearningObservation[] = [
       makeObs({ id: 'w1', type: 'workflow', pattern: 'stale workflow', mayBeStale: true }),
       makeObs({ id: 'w2', type: 'workflow', pattern: 'normal workflow' }),
-      makeObs({ id: 'w3', type: 'procedural', pattern: 'needs review', needsReview: true }),
-      makeObs({ id: 'w4', type: 'procedural', pattern: 'cap exceeded', softCapExceeded: true }),
+      makeObs({ id: 'w3', type: 'procedural', pattern: 'normal procedural' }),
     ];
 
-    const flagged = obs.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
-    expect(flagged).toHaveLength(3);
-    expect(flagged.map(o => o['id'])).toContain('w1');
-    expect(flagged.map(o => o['id'])).toContain('w3');
-    expect(flagged.map(o => o['id'])).toContain('w4');
+    const flagged = obs.filter(o => o.mayBeStale);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]['id']).toBe('w1');
     expect(flagged.map(o => o['id'])).not.toContain('w2');
+    expect(flagged.map(o => o['id'])).not.toContain('w3');
   });
 
-  it('learn --review flagged filter excludes non-flagged observations', () => {
+  it('flagged filter excludes non-stale observations', () => {
     const obs: LearningObservation[] = [
       makeObs({ id: 'w1', type: 'workflow', pattern: 'stale workflow', mayBeStale: true }),
       makeObs({ id: 'w2', type: 'workflow', pattern: 'normal workflow' }),
     ];
 
-    const flagged = obs.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
+    const flagged = obs.filter(o => o.mayBeStale);
     expect(flagged).toHaveLength(1);
     expect(flagged[0]['id']).toBe('w1');
   });

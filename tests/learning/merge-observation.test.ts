@@ -47,6 +47,34 @@ describe('merge-observation — id-keyed reinforce', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('E1: self-creates parent dir and log file when both are absent (fresh project)', () => {
+    // D54: merge-observation creates parent directory on first write, matching
+    // the behaviour process-observations had. Callers do not need to pre-create the log dir.
+    const deepLogDir = path.join(tmpDir, 'nested', 'subdir');
+    const deepLogFile = path.join(deepLogDir, 'learning-log.jsonl');
+    // Neither directory nor file exists yet.
+    expect(fs.existsSync(deepLogDir)).toBe(false);
+
+    const newObs = JSON.stringify({
+      id: 'obs_e1fresh',
+      type: 'workflow',
+      pattern: 'first write on fresh project',
+      evidence: ['initial evidence'],
+      details: 'step 1',
+      quality_ok: true,
+      confidence: 0.5,
+      status: 'observing',
+    });
+
+    runHelper(`merge-observation "${deepLogFile}" '${newObs}'`);
+
+    expect(fs.existsSync(deepLogDir)).toBe(true);
+    expect(fs.existsSync(deepLogFile)).toBe(true);
+    const entries = readLog(deepLogFile);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]['id']).toBe('obs_e1fresh');
+  });
+
   it('reinforces existing entry when id matches', () => {
     fs.writeFileSync(logFile, JSON.stringify(baseLogEntry('obs_m001')) + '\n');
 

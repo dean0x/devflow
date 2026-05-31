@@ -17,8 +17,6 @@ interface RawObservation {
   type: ObservationType;
   status: string;
   mayBeStale?: boolean;
-  needsReview?: boolean;
-  softCapExceeded?: boolean;
 }
 
 /** Returns true when v is undefined, or a boolean. Rejects any other value. */
@@ -35,7 +33,7 @@ function isRawObservation(val: unknown): val is RawObservation {
   if (!(VALID_OBSERVATION_TYPES as readonly string[]).includes(o.type)) return false;
 
   // Phase 2: optional boolean flags
-  return isOptBool(o.mayBeStale) && isOptBool(o.needsReview) && isOptBool(o.softCapExceeded);
+  return isOptBool(o.mayBeStale);
 }
 
 /**
@@ -68,7 +66,7 @@ function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
     parsedAny = true;
 
     // Count attention flags regardless of status
-    if (parsed.mayBeStale || parsed.needsReview || parsed.softCapExceeded) {
+    if (parsed.mayBeStale) {
       counts.needReview++;
     }
 

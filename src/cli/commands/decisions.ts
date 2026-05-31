@@ -99,7 +99,6 @@ export const decisionsCommand = new Command('decisions')
       const ready = decisionObs.filter(o => o.status === 'ready');
       const observing = decisionObs.filter(o => o.status === 'observing');
       const deprecated = decisionObs.filter(o => o.status === 'deprecated');
-      const needReview = decisionObs.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
 
       const lines: string[] = [`Decisions learning: ${enabled ? 'enabled' : 'disabled'}`];
       if (decisionObs.length === 0) {
@@ -108,9 +107,6 @@ export const decisionsCommand = new Command('decisions')
         lines.push(`Observations: ${decisionObs.length} total`);
         lines.push(`  Decisions: ${decisions.length}, Pitfalls: ${pitfalls.length}`);
         lines.push(`  Status: ${observing.length} observing, ${ready.length} ready, ${created.length} promoted, ${deprecated.length} deprecated`);
-        if (needReview.length > 0) {
-          lines.push(`  ${color.yellow('⚠')} ${needReview.length} flagged (stale/missing/capacity)`);
-        }
       }
       p.log.info(lines.join('\n'));
       warnIfInvalid(invalidCount);

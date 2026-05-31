@@ -31,11 +31,6 @@ export interface LearningObservation {
   /** Set by staleness checker (D16) when code refs in artifact file are missing */
   mayBeStale?: boolean;
   staleReason?: string;
-  /** Set by merge-observation when an incoming observation's details diverge
-   *  significantly from the existing entry (Levenshtein ratio < 0.6). See D14. */
-  needsReview?: boolean;
-  /** D17: Set when decisions file hits hard ceiling (100 entries) — repurposed from 50 soft cap */
-  softCapExceeded?: boolean;
   quality_ok?: boolean;
 }
 
@@ -95,17 +90,3 @@ export function loadAndCountObservations(logContent: string): {
   return { observations, invalidCount: rawLines - observations.length };
 }
 
-/**
- * Format a stale reason string for display.
- */
-export function formatStaleReason(obs: LearningObservation): string {
-  const reasons: string[] = [];
-  if (obs.mayBeStale && obs.staleReason) {
-    reasons.push(`stale: ${obs.staleReason}`);
-  } else if (obs.mayBeStale) {
-    reasons.push('may be stale');
-  }
-  if (obs.needsReview) reasons.push('artifact missing (deleted?)');
-  if (obs.softCapExceeded) reasons.push('decisions file at capacity');
-  return reasons.join(', ') || 'flagged for review';
-}

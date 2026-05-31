@@ -69,14 +69,10 @@ export function formatLearningStatus(observations: LearningObservation[], enable
   const ready = observations.filter((o) => o.status === 'ready');
   const observing = observations.filter((o) => o.status === 'observing');
   const deprecated = observations.filter((o) => o.status === 'deprecated');
-  const needReview = observations.filter((o) => o.mayBeStale || o.needsReview || o.softCapExceeded);
 
   lines.push(`Observations: ${observations.length} total`);
   lines.push(`  Workflows: ${workflows.length}, Procedural: ${procedurals.length}, Decisions: ${decisions.length}, Pitfalls: ${pitfalls.length}`);
   lines.push(`  Status: ${observing.length} observing, ${ready.length} ready, ${created.length} promoted, ${deprecated.length} deprecated`);
-  if (needReview.length > 0) {
-    lines.push(`  ${color.yellow('⚠')} ${needReview.length} flagged (stale/missing/capacity)`);
-  }
 
   return lines.join('\n');
 }

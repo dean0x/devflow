@@ -69,18 +69,19 @@ describe('getLearningCounts', () => {
     expect(result!.needReview).toBe(0);
   });
 
-  it('counts needReview from attention flags regardless of status', () => {
+  it('counts needReview from mayBeStale flag regardless of status', () => {
+    // needsReview and softCapExceeded removed in Part A — only mayBeStale remains.
     const lines = [
       makeEntry('workflow', 'created', { mayBeStale: true, staleReason: 'code-ref-missing:src/foo.ts' }),
-      makeEntry('decision', 'created', { softCapExceeded: true }),
-      makeEntry('pitfall', 'observing', { needsReview: true }),
+      makeEntry('decision', 'created'),
+      makeEntry('pitfall', 'observing'),
       makeEntry('procedural', 'created'), // no flags
     ];
     fs.writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
 
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.needReview).toBe(3);
+    expect(result!.needReview).toBe(1); // only mayBeStale counts
     expect(result!.workflows).toBe(1); // stale but still created
     expect(result!.decisions).toBe(1);
     expect(result!.pitfalls).toBe(0); // observing, not created
@@ -140,15 +141,16 @@ describe('getLearningCounts', () => {
     expect(result!.decisions).toBe(1);
   });
 
-  it('all flags count independently — entry with multiple flags counts once', () => {
+  it('mayBeStale flag counts the entry once', () => {
+    // Only mayBeStale remains after Part A removal of needsReview/softCapExceeded.
     const lines = [
-      makeEntry('workflow', 'created', { mayBeStale: true, softCapExceeded: true }), // both flags but 1 entry
+      makeEntry('workflow', 'created', { mayBeStale: true }),
     ];
     fs.writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
 
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.needReview).toBe(1); // counted once, not twice
+    expect(result!.needReview).toBe(1); // counted once
   });
 });
 
@@ -351,7 +353,8 @@ describe('getLearningCounts dual-log merging', () => {
     expect(result).toBeNull();
   });
 
-  it('merges needReview attention flags from both logs', () => {
+  it('merges needReview attention flags from both logs (mayBeStale only)', () => {
+    // needsReview and softCapExceeded removed in Part A — only mayBeStale counts.
     const learningLines = [
       makeEntry('workflow', 'created', { mayBeStale: true }),
       makeEntry('procedural', 'created'),
@@ -359,15 +362,15 @@ describe('getLearningCounts dual-log merging', () => {
     fs.writeFileSync(learningLogPath, learningLines.join('\n') + '\n', 'utf-8');
 
     const decisionsLines = [
-      makeEntry('decision', 'created', { softCapExceeded: true }),
-      makeEntry('pitfall', 'created', { needsReview: true }),
+      makeEntry('decision', 'created', { mayBeStale: true }),
+      makeEntry('pitfall', 'created'),
     ];
     fs.writeFileSync(decisionsLogPath, decisionsLines.join('\n') + '\n', 'utf-8');
 
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    // 3 entries with attention flags across both logs
-    expect(result!.needReview).toBe(3);
+    // 2 entries with mayBeStale flag across both logs
+    expect(result!.needReview).toBe(2);
   });
 
   it('returns null when both log files are empty', () => {

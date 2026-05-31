@@ -165,16 +165,17 @@ describe('decisions --status count logic', () => {
     expect(deprecated).toHaveLength(1);
   });
 
-  it('identifies entries needing attention via attention flags', () => {
+  it('identifies entries needing attention via mayBeStale flag', () => {
+    // needsReview and softCapExceeded removed in Part A — only mayBeStale remains.
     const observations = [
       makeDecisionObs({ id: 'obs_d_001', type: 'decision', mayBeStale: true }),
-      makeDecisionObs({ id: 'obs_d_002', type: 'decision', needsReview: true }),
+      makeDecisionObs({ id: 'obs_d_002', type: 'decision' }),
       makeDecisionObs({ id: 'obs_d_003', type: 'decision' }),
     ];
 
-    const needReview = observations.filter(o => o.mayBeStale || o.needsReview || o.softCapExceeded);
+    const needReview = observations.filter(o => o.mayBeStale);
 
-    expect(needReview).toHaveLength(2);
+    expect(needReview).toHaveLength(1);
   });
 });
 

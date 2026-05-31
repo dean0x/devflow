@@ -26,8 +26,6 @@
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   learning-created <file>               Extract created artifacts from learning log
 //   learning-new <file> <since_epoch>     Find new artifacts since epoch
-//   process-observations <resp> <log>     Merge model observations into learning log (id-keyed record)
-//   create-artifacts <resp> <log> <dir>   Create command/skill files from ready observations
 //   filter-observations <file> [sort] [n] Filter valid observations, sort desc, limit
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
 //   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
@@ -579,211 +577,6 @@ try {
       break;
     }
 
-    case 'process-observations': {
-      // ID-keyed record op: given an obs_xxx id, either create a new observation entry
-      // or, if the id exists, increment count, merge evidence, update last_seen.
-      // The LLM-provided confidence, status, and quality_ok fields are stored verbatim
-      // (no calculateConfidence / tryImmediatePromotion — the LLM decides promotion).
-      // The full read-modify-write is atomic under the existing .reinforce.lock.
-      const responseFile = safePath(args[0]);
-      const logFile = safePath(args[1]);
-
-      // Optional --types workflow,procedural (or --types decision,pitfall) filter.
-      // When present, only observations whose type is in the allowed set are processed.
-      // When absent, all types are processed.
-      let typeFilter = null;
-      const typesArgIdx = args.indexOf('--types');
-      if (typesArgIdx !== -1 && args[typesArgIdx + 1]) {
-        typeFilter = new Set(args[typesArgIdx + 1].split(',').map(t => t.trim()).filter(Boolean));
-      }
-
-      const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
-      const observations = response.observations || [];
-
-      let logEntries = [];
-      if (fs.existsSync(logFile)) {
-        logEntries = parseJsonl(logFile);
-      }
-      const logMap = new Map(logEntries.map(e => [e.id, e]));
-      const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-      let updated = 0, created = 0, skipped = 0;
-
-      // All 4 types are supported
-      const VALID_TYPES = new Set(['workflow', 'procedural', 'decision', 'pitfall']);
-
-      for (let i = 0; i < observations.length; i++) {
-        const obs = observations[i];
-        if (!obs.id || !obs.type || !obs.pattern) {
-          learningLog(`Skipping observation ${i}: missing required field (id='${obs.id || ''}' type='${obs.type || ''}')`);
-          skipped++;
-          continue;
-        }
-        if (!VALID_TYPES.has(obs.type)) {
-          learningLog(`Skipping observation ${i}: invalid type '${obs.type}'`);
-          skipped++;
-          continue;
-        }
-        // Type filter: skip observations not in the allowed set (when filter is active)
-        if (typeFilter !== null && !typeFilter.has(obs.type)) {
-          learningLog(`Skipping observation ${i}: type '${obs.type}' not in filter [${[...typeFilter].join(',')}]`);
-          skipped++;
-          continue;
-        }
-        if (!obs.id.startsWith('obs_')) {
-          learningLog(`Skipping observation ${i}: invalid id format '${obs.id}'`);
-          skipped++;
-          continue;
-        }
-
-        // Store quality_ok from the model (LLM sets quality_ok)
-        const qualityOk = obs.quality_ok === true;
-
-        const existing = logMap.get(obs.id);
-        if (existing) {
-          // Reinforce: increment count, merge evidence, update timestamps + pattern/details.
-          // Store the LLM-provided confidence and status verbatim (no recalculation).
-          const newCount = (existing.observations || 0) + 1;
-          existing.observations = newCount;
-          existing.evidence = mergeEvidence(existing.evidence || [], obs.evidence || []);
-          // LLM-set confidence/status stored verbatim; quality_ok is sticky once true
-          if (typeof obs.confidence === 'number') existing.confidence = obs.confidence;
-          if (obs.status) existing.status = obs.status;
-          existing.last_seen = nowIso;
-          if (obs.pattern) existing.pattern = obs.pattern;
-          if (obs.details) existing.details = obs.details;
-          if (qualityOk) existing.quality_ok = true;
-
-          learningLog(`Updated ${obs.id}: count=${newCount}, status=${existing.status}`);
-          updated++;
-        } else {
-          // New entry — store all LLM-provided fields verbatim
-          const newEntry = {
-            id: obs.id,
-            type: obs.type,
-            pattern: obs.pattern,
-            confidence: typeof obs.confidence === 'number' ? obs.confidence : 0,
-            observations: 1,
-            first_seen: nowIso,
-            last_seen: nowIso,
-            status: obs.status || 'observing',
-            evidence: obs.evidence || [],
-            details: obs.details || '',
-            quality_ok: qualityOk,
-          };
-          logMap.set(obs.id, newEntry);
-
-          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${newEntry.confidence} quality_ok=${qualityOk}`);
-          created++;
-        }
-      }
-
-      const logDir = path.dirname(logFile);
-      if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-      }
-      writeJsonlAtomic(logFile, Array.from(logMap.values()));
-      console.log(JSON.stringify({ updated, created, skipped }));
-      break;
-    }
-
-    case 'create-artifacts': {
-      const responseFile = safePath(args[0]);
-      const logFile = safePath(args[1]);
-      const baseDir = safePath(args[2]);
-      const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
-      const artifacts = response.artifacts || [];
-
-      if (artifacts.length === 0) {
-        console.log(JSON.stringify({ created: [], skipped: 0 }));
-        break;
-      }
-
-      let logEntries = [];
-      if (fs.existsSync(logFile)) {
-        logEntries = parseJsonl(logFile);
-      }
-      const logMap = new Map(logEntries.map(e => [e.id, e]));
-      const createdPaths = [];
-      let skippedCount = 0;
-      const artDate = new Date().toISOString().slice(0, 10);
-
-      for (const art of artifacts) {
-        let name = (art.name || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 50);
-        if (!name) {
-          learningLog('Skipping artifact with empty/invalid name');
-          skippedCount++;
-          continue;
-        }
-
-        const obs = logMap.get(art.observation_id);
-        if (!obs || obs.status !== 'ready') {
-          learningLog(`Skipping artifact for ${art.observation_id} (status: ${obs ? obs.status : 'not found'}, need: ready)`);
-          skippedCount++;
-          continue;
-        }
-
-        let artDir, artPath;
-        if (art.type === 'command') {
-          artDir = path.join(baseDir, '.claude', 'commands', 'self-learning');
-          artPath = path.join(artDir, `${name}.md`);
-        } else {
-          artDir = path.join(baseDir, '.claude', 'skills', name);
-          artPath = path.join(artDir, 'SKILL.md');
-        }
-
-        if (fs.existsSync(artPath)) {
-          learningLog(`Artifact already exists at ${artPath} — skipping`);
-          skippedCount++;
-          continue;
-        }
-
-        const desc = (art.description || '').replace(/"/g, '\\"');
-        const conf = obs.confidence || 0;
-        const obsN = obs.observations || 0;
-
-        fs.mkdirSync(artDir, { recursive: true });
-
-        let content;
-        if (art.type === 'command') {
-          content = [
-            '---',
-            `description: "${desc}"`,
-            `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
-            '---',
-            '',
-            stripLeadingFrontmatter(art.content || ''),
-            '',
-          ].join('\n');
-        } else {
-          content = [
-            '---',
-            `name: self-learning:${name}`,
-            `description: "${desc}"`,
-            'user-invocable: false',
-            'allowed-tools: Read, Grep, Glob',
-            `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
-            '---',
-            '',
-            stripLeadingFrontmatter(art.content || ''),
-            '',
-          ].join('\n');
-        }
-
-        fs.writeFileSync(artPath, content);
-        obs.status = 'created';
-        obs.artifact_path = artPath;
-        learningLog(`Created artifact: ${artPath}`);
-        createdPaths.push(artPath);
-      }
-
-      if (createdPaths.length > 0) {
-        writeJsonlAtomic(logFile, Array.from(logMap.values()));
-      }
-
-      console.log(JSON.stringify({ created: createdPaths, skipped: skippedCount }));
-      break;
-    }
-
     case 'filter-observations': {
       const file = args[0];
       const sortField = args[1] || 'confidence';
@@ -812,7 +605,12 @@ try {
     // If the id is new, insert a new entry with LLM-provided fields verbatim.
     // D11: ID collision with different-type entry → suffix _b to avoid trampling.
     // D12: evidence array capped at 10 (FIFO).
-    // Atomic under the .reinforce.lock held by the caller.
+    // D53: merge-observation is locked EXTERNALLY by the caller (SKILL.md processor acquires/
+    // releases .devflow/sidecar/.reinforce.lock around the Bash subshell call), while
+    // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
+    // domains — merge-observation itself never acquires a lock; it relies on the caller to
+    // serialize concurrent writes. This is intentional: the subshell pattern in the processor
+    // spec acquires the lock, invokes this op, and releases — all in a single Bash call.
     // -------------------------------------------------------------------------
     case 'merge-observation': {
       const logFile = safePath(args[0]);
@@ -821,6 +619,14 @@ try {
       try { newObs = JSON.parse(newObsJson); } catch {
         process.stderr.write('merge-observation: invalid JSON for new observation\n');
         process.exit(1);
+      }
+
+      // D54 (E1): self-create parent directory on first write (fresh project, file+dir absent).
+      // process-observations had this; merge-observation now matches its behavior so callers
+      // do not need to pre-create the log directory.
+      const logDir = path.dirname(logFile);
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
       }
 
       let logEntries = [];

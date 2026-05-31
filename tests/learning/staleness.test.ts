@@ -8,8 +8,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process'; // used by process-observations integration tests below
-import { JSON_HELPER } from './helpers.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -136,39 +134,6 @@ describe('staleness detection (D16)', () => {
   });
 });
 
-describe('staleness — via json-helper process-observations integration', () => {
-  let tmpDir: string;
-  let logFile: string;
-  let responseFile: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-int-test-'));
-    logFile = path.join(tmpDir, 'learning-log.jsonl');
-    responseFile = path.join(tmpDir, 'response.json');
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('process-observations stores observations correctly (base for staleness)', () => {
-    const response = {
-      observations: [{
-        id: 'obs_base001',
-        type: 'procedural',
-        pattern: 'check lock files',
-        evidence: ['check .devflow/learning/.learning.lock first'],
-        details: 'When debugging: check scripts/hooks/json-helper.cjs for errors',
-        quality_ok: true,
-      }],
-    };
-    fs.writeFileSync(responseFile, JSON.stringify(response));
-
-    execSync(`node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`, { encoding: 'utf8' });
-
-    const entries = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
-    expect(entries[0].id).toBe('obs_base001');
-    // Staleness is checked separately in shell script — just verify the observation was stored
-    expect(entries[0].status).toBe('observing');
-  });
-});
+// process-observations integration block removed in Part A — op was removed (zero
+// production callers). The staleness signal is now consumed directly by the LLM
+// sidecar-processor via staleness.cjs invocation during the learning phase. See SKILL.md.

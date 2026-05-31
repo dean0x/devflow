@@ -40,9 +40,7 @@ export interface LogEntry {
   details: string;
   quality_ok?: boolean;
   artifact_path?: string;
-  softCapExceeded?: boolean;
   deprecated_at?: string;
-  needsReview?: boolean;
   mayBeStale?: boolean;
   staleReason?: string;
 }
