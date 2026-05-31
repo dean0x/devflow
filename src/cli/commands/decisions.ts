@@ -16,7 +16,6 @@ import {
   getDecisionsBatchIdsPath,
   getDecisionsDisabledSentinel,
 } from '../utils/project-paths.js';
-import { loadDecisionsConfig } from '../utils/decisions-config.js';
 import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
 import { getGitRoot } from '../utils/git.js';
 import {

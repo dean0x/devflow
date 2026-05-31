@@ -270,14 +270,9 @@ function mergeEvidence(oldEvidence, newEvidence) {
 
 /**
  * Acquire a mkdir-based lock. Returns true on success, false on timeout.
- * DESIGN: Shared locking utility used by render-ready, reconcile-manifest, merge-observation,
- * and decisions-append. Callers pass their own timeoutMs/staleMs to suit their workload:
- *   - .decisions.lock writes (render-ready, decisions-append): 30 000 ms / 60 000 ms stale
- *   - .learning.lock (reconcile-manifest): 15 000 ms / 60 000 ms stale
- *   - .decisions-usage.lock (acquireDecisionsUsageLock): 2 000 ms / 5 000 ms stale
- * The bash acquire_lock in background-learning uses different defaults (90 s wait / 300 s stale)
- * because it guards the entire Sonnet analysis pipeline (up to 180 s watchdog timeout), not
- * just file I/O. Those higher values are intentional — see background-learning:68-81.
+ * DESIGN: Shared locking utility used by merge-observation and decisions-append.
+ * Callers pass their own timeoutMs/staleMs to suit their workload:
+ *   - .decisions.lock writes (decisions-append): 30 000 ms / 60 000 ms stale
  *
  * @param {string} lockDir - path to lock directory
  * @param {number} [timeoutMs=30000] - max wait in milliseconds
@@ -809,31 +804,6 @@ try {
       console.log(JSON.stringify(valid.slice(0, limit)));
       break;
     }
-
-    // render-ready removed in Phase 3 (reliable LLM sidecar consumption).
-    // The LLM now decides confidence/status/promotion; deterministic rendering is gone.
-    case 'render-ready': {
-      process.stderr.write('json-helper: render-ready has been removed (use decisions-append for decisions/pitfalls)\n');
-      process.exit(1);
-      break;
-    }
-
-    // reconcile-manifest removed in Phase 3 — no manifests written any more.
-    case 'reconcile-manifest': {
-      process.stderr.write('json-helper: reconcile-manifest has been removed\n');
-      process.exit(1);
-      break;
-    }
-
-    // temporal-decay removed in Phase 3 — decay logic was part of the deterministic
-    // confidence system which has been replaced by LLM-set confidence.
-    case 'temporal-decay': {
-      process.stderr.write('json-helper: temporal-decay has been removed\n');
-      process.exit(1);
-      break;
-    }
-
-    // (tombstone bodies removed)
 
     // -------------------------------------------------------------------------
     // merge-observation <log> <newObsJson>

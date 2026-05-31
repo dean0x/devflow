@@ -285,12 +285,15 @@ node "$HOME/.devflow/scripts/hooks/json-helper.cjs" count-active \
   ".devflow/decisions/decisions.md" "decision"
 node "$HOME/.devflow/scripts/hooks/json-helper.cjs" count-active \
   ".devflow/decisions/pitfalls.md" "pitfall"
-# Cite counts (scan current session context for ADR/PF references)
-echo "" | node "$HOME/.devflow/scripts/hooks/decisions-usage-scan.cjs" --cwd "$(pwd)"
 ```
 
 Also read `.devflow/decisions/decisions.md`, `.devflow/decisions/pitfalls.md`,
-`.devflow/decisions/decisions-log.jsonl`, and `.devflow/decisions/.decisions-usage.json` (cite counts).
+`.devflow/decisions/decisions-log.jsonl`, and `.devflow/decisions/.decisions-usage.json`.
+
+Cite counts come from `.decisions-usage.json` — read it directly. Each entry is keyed by
+anchor ID (`ADR-NNN` / `PF-NNN`) with `{ cites, last_cited, created }`. There is no separate
+"scan" step here: `decisions-usage-scan.cjs` is a write-path tool that increments cite counts
+from session text, not a reporter — do not call it from the curation task.
 
 **LLM judgment — identify entries to deprecate or merge**:
 
@@ -303,25 +306,30 @@ Merge near-duplicates: when two entries cover the same concern, deprecate the le
 and update the surviving entry to absorb the key insight.
 
 **DEPRECATE, NEVER DELETE** (append-only invariant):
-Flip status to `- **Status**: Deprecated` (exact literal — decisions-index.cjs matches this).
-Rewrite the TL;DR by calling `decisions-append` on a synthetic "curation" observation — this
-triggers `buildUpdatedTldr` which recounts active entries. Alternatively, directly edit the
-`- **Status**: ...` line and the TL;DR comment line — both must be updated together.
+Curation deprecates an *existing* entry by directly editing two lines together:
+1. Flip its status to `- **Status**: Deprecated` (exact literal — decisions-index.cjs matches this).
+2. Rewrite the TL;DR comment (`<!-- TL;DR: N decisions. Key: ... -->`) so the count drops by one
+   and the deprecated ID is dropped from the `Key:` list.
 
-When editing `.devflow/decisions/decisions.md` or `.devflow/decisions/pitfalls.md` directly,
-acquire the decisions lock first:
-```bash
-(
-  LOCK=".devflow/decisions/.decisions.lock"
-  mkdir "$LOCK" 2>/dev/null || { sleep 2; mkdir "$LOCK" 2>/dev/null || exit 1; }
-  # --- edit the file here (Edit tool call is inside this single Bash block) ---
-  rmdir "$LOCK" 2>/dev/null || true
-)
-```
-Note: the Edit tool call cannot be nested inside a Bash call. Instead, acquire the lock in
-one Bash call, perform the Edit tool call, then release the lock in another Bash call.
-Maximum time between acquire and release: complete the edit immediately. Do not interleave
-other tool calls between acquire and release.
+Do NOT use `decisions-append` for deprecation. `decisions-append` *appends a new* ADR/PF entry
+and acquires `.decisions.lock` internally — calling it while you already hold that lock (below)
+would deadlock, and appending is the wrong operation for deprecating an existing entry.
+
+Editing the file requires holding `.decisions.lock` across the read-modify-write. Because the
+Edit tool call cannot be nested inside a Bash call, split the lock lifecycle across three calls
+and acquire the lock EXACTLY ONCE — never re-acquire it inside this window:
+1. Bash call: acquire the lock.
+   ```bash
+   LOCK=".devflow/decisions/.decisions.lock"
+   mkdir "$LOCK" 2>/dev/null || { sleep 2; mkdir "$LOCK" 2>/dev/null || { echo "lock busy"; exit 1; }; }
+   ```
+2. Edit tool call(s): flip the `- **Status**:` line and rewrite the TL;DR comment line.
+3. Bash call: release the lock.
+   ```bash
+   rmdir ".devflow/decisions/.decisions.lock" 2>/dev/null || true
+   ```
+Complete the edit immediately. Do not interleave other tool calls (especially any plumbing op
+that takes `.decisions.lock`) between acquire and release.
 
 **Citation preservation**: if an entry being deprecated has inbound `applies ADR-NNN` citations
 in other entries, update those entries to reference the surviving entry instead.

@@ -25,7 +25,6 @@ import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/lear
 import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
 import {
   type LearningObservation,
-  loadAndCountObservations,
 } from '../utils/observations.js';
 import {
   readObservations,
