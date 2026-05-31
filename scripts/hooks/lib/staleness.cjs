@@ -5,10 +5,26 @@
 // then checks whether those files still exist on disk. Entries referencing
 // missing files are flagged with mayBeStale=true and a staleReason string.
 //
-// This module is the single source of truth for the staleness algorithm —
-// background-learning delegates to it via `node lib/staleness.cjs` rather
-// than re-implementing the logic in shell. Tests import it directly to test
-// the real implementation.
+// This module is the single source of truth for the staleness algorithm.
+//
+/**
+ * D55: Staleness as a processor signal, not a CLI display surface.
+ *
+ * Originally this module was wired into the background-learning shell script
+ * (via `node lib/staleness.cjs`) for direct file annotation, and the CLI
+ * displayed `⚠ N flagged` counts from the needsReview/softCapExceeded fields.
+ *
+ * After the LLM-driven sidecar refactor (Part B):
+ * - The sole live caller is the SessionStart LLM sidecar-processor agent,
+ *   which invokes `node staleness.cjs <logFile> <cwd>` during the learning
+ *   and curation phases to annotate log entries with mayBeStale before
+ *   deciding whether to reinforce or deprecate them.
+ * - The CLI display surface (needsReview/softCapExceeded flags, `⚠ flagged`
+ *   output lines) has been removed; staleness is now a SIGNAL to the LLM, not
+ *   a user-facing count.
+ * - The module contract is unchanged: input = JSONL log path + cwd;
+ *   output = in-place file annotation with mayBeStale/staleReason.
+ */
 
 'use strict';
 

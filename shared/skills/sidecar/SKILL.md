@@ -134,6 +134,24 @@ Read the merged `userSignals`. Cap at last 30 signals.
 Read `.devflow/learning/learning-log.jsonl` in full (needed for recurrence patterns).
 Read the existing learning artifacts (commands under `.claude/commands/self-learning/`, skills under `.claude/skills/`).
 
+**Staleness signal** (run once per learning task, before reinforcing):
+
+```bash
+node "$HOME/.devflow/scripts/hooks/lib/staleness.cjs" \
+  ".devflow/learning/learning-log.jsonl" \
+  "$(pwd)"
+```
+
+This updates `mayBeStale` + `staleReason` on entries whose referenced files no longer
+exist on disk. The output is **a signal, not an automatic deleter**: entries flagged
+`mayBeStale: true` should receive **lower priority** for reinforcement and promotion.
+- If an observation has `mayBeStale: true`, do not promote it to `status: "created"` in
+  this run. Continue observing and re-evaluate once the referenced file is restored.
+- If an observation is already `status: "created"`, note the staleness in evidence but
+  do not demote it — the artifact may still be useful.
+- After running staleness.cjs, re-read the log (or use the in-memory JSON it wrote back)
+  before looping over observations to reinforce.
+
 **LLM judgment — semantic matching and detection**:
 
 Detect WORKFLOW patterns (repeated multi-step sequences) and PROCEDURAL patterns (domain knowledge,
@@ -294,6 +312,20 @@ Cite counts come from `.decisions-usage.json` — read it directly. Each entry i
 anchor ID (`ADR-NNN` / `PF-NNN`) with `{ cites, last_cited, created }`. There is no separate
 "scan" step here: `decisions-usage-scan.cjs` is a write-path tool that increments cite counts
 from session text, not a reporter — do not call it from the curation task.
+
+**Staleness signal** (run once per curation task, before selecting candidates):
+
+```bash
+node "$HOME/.devflow/scripts/hooks/lib/staleness.cjs" \
+  ".devflow/decisions/decisions-log.jsonl" \
+  "$(pwd)"
+```
+
+Entries flagged `mayBeStale: true` in the log (their referenced files no longer exist) are
+**preferred deprecation candidates**, WITHIN the existing 7-day protection window and ≤5-changes
+bounds. This is a signal to prefer — not an automatic deprecation. Apply normal LLM judgment:
+a stale-referenced entry that is otherwise heavily cited should survive over one that is
+uncited and stale.
 
 **LLM judgment — identify entries to deprecate or merge**:
 
