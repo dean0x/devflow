@@ -33,6 +33,27 @@
 #       for manual/next-run handling (non-destructive).
 #   - Requires: get_mtime() (source get-mtime before calling), dbg(), log()
 #   - No set -e: every path exits cleanly.
+#
+# D56a: Per-type stale thresholds.
+#   memory = 300s (5 min) because the memory agent is fast — if it is still
+#   running after 5 minutes the session almost certainly crashed. All other
+#   types (learning, decisions, knowledge, curation) run the LLM and may take
+#   up to 30 minutes on large logs or slow models; 1800s avoids yanking an
+#   actively-running processor.
+#
+# D56b: JUST_RECOVERED guard.
+#   When sidecar_recover_stale renames a .processing back to .json, it records
+#   the basename in JUST_RECOVERED. sidecar_collect_tasks reads this list and
+#   preserves the existing .retries counter for recovered markers instead of
+#   resetting it. Without this guard, a marker that has failed 2/3 times would
+#   have its counter silently reset to 0 on recovery, defeating MAX_RETRIES.
+#
+# D56c: Orphaned .pending-turns.processing non-clobber recovery.
+#   The memory agent renames .pending-turns.jsonl → .pending-turns.processing
+#   as an atomic claim. If the session crashes mid-processing, .jsonl is gone
+#   and .processing is orphaned. Recovery renames it back ONLY when .jsonl does
+#   not already exist — this prevents clobbering a fresh .jsonl that a concurrent
+#   session may have written while the prior session's .processing was stale.
 
 # JUST_RECOVERED is the output variable — consumed by sidecar_collect_tasks
 JUST_RECOVERED=""
