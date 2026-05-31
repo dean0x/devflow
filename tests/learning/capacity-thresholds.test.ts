@@ -1,8 +1,12 @@
+// tests/learning/capacity-thresholds.test.ts
+// Tests for countActiveHeadings, usage file read/write, and registerUsageEntry.
+// Phase 3: capacity notification tests and render-ready capacity integration removed
+// (capacity enforcement was part of the deterministic judgment layer, now replaced by LLM).
+
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { runHelper } from './helpers.js';
 
 // json-helper.cjs is a CJS script — require it for the exported helpers
 // @ts-expect-error — CJS module without type declarations
@@ -53,8 +57,6 @@ describe('countActiveHeadings', () => {
   });
 
   it('does not bleed status from a later entry into an earlier one', () => {
-    // Regression: when entry N has no Status line, the lookup must not find
-    // entry N+1's Deprecated status and incorrectly skip entry N.
     const content = [
       '## ADR-001: Active without Status field',
       '- **Date**: 2026-01-01',
@@ -65,32 +67,6 @@ describe('countActiveHeadings', () => {
       '- **Status**: Deprecated',
     ].join('\n');
     expect(helpers.countActiveHeadings(content, 'decision')).toBe(1);
-  });
-});
-
-describe('crossedThresholds', () => {
-  it('returns empty for no change', () => {
-    expect(helpers.crossedThresholds(50, 50)).toEqual([]);
-  });
-
-  it('returns empty for decrease', () => {
-    expect(helpers.crossedThresholds(60, 55)).toEqual([]);
-  });
-
-  it('returns single threshold crossing', () => {
-    expect(helpers.crossedThresholds(49, 50)).toEqual([50]);
-  });
-
-  it('returns multiple threshold crossings', () => {
-    expect(helpers.crossedThresholds(49, 61)).toEqual([50, 60]);
-  });
-
-  it('handles fine-grained thresholds above 90', () => {
-    expect(helpers.crossedThresholds(90, 93)).toEqual([91, 92, 93]);
-  });
-
-  it('caps at 100', () => {
-    expect(helpers.crossedThresholds(99, 105)).toEqual([100]);
   });
 });
 
@@ -116,29 +92,6 @@ describe('usage file read/write', () => {
     helpers.writeUsageFile(tmpDir, data);
     const read = helpers.readUsageFile(tmpDir);
     expect(read).toEqual(data);
-  });
-});
-
-describe('notifications read/write', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notif-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('returns empty object when file missing', () => {
-    expect(helpers.readNotifications(tmpDir)).toEqual({});
-  });
-
-  it('round-trips notification data', () => {
-    const data = { 'decisions-capacity-decisions': { active: true, threshold: 50, count: 50, ceiling: 100 } };
-    helpers.writeNotifications(tmpDir, data);
-    expect(helpers.readNotifications(tmpDir)).toEqual(data);
   });
 });
 
@@ -168,152 +121,5 @@ describe('registerUsageEntry', () => {
     helpers.registerUsageEntry(tmpDir, 'ADR-001');
     const data = helpers.readUsageFile(tmpDir);
     expect(data.entries['ADR-001'].cites).toBe(5);
-  });
-});
-
-describe('render-ready capacity integration', () => {
-  let tmpDir: string;
-  let logFile: string;
-  let decisionsDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-integ-'));
-    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-    logFile = path.join(tmpDir, 'learning-log.jsonl');
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  function makeReadyDecision(id: string, pattern: string) {
-    return {
-      id, type: 'decision', pattern,
-      confidence: 0.95, observations: 3, status: 'ready',
-      first_seen: '2026-01-01T00:00:00Z', last_seen: '2026-04-01T00:00:00Z',
-      evidence: ['e1', 'e2', 'e3'], quality_ok: true,
-      details: 'context: test; decision: test; rationale: test',
-    };
-  }
-
-  it('appending at 49→50 succeeds and fires notification', () => {
-    const header = '<!-- TL;DR: 49 decisions. Key: ADR-049 -->\n# Architectural Decisions\n\nAppend-only.\n';
-    let entries = '';
-    for (let i = 1; i <= 49; i++) {
-      const n = i.toString().padStart(3, '0');
-      entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
-    }
-    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
-    const obs = makeReadyDecision('obs_at49', 'crossing 50');
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
-    expect(result.rendered).toHaveLength(1);
-
-    const notifPath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-notifications.json');
-    expect(fs.existsSync(notifPath)).toBe(true);
-    const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
-    expect(notif['decisions-capacity-decisions'].active).toBe(true);
-    expect(notif['decisions-capacity-decisions'].threshold).toBe(50);
-  });
-
-  it('appending at 99→100 succeeds (ceiling not yet hit)', () => {
-    const header = '<!-- TL;DR: 99 decisions. Key: ADR-099 -->\n# Architectural Decisions\n\nAppend-only.\n';
-    let entries = '';
-    for (let i = 1; i <= 99; i++) {
-      const n = i.toString().padStart(3, '0');
-      entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
-    }
-    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
-    const obs = makeReadyDecision('obs_at99', 'the 100th entry');
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
-    expect(result.rendered).toHaveLength(1);
-  });
-
-  it('skips at 100 (hard ceiling)', () => {
-    const header = '<!-- TL;DR: 100 decisions. Key: ADR-100 -->\n# Architectural Decisions\n\nAppend-only.\n';
-    let entries = '';
-    for (let i = 1; i <= 100; i++) {
-      const n = i.toString().padStart(3, '0');
-      entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
-    }
-    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
-    const obs = makeReadyDecision('obs_past100', 'should be blocked');
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
-    expect(result.skipped).toBe(1);
-
-    const updated = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-    expect(updated.softCapExceeded).toBe(true);
-  });
-
-  it('deprecated entries do not count toward capacity (D18)', () => {
-    const header = '<!-- TL;DR: 100 decisions. Key: ADR-100 -->\n# Architectural Decisions\n\nAppend-only.\n';
-    let entries = '';
-    for (let i = 1; i <= 100; i++) {
-      const n = i.toString().padStart(3, '0');
-      // Make 5 entries Deprecated — effective active count = 95
-      const status = i <= 5 ? 'Deprecated' : 'Accepted';
-      entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: ${status}\n- **Source**: test\n`;
-    }
-    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
-    const obs = makeReadyDecision('obs_deprecated_gap', 'should succeed because deprecated entries free slots');
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
-    // Active count is 95, which is < 100, so entry should succeed
-    expect(result.rendered).toHaveLength(1);
-  });
-
-  it('first-run seed fires notification immediately (D21)', () => {
-    // Simulate a project that already has 60 entries but no .decisions-notifications.json
-    const header = '<!-- TL;DR: 60 decisions. Key: ADR-060 -->\n# Architectural Decisions\n\nAppend-only.\n';
-    let entries = '';
-    for (let i = 1; i <= 60; i++) {
-      const n = i.toString().padStart(3, '0');
-      entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: Accepted\n- **Source**: test\n`;
-    }
-    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
-    // No .decisions-notifications.json exists (first-run)
-
-    const obs = makeReadyDecision('obs_seed', 'triggering seed');
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
-    expect(result.rendered).toHaveLength(1);
-
-    // Notification should fire for the highest crossed threshold
-    const notifPath = path.join(tmpDir, '.devflow', 'decisions', '.decisions-notifications.json');
-    expect(fs.existsSync(notifPath)).toBe(true);
-    const notif = JSON.parse(fs.readFileSync(notifPath, 'utf8'));
-    expect(notif['decisions-capacity-decisions'].active).toBe(true);
-    // After seed, previous_count = 0 so all thresholds up to 61 fire
-    expect(notif['decisions-capacity-decisions'].threshold).toBe(60);
-  });
-
-  it('TL;DR shows active-only count (D26)', () => {
-    const header = '<!-- TL;DR: 5 decisions. Key: ADR-005 -->\n# Architectural Decisions\n\nAppend-only.\n';
-    let entries = '';
-    for (let i = 1; i <= 5; i++) {
-      const n = i.toString().padStart(3, '0');
-      const status = i <= 2 ? 'Deprecated' : 'Accepted';
-      entries += `\n## ADR-${n}: entry ${i}\n\n- **Date**: 2026-01-01\n- **Status**: ${status}\n- **Source**: test\n`;
-    }
-    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), header + entries);
-
-    const obs = makeReadyDecision('obs_tldr', 'new entry');
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    const result = JSON.parse(runHelper(`render-ready "${logFile}" "${tmpDir}"`));
-    expect(result.rendered).toHaveLength(1);
-
-    const content = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
-    // 3 active + 1 new = 4 active (2 deprecated don't count)
-    expect(content).toMatch(/<!-- TL;DR: 4 decisions\./);
   });
 });

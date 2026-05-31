@@ -562,134 +562,8 @@ describe('json-helper.js operations', () => {
   });
 });
 
-describe('json-helper.cjs temporal-decay', () => {
-  it('applies decay to old entries', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const oldDate = new Date(Date.now() - 35 * 86400000).toISOString();
-      fs.writeFileSync(file, JSON.stringify({
-        id: 'obs_test1', confidence: 0.66, last_seen: oldDate,
-      }) + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.decayed).toBe(1);
-
-      const updated = fs.readFileSync(file, 'utf8').trim();
-      const entry = JSON.parse(updated);
-      expect(entry.confidence).toBeLessThan(0.66);
-      expect(entry.confidence).toBeGreaterThan(0);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('removes entries below threshold', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const oldDate = new Date(Date.now() - 200 * 86400000).toISOString();
-      fs.writeFileSync(file, JSON.stringify({
-        id: 'obs_test1', confidence: 0.15, last_seen: oldDate,
-      }) + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.removed).toBe(1);
-
-      const content = fs.readFileSync(file, 'utf8').trim();
-      expect(content).toBe('');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('preserves fresh entries', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const recentDate = new Date().toISOString();
-      fs.writeFileSync(file, JSON.stringify({
-        id: 'obs_test1', confidence: 0.66, last_seen: recentDate,
-      }) + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.decayed).toBe(0);
-      expect(counts.removed).toBe(0);
-
-      const entry = JSON.parse(fs.readFileSync(file, 'utf8').trim());
-      expect(entry.confidence).toBe(0.66);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('handles missing file gracefully', () => {
-    const result = execSync(
-      `node "${JSON_HELPER}" temporal-decay "/tmp/nonexistent-devflow-test-${Date.now()}.jsonl"`,
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    ).toString().trim();
-    const counts = JSON.parse(result);
-    expect(counts.removed).toBe(0);
-    expect(counts.decayed).toBe(0);
-  });
-
-  it('handles empty file', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(file, '');
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.removed).toBe(0);
-      expect(counts.decayed).toBe(0);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('returns correct counts for mixed entries', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const old35 = new Date(Date.now() - 35 * 86400000).toISOString();
-      const old200 = new Date(Date.now() - 200 * 86400000).toISOString();
-      const recent = new Date().toISOString();
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_a', confidence: 0.66, last_seen: old35 }),
-        JSON.stringify({ id: 'obs_b', confidence: 0.15, last_seen: old200 }),
-        JSON.stringify({ id: 'obs_c', confidence: 0.95, last_seen: recent }),
-      ].join('\n') + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.decayed).toBe(1);
-      expect(counts.removed).toBe(1);
-
-      const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
-      expect(lines).toHaveLength(2);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
+// temporal-decay tests removed in Phase 3 — temporal decay was part of the
+// deterministic confidence system which has been replaced by LLM-set confidence.
 
 describe('json-helper.cjs process-observations', () => {
   it('creates new observations', () => {
@@ -714,7 +588,8 @@ describe('json-helper.cjs process-observations', () => {
 
       const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
       expect(entry.id).toBe('obs_abc123');
-      expect(entry.confidence).toBe(0.33);
+      // Phase 3: no confidence provided in obs → stored as 0 (LLM must provide confidence)
+      expect(entry.confidence).toBe(0);
       expect(entry.status).toBe('observing');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -749,7 +624,8 @@ describe('json-helper.cjs process-observations', () => {
 
       const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
       expect(entry.observations).toBe(2);
-      expect(entry.confidence).toBe(0.66);
+      // Phase 3: no confidence provided in obs → existing confidence preserved (no recalc)
+      expect(entry.confidence).toBe(0.33);
       expect(entry.evidence).toContain('old evidence');
       expect(entry.evidence).toContain('new evidence');
     } finally {
@@ -823,7 +699,7 @@ describe('json-helper.cjs process-observations', () => {
     }
   });
 
-  it('calculates confidence correctly from count', () => {
+  it('stores LLM-provided confidence verbatim (Phase 3: no recalculation)', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
     const responseFile = path.join(tmpDir, 'response.json');
     const logFile = path.join(tmpDir, 'learning.jsonl');
@@ -835,8 +711,9 @@ describe('json-helper.cjs process-observations', () => {
         status: 'observing', evidence: [], details: '',
       }) + '\n');
 
+      // LLM provides confidence=0.90 — this is stored verbatim, not recalculated
       fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [] }],
+        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [], confidence: 0.90, status: 'ready' }],
       }));
 
       execSync(
@@ -845,27 +722,32 @@ describe('json-helper.cjs process-observations', () => {
       );
 
       const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.confidence).toBe(0.95);
+      expect(entry.confidence).toBe(0.90); // LLM-provided value stored verbatim
+      expect(entry.status).toBe('ready'); // LLM-provided status stored verbatim
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('sets ready on temporal spread', () => {
+  it('stores LLM-provided status verbatim (Phase 3: no auto-promotion)', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
     const responseFile = path.join(tmpDir, 'response.json');
     const logFile = path.join(tmpDir, 'learning.jsonl');
     try {
-      const eightDaysAgo = new Date(Date.now() - 8 * 86400000).toISOString();
+      // Existing obs in 'observing' — LLM promotes to 'ready' via explicit status field
       fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.80, observations: 4,
-        first_seen: eightDaysAgo, last_seen: eightDaysAgo,
-        status: 'observing', evidence: [], details: '', quality_ok: true,
+        id: 'obs_abc123', type: 'decision', pattern: 'use X over Y',
+        confidence: 0.33, observations: 1,
+        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
+        status: 'observing', evidence: [], details: '', quality_ok: false,
       }) + '\n');
 
+      // LLM says: this is ready with confidence=0.95
       fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [], quality_ok: true }],
+        observations: [{
+          id: 'obs_abc123', type: 'decision', pattern: 'use X over Y',
+          evidence: [], quality_ok: true, confidence: 0.95, status: 'ready',
+        }],
       }));
 
       execSync(
@@ -874,7 +756,8 @@ describe('json-helper.cjs process-observations', () => {
       );
 
       const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.status).toBe('ready');
+      expect(entry.status).toBe('ready'); // LLM-provided status
+      expect(entry.confidence).toBe(0.95); // LLM-provided confidence
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -40,25 +40,11 @@ export interface LogEntry {
   details: string;
   quality_ok?: boolean;
   artifact_path?: string;
-  /** D17: Set by render-ready when a decisions file hits the hard ceiling (100 entries). */
   softCapExceeded?: boolean;
   deprecated_at?: string;
   needsReview?: boolean;
   mayBeStale?: boolean;
   staleReason?: string;
-}
-
-/**
- * djb2 hash — matches the contentHash() implementation in json-helper.cjs.
- * Exported so all test files can share a single copy (T3: eliminates duplicate
- * inline definitions in reconcile.test.ts and any future test files).
- */
-export function djb2(s: string): string {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) {
-    h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
-  }
-  return h.toString(16);
 }
 
 /**

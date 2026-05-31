@@ -1,16 +1,12 @@
 import { Command } from 'commander';
 import { promises as fs } from 'fs';
-import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
-import { getDevFlowDirectory } from '../utils/paths.js';
 import {
   getMemoryDir,
   getSidecarDir,
   getDecisionsDir,
-  getDecisionsFilePath,
-  getPitfallsFilePath,
   getDecisionsConfigPath,
   getDecisionsLogPath,
   getDecisionsManifestPath,
@@ -18,130 +14,24 @@ import {
   getDecisionsNotificationsPath,
   getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
-  getDecisionsUsagePath,
   getDecisionsDisabledSentinel,
 } from '../utils/project-paths.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
 import { loadDecisionsConfig } from '../utils/decisions-config.js';
-import { acquireMkdirLock } from '../utils/mkdir-lock.js';
 import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
 import { getGitRoot } from '../utils/git.js';
 import {
-  isLearningObservation,
-  formatStaleReason,
-  type LearningObservation,
   type DecisionsEntryStatus,
 } from '../utils/observations.js';
 import {
   readObservations,
-  writeObservations,
-  updateDecisionsStatus,
   warnIfInvalid,
 } from '../utils/observation-io.js';
 
 /**
- * D-SEC2: Runtime guard for the `count-active` JSON result from json-helper.cjs.
- * Accepts any object that carries a numeric `count` field (extra fields are ignored).
- * (Local copy — decisions.ts does not import from learn.ts for this guard.)
- */
-function isCountActiveResult(v: unknown): v is { count: number } {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) &&
-    typeof (v as Record<string, unknown>).count === 'number';
-}
-
-// ---------------------------------------------------------------------------
-// Capacity review helpers (exported for testing)
-// ---------------------------------------------------------------------------
-
-/**
- * A parsed entry from decisions.md or pitfalls.md used during capacity review.
  * DecisionsEntryStatus is defined in observations.ts (pure data module) and
  * re-exported here for consumers that import from the decisions command module.
  */
 export type { DecisionsEntryStatus };
-
-const VALID_STATUSES_ARRAY = ['Accepted', 'Active', 'Deprecated', 'Superseded', 'Unknown'] as const satisfies readonly DecisionsEntryStatus[];
-const VALID_STATUSES = new Set<DecisionsEntryStatus>(VALID_STATUSES_ARRAY);
-
-/** Normalise a raw status string from markdown to the DecisionsEntryStatus union. */
-export function toDecisionsStatus(raw: string): DecisionsEntryStatus {
-  return VALID_STATUSES.has(raw as DecisionsEntryStatus) ? (raw as DecisionsEntryStatus) : 'Unknown';
-}
-
-export interface DecisionsEntry {
-  id: string;
-  pattern: string;
-  file: 'decisions' | 'pitfalls';
-  filePath: string;
-  status: DecisionsEntryStatus;
-  createdDate: string | null;
-}
-
-/**
- * D23: Filter entries to those eligible for deprecation review.
- * Excludes entries created within the 7-day protection window.
- */
-export function filterEligibleEntries(entries: DecisionsEntry[]): DecisionsEntry[] {
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  return entries.filter(e => {
-    if (!e.createdDate) return true; // No date — eligible
-    return e.createdDate <= sevenDaysAgo;
-  });
-}
-
-/**
- * D23: Sort entries by least used: cites ASC, last_cited ASC NULLS FIRST, created ASC.
- */
-export function sortByLeastUsed(
-  entries: DecisionsEntry[],
-  usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }>,
-): DecisionsEntry[] {
-  return [...entries].sort((a, b) => {
-    const aUsage = usageData[a.id] || { cites: 0, last_cited: null, created: null };
-    const bUsage = usageData[b.id] || { cites: 0, last_cited: null, created: null };
-
-    // cites ASC
-    if (aUsage.cites !== bUsage.cites) return aUsage.cites - bUsage.cites;
-
-    // last_cited ASC NULLS FIRST
-    if (aUsage.last_cited === null && bUsage.last_cited !== null) return -1;
-    if (aUsage.last_cited !== null && bUsage.last_cited === null) return 1;
-    if (aUsage.last_cited && bUsage.last_cited) {
-      if (aUsage.last_cited < bUsage.last_cited) return -1;
-      if (aUsage.last_cited > bUsage.last_cited) return 1;
-    }
-
-    // created ASC
-    const aCreated = a.createdDate || '';
-    const bCreated = b.createdDate || '';
-    return aCreated.localeCompare(bCreated);
-  });
-}
-
-/**
- * D28: Apply notification clearing after a capacity review deprecation pass.
- *
- * For each notifKey in `counts`, if the active entry count dropped below the
- * soft-start threshold (50), mark the notification inactive. Mutates `notifications`
- * in place so the caller can write it back atomically.
- *
- * Extracted for testability — the handler calls this after gathering counts via
- * json-helper.cjs; tests pass synthetic counts without spawning a child process.
- */
-export function clearCapacityNotifications(
-  notifications: Record<string, NotificationFileEntry>,
-  counts: Record<string, number>,
-  threshold = 50,
-): void {
-  for (const notifKey of Object.keys(counts)) {
-    const activeCount = counts[notifKey];
-    if (activeCount < threshold && notifications[notifKey]) {
-      notifications[notifKey].active = false;
-      notifications[notifKey].dismissed_at_threshold = null;
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Command
@@ -155,9 +45,6 @@ interface DecisionsOptions {
   configure?: boolean;
   clear?: boolean;
   reset?: boolean;
-  purge?: boolean;
-  review?: boolean;
-  dismissCapacity?: boolean;
 }
 
 export const decisionsCommand = new Command('decisions')
@@ -169,13 +56,10 @@ export const decisionsCommand = new Command('decisions')
   .option('--configure', 'Interactive configuration wizard for decisions.json')
   .option('--clear', 'Truncate decisions log (removes all observations)')
   .option('--reset', 'Remove all decisions-specific state files and artifacts')
-  .option('--purge', 'Remove invalid/corrupted entries from decisions log')
-  .option('--review', 'Interactively review flagged decision/pitfall observations')
-  .option('--dismiss-capacity', 'Dismiss the current capacity notification')
   .action(async (options: DecisionsOptions) => {
     const knownFlags: (keyof DecisionsOptions)[] = [
       'enable', 'disable', 'status', 'list', 'configure',
-      'clear', 'reset', 'purge', 'review', 'dismissCapacity',
+      'clear', 'reset',
     ];
     const hasFlag = knownFlags.some((f) => options[f]);
     if (!hasFlag) {
@@ -187,10 +71,7 @@ export const decisionsCommand = new Command('decisions')
         `${color.cyan('devflow decisions --list')}        Show all observations\n` +
         `${color.cyan('devflow decisions --configure')}   Configuration wizard\n` +
         `${color.cyan('devflow decisions --clear')}       Truncate decisions log\n` +
-        `${color.cyan('devflow decisions --reset')}       Remove all state files\n` +
-        `${color.cyan('devflow decisions --purge')}       Remove invalid entries\n` +
-        `${color.cyan('devflow decisions --review')}      Review flagged observations interactively\n` +
-        `${color.cyan('devflow decisions --dismiss-capacity')} Dismiss capacity notification`,
+        `${color.cyan('devflow decisions --reset')}       Remove all state files`,
         'Usage',
       );
       p.outro(color.dim('Detects architectural decisions and known pitfalls from your sessions'));
@@ -229,7 +110,7 @@ export const decisionsCommand = new Command('decisions')
         lines.push(`  Decisions: ${decisions.length}, Pitfalls: ${pitfalls.length}`);
         lines.push(`  Status: ${observing.length} observing, ${ready.length} ready, ${created.length} promoted, ${deprecated.length} deprecated`);
         if (needReview.length > 0) {
-          lines.push(`  ${color.yellow('⚠')} ${needReview.length} need review — run 'devflow decisions --review'`);
+          lines.push(`  ${color.yellow('⚠')} ${needReview.length} flagged (stale/missing/capacity)`);
         }
       }
       p.log.info(lines.join('\n'));
@@ -372,40 +253,6 @@ export const decisionsCommand = new Command('decisions')
       return;
     }
 
-    // --- --purge ---
-    if (options.purge) {
-      let logContent: string;
-      try {
-        logContent = await fs.readFile(logPath, 'utf-8');
-      } catch {
-        p.log.info('No decisions log to purge.');
-        return;
-      }
-
-      const rawLines = logContent.split('\n').filter(l => l.trim()).length;
-      const valid: LearningObservation[] = [];
-      for (const line of logContent.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed: unknown = JSON.parse(trimmed);
-          if (isLearningObservation(parsed) && (parsed.type === 'decision' || parsed.type === 'pitfall')) {
-            valid.push(parsed);
-          }
-        } catch { /* skip malformed */ }
-      }
-      const invalidCount = rawLines - valid.length;
-
-      if (invalidCount === 0) {
-        p.log.info('No invalid entries found. Decisions log is clean.');
-        return;
-      }
-
-      await writeObservations(logPath, valid);
-      p.log.success(`Purged ${invalidCount} invalid entry(ies). ${valid.length} valid observation(s) remain.`);
-      return;
-    }
-
     // --- --reset ---
     if (options.reset) {
       const lockDir = getDecisionsLockDir(process.cwd());
@@ -496,342 +343,6 @@ export const decisionsCommand = new Command('decisions')
 
       await fs.writeFile(logPath, '', 'utf-8');
       p.log.success('Decisions log cleared.');
-      return;
-    }
-
-    // --- --review ---
-    if (options.review) {
-      const mode = await p.select({
-        message: 'Review mode:',
-        options: [
-          { value: 'observations', label: 'Review flagged observations', hint: 'stale, missing, at capacity' },
-          { value: 'capacity', label: 'Review decisions capacity', hint: 'deprecate least-used entries' },
-          { value: 'cancel', label: 'Cancel' },
-        ],
-      });
-
-      if (p.isCancel(mode) || mode === 'cancel') {
-        return;
-      }
-
-      if (mode === 'observations') {
-        const { observations, invalidCount } = await readObservations(logPath);
-        warnIfInvalid(invalidCount, 'devflow decisions --purge');
-
-        const flagged = observations.filter(
-          (o) => (o.type === 'decision' || o.type === 'pitfall') && (o.mayBeStale || o.needsReview || o.softCapExceeded),
-        );
-
-        if (flagged.length === 0) {
-          p.log.info('No observations flagged for review. All clear.');
-          return;
-        }
-
-        const decisionsLockDir = getDecisionsLockDir(process.cwd());
-        const lockAcquired = await acquireMkdirLock(decisionsLockDir);
-        if (!lockAcquired) {
-          p.log.error('Decisions system is currently running. Try again in a moment.');
-          return;
-        }
-
-        p.intro(color.bgCyan(color.black(' Decisions Review ')));
-        p.log.info(`${flagged.length} observation(s) flagged for review.`);
-
-        const updatedObservations = [...observations];
-
-        try {
-          for (const obs of flagged) {
-            const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
-            const reason = formatStaleReason(obs);
-
-            p.log.info(
-              `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
-              `  Reason: ${color.yellow(reason)}\n` +
-              (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
-              `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
-            );
-
-            const action = await p.select({
-              message: 'Action:',
-              options: [
-                { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
-                { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
-                { value: 'skip', label: 'Skip', hint: 'No change' },
-              ],
-            });
-
-            if (p.isCancel(action)) {
-              await writeObservations(logPath, updatedObservations);
-              p.cancel('Review cancelled — partial progress saved.');
-              return;
-            }
-
-            const idx = updatedObservations.findIndex(o => o.id === obs.id);
-            if (idx === -1) continue;
-
-            if (action === 'deprecate') {
-              updatedObservations[idx] = {
-                ...updatedObservations[idx],
-                status: 'deprecated',
-                mayBeStale: undefined,
-                needsReview: undefined,
-                softCapExceeded: undefined,
-              };
-
-              // Update Status: field in the decisions/pitfalls markdown file
-              if (obs.artifact_path) {
-                const hashIdx = obs.artifact_path.indexOf('#');
-                if (hashIdx !== -1) {
-                  const decisionsFilePath = obs.artifact_path.slice(0, hashIdx);
-                  const anchorId = obs.artifact_path.slice(hashIdx + 1);
-                  const absPath = path.isAbsolute(decisionsFilePath)
-                    ? decisionsFilePath
-                    : path.join(process.cwd(), decisionsFilePath);
-                  const decisionsDir = getDecisionsDir(process.cwd()) + path.sep;
-                  if (!absPath.startsWith(decisionsDir)) {
-                    p.log.warn(`Skipping status update — artifact_path outside decisions directory: ${absPath}`);
-                  } else {
-                    const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
-                    if (updated) {
-                      p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
-                    } else {
-                      p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
-                    }
-                  }
-                }
-              }
-
-              await writeObservations(logPath, updatedObservations);
-              p.log.success(`Marked '${obs.pattern}' as deprecated.`);
-            } else if (action === 'keep') {
-              updatedObservations[idx] = {
-                ...updatedObservations[idx],
-                mayBeStale: undefined,
-                needsReview: undefined,
-                softCapExceeded: undefined,
-              };
-              await writeObservations(logPath, updatedObservations);
-              p.log.success(`Cleared review flags for '${obs.pattern}'.`);
-            }
-            // 'skip' — no change
-          }
-        } finally {
-          // Release side is intentionally a bare rmdir — all hardening (stale detection,
-          // EEXIST discrimination, timeout) belongs on the acquire side only.
-          try { await fs.rmdir(decisionsLockDir); } catch { /* already cleaned */ }
-        }
-
-        p.outro(color.green('Review complete.'));
-        return;
-      }
-
-      if (mode === 'capacity') {
-        const decisionsPath = getDecisionsFilePath(process.cwd());
-        const pitfallsPath = getPitfallsFilePath(process.cwd());
-
-        // D23: parse decisions entries from both files
-        const allEntries: DecisionsEntry[] = [];
-
-        for (const [filePath, type] of [[decisionsPath, 'decision'], [pitfallsPath, 'pitfall']] as const) {
-          let content: string;
-          try {
-            content = await fs.readFile(filePath, 'utf-8');
-          } catch {
-            continue; // File doesn't exist
-          }
-
-          const prefix = type === 'decision' ? 'ADR' : 'PF';
-          const headingRe = new RegExp(`^## (${prefix}-\\d+):\\s*(.+)$`, 'gm');
-          let match;
-          while ((match = headingRe.exec(content)) !== null) {
-            const entryId = match[1];
-            const pattern = match[2].trim();
-
-            // Extract Status from section
-            const sectionStart = match.index;
-            const nextHeading = content.indexOf('\n## ', sectionStart + 1);
-            const section = nextHeading !== -1
-              ? content.slice(sectionStart, nextHeading)
-              : content.slice(sectionStart);
-            const statusMatch = section.match(/- \*\*Status\*\*:\s*(\w+)/);
-            const status = statusMatch ? statusMatch[1] : 'Unknown';
-
-            // Skip deprecated/superseded entries
-            if (status === 'Deprecated' || status === 'Superseded') continue;
-
-            // Extract Date for protection check
-            const dateMatch = section.match(/- \*\*Date\*\*:\s*(\d{4}-\d{2}-\d{2})/);
-            const createdDate = dateMatch ? dateMatch[1] : null;
-
-            allEntries.push({
-              id: entryId,
-              pattern,
-              file: type === 'decision' ? 'decisions' : 'pitfalls',
-              filePath,
-              status: toDecisionsStatus(status),
-              createdDate,
-            });
-          }
-        }
-
-        if (allEntries.length === 0) {
-          p.log.info('No active decisions entries found.');
-          return;
-        }
-
-        // D23: Filter out entries created within 7 days (protected)
-        const eligible = filterEligibleEntries(allEntries);
-
-        if (eligible.length === 0) {
-          p.log.info('All active entries are within the 7-day protection window.');
-          return;
-        }
-
-        // Load usage data for sorting
-        let usageData: Record<string, { cites: number; last_cited: string | null; created: string | null }> = {};
-        try {
-          const raw = await fs.readFile(getDecisionsUsagePath(process.cwd()), 'utf-8');
-          const parsed = JSON.parse(raw);
-          // D-SEC2: Guard against non-object/null/array shapes before narrowing into typed record.
-          if (
-            parsed !== null &&
-            typeof parsed === 'object' &&
-            !Array.isArray(parsed) &&
-            parsed.version === 1 &&
-            parsed.entries !== null &&
-            typeof parsed.entries === 'object' &&
-            !Array.isArray(parsed.entries)
-          ) {
-            usageData = parsed.entries as typeof usageData;
-          }
-        } catch { /* no usage data — all cites=0 */ }
-
-        // D23: Sort by least used: (cites ASC, last_cited ASC NULLS FIRST, created ASC)
-        const sorted = sortByLeastUsed(eligible, usageData);
-
-        // Take top 20
-        const candidates = sorted.slice(0, 20);
-
-        p.intro(color.bgCyan(color.black(' Decisions Capacity Review ')));
-        p.log.info(
-          `${allEntries.length} active entries across decisions files.\n` +
-          `${eligible.length} eligible for review (${allEntries.length - eligible.length} within 7-day protection).\n` +
-          `Showing ${candidates.length} least-used entries.`,
-        );
-
-        // D23: p.multiselect with unchecked default
-        const selected = await p.multiselect({
-          message: 'Select entries to deprecate:',
-          options: candidates.map(e => ({
-            value: e.id,
-            label: `[${e.file}] ${e.id}: ${e.pattern}`,
-            hint: `${usageData[e.id]?.cites ?? 0} cites, ${e.status}`,
-          })),
-          required: false,
-        });
-
-        if (p.isCancel(selected) || !Array.isArray(selected) || selected.length === 0) {
-          p.log.info('No entries selected. Capacity review cancelled.');
-          return;
-        }
-
-        // Batch deprecation — each updateDecisionsStatus acquires .decisions.lock internally;
-        // no outer lock needed (no reentrancy issue since calls are sequential).
-        let deprecatedCount = 0;
-        for (const entryId of selected as string[]) {
-          const entry = candidates.find(e => e.id === entryId);
-          if (!entry) continue;
-
-          const updated = await updateDecisionsStatus(entry.filePath, entry.id, 'Deprecated');
-          if (updated) {
-            deprecatedCount++;
-            p.log.success(`Deprecated ${entry.id}: ${entry.pattern}`);
-          } else {
-            p.log.warn(`Could not update ${entry.id} — update manually`);
-          }
-        }
-
-        // D28: Check if counts dropped below soft start, clear notifications if so
-        let notifications: Record<string, NotificationFileEntry> = {};
-        const notifPath = getDecisionsNotificationsPath(process.cwd());
-        try {
-          const raw = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
-          if (isNotificationMap(raw)) {
-            notifications = raw;
-          } else {
-            p.log.warn('Notifications file has unexpected shape — treating as empty.');
-          }
-        } catch { /* no notifications file — nothing to clear */ }
-
-        const devflowDir = getDevFlowDirectory();
-        const jsonHelperPath = path.join(devflowDir, 'scripts', 'hooks', 'json-helper.cjs');
-
-        // D23/D28: gather post-deprecation active counts then delegate to
-        // clearCapacityNotifications (extracted for testability).
-        const postDeprecationCounts: Record<string, number> = {};
-        for (const [filePath, type, notifKey] of [
-          [decisionsPath, 'decision', 'decisions-capacity-decisions'],
-          [pitfallsPath, 'pitfall', 'decisions-capacity-pitfalls'],
-        ] as const) {
-          try {
-            // D23: Use count-active op via json-helper.cjs (single source of truth)
-            // D-SEC3: execFileSync with argv array — no shell interpolation of cwd-derived paths.
-            const raw = JSON.parse(
-              execFileSync('node', [jsonHelperPath, 'count-active', filePath, type], {
-                encoding: 'utf8',
-                stdio: ['pipe', 'pipe', 'pipe'],
-              }).trim(),
-            );
-            postDeprecationCounts[notifKey] = isCountActiveResult(raw) ? raw.count : 0;
-          } catch { /* count-active failed — skip notification update for this file */ }
-        }
-        clearCapacityNotifications(notifications, postDeprecationCounts);
-
-        await writeFileAtomicExclusive(notifPath, JSON.stringify(notifications, null, 2) + '\n');
-
-        p.log.success(`Deprecated ${deprecatedCount} entry(ies).`);
-        p.outro(color.green('Capacity review complete.'));
-        return;
-      }
-
-      return;
-    }
-
-    // --- --dismiss-capacity ---
-    if (options.dismissCapacity) {
-      const notifPath = getDecisionsNotificationsPath(process.cwd());
-
-      let notifications: Record<string, NotificationFileEntry>;
-      try {
-        const raw = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
-        if (!isNotificationMap(raw)) {
-          p.log.warn('Notifications file has unexpected shape — treating as empty.');
-          p.log.info('No active capacity notifications to dismiss.');
-          return;
-        }
-        notifications = raw;
-      } catch {
-        p.log.info('No capacity notifications found.');
-        return;
-      }
-
-      const activeKeys = Object.entries(notifications)
-        .filter(([, v]) => v && v.active && (v.dismissed_at_threshold == null || v.dismissed_at_threshold < (v.threshold ?? 0)))
-        .map(([k]) => k);
-
-      if (activeKeys.length === 0) {
-        p.log.info('No active capacity notifications to dismiss.');
-        return;
-      }
-
-      for (const key of activeKeys) {
-        const entry = notifications[key];
-        entry.dismissed_at_threshold = entry.threshold;
-        const fileType = key.replace('decisions-capacity-', '');
-        p.log.success(`Dismissed capacity notification for ${fileType} (at threshold ${entry.threshold}).`);
-      }
-
-      await writeFileAtomicExclusive(notifPath, JSON.stringify(notifications, null, 2) + '\n');
       return;
     }
 

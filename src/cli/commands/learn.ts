@@ -22,24 +22,16 @@ import {
 } from '../utils/project-paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
-import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import { type NotificationFileEntry, isNotificationMap } from '../utils/notifications-shape.js';
 import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
-import { acquireMkdirLock } from '../utils/mkdir-lock.js';
 import {
   type LearningObservation,
   loadAndCountObservations,
-  formatStaleReason,
 } from '../utils/observations.js';
 import {
   readObservations,
-  writeObservations,
-  updateDecisionsStatus,
   warnIfInvalid,
 } from '../utils/observation-io.js';
 
-// Re-export the consolidated alias for callers that previously imported it from this module.
-export type { NotificationFileEntry };
 
 // ---------------------------------------------------------------------------
 // Learning configuration
@@ -84,7 +76,7 @@ export function formatLearningStatus(observations: LearningObservation[], enable
   lines.push(`  Workflows: ${workflows.length}, Procedural: ${procedurals.length}, Decisions: ${decisions.length}, Pitfalls: ${pitfalls.length}`);
   lines.push(`  Status: ${observing.length} observing, ${ready.length} ready, ${created.length} promoted, ${deprecated.length} deprecated`);
   if (needReview.length > 0) {
-    lines.push(`  ${color.yellow('⚠')} ${needReview.length} need review — run 'devflow learn --review'`);
+    lines.push(`  ${color.yellow('⚠')} ${needReview.length} flagged (stale/missing/capacity)`);
   }
 
   return lines.join('\n');
@@ -136,9 +128,6 @@ interface LearnOptions {
   configure?: boolean;
   clear?: boolean;
   reset?: boolean;
-  purge?: boolean;
-  review?: boolean;
-  dismissCapacity?: boolean;
 }
 
 export const learnCommand = new Command('learn')
@@ -150,13 +139,10 @@ export const learnCommand = new Command('learn')
   .option('--configure', 'Interactive configuration wizard')
   .option('--clear', 'Reset learning log (removes all observations)')
   .option('--reset', 'Remove all self-learning artifacts, log, and transient state')
-  .option('--purge', 'Remove invalid/corrupted entries from learning log')
-  .option('--review', 'Interactively review flagged observations (stale, missing, at capacity)')
-  .option('--dismiss-capacity', 'Dismiss the current capacity notification for a decisions file')
   .action(async (options: LearnOptions) => {
     const knownFlags: (keyof LearnOptions)[] = [
       'enable', 'disable', 'status', 'list', 'configure',
-      'clear', 'reset', 'purge', 'review', 'dismissCapacity',
+      'clear', 'reset',
     ];
     const hasFlag = knownFlags.some((f) => options[f]);
     if (!hasFlag) {
@@ -168,10 +154,7 @@ export const learnCommand = new Command('learn')
         `${color.cyan('devflow learn --list')}        Show all observations\n` +
         `${color.cyan('devflow learn --configure')}   Configuration wizard\n` +
         `${color.cyan('devflow learn --clear')}       Reset learning log\n` +
-        `${color.cyan('devflow learn --reset')}       Remove artifacts + log + state\n` +
-        `${color.cyan('devflow learn --purge')}       Remove invalid entries\n` +
-        `${color.cyan('devflow learn --review')}      Review flagged observations interactively\n` +
-        `${color.cyan('devflow learn --dismiss-capacity')} Dismiss capacity notification`,
+        `${color.cyan('devflow learn --reset')}       Remove artifacts + log + state`,
         'Usage',
       );
       p.outro(color.dim('Detects repeated workflows and creates slash commands automatically'));
@@ -347,29 +330,6 @@ export const learnCommand = new Command('learn')
       }
 
       p.outro(color.green('Configuration saved.'));
-      return;
-    }
-
-    // --- --purge ---
-    if (options.purge) {
-      let logContent: string;
-      try {
-        logContent = await fs.readFile(logPath, 'utf-8');
-      } catch {
-        p.log.info('No learning log to purge.');
-        return;
-      }
-
-      const { observations, invalidCount } = loadAndCountObservations(logContent);
-
-      if (invalidCount === 0) {
-        p.log.info('No invalid entries found. Learning log is clean.');
-        return;
-      }
-
-      const validLines = observations.map(o => JSON.stringify(o));
-      await fs.writeFile(logPath, validLines.join('\n') + (validLines.length ? '\n' : ''), 'utf-8');
-      p.log.success(`Purged ${invalidCount} invalid entry(ies). ${observations.length} valid observation(s) remain.`);
       return;
     }
 
@@ -552,165 +512,6 @@ export const learnCommand = new Command('learn')
 
       await fs.writeFile(logPath, '', 'utf-8');
       p.log.success('Learning log cleared.');
-      return;
-    }
-
-    // --- --review ---
-    // Capacity review has moved to `devflow decisions --review` (capacity mode).
-    // This handler surfaces only workflow/procedural observations flagged for
-    // attention (stale, missing artifacts, soft cap exceeded).
-    if (options.review) {
-      const { observations, invalidCount } = await readObservations(logPath);
-      warnIfInvalid(invalidCount);
-
-      const flagged = observations.filter(
-        (o) => o.mayBeStale || o.needsReview || o.softCapExceeded,
-      );
-
-      if (flagged.length === 0) {
-        p.log.info('No observations flagged for review. All clear.');
-        return;
-      }
-
-      // Acquire .learning.lock so we don't race with background-learning during the
-      // interactive loop. The internal updateDecisionsStatus call still takes its own
-      // .decisions.lock — different lock directories, no deadlock.
-      const learningLockDir = getLearningLockDir(process.cwd());
-      const lockAcquired = await acquireMkdirLock(learningLockDir);
-      if (!lockAcquired) {
-        p.log.error('Learning system is currently running. Try again in a moment.');
-        return;
-      }
-
-      p.intro(color.bgYellow(color.black(' Learning Review ')));
-      p.log.info(`${flagged.length} observation(s) flagged for review.`);
-
-      const updatedObservations = [...observations];
-
-      try {
-        for (const obs of flagged) {
-          const typeLabel = obs.type.charAt(0).toUpperCase() + obs.type.slice(1);
-          const reason = formatStaleReason(obs);
-
-          p.log.info(
-            `\n[${typeLabel}] ${color.cyan(obs.pattern)}\n` +
-            `  Reason: ${color.yellow(reason)}\n` +
-            (obs.artifact_path ? `  Artifact: ${color.dim(obs.artifact_path)}\n` : '') +
-            `  Details: ${color.dim(obs.details.slice(0, 100))}${obs.details.length > 100 ? '...' : ''}`,
-          );
-
-          const action = await p.select({
-            message: 'Action:',
-            options: [
-              { value: 'deprecate', label: 'Mark as deprecated', hint: 'Remove from active use' },
-              { value: 'keep', label: 'Keep active', hint: 'Clear review flags' },
-              { value: 'skip', label: 'Skip', hint: 'No change' },
-            ],
-          });
-
-          if (p.isCancel(action)) {
-            // Persist any changes made so far before exiting so the user keeps
-            // partial progress (and log/decisions stay consistent).
-            await writeObservations(logPath, updatedObservations);
-            p.cancel('Review cancelled — partial progress saved.');
-            return;
-          }
-
-          const idx = updatedObservations.findIndex(o => o.id === obs.id);
-          if (idx === -1) continue;
-
-          if (action === 'deprecate') {
-            updatedObservations[idx] = {
-              ...updatedObservations[idx],
-              status: 'deprecated',
-              mayBeStale: undefined,
-              needsReview: undefined,
-              softCapExceeded: undefined,
-            };
-
-            // Update Status: field in decisions file for decisions/pitfalls
-            if ((obs.type === 'decision' || obs.type === 'pitfall') && obs.artifact_path) {
-              const hashIdx = obs.artifact_path.indexOf('#');
-              if (hashIdx !== -1) {
-                const decisionsPath = obs.artifact_path.slice(0, hashIdx);
-                const anchorId = obs.artifact_path.slice(hashIdx + 1);
-                const absPath = path.isAbsolute(decisionsPath)
-                  ? decisionsPath
-                  : path.join(process.cwd(), decisionsPath);
-                const updated = await updateDecisionsStatus(absPath, anchorId, 'Deprecated');
-                if (updated) {
-                  p.log.success(`Updated Status to Deprecated in ${path.basename(absPath)}`);
-                } else {
-                  p.log.warn(`Could not update Status in ${path.basename(absPath)} — update manually`);
-                }
-              }
-            }
-
-            // Persist log after each deprecation so Ctrl-C never leaves the log
-            // out of sync with the decisions file updates.
-            await writeObservations(logPath, updatedObservations);
-            p.log.success(`Marked '${obs.pattern}' as deprecated.`);
-          } else if (action === 'keep') {
-            updatedObservations[idx] = {
-              ...updatedObservations[idx],
-              mayBeStale: undefined,
-              needsReview: undefined,
-              softCapExceeded: undefined,
-            };
-            // Keep writes are flag-clears only; still persist immediately for
-            // consistent on-disk state if the loop is interrupted.
-            await writeObservations(logPath, updatedObservations);
-            p.log.success(`Cleared review flags for '${obs.pattern}'.`);
-          }
-          // 'skip' — no change
-        }
-
-        // Final write is a no-op if every branch already persisted, but cheap
-        // and keeps the success path explicit.
-        await writeObservations(logPath, updatedObservations);
-      } finally {
-        try { await fs.rmdir(learningLockDir); } catch { /* already cleaned */ }
-      }
-
-      p.outro(color.green('Review complete.'));
-      return;
-    }
-
-    // --- --dismiss-capacity ---
-    if (options.dismissCapacity) {
-      const notifPath = getLearningNotificationsPath(process.cwd());
-
-      let notifications: Record<string, NotificationFileEntry>;
-      try {
-        const raw = JSON.parse(await fs.readFile(notifPath, 'utf-8'));
-        if (!isNotificationMap(raw)) {
-          p.log.warn('Notifications file has unexpected shape — treating as empty.');
-          p.log.info('No active capacity notifications to dismiss.');
-          return;
-        }
-        notifications = raw;
-      } catch {
-        p.log.info('No capacity notifications found.');
-        return;
-      }
-
-      const activeKeys = Object.entries(notifications)
-        .filter(([, v]) => v && v.active && (v.dismissed_at_threshold == null || v.dismissed_at_threshold < (v.threshold ?? 0)))
-        .map(([k]) => k);
-
-      if (activeKeys.length === 0) {
-        p.log.info('No active capacity notifications to dismiss.');
-        return;
-      }
-
-      for (const key of activeKeys) {
-        const entry = notifications[key];
-        entry.dismissed_at_threshold = entry.threshold;
-        const fileType = key.replace('decisions-capacity-', '');
-        p.log.success(`Dismissed capacity notification for ${fileType} (at threshold ${entry.threshold}).`);
-      }
-
-      await writeFileAtomicExclusive(notifPath, JSON.stringify(notifications, null, 2) + '\n');
       return;
     }
 
