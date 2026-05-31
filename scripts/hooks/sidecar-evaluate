@@ -135,6 +135,7 @@ source "$SCRIPT_DIR/eval-reinforce"
 source "$SCRIPT_DIR/eval-learning"
 source "$SCRIPT_DIR/eval-decisions"
 source "$SCRIPT_DIR/eval-knowledge"
+source "$SCRIPT_DIR/eval-curation"
 
 dbg "=== HOOK COMPLETE ==="
 exit 0
