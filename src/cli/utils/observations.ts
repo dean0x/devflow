@@ -14,7 +14,7 @@ export type DecisionsEntryStatus = 'Accepted' | 'Active' | 'Deprecated' | 'Super
 
 /**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
- * v2 extends type to include 'decision' and 'pitfall', and adds attention flags.
+ * v2 extends type to include 'decision' and 'pitfall'.
  */
 export interface LearningObservation {
   id: string;

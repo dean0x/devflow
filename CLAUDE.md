@@ -158,7 +158,7 @@ Per-project runtime files live under `.devflow/`:
 │   ├── .learning-disabled        # Runtime sentinel — eval-learning module exits immediately if present
 │   ├── .pending-turns.jsonl      # Queue of captured user/assistant turns (JSONL, ephemeral)
 │   └── .pending-turns.processing # Atomic handoff during background processing (transient)
-├── sidecar/                      # Sidecar marker files (e.g., memory.json, learning.{session}.json, decisions.{session}.json)
+├── sidecar/                      # Sidecar state: config.json (feature toggles), per-session markers (memory.json, learning.{session}.json, decisions.{session}.json), .processor-spawned-at (120s spawn throttle), .curation-last (7-day curation throttle)
 ├── learning/
 │   ├── learning-log.jsonl        # Learning observations (workflow/procedural only, JSONL, one entry per line)
 │   ├── learning.json             # Project-level learning agent config (max runs, throttle, model, debug — no enabled field)

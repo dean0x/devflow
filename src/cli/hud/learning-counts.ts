@@ -1,8 +1,8 @@
 /**
  * @devflow-design-decision D15
- * Soft cap + HUD attention counter, not auto-pruning.
- * We cannot reliably detect "irrelevance" without human judgment.
- * The soft cap + attention counter shifts the decision to the user at the point where it matters.
+ * Counts promoted (status=created) entries by type, not auto-pruning.
+ * We cannot reliably detect "irrelevance" without human judgment, so the HUD
+ * surfaces what was learned and leaves curation to the user / sidecar processor.
  */
 
 import * as fs from 'node:fs';
@@ -83,7 +83,7 @@ function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
 }
 
 /**
- * Read .devflow/learning/learning-log.jsonl and .devflow/decisions/decisions-log.jsonl, merge counts by type + attention flags.
+ * Read .devflow/learning/learning-log.jsonl and .devflow/decisions/decisions-log.jsonl, merge counts by type.
  * Returns null if neither log exists or neither can be parsed (graceful fallback).
  * Only counts entries with status === 'created'.
  *
