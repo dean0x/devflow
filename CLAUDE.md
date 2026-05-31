@@ -164,6 +164,7 @@ Per-project runtime files live under `.devflow/`:
 │   ├── learning.json             # Project-level learning agent config (max runs, throttle, model, debug — no enabled field)
 │   ├── .learning-runs-today      # Daily run counter (date + count)
 │   ├── .learning-sessions        # Session IDs pending batch (one per line)
+│   ├── .learning-batch           # Session IDs for the current batch (one per line)
 │   └── .learning-notified-at     # New artifact notification marker (epoch timestamp)
 ├── decisions/
 │   ├── decisions-log.jsonl       # Decision/pitfall observations (JSONL, one entry per line)
