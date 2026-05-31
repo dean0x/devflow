@@ -66,11 +66,10 @@ describe('getLearningCounts', () => {
     expect(result!.procedural).toBe(2);
     expect(result!.decisions).toBe(5);
     expect(result!.pitfalls).toBe(1);
-    expect(result!.needReview).toBe(0);
   });
 
-  it('counts needReview from mayBeStale flag regardless of status', () => {
-    // needsReview and softCapExceeded removed in Part A — only mayBeStale remains.
+  it('counts status=created entries by type (mayBeStale field ignored by counter)', () => {
+    // needReview counter removed — mayBeStale is only a staleness signal, not displayed in HUD.
     const lines = [
       makeEntry('workflow', 'created', { mayBeStale: true, staleReason: 'code-ref-missing:src/foo.ts' }),
       makeEntry('decision', 'created'),
@@ -81,7 +80,6 @@ describe('getLearningCounts', () => {
 
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.needReview).toBe(1); // only mayBeStale counts
     expect(result!.workflows).toBe(1); // stale but still created
     expect(result!.decisions).toBe(1);
     expect(result!.pitfalls).toBe(0); // observing, not created
@@ -141,8 +139,8 @@ describe('getLearningCounts', () => {
     expect(result!.decisions).toBe(1);
   });
 
-  it('mayBeStale flag counts the entry once', () => {
-    // Only mayBeStale remains after Part A removal of needsReview/softCapExceeded.
+  it('mayBeStale flag does not affect type counts — entry still counted as created', () => {
+    // needReview counter removed — mayBeStale is a staleness signal only, not shown in HUD.
     const lines = [
       makeEntry('workflow', 'created', { mayBeStale: true }),
     ];
@@ -150,7 +148,7 @@ describe('getLearningCounts', () => {
 
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.needReview).toBe(1); // counted once
+    expect(result!.workflows).toBe(1); // stale but still a promoted entry
   });
 });
 
@@ -222,17 +220,19 @@ describe('isRawObservation adversarial inputs (via getLearningCounts)', () => {
     expect(result!.workflows).toBe(1);
   });
 
-  it('rejects entry where mayBeStale is a non-boolean', () => {
-    const invalid = JSON.stringify({ type: 'workflow', status: 'created', mayBeStale: 'yes' });
+  it('accepts entry where mayBeStale has non-boolean value — field is ignored by guard', () => {
+    // needReview counter removed — mayBeStale is no longer validated by isRawObservation.
+    // Extra fields on otherwise-valid entries are simply ignored, so both entries count.
+    const withExtraField = JSON.stringify({ type: 'workflow', status: 'created', mayBeStale: 'yes' });
     const valid = makeEntry('workflow', 'created');
-    fs.writeFileSync(logPath, [invalid, valid].join('\n') + '\n', 'utf-8');
+    fs.writeFileSync(logPath, [withExtraField, valid].join('\n') + '\n', 'utf-8');
 
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.workflows).toBe(1); // only the valid entry counted
+    expect(result!.workflows).toBe(2); // both entries have valid type + status
   });
 
-  it('accepts entry with no optional flags (all undefined)', () => {
+  it('accepts entry with only required fields (type and status)', () => {
     const entry = JSON.stringify({ type: 'decision', status: 'created' });
     fs.writeFileSync(logPath, entry + '\n', 'utf-8');
 
@@ -256,7 +256,7 @@ describe('getLearningCounts HUD component output', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns null for empty result from counts (no promoted entries)', async () => {
+  it('returns non-null with zero totals when observing entries exist (component returns null for total === 0)', async () => {
     // Only observing entries — no created
     const lines = [makeEntry('workflow', 'observing')];
     fs.writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
@@ -265,9 +265,8 @@ describe('getLearningCounts HUD component output', () => {
     // here we verify getLearningCounts returns data the component can use
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    // Component would return null since total === 0 and needReview === 0
+    // Component would return null since total === 0
     expect(result!.workflows).toBe(0);
-    expect(result!.needReview).toBe(0);
   });
 });
 
@@ -313,7 +312,6 @@ describe('getLearningCounts dual-log merging', () => {
     expect(result!.procedural).toBe(1);
     expect(result!.decisions).toBe(3);
     expect(result!.pitfalls).toBe(2);
-    expect(result!.needReview).toBe(0);
   });
 
   it('returns gracefully when decisions-log.jsonl does not exist — returns 0 for decision/pitfall types', () => {
@@ -353,8 +351,8 @@ describe('getLearningCounts dual-log merging', () => {
     expect(result).toBeNull();
   });
 
-  it('merges needReview attention flags from both logs (mayBeStale only)', () => {
-    // needsReview and softCapExceeded removed in Part A — only mayBeStale counts.
+  it('mayBeStale entries across both logs are counted normally in type totals', () => {
+    // needReview counter removed — mayBeStale field is ignored by the HUD counter.
     const learningLines = [
       makeEntry('workflow', 'created', { mayBeStale: true }),
       makeEntry('procedural', 'created'),
@@ -369,8 +367,11 @@ describe('getLearningCounts dual-log merging', () => {
 
     const result = getLearningCounts(tmpDir);
     expect(result).not.toBeNull();
-    // 2 entries with mayBeStale flag across both logs
-    expect(result!.needReview).toBe(2);
+    // Stale entries still count as promoted in their type totals
+    expect(result!.workflows).toBe(1);
+    expect(result!.procedural).toBe(1);
+    expect(result!.decisions).toBe(1);
+    expect(result!.pitfalls).toBe(1);
   });
 
   it('returns null when both log files are empty', () => {

@@ -117,16 +117,14 @@ export interface ConfigCountsData {
 
 /**
  * Learning counts data for the learningCounts HUD component.
- * @devflow-design-decision D15: Hard ceiling (100) + HUD attention counter, not auto-pruning.
- * We cannot reliably detect 'irrelevance' without human judgment. The hard ceiling (D17)
- * prevents unbounded growth; the HUD shifts the decision to the user at the point where it matters.
+ * @devflow-design-decision D15: Counts promoted (status=created) entries by type.
+ * We cannot reliably detect 'irrelevance' without human judgment.
  */
 export interface LearningCountsData {
   workflows: number;
   procedural: number;
   decisions: number;
   pitfalls: number;
-  needReview: number;
 }
 
 /**

@@ -16,24 +16,15 @@ type ObservationType = typeof VALID_OBSERVATION_TYPES[number];
 interface RawObservation {
   type: ObservationType;
   status: string;
-  mayBeStale?: boolean;
-}
-
-/** Returns true when v is undefined, or a boolean. Rejects any other value. */
-function isOptBool(v: unknown): boolean {
-  return v === undefined || typeof v === 'boolean';
 }
 
 function isRawObservation(val: unknown): val is RawObservation {
   if (typeof val !== 'object' || val === null) return false;
   const o = val as Record<string, unknown>;
 
-  // Phase 1: required fields
+  // Required fields only
   if (typeof o.type !== 'string' || typeof o.status !== 'string') return false;
-  if (!(VALID_OBSERVATION_TYPES as readonly string[]).includes(o.type)) return false;
-
-  // Phase 2: optional boolean flags
-  return isOptBool(o.mayBeStale);
+  return (VALID_OBSERVATION_TYPES as readonly string[]).includes(o.type);
 }
 
 /**
@@ -64,11 +55,6 @@ function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
 
     if (!isRawObservation(parsed)) continue;
     parsedAny = true;
-
-    // Count attention flags regardless of status
-    if (parsed.mayBeStale) {
-      counts.needReview++;
-    }
 
     // Only count 'created' entries in type totals
     if (parsed.status !== 'created') continue;
@@ -110,7 +96,6 @@ export function getLearningCounts(cwd: string): LearningCountsData | null {
     procedural: 0,
     decisions: 0,
     pitfalls: 0,
-    needReview: 0,
   };
 
   const learningParsed = parseLogInto(getLearningLogPath(cwd), counts);
