@@ -79,7 +79,7 @@ export const decisionsCommand = new Command('decisions')
 
     const memoryDir = getMemoryDir(process.cwd());
 
-    // Shared log path for --status, --list, --purge, --clear
+    // Shared log path for --status, --list, --clear
     const logPath = getDecisionsLogPath(process.cwd());
 
     // --- --status ---
@@ -113,7 +113,7 @@ export const decisionsCommand = new Command('decisions')
         }
       }
       p.log.info(lines.join('\n'));
-      warnIfInvalid(invalidCount, 'devflow decisions --purge');
+      warnIfInvalid(invalidCount);
       return;
     }
 
@@ -154,7 +154,7 @@ export const decisionsCommand = new Command('decisions')
           `[${typeIcon}] ${color.cyan(obs.pattern)} (${conf}% | ${obs.observations}x | ${statusIcon})`,
         );
       }
-      warnIfInvalid(invalidCount, 'devflow decisions --purge');
+      warnIfInvalid(invalidCount);
       p.outro(color.dim(`${filtered.length} observation(s) total`));
       return;
     }

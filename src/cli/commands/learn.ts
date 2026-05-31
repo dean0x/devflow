@@ -160,7 +160,7 @@ export const learnCommand = new Command('learn')
       return;
     }
 
-    // Shared log path for --status, --list, --purge, --clear
+    // Shared log path for --status, --list, --clear
     const logPath = getLearningLogPath(process.cwd());
 
     // --- --status ---
