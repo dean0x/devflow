@@ -8,8 +8,8 @@ Three shell hooks run behind the scenes:
 
 | Hook | When | What |
 |------|------|------|
-| **Stop** | After each response | Updates `.devflow/memory/WORKING-MEMORY.md` with current focus, decisions, and progress. Throttled — skips if updated <2 min ago. |
-| **SessionStart** | On startup, `/clear`, resume, compaction | Injects previous working memory + fresh git state as system context. Warns if memory is >1h stale. |
+| **Stop** | After each response | Captures the user/assistant turns to `.pending-turns.jsonl` and writes a `memory.json` sidecar marker (throttled — skips if written <2 min ago). |
+| **SessionStart** | On startup, `/clear`, resume, compaction | Injects previous working memory + fresh git state as system context. Warns if memory is >1h stale. Also emits a SIDECAR MAINTENANCE directive when pending markers are present, spawning the background sidecar processor that rewrites `WORKING-MEMORY.md`. |
 | **PreCompact** | Before context compaction | Backs up git state to JSON. Bootstraps a minimal working memory from git if none exists yet. |
 
 Working memory is **per-project** — scoped to each repo's `.devflow/` directory. Multiple sessions across different repos don't interfere.
@@ -29,14 +29,17 @@ devflow memory --status                # Check current state
 ```
 .devflow/
 ├── memory/
-│   ├── WORKING-MEMORY.md         # Auto-maintained by Stop hook (overwritten each session)
-│   └── backup.json               # Pre-compact git state snapshot
+│   ├── WORKING-MEMORY.md         # Auto-maintained by sidecar processor (background LLM agent)
+│   ├── backup.json               # Pre-compact git state snapshot
+│   ├── .pending-turns.jsonl      # Queue of captured user/assistant turns (JSONL, ephemeral)
+│   └── .pending-turns.processing # Atomic handoff during background processing (transient)
+├── sidecar/
+│   └── memory.{session}.json     # Pending memory update marker (claimed by sidecar processor)
 ├── learning/
 │   ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
 │   ├── learning.json             # Project-level learning config
 │   ├── .learning-runs-today      # Daily run counter (date + count)
-│   ├── .learning-session-count   # Session IDs pending batch (one per line)
-│   ├── .learning-batch-ids       # Session IDs for current batch run
+│   ├── .learning-sessions        # Session IDs pending batch (one per line)
 │   └── .learning-notified-at     # New artifact notification marker (epoch timestamp)
 └── decisions/
     ├── decisions.md              # Architectural decisions (ADR-NNN, append-only)
@@ -47,7 +50,7 @@ Debug logs are stored at `~/.devflow/logs/{project-slug}/`.
 
 ## Working Memory Sections
 
-The Stop hook maintains these sections in `WORKING-MEMORY.md`:
+The sidecar processor (background LLM agent spawned at SessionStart) maintains these sections in `WORKING-MEMORY.md`:
 
 | Section | Purpose |
 |---------|---------|
@@ -69,7 +72,7 @@ These files are read by reviewers automatically during `/code-review`.
 
 ## Self-Learning (Sibling System)
 
-Self-learning shares the `.devflow/` directory but uses a completely different pipeline. Working memory captures every turn via a queue (`UserPromptSubmit` → `.devflow/memory/.pending-turns.jsonl`) and processes them in batch via a background `claude -p --model haiku` updater that writes `WORKING-MEMORY.md`. Self-learning instead uses a `SessionEnd` hook that accumulates session IDs, then triggers a background `claude -p --model sonnet` agent every 3 sessions to extract 4 observation types (workflow, procedural, decision, pitfall) from full transcript batches via channel-based filtering. The two systems operate independently and do not interfere. See [Self-Learning](self-learning.md) for the full architecture.
+Self-learning shares the `.devflow/` directory but uses a completely different pipeline. Working memory captures every turn via a queue (`UserPromptSubmit` / Stop hook → `.devflow/memory/.pending-turns.jsonl`) and the sidecar processor rewrites `WORKING-MEMORY.md` from the queue. Self-learning instead uses `SessionEnd` evaluation modules that write sidecar markers; the same sidecar processor at SessionStart claims those markers and extracts 4 observation types (workflow, procedural, decision, pitfall) from transcript channels via LLM judgment. The two systems operate independently and do not interfere. See [Self-Learning](self-learning.md) for the full architecture.
 
 ## Documentation Structure
 

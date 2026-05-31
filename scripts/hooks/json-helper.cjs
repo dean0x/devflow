@@ -688,9 +688,9 @@ try {
     // -------------------------------------------------------------------------
     // decisions-append <file> <type> <obsJson>
     // Standalone op for appending to decisions files (decisions.md or pitfalls.md).
-    // Acquires the shared `.devflow/decisions/.decisions.lock` to serialize against render-ready
-    // and any CLI updateDecisionsStatus callers. Lock path derivation matches the
-    // render-ready handler: sibling of the `decisions/` directory.
+    // Acquires the shared `.devflow/decisions/.decisions.lock` to serialize concurrent
+    // decisions-append writers and CLI updateDecisionsStatus callers. Lock path derivation
+    // (sibling of the `decisions/` directory) must match updateDecisionsStatus in observation-io.ts.
     // -------------------------------------------------------------------------
     case 'decisions-append': {
       const decisionsFile = safePath(args[0]);
