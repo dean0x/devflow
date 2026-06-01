@@ -144,7 +144,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-ambient',
-    description: 'Plan auto-detection and command awareness',
+    description: 'Plan auto-detection',
     commands: ['/ambient'],
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
     skills: [

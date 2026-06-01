@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { addAmbientHook, removeAmbientHook, hasAmbientHook, installCommandsRule, removeCommandsRule, COMMANDS_RULE_CONTENT, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
+import { addAmbientHook, removeAmbientHook, hasAmbientHook, removeLegacyCommandsRule, COMMANDS_RULE_PATH } from '../src/cli/commands/ambient.js';
 import type { StreamResult } from './integration/helpers.js';
 import {
   hasSkillInvocations,
@@ -15,10 +15,9 @@ function textResult(text: string, skills: string[] = []): StreamResult {
 
 describe('addAmbientHook', () => {
   beforeEach(() => {
-    // installCommandsRule() writes to COMMANDS_RULE_PATH — stub out the underlying
-    // fs operations so unit tests produce no real filesystem side-effects.
-    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
-    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+    // removeLegacyCommandsRule() unlinks COMMANDS_RULE_PATH — stub out the
+    // underlying fs operations so unit tests produce no real filesystem side-effects.
+    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -92,6 +91,19 @@ describe('addAmbientHook', () => {
     expect(second).toBe(first);
   });
 
+  it('purges legacy rule even when preamble hook already present (ordering invariant)', async () => {
+    // When the hook is already registered addAmbientHook takes the early-return path.
+    // removeLegacyCommandsRule MUST still run so stale commands.md files are cleaned up.
+    const withHook = await addAmbientHook('{}', '/home/user/.devflow');
+    vi.restoreAllMocks();
+    // Re-stub so we can assert on the second call
+    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+
+    await addAmbientHook(withHook, '/home/user/.devflow');
+
+    expect(fs.unlink).toHaveBeenCalledWith(COMMANDS_RULE_PATH);
+  });
+
   it('preserves other settings', async () => {
     const input = JSON.stringify({
       statusLine: { type: 'command', command: 'statusline.sh' },
@@ -153,10 +165,7 @@ describe('addAmbientHook', () => {
 
 describe('removeAmbientHook', () => {
   beforeEach(() => {
-    // removeCommandsRule() unlinks COMMANDS_RULE_PATH; installCommandsRule() used by
-    // addAmbientHook in shared setup — stub all fs side-effects to keep tests pure.
-    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
-    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+    // removeLegacyCommandsRule() unlinks COMMANDS_RULE_PATH — stub fs side-effects to keep tests pure.
     vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
   });
 
@@ -312,65 +321,34 @@ describe('removeAmbientHook', () => {
   });
 });
 
-describe('installCommandsRule', () => {
-  beforeEach(() => {
-    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
-    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('creates the parent directory recursively', async () => {
-    await installCommandsRule();
-    expect(fs.mkdir).toHaveBeenCalledWith(
-      expect.stringContaining('rules/devflow'),
-      { recursive: true },
-    );
-  });
-
-  it('writes COMMANDS_RULE_CONTENT to COMMANDS_RULE_PATH', async () => {
-    await installCommandsRule();
-    expect(fs.writeFile).toHaveBeenCalledWith(COMMANDS_RULE_PATH, COMMANDS_RULE_CONTENT, 'utf-8');
-  });
-
-  it('is idempotent — overwrites existing file without error', async () => {
-    await expect(installCommandsRule()).resolves.toBeUndefined();
-    await expect(installCommandsRule()).resolves.toBeUndefined();
-    expect(fs.writeFile).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('removeCommandsRule', () => {
+describe('removeLegacyCommandsRule', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it('unlinks COMMANDS_RULE_PATH when file exists', async () => {
     vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
-    await removeCommandsRule();
+    await removeLegacyCommandsRule();
     expect(fs.unlink).toHaveBeenCalledWith(COMMANDS_RULE_PATH);
   });
 
   it('swallows ENOENT — idempotent when file does not exist', async () => {
     const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     vi.spyOn(fs, 'unlink').mockRejectedValue(enoent);
-    await expect(removeCommandsRule()).resolves.toBeUndefined();
+    await expect(removeLegacyCommandsRule()).resolves.toBeUndefined();
   });
 
   it('re-throws non-ENOENT errors — e.g. EACCES', async () => {
     const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' });
     vi.spyOn(fs, 'unlink').mockRejectedValue(eacces);
-    await expect(removeCommandsRule()).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(removeLegacyCommandsRule()).rejects.toMatchObject({ code: 'EACCES' });
   });
 });
 
 describe('hasAmbientHook', () => {
   beforeEach(() => {
-    // addAmbientHook (called in one test) triggers installCommandsRule — stub fs side-effects.
-    vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
-    vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+    // addAmbientHook (called in one test) triggers removeLegacyCommandsRule — stub fs side-effects.
+    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -430,38 +408,6 @@ describe('hasAmbientHook', () => {
       },
     });
     expect(hasAmbientHook(input)).toBe(false);
-  });
-});
-
-describe('COMMANDS_RULE_CONTENT', () => {
-  it('matches shared/rules/commands.md source file', async () => {
-    // Dual-source guard: COMMANDS_RULE_CONTENT in ambient.ts and shared/rules/commands.md
-    // must stay in sync. This test detects drift so either source can be updated confidently.
-    const sourceFile = path.resolve(__dirname, '../shared/rules/commands.md');
-    const diskContent = await fs.readFile(sourceFile, 'utf-8');
-    expect(COMMANDS_RULE_CONTENT).toBe(diskContent);
-  });
-
-  it('has paths: [] frontmatter for global application', () => {
-    expect(COMMANDS_RULE_CONTENT).toContain('paths: []');
-  });
-
-  it('lists all 10 devflow commands', () => {
-    const commands = ['plan', 'implement', 'code-review', 'resolve', 'debug', 'explore', 'research', 'release', 'self-review', 'bug-analysis'];
-    for (const cmd of commands) {
-      expect(COMMANDS_RULE_CONTENT, `COMMANDS_RULE_CONTENT missing command: ${cmd}`).toContain(`\`${cmd}\``);
-    }
-  });
-
-  it('mentions plan auto-execution with the three required section markers', () => {
-    expect(COMMANDS_RULE_CONTENT).toContain('Plan Auto-Execution');
-    expect(COMMANDS_RULE_CONTENT).toContain('## Goal');
-    expect(COMMANDS_RULE_CONTENT).toContain('## Steps');
-    expect(COMMANDS_RULE_CONTENT).toContain('## Files');
-  });
-
-  it('instructs invoking devflow:implement skill for plan handoffs', () => {
-    expect(COMMANDS_RULE_CONTENT).toContain('devflow:implement');
   });
 });
 

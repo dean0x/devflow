@@ -1,6 +1,6 @@
 {
   "name": "devflow-ambient",
-  "description": "Plan auto-detection and command awareness",
+  "description": "Plan auto-detection",
   "author": {
     "name": "Dean0x"
   },
@@ -11,9 +11,7 @@
   "keywords": [
     "ambient",
     "plan",
-    "detection",
-    "commands",
-    "awareness"
+    "detection"
   ],
   "agents": [
     "coder",

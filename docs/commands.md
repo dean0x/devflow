@@ -170,7 +170,6 @@ Incremental by default — only analyzes commits since the last run. Findings ar
 
 ## Ambient Mode
 
-Not a command — a zero-overhead enhancement with two components:
+Not a command — a zero-overhead enhancement:
 
-1. **Plan auto-detection** — A `UserPromptSubmit` hook detects structured plans (containing `## Goal`, `## Steps`, and `## Files`) and auto-invokes `/implement`. Normal prompts produce zero output.
-2. **Command awareness** — An always-on rule (`~/.claude/rules/devflow/commands.md`) lists available `/devflow:<name>` commands for passive reference.
+**Plan auto-detection** — A `UserPromptSubmit` hook detects structured plans (containing `## Goal`, `## Steps`, and `## Files`) and auto-invokes `/implement`. Normal prompts produce zero output.
