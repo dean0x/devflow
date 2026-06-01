@@ -4,14 +4,14 @@
 # Always-on hook that injects decisions TL;DR and learned behaviors as additionalContext.
 # Sections are independently gated by feature sentinels — this hook itself is never disabled.
 #
-# Section 1.4: Learning manifest reconciliation (skipped if .devflow/memory/.learning-disabled)
 # Section 1.5: Decisions TL;DR (skipped if .devflow/decisions/.disabled)
 # Section 1.75: Learned behaviors + new artifact notifications (skipped if .devflow/memory/.learning-disabled)
+# Section 2: Sidecar pending-work (emits directive when pending tasks detected)
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
 
-# set -e intentionally omitted: sections 1.4, 1.5, and 1.75 are independent —
+# set -e intentionally omitted: sections 1.5, 1.75, and 2 are independent —
 # a failure in one must not prevent the others from running.
 
 # JSON parsing (jq with node fallback) — silently no-op if neither available
@@ -52,24 +52,6 @@ if [ -f "$_SIDECAR_CONFIG" ]; then
 fi
 
 dbg "LEARNING_SIDECAR=$_LEARNING_SIDECAR"
-
-# --- Section 1.4: Learning Manifest Reconciliation ---
-# DESIGN: D6 — reconciler runs at session-start to amortize filesystem checks
-# across session boundaries rather than on every tool call.
-# Silently ignores errors — a failed reconcile is non-fatal.
-# Skipped if learning feature is disabled via sentinel or sidecar config.
-
-if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
-  dbg "Running learning manifest reconciliation"
-  if [ -f "$LEARNING_DIR/.learning-manifest.json" ] && [ -f "$LEARNING_DIR/learning-log.jsonl" ]; then
-    node "$_JSON_HELPER" reconcile-manifest "$CWD" 2>/dev/null || true
-  fi
-
-  # Reconcile decisions manifest (still done here even if decisions disabled — manifest is learning's)
-  if [ -f "$DECISIONS_CONTENT_DIR/decisions-log.jsonl" ]; then
-    node "$_JSON_HELPER" reconcile-manifest "$CWD" "$DECISIONS_CONTENT_DIR/decisions-log.jsonl" "$DECISIONS_CONTENT_DIR/.decisions-manifest.json" 2>/dev/null || true
-  fi
-fi
 
 # --- Section 1.5: Project Decisions TL;DR ---
 # Skipped if decisions feature is disabled via sentinel.
@@ -183,6 +165,139 @@ ${LEARNED_SECTION}"
       fi
     fi
   fi
+fi
+
+# --- Section 2: Sidecar Pending-Work ---
+# Detects pending sidecar tasks and emits a directive to spawn a background processor agent.
+# Guards: processor-spawn throttle (120s window) prevents duplicate emissions on rapid
+# SessionStart events (e.g., /clear or compact).
+# Requires: sidecar-recover + sidecar-collect-tasks helpers (sourced inline below).
+# No set -e: any failure must not affect prior sections.
+#
+# D57a: Per-session .processing suffix (collision fix).
+#   Each eval-* module writes marker files as {type}.{session_id}.json, where
+#   session_id is the Claude session ID passed to the hook. When the processor
+#   claims a marker it renames it to {type}.{session_id}.processing. This suffix
+#   prevents two concurrent processor instances (from two simultaneous SessionStart
+#   events) from racing on the same marker file — each session only claims its own
+#   markers.
+#
+# D57b: 120s processor-spawn throttle.
+#   SessionStart fires on /clear, compact, and every new window open. Without
+#   a throttle, three rapid /clear commands would spawn three background agents
+#   all processing the same pending markers. The 120s window (.processor-spawned-at)
+#   ensures only one processor is spawned per burst. The throttle is written
+#   atomically (temp+mv) so concurrent SessionStart events read a consistent value.
+#
+# D57c: Heartbeat rationale.
+#   The processor agent touches each in-flight .processing file at the start of
+#   every phase. sidecar-recover uses the mtime to determine staleness (1800s
+#   threshold for non-memory types). The touch refreshes the mtime so a legitimate
+#   long-running processor is not yanked mid-phase. Pairs with D56a thresholds.
+
+# Source helpers — soft-fail if absent (e.g., on older installs before rebuild).
+# All sourced helpers follow the no-set-e discipline and exit cleanly on failure.
+_SC2_HELPERS_OK="false"
+if [ -f "$SCRIPT_DIR/get-mtime" ] && [ -f "$SCRIPT_DIR/sidecar-recover" ] && [ -f "$SCRIPT_DIR/sidecar-collect-tasks" ]; then
+  source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
+  source "$SCRIPT_DIR/sidecar-lock" 2>/dev/null || true
+  source "$SCRIPT_DIR/sidecar-recover" 2>/dev/null || true
+  source "$SCRIPT_DIR/sidecar-collect-tasks" 2>/dev/null || true
+  _SC2_HELPERS_OK="true"
+fi
+
+if [ "$_SC2_HELPERS_OK" = "true" ]; then
+  # Determine feature enabled-state.
+  # Primary: sidecar/config.json fields; secondary: runtime sentinels (defense-in-depth).
+  _SC2_MEM_EN="true"
+  _SC2_LEARN_EN="true"
+  _SC2_DEC_EN="true"
+  _SC2_KNOW_EN="true"
+
+  _SC2_SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+  if [ -f "$_SC2_SIDECAR_CONFIG" ]; then
+    _SC2_MEM_EN=$(json_field_file   "$_SC2_SIDECAR_CONFIG" "memory"    "true")
+    _SC2_LEARN_EN=$(json_field_file "$_SC2_SIDECAR_CONFIG" "learning"  "true")
+    _SC2_DEC_EN=$(json_field_file   "$_SC2_SIDECAR_CONFIG" "decisions" "true")
+    _SC2_KNOW_EN=$(json_field_file  "$_SC2_SIDECAR_CONFIG" "knowledge" "true")
+  fi
+  # Sentinel overrides
+  [ -f "$MEMORY_DIR/.working-memory-disabled" ] && _SC2_MEM_EN="false"
+  [ -f "$MEMORY_DIR/.learning-disabled" ]       && _SC2_LEARN_EN="false"
+  [ -f "$DEVFLOW_DIR/decisions/.disabled" ]     && _SC2_DEC_EN="false"
+  [ -f "$DEVFLOW_DIR/features/.disabled" ]      && _SC2_KNOW_EN="false"
+
+  dbg "Section2: mem=$_SC2_MEM_EN learn=$_SC2_LEARN_EN dec=$_SC2_DEC_EN know=$_SC2_KNOW_EN"
+
+  # Step 1: recover stale .processing markers so they become collectable in step 2
+  if [ -d "$SIDECAR_DIR" ]; then
+    sidecar_recover_stale "$SIDECAR_DIR" "$MEMORY_DIR" || true
+  fi
+
+  # Step 2: collect pending marker task types
+  sidecar_collect_tasks "$SIDECAR_DIR" "$_SC2_MEM_EN" "$_SC2_LEARN_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
+
+  # Step 3: raw-queue bridge — union in memory task if .pending-turns.jsonl is non-empty
+  # even when no memory sidecar marker exists (queue written but marker not yet written).
+  if [ "$_SC2_MEM_EN" = "true" ] && [ -s "$MEMORY_DIR/.pending-turns.jsonl" ]; then
+    case ",$_SIDECAR_TASKS," in
+      *,memory,*) ;;  # already present — skip
+      *)
+        if [ -n "$_SIDECAR_TASKS" ]; then
+          _SIDECAR_TASKS="memory,$_SIDECAR_TASKS"
+        else
+          _SIDECAR_TASKS="memory"
+        fi
+        dbg "Section2: added memory task via raw-queue bridge"
+        ;;
+    esac
+  fi
+
+  # Step 4: emit directive if tasks pending, subject to processor-spawn throttle
+  if [ -n "$_SIDECAR_TASKS" ]; then
+    _SC2_SPAWNED_AT_FILE="$SIDECAR_DIR/.processor-spawned-at"
+    _SC2_THROTTLE=120
+    _SC2_EMIT="true"
+    _SC2_NOW=$(date +%s)
+
+    if [ -f "$_SC2_SPAWNED_AT_FILE" ]; then
+      _SC2_LAST_SPAWN=$(cat "$_SC2_SPAWNED_AT_FILE" 2>/dev/null | tr -dc '0-9' || true)
+      _SC2_LAST_SPAWN="${_SC2_LAST_SPAWN:-0}"
+      _SC2_SPAWN_AGE=$(( _SC2_NOW - _SC2_LAST_SPAWN ))
+      if [ "$_SC2_SPAWN_AGE" -lt "$_SC2_THROTTLE" ]; then
+        _SC2_EMIT="false"
+        dbg "Section2: processor-spawn throttled (spawned ${_SC2_SPAWN_AGE}s ago)"
+        log "Sidecar processor-spawn throttled (${_SC2_SPAWN_AGE}s < ${_SC2_THROTTLE}s): tasks=$_SIDECAR_TASKS"
+      fi
+    fi
+
+    if [ "$_SC2_EMIT" = "true" ]; then
+      # Write/refresh .processor-spawned-at atomically
+      _SC2_SPAWN_TMP="$SIDECAR_DIR/.processor-spawned-at.tmp.$$"
+      printf '%s' "$_SC2_NOW" > "$_SC2_SPAWN_TMP" 2>/dev/null && mv "$_SC2_SPAWN_TMP" "$_SC2_SPAWNED_AT_FILE" 2>/dev/null || rm -f "$_SC2_SPAWN_TMP" 2>/dev/null || true
+
+      _SC2_DIRECTIVE="--- SIDECAR MAINTENANCE (pending from previous session) ---
+Pending background maintenance: ${_SIDECAR_TASKS}.
+FIRST ACTION, before responding to the user: load the devflow:sidecar skill and
+spawn ONE background sidecar-processor agent (run_in_background: true).
+Single non-blocking tool call. Do it now, then continue normally.
+Do not summarize or ask about this — just spawn the processor."
+
+      if [ -n "$CONTEXT" ]; then
+        CONTEXT="${CONTEXT}
+
+${_SC2_DIRECTIVE}"
+      else
+        CONTEXT="$_SC2_DIRECTIVE"
+      fi
+      dbg "Section2: emitted sidecar directive (tasks=$_SIDECAR_TASKS)"
+      log "Sidecar pending-work directive emitted: tasks=$_SIDECAR_TASKS"
+    fi
+  else
+    dbg "Section2: no pending sidecar tasks"
+  fi
+else
+  dbg "Section2: helpers not available — skip"
 fi
 
 # --- Output ---

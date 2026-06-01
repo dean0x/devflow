@@ -198,8 +198,8 @@ Knowledge files in `.devflow/decisions/` capture decisions and pitfalls that age
 
 | File | Format | Source | Purpose |
 |------|--------|--------|---------|
-| `decisions.md` | ADR-NNN (sequential) | `background-learning` | Architectural decisions — why choices were made |
-| `pitfalls.md` | PF-NNN (sequential) | `background-learning` | Known gotchas, fragile areas, past bugs |
+| `decisions.md` | ADR-NNN (sequential) | sidecar processor via `decisions-append` | Architectural decisions — why choices were made |
+| `pitfalls.md` | PF-NNN (sequential) | sidecar processor via `decisions-append` | Known gotchas, fragile areas, past bugs |
 
 Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL;DR headers only (~30-50 tokens). Agents read full files when relevant to their work. Cap: 50 entries per file.
 

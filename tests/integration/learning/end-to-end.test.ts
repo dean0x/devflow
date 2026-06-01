@@ -1,17 +1,14 @@
 // tests/integration/learning/end-to-end.test.ts
-// Full end-to-end test for the self-learning pipeline.
+// End-to-end test for the self-learning pipeline.
 //
 // Flow:
 //   1. Creates a tmpdir project with .devflow/ and .claude/ structure
 //   2. Plants 3 synthetic session JSONL files in the Claude project directory
 //   3. Creates a claude shim that echoes canned observations (bypasses LLM)
 //   4. Invokes `devflow learn --run-background` via the compiled CLI
-//   5. Asserts all 4 observation types present in log
-//   6. Asserts rendered artifacts exist (command file, skill dir, decisions.md, pitfalls.md)
-//   7. Deletes one artifact, runs reconcile-manifest
-//   8. Asserts corresponding observation is deprecated
+//   5. Asserts all 4 observation types present in log with LLM-provided fields stored verbatim
 //
-// Note: background-learning (deleted in Sub-Phase 3F) is replaced by `devflow learn --run-background`.
+// Phase 3: reconcile-manifest and artifact rendering tests removed (no longer exist).
 // The CLI is invoked via `node dist/cli.js` to ensure the compiled TypeScript is tested.
 // Total test timeout: 60s.
 
@@ -268,68 +265,16 @@ CANNED_EOF
     expect(ids).toContain('obs_e2e_d1');
     expect(ids).toContain('obs_e2e_f1');
 
-    // Observations must be in 'created' status (since quality_ok=true and thresholds
-    // for decision/pitfall require 2 observations but render is triggered by quality_ok+status)
-    // Note: With required=2 for decision/pitfall, single observation → 'observing' or 'ready'.
-    // For workflow/procedural with required=3, single observation → 'observing'.
-    // We assert all observations were written and their IDs match.
+    // Assert all observations were written with correct status (LLM-provided status stored verbatim).
+    // Phase 3: no auto-promotion; the shim does not provide status, so observations default to 'observing'.
     for (const obs of observations) {
       expect(['observing', 'ready', 'created']).toContain(obs.status);
     }
 
-    // Assert manifest was created or decisions dirs exist
-    const decisionsDir = path.join(memoryDir, 'decisions');
-    expect(fs.existsSync(decisionsDir)).toBe(true);
-
-    // --- Test reconcile-manifest ---
-    // First: manually write a manifest entry pointing to a non-existent artifact
-    const manifestPath = path.join(memoryDir, '.learning-manifest.json');
-    const fakeManifest = {
-      schemaVersion: 1,
-      entries: [
-        {
-          observationId: 'obs_e2e_w1',
-          type: 'command',
-          path: path.join(tmpDir, '.claude', 'commands', 'self-learning', 'implement-review-commit-push.md'),
-          contentHash: 'fakehash123',
-          renderedAt: new Date().toISOString(),
-        },
-      ],
-    };
-    fs.writeFileSync(manifestPath, JSON.stringify(fakeManifest), 'utf-8');
-
-    // Write the log with obs_e2e_w1 as 'created' with artifact_path
-    const w1Obs = {
-      id: 'obs_e2e_w1',
-      type: 'workflow',
-      pattern: 'implement-review-commit-push',
-      evidence: ['implement the plan, then run /self-review, then commit and push'],
-      details: '1. Run /implement\n2. /self-review\n3. commit\n4. push',
-      quality_ok: true,
-      confidence: 0.85,
-      observations: 3,
-      first_seen: new Date().toISOString(),
-      last_seen: new Date().toISOString(),
-      status: 'created',
-      artifact_path: path.join(tmpDir, '.claude', 'commands', 'self-learning', 'implement-review-commit-push.md'),
-    };
-    fs.writeFileSync(logPath, JSON.stringify(w1Obs) + '\n', 'utf-8');
-
-    // Don't create the artifact file — simulating a deleted artifact
-
-    // Run reconcile-manifest
-    execSync(`node "${JSON_HELPER}" reconcile-manifest "${tmpDir}"`, {
-      env: process.env,
-      timeout: 10000,
-    });
-
-    // Assert: the observation is now deprecated (artifact was missing)
-    const reconciledContent = fs.readFileSync(logPath, 'utf-8');
-    const reconciledObs = reconciledContent.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
-    const w1After = reconciledObs.find((o: { id: string }) => o.id === 'obs_e2e_w1');
-
-    expect(w1After).toBeDefined();
-    expect(w1After.status).toBe('deprecated');
+    // Assert quality_ok is stored from the LLM response
+    for (const obs of observations) {
+      expect(obs.quality_ok).toBe(true); // shim provides quality_ok=true for all
+    }
   }, 60000); // 60s timeout for integration test
 
   it('gracefully handles missing batch IDs file', () => {
@@ -357,54 +302,6 @@ CANNED_EOF
     expect(fs.existsSync(path.join(memoryDir, 'learning-log.jsonl'))).toBe(false);
   }, 30000);
 
-  it('reconcile-manifest marks missing artifacts as deprecated in log', () => {
-    // Set up a log with a 'created' observation pointing to a missing file
-    const logPath = path.join(memoryDir, 'learning-log.jsonl');
-    const missingPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'does-not-exist.md');
-    const obs = {
-      id: 'obs_reconcile_01',
-      type: 'workflow',
-      pattern: 'test-pattern',
-      evidence: ['test evidence'],
-      details: 'test details',
-      quality_ok: true,
-      confidence: 0.8,
-      observations: 3,
-      first_seen: new Date().toISOString(),
-      last_seen: new Date().toISOString(),
-      status: 'created',
-      artifact_path: missingPath,
-    };
-
-    // Set up manifest pointing to same missing file
-    const manifestPath = path.join(memoryDir, '.learning-manifest.json');
-    fs.writeFileSync(logPath, JSON.stringify(obs) + '\n', 'utf-8');
-    fs.writeFileSync(manifestPath, JSON.stringify({
-      schemaVersion: 1,
-      entries: [{
-        observationId: 'obs_reconcile_01',
-        type: 'command',
-        path: missingPath,
-        contentHash: 'testhash',
-        renderedAt: new Date().toISOString(),
-      }],
-    }), 'utf-8');
-
-    // Run reconcile-manifest
-    execSync(`node "${JSON_HELPER}" reconcile-manifest "${tmpDir}"`, {
-      timeout: 10000,
-    });
-
-    // Read updated log
-    const updatedContent = fs.readFileSync(logPath, 'utf-8');
-    const updatedObs = updatedContent.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
-    const updated = updatedObs.find((o: { id: string }) => o.id === 'obs_reconcile_01');
-
-    expect(updated).toBeDefined();
-    expect(updated.status).toBe('deprecated');
-    // The manifest entry should be removed
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-    const entry = manifest.entries.find((e: { observationId: string }) => e.observationId === 'obs_reconcile_01');
-    expect(entry).toBeUndefined();
-  }, 20000);
+  // reconcile-manifest test removed in Phase 3 (reliable LLM sidecar consumption).
+  // reconcile-manifest and render-ready have been removed — no manifests are written.
 });

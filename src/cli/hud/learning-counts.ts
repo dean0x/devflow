@@ -1,8 +1,8 @@
 /**
  * @devflow-design-decision D15
- * Soft cap + HUD attention counter, not auto-pruning.
- * We cannot reliably detect "irrelevance" without human judgment.
- * The soft cap + attention counter shifts the decision to the user at the point where it matters.
+ * Counts promoted (status=created) entries by type, not auto-pruning.
+ * We cannot reliably detect "irrelevance" without human judgment, so the HUD
+ * surfaces what was learned and leaves curation to the user / sidecar processor.
  */
 
 import * as fs from 'node:fs';
@@ -16,26 +16,15 @@ type ObservationType = typeof VALID_OBSERVATION_TYPES[number];
 interface RawObservation {
   type: ObservationType;
   status: string;
-  mayBeStale?: boolean;
-  needsReview?: boolean;
-  softCapExceeded?: boolean;
-}
-
-/** Returns true when v is undefined, or a boolean. Rejects any other value. */
-function isOptBool(v: unknown): boolean {
-  return v === undefined || typeof v === 'boolean';
 }
 
 function isRawObservation(val: unknown): val is RawObservation {
   if (typeof val !== 'object' || val === null) return false;
   const o = val as Record<string, unknown>;
 
-  // Phase 1: required fields
+  // Required fields only
   if (typeof o.type !== 'string' || typeof o.status !== 'string') return false;
-  if (!(VALID_OBSERVATION_TYPES as readonly string[]).includes(o.type)) return false;
-
-  // Phase 2: optional boolean flags
-  return isOptBool(o.mayBeStale) && isOptBool(o.needsReview) && isOptBool(o.softCapExceeded);
+  return (VALID_OBSERVATION_TYPES as readonly string[]).includes(o.type);
 }
 
 /**
@@ -67,11 +56,6 @@ function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
     if (!isRawObservation(parsed)) continue;
     parsedAny = true;
 
-    // Count attention flags regardless of status
-    if (parsed.mayBeStale || parsed.needsReview || parsed.softCapExceeded) {
-      counts.needReview++;
-    }
-
     // Only count 'created' entries in type totals
     if (parsed.status !== 'created') continue;
 
@@ -99,7 +83,7 @@ function parseLogInto(logPath: string, counts: LearningCountsData): boolean {
 }
 
 /**
- * Read .devflow/learning/learning-log.jsonl and .devflow/decisions/decisions-log.jsonl, merge counts by type + attention flags.
+ * Read .devflow/learning/learning-log.jsonl and .devflow/decisions/decisions-log.jsonl, merge counts by type.
  * Returns null if neither log exists or neither can be parsed (graceful fallback).
  * Only counts entries with status === 'created'.
  *
@@ -112,7 +96,6 @@ export function getLearningCounts(cwd: string): LearningCountsData | null {
     procedural: 0,
     decisions: 0,
     pitfalls: 0,
-    needReview: 0,
   };
 
   const learningParsed = parseLogInto(getLearningLogPath(cwd), counts);

@@ -40,11 +40,11 @@ export async function writeObservations(logPath: string, observations: LearningO
 
 /**
  * Warn the user if invalid entries were found in a log file.
- * Pass `command` to customize the purge command shown in the warning.
+ * Invalid entries are cleaned up automatically by the background curation pass.
  */
-export function warnIfInvalid(invalidCount: number, command = 'devflow learn --purge'): void {
+export function warnIfInvalid(invalidCount: number): void {
   if (invalidCount > 0) {
-    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. Run '${command}' to clean.`);
+    p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. They will be cleaned up automatically.`);
   }
 }
 
@@ -57,8 +57,8 @@ function escapeRegExp(str: string): string {
  * Locates the entry by anchor ID (from artifact_path fragment), sets Status to the given value.
  * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
  *
- * The lock path MUST match the render-ready writer in json-helper.cjs so CLI updates
- * serialize against the background learning pipeline.
+ * The lock path MUST match the decisions-append writer in json-helper.cjs so CLI updates
+ * serialize against the sidecar processor's decisions-append calls.
  */
 export async function updateDecisionsStatus(
   filePath: string,

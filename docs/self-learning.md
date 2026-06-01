@@ -22,81 +22,33 @@ Transcripts are split into two channels by `scripts/hooks/lib/transcript-filter.
 - **USER_SIGNALS** — Plain user messages (no prior context). Feeds workflow and procedural detection. These reflect what you explicitly asked for.
 - **DIALOG_PAIRS** — Each prior-assistant turn paired with the following user message. Feeds decision and pitfall detection. These capture rationale confirmed or challenged by the user.
 
-### Detection: Per-Type Extraction
+### Detection: LLM-Driven Extraction at SessionStart
 
-The background `claude -p --model sonnet` agent receives separate USER_SIGNALS and DIALOG_PAIRS blocks and uses per-type linguistic markers to extract observations. Each observation includes a `quality_ok` boolean set by the LLM based on quality gates (specificity, actionability, scope).
+All detection, semantic matching, and promotion decisions are made by the **sidecar processor** — a background LLM agent spawned at SessionStart via `Agent(run_in_background:true)` using the `devflow:sidecar` skill.
 
-### Merge: Per-Type Thresholds + Status Machine
+The processor receives USER_SIGNALS and DIALOG_PAIRS from the pending sidecar markers and uses LLM judgment to extract observations, deduplicate semantically (reusing `obs_id` when a pattern matches an existing observation), and decide whether an observation warrants materialization. There are no deterministic thresholds, confidence formulas, or promotion rules in code — all judgment is LLM-authored.
 
-Observations accumulate in `.devflow/learning/learning-log.jsonl` (JSONL, one entry per line). Each observation tracks:
+### SessionEnd: Marker Writing (Plumbing Only)
 
-- `confidence` — computed as `min(floor(count * 100 / required), 95) / 100` (per-type required count)
-- `status` — `observing → ready → created → deprecated`
-- `quality_ok` — required for promotion to `ready`
-- `first_seen` / `last_seen` — used for temporal spread check
+`sidecar-evaluate` (SessionEnd hook) is plumbing: it runs per-type evaluation modules that decide whether a marker is worth writing, then write it atomically.
 
-Per-type thresholds (in `json-helper.cjs THRESHOLDS`):
+- **`eval-learning`** — Accumulates session IDs. When the batch threshold is reached (default 3 sessions, 5 at 15+ observations), writes `learning.{session_id}.json` in `.devflow/sidecar/`.
+- **`eval-decisions`** — Runs every session. Extracts DIALOG_PAIRS from the transcript and writes `decisions.{session_id}.json` in `.devflow/sidecar/`.
+- **`eval-knowledge`** — Writes knowledge markers when staleness is detected.
+- **`eval-curation`** — Throttled to once per 7 days; writes a curation marker when triggered.
 
-| Type | Required count | Spread | Promote threshold |
-|------|---------------|--------|-------------------|
-| workflow | 3 | 7 days | 0.60 |
-| procedural | 4 | 14 days | 0.70 |
-| decision | 2 | 0 days (no spread) | 0.65 |
-| pitfall | 2 | 0 days (no spread) | 0.65 |
+### Merge: Sidecar Processor Writes via Plumbing Ops
 
-An observation promotes to `ready` when: `quality_ok === true` AND `confidence >= promote` AND `daySpread >= spread`.
+When the processor materializes an observation, it calls atomic plumbing operations:
 
-Confidence is computed as `min(floor(count × 100 / required), 95) / 100`. For workflow (promote=0.60, required=3) this means promotion at count=2 (0.66 ≥ 0.60); for procedural (promote=0.70, required=4) at count=3 (0.75 ≥ 0.70). The `promote` threshold is what the code actually evaluates — not a raw count comparison.
+- **`merge-observation`** — Id-keyed reinforcement into `.devflow/learning/learning-log.jsonl`. Lock acquired externally by the processor via `.reinforce.lock` before the call.
+- **`decisions-append`** — Appends a new ADR-NNN or PF-NNN entry to `decisions.md` / `pitfalls.md`. Internally self-acquires `.decisions.lock`, assigns the next sequential number, writes the TL;DR and `- **Source**:` marker. The processor must NOT hold `.decisions.lock` when calling this op.
 
-### Rendering: Deterministic 4-Target Dispatch
+Observations accumulate in `.devflow/learning/learning-log.jsonl` (workflow/procedural) and `.devflow/decisions/decisions-log.jsonl` (decision/pitfall). Lifecycle: `observing → created → deprecated`.
 
-`json-helper.cjs render-ready <log> <baseDir>` reads the log, finds all `status: 'ready'` entries, and dispatches each to one of 4 render handlers:
+### Curation
 
-- **workflow** → generates a slash command file with frontmatter and pattern body
-- **procedural** → generates a skill SKILL.md with Iron Law and step sections
-- **decision** → appends an ADR-NNN entry to `.devflow/decisions/decisions.md`
-- **pitfall** → appends a PF-NNN entry to `.devflow/decisions/pitfalls.md` (deduped by normalized Area+Issue prefix)
-
-All rendered artifacts are recorded in `.devflow/learning/.learning-manifest.json`:
-
-```json
-{
-  "schemaVersion": 1,
-  "entries": [
-    {
-      "observationId": "obs_abc123",
-      "type": "workflow",
-      "path": ".claude/commands/self-learning/my-workflow.md",
-      "contentHash": "sha256...",
-      "renderedAt": "2026-04-10T12:00:00Z"
-    }
-  ]
-}
-```
-
-### Feedback: Session-Start Reconciler
-
-On session start, `json-helper.cjs reconcile-manifest <cwd>` compares manifest entries against the filesystem:
-
-- **File deleted** → applies 0.3× confidence penalty to the observation (signals unwanted artifact)
-- **File edited** → ignored (per D13 — user edits are authoritative; don't fight them)
-- **File present and unchanged** → counted in telemetry only (no confidence change)
-
-This creates a feedback loop: deleting a generated artifact reduces its observation's confidence, eventually causing it to stop promoting.
-
-#### Self-Heal: Crash-Window Recovery
-
-`render-ready` writes to the decisions file first, then updates the log and manifest. If the process crashes in the window between file write and log update, the decisions file contains the new ADR/PF entry but the log still shows `status: 'ready'` — a duplicate would be written on the next render-ready call.
-
-The reconciler detects and heals these orphans automatically:
-
-1. Scans `decisions.md` and `pitfalls.md` for ADR/PF anchors not tracked in the manifest. Only sections containing the `- **Source**: self-learning:` marker qualify — pre-v2 seeded entries (which lack the marker) are excluded so they cannot be falsely paired with a current ready obs.
-2. For each unmanaged anchor, searches the log for `status: 'ready'` observations whose normalized pattern matches the anchor's heading text.
-3. **Exactly one match** → upgrades the observation to `status: 'created'`, reconstructs the manifest entry, and registers usage. The `healed` counter in the reconcile output increments.
-4. **Zero matches** → the entry is user-curated (written manually). Left untouched.
-5. **Multiple matches** → ambiguous; silently skipped. The `healed` counter does not increment.
-
-The `healed` field is present in all three reconcile-manifest output shapes (main path and both early-return paths) and is backward-compatible — callers that discard the output are unaffected.
+The processor handles curation in the same background pass when a curation marker is present. It deprecates (never deletes) stale or low-value entries, updates `- **Status**: Deprecated` in place, and re-points citations. Maximum 5 changes per run; 7-day protection window for recently created entries.
 
 ## Decisions Index + On-Demand Read Pattern
 
@@ -124,7 +76,7 @@ PF-NNN  entries live in /path/to/project/.devflow/decisions/pitfalls.md
 Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
 ```
 
-> **Note**: Pre-v2 seeded entries may show `[unknown]` instead of `[Active]` if they predate the standard `- **Status**: Active` line format. New entries created by the learning system always include the status line.
+> **Note**: Pre-v2 seeded entries may show `[unknown]` instead of `[Active]` if they predate the standard `- **Status**: Active` line format. New entries created by the sidecar processor always include the status line.
 
 ### Step 2: Agent reads full body on demand
 
@@ -151,11 +103,9 @@ Agents that receive `DECISIONS_CONTEXT` follow the `devflow:apply-decisions` ski
 npx devflow-kit learn --enable                  # Register the learning SessionEnd hook
 npx devflow-kit learn --disable                 # Remove the learning hook
 npx devflow-kit learn --status                  # Show status and observation counts
-npx devflow-kit learn --list                    # Show all observations sorted by confidence
+npx devflow-kit learn --list                    # Show all observations sorted by type
 npx devflow-kit learn --configure               # Interactive config (model, throttle, daily cap, debug)
 npx devflow-kit learn --clear                   # Reset all observations
-npx devflow-kit learn --purge                   # Remove invalid/corrupted entries
-npx devflow-kit learn --review                  # Inspect observations needing attention (stale, capped, low-quality)
 ```
 
 Two one-time migrations run automatically on `devflow init` to remove pre-v2 seeded decisions entries — no CLI flag needed. Migration state is tracked at `~/.devflow/migrations.json`.
@@ -164,15 +114,11 @@ Two one-time migrations run automatically on `devflow init` to remove pre-v2 see
 
 **v3 migration (`purge-legacy-knowledge-v3`)**: Sweeps all remaining pre-v2 seeded entries using a format discriminator. Any ADR/PF section in `decisions.md` or `pitfalls.md` that lacks the line `- **Source**: self-learning:` is treated as pre-v2 seeded content and removed. Self-learning-generated entries all carry this marker, so they are preserved. User-edited entries survive too — add the `- **Source**: self-learning:manual_xxx` line to any entry you want to keep through future migrations.
 
+**v4 migration (`purge-orphaned-sidecar-judgment-state`)**: Removes orphaned `.learning-manifest.json`, `.decisions-manifest.json`, and `.decisions-notifications.json` — judgment-state files written by the now-removed deterministic render/reconcile layer. Preserves `.decisions-usage.json` (still written by the `decisions-usage-scan.cjs` Stop hook).
+
 ## HUD Row
 
-When promoted entries exist, the HUD displays:
-
-```
-Learning: 2 workflows, 1 skills, 3 decisions, 1 pitfalls  ⚠ 1 need review
-```
-
-The `⚠ N need review` suffix appears when observations have `needsReview: true` (stale code refs, soft cap exceeded, or low confidence with many observations).
+When promoted entries exist, the HUD displays counts of workflows, skills, decisions, and pitfalls.
 
 ## Configuration
 
@@ -180,9 +126,9 @@ Use `devflow learn --configure` for interactive setup, or edit `.devflow/learnin
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Model | `sonnet` | Model for background extraction |
-| Batch size | 3 sessions (5 at 15+ obs) | Sessions accumulated before analysis |
-| Daily cap | 5 runs | Maximum learning runs per day |
+| Model | `sonnet` | Model alias for the background sidecar processor |
+| Batch size | 3 sessions (5 at 15+ obs) | Sessions accumulated before writing a learning marker |
+| Daily cap | 5 runs | Maximum learning marker writes per day |
 | Debug | `false` | Enable verbose logging |
 
 ## Files
@@ -190,20 +136,17 @@ Use `devflow learn --configure` for interactive setup, or edit `.devflow/learnin
 | File | Purpose |
 |------|---------|
 | `.devflow/learning/learning-log.jsonl` | All observations (one JSON per line) |
-| `.devflow/learning/.learning-manifest.json` | Rendered artifact registry for feedback reconciliation |
 | `.devflow/learning/learning.json` | Project-level config (no `enabled` field — hook presence IS the toggle) |
 | `.devflow/learning/.learning-runs-today` | Daily run counter (date + count) |
-| `.devflow/learning/.learning-session-count` | Session IDs pending batch |
-| `.devflow/learning/.learning-batch-ids` | Session IDs for current batch run |
+| `.devflow/learning/.learning-sessions` | Session IDs pending batch |
 | `.devflow/learning/.learning-notified-at` | New artifact notification marker |
-| `.devflow/decisions/decisions.md` | ADR entries (append-only, written by render-ready) |
-| `.devflow/decisions/pitfalls.md` | PF entries (append-only, written by render-ready) |
-| `~/.devflow/logs/{project-slug}/.learning-update.log` | Background agent log |
+| `.devflow/decisions/decisions.md` | ADR entries (append-only, written by sidecar processor via decisions-append) |
+| `.devflow/decisions/pitfalls.md` | PF entries (append-only, written by sidecar processor via decisions-append) |
+| `.devflow/decisions/.decisions-usage.json` | Citation counts (written by decisions-usage-scan.cjs) |
 
 ## Key Design Decisions
 
-- **D8**: Decisions writers removed from commands — agent-summaries at command-end were low-signal. Decisions now extracted directly from user transcripts.
-- **D9**: `decisions-format` SKILL is a format specification only. The actual writer is `scripts/hooks/background-learning` via `json-helper.cjs render-ready`.
-- **D13**: User edits to generated artifacts are ignored by the reconciler — your edits are authoritative.
-- **D15**: Soft cap + HUD attention counter instead of auto-pruning. Human judgment is required for deprecation.
+- **D8**: Decisions writers removed from commands — agent-summaries at command-end were low-signal. Decisions now extracted directly from user transcripts by the sidecar processor.
+- **D9**: `decisions-format` SKILL is a format specification only. The actual writer is the sidecar processor via `decisions-append`.
+- **D13**: User edits to generated artifacts are authoritative.
 - **D16**: Staleness detection is file-reference-based (grep for `.ts`, `.js`, `.py` paths). Function-level checks are not performed.

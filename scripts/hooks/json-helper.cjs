@@ -26,15 +26,11 @@
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   learning-created <file>               Extract created artifacts from learning log
 //   learning-new <file> <since_epoch>     Find new artifacts since epoch
-//   temporal-decay <file>                 Apply temporal decay to learning log entries
-//   process-observations <resp> <log>     Merge model observations into learning log
-//   create-artifacts <resp> <log> <dir>   Create command/skill files from ready observations
 //   filter-observations <file> [sort] [n] Filter valid observations, sort desc, limit
-//   render-ready <log> <baseDir>          Render ready observations to files (D5)
-//   reconcile-manifest <cwd>             Session-start reconciler: sync manifest vs FS (D6, D13)
-//   merge-observation <log> <newObsJson> Dedup/reinforce with in-place merge (D14)
-//   decisions-append <file> <type> <obs> Append ADR/PF entry to decisions file
-//   read-sidecar <file> <field>          Read field from sidecar JSON (allowed fields only; returns [] on any error)
+//   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
+//   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
+//   decisions-usage-scan                  Scan session context for ADR/PF cite counts
+//   read-sidecar <file> <field>           Read field from sidecar JSON (allowed fields only; returns [] on any error)
 
 'use strict';
 
@@ -46,17 +42,11 @@ const args = process.argv.slice(3);
 
 const { safePath } = require('./lib/safe-path.cjs');
 const {
-  getMemoryDir,
-  getDecisionsDir,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsUsagePath,
-  getDecisionsUsageLockDir,
-  getDecisionsNotificationsPath,
   getDecisionsLockDir,
   getLearningLogPath,
-  getLearningLockDir,
-  getLearningManifestPath,
 } = require('./lib/project-paths.cjs');
 
 function readStdin() {
@@ -85,32 +75,8 @@ function parseJsonl(file) {
 }
 
 // --- Learning system constants ---
-const DECAY_FACTORS = [1.0, 0.90, 0.81, 0.73, 0.66, 0.59, 0.53];
-const CONFIDENCE_FLOOR = 0.10;
-const DECAY_PERIOD_DAYS = 30;
-const REQUIRED_OBSERVATIONS = 5;
-const TEMPORAL_SPREAD_SECS = 604800; // 7 days
-const INITIAL_CONFIDENCE = 0.33; // seed value for first observation (higher than calculateConfidence(1) to reduce noise)
-
-/**
- * Per-type promotion thresholds.
- * DESIGN: D3 — each observation type has distinct evidence requirements reflecting
- * how often the pattern must recur before materialization. Workflow/procedural require
- * temporal spread to guard against single-session spikes; decision/pitfall require
- * only count (rationale quality is enforced by quality_ok, not frequency).
- */
-const THRESHOLDS = {
-  workflow:   { required: 3, spread: 7 * 86400, promote: 0.60 },
-  procedural: { required: 4, spread: 14 * 86400, promote: 0.70 },
-  decision:   { required: 1, spread: 0,          promote: 0.65 },
-  pitfall:    { required: 1, spread: 0,          promote: 0.65 },
-};
-
-// D17: softCapExceeded repurposed to hard ceiling (100), not removed.
-// Threshold shifts from 50→100; most call sites unchanged. Constants renamed to DECISIONS_*.
-const DECISIONS_SOFT_START = 50;
-const DECISIONS_HARD_CEILING = 100;
-const DECISIONS_THRESHOLDS = [50, 60, 70, 80, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100];
+// (Phase 3: deterministic confidence/promotion constants removed.
+//  The LLM now sets confidence/status/quality_ok fields directly.)
 
 function learningLog(msg) {
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -191,37 +157,6 @@ function nextDecisionsId(matches, prefix) {
 }
 
 /**
- * Extract the content of a single ADR-NNN / PF-NNN section from a decisions file.
- * Returns the text from the matching `## <anchorId>` heading through the next `## ADR-`
- * or `## PF-` heading (exclusive), or to end-of-file.  Returns null when the anchor is
- * not present.  The anchorId is sanitised before use to eliminate ReDoS surface.
- *
- * Shared by reconcileExisting (anchored hash path) and the heal block — eliminates the
- * duplicated inline regex that appeared at three reconcile-manifest call sites (A2).
- *
- * @param {string} content   - Full file content
- * @param {string} anchorId  - e.g. 'ADR-001' or 'PF-007'
- * @returns {string|null}
- */
-function sliceDecisionsSection(content, anchorId) {
-  const safe = anchorId.replace(/[^A-Z0-9-]/gi, '');
-  const sectionRe = new RegExp(`(##\\s+${safe}[\\s\\S]*?)(?=\\n##\\s+(?:ADR|PF)-|\\s*$)`);
-  const m = content.match(sectionRe);
-  return m ? m[1] : null;
-}
-
-/**
- * Return a zeroed reconcile-manifest result object.
- * Centralises the five-place inline shape `{ deletions: 0, edits: 0, unchanged: 0, healed: 0 }`
- * so that adding a counter in the future is a one-line change (C3).
- *
- * @returns {{ deletions: number, edits: number, unchanged: number, healed: number }}
- */
-function emptyReconcileResult() {
-  return { deletions: 0, edits: 0, unchanged: 0, healed: 0 };
-}
-
-/**
  * D18: Count only non-deprecated headings in a decisions file.
  * Scans ## ADR-NNN: or ## PF-NNN: headings, then checks the next Status
  * line — if `Deprecated` or `Superseded`, the entry is excluded from the count.
@@ -252,59 +187,6 @@ function countActiveHeadings(content, entryType) {
 }
 
 /**
- * Scan decisions.md and pitfalls.md for anchors (ADR-NNN / PF-NNN) that are present in
- * the files but not tracked in the manifest. Returns an array of unmanaged anchor descriptors.
- * Used by reconcile-manifest to self-heal render-ready crash-window duplicates.
- *
- * Only sections that contain the `- **Source**: self-learning:` marker qualify — pre-v2
- * seeded entries (which lack the marker) are excluded so they cannot be falsely paired
- * with a current `ready` log obs by normalised heading match. Pre-v2 entries are removed
- * separately by the v3 migration; until that runs they must remain inert here.
- *
- * `fileContent` is threaded through the returned descriptor so the heal block can reuse
- * the already-read bytes instead of re-reading the file a second time (A3).
- *
- * Skips scanning when `logMap` contains no `ready` observations — there is nothing to
- * pair with, so the I/O would be wasted (P2).
- *
- * @param {string} projectRoot - Path to project root (cwd)
- * @param {Set<string>} managedAnchors - Anchor IDs already tracked in the manifest
- * @param {Map<string,Object>} logMap - Current observation log keyed by obs ID
- * @returns {Array<{anchorId: string, type: string, path: string, headingText: string, fileContent: string}>}
- */
-function findUnmanagedAnchors(projectRoot, managedAnchors, logMap) {
-  // P2: short-circuit when no ready observations exist — nothing can be healed.
-  if (!Array.from(logMap.values()).some(o => o.status === 'ready')) return [];
-
-  // Use only literal (non-dynamic) regexes to avoid ReDoS surface on tainted data.
-  // prefix values are hardcoded: 'ADR' for decisions, 'PF' for pitfalls.
-  const result = [];
-  const files = [
-    { file: getDecisionsFilePath(projectRoot), type: 'decision', re: /^## (ADR-\d+):\s*([^\n]+)/gm },
-    { file: getPitfallsFilePath(projectRoot),  type: 'pitfall',  re: /^## (PF-\d+):\s*([^\n]+)/gm },
-  ];
-  for (const { file, type, re } of files) {
-    if (!fs.existsSync(file)) continue;
-    const content = fs.readFileSync(file, 'utf8');
-    let m;
-    while ((m = re.exec(content)) !== null) {
-      if (managedAnchors.has(m[1])) continue;
-      // Slice out this section's body (heading → next ## heading or eof) and require the
-      // self-learning source marker — this excludes pre-v2 seeded content from the heal path.
-      const sectionStart = m.index;
-      const nextHeadingIdx = content.indexOf('\n## ', sectionStart + 1);
-      const section = nextHeadingIdx !== -1
-        ? content.slice(sectionStart, nextHeadingIdx)
-        : content.slice(sectionStart);
-      if (!section.includes('\n- **Source**: self-learning:')) continue;
-      // A3: thread fileContent so the heal block does not re-read this file.
-      result.push({ anchorId: m[1], type, path: file, headingText: m[2].trim(), fileContent: content });
-    }
-  }
-  return result;
-}
-
-/**
  * Read .decisions-usage.json. Returns {version, entries} or empty default.
  * @param {string} projectRoot - Path to project root (cwd)
  * @returns {{version: number, entries: Object}}
@@ -326,59 +208,6 @@ function readUsageFile(projectRoot) {
  */
 function writeUsageFile(projectRoot, data) {
   writeFileAtomic(getDecisionsUsagePath(projectRoot), JSON.stringify(data, null, 2) + '\n');
-}
-
-/**
- * Read .decisions-notifications.json.
- * @param {string} projectRoot - Path to project root (cwd)
- * @returns {Object}
- */
-function readNotifications(projectRoot) {
-  return readNotificationsFromPath(getDecisionsNotificationsPath(projectRoot));
-}
-
-/**
- * Write .decisions-notifications.json atomically.
- * @param {string} projectRoot - Path to project root (cwd)
- * @param {Object} data
- */
-function writeNotifications(projectRoot, data) {
-  writeNotificationsToPath(getDecisionsNotificationsPath(projectRoot), data);
-}
-
-/**
- * Read a notifications file by its full path.
- * @param {string} filePath
- * @returns {Object}
- */
-function readNotificationsFromPath(filePath) {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const data = JSON.parse(raw);
-    if (data && typeof data === 'object') return data;
-  } catch { /* ENOENT or malformed — return empty */ }
-  return {};
-}
-
-/**
- * Write a notifications file atomically by its full path.
- * @param {string} filePath
- * @param {Object} data
- */
-function writeNotificationsToPath(filePath, data) {
-  writeFileAtomic(filePath, JSON.stringify(data, null, 2) + '\n');
-}
-
-/**
- * D22: Compute which thresholds were crossed going from prev to next count.
- * Returns array of crossed threshold values (ascending).
- * @param {number} prev
- * @param {number} next
- * @returns {number[]}
- */
-function crossedThresholds(prev, next) {
-  if (next <= prev) return [];
-  return DECISIONS_THRESHOLDS.filter(t => t > prev && t <= next);
 }
 
 /**
@@ -415,56 +244,7 @@ function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, 
 }
 
 /**
- * D21/D22/D24/D28: Update notifications file after a decisions entry is appended.
- * Handles first-run seed, threshold crossing, severity escalation, and re-fire on dismiss.
- *
- * @param {string} projectRoot - Path to project root (cwd)
- * @param {string} notifKey - e.g. 'decisions-capacity-decisions'
- * @param {number} previousCount - Active count before the append
- * @param {number} newCount - Active count after the append
- * @param {string} [notifFilePath] - Optional full path to notifications file.
- */
-function updateCapacityNotification(projectRoot, notifKey, previousCount, newCount, notifFilePath) {
-  const effectiveNotifPath = notifFilePath || getDecisionsNotificationsPath(projectRoot);
-  const notifications = readNotificationsFromPath(effectiveNotifPath);
-  const existingNotif = notifications[notifKey];
-
-  // D21: first-run seed — if no notification existed and count >= soft start,
-  // pretend we started from 0 so all crossed thresholds fire on first pass.
-  let effectivePrevCount = previousCount;
-  if (!existingNotif && newCount >= DECISIONS_SOFT_START) {
-    effectivePrevCount = 0;
-  }
-
-  const crossed = crossedThresholds(effectivePrevCount, newCount);
-  if (crossed.length === 0) return;
-
-  const highestCrossed = crossed[crossed.length - 1];
-  // D24: severity escalates with count
-  let severity = 'dim';
-  if (highestCrossed >= 90) severity = 'error';
-  else if (highestCrossed >= 70) severity = 'warning';
-
-  notifications[notifKey] = {
-    active: true,
-    threshold: highestCrossed,
-    count: newCount,
-    ceiling: DECISIONS_HARD_CEILING,
-    dismissed_at_threshold: (existingNotif && existingNotif.dismissed_at_threshold) || null,
-    severity,
-    created_at: (existingNotif && existingNotif.created_at) || new Date().toISOString(),
-  };
-
-  // D28: if user dismissed at a lower threshold, re-fire at new threshold
-  if (existingNotif && existingNotif.dismissed_at_threshold && highestCrossed > existingNotif.dismissed_at_threshold) {
-    notifications[notifKey].dismissed_at_threshold = null;
-  }
-
-  writeNotificationsToPath(effectiveNotifPath, notifications);
-}
-
-/**
- * D20: Register an entry in .decisions-usage.json with initial cite count.
+ * Register an entry in .decisions-usage.json with initial cite count.
  * @param {string} projectRoot - Path to project root (cwd)
  * @param {string} anchorId - e.g. 'ADR-001' or 'PF-003'
  */
@@ -480,70 +260,6 @@ function registerUsageEntry(projectRoot, anchorId) {
   }
 }
 
-/**
- * Acquire .decisions-usage.lock with a 2-second timeout.
- * Separate from .decisions.lock to avoid blocking decisions writes.
- * @param {string} projectRoot - Path to project root (cwd)
- * @returns {boolean}
- */
-function acquireDecisionsUsageLock(projectRoot) {
-  const lockDir = getDecisionsUsageLockDir(projectRoot);
-  return acquireMkdirLock(lockDir, 2000, 5000);
-}
-
-/**
- * Release .decisions-usage.lock.
- * @param {string} projectRoot - Path to project root (cwd)
- */
-function releaseDecisionsUsageLock(projectRoot) {
-  const lockDir = getDecisionsUsageLockDir(projectRoot);
-  releaseLock(lockDir);
-}
-
-/**
- * Calculate confidence for a given observation count and type.
- * DESIGN: D3 — uses per-type required count from THRESHOLDS so workflow (req=3) reaches
- * 0.95 faster than procedural (req=4). Type defaults to 'procedural' if unrecognized
- * to keep legacy calls working.
- *
- * @param {number} count
- * @param {string} [type] - observation type key (workflow|procedural|decision|pitfall)
- * @returns {number} confidence in [0, 0.95]
- */
-function calculateConfidence(count, type) {
-  const req = (THRESHOLDS[type] || THRESHOLDS.procedural).required;
-  return Math.min(Math.floor(count * 100 / req), 95) / 100;
-}
-
-/**
- * D3+D4: Attempt promotion for an entry whose type has required=1 and spread=0
- * (decision/pitfall). If confidence >= threshold AND quality_ok, sets
- * entry.status = 'ready' in place.
- *
- * @param {object} entry - The log entry (mutated in place).
- * @param {object} [opts]
- * @param {boolean} [opts.guardCreated=false] - When true, skip promotion if
- *   entry.status === 'created' (already materialized). Use for existing entries.
- *   Omit (false) for brand-new entries that cannot yet be 'created'.
- * @param {boolean} [opts.firstSeenFallback=false] - When true, fall back to
- *   epoch-0 when first_seen is absent (existing entries may lack the field).
- *   Omit (false) for brand-new entries that always have first_seen set.
- */
-function tryImmediatePromotion(entry, opts = {}) {
-  const { guardCreated = false, firstSeenFallback = false } = opts;
-  if (guardCreated && entry.status === 'created') return;
-  const th = THRESHOLDS[entry.type] || THRESHOLDS.procedural;
-  if (entry.confidence >= th.promote && entry.quality_ok === true) {
-    const firstSeenMs = firstSeenFallback
-      ? (entry.first_seen ? new Date(entry.first_seen).getTime() : 0)
-      : new Date(entry.first_seen).getTime();
-    const spread = (Date.now() - firstSeenMs) / 1000;
-    if (!isNaN(firstSeenMs) && spread >= th.spread) {
-      entry.status = 'ready';
-    }
-  }
-}
-
 function mergeEvidence(oldEvidence, newEvidence) {
   const flat = [...(oldEvidence || []), ...(newEvidence || [])];
   const unique = [...new Set(flat)];
@@ -552,14 +268,9 @@ function mergeEvidence(oldEvidence, newEvidence) {
 
 /**
  * Acquire a mkdir-based lock. Returns true on success, false on timeout.
- * DESIGN: Shared locking utility used by render-ready, reconcile-manifest, merge-observation,
- * and decisions-append. Callers pass their own timeoutMs/staleMs to suit their workload:
- *   - .decisions.lock writes (render-ready, decisions-append): 30 000 ms / 60 000 ms stale
- *   - .learning.lock (reconcile-manifest): 15 000 ms / 60 000 ms stale
- *   - .decisions-usage.lock (acquireDecisionsUsageLock): 2 000 ms / 5 000 ms stale
- * The bash acquire_lock in background-learning uses different defaults (90 s wait / 300 s stale)
- * because it guards the entire Sonnet analysis pipeline (up to 180 s watchdog timeout), not
- * just file I/O. Those higher values are intentional — see background-learning:68-81.
+ * DESIGN: Shared locking utility used by merge-observation and decisions-append.
+ * Callers pass their own timeoutMs/staleMs to suit their workload:
+ *   - .decisions.lock writes (decisions-append): 30 000 ms / 60 000 ms stale
  *
  * @param {string} lockDir - path to lock directory
  * @param {number} [timeoutMs=30000] - max wait in milliseconds
@@ -598,64 +309,6 @@ function acquireMkdirLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
 
 function releaseLock(lockDir) {
   try { fs.rmdirSync(lockDir); } catch { /* already released */ }
-}
-
-/**
- * Compute a simple hash of content for change detection in the manifest.
- * Uses a djb2-style rolling hash — adequate for detecting edits, not cryptographic.
- * @param {string} content
- * @returns {string}
- */
-function contentHash(content) {
-  let h = 5381;
-  for (let i = 0; i < content.length; i++) {
-    h = ((h * 33) ^ content.charCodeAt(i)) >>> 0;
-  }
-  return h.toString(16);
-}
-
-/**
- * Normalize a string for dedup comparisons: lowercase, strip punctuation, trim.
- * @param {string} s
- * @returns {string}
- */
-function normalizeForDedup(s) {
-  return (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-}
-
-/**
- * Approximate similarity ratio between two strings using character overlap.
- * Used in merge-observation to detect divergent details that warrant flagging.
- * For short strings this is O(n) and "good enough" — not a full Levenshtein.
- * Returns a value in [0, 1] where 1 = identical.
- * @param {string} a
- * @param {string} b
- * @returns {number}
- */
-function longestCommonSubsequenceRatio(a, b) {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  // Count common characters (order-independent) — fast approximation
-  const countA = {};
-  for (const c of a) countA[c] = (countA[c] || 0) + 1;
-  let common = 0;
-  for (const c of b) {
-    if (countA[c] > 0) { common++; countA[c]--; }
-  }
-  return (2 * common) / (a.length + b.length);
-}
-
-/**
- * Convert pattern string to kebab-case slug (max 50 chars).
- * @param {string} pattern
- * @returns {string}
- */
-function toSlug(pattern) {
-  return (pattern || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
 }
 
 /** Extract artifact display name from its file path. */
@@ -924,262 +577,6 @@ try {
       break;
     }
 
-    case 'temporal-decay': {
-      const file = safePath(args[0]);
-      if (!fs.existsSync(file)) {
-        console.log(JSON.stringify({ removed: 0, decayed: 0 }));
-        break;
-      }
-      const entries = parseJsonl(file);
-      const now = Date.now() / 1000;
-      let removed = 0;
-      let decayed = 0;
-      const results = [];
-      for (const entry of entries) {
-        if (entry.last_seen) {
-          const lastDate = new Date(entry.last_seen);
-          if (isNaN(lastDate.getTime())) {
-            learningLog(`Warning: invalid date in ${entry.id || 'unknown'}: ${entry.last_seen}`);
-            results.push(entry);
-            continue;
-          }
-          const lastEpoch = lastDate.getTime() / 1000;
-          const days = Math.floor((now - lastEpoch) / 86400);
-          const periods = Math.floor(days / DECAY_PERIOD_DAYS);
-          if (periods > 0) {
-            const factor = periods < DECAY_FACTORS.length
-              ? DECAY_FACTORS[periods] : DECAY_FACTORS[DECAY_FACTORS.length - 1];
-            const newConf = Math.round(entry.confidence * factor * 100) / 100;
-            if (newConf < CONFIDENCE_FLOOR) {
-              removed++;
-              learningLog(`Removed ${entry.id || 'unknown'}: confidence ${newConf} below threshold`);
-              continue;
-            }
-            entry.confidence = newConf;
-            decayed++;
-          }
-        }
-        results.push(entry);
-      }
-      writeJsonlAtomic(file, results);
-      learningLog(`Temporal decay: removed=${removed}, decayed=${decayed}`);
-      console.log(JSON.stringify({ removed, decayed }));
-      break;
-    }
-
-    case 'process-observations': {
-      const responseFile = safePath(args[0]);
-      const logFile = safePath(args[1]);
-
-      // Optional --types workflow,procedural (or --types decision,pitfall) filter.
-      // When present, only observations whose type is in the allowed set are processed.
-      // When absent, all types are processed.
-      let typeFilter = null;
-      const typesArgIdx = args.indexOf('--types');
-      if (typesArgIdx !== -1 && args[typesArgIdx + 1]) {
-        typeFilter = new Set(args[typesArgIdx + 1].split(',').map(t => t.trim()).filter(Boolean));
-      }
-
-      const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
-      const observations = response.observations || [];
-
-      let logEntries = [];
-      if (fs.existsSync(logFile)) {
-        logEntries = parseJsonl(logFile);
-      }
-      const logMap = new Map(logEntries.map(e => [e.id, e]));
-      const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-      let updated = 0, created = 0, skipped = 0;
-
-      // All 4 types are now supported (D3)
-      const VALID_TYPES = new Set(['workflow', 'procedural', 'decision', 'pitfall']);
-
-      for (let i = 0; i < observations.length; i++) {
-        const obs = observations[i];
-        if (!obs.id || !obs.type || !obs.pattern) {
-          learningLog(`Skipping observation ${i}: missing required field (id='${obs.id || ''}' type='${obs.type || ''}')`);
-          skipped++;
-          continue;
-        }
-        if (!VALID_TYPES.has(obs.type)) {
-          learningLog(`Skipping observation ${i}: invalid type '${obs.type}'`);
-          skipped++;
-          continue;
-        }
-        // Type filter: skip observations not in the allowed set (when filter is active)
-        if (typeFilter !== null && !typeFilter.has(obs.type)) {
-          learningLog(`Skipping observation ${i}: type '${obs.type}' not in filter [${[...typeFilter].join(',')}]`);
-          skipped++;
-          continue;
-        }
-        if (!obs.id.startsWith('obs_')) {
-          learningLog(`Skipping observation ${i}: invalid id format '${obs.id}'`);
-          skipped++;
-          continue;
-        }
-
-        // Store quality_ok from the model (D4 — LLM sets quality_ok, downstream checks it)
-        const qualityOk = obs.quality_ok === true;
-
-        const existing = logMap.get(obs.id);
-        if (existing) {
-          const newCount = (existing.observations || 0) + 1;
-          existing.observations = newCount;
-          existing.evidence = mergeEvidence(existing.evidence || [], obs.evidence || []);
-          existing.confidence = calculateConfidence(newCount, existing.type);
-          existing.last_seen = nowIso;
-          if (obs.pattern) existing.pattern = obs.pattern;
-          if (obs.details) existing.details = obs.details;
-          // DESIGN: D4 — quality_ok is sticky once true. A single low-confidence
-          // model call cannot regress the rationale quality of an already-promoted
-          // observation; the model can only confirm or upgrade it.
-          if (qualityOk) existing.quality_ok = true;
-
-          // DESIGN: D3 + D4 — per-type promotion requires BOTH the confidence
-          // threshold AND quality_ok. quality_ok gates materialization; without it
-          // we keep accumulating observations (so the count still grows) but the
-          // downstream render-ready will skip the entry. See render-ready (line ~838).
-          // guardCreated: skip already-materialized entries; firstSeenFallback: tolerate
-          // legacy entries that may lack first_seen.
-          tryImmediatePromotion(existing, { guardCreated: true, firstSeenFallback: true });
-
-          learningLog(`Updated ${obs.id}: confidence ${existing.confidence}, status ${existing.status}`);
-          updated++;
-        } else {
-          const isImmediateType = obs.type === 'decision' || obs.type === 'pitfall';
-          const newEntry = {
-            id: obs.id,
-            type: obs.type,
-            pattern: obs.pattern,
-            confidence: isImmediateType ? calculateConfidence(1, obs.type) : INITIAL_CONFIDENCE,
-            observations: 1,
-            first_seen: nowIso,
-            last_seen: nowIso,
-            status: 'observing',
-            evidence: obs.evidence || [],
-            details: obs.details || '',
-            quality_ok: qualityOk,
-          };
-          logMap.set(obs.id, newEntry);
-
-          // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first observation
-          // if quality_ok=true. Check immediately after creation.
-          if (isImmediateType) {
-            tryImmediatePromotion(newEntry);
-          }
-
-          learningLog(`New observation ${obs.id}: type=${obs.type} confidence=${newEntry.confidence} quality_ok=${qualityOk}`);
-          created++;
-        }
-      }
-
-      const logDir = path.dirname(logFile);
-      if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-      }
-      writeJsonlAtomic(logFile, Array.from(logMap.values()));
-      console.log(JSON.stringify({ updated, created, skipped }));
-      break;
-    }
-
-    case 'create-artifacts': {
-      const responseFile = safePath(args[0]);
-      const logFile = safePath(args[1]);
-      const baseDir = safePath(args[2]);
-      const response = JSON.parse(fs.readFileSync(responseFile, 'utf8'));
-      const artifacts = response.artifacts || [];
-
-      if (artifacts.length === 0) {
-        console.log(JSON.stringify({ created: [], skipped: 0 }));
-        break;
-      }
-
-      let logEntries = [];
-      if (fs.existsSync(logFile)) {
-        logEntries = parseJsonl(logFile);
-      }
-      const logMap = new Map(logEntries.map(e => [e.id, e]));
-      const createdPaths = [];
-      let skippedCount = 0;
-      const artDate = new Date().toISOString().slice(0, 10);
-
-      for (const art of artifacts) {
-        let name = (art.name || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 50);
-        if (!name) {
-          learningLog('Skipping artifact with empty/invalid name');
-          skippedCount++;
-          continue;
-        }
-
-        const obs = logMap.get(art.observation_id);
-        if (!obs || obs.status !== 'ready') {
-          learningLog(`Skipping artifact for ${art.observation_id} (status: ${obs ? obs.status : 'not found'}, need: ready)`);
-          skippedCount++;
-          continue;
-        }
-
-        let artDir, artPath;
-        if (art.type === 'command') {
-          artDir = path.join(baseDir, '.claude', 'commands', 'self-learning');
-          artPath = path.join(artDir, `${name}.md`);
-        } else {
-          artDir = path.join(baseDir, '.claude', 'skills', name);
-          artPath = path.join(artDir, 'SKILL.md');
-        }
-
-        if (fs.existsSync(artPath)) {
-          learningLog(`Artifact already exists at ${artPath} — skipping`);
-          skippedCount++;
-          continue;
-        }
-
-        const desc = (art.description || '').replace(/"/g, '\\"');
-        const conf = obs.confidence || 0;
-        const obsN = obs.observations || 0;
-
-        fs.mkdirSync(artDir, { recursive: true });
-
-        let content;
-        if (art.type === 'command') {
-          content = [
-            '---',
-            `description: "${desc}"`,
-            `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
-            '---',
-            '',
-            stripLeadingFrontmatter(art.content || ''),
-            '',
-          ].join('\n');
-        } else {
-          content = [
-            '---',
-            `name: self-learning:${name}`,
-            `description: "${desc}"`,
-            'user-invocable: false',
-            'allowed-tools: Read, Grep, Glob',
-            `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
-            '---',
-            '',
-            stripLeadingFrontmatter(art.content || ''),
-            '',
-          ].join('\n');
-        }
-
-        fs.writeFileSync(artPath, content);
-        obs.status = 'created';
-        obs.artifact_path = artPath;
-        learningLog(`Created artifact: ${artPath}`);
-        createdPaths.push(artPath);
-      }
-
-      if (createdPaths.length > 0) {
-        writeJsonlAtomic(logFile, Array.from(logMap.values()));
-      }
-
-      console.log(JSON.stringify({ created: createdPaths, skipped: skippedCount }));
-      break;
-    }
-
     case 'filter-observations': {
       const file = args[0];
       const sortField = args[1] || 'confidence';
@@ -1202,492 +599,18 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // render-ready <log> <baseDir> [--manifest-path <path>] [--notifications-path <path>]
-    // DESIGN: D5 — deterministic rendering replaces LLM-generated artifact content.
-    // The model provides structured metadata (pattern, details, evidence, type);
-    // rendering is a pure template application. This separates detection from materialization.
-    // Optional args allow callers to override default manifest and notifications paths
-    // (used by type-specific pipelines that maintain separate log/manifest files).
-    // Defaults: --notifications-path → .decisions-notifications.json,
-    //           --manifest-path → .learning-manifest.json.
-    // -------------------------------------------------------------------------
-    case 'render-ready': {
-      const logFile = safePath(args[0]);
-      const baseDir = safePath(args[1]);
-      if (!fs.existsSync(logFile)) {
-        console.log(JSON.stringify({ rendered: [], skipped: 0 }));
-        break;
-      }
-
-      // Parse optional path overrides (args[2..] may contain --manifest-path and --notifications-path)
-      let manifestPathOverride = null;
-      let notifPathOverride = null;
-      for (let i = 2; i < args.length; i++) {
-        if (args[i] === '--manifest-path' && args[i + 1]) {
-          manifestPathOverride = safePath(args[i + 1]);
-          i++;
-        } else if (args[i] === '--notifications-path' && args[i + 1]) {
-          notifPathOverride = safePath(args[i + 1]);
-          i++;
-        }
-      }
-
-      const entries = parseJsonl(logFile);
-      const logMap = new Map(entries.map(e => [e.id, e]));
-      const manifestPath = manifestPathOverride || getLearningManifestPath(baseDir);
-      const artDate = new Date().toISOString().slice(0, 10);
-
-      // Load or init manifest (schemaVersion 1)
-      let manifest = { schemaVersion: 1, entries: [] };
-      if (fs.existsSync(manifestPath)) {
-        try {
-          manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-          if (!manifest.entries) manifest.entries = [];
-        } catch { manifest = { schemaVersion: 1, entries: [] }; }
-      }
-      const manifestMap = new Map(manifest.entries.map(e => [e.observationId, e]));
-
-      const rendered = [];
-      let skipped = 0;
-      const decisionsLockDir = getDecisionsLockDir(baseDir);
-
-      for (const obs of entries) {
-        if (obs.status !== 'ready') continue;
-        // quality_ok must be true for materialization (D4)
-        if (obs.quality_ok !== true) {
-          learningLog(`Skipping render for ${obs.id}: quality_ok is not true`);
-          skipped++;
-          continue;
-        }
-
-        const slug = toSlug(obs.pattern);
-        if (!slug) { skipped++; continue; }
-
-        try {
-          if (obs.type === 'workflow') {
-            // --- Workflow: write command file ---
-            const artDir = path.join(baseDir, '.claude', 'commands', 'self-learning');
-            const artPath = path.join(artDir, `${slug}.md`);
-            fs.mkdirSync(artDir, { recursive: true });
-
-            const conf = obs.confidence || 0;
-            const obsN = obs.observations || 0;
-            const evidenceList = (obs.evidence || []).map(e => `- ${e}`).join('\n');
-            const content = [
-              '---',
-              `description: "${(obs.pattern || '').replace(/"/g, '\\"')}"`,
-              `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
-              '---',
-              '',
-              `# ${obs.pattern}`,
-              '',
-              obs.details || '',
-              '',
-              '## Evidence',
-              evidenceList,
-              '',
-            ].join('\n');
-
-            writeFileAtomic(artPath, content);
-
-            obs.status = 'created';
-            obs.artifact_path = artPath;
-
-            manifestMap.set(obs.id, {
-              observationId: obs.id,
-              type: obs.type,
-              path: artPath,
-              contentHash: contentHash(content),
-              renderedAt: new Date().toISOString(),
-            });
-            rendered.push(artPath);
-            learningLog(`Rendered workflow: ${artPath}`);
-
-          } else if (obs.type === 'procedural') {
-            // --- Procedural: write skill file ---
-            const artDir = path.join(baseDir, '.claude', 'skills', `self-learning:${slug}`);
-            const artPath = path.join(artDir, 'SKILL.md');
-            fs.mkdirSync(artDir, { recursive: true });
-
-            const conf = obs.confidence || 0;
-            const obsN = obs.observations || 0;
-            const patternUpper = (obs.pattern || '').toUpperCase();
-            const content = [
-              '---',
-              `name: self-learning:${slug}`,
-              `description: "This skill should be used when ${(obs.pattern || '').replace(/"/g, '\\"')}"`,
-              'user-invocable: false',
-              'allowed-tools: Read, Grep, Glob',
-              `# devflow-learning: auto-generated (${artDate}, confidence: ${conf}, obs: ${obsN})`,
-              '---',
-              '',
-              `# ${obs.pattern}`,
-              '',
-              obs.details || '',
-              '',
-              '## Iron Law',
-              '',
-              `> **${patternUpper}**`,
-              '',
-              '---',
-              '',
-              '## When This Skill Activates',
-              '- Based on detected patterns',
-              '',
-              '## Procedure',
-              obs.details || '',
-              '',
-            ].join('\n');
-
-            writeFileAtomic(artPath, content);
-
-            obs.status = 'created';
-            obs.artifact_path = artPath;
-
-            manifestMap.set(obs.id, {
-              observationId: obs.id,
-              type: obs.type,
-              path: artPath,
-              contentHash: contentHash(content),
-              renderedAt: new Date().toISOString(),
-            });
-            rendered.push(artPath);
-            learningLog(`Rendered procedural: ${artPath}`);
-
-          } else if (obs.type === 'decision' || obs.type === 'pitfall') {
-            // --- Decision / Pitfall: append to decisions file ---
-            const isDecision = obs.type === 'decision';
-            const decisionsDir = getDecisionsDir(baseDir);
-            const decisionsFile = isDecision ? getDecisionsFilePath(baseDir) : getPitfallsFilePath(baseDir);
-            const entryPrefix = isDecision ? 'ADR' : 'PF';
-            const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
-
-            // Acquire decisions lock (D — lock protocol from decisions-format SKILL.md)
-            if (!acquireMkdirLock(decisionsLockDir, 30000, 60000)) {
-              learningLog(`Timeout acquiring decisions lock for ${obs.id} — skipping`);
-              skipped++;
-              continue;
-            }
-            try {
-              fs.mkdirSync(decisionsDir, { recursive: true });
-
-              const existingContent = fs.existsSync(decisionsFile)
-                ? fs.readFileSync(decisionsFile, 'utf8')
-                : initDecisionsContent(obs.type);
-
-              // existingMatches needed for nextDecisionsId (uses Math.max on match groups)
-              const existingMatches = [...existingContent.matchAll(headingRe)];
-
-              // D18: count only active (non-deprecated/superseded) headings for capacity check
-              const previousCount = countActiveHeadings(existingContent, obs.type);
-
-              const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
-
-              // D17: hard ceiling at DECISIONS_HARD_CEILING (100); softCapExceeded repurposed
-              // from old 50-entry soft cap — now signals the hard ceiling was hit.
-              if (previousCount >= DECISIONS_HARD_CEILING) {
-                // D15: set softCapExceeded — surfaces to HUD and `devflow learn --review`
-                // so the user can decide which entry to deprecate before a new one lands.
-                obs.softCapExceeded = true;
-                // Write error-level notification for hard ceiling
-                const notifFilePath = notifPathOverride || getDecisionsNotificationsPath(baseDir);
-                const notifications = readNotificationsFromPath(notifFilePath);
-                notifications[notifKey] = {
-                  active: true,
-                  threshold: DECISIONS_HARD_CEILING,
-                  count: previousCount,
-                  ceiling: DECISIONS_HARD_CEILING,
-                  dismissed_at_threshold: null,
-                  severity: 'error',
-                  created_at: new Date().toISOString(),
-                };
-                writeNotificationsToPath(notifFilePath, notifications);
-                learningLog(`Decisions file at hard ceiling (${previousCount}/${DECISIONS_HARD_CEILING}), skipping ${obs.id}`);
-                skipped++;
-                continue; // lock still held; released in finally
-              }
-
-              // Dedup for pitfalls: compare Area + Issue first 40 chars
-              if (!isDecision) {
-                let details = obs.details || '';
-                let areaMatch = details.match(/area:\s*([^\n;]+)/i);
-                let issueMatch = details.match(/issue:\s*([^\n;]+)/i);
-                let area = normalizeForDedup((areaMatch || [])[1] || '').slice(0, 40);
-                let issue = normalizeForDedup((issueMatch || [])[1] || '').slice(0, 40);
-                if (area && issue) {
-                  const dupRe = /##\s+PF-\d+:[\s\S]*?(?=##\s+PF-|\s*$)/g;
-                  let isDuplicate = false;
-                  for (const m of existingContent.matchAll(dupRe)) {
-                    const block = m[0];
-                    const bArea = normalizeForDedup((block.match(/\*\*Area\*\*:\s*([^\n]+)/) || [])[1] || '').slice(0, 40);
-                    const bIssue = normalizeForDedup((block.match(/\*\*Issue\*\*:\s*([^\n]+)/) || [])[1] || '').slice(0, 40);
-                    if (bArea === area && bIssue === issue) {
-                      learningLog(`Duplicate pitfall detected for ${obs.id} — skipping`);
-                      skipped++;
-                      isDuplicate = true;
-                      break;
-                    }
-                  }
-                  if (isDuplicate) continue; // lock released in finally
-                }
-              }
-
-              const { anchorId } = nextDecisionsId(existingMatches, entryPrefix);
-
-              let entry;
-              const detailsStr = obs.details || '';
-              if (isDecision) {
-                // Parse "context: ...; decision: ...; rationale: ..." from details
-                const contextMatch = detailsStr.match(/context:\s*([^;]+)/i);
-                const decisionMatch = detailsStr.match(/decision:\s*([^;]+)/i);
-                const rationaleMatch = detailsStr.match(/rationale:\s*([^;]+)/i);
-                entry = [
-                  `\n## ${anchorId}: ${obs.pattern}`,
-                  '',
-                  `- **Date**: ${artDate}`,
-                  `- **Status**: Accepted`,
-                  `- **Context**: ${(contextMatch || [])[1] || detailsStr}`,
-                  `- **Decision**: ${(decisionMatch || [])[1] || obs.pattern}`,
-                  `- **Consequences**: ${(rationaleMatch || [])[1] || ''}`,
-                  `- **Source**: self-learning:${obs.id}`,
-                  '',
-                ].join('\n');
-              } else {
-                const areaMatch2 = detailsStr.match(/area:\s*([^;]+)/i);
-                const issueMatch2 = detailsStr.match(/issue:\s*([^;]+)/i);
-                const impactMatch = detailsStr.match(/impact:\s*([^;]+)/i);
-                const resMatch = detailsStr.match(/resolution:\s*([^;]+)/i);
-                // Status: Active — added so `devflow learn --review` deprecate
-                // can flip it to Deprecated consistently with ADR entries.
-                entry = [
-                  `\n## ${anchorId}: ${obs.pattern}`,
-                  '',
-                  `- **Area**: ${(areaMatch2 || [])[1] || detailsStr}`,
-                  `- **Issue**: ${(issueMatch2 || [])[1] || detailsStr}`,
-                  `- **Impact**: ${(impactMatch || [])[1] || ''}`,
-                  `- **Resolution**: ${(resMatch || [])[1] || ''}`,
-                  `- **Status**: Active`,
-                  `- **Source**: self-learning:${obs.id}`,
-                  '',
-                ].join('\n');
-              }
-
-              const newContent = existingContent + entry;
-
-              // D26: TL;DR shows active-only count (excludes deprecated/superseded)
-              const newCount = previousCount + 1;
-
-              const updatedContent = buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newCount);
-              writeFileAtomic(decisionsFile, updatedContent);
-
-              // D20: register in usage tracking so cite counts start at 0
-              registerUsageEntry(baseDir, anchorId);
-
-              // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
-              const renderNotifPath = notifPathOverride || undefined;
-              updateCapacityNotification(baseDir, notifKey, previousCount, newCount, renderNotifPath);
-
-              obs.status = 'created';
-              obs.artifact_path = `${decisionsFile}#${anchorId}`;
-
-              manifestMap.set(obs.id, {
-                observationId: obs.id,
-                type: obs.type,
-                path: decisionsFile,
-                contentHash: contentHash(entry),
-                renderedAt: new Date().toISOString(),
-                anchorId,
-              });
-              rendered.push(obs.artifact_path);
-              learningLog(`Rendered ${obs.type}: ${obs.artifact_path}`);
-            } finally {
-              releaseLock(decisionsLockDir);
-            }
-          }
-        } catch (renderErr) {
-          learningLog(`Render error for ${obs.id}: ${renderErr.message}`);
-          skipped++;
-        }
-      }
-
-      // Write updated log and manifest atomically
-      writeJsonlAtomic(logFile, Array.from(logMap.values()));
-      fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-      manifest.entries = Array.from(manifestMap.values());
-      writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2));
-
-      console.log(JSON.stringify({ rendered, skipped }));
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // reconcile-manifest <cwd> [logFile] [manifestPath]
-    // DESIGN: D6 — reconciler runs at session-start (not PostToolUse) to avoid
-    // write-time overhead. This amortizes the filesystem check over session boundaries.
-    // DESIGN: D13 — edits to artifact content are silently ignored (hash update only,
-    // no confidence penalty). Users should be free to improve their own artifacts.
-    // Optional positional args [logFile] and [manifestPath] allow callers to use
-    // type-specific log/manifest files instead of the default shared paths.
-    // -------------------------------------------------------------------------
-    case 'reconcile-manifest': {
-      const cwd = safePath(args[0]);
-      const logFile = args[1] ? safePath(args[1]) : getLearningLogPath(cwd);
-      const manifestPath = args[2] ? safePath(args[2]) : getLearningManifestPath(cwd);
-      const lockDir = getLearningLockDir(cwd);
-
-      // A1: require only the log file (not the manifest) before proceeding.
-      // The heal path must be able to run even when the manifest has never been written
-      // (e.g. render-ready crashed before its manifest write).  A missing manifest is
-      // treated as an empty one; the heal block then reconstructs it from the log + files.
-      if (!fs.existsSync(logFile)) {
-        console.log(JSON.stringify(emptyReconcileResult()));
-        break;
-      }
-
-      if (!acquireMkdirLock(lockDir, 15000, 60000)) {
-        learningLog('reconcile-manifest: timeout acquiring lock, skipping');
-        console.log(JSON.stringify(emptyReconcileResult()));
-        break;
-      }
-
-      try {
-        // C1: loadReconcileState — read manifest (or construct empty) + build logMap.
-        let manifest;
-        if (fs.existsSync(manifestPath)) {
-          try {
-            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-            if (!manifest.entries) manifest.entries = [];
-          } catch {
-            // Corrupt manifest — treat as empty so the heal path can still recover.
-            manifest = { schemaVersion: 1, entries: [] };
-          }
-        } else {
-          // A1: no manifest yet; construct empty in-memory so heal can populate it.
-          manifest = { schemaVersion: 1, entries: [] };
-        }
-
-        const logEntries = parseJsonl(logFile);
-        const logMap = new Map(logEntries.map(e => [e.id, e]));
-
-        // C1: reconcileExisting — walk manifest entries, detect deletions / edits.
-        const counters = emptyReconcileResult();
-        const keptEntries = [];
-
-        for (const entry of manifest.entries) {
-          // Stale manifest entry: no matching obs in log → drop silently
-          const obs = logMap.get(entry.observationId);
-          if (!obs) {
-            learningLog(`reconcile: dropping stale manifest entry ${entry.observationId}`);
-            continue;
-          }
-
-          // Check file existence
-          const filePath = entry.path;
-          if (!fs.existsSync(filePath)) {
-            // Deletion detected: penalize confidence
-            obs.confidence = Math.round(obs.confidence * 0.3 * 100) / 100;
-            obs.status = 'deprecated';
-            obs.deprecated_at = new Date().toISOString();
-            learningLog(`reconcile: deletion detected for ${entry.observationId}, confidence -> ${obs.confidence}`);
-            counters.deletions++;
-            // Remove manifest entry (don't keep it)
-            continue;
-          }
-
-          // File exists — check anchor for decisions entries
-          if (entry.anchorId) {
-            const content = fs.readFileSync(filePath, 'utf8');
-            // Sanitise anchorId before embedding in regex to eliminate ReDoS surface.
-            const safeAnchorId = entry.anchorId.replace(/[^A-Z0-9-]/gi, '');
-            const anchorPattern = new RegExp(`##\\s+${safeAnchorId}\\b`);
-            if (!anchorPattern.test(content)) {
-              // Anchor missing — treat as deletion (D13 exception: anchor loss = deletion)
-              obs.confidence = Math.round(obs.confidence * 0.3 * 100) / 100;
-              obs.status = 'deprecated';
-              obs.deprecated_at = new Date().toISOString();
-              learningLog(`reconcile: anchor ${entry.anchorId} missing for ${entry.observationId}`);
-              counters.deletions++;
-              continue;
-            }
-            // A2: use shared sliceDecisionsSection — eliminates duplicated inline regex.
-            const sectionContent = sliceDecisionsSection(content, entry.anchorId) ?? content;
-            const currentHash = contentHash(sectionContent);
-            if (currentHash !== entry.contentHash) {
-              // D13: silently update hash only, no confidence penalty
-              entry.contentHash = currentHash;
-              counters.edits++;
-            } else {
-              counters.unchanged++;
-            }
-          } else {
-            const content = fs.readFileSync(filePath, 'utf8');
-            const currentHash = contentHash(content);
-            if (currentHash !== entry.contentHash) {
-              // D13: silently update hash only
-              entry.contentHash = currentHash;
-              counters.edits++;
-            } else {
-              counters.unchanged++;
-            }
-          }
-
-          keptEntries.push(entry);
-        }
-
-        // C1: healUnmanagedAnchors — recover from render-ready crash-window duplicates.
-        // If render-ready wrote the decisions file but crashed before updating the log
-        // and manifest, the anchor exists in the file but the log still shows status=ready
-        // and the manifest has no entry.  We detect this by scanning decisions files for
-        // anchors not tracked in the manifest, then matching them against ready log
-        // observations with a matching normalised pattern.
-        // DESIGN: D-D — skip silently when zero or multiple log entries match (ambiguity guard).
-        const managedAnchors = new Set(keptEntries.filter(e => e.anchorId).map(e => e.anchorId));
-        // P2 early-exit is inside findUnmanagedAnchors; pass logMap so it can check.
-        const unmanaged = findUnmanagedAnchors(cwd, managedAnchors, logMap);
-        for (const u of unmanaged) {
-          const headingNorm = normalizeForDedup(u.headingText);
-          const candidates = Array.from(logMap.values()).filter(o =>
-            o.type === u.type && o.status === 'ready' &&
-            normalizeForDedup(o.pattern) === headingNorm,
-          );
-          if (candidates.length !== 1) continue; // 0 = user-curated, >1 = ambiguous (D-D: silent)
-          const obs = candidates[0];
-          obs.status = 'created';
-          obs.artifact_path = `${u.path}#${u.anchorId}`;
-          // A2: use shared sliceDecisionsSection; A3: use fileContent already read by findUnmanagedAnchors.
-          const section = sliceDecisionsSection(u.fileContent, u.anchorId);
-          keptEntries.push({
-            observationId: obs.id, type: u.type, path: u.path,
-            contentHash: contentHash(section ?? u.headingText),
-            renderedAt: new Date().toISOString(), anchorId: u.anchorId,
-          });
-          registerUsageEntry(cwd, u.anchorId);
-          counters.healed++;
-          learningLog(`reconcile: healed ${obs.id} → ${u.anchorId}`);
-        }
-
-        // Atomic writes
-        writeJsonlAtomic(logFile, Array.from(logMap.values()));
-        manifest.entries = keptEntries;
-        fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-        writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2));
-
-        console.log(JSON.stringify(counters));
-      } finally {
-        releaseLock(lockDir);
-      }
-      break;
-    }
-
-    // -------------------------------------------------------------------------
     // merge-observation <log> <newObsJson>
-    // DESIGN: D14 — in-place merge (not supersede). When an observation arrives that
-    // matches an existing entry (same type + pattern or pitfall Area+Issue), we merge
-    // evidence and metadata rather than creating a duplicate. If the artifact is already
-    // created (status=created), we trigger in-place re-render of the target section.
-    // D11 — ID collision recovery: if a new obs ID collides with an existing entry of
-    // a different type, the new ID is suffixed with '_b' to avoid trampling.
-    // D12 — evidence array capped at 10 (FIFO).
+    // ID-keyed reinforce op: if the id exists in the log, increment count, merge evidence,
+    // update last_seen, and store LLM-provided confidence/status/quality_ok verbatim.
+    // If the id is new, insert a new entry with LLM-provided fields verbatim.
+    // D11: ID collision with different-type entry → suffix _b to avoid trampling.
+    // D12: evidence array capped at 10 (FIFO).
+    // D53: merge-observation is locked EXTERNALLY by the caller (SKILL.md processor acquires/
+    // releases .devflow/sidecar/.reinforce.lock around the Bash subshell call), while
+    // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
+    // domains — merge-observation itself never acquires a lock; it relies on the caller to
+    // serialize concurrent writes. This is intentional: the subshell pattern in the processor
+    // spec acquires the lock, invokes this op, and releases — all in a single Bash call.
     // -------------------------------------------------------------------------
     case 'merge-observation': {
       const logFile = safePath(args[0]);
@@ -1698,6 +621,14 @@ try {
         process.exit(1);
       }
 
+      // D54 (E1): self-create parent directory on first write (fresh project, file+dir absent).
+      // The prior batch-merge op created the dir; merge-observation matches that so callers
+      // do not need to pre-create the log directory.
+      const logDir = path.dirname(logFile);
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+
       let logEntries = [];
       if (fs.existsSync(logFile)) {
         logEntries = parseJsonl(logFile);
@@ -1705,64 +636,21 @@ try {
       const logMap = new Map(logEntries.map(e => [e.id, e]));
       const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-      // Attempt to find matching active entry
-      let existing = null;
-      for (const entry of logMap.values()) {
-        if (entry.type !== newObs.type) continue;
-        if (entry.status === 'deprecated') continue;
-
-        const normExisting = normalizeForDedup(entry.pattern || '');
-        const normNew = normalizeForDedup(newObs.pattern || '');
-
-        if (normExisting === normNew) {
-          existing = entry;
-          break;
-        }
-
-        // For pitfalls: also match on Area + Issue first 40 chars
-        if (entry.type === 'pitfall') {
-          const existArea = normalizeForDedup((entry.details || '').match(/area:\s*([^;]+)/i)?.[1] || '').slice(0, 40);
-          const newArea = normalizeForDedup((newObs.details || '').match(/area:\s*([^;]+)/i)?.[1] || '').slice(0, 40);
-          const existIssue = normalizeForDedup((entry.details || '').match(/issue:\s*([^;]+)/i)?.[1] || '').slice(0, 40);
-          const newIssue = normalizeForDedup((newObs.details || '').match(/issue:\s*([^;]+)/i)?.[1] || '').slice(0, 40);
-          if (existArea && newArea && existArea === newArea && existIssue === newIssue) {
-            existing = entry;
-            break;
-          }
-        }
-      }
-
+      // ID-keyed lookup: match by obs_xxx id only
+      const existing = logMap.get(newObs.id);
       let merged = false;
+
       if (existing) {
-        // Merge: append evidence (FIFO cap 10), increment count, update last_seen (D12)
+        // Reinforce: increment count, merge evidence (FIFO cap 10), update last_seen.
+        // Store LLM-provided confidence/status/quality_ok verbatim (no recalculation).
         const newCount = (existing.observations || 0) + 1;
         existing.observations = newCount;
         existing.evidence = mergeEvidence(existing.evidence || [], newObs.evidence || []);
-        existing.confidence = calculateConfidence(newCount, existing.type);
+        if (typeof newObs.confidence === 'number') existing.confidence = newObs.confidence;
+        if (newObs.status) existing.status = newObs.status;
         existing.last_seen = nowIso;
-
-        // Pattern update: if new pattern is >20% longer, use it
-        const oldLen = (existing.pattern || '').length;
-        const newLen = (newObs.pattern || '').length;
-        if (newLen > oldLen * 1.2) existing.pattern = newObs.pattern;
-
-        // Details merge: longer field wins; add missing fields
-        if ((newObs.details || '').length > (existing.details || '').length) {
-          existing.details = newObs.details;
-        }
-
-        // If details diverge significantly, flag for review and append new version
-        // as an additional bullet rather than silently overwriting.
-        const existDetails = normalizeForDedup(existing.details || '');
-        const newDetails = normalizeForDedup(newObs.details || '');
-        if (existDetails.length > 0 && newDetails.length > 0) {
-          const similarity = longestCommonSubsequenceRatio(existDetails, newDetails);
-          if (similarity < 0.6) {
-            existing.needsReview = true;
-            existing.details = (existing.details || '') + '\n\n**Additional observation**: ' + newObs.details;
-          }
-        }
-
+        if (newObs.pattern) existing.pattern = newObs.pattern;
+        if (newObs.details) existing.details = newObs.details;
         if (newObs.quality_ok === true) existing.quality_ok = true;
 
         merged = true;
@@ -1771,30 +659,22 @@ try {
         // D11: ID collision recovery
         let newId = newObs.id;
         if (logMap.has(newId)) {
-          // Collision with different type entry — suffix with _b
           newId = newId + '_b';
           learningLog(`merge-observation: ID collision resolved: ${newObs.id} -> ${newId}`);
         }
-        const isImmediateType = newObs.type === 'decision' || newObs.type === 'pitfall';
         const entry = {
           id: newId,
           type: newObs.type,
           pattern: newObs.pattern,
-          confidence: isImmediateType ? calculateConfidence(1, newObs.type) : INITIAL_CONFIDENCE,
+          confidence: typeof newObs.confidence === 'number' ? newObs.confidence : 0,
           observations: 1,
           first_seen: nowIso,
           last_seen: nowIso,
-          status: 'observing',
+          status: newObs.status || 'observing',
           evidence: (newObs.evidence || []).slice(0, 10),
           details: newObs.details || '',
           quality_ok: newObs.quality_ok === true,
         };
-
-        // D3+D4: decision/pitfall with required=1 and spread=0 can promote on first merge
-        // if quality_ok=true. Check immediately after creation.
-        if (isImmediateType) {
-          tryImmediatePromotion(entry);
-        }
 
         logMap.set(newId, entry);
         learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
@@ -1808,9 +688,9 @@ try {
     // -------------------------------------------------------------------------
     // decisions-append <file> <type> <obsJson>
     // Standalone op for appending to decisions files (decisions.md or pitfalls.md).
-    // Acquires the shared `.devflow/decisions/.decisions.lock` to serialize against render-ready
-    // and any CLI updateDecisionsStatus callers. Lock path derivation matches the
-    // render-ready handler: sibling of the `decisions/` directory.
+    // Acquires the shared `.devflow/decisions/.decisions.lock` to serialize concurrent
+    // decisions-append writers and CLI updateDecisionsStatus callers. Lock path derivation
+    // (sibling of the `decisions/` directory) must match updateDecisionsStatus in observation-io.ts.
     // -------------------------------------------------------------------------
     case 'decisions-append': {
       const decisionsFile = safePath(args[0]);
@@ -1846,16 +726,6 @@ try {
         // existingMatches needed for nextDecisionsId (uses Math.max on match groups)
         const existingMatches = [...existingContent.matchAll(headingRe)];
 
-        // D18: count only active headings (latent bug fix — decisions-append never had capacity check)
-        const previousCount = countActiveHeadings(existingContent, entryType);
-
-        // D17: hard ceiling enforcement — same threshold as render-ready
-        if (previousCount >= DECISIONS_HARD_CEILING) {
-          process.stderr.write(`decisions-append: hard ceiling reached (${previousCount}/${DECISIONS_HARD_CEILING})\n`);
-          console.log(JSON.stringify({ error: 'hard_ceiling', count: previousCount }));
-          break; // exits switch, lock released in finally
-        }
-
         const { anchorId } = nextDecisionsId(existingMatches, entryPrefix);
 
         const detailsStr = obs.details || '';
@@ -1870,27 +740,19 @@ try {
           const issueM = detailsStr.match(/issue:\s*([^;]+)/i);
           const impactM = detailsStr.match(/impact:\s*([^;]+)/i);
           const resM = detailsStr.match(/resolution:\s*([^;]+)/i);
-          // Status: Active — kept in sync with render-ready pitfall template so
-          // `devflow learn --review` can deprecate entries appended via this op too.
           entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Area**: ${(areaM||[])[1]||detailsStr}\n- **Issue**: ${(issueM||[])[1]||detailsStr}\n- **Impact**: ${(impactM||[])[1]||''}\n- **Resolution**: ${(resM||[])[1]||''}\n- **Status**: Active\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
         }
 
         const newContent = existingContent + entry;
 
-        // D26: TL;DR shows active-only count (excludes deprecated/superseded)
+        // Count active headings for TL;DR (D26: excludes deprecated/superseded)
         const newActiveCount = countActiveHeadings(newContent, entryType);
 
         const updatedContent = buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newActiveCount);
         writeFileAtomic(decisionsFile, updatedContent);
 
-        // D20: register in usage tracking so cite counts start at 0
+        // Register in usage tracking so cite counts start at 0
         registerUsageEntry(projectRoot, anchorId);
-
-        // D21/D22/D24/D28: update capacity notification (first-run seed + threshold crossing)
-        // Write to .decisions-notifications.json — decisions-append owns the decisions/pitfalls pipeline.
-        const notifKey = isDecision ? 'decisions-capacity-decisions' : 'decisions-capacity-pitfalls';
-        const decisionsNotifPath = getDecisionsNotificationsPath(projectRoot);
-        updateCapacityNotification(projectRoot, notifKey, previousCount, newActiveCount, decisionsNotifPath);
 
         console.log(JSON.stringify({ anchorId, file: decisionsFile }));
       } finally {
@@ -1932,15 +794,7 @@ if (typeof module !== 'undefined' && module.exports) {
     countActiveHeadings,
     readUsageFile,
     writeUsageFile,
-    readNotifications,
-    writeNotifications,
-    crossedThresholds,
     registerUsageEntry,
-    acquireDecisionsUsageLock,
-    releaseDecisionsUsageLock,
-    DECISIONS_SOFT_START,
-    DECISIONS_HARD_CEILING,
-    DECISIONS_THRESHOLDS,
     writeFileAtomic,
     initDecisionsContent,
     nextDecisionsId,

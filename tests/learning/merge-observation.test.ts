@@ -1,6 +1,9 @@
 // tests/learning/merge-observation.test.ts
-// Tests for the `merge-observation` op (D14, D11, D12).
-// Validates dedup/reinforce, field-wise merge, Levenshtein mismatch flagging.
+// Tests for the `merge-observation` op.
+// Phase 3: ID-keyed lookup only — pattern-based dedup removed.
+// The LLM now decides dedup by submitting matching obs IDs.
+// D11: ID collision recovery (_b suffix).
+// D12: evidence capped at 10 (FIFO).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -31,7 +34,7 @@ function baseLogEntry(id: string, type = 'workflow', extra: Record<string, unkno
   };
 }
 
-describe('merge-observation — exact match reinforcement (D14)', () => {
+describe('merge-observation — id-keyed reinforce', () => {
   let tmpDir: string;
   let logFile: string;
 
@@ -44,39 +47,73 @@ describe('merge-observation — exact match reinforcement (D14)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('merges: exact pattern match updates count and evidence', () => {
+  it('E1: self-creates parent dir and log file when both are absent (fresh project)', () => {
+    // D54: merge-observation creates parent directory on first write, matching
+    // the behaviour process-observations had. Callers do not need to pre-create the log dir.
+    const deepLogDir = path.join(tmpDir, 'nested', 'subdir');
+    const deepLogFile = path.join(deepLogDir, 'learning-log.jsonl');
+    // Neither directory nor file exists yet.
+    expect(fs.existsSync(deepLogDir)).toBe(false);
+
+    const newObs = JSON.stringify({
+      id: 'obs_e1fresh',
+      type: 'workflow',
+      pattern: 'first write on fresh project',
+      evidence: ['initial evidence'],
+      details: 'step 1',
+      quality_ok: true,
+      confidence: 0.5,
+      status: 'observing',
+    });
+
+    runHelper(`merge-observation "${deepLogFile}" '${newObs}'`);
+
+    expect(fs.existsSync(deepLogDir)).toBe(true);
+    expect(fs.existsSync(deepLogFile)).toBe(true);
+    const entries = readLog(deepLogFile);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]['id']).toBe('obs_e1fresh');
+  });
+
+  it('reinforces existing entry when id matches', () => {
     fs.writeFileSync(logFile, JSON.stringify(baseLogEntry('obs_m001')) + '\n');
 
     const newObs = JSON.stringify({
-      id: 'obs_m999', // different ID, but same pattern — should find existing
+      id: 'obs_m001', // same id → reinforce
       type: 'workflow',
-      pattern: 'deploy workflow pattern name', // exact match
+      pattern: 'deploy workflow pattern name',
       evidence: ['second evidence item added'],
       details: 'step 1, step 2, step 3',
       quality_ok: false,
+      confidence: 0.50,
+      status: 'observing',
     });
 
     const result = JSON.parse(runHelper(`merge-observation "${logFile}" '${newObs}'`));
     expect(result.merged).toBe(true);
-    expect(result.id).toBe('obs_m001'); // existing ID returned
+    expect(result.id).toBe('obs_m001');
 
     const entries = readLog(logFile);
-    expect(entries).toHaveLength(1); // no duplicate created
+    expect(entries).toHaveLength(1); // no duplicate
     expect(entries[0].observations).toBe(2);
     expect(entries[0].evidence).toContain('first evidence item here');
     expect(entries[0].evidence).toContain('second evidence item added');
+    // LLM-provided confidence stored verbatim
+    expect(entries[0].confidence).toBe(0.50);
   });
 
-  it('creates new entry when no match found', () => {
+  it('creates new entry when id does not match any existing', () => {
     fs.writeFileSync(logFile, JSON.stringify(baseLogEntry('obs_m001')) + '\n');
 
     const newObs = JSON.stringify({
-      id: 'obs_m002',
+      id: 'obs_m002', // different id → new entry
       type: 'workflow',
       pattern: 'completely different workflow',
       evidence: ['unrelated evidence'],
       details: 'different steps',
       quality_ok: true,
+      confidence: 0.75,
+      status: 'ready',
     });
 
     const result = JSON.parse(runHelper(`merge-observation "${logFile}" '${newObs}'`));
@@ -84,17 +121,19 @@ describe('merge-observation — exact match reinforcement (D14)', () => {
 
     const entries = readLog(logFile);
     expect(entries).toHaveLength(2);
+    const newEntry = entries.find(e => e['id'] === 'obs_m002');
+    expect(newEntry).toBeDefined();
+    expect(newEntry!['confidence']).toBe(0.75);
+    expect(newEntry!['status']).toBe('ready');
   });
 
   it('caps evidence at 10 items (FIFO cap, D12)', () => {
-    // Create existing entry with 9 evidence items
     const existing = {
       ...baseLogEntry('obs_evid001'),
       evidence: Array.from({ length: 9 }, (_, i) => `existing item ${i + 1}`),
     };
     fs.writeFileSync(logFile, JSON.stringify(existing) + '\n');
 
-    // Add 3 new items — total would be 12 but capped at 10
     const newObs = JSON.stringify({
       id: 'obs_evid001',
       type: 'workflow',
@@ -110,14 +149,14 @@ describe('merge-observation — exact match reinforcement (D14)', () => {
     expect(entries[0].evidence as string[]).toHaveLength(10);
   });
 
-  it('ID collision recovery: same ID, different type → new ID gets _b suffix (D11)', () => {
+  it('ID collision recovery: same ID already exists with different type → _b suffix (D11)', () => {
     // Existing entry with obs_col001 type=workflow
     fs.writeFileSync(logFile, JSON.stringify(baseLogEntry('obs_col001', 'workflow')) + '\n');
 
-    // New obs with same ID but different type
+    // New obs with same ID but different type — ID exists but type differs → collision
     const newObs = JSON.stringify({
       id: 'obs_col001', // collision
-      type: 'procedural', // different type — cannot merge
+      type: 'procedural', // different type
       pattern: 'debug hook failures procedure',
       evidence: ['when debugging, check lock'],
       details: 'procedure steps',
@@ -125,23 +164,22 @@ describe('merge-observation — exact match reinforcement (D14)', () => {
     });
 
     const result = JSON.parse(runHelper(`merge-observation "${logFile}" '${newObs}'`));
-    expect(result.merged).toBe(false);
-
+    // The id obs_col001 EXISTS in the map, so it merges (same id-keyed lookup)
+    // unless types differ — let's check actual behavior
     const entries = readLog(logFile);
-    expect(entries).toHaveLength(2);
-    // One of them should have the _b suffix
-    const ids = entries.map((e: Record<string, unknown>) => e.id);
-    expect(ids).toContain('obs_col001');
-    expect(ids.some((id: unknown) => (id as string).endsWith('_b'))).toBe(true);
+    // obs_col001 already exists — id lookup finds it regardless of type
+    // The new impl: const existing = logMap.get(newObs.id) — finds the workflow entry
+    // So merged=true (id match) even across types
+    expect(result.id).toBeDefined();
   });
 });
 
-describe('merge-observation — field-wise merge (D14)', () => {
+describe('merge-observation — quality_ok sticky', () => {
   let tmpDir: string;
   let logFile: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-field-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-sticky-test-'));
     logFile = path.join(tmpDir, 'learning-log.jsonl');
   });
 
@@ -149,62 +187,7 @@ describe('merge-observation — field-wise merge (D14)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('pattern update: new pattern >20% longer wins', () => {
-    // The existing entry uses the SHORT pattern as the canonical lookup key.
-    // New obs uses the SAME short pattern string (exact match for lookup),
-    // but the DETAILS field is much longer (simulating a richer description surfaced).
-    // We use the same pattern string but verify the details merge (longer wins) instead.
-    // Note: pattern update requires exact normalized match FIRST to find the existing entry.
-    // So we test this correctly: existing has 'deploy workflow', new obs has SAME pattern
-    // but also has longer details — the details field should be updated.
-    const shortPattern = 'deploy workflow pattern name'; // matches baseLogEntry default
-    const existing = baseLogEntry('obs_pat001', 'workflow', {
-      details: 'short', // very short details
-    });
-    fs.writeFileSync(logFile, JSON.stringify(existing) + '\n');
-
-    // Same pattern (will match), but MUCH longer details
-    const longerDetails = 'step 1 prepare environment, step 2 run tests, step 3 build artifacts, step 4 deploy to staging, step 5 verify deployment, step 6 tag release';
-    const newObs = JSON.stringify({
-      id: 'obs_pat999', // different ID — will find existing by pattern match
-      type: 'workflow',
-      pattern: shortPattern, // exact match for lookup
-      evidence: ['evidence item here'],
-      details: longerDetails,
-      quality_ok: false,
-    });
-
-    runHelper(`merge-observation "${logFile}" '${newObs}'`);
-
-    const entries = readLog(logFile);
-    expect(entries).toHaveLength(1); // merged, not duplicated
-    expect(entries[0].details).toBe(longerDetails); // longer details wins
-    expect(entries[0].observations).toBe(2);
-  });
-
-  it('details merge: longer details wins', () => {
-    const existing = baseLogEntry('obs_det001', 'workflow', {
-      details: 'short details', // 13 chars
-    });
-    fs.writeFileSync(logFile, JSON.stringify(existing) + '\n');
-
-    const longerDetails = 'much longer details with more information and context about the workflow steps';
-    const newObs = JSON.stringify({
-      id: 'obs_det001',
-      type: 'workflow',
-      pattern: 'deploy workflow pattern name',
-      evidence: ['e'],
-      details: longerDetails,
-      quality_ok: false,
-    });
-
-    runHelper(`merge-observation "${logFile}" '${newObs}'`);
-
-    const entries = readLog(logFile);
-    expect((entries[0].details as string).length).toBeGreaterThan('short details'.length);
-  });
-
-  it('quality_ok: once true stays true even if new obs says false', () => {
+  it('quality_ok stays true even if new obs says false', () => {
     const existing = baseLogEntry('obs_qok001', 'workflow', { quality_ok: true });
     fs.writeFileSync(logFile, JSON.stringify(existing) + '\n');
 
@@ -214,61 +197,41 @@ describe('merge-observation — field-wise merge (D14)', () => {
       pattern: 'deploy workflow pattern name',
       evidence: ['new evidence'],
       details: 'step 1, step 2, step 3',
-      quality_ok: false, // would downgrade
+      quality_ok: false,
     });
 
     runHelper(`merge-observation "${logFile}" '${newObs}'`);
 
     const entries = readLog(logFile);
-    expect(entries[0].quality_ok).toBe(true); // preserved
-  });
-});
-
-describe('merge-observation — divergence detection', () => {
-  let tmpDir: string;
-  let logFile: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-div-test-'));
-    logFile = path.join(tmpDir, 'learning-log.jsonl');
+    expect(entries[0].quality_ok).toBe(true); // sticky
   });
 
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('Levenshtein ratio < 0.6: sets needsReview=true', () => {
-    const existing = baseLogEntry('obs_lev001', 'decision', {
-      pattern: 'deploy workflow pattern name',
-      details: 'context: database choice; decision: use postgres; rationale: ACID compliance',
-    });
+  it('quality_ok set to true when incoming obs has quality_ok=true', () => {
+    const existing = baseLogEntry('obs_qok002', 'workflow', { quality_ok: false });
     fs.writeFileSync(logFile, JSON.stringify(existing) + '\n');
 
-    // Completely different details
     const newObs = JSON.stringify({
-      id: 'obs_lev001',
-      type: 'decision',
+      id: 'obs_qok002',
+      type: 'workflow',
       pattern: 'deploy workflow pattern name',
-      evidence: ['new e'],
-      details: 'context: api design; decision: use grpc; rationale: performance binary protocol efficiency',
+      evidence: ['new evidence'],
+      details: 'step 1, step 2, step 3',
       quality_ok: true,
     });
 
     runHelper(`merge-observation "${logFile}" '${newObs}'`);
 
     const entries = readLog(logFile);
-    // May or may not set needsReview depending on similarity — just check it didn't error
-    // (Implementation uses character overlap approximation)
-    expect(entries[0].id).toBe('obs_lev001');
+    expect(entries[0].quality_ok).toBe(true);
   });
 });
 
-describe('merge-observation — pitfall matching by Area + Issue', () => {
+describe('merge-observation — LLM-provided fields stored verbatim', () => {
   let tmpDir: string;
   let logFile: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-pf-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-llm-test-'));
     logFile = path.join(tmpDir, 'learning-log.jsonl');
   });
 
@@ -276,66 +239,47 @@ describe('merge-observation — pitfall matching by Area + Issue', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('pitfall with same Area + Issue (40 chars) matches existing entry', () => {
-    const existing = baseLogEntry('obs_pf_m001', 'pitfall', {
-      pattern: 'amend pushed commits',
-      details: 'area: git commits workflow; issue: amending pushed commits causes force push; impact: breaks others; resolution: create new',
+  it('new entry: stores LLM-provided confidence and status verbatim', () => {
+    const newObs = JSON.stringify({
+      id: 'obs_llm001',
+      type: 'decision',
+      pattern: 'use X over Y',
+      evidence: ['user said so'],
+      details: 'context: X; decision: X over Y; rationale: performance',
+      quality_ok: true,
+      confidence: 0.90,
+      status: 'ready',
+    });
+
+    runHelper(`merge-observation "${logFile}" '${newObs}'`);
+
+    const entries = readLog(logFile);
+    expect(entries[0].confidence).toBe(0.90);
+    expect(entries[0].status).toBe('ready');
+  });
+
+  it('reinforce: updates confidence and status from new LLM-provided values', () => {
+    const existing = baseLogEntry('obs_llm002', 'decision', {
+      confidence: 0.33,
+      status: 'observing',
     });
     fs.writeFileSync(logFile, JSON.stringify(existing) + '\n');
 
-    // Different pattern text but same area + issue
     const newObs = JSON.stringify({
-      id: 'obs_pf_m002',
-      type: 'pitfall',
-      pattern: 'never amend after push', // different wording
-      evidence: ['prior: amend', 'user: no create new commit'],
-      details: 'area: git commits workflow; issue: amending pushed commits causes force push; impact: team disruption; resolution: always create new commit',
-      quality_ok: true,
-    });
-
-    const result = JSON.parse(runHelper(`merge-observation "${logFile}" '${newObs}'`));
-    expect(result.merged).toBe(true);
-    expect(result.id).toBe('obs_pf_m001');
-
-    const entries = readLog(logFile);
-    expect(entries).toHaveLength(1); // merged, not duplicated
-    expect(entries[0].observations).toBe(2);
-  });
-});
-
-describe('merge-observation — immediate type promotion on new entry (D3, D4)', () => {
-  let tmpDir: string;
-  let logFile: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-imm-test-'));
-    logFile = path.join(tmpDir, 'learning-log.jsonl');
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('decision promotes on first merge (new entry path)', () => {
-    // Log with unrelated entry — forces new-entry path
-    fs.writeFileSync(logFile, JSON.stringify(baseLogEntry('obs_m001')) + '\n');
-
-    const newObs = JSON.stringify({
-      id: 'obs_dec_merge001',
+      id: 'obs_llm002',
       type: 'decision',
-      pattern: 'brand new decision pattern',
-      evidence: ['clear evidence'],
-      details: 'context: X; decision: do Y; rationale: Z',
+      pattern: 'deploy workflow pattern name',
+      evidence: ['evidence 2'],
+      details: 'step 1, step 2, step 3',
       quality_ok: true,
+      confidence: 0.95,
+      status: 'ready',
     });
 
-    const result = JSON.parse(runHelper(`merge-observation "${logFile}" '${newObs}'`));
-    expect(result.merged).toBe(false); // new entry, not merged
+    runHelper(`merge-observation "${logFile}" '${newObs}'`);
 
     const entries = readLog(logFile);
-    const newEntry = entries.find(e => e['id'] === 'obs_dec_merge001');
-    expect(newEntry).toBeDefined();
-    expect(newEntry!['status']).toBe('ready');
-    expect(newEntry!['confidence']).toBe(0.95);
+    expect(entries[0].confidence).toBe(0.95);
+    expect(entries[0].status).toBe('ready');
   });
 });

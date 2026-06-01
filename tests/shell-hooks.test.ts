@@ -562,714 +562,6 @@ describe('json-helper.js operations', () => {
   });
 });
 
-describe('json-helper.cjs temporal-decay', () => {
-  it('applies decay to old entries', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const oldDate = new Date(Date.now() - 35 * 86400000).toISOString();
-      fs.writeFileSync(file, JSON.stringify({
-        id: 'obs_test1', confidence: 0.66, last_seen: oldDate,
-      }) + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.decayed).toBe(1);
-
-      const updated = fs.readFileSync(file, 'utf8').trim();
-      const entry = JSON.parse(updated);
-      expect(entry.confidence).toBeLessThan(0.66);
-      expect(entry.confidence).toBeGreaterThan(0);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('removes entries below threshold', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const oldDate = new Date(Date.now() - 200 * 86400000).toISOString();
-      fs.writeFileSync(file, JSON.stringify({
-        id: 'obs_test1', confidence: 0.15, last_seen: oldDate,
-      }) + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.removed).toBe(1);
-
-      const content = fs.readFileSync(file, 'utf8').trim();
-      expect(content).toBe('');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('preserves fresh entries', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const recentDate = new Date().toISOString();
-      fs.writeFileSync(file, JSON.stringify({
-        id: 'obs_test1', confidence: 0.66, last_seen: recentDate,
-      }) + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.decayed).toBe(0);
-      expect(counts.removed).toBe(0);
-
-      const entry = JSON.parse(fs.readFileSync(file, 'utf8').trim());
-      expect(entry.confidence).toBe(0.66);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('handles missing file gracefully', () => {
-    const result = execSync(
-      `node "${JSON_HELPER}" temporal-decay "/tmp/nonexistent-devflow-test-${Date.now()}.jsonl"`,
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    ).toString().trim();
-    const counts = JSON.parse(result);
-    expect(counts.removed).toBe(0);
-    expect(counts.decayed).toBe(0);
-  });
-
-  it('handles empty file', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(file, '');
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.removed).toBe(0);
-      expect(counts.decayed).toBe(0);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('returns correct counts for mixed entries', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const old35 = new Date(Date.now() - 35 * 86400000).toISOString();
-      const old200 = new Date(Date.now() - 200 * 86400000).toISOString();
-      const recent = new Date().toISOString();
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_a', confidence: 0.66, last_seen: old35 }),
-        JSON.stringify({ id: 'obs_b', confidence: 0.15, last_seen: old200 }),
-        JSON.stringify({ id: 'obs_c', confidence: 0.95, last_seen: recent }),
-      ].join('\n') + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" temporal-decay "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.decayed).toBe(1);
-      expect(counts.removed).toBe(1);
-
-      const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
-      expect(lines).toHaveLength(2);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('json-helper.cjs process-observations', () => {
-  it('creates new observations', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{
-          id: 'obs_abc123', type: 'workflow', pattern: 'test pattern',
-          evidence: ['evidence1'], details: 'test details',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.created).toBe(1);
-      expect(counts.updated).toBe(0);
-
-      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.id).toBe('obs_abc123');
-      expect(entry.confidence).toBe(0.33);
-      expect(entry.status).toBe('observing');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('updates existing observations', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'old pattern',
-        confidence: 0.33, observations: 1,
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
-        status: 'observing', evidence: ['old evidence'], details: 'old',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{
-          id: 'obs_abc123', type: 'workflow', pattern: 'updated pattern',
-          evidence: ['new evidence'], details: 'updated',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.updated).toBe(1);
-
-      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.observations).toBe(2);
-      expect(entry.confidence).toBe(0.66);
-      expect(entry.evidence).toContain('old evidence');
-      expect(entry.evidence).toContain('new evidence');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('skips observations with missing fields', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [
-          { id: 'obs_abc123', type: 'workflow' },
-        ],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.skipped).toBe(1);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('skips observations with invalid type', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [
-          { id: 'obs_abc123', type: 'invalid', pattern: 'test' },
-        ],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.skipped).toBe(1);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('skips observations with invalid id format', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [
-          { id: 'bad_id', type: 'workflow', pattern: 'test' },
-        ],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.skipped).toBe(1);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('calculates confidence correctly from count', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.80, observations: 4,
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
-        status: 'observing', evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [] }],
-      }));
-
-      execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-
-      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.confidence).toBe(0.95);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('sets ready on temporal spread', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      const eightDaysAgo = new Date(Date.now() - 8 * 86400000).toISOString();
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.80, observations: 4,
-        first_seen: eightDaysAgo, last_seen: eightDaysAgo,
-        status: 'observing', evidence: [], details: '', quality_ok: true,
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [], quality_ok: true }],
-      }));
-
-      execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-
-      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.status).toBe('ready');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('preserves created status', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3,
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
-        status: 'created', evidence: [], details: '',
-        artifact_path: '/some/path.md',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{ id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: ['new'] }],
-      }));
-
-      execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-
-      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.status).toBe('created');
-      expect(entry.observations).toBe(4);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('handles missing log file by creating it', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [{
-          id: 'obs_abc123', type: 'workflow', pattern: 'test', evidence: [],
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.created).toBe(1);
-      expect(fs.existsSync(logFile)).toBe(true);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('returns correct counts for mixed operations', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_exist1', type: 'workflow', pattern: 'existing',
-        confidence: 0.33, observations: 1,
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-20T00:00:00Z',
-        status: 'observing', evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        observations: [
-          { id: 'obs_exist1', type: 'workflow', pattern: 'existing', evidence: [] },
-          { id: 'obs_new001', type: 'procedural', pattern: 'new pattern', evidence: [] },
-          { id: 'bad', type: 'workflow', pattern: 'test' },
-        ],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" process-observations "${responseFile}" "${logFile}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.updated).toBe(1);
-      expect(counts.created).toBe(1);
-      expect(counts.skipped).toBe(1);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('json-helper.cjs create-artifacts', () => {
-  it('creates command with correct frontmatter', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'deploy flow',
-        confidence: 0.95, observations: 3, status: 'ready',
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'deploy-flow', description: 'Deploy workflow',
-          content: '# Deploy Flow\nDeploy the app.',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.created).toHaveLength(1);
-
-      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'deploy-flow.md');
-      expect(fs.existsSync(artPath)).toBe(true);
-      const content = fs.readFileSync(artPath, 'utf8');
-      expect(content).toContain('description: "Deploy workflow"');
-      expect(content).toContain('devflow-learning: auto-generated');
-      expect(content).toContain('# Deploy Flow');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('creates skill with correct frontmatter', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'procedural', pattern: 'debug hooks',
-        confidence: 0.95, observations: 3, status: 'ready',
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'skill',
-          name: 'debug-hooks', description: 'Debug hook issues',
-          content: '# Debug Hooks\nHow to debug hooks.',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.created).toHaveLength(1);
-
-      const artPath = path.join(tmpDir, '.claude', 'skills', 'debug-hooks', 'SKILL.md');
-      expect(fs.existsSync(artPath)).toBe(true);
-      const content = fs.readFileSync(artPath, 'utf8');
-      expect(content).toContain('name: self-learning:debug-hooks');
-      expect(content).toContain('user-invocable: false');
-      expect(content).toContain('allowed-tools: Read, Grep, Glob');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('skips non-ready observations', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.33, observations: 1, status: 'observing',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'test-cmd', description: 'Test', content: 'Test',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.skipped).toBe(1);
-      expect(counts.created).toHaveLength(0);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('skips empty or invalid names', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3, status: 'ready',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: '!!!', description: 'Test', content: 'Test',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.skipped).toBe(1);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('never overwrites existing files', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3, status: 'ready',
-        evidence: [], details: '',
-      }) + '\n');
-
-      const artDir = path.join(tmpDir, '.claude', 'commands', 'self-learning');
-      fs.mkdirSync(artDir, { recursive: true });
-      fs.writeFileSync(path.join(artDir, 'existing.md'), 'USER CONTENT');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'existing', description: 'Test', content: 'New content',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.skipped).toBe(1);
-
-      const content = fs.readFileSync(path.join(artDir, 'existing.md'), 'utf8');
-      expect(content).toBe('USER CONTENT');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('sanitizes artifact name', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3, status: 'ready',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'My Cool_Command!@#', description: 'Test', content: 'Test',
-        }],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.created).toHaveLength(1);
-      expect(counts.created[0]).toContain('mycoolcommand');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('updates observation status in log', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3, status: 'ready',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'test-cmd', description: 'Test', content: 'Test',
-        }],
-      }));
-
-      execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-
-      const entry = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
-      expect(entry.status).toBe('created');
-      expect(entry.artifact_path).toContain('test-cmd.md');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('escapes description quotes', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3, status: 'ready',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'test-cmd', description: 'A "quoted" description', content: 'Test',
-        }],
-      }));
-
-      execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-
-      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'test-cmd.md');
-      const content = fs.readFileSync(artPath, 'utf8');
-      expect(content).toContain('description: "A \\"quoted\\" description"');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('returns created paths', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, [
-        JSON.stringify({
-          id: 'obs_abc123', type: 'workflow', pattern: 'test1',
-          confidence: 0.95, observations: 3, status: 'ready',
-          evidence: [], details: '',
-        }),
-        JSON.stringify({
-          id: 'obs_def456', type: 'procedural', pattern: 'test2',
-          confidence: 0.95, observations: 3, status: 'ready',
-          evidence: [], details: '',
-        }),
-      ].join('\n') + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [
-          { observation_id: 'obs_abc123', type: 'command', name: 'cmd1', description: 'Cmd 1', content: 'C1' },
-          { observation_id: 'obs_def456', type: 'skill', name: 'skill1', description: 'Skill 1', content: 'S1' },
-        ],
-      }));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const counts = JSON.parse(result);
-      expect(counts.created).toHaveLength(2);
-      expect(counts.created[0]).toContain('cmd1.md');
-      expect(counts.created[1]).toContain('SKILL.md');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('json-helper.cjs filter-observations', () => {
   it('returns valid entries as sorted array', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
@@ -1327,82 +619,6 @@ describe('json-helper.cjs filter-observations', () => {
   });
 });
 
-
-describe('json-helper.cjs create-artifacts frontmatter stripping', () => {
-  it('strips model-generated YAML frontmatter from artifact content', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3, status: 'ready',
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
-        evidence: [], details: '',
-      }) + '\n');
-
-      // Model incorrectly includes frontmatter in content
-      const contentWithFrontmatter = '---\ndescription: "model added this"\n---\n\n# Real Content\nActual body.';
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'strip-test', description: 'Test stripping',
-          content: contentWithFrontmatter,
-        }],
-      }));
-
-      execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-
-      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'strip-test.md');
-      const content = fs.readFileSync(artPath, 'utf8');
-      // Should have system-generated frontmatter, NOT the model's frontmatter
-      expect(content).toContain('description: "Test stripping"');
-      expect(content).toContain('devflow-learning: auto-generated');
-      // Model's frontmatter should be stripped, leaving only the body
-      expect(content).toContain('# Real Content');
-      expect(content).not.toContain('model added this');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('preserves content without frontmatter unchanged', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const responseFile = path.join(tmpDir, 'response.json');
-    const logFile = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(logFile, JSON.stringify({
-        id: 'obs_abc123', type: 'workflow', pattern: 'test',
-        confidence: 0.95, observations: 3, status: 'ready',
-        first_seen: '2026-03-20T00:00:00Z', last_seen: '2026-03-22T00:00:00Z',
-        evidence: [], details: '',
-      }) + '\n');
-
-      fs.writeFileSync(responseFile, JSON.stringify({
-        artifacts: [{
-          observation_id: 'obs_abc123', type: 'command',
-          name: 'no-strip-test', description: 'No stripping needed',
-          content: '# Clean Content\nNo frontmatter here.',
-        }],
-      }));
-
-      execSync(
-        `node "${JSON_HELPER}" create-artifacts "${responseFile}" "${logFile}" "${tmpDir}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-
-      const artPath = path.join(tmpDir, '.claude', 'commands', 'self-learning', 'no-strip-test.md');
-      const content = fs.readFileSync(artPath, 'utf8');
-      expect(content).toContain('# Clean Content');
-      expect(content).toContain('No frontmatter here.');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-});
 
 describe('json-parse wrapper', () => {
   it('can be sourced and provides function definitions', () => {
@@ -2626,10 +1842,227 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 });
 
 // =============================================================================
-// sidecar-dispatch stale marker recovery
+// sidecar-recover stale marker recovery
 // =============================================================================
 
-describe('sidecar-dispatch stale marker recovery', () => {
+// Bash harness that stubs dbg/log, sources get-mtime + sidecar-recover, then
+// calls sidecar_recover_stale and echoes JUST_RECOVERED so tests can assert it.
+const SIDECAR_RECOVER = path.join(HOOKS_DIR, 'sidecar-recover');
+const GET_MTIME = path.join(HOOKS_DIR, 'get-mtime');
+
+function runRecover(sidecarDir: string, memoryDir: string): { justRecovered: string } {
+  const result = execSync(`bash -c '
+    dbg() { :; }
+    log() { :; }
+    source "${GET_MTIME}"
+    source "${SIDECAR_RECOVER}"
+    sidecar_recover_stale "${sidecarDir}" "${memoryDir}"
+    printf "%s" "$JUST_RECOVERED"
+  '`, { stdio: 'pipe' }).toString();
+  return { justRecovered: result };
+}
+
+describe('sidecar-recover stale marker recovery', () => {
+  let tmpDir: string;
+  let sidecarDir: string;
+  let memoryDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-recover-test-'));
+    sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    memoryDir = path.join(tmpDir, '.devflow', 'memory');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.mkdirSync(memoryDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // sidecar-dispatch still handles the capture-only path — fresh .processing is
+  // left alone by sidecar-recover (it checks age, not presence).
+  it('fresh .processing left alone (age below threshold)', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+    // mtime is current — well below 1800s threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(true);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+  });
+
+  it('stale .processing retried — renamed back to .json', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000); // older than 1800s threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(true);
+
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+    expect(fs.existsSync(retryFile)).toBe(true);
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
+  });
+
+  it('retry count increments on repeated stale recovery', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+    fs.writeFileSync(retryFile, '1');
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('2');
+  });
+
+  it('max retries exhausted — marked as .failed', () => {
+    const procFile = path.join(sidecarDir, 'learning.processing');
+    const retryFile = path.join(sidecarDir, 'learning.retries');
+
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+    fs.writeFileSync(retryFile, '3');
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.failed'))).toBe(true);
+    expect(fs.existsSync(retryFile)).toBe(false);
+  });
+
+  // T2(a): per-type stale thresholds
+  it('memory type recovers after 300s but NOT before', () => {
+    const procFile = path.join(sidecarDir, 'memory.abc123.processing');
+    // Fresh — should NOT recover
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 200); // below 300s memory threshold
+
+    runRecover(sidecarDir, memoryDir);
+    expect(fs.existsSync(procFile)).toBe(true); // still .processing
+
+    // Now age it past threshold
+    backdateMtime(procFile, 400);
+    runRecover(sidecarDir, memoryDir);
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'memory.abc123.json'))).toBe(true);
+  });
+
+  it('learning type does NOT recover at 300s (needs 1800s)', () => {
+    const procFile = path.join(sidecarDir, 'learning.abc123.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 400); // past memory threshold but below learning threshold (1800s)
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(true); // should still be .processing
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.abc123.json'))).toBe(false);
+  });
+
+  it('decisions type recovers after 1800s', () => {
+    const procFile = path.join(sidecarDir, 'decisions.abc123.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000); // past 1800s threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'decisions.abc123.json'))).toBe(true);
+  });
+
+  it('knowledge type recovers after 1800s', () => {
+    const procFile = path.join(sidecarDir, 'knowledge.abc123.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.abc123.json'))).toBe(true);
+  });
+
+  // T2(b): JUST_RECOVERED guard — recovered markers have .retries preserved, not reset
+  it('JUST_RECOVERED guard: recovered marker basename is included in JUST_RECOVERED output', () => {
+    const procFile = path.join(sidecarDir, 'learning.sess1.processing');
+    const retryFile = path.join(sidecarDir, 'learning.sess1.retries');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000);
+    fs.writeFileSync(retryFile, '2'); // pre-existing retry count
+
+    const { justRecovered } = runRecover(sidecarDir, memoryDir);
+
+    // Marker should be recovered
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.sess1.json'))).toBe(true);
+    // JUST_RECOVERED should contain the basename (without .processing)
+    expect(justRecovered).toContain('learning.sess1');
+    // Retry count should be bumped to 3, not reset to 1
+    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('3');
+  });
+
+  // T2(c): orphaned .pending-turns.processing recovery
+  it('orphaned .pending-turns.processing older than 300s is renamed back to .pending-turns.jsonl', () => {
+    const ptProc = path.join(memoryDir, '.pending-turns.processing');
+    fs.writeFileSync(ptProc, 'some queued data\n');
+    backdateMtime(ptProc, 400);
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(ptProc)).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl'))).toBe(true);
+    expect(fs.readFileSync(path.join(memoryDir, '.pending-turns.jsonl'), 'utf-8')).toBe('some queued data\n');
+  });
+
+  it('orphaned .pending-turns.processing left alone when .pending-turns.jsonl already exists', () => {
+    const ptProc = path.join(memoryDir, '.pending-turns.processing');
+    const ptJsonl = path.join(memoryDir, '.pending-turns.jsonl');
+    fs.writeFileSync(ptProc, 'processing data\n');
+    backdateMtime(ptProc, 400);
+    fs.writeFileSync(ptJsonl, 'existing jsonl data\n');
+
+    runRecover(sidecarDir, memoryDir);
+
+    // .processing should remain (non-destructive when .jsonl already exists)
+    expect(fs.existsSync(ptProc)).toBe(true);
+    // .jsonl should be unchanged
+    expect(fs.readFileSync(ptJsonl, 'utf-8')).toBe('existing jsonl data\n');
+  });
+
+  it('fresh .pending-turns.processing (below 300s) is NOT yanked', () => {
+    const ptProc = path.join(memoryDir, '.pending-turns.processing');
+    fs.writeFileSync(ptProc, 'active data\n');
+    backdateMtime(ptProc, 100); // below 300s memory threshold
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(ptProc)).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl'))).toBe(false);
+  });
+
+  // T2(d): heartbeat — a .processing whose mtime was just refreshed is NOT yanked
+  it('recently heartbeated .processing is not recovered (mtime is fresh)', () => {
+    const procFile = path.join(sidecarDir, 'knowledge.live.processing');
+    fs.writeFileSync(procFile, '{}');
+    // Touch to current mtime — simulates a live heartbeat
+    const now = new Date();
+    fs.utimesSync(procFile, now, now);
+
+    runRecover(sidecarDir, memoryDir);
+
+    expect(fs.existsSync(procFile)).toBe(true);
+    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.live.json'))).toBe(false);
+  });
+});
+
+// =============================================================================
+// sidecar-dispatch: capture-only (no directive emission)
+// session-start-context: pending-work directive emission (Section 2)
+// =============================================================================
+
+describe('sidecar-dispatch capture-only (no directive emitted)', () => {
   const DISPATCH_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
 
   let tmpDir: string;
@@ -2637,13 +2070,36 @@ describe('sidecar-dispatch stale marker recovery', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dispatch-test-'));
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('fresh .processing left alone', () => {
+  // sidecar-dispatch is now capture-only; it must never emit a directive
+  it('emits no additionalContext even when pending .json markers exist (T6)', () => {
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
+    fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
+
+    // Dispatch should exit 0 and produce no JSON output (capture-only)
+    let stdout = '';
+    try {
+      stdout = execSync(`bash "${DISPATCH_HOOK}"`, {
+        input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).toString().trim();
+    } catch (e: unknown) {
+      const err = e as { stdout?: Buffer; status?: number };
+      stdout = err.stdout?.toString().trim() ?? '';
+    }
+
+    // Dispatch produces no output (it is capture-only)
+    expect(stdout).toBe('');
+  });
+
+  it('fresh .processing is left alone by sidecar-dispatch (dispatch does not recover)', () => {
     const procFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.processing');
     fs.writeFileSync(procFile, '{}');
 
@@ -2655,76 +2111,69 @@ describe('sidecar-dispatch stale marker recovery', () => {
     expect(fs.existsSync(procFile)).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'learning.json'))).toBe(false);
   });
+});
 
-  it('stale .processing retried — renamed back to .json', () => {
-    const procFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.processing');
-    fs.writeFileSync(procFile, '{}');
-    backdateMtime(procFile, 600);
+describe('session-start-context pending-work directive', () => {
+  const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
 
-    execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  let tmpDir: string;
+  let homeDir: string;
 
-    expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'learning.json'))).toBe(true);
-
-    const retryFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.retries');
-    expect(fs.existsSync(retryFile)).toBe(true);
-    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-context-test-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-context-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    // Do NOT disable learning/decisions sentinels here — doing so would also
+    // cause sidecar-collect-tasks to delete those marker types. Instead we
+    // rely on the absence of decisions.md, pitfalls.md, and learning-log.jsonl
+    // to keep Sections 1.5 and 1.75 silent (no file → no output).
   });
 
-  it('retry count increments on repeated stale recovery', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    const procFile = path.join(sidecarDir, 'learning.processing');
-    const retryFile = path.join(sidecarDir, 'learning.retries');
-
-    fs.writeFileSync(procFile, '{}');
-    backdateMtime(procFile, 600);
-    fs.writeFileSync(retryFile, '1');
-
-    execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('2');
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it('max retries exhausted — marked as .failed', () => {
+  // T5: directive lists expected task names from pending {type}.{session}.json markers
+  it('pending marker directive includes multiple task names (T5)', () => {
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    const procFile = path.join(sidecarDir, 'learning.processing');
-    const retryFile = path.join(sidecarDir, 'learning.retries');
+    fs.writeFileSync(path.join(sidecarDir, 'learning.sess1.json'), '{}');
+    fs.writeFileSync(path.join(sidecarDir, 'decisions.sess1.json'), '{}');
 
-    fs.writeFileSync(procFile, '{}');
-    backdateMtime(procFile, 600);
-    fs.writeFileSync(retryFile, '3');
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
 
-    execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.failed'))).toBe(true);
-    expect(fs.existsSync(retryFile)).toBe(false);
-  });
-
-  it('pending marker directive includes multiple task names', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
-    fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
-
-    const result = execSync(`bash "${DISPATCH_HOOK}"`, {
-      input: JSON.stringify({ cwd: tmpDir, session_id: 'test', prompt: 'hello world' }),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).toString();
-
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(stdout.trim());
     const context = parsed.hookSpecificOutput.additionalContext;
-    expect(context).toContain('SIDECAR:');
+    expect(context).toContain('SIDECAR MAINTENANCE');
     expect(context).toContain('learning');
     expect(context).toContain('decisions');
+  });
+
+  it('no directive emitted when no pending markers present', () => {
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    // No pending markers — hook should produce no output
+    expect(stdout.trim()).toBe('');
+  });
+
+  it('stale .processing recovered and included in directive', () => {
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    // Seed a stale learning .processing — should be recovered then emitted
+    const procFile = path.join(sidecarDir, 'learning.stale.processing');
+    fs.writeFileSync(procFile, '{}');
+    backdateMtime(procFile, 2000); // past 1800s threshold
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    const parsed = JSON.parse(stdout.trim());
+    const context = parsed.hookSpecificOutput.additionalContext;
+    expect(context).toContain('SIDECAR MAINTENANCE');
+    expect(context).toContain('learning');
+    // The .processing should have been renamed to .json
+    expect(fs.existsSync(procFile)).toBe(false);
+    expect(fs.existsSync(path.join(sidecarDir, 'learning.stale.json'))).toBe(true);
   });
 });
 

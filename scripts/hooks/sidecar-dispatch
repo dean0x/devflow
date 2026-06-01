@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # Sidecar System: sidecar-dispatch (UserPromptSubmit Hook)
-# 1. Captures user turn to .devflow/memory/.pending-turns.jsonl
-# 2. Checks for pending sidecar markers in .devflow/sidecar/
-# 3. If markers found, injects SIDECAR directive via additionalContext
+# Capture-only: appends the user turn to .devflow/memory/.pending-turns.jsonl.
+# Marker collection and directive emission have moved to session-start-context (Section 2).
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
@@ -20,7 +19,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/hook-bootstrap" "sidecar-dispatch"
 
 source "$SCRIPT_DIR/json-parse" || { echo "sidecar-dispatch: failed to source json-parse" >&2; exit 1; }
-source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-dispatch: failed to source get-mtime" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 INPUT=$(cat)
@@ -42,20 +40,14 @@ SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "sidecar-dispatch"
 
-# Read sidecar config — skip user turn capture if memory: false; gate marker dispatch per feature
+# Read sidecar config — memory:false skips user turn capture
 SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
 MEMORY_ENABLED="true"
-LEARNING_ENABLED="true"
-DECISIONS_ENABLED="true"
-KNOWLEDGE_ENABLED="true"
 if [ -f "$SIDECAR_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
-  LEARNING_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "learning" "true")
-  DECISIONS_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "decisions" "true")
-  KNOWLEDGE_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "knowledge" "true")
 fi
 
-dbg "memory=$MEMORY_ENABLED learning=$LEARNING_ENABLED decisions=$DECISIONS_ENABLED knowledge=$KNOWLEDGE_ENABLED"
+dbg "memory=$MEMORY_ENABLED"
 
 # --- Capture user turn ---
 if [ "$MEMORY_ENABLED" = "true" ] && [ -n "$PROMPT" ]; then
@@ -83,139 +75,5 @@ if [ "$MEMORY_ENABLED" = "true" ] && [ -n "$PROMPT" ]; then
   fi
 fi
 
-# --- Check for pending sidecar markers ---
-# Skip if sidecar dir doesn't exist
-if [ ! -d "$SIDECAR_DIR" ]; then
-  dbg "EXIT: no sidecar dir"
-  exit 0
-fi
-
-# Stale retry: if any .processing file is >5 min old, rename back to .json.
-# Cap at 10 files to guard against unexpected proliferation.
-# After MAX_RETRIES stale recoveries, mark as .failed instead of cycling.
-NOW=$(date +%s)
-MAX_RETRIES=3
-
-# Track markers recovered from stale .processing in this call — their .retries must
-# persist to the next call so the retry counter survives until dispatch can use it.
-JUST_RECOVERED=""
-
-# Clean up .failed markers older than 24h
-if compgen -G "$SIDECAR_DIR/*.failed" > /dev/null 2>&1; then
-  for FAILED_FILE in "$SIDECAR_DIR"/*.failed; do
-    [ -f "$FAILED_FILE" ] || continue
-    FAILED_MTIME=$(get_mtime "$FAILED_FILE")
-    FAILED_MTIME="${FAILED_MTIME:-0}"
-    FAILED_AGE=$(( NOW - FAILED_MTIME ))
-    if [ "$FAILED_AGE" -gt 86400 ]; then
-      rm -f "$FAILED_FILE" 2>/dev/null || true
-    fi
-  done
-fi
-
-# Guard: only enter stale-retry loop when .processing files actually exist.
-# This avoids the glob expansion cost (get_mtime + stat calls) on every prompt.
-if compgen -G "$SIDECAR_DIR/*.processing" > /dev/null 2>&1; then
-  PROC_COUNT=0
-  PROC_LIMIT=10
-  for PROC_FILE in "$SIDECAR_DIR"/*.processing; do
-    [ -f "$PROC_FILE" ] || continue
-    PROC_COUNT=$(( PROC_COUNT + 1 ))
-    [ "$PROC_COUNT" -gt "$PROC_LIMIT" ] && break
-    PROC_MTIME=$(get_mtime "$PROC_FILE")
-    PROC_MTIME="${PROC_MTIME:-0}"
-    PROC_AGE=$(( NOW - PROC_MTIME ))
-    if [ "$PROC_AGE" -gt 300 ]; then
-      # Check how many times this marker has already been retried
-      BASE="${PROC_FILE%.processing}"
-      RETRY_FILE="${BASE}.retries"
-      RETRY_COUNT=0
-      if [ -f "$RETRY_FILE" ]; then
-        # Sanitize: strip non-digits to guard against corrupted .retries files causing
-        # arithmetic errors under set -e.
-        RETRY_COUNT=$(cat "$RETRY_FILE" 2>/dev/null | tr -dc '0-9' || true)
-        RETRY_COUNT="${RETRY_COUNT:-0}"
-      fi
-      if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
-        # Too many retries — mark as permanently failed to stop cycling
-        mv "$PROC_FILE" "${BASE}.failed" 2>/dev/null || true
-        rm -f "$RETRY_FILE" 2>/dev/null || true
-        if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Stale marker permanently failed after $RETRY_COUNT retries: $(basename "$PROC_FILE")"; fi
-        log "Stale marker permanently failed after $RETRY_COUNT retries: $(basename "$PROC_FILE")"
-      else
-        # Stale processing file — rename back to .json for retry; record basename so the
-        # collection loop knows not to clean the .retries file for this marker in this call.
-        echo $(( RETRY_COUNT + 1 )) > "$RETRY_FILE"
-        mv "$PROC_FILE" "${BASE}.json" 2>/dev/null || true
-        JUST_RECOVERED="$JUST_RECOVERED $(basename "$BASE")"
-        if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Stale marker recovered (retry $((RETRY_COUNT + 1))/$MAX_RETRIES): $(basename "$BASE")"; fi
-        log "Stale marker recovered (retry $((RETRY_COUNT + 1))/$MAX_RETRIES): $(basename "$BASE")"
-      fi
-    fi
-  done
-fi
-
-# Collect pending markers (exclude config.json)
-# Markers with a timestamp field older than 24h are expired — delete and skip.
-# Skip markers whose feature is currently disabled in config (avoids dispatching stale markers
-# after a feature is turned off between write-time and dispatch-time).
-PENDING_TASKS=""
-for MARKER_FILE in "$SIDECAR_DIR"/*.json; do
-  [ -f "$MARKER_FILE" ] || continue
-  FULL_BASENAME=$(basename "$MARKER_FILE" .json)
-  # Extract type from session-scoped filename: learning.abc123 → learning
-  case "$FULL_BASENAME" in *.*) BASENAME="${FULL_BASENAME%%.*}" ;; *) BASENAME="$FULL_BASENAME" ;; esac
-  # Skip config
-  [ "$BASENAME" = "config" ] && continue
-  # Skip marker if its feature is currently disabled — remove the stale marker to prevent
-  # it accumulating indefinitely after a feature is turned off.
-  case "$BASENAME" in
-    memory)     [ "$MEMORY_ENABLED"    != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
-    learning)   [ "$LEARNING_ENABLED"  != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
-    decisions)  [ "$DECISIONS_ENABLED" != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
-    knowledge)  [ "$KNOWLEDGE_ENABLED" != "true" ] && { rm -f "$MARKER_FILE" 2>/dev/null || true; continue; } ;;
-  esac
-  # Expire markers older than 24h (86400s) when they carry a timestamp field.
-  # Use json_field_file for node fallback support.
-  MARKER_TS=$(json_field_file "$MARKER_FILE" "timestamp" "")
-  if [ -n "$MARKER_TS" ] && [ "$MARKER_TS" -gt 0 ] 2>/dev/null; then
-    MARKER_AGE=$(( NOW - MARKER_TS ))
-    if [ "$MARKER_AGE" -gt 86400 ]; then
-      rm -f "$MARKER_FILE" 2>/dev/null || true
-      continue
-    fi
-  fi
-  # Clean up any stale .retries file for this marker, unless the marker was just recovered
-  # from stale .processing in this same call (in which case the .retries counter must survive
-  # to the next call so it isn't reset before the retry limit can be enforced).
-  case " $JUST_RECOVERED " in
-    *" $FULL_BASENAME "*) ;;  # Just recovered — leave .retries in place
-    *) rm -f "${MARKER_FILE%.json}.retries" 2>/dev/null || true ;;
-  esac
-  if [ -n "$PENDING_TASKS" ]; then
-    PENDING_TASKS="$PENDING_TASKS,$BASENAME"
-  else
-    PENDING_TASKS="$BASENAME"
-  fi
-done
-
-# Deduplicate types (multiple session markers → single type entry)
-if [ -n "$PENDING_TASKS" ]; then
-  PENDING_TASKS=$(echo "$PENDING_TASKS" | tr ',' '\n' | sort -u | paste -sd ',' -)
-fi
-
-# If no pending tasks, exit silently (no additionalContext output)
-if [ -z "$PENDING_TASKS" ]; then
-  dbg "EXIT: no pending tasks"
-  exit 0
-fi
-
-dbg "PENDING_TASKS=$PENDING_TASKS — injecting SIDECAR directive"
-log "Dispatching tasks: $PENDING_TASKS"
-
-# Output SIDECAR directive
-DIRECTIVE="SIDECAR: ${PENDING_TASKS}. Spawn background agents — load devflow:sidecar skill."
-json_prompt_output "$DIRECTIVE"
 dbg "=== HOOK COMPLETE ==="
-
 exit 0

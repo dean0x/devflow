@@ -4,7 +4,6 @@ import { dim } from '../colors.js';
 /**
  * HUD component: learning decisions counts.
  * Shows count of promoted (created) decisions entries by type.
- * Shows attention indicator when entries need review (stale/soft-cap exceeded).
  * Returns null gracefully if no learning log exists or no promoted entries.
  */
 export default async function learningCounts(
@@ -13,11 +12,11 @@ export default async function learningCounts(
   const data = ctx.learningCounts;
   if (!data) return null;
 
-  const { workflows, procedural, decisions, pitfalls, needReview } = data;
+  const { workflows, procedural, decisions, pitfalls } = data;
   const total = workflows + procedural + decisions + pitfalls;
 
   // Only render if there is at least one promoted entry
-  if (total === 0 && needReview === 0) return null;
+  if (total === 0) return null;
 
   const parts: string[] = [];
   if (workflows > 0) parts.push(`${workflows} workflow${workflows !== 1 ? 's' : ''}`);
@@ -27,10 +26,8 @@ export default async function learningCounts(
 
   if (parts.length === 0) return null;
 
-  const base = `Learning: ${parts.join(', ')}`;
-  const attention = needReview > 0 ? `  \u26A0 ${needReview} need review` : '';
-  const raw = base + attention;
-  const text = dim(base) + (needReview > 0 ? `  \u26A0 ${needReview} need review` : '');
+  const raw = `Learning: ${parts.join(', ')}`;
+  const text = dim(raw);
 
   return { text, raw };
 }

@@ -504,6 +504,48 @@ const MIGRATION_SYNC_DEVFLOW_GITIGNORE: Migration<'per-project'> = {
 };
 
 /**
+ * Phase 3 (reliable LLM sidecar consumption): remove orphaned state files
+ * left by the removed deterministic capacity/manifest/reconcile features.
+ *
+ * Files removed (applies ADR-002: clean house, no skip-list stranding):
+ *   - .devflow/learning/.learning-manifest.json  — no longer written
+ *   - .devflow/decisions/.decisions-manifest.json — no longer written
+ *   - .devflow/decisions/.decisions-notifications.json — no longer written
+ *
+ * Non-fatal, idempotent (applies PF-004: buggy first run never re-sweeps,
+ * but these are simple unlinks so a non-existent file is a no-op).
+ */
+const MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE: Migration<'per-project'> = {
+  id: 'purge-orphaned-sidecar-judgment-state',
+  description: 'Remove manifest and capacity notification files orphaned by Phase 3 removal of deterministic judgment layer',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const toRemove = [
+      path.join(ctx.projectRoot, '.devflow', 'learning', '.learning-manifest.json'),
+      path.join(ctx.projectRoot, '.devflow', 'decisions', '.decisions-manifest.json'),
+      path.join(ctx.projectRoot, '.devflow', 'decisions', '.decisions-notifications.json'),
+    ];
+
+    let removed = 0;
+    for (const filePath of toRemove) {
+      try {
+        await fs.unlink(filePath);
+        removed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err; // unexpected error — surface to runner
+        // ENOENT = already absent — idempotent skip
+      }
+    }
+
+    const infos = removed > 0
+      ? [`Removed ${removed} orphaned judgment-state file(s)`]
+      : [];
+    return { infos, warnings: [] };
+  },
+};
+
+/**
  * Migration ID suffix conventions:
  *
  * - `-vN`        A revision of a migration. `-v2`, `-v3`, etc. indicate
@@ -527,6 +569,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_CONSOLIDATE_TO_DEVFLOW,
   MIGRATION_CLEANUP_STALE_WORKING_MEMORY,
   MIGRATION_SYNC_DEVFLOW_GITIGNORE,
+  MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
