@@ -18,7 +18,7 @@ import {
   createDocsStructure,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
@@ -196,21 +196,6 @@ export const initCommand = new Command('init')
     } else if (!process.stdin.isTTY) {
       p.log.info('Non-interactive mode detected, using scope: user');
       scope = 'user';
-    } else {
-      const selected = await p.select({
-        message: 'Installation scope',
-        options: [
-          { value: 'user', label: 'User', hint: 'all projects (~/.claude/)' },
-          { value: 'local', label: 'Local', hint: 'this project only (./.claude/)' },
-        ],
-      });
-
-      if (p.isCancel(selected)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-
-      scope = selected as 'user' | 'local';
     }
 
     // --hud-only: install only HUD (skip plugins, hooks, extras)
@@ -301,6 +286,10 @@ export const initCommand = new Command('init')
         'devflow-code-review': 'parallel specialized reviewers',
         'devflow-resolve': 'fix review issues by risk',
         'devflow-debug': 'competing hypotheses',
+        'devflow-explore': 'codebase exploration + knowledge bases',
+        'devflow-research': 'multi-type research with synthesis',
+        'devflow-release': 'adaptive release with learned config',
+        'devflow-bug-analysis': 'proactive bug finding, post-pipeline',
         'devflow-self-review': 'Simplifier + Scrutinizer',
         'devflow-typescript': 'TypeScript patterns',
         'devflow-react': 'React patterns',
@@ -312,31 +301,80 @@ export const initCommand = new Command('init')
         'devflow-rust': 'Rust patterns',
       };
 
-      const choices = DEVFLOW_PLUGINS
-        .filter(pl => pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient' && pl.name !== 'devflow-audit-claude')
-        .map(pl => ({
-          value: pl.name,
-          label: pl.name.replace('devflow-', ''),
-          hint: pluginHints[pl.name] ?? pl.description,
-        }));
+      const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
 
-      const preSelected = DEVFLOW_PLUGINS
-        .filter(pl => !pl.optional && pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient')
+      const workflowChoices = workflow.map(pl => ({
+        value: pl.name,
+        label: pl.name.replace('devflow-', ''),
+        hint: pluginHints[pl.name] ?? pl.description,
+      }));
+
+      const languageChoices = language.map(pl => ({
+        value: pl.name,
+        label: pl.name.replace('devflow-', ''),
+        hint: pluginHints[pl.name] ?? pl.description,
+      }));
+
+      const workflowInitialValues = workflow
+        .filter(pl => !pl.optional)
         .map(pl => pl.name);
 
-      const pluginSelection = await p.multiselect({
-        message: 'Select plugins to install',
-        options: choices,
-        initialValues: preSelected,
-        required: true,
-      });
+      // Bounded selection loop — max 3 attempts (reliability rule: no unbounded loops)
+      const MAX_ATTEMPTS = 3;
+      let attempts = 0;
 
-      if (p.isCancel(pluginSelection)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
+      while (attempts < MAX_ATTEMPTS) {
+        attempts++;
+        const workflowSelected: string[] = [];
+        const languageSelected: string[] = [];
+
+        // Step 1 — Workflow plugins (skip if empty bucket)
+        if (workflowChoices.length > 0) {
+          const step1 = await p.multiselect({
+            message: 'Step 1 — Workflow plugins',
+            options: workflowChoices,
+            initialValues: workflowInitialValues,
+            required: false,
+          });
+
+          if (p.isCancel(step1)) {
+            p.cancel('Installation cancelled.');
+            process.exit(0);
+          }
+
+          workflowSelected.push(...(step1 as string[]));
+        }
+
+        // Step 2 — Language plugins (skip if empty bucket)
+        if (languageChoices.length > 0) {
+          const step2 = await p.multiselect({
+            message: 'Step 2 — Language plugins',
+            options: languageChoices,
+            required: false,
+          });
+
+          if (p.isCancel(step2)) {
+            p.cancel('Installation cancelled.');
+            process.exit(0);
+          }
+
+          languageSelected.push(...(step2 as string[]));
+        }
+
+        const combined = [...workflowSelected, ...languageSelected];
+
+        if (combined.length > 0) {
+          selectedPlugins = combined;
+          break;
+        }
+
+        if (attempts < MAX_ATTEMPTS) {
+          p.log.warn('Select at least one plugin.');
+        } else {
+          p.cancel('Installation cancelled — no plugins selected.');
+          process.exit(0);
+        }
       }
-
-      selectedPlugins = pluginSelection as string[];
     }
 
     // ╭──────────────────────────────────────────────────────────╮
@@ -1219,11 +1257,6 @@ export const initCommand = new Command('init')
       p.log.info('Installed via file copy (Claude CLI not available)');
     }
 
-    const WORKFLOW_ORDER = [
-      '/research', '/explore', '/plan', '/implement',
-      '/code-review', '/resolve', '/self-review',
-      '/debug', '/release', '/audit-claude',
-    ];
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));
     if (orderedCommands.length > 0) {
