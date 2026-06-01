@@ -135,11 +135,9 @@ export function combineSelection(
 }
 
 /**
- * Decide whether the selection loop should retry on the next iteration.
- *
- * Returns true when a retry is warranted (selection was empty and attempts
- * have not been exhausted). Returns false when either the selection is
- * accepted or the attempt ceiling has been reached (caller should exit).
+ * Returns true when the selection loop should retry: selection was empty and
+ * the attempt ceiling has not been reached. Returns false when accepted or
+ * when attempts are exhausted (caller should exit).
  *
  * Pure function — no I/O, no side effects; extracted for testability.
  */
@@ -389,8 +387,7 @@ export const initCommand = new Command('init')
           break;
         }
 
-        const isLastAttempt = !shouldRetry(attempts, MAX_ATTEMPTS, accepted);
-        if (isLastAttempt) {
+        if (!shouldRetry(attempts, MAX_ATTEMPTS, accepted)) {
           p.cancel('Installation cancelled — no plugins selected.');
           process.exit(0);
         }
