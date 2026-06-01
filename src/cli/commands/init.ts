@@ -121,6 +121,34 @@ export function parsePluginSelection(
 }
 
 /**
+ * Combine workflow and language selections into a single plugin list.
+ * Returns the merged array and whether a valid (non-empty) selection was made.
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ */
+export function combineSelection(
+  workflowSelected: string[],
+  languageSelected: string[],
+): { plugins: string[]; accepted: boolean } {
+  const plugins = [...workflowSelected, ...languageSelected];
+  return { plugins, accepted: plugins.length > 0 };
+}
+
+/**
+ * Decide whether the selection loop should retry on the next iteration.
+ *
+ * Returns true when a retry is warranted (selection was empty and attempts
+ * have not been exhausted). Returns false when either the selection is
+ * accepted or the attempt ceiling has been reached (caller should exit).
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ */
+export function shouldRetry(attempt: number, maxAttempts: number, accepted: boolean): boolean {
+  if (accepted) return false;
+  return attempt < maxAttempts;
+}
+
+/**
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
@@ -289,8 +317,8 @@ export const initCommand = new Command('init')
         'devflow-explore': 'codebase exploration + knowledge bases',
         'devflow-research': 'multi-type research with synthesis',
         'devflow-release': 'adaptive release with learned config',
-        'devflow-bug-analysis': 'proactive bug finding, post-pipeline',
         'devflow-self-review': 'Simplifier + Scrutinizer',
+        'devflow-bug-analysis': 'proactive bug finding, post-pipeline',
         'devflow-typescript': 'TypeScript patterns',
         'devflow-react': 'React patterns',
         'devflow-accessibility': 'WCAG compliance',
@@ -303,17 +331,14 @@ export const initCommand = new Command('init')
 
       const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
 
-      const workflowChoices = workflow.map(pl => ({
+      const toChoice = (pl: PluginDefinition) => ({
         value: pl.name,
         label: pl.name.replace('devflow-', ''),
         hint: pluginHints[pl.name] ?? pl.description,
-      }));
+      });
 
-      const languageChoices = language.map(pl => ({
-        value: pl.name,
-        label: pl.name.replace('devflow-', ''),
-        hint: pluginHints[pl.name] ?? pl.description,
-      }));
+      const workflowChoices = workflow.map(toChoice);
+      const languageChoices = language.map(toChoice);
 
       const workflowInitialValues = workflow
         .filter(pl => !pl.optional)
@@ -339,7 +364,7 @@ export const initCommand = new Command('init')
             p.cancel('Installation cancelled.');
             process.exit(0);
           }
-          workflowSelected = step1 as string[];
+          workflowSelected = step1;
         }
 
         // Step 2 — Language plugins (skip if empty bucket)
@@ -354,22 +379,22 @@ export const initCommand = new Command('init')
             p.cancel('Installation cancelled.');
             process.exit(0);
           }
-          languageSelected = step2 as string[];
+          languageSelected = step2;
         }
 
-        const combined = [...workflowSelected, ...languageSelected];
+        const { plugins: combined, accepted } = combineSelection(workflowSelected, languageSelected);
 
-        if (combined.length > 0) {
+        if (accepted) {
           selectedPlugins = combined;
           break;
         }
 
-        if (attempts < MAX_ATTEMPTS) {
-          p.log.warn('Select at least one plugin.');
-        } else {
+        const isLastAttempt = !shouldRetry(attempts, MAX_ATTEMPTS, accepted);
+        if (isLastAttempt) {
           p.cancel('Installation cancelled — no plugins selected.');
           process.exit(0);
         }
+        p.log.warn('Select at least one plugin.');
       }
     }
 

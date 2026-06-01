@@ -729,6 +729,10 @@ export function partitionSelectablePlugins(plugins: PluginDefinition[]): {
     if (plugin.commands.length > 0) {
       workflow.push(plugin);
     } else {
+      // "language" bucket: today every command-less selectable plugin is a
+      // language/ecosystem plugin. If a non-language command-less plugin is
+      // added in the future, it will land here — update the bucket name or
+      // add an explicit category field at that point.
       language.push(plugin);
     }
   }

@@ -411,6 +411,18 @@ describe('WORKFLOW_ORDER', () => {
     }
   });
 
+  it('every WORKFLOW_ORDER entry corresponds to a real command in the registry (reverse regression guard)', () => {
+    // Build the full set of all commands across ALL plugins (including excluded ones like
+    // devflow-audit-claude, which owns /audit-claude and is intentionally in WORKFLOW_ORDER).
+    const allCommands = new Set(DEVFLOW_PLUGINS.flatMap(pl => pl.commands));
+    for (const cmd of WORKFLOW_ORDER) {
+      expect(
+        allCommands.has(cmd),
+        `WORKFLOW_ORDER entry '${cmd}' must correspond to a real command in DEVFLOW_PLUGINS`,
+      ).toBe(true);
+    }
+  });
+
   it('has no duplicate entries', () => {
     expect(new Set(WORKFLOW_ORDER).size).toBe(WORKFLOW_ORDER.length);
   });

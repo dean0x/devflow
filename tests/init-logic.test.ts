@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   parsePluginSelection,
+  combineSelection,
+  shouldRetry,
   substituteSettingsTemplate,
   computeGitignoreAppend,
   applyTeamsConfig,
@@ -71,6 +73,60 @@ describe('parsePluginSelection', () => {
     const { selected, invalid } = parsePluginSelection('devflow-frontend-design', DEVFLOW_PLUGINS);
     expect(selected).toEqual(['devflow-ui-design']);
     expect(invalid).toEqual([]);
+  });
+});
+
+describe('combineSelection', () => {
+  it('accepts non-empty workflow-only selection', () => {
+    const result = combineSelection(['devflow-implement'], []);
+    expect(result.plugins).toEqual(['devflow-implement']);
+    expect(result.accepted).toBe(true);
+  });
+
+  it('accepts non-empty language-only selection', () => {
+    const result = combineSelection([], ['devflow-typescript']);
+    expect(result.plugins).toEqual(['devflow-typescript']);
+    expect(result.accepted).toBe(true);
+  });
+
+  it('accepts non-empty combined selection from both buckets', () => {
+    const result = combineSelection(['devflow-implement'], ['devflow-typescript']);
+    expect(result.plugins).toEqual(['devflow-implement', 'devflow-typescript']);
+    expect(result.accepted).toBe(true);
+  });
+
+  it('rejects empty-both-buckets selection', () => {
+    const result = combineSelection([], []);
+    expect(result.plugins).toEqual([]);
+    expect(result.accepted).toBe(false);
+  });
+
+  it('workflow entries precede language entries in the merged list', () => {
+    const result = combineSelection(['devflow-implement', 'devflow-code-review'], ['devflow-typescript']);
+    expect(result.plugins).toEqual(['devflow-implement', 'devflow-code-review', 'devflow-typescript']);
+  });
+});
+
+describe('shouldRetry', () => {
+  const MAX_ATTEMPTS = 3;
+
+  it('returns false when selection is accepted (regardless of attempt count)', () => {
+    expect(shouldRetry(1, MAX_ATTEMPTS, true)).toBe(false);
+    expect(shouldRetry(2, MAX_ATTEMPTS, true)).toBe(false);
+    expect(shouldRetry(3, MAX_ATTEMPTS, true)).toBe(false);
+  });
+
+  it('returns true when not accepted and attempts remain', () => {
+    expect(shouldRetry(1, MAX_ATTEMPTS, false)).toBe(true);
+    expect(shouldRetry(2, MAX_ATTEMPTS, false)).toBe(true);
+  });
+
+  it('returns false when not accepted and attempt ceiling is reached (exits instead of retrying)', () => {
+    expect(shouldRetry(3, MAX_ATTEMPTS, false)).toBe(false);
+  });
+
+  it('returns false on attempt exceeding ceiling', () => {
+    expect(shouldRetry(4, MAX_ATTEMPTS, false)).toBe(false);
   });
 });
 
