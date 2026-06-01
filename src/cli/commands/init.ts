@@ -325,10 +325,9 @@ export const initCommand = new Command('init')
 
       while (attempts < MAX_ATTEMPTS) {
         attempts++;
-        const workflowSelected: string[] = [];
-        const languageSelected: string[] = [];
 
         // Step 1 — Workflow plugins (skip if empty bucket)
+        let workflowSelected: string[] = [];
         if (workflowChoices.length > 0) {
           const step1 = await p.multiselect({
             message: 'Step 1 — Workflow plugins',
@@ -336,29 +335,26 @@ export const initCommand = new Command('init')
             initialValues: workflowInitialValues,
             required: false,
           });
-
           if (p.isCancel(step1)) {
             p.cancel('Installation cancelled.');
             process.exit(0);
           }
-
-          workflowSelected.push(...(step1 as string[]));
+          workflowSelected = step1 as string[];
         }
 
         // Step 2 — Language plugins (skip if empty bucket)
+        let languageSelected: string[] = [];
         if (languageChoices.length > 0) {
           const step2 = await p.multiselect({
             message: 'Step 2 — Language plugins',
             options: languageChoices,
             required: false,
           });
-
           if (p.isCancel(step2)) {
             p.cancel('Installation cancelled.');
             process.exit(0);
           }
-
-          languageSelected.push(...(step2 as string[]));
+          languageSelected = step2 as string[];
         }
 
         const combined = [...workflowSelected, ...languageSelected];
