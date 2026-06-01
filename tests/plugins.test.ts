@@ -5,6 +5,8 @@ import {
   getAllAgentNames,
   buildAssetMaps,
   buildFullSkillsMap,
+  partitionSelectablePlugins,
+  WORKFLOW_ORDER,
   SHADOW_RENAMES,
   LEGACY_SKILL_NAMES,
   LEGACY_AGENT_NAMES,
@@ -190,12 +192,10 @@ describe('optional plugin flag', () => {
   });
 
   it('audit-claude is excluded from init multiselect choices', () => {
-    // Mirrors the filter logic in init.ts — audit-claude should not appear in interactive selector
-    const multiselectPlugins = DEVFLOW_PLUGINS.filter(
-      pl => pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient' && pl.name !== 'devflow-audit-claude',
-    );
-    const names = multiselectPlugins.map(pl => pl.name);
-    expect(names).not.toContain('devflow-audit-claude');
+    // partitionSelectablePlugins excludes devflow-audit-claude from both buckets
+    const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    const selectableNames = [...workflow, ...language].map(pl => pl.name);
+    expect(selectableNames).not.toContain('devflow-audit-claude');
     // But it still exists in the registry (installable via --plugin=audit-claude)
     expect(DEVFLOW_PLUGINS.find(p => p.name === 'devflow-audit-claude')).toBeDefined();
   });
@@ -303,5 +303,127 @@ describe('LEGACY_AGENT_NAMES consistency', () => {
         `LEGACY_AGENT_NAMES entry '${legacyName}' must not appear in getAllAgentNames() — remove it from LEGACY_AGENT_NAMES or update the plugin registry`,
       ).not.toContain(legacyName);
     }
+  });
+});
+
+describe('partitionSelectablePlugins', () => {
+  const EXCLUDED = new Set(['devflow-core-skills', 'devflow-ambient', 'devflow-audit-claude']);
+
+  it('command-bearing plugins land in workflow bucket', () => {
+    const { workflow } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    const workflowNames = workflow.map(pl => pl.name);
+    // Spot-check known workflow plugins
+    expect(workflowNames).toContain('devflow-plan');
+    expect(workflowNames).toContain('devflow-bug-analysis');
+    expect(workflowNames).toContain('devflow-implement');
+    expect(workflowNames).toContain('devflow-code-review');
+    // All workflow plugins must have at least one command
+    for (const pl of workflow) {
+      expect(pl.commands.length, `${pl.name} in workflow bucket must have commands`).toBeGreaterThan(0);
+    }
+  });
+
+  it('command-less plugins land in language bucket', () => {
+    const { language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    const languageNames = language.map(pl => pl.name);
+    // Spot-check known language plugins
+    expect(languageNames).toContain('devflow-typescript');
+    expect(languageNames).toContain('devflow-react');
+    expect(languageNames).toContain('devflow-go');
+    expect(languageNames).toContain('devflow-python');
+    // All language plugins must have zero commands
+    for (const pl of language) {
+      expect(pl.commands.length, `${pl.name} in language bucket must have no commands`).toBe(0);
+    }
+  });
+
+  it('excluded plugins appear in neither bucket', () => {
+    const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    const allNames = new Set([...workflow, ...language].map(pl => pl.name));
+    for (const excluded of EXCLUDED) {
+      expect(allNames.has(excluded), `${excluded} must not appear in any bucket`).toBe(false);
+    }
+  });
+
+  it('workflow + language covers all selectable (non-excluded) plugins', () => {
+    const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    const selectableCount = DEVFLOW_PLUGINS.filter(pl => !EXCLUDED.has(pl.name)).length;
+    expect(workflow.length + language.length).toBe(selectableCount);
+  });
+
+  it('buckets are disjoint', () => {
+    const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    const workflowNames = new Set(workflow.map(pl => pl.name));
+    for (const pl of language) {
+      expect(workflowNames.has(pl.name), `${pl.name} must not appear in both buckets`).toBe(false);
+    }
+  });
+
+  it('does not mutate the input array', () => {
+    const inputCopy = [...DEVFLOW_PLUGINS];
+    partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    expect(DEVFLOW_PLUGINS).toEqual(inputCopy);
+  });
+
+  it('preserves DEVFLOW_PLUGINS ordering within each bucket', () => {
+    const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    // Collect the order of workflow and language plugins from the original registry
+    const registryWorkflowOrder = DEVFLOW_PLUGINS
+      .filter(pl => !EXCLUDED.has(pl.name) && pl.commands.length > 0)
+      .map(pl => pl.name);
+    const registryLanguageOrder = DEVFLOW_PLUGINS
+      .filter(pl => !EXCLUDED.has(pl.name) && pl.commands.length === 0)
+      .map(pl => pl.name);
+    expect(workflow.map(pl => pl.name)).toEqual(registryWorkflowOrder);
+    expect(language.map(pl => pl.name)).toEqual(registryLanguageOrder);
+  });
+
+  it('returns empty buckets for empty input', () => {
+    const { workflow, language } = partitionSelectablePlugins([]);
+    expect(workflow).toHaveLength(0);
+    expect(language).toHaveLength(0);
+  });
+});
+
+describe('WORKFLOW_ORDER', () => {
+  it('is exported and contains /bug-analysis', () => {
+    expect(WORKFLOW_ORDER).toContain('/bug-analysis');
+  });
+
+  it('/bug-analysis appears after /self-review', () => {
+    const selfReviewIdx = WORKFLOW_ORDER.indexOf('/self-review');
+    const bugAnalysisIdx = WORKFLOW_ORDER.indexOf('/bug-analysis');
+    expect(selfReviewIdx).toBeGreaterThanOrEqual(0);
+    expect(bugAnalysisIdx).toBeGreaterThan(selfReviewIdx);
+  });
+
+  it('every workflow plugin command appears in WORKFLOW_ORDER (regression guard)', () => {
+    const { workflow } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
+    const workflowOrderSet = new Set(WORKFLOW_ORDER);
+    for (const pl of workflow) {
+      for (const cmd of pl.commands) {
+        // Commands in plugin definitions use the /name format, matching WORKFLOW_ORDER entries
+        expect(
+          workflowOrderSet.has(cmd),
+          `Command '${cmd}' from plugin '${pl.name}' must appear in WORKFLOW_ORDER`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('every WORKFLOW_ORDER entry corresponds to a real command in the registry (reverse regression guard)', () => {
+    // Build the full set of all commands across ALL plugins (including excluded ones like
+    // devflow-audit-claude, which owns /audit-claude and is intentionally in WORKFLOW_ORDER).
+    const allCommands = new Set(DEVFLOW_PLUGINS.flatMap(pl => pl.commands));
+    for (const cmd of WORKFLOW_ORDER) {
+      expect(
+        allCommands.has(cmd),
+        `WORKFLOW_ORDER entry '${cmd}' must correspond to a real command in DEVFLOW_PLUGINS`,
+      ).toBe(true);
+    }
+  });
+
+  it('has no duplicate entries', () => {
+    expect(new Set(WORKFLOW_ORDER).size).toBe(WORKFLOW_ORDER.length);
   });
 });

@@ -691,3 +691,51 @@ export function buildRulesMap(plugins: PluginDefinition[]): Map<string, string> 
  * Pruning: entries can be removed after 2 major versions.
  */
 export const LEGACY_RULE_NAMES: string[] = [];
+
+/**
+ * Canonical display order for workflow commands shown at end of init.
+ * Mirrors the user-facing pipeline: research → explore → plan → implement →
+ * code-review → resolve → self-review → bug-analysis → debug → release → audit-claude.
+ * Export so init.ts can import it rather than keeping a local copy.
+ */
+export const WORKFLOW_ORDER: string[] = [
+  '/research', '/explore', '/plan', '/implement',
+  '/code-review', '/resolve', '/self-review', '/bug-analysis',
+  '/debug', '/release', '/audit-claude',
+];
+
+/**
+ * Partition the selectable plugins into workflow (command-bearing) and language
+ * (command-less, optional language/ecosystem) buckets for the two-step init UI.
+ *
+ * Excluded from both buckets (not selectable at init):
+ *   - devflow-core-skills  (always installed)
+ *   - devflow-ambient      (always installed)
+ *   - devflow-audit-claude (installable via --plugin only)
+ *
+ * Pure function — does not mutate the input array; preserves DEVFLOW_PLUGINS
+ * ordering within each bucket; deterministic; no I/O.
+ */
+export function partitionSelectablePlugins(plugins: PluginDefinition[]): {
+  workflow: PluginDefinition[];
+  language: PluginDefinition[];
+} {
+  const EXCLUDED = new Set(['devflow-core-skills', 'devflow-ambient', 'devflow-audit-claude']);
+  const workflow: PluginDefinition[] = [];
+  const language: PluginDefinition[] = [];
+
+  for (const plugin of plugins) {
+    if (EXCLUDED.has(plugin.name)) continue;
+    if (plugin.commands.length > 0) {
+      workflow.push(plugin);
+    } else {
+      // "language" bucket: today every command-less selectable plugin is a
+      // language/ecosystem plugin. If a non-language command-less plugin is
+      // added in the future, it will land here — update the bucket name or
+      // add an explicit category field at that point.
+      language.push(plugin);
+    }
+  }
+
+  return { workflow, language };
+}

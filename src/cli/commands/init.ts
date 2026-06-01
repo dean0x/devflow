@@ -18,7 +18,7 @@ import {
   createDocsStructure,
   type SecurityMode,
 } from '../utils/post-install.js';
-import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, type PluginDefinition } from '../plugins.js';
+import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, type PluginDefinition } from '../plugins.js';
 import { detectPlatform, detectShell, getProfilePath, getSafeDeleteInfo, hasSafeDelete } from '../utils/safe-delete.js';
 import { generateSafeDeleteBlock, installToProfile, removeFromProfile, getInstalledVersion, SAFE_DELETE_BLOCK_VERSION } from '../utils/safe-delete-install.js';
 import { addAmbientHook, removeAmbientHook } from './ambient.js';
@@ -121,6 +121,32 @@ export function parsePluginSelection(
 }
 
 /**
+ * Combine workflow and language selections into a single plugin list.
+ * Returns the merged array and whether a valid (non-empty) selection was made.
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ */
+export function combineSelection(
+  workflowSelected: string[],
+  languageSelected: string[],
+): { plugins: string[]; accepted: boolean } {
+  const plugins = [...workflowSelected, ...languageSelected];
+  return { plugins, accepted: plugins.length > 0 };
+}
+
+/**
+ * Returns true when the selection loop should retry: selection was empty and
+ * the attempt ceiling has not been reached. Returns false when accepted or
+ * when attempts are exhausted (caller should exit).
+ *
+ * Pure function — no I/O, no side effects; extracted for testability.
+ */
+export function shouldRetry(attempt: number, maxAttempts: number, accepted: boolean): boolean {
+  if (accepted) return false;
+  return attempt < maxAttempts;
+}
+
+/**
  * Options for the init command parsed by Commander.js
  */
 interface InitOptions {
@@ -196,21 +222,6 @@ export const initCommand = new Command('init')
     } else if (!process.stdin.isTTY) {
       p.log.info('Non-interactive mode detected, using scope: user');
       scope = 'user';
-    } else {
-      const selected = await p.select({
-        message: 'Installation scope',
-        options: [
-          { value: 'user', label: 'User', hint: 'all projects (~/.claude/)' },
-          { value: 'local', label: 'Local', hint: 'this project only (./.claude/)' },
-        ],
-      });
-
-      if (p.isCancel(selected)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
-
-      scope = selected as 'user' | 'local';
     }
 
     // --hud-only: install only HUD (skip plugins, hooks, extras)
@@ -301,7 +312,11 @@ export const initCommand = new Command('init')
         'devflow-code-review': 'parallel specialized reviewers',
         'devflow-resolve': 'fix review issues by risk',
         'devflow-debug': 'competing hypotheses',
+        'devflow-explore': 'codebase exploration + knowledge bases',
+        'devflow-research': 'multi-type research with synthesis',
+        'devflow-release': 'adaptive release with learned config',
         'devflow-self-review': 'Simplifier + Scrutinizer',
+        'devflow-bug-analysis': 'proactive bug finding, post-pipeline',
         'devflow-typescript': 'TypeScript patterns',
         'devflow-react': 'React patterns',
         'devflow-accessibility': 'WCAG compliance',
@@ -312,31 +327,72 @@ export const initCommand = new Command('init')
         'devflow-rust': 'Rust patterns',
       };
 
-      const choices = DEVFLOW_PLUGINS
-        .filter(pl => pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient' && pl.name !== 'devflow-audit-claude')
-        .map(pl => ({
-          value: pl.name,
-          label: pl.name.replace('devflow-', ''),
-          hint: pluginHints[pl.name] ?? pl.description,
-        }));
+      const { workflow, language } = partitionSelectablePlugins(DEVFLOW_PLUGINS);
 
-      const preSelected = DEVFLOW_PLUGINS
-        .filter(pl => !pl.optional && pl.name !== 'devflow-core-skills' && pl.name !== 'devflow-ambient')
-        .map(pl => pl.name);
-
-      const pluginSelection = await p.multiselect({
-        message: 'Select plugins to install',
-        options: choices,
-        initialValues: preSelected,
-        required: true,
+      const toChoice = (pl: PluginDefinition) => ({
+        value: pl.name,
+        label: pl.name.replace('devflow-', ''),
+        hint: pluginHints[pl.name] ?? pl.description,
       });
 
-      if (p.isCancel(pluginSelection)) {
-        p.cancel('Installation cancelled.');
-        process.exit(0);
-      }
+      const workflowChoices = workflow.map(toChoice);
+      const languageChoices = language.map(toChoice);
 
-      selectedPlugins = pluginSelection as string[];
+      const workflowInitialValues = workflow
+        .filter(pl => !pl.optional)
+        .map(pl => pl.name);
+
+      // Bounded selection loop — max 3 attempts (reliability rule: no unbounded loops)
+      const MAX_ATTEMPTS = 3;
+      let attempts = 0;
+
+      while (attempts < MAX_ATTEMPTS) {
+        attempts++;
+
+        // Step 1 — Workflow plugins (skip if empty bucket)
+        let workflowSelected: string[] = [];
+        if (workflowChoices.length > 0) {
+          const step1 = await p.multiselect({
+            message: 'Step 1 — Workflow plugins',
+            options: workflowChoices,
+            initialValues: workflowInitialValues,
+            required: false,
+          });
+          if (p.isCancel(step1)) {
+            p.cancel('Installation cancelled.');
+            process.exit(0);
+          }
+          workflowSelected = step1;
+        }
+
+        // Step 2 — Language plugins (skip if empty bucket)
+        let languageSelected: string[] = [];
+        if (languageChoices.length > 0) {
+          const step2 = await p.multiselect({
+            message: 'Step 2 — Language plugins',
+            options: languageChoices,
+            required: false,
+          });
+          if (p.isCancel(step2)) {
+            p.cancel('Installation cancelled.');
+            process.exit(0);
+          }
+          languageSelected = step2;
+        }
+
+        const { plugins: combined, accepted } = combineSelection(workflowSelected, languageSelected);
+
+        if (accepted) {
+          selectedPlugins = combined;
+          break;
+        }
+
+        if (!shouldRetry(attempts, MAX_ATTEMPTS, accepted)) {
+          p.cancel('Installation cancelled — no plugins selected.');
+          process.exit(0);
+        }
+        p.log.warn('Select at least one plugin.');
+      }
     }
 
     // ╭──────────────────────────────────────────────────────────╮
@@ -1219,11 +1275,6 @@ export const initCommand = new Command('init')
       p.log.info('Installed via file copy (Claude CLI not available)');
     }
 
-    const WORKFLOW_ORDER = [
-      '/research', '/explore', '/plan', '/implement',
-      '/code-review', '/resolve', '/self-review',
-      '/debug', '/release', '/audit-claude',
-    ];
     const installedSet = new Set(pluginsToInstall.flatMap(p => p.commands).filter(c => c.length > 0));
     const orderedCommands = WORKFLOW_ORDER.filter(cmd => installedSet.has(cmd));
     if (orderedCommands.length > 0) {
