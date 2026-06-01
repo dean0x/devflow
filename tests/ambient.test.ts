@@ -338,10 +338,10 @@ describe('removeLegacyCommandsRule', () => {
     await expect(removeLegacyCommandsRule()).resolves.toBeUndefined();
   });
 
-  it('re-throws non-ENOENT errors — e.g. EACCES', async () => {
+  it('swallows non-ENOENT errors — e.g. EACCES (fail-safe cleanup)', async () => {
     const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' });
     vi.spyOn(fs, 'unlink').mockRejectedValue(eacces);
-    await expect(removeLegacyCommandsRule()).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(removeLegacyCommandsRule()).resolves.toBeUndefined();
   });
 });
 

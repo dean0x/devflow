@@ -58,13 +58,17 @@ const isClassification = (matcher: HookMatcher) =>
 /**
  * Remove the legacy commands awareness rule file left by prior installs.
  * Idempotent — no-op if the file does not exist.
- * Only swallows ENOENT; other errors (e.g. EACCES) propagate.
+ * Fail-safe: swallows ALL errors (ENOENT, EACCES, EPERM, EROFS, etc.).
+ * This is best-effort cleanup of a deprecated file; it must never abort
+ * the primary operation (hook write or settings.json update) that calls it.
  */
 export async function removeLegacyCommandsRule(): Promise<void> {
   try {
     await fs.unlink(COMMANDS_RULE_PATH);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  } catch {
+    // Intentionally swallow all errors — cleanup is best-effort.
+    // ENOENT = already gone (idempotent); EACCES/EPERM/EROFS = unwritable
+    // filesystem. Neither should abort the caller's primary operation.
   }
 }
 
