@@ -1108,9 +1108,11 @@ describe('preamble keyword detection', () => {
   /** Expected additionalContext message for a matched skill. */
   function expectedContext(skill: string): string {
     return (
-      `The user is invoking the \`${skill}\` workflow. Briefly tell the user you are invoking ` +
-      `\`devflow:${skill}\`, then invoke it via the Skill tool, passing the user's request ` +
-      `(the text after the leading \`${skill}\` keyword) as the task input.`
+      `The user's prompt begins with the \`${skill}\` keyword, which signals the ` +
+      `\`devflow:${skill}\` workflow. In one short sentence, tell the user you're invoking ` +
+      `\`devflow:${skill}\`. Then immediately invoke it with the Skill tool, passing the user's ` +
+      `full request (everything after the leading \`${skill}\` keyword) as the skill input. ` +
+      `Do not pause to ask whether to proceed.`
     );
   }
 
@@ -1198,7 +1200,7 @@ describe('preamble keyword detection', () => {
       const ctx = parsed.hookSpecificOutput.additionalContext;
       expect(ctx).toContain('`devflow:research`');
       expect(ctx).toContain('Skill tool');
-      expect(ctx).toContain('Briefly tell the user');
+      expect(ctx).toContain("tell the user you're invoking");
     });
   });
 
