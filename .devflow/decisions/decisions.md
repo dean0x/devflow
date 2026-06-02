@@ -1,4 +1,4 @@
-<!-- TL;DR: 11 decisions. Key: ADR-007, ADR-008, ADR-009, ADR-010, ADR-011 -->
+<!-- TL;DR: 14 decisions. Key: ADR-010, ADR-011, ADR-012, ADR-013, ADR-014 -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.
@@ -101,3 +101,30 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: present interactive plugin selection as two sequential @clack multiselects — Step 1 workflow plugins, Step 2 language plugins — partitioned by a pure partitionSelectablePlugins helper
 - **Consequences**: clearer mental model and discoverability
 - **Source**: self-learning:obs_plug2st
+
+## ADR-012: .devflow/ knowledge artifacts must be committed to git as shared project-level data
+
+- **Date**: 2026-06-02
+- **Status**: Accepted
+- **Context**: after PR #233 fixes were complete, the user clarified that .devflow/ knowledge artifacts are project-level shared data that should be committed and pushed with the branch
+- **Decision**: .devflow/decisions/decisions.md, .devflow/decisions/pitfalls.md, .devflow/features/*/KNOWLEDGE.md, .devflow/docs/ design/review artifacts are committed to git and shared across all collaborators — they are the project knowledge base
+- **Consequences**: decisions, pitfalls, and feature knowledge bases accumulate institutional knowledge about the project — committing them makes this knowledge available to all contributors and persists across developer machine changes
+- **Source**: self-learning:obs_devd01x
+
+## ADR-013: Preamble hook ambient mode redesigned: first-word keyword dispatch replaces three-marker structured-plan detection
+
+- **Date**: 2026-06-02
+- **Status**: Accepted
+- **Context**: preamble UserPromptSubmit hook previously detected structured implementation plans (## Goal + ## Steps + ## Files markers) and injected a directive
+- **Decision**: add first-word keyword dispatch as the primary detection path — if the first word of a prompt is implement/explore/research/debug/plan (any case) followed by at least one additional word and the prompt does not end in ?, inject a directive to invoke the matching devflow:<keyword> skill via the Skill tool; the three-marker structured-plan detection (## Goal + ## Steps + ## Files) is retained as a coexisting elif fallback path that fires only when the keyword path does not match
+- **Consequences**: simpler UX (users type natural commands like implement fix the login bug instead of constructing a structured plan), broader coverage (five keywords instead of one structured-plan path), and the two detection paths coexist — keyword dispatch takes precedence, structured-plan detection remains available as a fallback
+- **Source**: self-learning:obs_preamble1
+
+## ADR-014: Preamble hook test plan must cover four independent suites: functionality truth table, JSON API contract, security fuzz for prompt injection, and performance bounded by methodology
+
+- **Date**: 2026-06-02
+- **Status**: Accepted
+- **Context**: preamble hook test plan design after ambient mode keyword-dispatch redesign
+- **Decision**: test the preamble hook with four independent suites — (1) functionality truth table (prompt→expected output for all keyword variants, case permutations, non-matching inputs, boundary cases), (2) API contract (JSON schema assertions on hookSpecificOutput and hookEventName keys, zero-byte output on no-match, exit-0 on all paths, file-I/O snapshot, bash-4-construct guard), (3) security/fuzz (hostile prompt tails including backticks, command substitution, IFS injection, 200KB payload — assert output equals fixed template proving no user text leaks into the directive), (4) performance (length-independence methodology: compare 1KB vs 200KB payload, assert bounded delta/ratio — no absolute ms assertions, plus static no-subprocess check)
+- **Consequences**: the four suites map directly to the four risk dimensions of the hook — correctness, API stability, security injection, and performance predictability
+- **Source**: self-learning:obs_preamble2
