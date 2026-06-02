@@ -1125,8 +1125,8 @@ describe('preamble keyword detection', () => {
       { prompt: 'Explore the auth flow',     expectedSkill: 'explore',   label: 'F2a: Explore (mixed case)' },
       { prompt: 'RESEARCH options now',      expectedSkill: 'research',  label: 'F2b: RESEARCH (uppercase)' },
       { prompt: 'debug: why it hangs',       expectedSkill: 'debug',     label: 'F3: debug with trailing punct' },
-      // F13: preamble:41 strips HEAD leading whitespace before extracting the first token,
-      // so prompts with leading newlines/spaces still dispatch correctly (applies ADR-014).
+      // F13: the hook strips leading whitespace/newlines from HEAD before extracting the
+      // first token, so prompts with leading newlines/spaces still dispatch correctly (ADR-014).
       { prompt: '\n\n  implement the cache', expectedSkill: 'implement', label: 'F13: leading newlines/spaces still match' },
     ];
 
