@@ -1286,11 +1286,10 @@ describe('preamble keyword detection', () => {
     for (const { label, tail } of hostilePayloads) {
       it(`C7: hostile tail (${label}) — exit 0, valid JSON, no injection in output`, () => {
         const prompt = `implement ${tail}`;
-        let out: string;
-        // Large payloads: use writeFileSync to avoid execSync buffer limits
+        // Write to file to avoid execSync stdin buffer limits on large payloads
         const inputFile = path.join(tmpDir, `input-${label.replace(/\W/g, '_')}.json`);
         fs.writeFileSync(inputFile, JSON.stringify({ cwd: tmpDir, prompt }));
-        out = execSync(`bash "${PREAMBLE_HOOK}" < "${inputFile}"`, {
+        const out = execSync(`bash "${PREAMBLE_HOOK}" < "${inputFile}"`, {
           stdio: ['pipe', 'pipe', 'pipe'],
         }).toString();
 
