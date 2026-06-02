@@ -1,6 +1,6 @@
 # devflow-ambient
 
-Ambient mode — plan auto-detection. A `UserPromptSubmit` hook detects structured implementation plans and invokes the implement workflow automatically.
+Ambient mode — keyword dispatch and plan auto-detection. A `UserPromptSubmit` hook detects first-word keywords (`implement`, `explore`, `research`, `debug`, `plan`) and invokes the matching workflow skill, or detects structured implementation plans (`## Goal` / `## Steps` / `## Files`) and invokes `devflow:implement` automatically.
 
 ## Activation
 
