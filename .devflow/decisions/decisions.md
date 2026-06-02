@@ -116,8 +116,8 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Date**: 2026-06-02
 - **Status**: Accepted
 - **Context**: preamble UserPromptSubmit hook previously detected structured implementation plans (## Goal + ## Steps + ## Files markers) and injected a directive
-- **Decision**: replace this mechanism with first-word keyword dispatch — if the first word of a prompt is implement/explore/research/debug (any case), replace only that word with the corresponding devflow skill invocation (devflow:implement, devflow:explore, devflow:research, devflow:debug)
-- **Consequences**: simpler UX (users type natural commands like implement fix the login bug instead of constructing a structured plan), broader coverage (four commands instead of one), and eliminates the structured plan authoring step entirely
+- **Decision**: add first-word keyword dispatch as the primary detection path — if the first word of a prompt is implement/explore/research/debug/plan (any case) followed by at least one additional word and the prompt does not end in ?, inject a directive to invoke the matching devflow:<keyword> skill via the Skill tool; the three-marker structured-plan detection (## Goal + ## Steps + ## Files) is retained as a coexisting elif fallback path that fires only when the keyword path does not match
+- **Consequences**: simpler UX (users type natural commands like implement fix the login bug instead of constructing a structured plan), broader coverage (five keywords instead of one structured-plan path), and the two detection paths coexist — keyword dispatch takes precedence, structured-plan detection remains available as a fallback
 - **Source**: self-learning:obs_preamble1
 
 ## ADR-014: Preamble hook test plan must cover four independent suites: functionality truth table, JSON API contract, security fuzz for prompt injection, and performance bounded by methodology
