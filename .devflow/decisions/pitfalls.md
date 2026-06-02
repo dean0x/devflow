@@ -1,4 +1,4 @@
-<!-- TL;DR: 7 pitfalls. Key: PF-001, PF-002, PF-003, PF-004, PF-005, PF-006, PF-007 -->
+<!-- TL;DR: 8 pitfalls. Key: PF-004, PF-005, PF-006, PF-007, PF-008 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
@@ -65,3 +65,12 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: Always edit source files (`scripts/hooks/`), run `npm run build`, then run `devflow init` to reinstall. Never directly edit installed copies at `~/.devflow/scripts/` or `~/.claude/`. The same rule applies to any other installed artifact (commands, agents, skills).
 - **Status**: Active
 - **Source**: self-learning:obs_n4rs8t
+
+## PF-008: Using additionalContext for critical maintenance directives — models deprioritize soft context when competing with an active user task, causing markers to silently accumulate
+
+- **Area**: sidecar consumption architecture, Claude Code hook additionalContext
+- **Issue**: injecting critical background directives via additionalContext (system-reminder) relies on the model to act on them when a user question is also present — in practice the model almost always prioritizes answering the user, leaving maintenance markers unprocessed
+- **Impact**: markers accumulated for weeks across all projects (alefy, autobeat, devflow) with no errors surfaced — purely silent backlog growth
+- **Resolution**: anchor critical directives to hook events where no user task competes (SessionStart is the correct hook)
+- **Status**: Active
+- **Source**: self-learning:obs_m5v2xt

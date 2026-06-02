@@ -13,43 +13,12 @@ const LEGACY_HOOK_MARKER = 'ambient-prompt';
 const CLASSIFICATION_HOOK_MARKER = 'session-start-classification';
 
 /**
- * Path where the commands rule is installed.
- * Managed by ambient.ts directly — NOT by the rules plugin system.
+ * Path where the legacy commands rule was installed.
+ * The commands rule was removed — this path now exists only to purge the
+ * legacy file from prior installs. Managed by ambient.ts directly (not the
+ * plugin rules system), so only ambient enable/disable/init paths clean it up.
  */
 export const COMMANDS_RULE_PATH = path.join(os.homedir(), '.claude', 'rules', 'devflow', 'commands.md');
-
-/**
- * D1: Content of the commands awareness rule.
- * Installed to COMMANDS_RULE_PATH when ambient mode is enabled.
- * The `paths: []` frontmatter signals Claude Code to apply this rule globally.
- */
-export const COMMANDS_RULE_CONTENT = `---
-name: commands
-description: Available devflow workflow commands and plan auto-execution
-paths: []
----
-
-# Devflow Workflow Commands
-
-Use \`/devflow:<name>\` to trigger a workflow:
-
-- \`plan\` — Design implementation plans with gap analysis and design review
-- \`implement\` — Execute tasks through implementation, quality gates, and PR creation
-- \`code-review\` — Branch review with specialized parallel reviewers
-- \`resolve\` — Process review/analysis issues — validate, fix, or defer
-- \`debug\` — Competing hypothesis investigation with parallel agents
-- \`explore\` — Codebase exploration with structured analysis
-- \`research\` — Multi-type research with trust-aware synthesis
-- \`release\` — Adaptive release with learned configuration
-- \`self-review\` — Simplifier (code clarity) then Scrutinizer (9-pillar quality)
-- \`bug-analysis\` — Proactive bug finding in changed code
-
-## Plan Auto-Execution
-
-When a prompt is a structured implementation plan (contains \`## Goal\`, \`## Steps\`,
-and \`## Files\` sections), this is a plan handoff from a prior planning session.
-Invoke \`devflow:implement\` via the Skill tool to execute it.
-`;
 
 /** Filter hook entries from a parsed Settings object for a given event. Returns true if any were removed. */
 function filterHookEntries(
@@ -87,32 +56,28 @@ const isClassification = (matcher: HookMatcher) =>
   matcher.hooks.some((h) => h.command.includes(CLASSIFICATION_HOOK_MARKER));
 
 /**
- * Install the commands awareness rule file.
- * Idempotent — always overwrites with current content.
- */
-export async function installCommandsRule(): Promise<void> {
-  await fs.mkdir(path.dirname(COMMANDS_RULE_PATH), { recursive: true });
-  await fs.writeFile(COMMANDS_RULE_PATH, COMMANDS_RULE_CONTENT, 'utf-8');
-}
-
-/**
- * Remove the commands awareness rule file.
+ * Remove the legacy commands awareness rule file left by prior installs.
  * Idempotent — no-op if the file does not exist.
- * Only swallows ENOENT; other errors (e.g. EACCES) propagate.
+ * Fail-safe: swallows ALL errors (ENOENT, EACCES, EPERM, EROFS, etc.).
+ * This is best-effort cleanup of a deprecated file; it must never abort
+ * the primary operation (hook write or settings.json update) that calls it.
  */
-export async function removeCommandsRule(): Promise<void> {
+export async function removeLegacyCommandsRule(): Promise<void> {
   try {
     await fs.unlink(COMMANDS_RULE_PATH);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  } catch {
+    // Intentionally swallow all errors — cleanup is best-effort.
+    // ENOENT = already gone (idempotent); EACCES/EPERM/EROFS = unwritable
+    // filesystem. Neither should abort the caller's primary operation.
   }
 }
 
 /**
- * Add the ambient UserPromptSubmit hook and write the commands awareness rule.
+ * Add the ambient UserPromptSubmit hook and remove any legacy commands rule.
  * Removes any legacy `ambient-prompt` hook first, then adds the new `preamble` hook.
- * Writes COMMANDS_RULE_CONTENT to COMMANDS_RULE_PATH for passive command awareness.
- * Idempotent — hook checked before adding, rule always overwritten.
+ * Removes any legacy commands rule left by prior installs.
+ * Idempotent — hook checked before adding; legacy rule purge runs unconditionally
+ * (before the early-return) to ensure stale files are always cleaned up.
  */
 export async function addAmbientHook(settingsJson: string, devflowDir: string): Promise<string> {
   const settings: Settings = JSON.parse(settingsJson);
@@ -138,18 +103,18 @@ export async function addAmbientHook(settingsJson: string, devflowDir: string): 
     changed = true;
   }
 
-  // --- Write commands awareness rule ---
-  await installCommandsRule();
+  // --- Purge legacy commands rule (runs before early-return so stale files are always removed) ---
+  await removeLegacyCommandsRule();
 
   if (!changed) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
 }
 
 /**
- * Remove the ambient hooks from settings JSON and delete the commands rule.
+ * Remove the ambient hooks from settings JSON and purge any legacy commands rule.
  * Removes preamble + legacy from UserPromptSubmit.
  * Also removes stale SessionStart classification hook from previous installs.
- * Deletes COMMANDS_RULE_PATH if present.
+ * Purges legacy COMMANDS_RULE_PATH if present (runs before early-return).
  * Idempotent — returns unchanged JSON if neither prompt hook nor stale classification was present.
  * Preserves other hooks. Cleans empty arrays/objects.
  */
@@ -159,8 +124,8 @@ export async function removeAmbientHook(settingsJson: string): Promise<string> {
   // Clean up stale classification hooks from previous installs (no longer registered)
   const removedClassification = filterHookEntries(settings, 'SessionStart', isClassification);
 
-  // Delete commands rule if it exists
-  await removeCommandsRule();
+  // Purge legacy commands rule (runs before early-return so stale files are always removed)
+  await removeLegacyCommandsRule();
 
   if (!removedPrompt && !removedClassification) return settingsJson;
   return JSON.stringify(settings, null, 2) + '\n';
@@ -185,9 +150,9 @@ interface AmbientOptions {
 }
 
 export const ambientCommand = new Command('ambient')
-  .description('Enable or disable ambient mode (plan auto-detection and command awareness)')
-  .option('--enable', 'Register ambient mode hooks and install commands rule')
-  .option('--disable', 'Remove ambient mode hooks and uninstall commands rule')
+  .description('Enable or disable ambient mode (plan auto-detection)')
+  .option('--enable', 'Register ambient mode hook')
+  .option('--disable', 'Remove ambient mode hook')
   .option('--status', 'Check if ambient mode is enabled')
   .action(async (options: AmbientOptions) => {
     const hasFlag = options.enable || options.disable || options.status;
@@ -249,13 +214,13 @@ export const ambientCommand = new Command('ambient')
     if (options.enable) {
       const updated = await addAmbientHook(settingsContent, devflowDir);
       if (updated === settingsContent) {
-        // Hook already exists but rule may still need writing — addAmbientHook writes it anyway
+        // Hook already exists — addAmbientHook purges any legacy rule anyway
         p.log.info('Ambient mode already enabled');
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
       p.log.success('Ambient mode enabled — plan detection hook registered');
-      p.log.info(color.dim('Structured plans auto-execute; command listing available as a rule'));
+      p.log.info(color.dim('Structured plans auto-execute'));
     }
 
     if (options.disable) {

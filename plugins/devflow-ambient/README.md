@@ -1,19 +1,18 @@
 # devflow-ambient
 
-Ambient mode — plan auto-detection and command awareness. A `UserPromptSubmit` hook detects structured implementation plans and invokes the implement workflow. A commands rule provides passive command reference.
+Ambient mode — plan auto-detection. A `UserPromptSubmit` hook detects structured implementation plans and invokes the implement workflow automatically.
 
 ## Activation
 
 ```bash
-devflow ambient --enable    # Register ambient mode hook and install commands rule
-devflow ambient --disable   # Remove hook and commands rule
+devflow ambient --enable    # Register ambient mode hook
+devflow ambient --disable   # Remove hook
 devflow ambient --status    # Check if enabled
 ```
 
 ## How It Works
 
-1. **Plan detection** — When a prompt contains `## Goal`, `## Steps`, and `## Files` sections, the preamble hook outputs a directive to invoke `devflow:implement` via the Skill tool
-2. **Command awareness** — The `~/.claude/rules/devflow/commands.md` rule lists all available `/devflow:<name>` commands and documents the plan auto-execution trigger
+**Plan detection** — When a prompt contains `## Goal`, `## Steps`, and `## Files` sections, the preamble hook outputs a directive to invoke `devflow:implement` via the Skill tool.
 
 Normal prompts produce zero overhead — the hook exits without output.
 

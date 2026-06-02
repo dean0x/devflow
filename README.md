@@ -16,7 +16,7 @@ Claude Code is powerful. But every session starts from scratch. Context evaporat
 
 Devflow fixes this. Install once, forget about it. Your code gets better automatically.
 
-It provides passive command awareness via always-on rules, and detects when you paste a structured plan so it can auto-execute — no classification overhead for normal prompts. Complex tasks get an advanced TDD and EDD harness with quality gates at every step.
+It detects when you paste a structured plan so it can auto-execute — no classification overhead for normal prompts. Complex tasks get an advanced TDD and EDD harness with quality gates at every step.
 
 ## See it work
 
@@ -41,7 +41,7 @@ you: add rate limiting to the /api/upload endpoint
 
 ## What you get
 
-**Ambient intelligence.** Devflow gives commands passive awareness via always-on rules, and detects structured plans for automatic execution — normal prompts get zero overhead, no classification step. You never invoke it manually. Init and forget.
+**Ambient intelligence.** Devflow detects structured plans for automatic execution — normal prompts get zero overhead, no classification step. You never invoke it manually. Init and forget.
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.devflow/decisions/` and inform every future session. No manual bookkeeping.
 
@@ -53,7 +53,7 @@ you: add rate limiting to the /api/upload endpoint
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
-**Always-on rules.** 13 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md`.
+**Always-on rules.** 12 ultra-condensed engineering principles (~10 lines each) load on every prompt — security, quality, and language-specific guidance (TypeScript, React, Go, Python, Java, Rust). Rules install from your selected plugins only, so a Go project won't get React rules. Override any rule via `~/.devflow/rules/{name}.md`.
 
 **Full lifecycle.** `/plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/implement`. `/implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
 

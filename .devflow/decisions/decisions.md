@@ -1,4 +1,4 @@
-<!-- TL;DR: 7 decisions. Key: ADR-001, ADR-002, ADR-003, ADR-004, ADR-005, ADR-006, ADR-007 -->
+<!-- TL;DR: 11 decisions. Key: ADR-007, ADR-008, ADR-009, ADR-010, ADR-011 -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.
@@ -65,3 +65,39 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: Implement a single global `DEVFLOW_HOOK_DEBUG=1` env var toggle exposed as `devflow debug --enable/--disable/--status`, covering ALL hooks via a shared `scripts/hooks/debug-trace` helper script. Stored in `~/.claude/settings.json` env block so it survives reinstalls.
 - **Consequences**: When debugging any hook issue, all hooks emit traces simultaneously — enabling cross-hook interaction visibility. Per-feature toggles would require enabling multiple flags and could miss interactions between hooks (e.g., sidecar-capture writing a queue entry that sidecar-dispatch reads). The shared helper means debug tracing is consistent across all hooks and can be updated in one place.
 - **Source**: self-learning:obs_h9bw3c
+
+## ADR-008: LLM-vs-plumbing principle: artifact content must be LLM-authored — deterministic scripts must not write memory, observations, ADR/PF bodies, or knowledge bases
+
+- **Date**: 2026-06-01
+- **Status**: Accepted
+- **Context**: investigation found dead deterministic promotion code (process-observations, calculateConfidence, tryImmediatePromotion) that was writing artifact files via threshold calculations — contradicting the system design
+- **Decision**: all artifact content (working memory, learning observations, ADR/PF bodies, knowledge bases) MUST be authored by an LLM agent
+- **Consequences**: artifact quality requires semantic intelligence that deterministic thresholds cannot provide
+- **Source**: self-learning:obs_7xk9qm
+
+## ADR-009: Sidecar processor must be spawned at SessionStart — not via additionalContext injection — because soft context directives are unreliably acted upon when a user task is present
+
+- **Date**: 2026-06-01
+- **Status**: Accepted
+- **Context**: original sidecar design injected SIDECAR directives via additionalContext (UserPromptSubmit hook) and relied on the model to spawn a background processor
+- **Decision**: move processor spawning entirely to SessionStart (session-start-context hook) — a clean hook event where no competing user task is present
+- **Consequences**: SessionStart fires before any user turn is visible to the model — there is no competing user request, so the spawn directive receives full attention
+- **Source**: self-learning:obs_p3r8wn
+
+## ADR-010: Interactive devflow init always installs on user scope — interactive scope prompt removed, --scope flag retained
+
+- **Date**: 2026-06-01
+- **Status**: Accepted
+- **Context**: devflow init interactively prompted user vs local/project install scope, adding unwanted friction since user scope is the intended default for interactive installs
+- **Decision**: remove the interactive Installation scope prompt and hardcode interactive scope to user, while keeping the --scope CLI flag and non-TTY auto-detection unchanged so scripted and local installs (--scope local) continue to work
+- **Consequences**: interactive users effectively always want user scope (~/.claude) so the prompt was noise
+- **Source**: self-learning:obs_scopeu1
+
+## ADR-011: Interactive plugin selection split into two sequential multiselects (workflow then language plugins); custom grid rejected
+
+- **Date**: 2026-06-01
+- **Status**: Accepted
+- **Context**: the single interactive plugin multiselect conflated workflow/command plugins (plan, implement, code-review) with language/ecosystem plugins (typescript, react, go), making selection unclear
+- **Decision**: present interactive plugin selection as two sequential @clack multiselects — Step 1 workflow plugins, Step 2 language plugins — partitioned by a pure partitionSelectablePlugins helper
+- **Consequences**: clearer mental model and discoverability
+- **Source**: self-learning:obs_plug2st

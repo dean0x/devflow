@@ -173,7 +173,7 @@ export const initCommand = new Command('init')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
   .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
   .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
-  .option('--ambient', 'Enable ambient mode (plan auto-detection and command awareness)')
+  .option('--ambient', 'Enable ambient mode (plan auto-detection)')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
@@ -552,7 +552,7 @@ export const initCommand = new Command('init')
         ambientEnabled = options.ambient;
       } else {
         p.note(
-          'Detects implementation plans and provides command awareness.\n' +
+          'Detects implementation plans and auto-executes them.\n' +
           'When the first message is a structured plan, automatically\n' +
           'invokes the implement workflow to execute it.\n\n' +
           'Zero overhead for normal prompts.',
