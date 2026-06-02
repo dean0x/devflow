@@ -12,13 +12,29 @@ devflow ambient --status    # Check if enabled
 
 ## How It Works
 
-**Plan detection** — When a prompt contains `## Goal`, `## Steps`, and `## Files` sections, the preamble hook outputs a directive to invoke `devflow:implement` via the Skill tool.
+The `preamble` UserPromptSubmit hook uses two coexisting detection paths. Both are controlled by the same `devflow ambient` toggle.
 
-Normal prompts produce zero overhead — the hook exits without output.
+### Keyword detection
 
-## Plan Handoff Format
+When a prompt's first word (case-insensitive) is one of `implement`, `explore`, `research`, `debug`, or `plan`:
 
-A structured plan that triggers auto-execution:
+- The prompt must have at least one word after the keyword (bare `plan` alone does nothing).
+- The prompt must not end in `?` (questions are suppressed — "explore A or B?" produces no output).
+- The model is told to briefly announce the invoked workflow, then invoke `devflow:<keyword>` via the Skill tool, passing the text after the keyword as the task input.
+
+**Example triggers:**
+
+```
+implement the auth module
+Explore the payments flow
+RESEARCH caching options
+debug: why the tests fail
+plan a new feature
+```
+
+### Plan detection
+
+When a prompt contains all three of `## Goal`, `## Steps`, and `## Files` (and the keyword path did not fire), the hook invokes `devflow:implement` to execute the plan.
 
 ```markdown
 ## Goal
@@ -33,9 +49,17 @@ Description of what to implement.
 - path/to/test.ts
 ```
 
+### Command coverage
+
+Auto-triggered by ambient mode: `implement`, `explore`, `research`, `debug`, `plan`.
+
+Remaining commands require explicit slash commands: `/code-review`, `/resolve`, `/release`, `/self-review`, `/bug-analysis`.
+
+Normal prompts produce zero overhead — the hook exits without output.
+
 ## Skills
 
-The ambient plugin distributes shared skills used by commands. Plan detection triggers `/implement` automatically — other commands are invoked via explicit slash commands (e.g. `/devflow:debug`, `/devflow:code-review`).
+The ambient plugin distributes shared skills used by commands.
 
 - `review-methodology` — Review process patterns
 - `security` — Security analysis patterns

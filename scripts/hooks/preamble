@@ -33,12 +33,40 @@ fi
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
-# Detect structured plan handoff: all three section markers must be present
-if [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PROMPT" == *"## Files"* ]]; then
+# --- First-word workflow keyword detection (strict guard) ---
+# Bound work to the first 256 bytes (the keyword lives at the very start); avoids
+# pathological parameter-expansion scans on huge pasted prompts. Pure bash 3.2:
+# no subprocess, no ${var,,} (macOS bash is 3.2).
+HEAD="${PROMPT:0:256}"
+HEAD="${HEAD#"${HEAD%%[![:space:]]*}"}"   # strip leading whitespace/newlines
+TOKEN="${HEAD%%[[:space:]]*}"             # first whitespace-delimited token (may carry punct)
+REST="${HEAD#"$TOKEN"}"                    # text after first token
+REST="${REST#"${REST%%[![:space:]]*}"}"   # strip its leading whitespace
+WORD="${TOKEN%[[:punct:]]}"               # strip one trailing punct: "Debug:" -> "Debug"
+
+# Canonical lowercase skill name; nocasematch makes the match case-insensitive AND the
+# case arms yield the lowercase form — no external tools required.
+shopt -s nocasematch
+case "$WORD" in
+  implement) SKILL=implement ;;
+  explore)   SKILL=explore ;;
+  research)  SKILL=research ;;
+  debug)     SKILL=debug ;;
+  plan)      SKILL=plan ;;
+  *)         SKILL="" ;;
+esac
+shopt -u nocasematch
+
+# Guard B: skip prompts ending in '?' (the $ anchor makes this efficient — bash regex
+# does not scan the full string for a trailing match; no subprocess required).
+if [[ -n "$SKILL" && -n "$REST" ]] && ! [[ "$PROMPT" =~ [?][[:space:]]*$ ]]; then
+  dbg "WORKFLOW_KEYWORD detected: $SKILL — injecting directive"
+  json_prompt_output "The user is invoking the \`$SKILL\` workflow. Briefly tell the user you are invoking \`devflow:$SKILL\`, then invoke it via the Skill tool, passing the user's request (the text after the leading \`$SKILL\` keyword) as the task input."
+elif [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PROMPT" == *"## Files"* ]]; then
   dbg "EXECUTION_PLAN detected — injecting directive"
   json_prompt_output "EXECUTION_PLAN detected. Invoke \`devflow:implement\` via the Skill tool to execute this plan."
 else
-  dbg "No plan markers detected — no output"
+  dbg "No keyword or plan markers detected — no output"
 fi
 
 dbg "=== HOOK COMPLETE ==="

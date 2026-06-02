@@ -1077,6 +1077,301 @@ describe('working memory queue behavior', () => {
   });
 });
 
+// =============================================================================
+// preamble keyword detection — Suites 1-4
+// =============================================================================
+
+describe('preamble keyword detection', () => {
+  const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
+  const PREAMBLE_SRC = path.resolve(__dirname, '..', 'scripts', 'hooks', 'preamble');
+
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-preamble-kw-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  /** Run the preamble hook and return stdout as a string. */
+  function runPreamble(prompt: string, cwd?: string): string {
+    const dir = cwd ?? tmpDir;
+    const input = JSON.stringify({ cwd: dir, prompt });
+    return execSync(`bash "${PREAMBLE_HOOK}"`, {
+      input,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString();
+  }
+
+  /** Expected additionalContext message for a matched skill. */
+  function expectedContext(skill: string): string {
+    return (
+      `The user is invoking the \`${skill}\` workflow. Briefly tell the user you are invoking ` +
+      `\`devflow:${skill}\`, then invoke it via the Skill tool, passing the user's request ` +
+      `(the text after the leading \`${skill}\` keyword) as the task input.`
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Suite 1 — Functionality (F1–F11)
+  // -------------------------------------------------------------------------
+
+  describe('Suite 1 — Functionality', () => {
+    const matchCases: Array<{ prompt: string; expectedSkill: string; label: string }> = [
+      { prompt: 'implement the cache',   expectedSkill: 'implement', label: 'F1a: implement' },
+      { prompt: 'plan a caching layer',  expectedSkill: 'plan',      label: 'F1b: plan' },
+      { prompt: 'Explore the auth flow', expectedSkill: 'explore',   label: 'F2a: Explore (mixed case)' },
+      { prompt: 'RESEARCH options now',  expectedSkill: 'research',  label: 'F2b: RESEARCH (uppercase)' },
+      { prompt: 'debug: why it hangs',   expectedSkill: 'debug',     label: 'F3: debug with trailing punct' },
+    ];
+
+    const noMatchCases: Array<{ prompt: string; label: string }> = [
+      { prompt: 'implementation of X',   label: 'F4a: implementation (prefix, not word)' },
+      { prompt: 'researching Y',          label: 'F4b: researching (suffix)' },
+      { prompt: 'debugger Z',             label: 'F4c: debugger (suffix)' },
+      { prompt: 'explorer mode',          label: 'F4d: explorer (suffix)' },
+      { prompt: 'implement',              label: 'F5a: bare implement (no following word)' },
+      { prompt: 'plan',                   label: 'F5b: bare plan (no following word)' },
+      { prompt: 'explore A or B?',        label: 'F6a: question form suppressed' },
+      { prompt: 'debug this?  ',          label: 'F6b: question with trailing whitespace suppressed' },
+      { prompt: 'fix the auth bug',       label: 'F9: non-keyword first word' },
+      { prompt: '# Implement Command\n## Usage\n...', label: 'F11: # prefix not a keyword' },
+    ];
+
+    for (const { prompt, expectedSkill, label } of matchCases) {
+      it(`${label} → emits directive for ${expectedSkill}`, () => {
+        const out = runPreamble(prompt);
+        const parsed = JSON.parse(out) as {
+          hookSpecificOutput: { hookEventName: string; additionalContext: string };
+        };
+        expect(parsed.hookSpecificOutput.additionalContext).toContain(`\`devflow:${expectedSkill}\``);
+        expect(parsed.hookSpecificOutput.additionalContext).toContain('Skill tool');
+        // Case-insensitive: skill name in output is always lowercase (F2)
+        expect(parsed.hookSpecificOutput.additionalContext).not.toContain(expectedSkill.toUpperCase());
+      });
+    }
+
+    for (const { prompt, label } of noMatchCases) {
+      it(`${label} → empty stdout`, () => {
+        const out = runPreamble(prompt);
+        expect(out).toBe('');
+      });
+    }
+
+    it('F7: marker path intact — plan body with ## Goal/Steps/Files but no leading keyword', () => {
+      const planBody = '## Goal\nBuild a cache\n## Steps\n1. Add\n## Files\ncache.ts';
+      const out = runPreamble(planBody);
+      const parsed = JSON.parse(out) as {
+        hookSpecificOutput: { additionalContext: string };
+      };
+      expect(parsed.hookSpecificOutput.additionalContext).toContain('devflow:implement');
+    });
+
+    it('F8: keyword + markers → keyword wins, exactly ONE directive', () => {
+      const prompt = 'implement the cache\n## Goal\nbuild it\n## Steps\n1\n## Files\ncache.ts';
+      const out = runPreamble(prompt);
+      const parsed = JSON.parse(out) as {
+        hookSpecificOutput: { additionalContext: string };
+      };
+      // Keyword path fires: mentions the skill and Skill tool
+      expect(parsed.hookSpecificOutput.additionalContext).toContain('`devflow:implement`');
+      expect(parsed.hookSpecificOutput.additionalContext).toContain('Skill tool');
+      // EXECUTION_PLAN marker text must NOT appear (keyword won)
+      expect(parsed.hookSpecificOutput.additionalContext).not.toContain('EXECUTION_PLAN detected');
+      // Only one hookSpecificOutput key at the top level
+      expect(Object.keys(JSON.parse(out))).toEqual(['hookSpecificOutput']);
+    });
+
+    it('F10: matched output contains backtick-wrapped skill name and instructs announce-then-invoke-via-Skill-tool', () => {
+      const out = runPreamble('research the auth options');
+      const parsed = JSON.parse(out) as {
+        hookSpecificOutput: { additionalContext: string };
+      };
+      const ctx = parsed.hookSpecificOutput.additionalContext;
+      expect(ctx).toContain('`devflow:research`');
+      expect(ctx).toContain('Skill tool');
+      expect(ctx).toContain('Briefly tell the user');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Suite 2 — API contract (C1–C7)
+  // -------------------------------------------------------------------------
+
+  describe('Suite 2 — API contract', () => {
+    it('C1/C6: matched output has exactly one top-level key hookSpecificOutput with correct schema', () => {
+      const out = runPreamble('explore the codebase');
+      const parsed = JSON.parse(out) as Record<string, unknown>;
+      // Exactly one top-level key
+      expect(Object.keys(parsed)).toEqual(['hookSpecificOutput']);
+      const hso = parsed.hookSpecificOutput as Record<string, unknown>;
+      expect(hso.hookEventName).toBe('UserPromptSubmit');
+      expect(typeof hso.additionalContext).toBe('string');
+      expect((hso.additionalContext as string).length).toBeGreaterThan(0);
+      // No extra keys
+      expect(Object.keys(hso).sort()).toEqual(['additionalContext', 'hookEventName'].sort());
+    });
+
+    it('C2: empty stdout on no-match — zero bytes', () => {
+      const out = runPreamble('fix the login bug');
+      expect(out.length).toBe(0);
+    });
+
+    it('C3a: exit code 0 on keyword match', () => {
+      expect(() => runPreamble('implement the cache')).not.toThrow();
+    });
+
+    it('C3b: exit code 0 on no-match', () => {
+      expect(() => runPreamble('fix the login bug')).not.toThrow();
+    });
+
+    it('C3c: exit code 0 on empty prompt', () => {
+      expect(() => runPreamble('')).not.toThrow();
+    });
+
+    it('C3d: exit code 0 when cwd does not exist', () => {
+      const input = JSON.stringify({ cwd: '/nonexistent/path/devflow-test', prompt: 'implement it' });
+      expect(() => {
+        execSync(`bash "${PREAMBLE_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+      }).not.toThrow();
+    });
+
+    it('C4: no file I/O on keyword match — tmpDir unchanged', () => {
+      const before = fs.readdirSync(tmpDir);
+      runPreamble('implement the cache');
+      const after = fs.readdirSync(tmpDir);
+      expect(after).toEqual(before);
+      const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
+      expect(fs.existsSync(queueFile)).toBe(false);
+    });
+
+    it('C4: no file I/O on no-match — tmpDir unchanged', () => {
+      const before = fs.readdirSync(tmpDir);
+      runPreamble('fix the login bug');
+      const after = fs.readdirSync(tmpDir);
+      expect(after).toEqual(before);
+    });
+
+    it('C5: preamble source contains no bash-4-only ${var,,} or ${var^^} lowercasing in non-comment code', () => {
+      const src = fs.readFileSync(PREAMBLE_SRC, 'utf-8');
+      // Strip comment lines to avoid false positives from documentation text
+      const codeLines = src
+        .split('\n')
+        .filter((line) => !line.trimStart().startsWith('#'))
+        .join('\n');
+      // Bash 3.2 guard: these patterns indicate bash 4+ only syntax
+      expect(codeLines).not.toMatch(/\$\{[^}]+,,\}/);
+      expect(codeLines).not.toMatch(/\$\{[^}]+\^\^\}/);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Suite 3 — Security / fuzz (C7)
+  // -------------------------------------------------------------------------
+
+  describe('Suite 3 — Security / fuzz', () => {
+    const hostilePayloads: Array<{ label: string; tail: string }> = [
+      { label: 'backticks',      tail: '`rm -rf /tmp/devflow-test`' },
+      { label: 'dollar-parens',  tail: '$(echo injected)' },
+      { label: 'IFS expansion',  tail: '${IFS}injected' },
+      { label: 'embedded quote', tail: 'foo " bar \' baz' },
+      { label: 'backslashes',    tail: 'foo\\nbar\\\\baz' },
+      { label: 'newlines',       tail: 'line1\nline2\nline3' },
+      { label: 'unicode',        tail: '漢字 привет مرحبا 🚀' },
+      { label: 'large body',     tail: 'x'.repeat(200_000) },
+    ];
+
+    for (const { label, tail } of hostilePayloads) {
+      it(`C7: hostile tail (${label}) — exit 0, valid JSON, no injection in output`, () => {
+        const prompt = `implement ${tail}`;
+        let out: string;
+        // Large payloads: use writeFileSync to avoid execSync buffer limits
+        const inputFile = path.join(tmpDir, `input-${label.replace(/\W/g, '_')}.json`);
+        fs.writeFileSync(inputFile, JSON.stringify({ cwd: tmpDir, prompt }));
+        out = execSync(`bash "${PREAMBLE_HOOK}" < "${inputFile}"`, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).toString();
+
+        // Valid JSON
+        const parsed = JSON.parse(out) as {
+          hookSpecificOutput: { additionalContext: string };
+        };
+        const ctx = parsed.hookSpecificOutput.additionalContext;
+
+        // additionalContext EQUALS the expected fixed template — no user text leaks through
+        expect(ctx).toBe(expectedContext('implement'));
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Suite 4 — Performance (P1–P3)
+  // -------------------------------------------------------------------------
+
+  describe('Suite 4 — Performance', () => {
+    it('P1: no subprocess calls in new keyword detection block (awk/sed/tr/$() absent)', () => {
+      const src = fs.readFileSync(PREAMBLE_SRC, 'utf-8');
+      // Locate the keyword detection block (between the "First-word" comment and the elif)
+      const blockStart = src.indexOf('# --- First-word workflow keyword detection');
+      const blockEnd = src.indexOf('elif [[ "$PROMPT" == *"## Goal"*', blockStart);
+      expect(blockStart).toBeGreaterThan(-1);
+      expect(blockEnd).toBeGreaterThan(blockStart);
+      const block = src.slice(blockStart, blockEnd);
+
+      // Strip comment lines and string literals (backtick-quoted text inside string values)
+      // to avoid false positives from documentation in comments or in the directive string.
+      const codeLines = block
+        .split('\n')
+        .filter((line) => !line.trimStart().startsWith('#'))
+        .join('\n');
+
+      // No awk, sed, or tr commands on code lines
+      expect(codeLines).not.toMatch(/\bawk\b/);
+      expect(codeLines).not.toMatch(/\bsed\b/);
+      expect(codeLines).not.toMatch(/\btr\b/);
+      // No command substitution $( cmd ) on code lines
+      // (backtick-quoted names inside string literals are allowed — they are not execution)
+      expect(codeLines).not.toMatch(/\$\(\s*[a-zA-Z]/);
+    });
+
+    it('P2/P3: wall-time on large prompt is bounded — delta < 500ms and ratio < 5×', () => {
+      // Methodology: the keyword detection itself is O(1) (capped at 256 bytes via HEAD="${PROMPT:0:256}").
+      // The total wall-time difference is dominated by JSON parsing of the full prompt, not our detection.
+      // We assert that the DELTA is bounded (< 500ms) and the ratio does not blow up exponentially (< 5×).
+      // These thresholds are intentionally generous — tighter bounds belong in a dedicated benchmark,
+      // not in a correctness test suite.
+      const K = 5;
+
+      function median(times: number[]): number {
+        const sorted = [...times].sort((a, b) => a - b);
+        return sorted[Math.floor(sorted.length / 2)];
+      }
+
+      function measureMs(prompt: string): number[] {
+        return Array.from({ length: K }, () => {
+          const start = Date.now();
+          runPreamble(prompt);
+          return Date.now() - start;
+        });
+      }
+
+      const smallPrompt = 'implement the auth module';
+      const largePrompt = `implement ${'x'.repeat(200_000)}`;
+
+      const smallMs = median(measureMs(smallPrompt));
+      const largeMs = median(measureMs(largePrompt));
+
+      const delta = largeMs - smallMs;
+      const ratio = smallMs > 0 ? largeMs / smallMs : largeMs;
+
+      expect(delta).toBeLessThan(500);
+      expect(ratio).toBeLessThan(5);
+    });
+  });
+});
+
 describe('ensure-devflow-init behavioral', () => {
   const ENSURE_DEVFLOW = path.join(HOOKS_DIR, 'ensure-devflow-init');
 
