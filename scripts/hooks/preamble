@@ -1,8 +1,12 @@
 #!/bin/bash
 
 # Devflow Preamble: UserPromptSubmit Hook
-# Detects structured implementation plans and injects a directive to execute them.
-# Zero overhead for normal prompts — only fires when all three plan markers are present.
+# Two detection paths — emits nothing when neither fires:
+#   1. First-word keyword dispatch: if the prompt starts with one of
+#      implement/explore/research/debug/plan (any case) followed by at least one
+#      additional word, inject a directive to invoke devflow:<keyword> via the Skill tool.
+#   2. Structured plan: if the prompt contains ## Goal, ## Steps, and ## Files markers,
+#      inject a directive to invoke devflow:implement via the Skill tool.
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
@@ -52,19 +56,22 @@ case "$WORD" in
   explore)   SKILL=explore ;;
   research)  SKILL=research ;;
   debug)     SKILL=debug ;;
-  plan)      SKILL=plan ;;
+  plan)      SKILL=plan ;;  # Note: `plan` keyword → devflow:plan; the structured-plan path below → devflow:implement
   *)         SKILL="" ;;
 esac
 shopt -u nocasematch
 
-# Guard B: skip prompts ending in '?' (the $ anchor makes this efficient — bash regex
-# does not scan the full string for a trailing match; no subprocess required).
+# Guard B: skip prompts ending in '?' — runs against the full $PROMPT, not $HEAD,
+# because the trailing '?' lives at the END of the prompt, well beyond the 256-byte
+# keyword window. This is O(n) over prompt length (bash 3.2 ERE walks the whole string;
+# the $ anchor does NOT enable a tail-only scan). Cost applies only to keyword-matched
+# prompts and is negligible in practice (~6ms at 200KB). No subprocess required.
 if [[ -n "$SKILL" && -n "$REST" ]] && ! [[ "$PROMPT" =~ [?][[:space:]]*$ ]]; then
   dbg "WORKFLOW_KEYWORD detected: $SKILL — injecting directive"
   json_prompt_output "The user is invoking the \`$SKILL\` workflow. Briefly tell the user you are invoking \`devflow:$SKILL\`, then invoke it via the Skill tool, passing the user's request (the text after the leading \`$SKILL\` keyword) as the task input."
 elif [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PROMPT" == *"## Files"* ]]; then
   dbg "EXECUTION_PLAN detected — injecting directive"
-  json_prompt_output "EXECUTION_PLAN detected. Invoke \`devflow:implement\` via the Skill tool to execute this plan."
+  json_prompt_output "The user supplied a structured implementation plan. Briefly tell the user you are invoking \`devflow:implement\`, then invoke it via the Skill tool to execute this plan."
 else
   dbg "No keyword or plan markers detected — no output"
 fi
