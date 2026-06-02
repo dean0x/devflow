@@ -1120,11 +1120,14 @@ describe('preamble keyword detection', () => {
 
   describe('Suite 1 — Functionality', () => {
     const matchCases: Array<{ prompt: string; expectedSkill: string; label: string }> = [
-      { prompt: 'implement the cache',   expectedSkill: 'implement', label: 'F1a: implement' },
-      { prompt: 'plan a caching layer',  expectedSkill: 'plan',      label: 'F1b: plan' },
-      { prompt: 'Explore the auth flow', expectedSkill: 'explore',   label: 'F2a: Explore (mixed case)' },
-      { prompt: 'RESEARCH options now',  expectedSkill: 'research',  label: 'F2b: RESEARCH (uppercase)' },
-      { prompt: 'debug: why it hangs',   expectedSkill: 'debug',     label: 'F3: debug with trailing punct' },
+      { prompt: 'implement the cache',       expectedSkill: 'implement', label: 'F1a: implement' },
+      { prompt: 'plan a caching layer',      expectedSkill: 'plan',      label: 'F1b: plan' },
+      { prompt: 'Explore the auth flow',     expectedSkill: 'explore',   label: 'F2a: Explore (mixed case)' },
+      { prompt: 'RESEARCH options now',      expectedSkill: 'research',  label: 'F2b: RESEARCH (uppercase)' },
+      { prompt: 'debug: why it hangs',       expectedSkill: 'debug',     label: 'F3: debug with trailing punct' },
+      // F13: preamble:41 strips HEAD leading whitespace before extracting the first token,
+      // so prompts with leading newlines/spaces still dispatch correctly (applies ADR-014).
+      { prompt: '\n\n  implement the cache', expectedSkill: 'implement', label: 'F13: leading newlines/spaces still match' },
     ];
 
     const noMatchCases: Array<{ prompt: string; label: string }> = [
@@ -1138,6 +1141,9 @@ describe('preamble keyword detection', () => {
       { prompt: 'debug this?  ',          label: 'F6b: question with trailing whitespace suppressed' },
       { prompt: 'fix the auth bug',       label: 'F9: non-keyword first word' },
       { prompt: '# Implement Command\n## Usage\n...', label: 'F11: # prefix not a keyword' },
+      // F12: WORD="${TOKEN%[[:punct:]]}" strips exactly ONE trailing punct char.
+      // "implement..." → TOKEN="implement..." → WORD="implement.." (still has two dots) → no case match.
+      { prompt: 'implement... the cache', label: 'F12: multi-char trailing punct — only ONE punct stripped, no match' },
     ];
 
     for (const { prompt, expectedSkill, label } of matchCases) {
