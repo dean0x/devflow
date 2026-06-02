@@ -95,9 +95,7 @@ describe('addAmbientHook', () => {
     // When the hook is already registered addAmbientHook takes the early-return path.
     // removeLegacyCommandsRule MUST still run so stale commands.md files are cleaned up.
     const withHook = await addAmbientHook('{}', '/home/user/.devflow');
-    vi.restoreAllMocks();
-    // Re-stub so we can assert on the second call
-    vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+    vi.clearAllMocks();
 
     await addAmbientHook(withHook, '/home/user/.devflow');
 
@@ -253,6 +251,17 @@ describe('removeAmbientHook', () => {
     const result = await removeAmbientHook(input);
 
     expect(result).toBe(input);
+  });
+
+  it('purges legacy rule even when nothing to remove (ordering invariant)', async () => {
+    // When neither a prompt hook nor a classification hook is present removeAmbientHook
+    // takes the early-return path. removeLegacyCommandsRule MUST still run so stale
+    // commands.md files are cleaned up regardless of the hook state.
+    const input = JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'stop.sh' }] }] } });
+    const result = await removeAmbientHook(input);
+
+    expect(result).toBe(input);
+    expect(fs.unlink).toHaveBeenCalledWith(COMMANDS_RULE_PATH);
   });
 
   it('preserves other settings', async () => {

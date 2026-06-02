@@ -3,7 +3,7 @@
   "features": {
     "cli-rules": {
       "name": "Rules System CLI",
-      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, commands.md, ambient.ts.",
+      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry.",
       "directories": [
         "src/cli/commands/",
         "src/cli/utils/",
@@ -22,10 +22,9 @@
         "shared/rules/security.md",
         "shared/rules/engineering.md",
         "shared/rules/quality.md",
-        "shared/rules/reliability.md",
-        "shared/rules/commands.md"
+        "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-05-27T19:30:17.997Z",
+      "lastUpdated": "2026-06-01T20:16:11.526Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
@@ -42,13 +41,16 @@
         "scripts/hooks/lib/staleness.cjs",
         "scripts/hooks/json-helper.cjs",
         "scripts/hooks/sidecar-capture",
+        "scripts/hooks/sidecar-collect-tasks",
+        "scripts/hooks/sidecar-dispatch",
         "scripts/hooks/sidecar-evaluate",
         "scripts/hooks/sidecar-recover",
+        "scripts/hooks/eval-curation",
         "scripts/hooks/session-start-context",
         "shared/skills/sidecar/SKILL.md",
         "src/cli/commands/decisions.ts"
       ],
-      "lastUpdated": "2026-05-31T22:27:20.021Z",
+      "lastUpdated": "2026-06-01T10:36:05.464Z",
       "createdBy": "devflow-knowledge"
     }
   }
