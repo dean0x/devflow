@@ -68,10 +68,10 @@ shopt -u nocasematch
 # prompts and is negligible in practice (~6ms at 200KB). No subprocess required.
 if [[ -n "$SKILL" && -n "$REST" ]] && ! [[ "$PROMPT" =~ [?][[:space:]]*$ ]]; then
   dbg "WORKFLOW_KEYWORD detected: $SKILL — injecting directive"
-  json_prompt_output "The user is invoking the \`$SKILL\` workflow. Briefly tell the user you are invoking \`devflow:$SKILL\`, then invoke it via the Skill tool, passing the user's request (the text after the leading \`$SKILL\` keyword) as the task input."
+  json_prompt_output "The user's prompt begins with the \`$SKILL\` keyword, which signals the \`devflow:$SKILL\` workflow. In one short sentence, tell the user you're invoking \`devflow:$SKILL\`. Then immediately invoke it with the Skill tool, passing the user's full request (everything after the leading \`$SKILL\` keyword) as the skill input. Do not pause to ask whether to proceed."
 elif [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PROMPT" == *"## Files"* ]]; then
   dbg "EXECUTION_PLAN detected — injecting directive"
-  json_prompt_output "The user supplied a structured implementation plan. Briefly tell the user you are invoking \`devflow:implement\`, then invoke it via the Skill tool to execute this plan."
+  json_prompt_output "The user's prompt is a structured implementation plan (it contains ## Goal, ## Steps, and ## Files). In one short sentence, tell the user you're invoking \`devflow:implement\`. Then immediately invoke it with the Skill tool, passing the full plan as the skill input so it can be executed. Do not pause to ask whether to proceed."
 else
   dbg "No keyword or plan markers detected — no output"
 fi
