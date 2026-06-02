@@ -41,7 +41,7 @@ you: add rate limiting to the /api/upload endpoint
 
 ## What you get
 
-**Ambient intelligence.** Devflow detects structured plans for automatic execution — normal prompts get zero overhead, no classification step. You never invoke it manually. Init and forget.
+**Ambient intelligence.** Devflow detects workflow intent — start a prompt with `implement`, `explore`, `research`, `debug`, or `plan`, or paste a structured plan, and the matching workflow runs automatically. Normal prompts get zero overhead, no classification step. No slash commands needed. Init and forget.
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.devflow/decisions/` and inform every future session. No manual bookkeeping.
 

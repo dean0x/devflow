@@ -83,7 +83,7 @@ export async function addAmbientHook(settingsJson: string, devflowDir: string): 
   const settings: Settings = JSON.parse(settingsJson);
   let changed = filterHookEntries(settings, 'UserPromptSubmit', isLegacy);
 
-  // --- UserPromptSubmit: preamble hook (plan detection) ---
+  // --- UserPromptSubmit: preamble hook (keyword + plan detection) ---
   const hasPreamble = settings.hooks?.UserPromptSubmit?.some((m) =>
     m.hooks.some((h) => h.command.includes(PREAMBLE_HOOK_MARKER)),
   );
@@ -150,7 +150,7 @@ interface AmbientOptions {
 }
 
 export const ambientCommand = new Command('ambient')
-  .description('Enable or disable ambient mode (plan auto-detection)')
+  .description('Enable or disable ambient mode (keyword + plan auto-detection)')
   .option('--enable', 'Register ambient mode hook')
   .option('--disable', 'Remove ambient mode hook')
   .option('--status', 'Check if ambient mode is enabled')
@@ -159,8 +159,8 @@ export const ambientCommand = new Command('ambient')
     if (!hasFlag) {
       p.intro(color.bgMagenta(color.white(' Ambient Mode ')));
       p.note(
-        `${color.cyan('devflow ambient --enable')}   Register plan detection hook\n` +
-        `${color.cyan('devflow ambient --disable')}  Remove plan detection hook\n` +
+        `${color.cyan('devflow ambient --enable')}   Register detection hook\n` +
+        `${color.cyan('devflow ambient --disable')}  Remove detection hook\n` +
         `${color.cyan('devflow ambient --status')}   Check current state`,
         'Usage',
       );
@@ -219,8 +219,8 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await fs.writeFile(settingsPath, updated, 'utf-8');
-      p.log.success('Ambient mode enabled — plan detection hook registered');
-      p.log.info(color.dim('Structured plans auto-execute'));
+      p.log.success('Ambient mode enabled — detection hook registered');
+      p.log.info(color.dim('Keyword prompts and structured plans auto-run their workflow'));
     }
 
     if (options.disable) {
