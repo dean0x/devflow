@@ -11,8 +11,11 @@ referencedFiles:
   - scripts/hooks/lib/staleness.cjs
   - scripts/hooks/json-helper.cjs
   - scripts/hooks/sidecar-capture
+  - scripts/hooks/sidecar-collect-tasks
+  - scripts/hooks/sidecar-dispatch
   - scripts/hooks/sidecar-evaluate
   - scripts/hooks/sidecar-recover
+  - scripts/hooks/eval-curation
   - scripts/hooks/session-start-context
   - shared/skills/sidecar/SKILL.md
   - src/cli/commands/decisions.ts
@@ -160,12 +163,14 @@ No `claude -p` subprocess is spawned for individual features. The sidecar skill 
 
 ## Anti-Patterns
 
-- **Editing installed copies** — always edit `scripts/hooks/`, then `npm run build` + `devflow init`. Changes to `~/.devflow/scripts/hooks/` are silently overwritten on reinstall (avoids PF-007).
-- **Calling `decisions-append` during curation** — it acquires `.decisions.lock` internally; calling it while holding that lock deadlocks. Use Edit tool for deprecation (avoids SKILL.md explicit warning).
+- **Editing installed copies** — always edit `scripts/hooks/`, then `npm run build` + `devflow init`. Changes to `~/.devflow/scripts/hooks/` are silently overwritten on reinstall (PF-007).
+- **Calling `decisions-append` during curation** — it acquires `.decisions.lock` internally; calling it while holding that lock deadlocks. Use Edit tool for deprecation (SKILL.md explicit warning).
 - **Holding a lock across tool calls** — the processor's lock lifecycle must be: acquire → single Bash → release. Never span multiple tool calls under one lock.
 - **Spawning multiple background agents** — the main model makes exactly one `Agent(run_in_background: true)` call. The processor handles all task types sequentially inside one agent.
-- **Assuming `sidecar-dispatch` injects the SIDECAR directive** — after the LLM refactor, `sidecar-dispatch` is capture-only (UserPromptSubmit); the SIDECAR directive is emitted by `session-start-context` (SessionStart). `sidecar-dispatch` no longer drives the processor.
+- **Assuming `sidecar-dispatch` injects the SIDECAR directive** — `sidecar-dispatch` is capture-only (UserPromptSubmit); the SIDECAR directive is emitted by `session-start-context` (SessionStart) (ADR-009).
+- **Using `additionalContext` for critical directives** — models deprioritize `additionalContext` when a user question is present; critical maintenance directives must be anchored to SessionStart (PF-008).
 - **Using `decisions-usage-scan.cjs` to read cite counts** — it is a write-path tool that increments counts from session text. Read `.decisions-usage.json` directly for reporting or curation decisions.
+- **Writing artifact content in deterministic scripts** — memory, observations, ADR/PF bodies, and knowledge bases must be authored by the LLM processor; plumbing scripts handle only structural writes (ADR-008).
 
 ## Gotchas
 
@@ -180,10 +185,13 @@ No `claude -p` subprocess is spawned for individual features. The sidecar skill 
 ## Key Files
 
 - `scripts/hooks/sidecar-capture` — Stop hook; queue append + memory marker write (120s throttle)
-- `scripts/hooks/sidecar-evaluate` — SessionEnd hook; orchestrator sourcing eval-* modules
-- `scripts/hooks/sidecar-recover` — stale `.processing` recovery helper; per-type thresholds
-- `scripts/hooks/session-start-context` — SessionStart hook; recover → collect → emit directive
-- `scripts/hooks/json-helper.cjs` — plumbing ops: `merge-observation`, `decisions-append`, atomic writes
+- `scripts/hooks/sidecar-dispatch` — UserPromptSubmit hook; capture-only (user turn append to pending-turns queue); no directive emission
+- `scripts/hooks/sidecar-evaluate` — SessionEnd hook; orchestrator sourcing eval-* modules (eval-learning, eval-decisions, eval-knowledge, eval-curation, eval-reinforce, eval-helpers)
+- `scripts/hooks/eval-curation` — sourced by sidecar-evaluate; writes `curation.{session}.json` marker on 7-day throttle (D58)
+- `scripts/hooks/sidecar-recover` — sourced helper; stale `.processing` recovery per-type thresholds; JUST_RECOVERED guard; orphaned pending-turns recovery
+- `scripts/hooks/sidecar-collect-tasks` — sourced helper; collects pending `.json` markers into `_SIDECAR_TASKS`; COLLECT_LIMIT=50 FIFO; deletes disabled-feature markers
+- `scripts/hooks/session-start-context` — SessionStart hook (no set -e); three independent sections: 1.5 decisions TL;DR, 1.75 learned behaviors, 2 sidecar spawn directive
+- `scripts/hooks/json-helper.cjs` — plumbing ops: `merge-observation`, `decisions-append`, atomic writes; does NOT contain judgment logic
 - `scripts/hooks/lib/transcript-filter.cjs` — two-channel filter: USER_SIGNALS + DIALOG_PAIRS
 - `scripts/hooks/lib/staleness.cjs` — annotates log entries with `mayBeStale` based on file existence
 - `scripts/hooks/lib/feature-knowledge.cjs` — KB index, staleness checks, `updateIndex`, slug validation
