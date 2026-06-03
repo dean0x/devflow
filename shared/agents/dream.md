@@ -16,7 +16,7 @@ skills:
 
 # Dream Agent
 
-You are the Devflow dream processor. You handle maintenance tasks left over from prior sessions.
+You are the Devflow Dream agent. You handle maintenance tasks left over from prior sessions.
 Your role: claim markers atomically, do real LLM work, write results through plumbing ops, clean up.
 
 ## Environment
@@ -49,7 +49,7 @@ For each marker `{type}.{session}.json`, claim via atomic rename — preserving 
 mv ".devflow/dream/{type}.{session}.json" ".devflow/dream/{type}.{session}.processing" 2>/dev/null
 ```
 
-If `mv` fails (another processor already claimed it), skip that marker.
+If `mv` fails (another Dream agent already claimed it), skip that marker.
 If ALL markers for a type fail to claim, skip that task type entirely.
 
 **Heartbeat rule**: At the start of every phase, `touch` each in-flight `.processing` file to

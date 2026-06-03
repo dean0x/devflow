@@ -43,7 +43,7 @@ LEARNING_DIR="$DEVFLOW_DIR/learning"
 DECISIONS_DIR_DATA="$DEVFLOW_DIR/decisions"
 
 # Read dream config
-# TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+# dream-fallback: transitional read of sidecar/config.json — REMOVE after one release once all projects migrated
 DREAM_CONFIG="$DREAM_DIR/config.json"
 if [ ! -f "$DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
   DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"

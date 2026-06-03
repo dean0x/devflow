@@ -1557,7 +1557,7 @@ describe('transcript-filter.cjs CLI', () => {
 });
 
 // =============================================================================
-// Sidecar hook test helpers
+// Dream hook test helpers
 // =============================================================================
 
 function encodeCwd(cwd: string): string {
@@ -1588,8 +1588,15 @@ function createTranscript(
   return transcriptPath;
 }
 
-function createSidecarConfig(cwdDir: string, config: Record<string, boolean>): void {
+function createDreamConfig(cwdDir: string, config: Record<string, boolean>): void {
   const dir = path.join(cwdDir, '.devflow', 'dream');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
+}
+
+/** Writes a config to the LEGACY .devflow/sidecar/ path (no dream/config.json present). */
+function createLegacySidecarConfig(cwdDir: string, config: Record<string, boolean>): void {
+  const dir = path.join(cwdDir, '.devflow', 'sidecar');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
 }
@@ -1657,7 +1664,7 @@ describe('dream-evaluate business logic', () => {
   });
 
   it('config disables learning: learning skipped, decisions still evaluated', () => {
-    createSidecarConfig(tmpDir, { learning: false });
+    createDreamConfig(tmpDir, { learning: false });
     createTranscript(homeDir, tmpDir, 5);
     runHook(EVALUATE_HOOK, {
       cwd: tmpDir,
@@ -2565,7 +2572,7 @@ describe('dream-capture memory marker', () => {
   });
 
   it('memory disabled via config skips all capture', () => {
-    createSidecarConfig(tmpDir, { memory: false });
+    createDreamConfig(tmpDir, { memory: false });
 
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
@@ -2578,6 +2585,176 @@ describe('dream-capture memory marker', () => {
 
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     expect(fs.existsSync(path.join(dreamDir, 'memory.json'))).toBe(false);
+  });
+});
+
+// =============================================================================
+// D37 dual-read fallback: legacy sidecar/config.json honored when dream/config.json absent
+// =============================================================================
+
+describe('D37 fallback: dream-capture honors legacy sidecar config', () => {
+  const CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-capture');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-d37-capture-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-d37-capture-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('memory:false in legacy sidecar/config.json suppresses queue append when dream/config.json absent', () => {
+    // Seed ONLY the legacy path — no .devflow/dream/config.json present
+    createLegacySidecarConfig(tmpDir, { memory: false, learning: true, decisions: true, knowledge: true });
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      last_assistant_message: 'some assistant response',
+    }, homeDir);
+
+    // memory:false should prevent the queue file from being written
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
+  it('memory:true in legacy sidecar/config.json allows queue append when dream/config.json absent', () => {
+    // Seed ONLY the legacy path with memory enabled
+    createLegacySidecarConfig(tmpDir, { memory: true, learning: true, decisions: true, knowledge: true });
+
+    runHook(CAPTURE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test',
+      last_assistant_message: 'some assistant response',
+    }, homeDir);
+
+    // memory:true — queue append should occur
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+});
+
+describe('D37 fallback: dream-evaluate honors legacy sidecar config', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-d37-eval-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-d37-eval-home-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('learning:false in legacy sidecar/config.json skips learning evaluation when dream/config.json absent', () => {
+    // Seed ONLY the legacy path with learning disabled
+    createLegacySidecarConfig(tmpDir, { memory: true, learning: false, decisions: true, knowledge: true });
+    createTranscript(homeDir, tmpDir, 5);
+
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.dream-evaluate.log');
+    const log = fs.readFileSync(logFile, 'utf-8');
+
+    // learning disabled via legacy config — no learning evaluation
+    expect(log).not.toContain('Evaluating learning');
+    // decisions is still enabled — should be evaluated
+    expect(log).toContain('Evaluating decisions');
+  });
+
+  it('decisions:false in legacy sidecar/config.json skips decisions evaluation when dream/config.json absent', () => {
+    // Seed ONLY the legacy path with decisions disabled
+    createLegacySidecarConfig(tmpDir, { memory: true, learning: true, decisions: false, knowledge: true });
+    createTranscript(homeDir, tmpDir, 5);
+
+    runHook(EVALUATE_HOOK, {
+      cwd: tmpDir,
+      session_id: 'test-session',
+    }, homeDir);
+
+    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
+    const logFile = path.join(logDir, '.dream-evaluate.log');
+    const log = fs.readFileSync(logFile, 'utf-8');
+
+    // decisions disabled via legacy config — should not appear
+    expect(log).not.toContain('Evaluating decisions');
+    // learning still enabled
+    expect(log).toContain('Evaluating learning');
+  });
+});
+
+describe('D37 fallback: session-start-context honors legacy sidecar config', () => {
+  const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-d37-ctx-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-d37-ctx-home-'));
+    // Note: no dream/ dir created — only sidecar/ will exist
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('pending marker directive still emitted when only legacy sidecar/config.json present (memory:true)', () => {
+    // Seed ONLY the legacy path with all features enabled
+    createLegacySidecarConfig(tmpDir, { memory: true, learning: true, decisions: true, knowledge: true });
+
+    // Create dream dir and a pending marker so there is something to emit
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'memory.json'), '{}');
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    // memory is enabled in legacy config — directive should be emitted
+    const parsed = JSON.parse(stdout.trim());
+    const context = parsed.hookSpecificOutput.additionalContext;
+    expect(context).toContain('DREAM MAINTENANCE');
+    expect(context).toContain('memory');
+  });
+
+  it('memory:false in legacy sidecar/config.json excludes memory tasks from directive when dream/config.json absent', () => {
+    // Seed ONLY the legacy path with memory disabled
+    createLegacySidecarConfig(tmpDir, { memory: false, learning: true, decisions: true, knowledge: true });
+
+    // Create dream dir with a pending memory marker and a learning marker
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'memory.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'learning.sess1.json'), '{}');
+
+    const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    // memory disabled — memory task should not appear in directive
+    const parsed = JSON.parse(stdout.trim());
+    const context = parsed.hookSpecificOutput.additionalContext;
+    expect(context).not.toContain('memory');
+    // learning is still enabled — should be present
+    expect(context).toContain('learning');
   });
 });
 

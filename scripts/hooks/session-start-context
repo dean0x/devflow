@@ -45,7 +45,7 @@ DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
 # Read dream config for feature state (primary source of truth)
-# TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+# dream-fallback: transitional read of sidecar/config.json — REMOVE after one release once all projects migrated
 _DREAM_CONFIG="$DREAM_DIR/config.json"
 if [ ! -f "$_DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
   _DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
@@ -218,7 +218,7 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   _SC2_DEC_EN="true"
   _SC2_KNOW_EN="true"
 
-  # TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+  # dream-fallback: transitional read of sidecar/config.json — REMOVE after one release once all projects migrated
   _SC2_DREAM_CONFIG="$DREAM_DIR/config.json"
   if [ ! -f "$_SC2_DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
     _SC2_DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
