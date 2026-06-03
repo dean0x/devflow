@@ -50,7 +50,7 @@ export interface LearningConfig {
 
 /**
  * Format a human-readable status summary for learning state.
- * enabled: true when the sidecar config has learning: true (or no config).
+ * enabled: true when the dream config has learning: true (or no config).
  */
 export function formatLearningStatus(observations: LearningObservation[], enabled: boolean): string {
   const lines: string[] = [];
@@ -515,7 +515,7 @@ export const learnCommand = new Command('learn')
       const gitRoot = await getGitRoot();
       if (gitRoot) {
         await updateFeature(gitRoot, 'learning', true);
-        // Remove .learning-disabled sentinel (defense-in-depth with sidecar config)
+        // Remove .learning-disabled sentinel (defense-in-depth with dream config)
         try {
           await fs.unlink(getLearningDisabledSentinel(gitRoot));
         } catch { /* may not exist */ }

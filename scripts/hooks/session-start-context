@@ -6,7 +6,7 @@
 #
 # Section 1.5: Decisions TL;DR (skipped if .devflow/decisions/.disabled)
 # Section 1.75: Learned behaviors + new artifact notifications (skipped if .devflow/memory/.learning-disabled)
-# Section 2: Sidecar pending-work (emits directive when pending tasks detected)
+# Section 2: Dream pending-work (emits directive when pending tasks detected)
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
 dbg() { :; }
@@ -50,12 +50,12 @@ _DREAM_CONFIG="$DREAM_DIR/config.json"
 if [ ! -f "$_DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
   _DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
 fi
-_LEARNING_SIDECAR="true"
+_LEARNING_DREAM="true"
 if [ -f "$_DREAM_CONFIG" ]; then
-  _LEARNING_SIDECAR=$(json_field_file "$_DREAM_CONFIG" "learning" "true")
+  _LEARNING_DREAM=$(json_field_file "$_DREAM_CONFIG" "learning" "true")
 fi
 
-dbg "LEARNING_SIDECAR=$_LEARNING_SIDECAR"
+dbg "LEARNING_DREAM=$_LEARNING_DREAM"
 
 # --- Section 1.5: Project Decisions TL;DR ---
 # Skipped if decisions feature is disabled via sentinel.
@@ -91,7 +91,7 @@ ${DECISIONS_SECTION}"
 fi
 
 # --- Section 1.75: Learned Behaviors ---
-# Skipped if learning feature is disabled via sentinel or sidecar config.
+# Skipped if learning feature is disabled via sentinel or dream config.
 #
 # _build_learned_section LEARNING_LOG NOTIFIED_MARKER
 #   Prints the LEARNED BEHAVIORS block to stdout, or nothing if no artifacts exist.
@@ -153,7 +153,7 @@ Run \`devflow learn --list\` to see all."
   printf '%s' "$section"
 }
 
-if [ "$_LEARNING_SIDECAR" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
+if [ "$_LEARNING_DREAM" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
   LEARNING_LOG="$LEARNING_DIR/learning-log.jsonl"
   NOTIFIED_MARKER="$LEARNING_DIR/.learning-notified-at"
 
@@ -171,11 +171,11 @@ ${LEARNED_SECTION}"
   fi
 fi
 
-# --- Section 2: Sidecar Pending-Work ---
-# Detects pending sidecar tasks and emits a directive to spawn a background processor agent.
+# --- Section 2: Dream Pending-Work ---
+# Detects pending dream tasks and emits a directive to spawn a background processor agent.
 # Guards: processor-spawn throttle (120s window) prevents duplicate emissions on rapid
 # SessionStart events (e.g., /clear or compact).
-# Requires: sidecar-recover + sidecar-collect-tasks helpers (sourced inline below).
+# Requires: dream-recover + dream-collect-tasks helpers (sourced inline below).
 # No set -e: any failure must not affect prior sections.
 #
 # D57a: Per-session .processing suffix (collision fix).
@@ -195,7 +195,7 @@ fi
 #
 # D57c: Heartbeat rationale.
 #   The processor agent touches each in-flight .processing file at the start of
-#   every phase. sidecar-recover uses the mtime to determine staleness (1800s
+#   every phase. dream-recover uses the mtime to determine staleness (1800s
 #   threshold for non-memory types). The touch refreshes the mtime so a legitimate
 #   long-running processor is not yanked mid-phase. Pairs with D56a thresholds.
 
@@ -212,7 +212,7 @@ fi
 
 if [ "$_SC2_HELPERS_OK" = "true" ]; then
   # Determine feature enabled-state.
-  # Primary: sidecar/config.json fields; secondary: runtime sentinels (defense-in-depth).
+  # Primary: dream/config.json fields; secondary: runtime sentinels (defense-in-depth).
   _SC2_MEM_EN="true"
   _SC2_LEARN_EN="true"
   _SC2_DEC_EN="true"
