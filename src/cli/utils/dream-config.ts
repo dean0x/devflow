@@ -21,6 +21,24 @@ export function getConfigPath(projectRoot: string): string {
 }
 
 /**
+ * Parse and narrow an unknown JSON value into a DreamConfig, merging onto
+ * DEFAULT_CONFIG. Pure function — no I/O, no side effects.
+ *
+ * Returns null when `parsed` is not a plain object (caller falls through to
+ * the next candidate path).
+ */
+function coerceConfig(parsed: unknown): DreamConfig | null {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const p = parsed as Record<string, unknown>;
+  return {
+    memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
+    learning: typeof p.learning === 'boolean' ? p.learning : DEFAULT_CONFIG.learning,
+    decisions: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.decisions,
+    knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
+  };
+}
+
+/**
  * Read the dream config for a project root.
  * Returns defaults when the file is missing or unreadable.
  *
@@ -30,30 +48,16 @@ export function getConfigPath(projectRoot: string): string {
 export async function readConfig(projectRoot: string): Promise<DreamConfig> {
   const configPath = getDreamConfigPath(projectRoot);
   try {
-    const raw = await fs.readFile(configPath, 'utf-8');
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ...DEFAULT_CONFIG };
-    const p = parsed as Record<string, unknown>;
-    return {
-      memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
-      learning: typeof p.learning === 'boolean' ? p.learning : DEFAULT_CONFIG.learning,
-      decisions: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.decisions,
-      knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
-    };
+    const config = coerceConfig(JSON.parse(await fs.readFile(configPath, 'utf-8')));
+    if (config !== null) return config;
+    return { ...DEFAULT_CONFIG };
   } catch {
     // TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json absent
     const legacyPath = path.join(projectRoot, '.devflow', 'sidecar', 'config.json');
     try {
-      const raw = await fs.readFile(legacyPath, 'utf-8');
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { ...DEFAULT_CONFIG };
-      const p = parsed as Record<string, unknown>;
-      return {
-        memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
-        learning: typeof p.learning === 'boolean' ? p.learning : DEFAULT_CONFIG.learning,
-        decisions: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.decisions,
-        knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
-      };
+      const config = coerceConfig(JSON.parse(await fs.readFile(legacyPath, 'utf-8')));
+      if (config !== null) return config;
+      return { ...DEFAULT_CONFIG };
     } catch {
       return { ...DEFAULT_CONFIG };
     }
