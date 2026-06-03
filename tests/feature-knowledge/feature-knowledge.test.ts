@@ -745,12 +745,12 @@ describe('safePath', () => {
 });
 
 // ---------------------------------------------------------------------------
-// readDream helper (TypeScript)
+// readAgentResult helper (TypeScript)
 // ---------------------------------------------------------------------------
 
-import { readDream } from '../../src/cli/commands/knowledge/index.js';
+import { readAgentResult } from '../../src/cli/commands/knowledge/index.js';
 
-describe('readDream', () => {
+describe('readAgentResult', () => {
   const tmpFiles: string[] = [];
 
   afterEach(() => {
@@ -761,47 +761,47 @@ describe('readDream', () => {
   });
 
   function writeTmp(content: string): string {
-    const f = path.join(os.tmpdir(), `test-read-dream-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    const f = path.join(os.tmpdir(), `test-read-agent-result-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
     writeFileSync(f, content);
     tmpFiles.push(f);
     return f;
   }
 
-  it('returns referencedFiles and description for valid dream file', async () => {
+  it('returns referencedFiles and description for valid result file', async () => {
     const f = writeTmp(JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'], description: 'Use when X' }));
-    const result = await readDream(f);
+    const result = await readAgentResult(f);
     expect(result.referencedFiles).toEqual(['src/a.ts', 'src/b.ts']);
     expect(result.description).toBe('Use when X');
   });
 
   it('returns {} for missing file', async () => {
-    const result = await readDream('/nonexistent/path/file.json');
+    const result = await readAgentResult('/nonexistent/path/file.json');
     expect(result).toEqual({});
   });
 
   it('returns {} for invalid JSON', async () => {
     const f = writeTmp('not-valid-json');
-    const result = await readDream(f);
+    const result = await readAgentResult(f);
     expect(result).toEqual({});
   });
 
   it('omits referencedFiles when value is a string not array', async () => {
     const f = writeTmp(JSON.stringify({ referencedFiles: 'should-be-array' }));
-    const result = await readDream(f);
+    const result = await readAgentResult(f);
     expect(result.referencedFiles).toBeUndefined();
   });
 
   it('filters mixed-type referencedFiles array to strings only', async () => {
     const f = writeTmp(JSON.stringify({ referencedFiles: ['src/a.ts', 42, null, 'src/b.ts'] }));
-    const result = await readDream(f);
+    const result = await readAgentResult(f);
     expect(result.referencedFiles).toEqual(['src/a.ts', 'src/b.ts']);
   });
 
   it('returns {} when JSON parses to a non-object (primitive)', async () => {
-    const tmp = path.join(os.tmpdir(), `dream-primitive-${Date.now()}.json`);
+    const tmp = path.join(os.tmpdir(), `agent-result-primitive-${Date.now()}.json`);
     writeFileSync(tmp, '42');
     try {
-      const result = await readDream(tmp);
+      const result = await readAgentResult(tmp);
       expect(result).toEqual({});
     } finally {
       rmSync(tmp, { force: true });

@@ -62,14 +62,14 @@ export async function handleCreate(slug: string): Promise<void> {
   ].join('\n');
 
   try {
-    const { sidecar } = await runKnowledgeAgent({ worktreePath, slug, prompt, sidecarName: '.create-result.json' });
+    const { result } = await runKnowledgeAgent({ worktreePath, slug, prompt, resultFileName: '.create-result.json' });
 
     getFeatureKnowledge().updateIndex(worktreePath, {
       slug,
       name: name as string,
       directories,
-      referencedFiles: sidecar.referencedFiles ?? [],
-      description: sidecar.description,
+      referencedFiles: result.referencedFiles ?? [],
+      description: result.description,
       createdBy: 'devflow-knowledge',
     });
 

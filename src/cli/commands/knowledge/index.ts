@@ -11,9 +11,9 @@ import { handleCreate } from './create.js';
 import { handleRefresh } from './refresh.js';
 import { handleRemove } from './remove.js';
 
-// Re-export dream helpers for callers that import from knowledge/index.js
-export type { DreamData } from '../../utils/dream.js';
-export { readDream } from '../../utils/dream.js';
+// Re-export agent result helpers for callers that import from knowledge/index.js
+export type { AgentResult } from '../../utils/agent-result.js';
+export { readAgentResult } from '../../utils/agent-result.js';
 
 export const knowledgeCommand = new Command('knowledge')
   .description('Manage per-feature knowledge bases')

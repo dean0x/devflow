@@ -35,7 +35,7 @@ tools:
 4. **Cross-reference decisions**: If DECISIONS_CONTEXT is provided, reference relevant ADR/PF entries in the feature knowledge's "Related" section
 5. **Handle refresh**: If EXISTING_KB is provided, update stale sections based on CHANGED_FILES while preserving any manually added content (user edits). Don't regenerate from scratch.
 6. **Write KNOWLEDGE.md**: Write to `.devflow/features/{FEATURE_SLUG}/KNOWLEDGE.md` (create directory if needed)
-7. **Write sidecar**: Write sidecar JSON file (`.create-result.json` or `.refresh-result.json`) with `referencedFiles` and `description` so the host process can update the index
+7. **Write result file**: Write result JSON file (`.create-result.json` or `.refresh-result.json`) with `referencedFiles` and `description` so the host process can update the index
 8. **Report**: Output what was created/updated
 
 ## Output

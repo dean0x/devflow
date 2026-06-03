@@ -79,14 +79,14 @@ export async function handleRefresh(targetSlug?: string): Promise<void> {
     ].join('\n');
 
     try {
-      const { sidecar } = await runKnowledgeAgent({ worktreePath, slug, prompt, sidecarName: '.refresh-result.json' });
+      const { result } = await runKnowledgeAgent({ worktreePath, slug, prompt, resultFileName: '.refresh-result.json' });
 
       getFeatureKnowledge().updateIndex(worktreePath, {
         slug,
         name: featureName,
         directories,
-        referencedFiles: sidecar.referencedFiles ?? entry?.referencedFiles ?? [],
-        description: sidecar.description,
+        referencedFiles: result.referencedFiles ?? entry?.referencedFiles ?? [],
+        description: result.description,
         createdBy: 'devflow-knowledge',
       });
 
