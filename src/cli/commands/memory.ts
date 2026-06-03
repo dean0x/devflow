@@ -115,7 +115,7 @@ export function removeMemoryHooks(input: string | Settings): string {
     }
   }
 
-  // Remove legacy pre-sidecar hooks from upgrading users
+  // Remove legacy pre-dream hooks from upgrading users
   for (const [hookType, markers] of Object.entries(LEGACY_HOOK_MARKERS)) {
     if (!settings.hooks[hookType]) continue;
     const before = settings.hooks[hookType].length;
@@ -323,7 +323,7 @@ export const memoryCommand = new Command('memory')
       settingsContent = '{}';
     }
 
-    // Resolve current project root for sidecar config
+    // Resolve current project root for dream config
     const gitRoot = await getGitRoot();
 
     if (options.status) {
@@ -333,7 +333,7 @@ export const memoryCommand = new Command('memory')
       }
       const count = countMemoryHooks(settingsContent);
       const total = Object.keys(MEMORY_HOOK_CONFIG).length;
-      // Also check sidecar config: hooks may be registered but feature toggled off
+      // Also check dream config: hooks may be registered but feature toggled off
       const featureEnabled = await isFeatureEnabled(gitRoot, 'memory');
       if (count === total && featureEnabled) {
         p.log.info(`Working memory: ${color.green('enabled')} (${total}/${total} hooks)`);
@@ -348,8 +348,8 @@ export const memoryCommand = new Command('memory')
     const devflowDir = getDevFlowDirectory();
 
     if (options.enable) {
-      // D: --enable both installs hooks AND writes sidecar config, while --disable only
-      // writes sidecar config. This asymmetry is intentional: sidecar hooks are shared
+      // D: --enable both installs hooks AND writes dream config, while --disable only
+      // writes dream config. This asymmetry is intentional: dream hooks are shared
       // across features (memory, learning, decisions) and must never be removed by a
       // single-feature disable. --enable must still install them on first use.
       const alreadyHasHooks = hasMemoryHooks(settingsContent);

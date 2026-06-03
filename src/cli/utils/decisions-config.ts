@@ -14,7 +14,7 @@ export interface DecisionsConfig {
   max_daily_runs: number;
   /** Minimum minutes between consecutive runs. Default: 5 */
   throttle_minutes: number;
-  /** Model alias for the background sidecar processor. Default: 'sonnet' */
+  /** Model alias for the background Dream agent. Default: 'sonnet' */
   model: string;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;

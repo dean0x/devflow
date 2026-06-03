@@ -2,7 +2,7 @@
  * @devflow-design-decision D15
  * Counts promoted (status=created) entries by type, not auto-pruning.
  * We cannot reliably detect "irrelevance" without human judgment, so the HUD
- * surfaces what was learned and leaves curation to the user / sidecar processor.
+ * surfaces what was learned and leaves curation to the user / Dream agent.
  */
 
 import * as fs from 'node:fs';

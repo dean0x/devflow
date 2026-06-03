@@ -32,7 +32,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Remove .disabled sentinel
     try { await fs.unlink(getFeaturesDisabledSentinel(worktreePath)); } catch { /* doesn't exist */ }
 
-    // Update sidecar config
+    // Update dream config
     await updateFeature(worktreePath, 'knowledge', true);
 
     // Update manifest
@@ -54,7 +54,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     await fs.mkdir(featuresDir, { recursive: true });
     await fs.writeFile(getFeaturesDisabledSentinel(worktreePath), '', 'utf-8');
 
-    // Update sidecar config
+    // Update dream config
     await updateFeature(worktreePath, 'knowledge', false);
 
     // Update manifest
