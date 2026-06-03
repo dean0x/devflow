@@ -28,11 +28,11 @@
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
-      "name": "Sidecar & Hooks System",
-      "description": "Use when modifying sidecar hooks, background maintenance, marker lifecycle, memory/learning/decisions/knowledge processing, or curation. Keywords: sidecar, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart.",
+      "name": "Dream & Hooks System",
+      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/learning/decisions/knowledge processing, or curation. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, dream-evaluate.",
       "directories": [
         "scripts/hooks/",
-        "shared/skills/sidecar/"
+        "shared/agents/"
       ],
       "referencedFiles": [
         "scripts/hooks/lib/feature-knowledge.cjs",
@@ -40,17 +40,17 @@
         "scripts/hooks/lib/transcript-filter.cjs",
         "scripts/hooks/lib/staleness.cjs",
         "scripts/hooks/json-helper.cjs",
-        "scripts/hooks/sidecar-capture",
-        "scripts/hooks/sidecar-collect-tasks",
-        "scripts/hooks/sidecar-dispatch",
-        "scripts/hooks/sidecar-evaluate",
-        "scripts/hooks/sidecar-recover",
+        "scripts/hooks/dream-capture",
+        "scripts/hooks/dream-collect-tasks",
+        "scripts/hooks/dream-dispatch",
+        "scripts/hooks/dream-evaluate",
+        "scripts/hooks/dream-recover",
         "scripts/hooks/eval-curation",
         "scripts/hooks/session-start-context",
-        "shared/skills/sidecar/SKILL.md",
+        "shared/agents/dream.md",
         "src/cli/commands/decisions.ts"
       ],
-      "lastUpdated": "2026-06-01T10:36:05.464Z",
+      "lastUpdated": "2026-06-03T20:40:04.080Z",
       "createdBy": "devflow-knowledge"
     }
   }
