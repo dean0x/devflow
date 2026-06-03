@@ -16,24 +16,42 @@ import { getMemoryDir, getFeaturesDir, getDevflowGitignoreContent } from './proj
  * we check dest existence with lstat before rename to preserve idempotency.
  * For directory renames, POSIX returns ENOTEMPTY when dest is a non-empty
  * directory — treated the same as EEXIST (idempotent skip).
+ *
+ * @param overwrite - when true, proceed even if dest already exists (old-wins
+ *   semantics). Used for config.json in rename-sidecar-to-dream-v1.
  */
-async function moveFile(src: string, dest: string): Promise<void> {
+async function moveFile(src: string, dest: string, opts?: { overwrite?: boolean }): Promise<void> {
+  const overwrite = opts?.overwrite ?? false;
   // Ensure parent directory exists before attempting rename
   await fs.mkdir(path.dirname(dest), { recursive: true });
   // Check dest existence first: POSIX rename(2) silently overwrites files
   // and returns ENOTEMPTY (not EEXIST) for non-empty directory destinations.
   // An explicit lstat guard restores idempotency for both cases.
+  if (!overwrite) {
+    try {
+      await fs.lstat(dest);
+      return; // dest already present — idempotent skip
+    } catch { /* dest absent — proceed with rename */ }
+  }
+  // Security: guard against symlinks at the source before any copy operation.
+  // fs.rename(2) does not follow symlinks; the EXDEV copy path must match that
+  // behaviour. Refuse to copy if src is a symlink — avoids arbitrary-file-read
+  // via a crafted symlink at the migration source path.
   try {
-    await fs.lstat(dest);
-    return; // dest already present — idempotent skip
-  } catch { /* dest absent — proceed with rename */ }
+    const srcStat = await fs.lstat(src);
+    if (srcStat.isSymbolicLink()) return; // symlink at source — skip silently (avoids PF-004-style no-op-is-safe)
+  } catch {
+    return; // src absent — already moved or never existed
+  }
   try {
     await fs.rename(src, dest);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return;               // src gone — already moved or never existed
     if (code === 'EEXIST' || code === 'ENOTEMPTY') return; // dest appeared concurrently — idempotent skip
-    // Cross-device: fall back to copy+delete
+    // Cross-device: fall back to copy+delete.
+    // The symlink guard above ensures src is not a symlink before we reach here,
+    // so copyFile cannot be redirected to an arbitrary path via symlink.
     if (code === 'EXDEV') {
       await fs.cp(src, dest, { recursive: true });
       await fs.rm(src, { recursive: true, force: true });
@@ -46,22 +64,41 @@ async function moveFile(src: string, dest: string): Promise<void> {
 /**
  * Move a directory entry-by-entry into destDir.
  * srcDir itself is left in place (emptied); callers remove it after.
+ *
+ * Uses Promise.allSettled so a failure on one entry does not mask sibling
+ * errors — all partial failures are surfaced as warning strings in the
+ * return value. Callers append these to their MigrationRunResult.warnings.
+ *
+ * Per PF-004: correctness on first run is critical; partial failures must be
+ * visible so the manual sweep runbook can identify exactly which entries need
+ * attention on re-run.
  */
 async function moveDirContents(
   srcDir: string,
   destDir: string,
   skipNames: Set<string>,
-): Promise<void> {
+): Promise<string[]> {
   let entries: import('fs').Dirent[];
   try {
     entries = await fs.readdir(srcDir, { withFileTypes: true });
-  } catch { return; }
+  } catch { return []; }
 
-  await Promise.all(
-    entries
-      .filter(entry => !skipNames.has(entry.name))
-      .map(entry => moveFile(path.join(srcDir, entry.name), path.join(destDir, entry.name))),
+  const filtered = entries.filter(entry => !skipNames.has(entry.name));
+  const settled = await Promise.allSettled(
+    filtered.map(entry =>
+      moveFile(path.join(srcDir, entry.name), path.join(destDir, entry.name)),
+    ),
   );
+
+  const warnings: string[] = [];
+  for (const [i, result] of settled.entries()) {
+    if (result.status === 'rejected') {
+      const name = filtered[i]?.name ?? '(unknown)';
+      const msg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      warnings.push(`moveDirContents: failed to move ${path.join(srcDir, name)}: ${msg}`);
+    }
+  }
+  return warnings;
 }
 
 /**
@@ -325,20 +362,23 @@ async function cleanStaleGitignoreEntries(projectRoot: string): Promise<string[]
 /**
  * Step 2 helper: move all .memory/ content into the appropriate .devflow/
  * subdirectories using the explicit memMap plus catch-all subdirectory sweeps.
+ *
+ * Returns accumulated warnings from moveDirContents so callers can surface
+ * partial failures in their MigrationRunResult.warnings.
  */
 async function migrateMemoryDir(
   memSrc: string,
   devflowDir: string,
   memMap: Array<[string, string]>,
-): Promise<void> {
+): Promise<string[]> {
   // Explicit mapped moves (all independent — run in parallel)
   await Promise.all(memMap.map(([name, dest]) => moveFile(path.join(memSrc, name), dest)));
 
   // Move .memory/.sidecar/ → .devflow/sidecar/ (directory contents)
-  await moveDirContents(path.join(memSrc, '.sidecar'), path.join(devflowDir, 'sidecar'), new Set());
+  const w1 = await moveDirContents(path.join(memSrc, '.sidecar'), path.join(devflowDir, 'sidecar'), new Set());
 
   // Move .memory/decisions/ contents → .devflow/decisions/
-  await moveDirContents(path.join(memSrc, 'decisions'), path.join(devflowDir, 'decisions'), new Set());
+  const w2 = await moveDirContents(path.join(memSrc, 'decisions'), path.join(devflowDir, 'decisions'), new Set());
 
   // Catch-all: move any remaining .memory/ files not already handled.
   // Skip set is derived from memMap keys (already moved above) plus legacy-only
@@ -347,7 +387,9 @@ async function migrateMemoryDir(
     ...MEMORY_LEGACY_SKIP_FILES,
     ...memMap.map(([name]) => name),
   ]);
-  await moveDirContents(memSrc, path.join(devflowDir, 'memory'), memSkipFiles);
+  const w3 = await moveDirContents(memSrc, path.join(devflowDir, 'memory'), memSkipFiles);
+
+  return [...w1, ...w2, ...w3];
 }
 
 /**
@@ -415,13 +457,13 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       ['debug',                         path.join(devflowDir, 'learning',  'debug')],
       ['working',                       path.join(devflowDir, 'memory',    'working')],
     ];
-    await migrateMemoryDir(memSrc, devflowDir, memMap);
+    const memWarnings = await migrateMemoryDir(memSrc, devflowDir, memMap);
 
     // 3. Move .features/ contents → .devflow/features/
-    await moveDirContents(featSrc, path.join(devflowDir, 'features'), new Set());
+    const featWarnings = await moveDirContents(featSrc, path.join(devflowDir, 'features'), new Set());
 
     // 4. Move .docs/ contents → .devflow/docs/ (skip WORKING-MEMORY.md — belongs in memory/)
-    await moveDirContents(docsSrc, path.join(devflowDir, 'docs'), new Set(['WORKING-MEMORY.md']));
+    const docsWarnings = await moveDirContents(docsSrc, path.join(devflowDir, 'docs'), new Set(['WORKING-MEMORY.md']));
 
     // 5. Create .devflow/.gitignore if not present (atomic exclusive create — no TOCTOU)
     await createDevflowGitignoreIfAbsent(devflowDir);
@@ -460,7 +502,7 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
 
     return {
       infos: [...gitignoreInfos, 'Consolidated .memory/, .features/, .docs/ under .devflow/'],
-      warnings: [],
+      warnings: [...memWarnings, ...featWarnings, ...docsWarnings],
     };
   },
 };
@@ -591,38 +633,24 @@ const MIGRATION_RENAME_SIDECAR_TO_DREAM: Migration<'per-project'> = {
     // Ensure destination exists
     await fs.mkdir(dreamDir, { recursive: true });
 
-    // 1. config.json FIRST (old wins — overwrite fresh default) per PF-002
-    const sidecarConfig = path.join(sidecarDir, 'config.json');
-    const dreamConfig = path.join(dreamDir, 'config.json');
-    try {
-      await fs.access(sidecarConfig);
-      // Old config exists — move it (overwriting any fresh default at destination)
-      try {
-        await fs.rename(sidecarConfig, dreamConfig);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'EXDEV') {
-          // Cross-device: copy + delete
-          await fs.copyFile(sidecarConfig, dreamConfig);
-          await fs.unlink(sidecarConfig);
-        } else if (code !== 'ENOENT') {
-          throw err;
-        }
-      }
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') throw err;
-      // config.json absent — nothing to move
-    }
+    // 1. config.json FIRST (old wins — overwrite fresh default) per PF-002.
+    // Uses moveFile with overwrite:true so the shared EXDEV-safe, symlink-
+    // guarded helper handles rename + cross-device fallback in one place
+    // (avoids PF-003-style code drift between the two EXDEV implementations).
+    await moveFile(
+      path.join(sidecarDir, 'config.json'),
+      path.join(dreamDir, 'config.json'),
+      { overwrite: true },
+    );
 
     // 2. Move remaining contents (no-overwrite) — markers, .processing, lock dirs, etc.
-    await moveDirContents(sidecarDir, dreamDir, new Set(['config.json']));
+    const moveWarnings = await moveDirContents(sidecarDir, dreamDir, new Set(['config.json']));
 
     // 3. Best-effort rmdir (sidecar dir may still contain a live .reinforce.lock/ —
     //    NEVER lock the whole dir to avoid deadlocking a live processor per migration note)
     try { await fs.rmdir(sidecarDir); } catch { /* non-empty or already removed */ }
 
-    return { infos: ['Renamed .devflow/sidecar/ → .devflow/dream/'], warnings: [] };
+    return { infos: ['Renamed .devflow/sidecar/ → .devflow/dream/'], warnings: moveWarnings };
   },
 };
 

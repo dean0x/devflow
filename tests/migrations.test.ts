@@ -1247,6 +1247,67 @@ describe('rename-sidecar-to-dream-v1 migration', () => {
     expect(dreamMarker).toBe('"dream-version"');
   });
 
+  // M5: true re-run idempotency — run on already-migrated state preserves data, no throw
+  it('M5: re-run after full migration is a clean no-op that preserves data', async () => {
+    const sidecarDir = path.join(devflowDir, 'sidecar');
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(sidecarDir, { recursive: true });
+    await fs.writeFile(
+      path.join(sidecarDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: false, decisions: true, knowledge: true }),
+      'utf-8',
+    );
+    await fs.writeFile(path.join(sidecarDir, 'learning.abc.json'), '{"type":"learning"}', 'utf-8');
+
+    // First run: migrates sidecar/ → dream/
+    await getMigration().run(makeCtx());
+
+    // Confirm first run succeeded
+    await expect(fs.access(sidecarDir)).rejects.toThrow(); // sidecar/ removed
+    const configAfterFirstRun = JSON.parse(await fs.readFile(path.join(dreamDir, 'config.json'), 'utf-8'));
+    expect(configAfterFirstRun.learning).toBe(false);
+
+    // Second run: sidecar/ no longer exists — should be a no-op, not throw
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    // dream/ data preserved exactly as the first run left it
+    const configAfterSecondRun = JSON.parse(await fs.readFile(path.join(dreamDir, 'config.json'), 'utf-8'));
+    expect(configAfterSecondRun.learning).toBe(false);
+    const markerContent = await fs.readFile(path.join(dreamDir, 'learning.abc.json'), 'utf-8');
+    expect(markerContent).toBe('{"type":"learning"}');
+  });
+
+  // M6: partial-failure resume — config moved but markers remain; second run completes migration
+  it('M6: handles partial state — config already in dream/, remaining sidecar markers are moved', async () => {
+    const sidecarDir = path.join(devflowDir, 'sidecar');
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(sidecarDir, { recursive: true });
+    await fs.mkdir(dreamDir, { recursive: true });
+
+    // Simulate partial migration: config.json was already moved to dream/, but
+    // sidecar/ still exists with residual markers that were not yet moved.
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: false, decisions: true, knowledge: true }),
+      'utf-8',
+    );
+    await fs.writeFile(path.join(sidecarDir, 'memory.abc.json'), '{"ts":42}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // Residual marker should be moved to dream/
+    await expect(fs.access(path.join(dreamDir, 'memory.abc.json'))).resolves.toBeUndefined();
+    const movedMarker = await fs.readFile(path.join(dreamDir, 'memory.abc.json'), 'utf-8');
+    expect(movedMarker).toBe('{"ts":42}');
+
+    // sidecar/ should be removed after the run
+    await expect(fs.access(sidecarDir)).rejects.toThrow();
+
+    // dream/config.json content preserved (no overwrite from absent sidecar/config.json)
+    const config = JSON.parse(await fs.readFile(path.join(dreamDir, 'config.json'), 'utf-8'));
+    expect(config.learning).toBe(false);
+  });
+
   // Registry test: migration is registered with correct metadata
   it('is registered in MIGRATIONS with per-project scope', () => {
     const m = MIGRATIONS.find(m => m.id === 'rename-sidecar-to-dream-v1');
