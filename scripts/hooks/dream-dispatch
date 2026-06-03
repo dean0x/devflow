@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Sidecar System: sidecar-dispatch (UserPromptSubmit Hook)
+# Dream System: dream-dispatch (UserPromptSubmit Hook)
 # Capture-only: appends the user turn to .devflow/memory/.pending-turns.jsonl.
 # Marker collection and directive emission have moved to session-start-context (Section 2).
 
@@ -16,9 +16,9 @@ if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then dbg "EXIT: bg_knowledge";
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/hook-bootstrap" "sidecar-dispatch"
+source "$SCRIPT_DIR/hook-bootstrap" "dream-dispatch"
 
-source "$SCRIPT_DIR/json-parse" || { echo "sidecar-dispatch: failed to source json-parse" >&2; exit 1; }
+source "$SCRIPT_DIR/json-parse" || { echo "dream-dispatch: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 INPUT=$(cat)
@@ -35,16 +35,20 @@ devflow_debug_set_cwd "$CWD"
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+DREAM_DIR="$DEVFLOW_DIR/dream"
 
 # Normal logging
-source "$SCRIPT_DIR/hook-log-init" "sidecar-dispatch"
+source "$SCRIPT_DIR/hook-log-init" "dream-dispatch"
 
-# Read sidecar config — memory:false skips user turn capture
-SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+# Read dream config — memory:false skips user turn capture
+# TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+DREAM_CONFIG="$DREAM_DIR/config.json"
+if [ ! -f "$DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
+  DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
+fi
 MEMORY_ENABLED="true"
-if [ -f "$SIDECAR_CONFIG" ]; then
-  MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
+if [ -f "$DREAM_CONFIG" ]; then
+  MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
 fi
 
 dbg "memory=$MEMORY_ENABLED"

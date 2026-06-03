@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Sidecar System: sidecar-capture (Stop Hook)
+# Dream System: dream-capture (Stop Hook)
 # Captures assistant responses to .devflow/memory/.pending-turns.jsonl queue.
-# Writes .devflow/sidecar/memory.json marker when throttle has expired (>2 min).
+# Writes .devflow/dream/memory.json marker when throttle has expired (>2 min).
 # On failure: does nothing (stale memory is better than fake data).
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
@@ -18,10 +18,10 @@ if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then dbg "EXIT: bg_knowledge";
 # Resolve script directory once
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/hook-bootstrap" "sidecar-capture"
+source "$SCRIPT_DIR/hook-bootstrap" "dream-capture"
 
 # JSON parsing (jq with node fallback)
-source "$SCRIPT_DIR/json-parse" || { echo "sidecar-capture: failed to source json-parse" >&2; exit 1; }
+source "$SCRIPT_DIR/json-parse" || { echo "dream-capture: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 dbg "json available, has_jq=$_HAS_JQ"
@@ -53,14 +53,18 @@ dbg "ASSISTANT_MSG length=${#ASSISTANT_MSG}"
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+DREAM_DIR="$DEVFLOW_DIR/dream"
 
-# Read sidecar config — memory:false gates memory-specific sections only.
+# Read dream config — memory:false gates memory-specific sections only.
 # The decisions usage scanner runs independently of memory state.
-SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+# TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+DREAM_CONFIG="$DREAM_DIR/config.json"
+if [ ! -f "$DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
+  DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
+fi
 MEMORY_ENABLED="true"
-if [ -f "$SIDECAR_CONFIG" ]; then
-  MEMORY_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "memory" "true")
+if [ -f "$DREAM_CONFIG" ]; then
+  MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
 fi
 
 dbg "MEMORY_ENABLED=$MEMORY_ENABLED"
@@ -88,7 +92,7 @@ if [ -f "$SCANNER" ] && [ ! -f "$DEVFLOW_DIR/decisions/.disabled" ]; then
   fi
 fi
 
-# --- Memory-specific sections (gated by memory:false in sidecar config) ---
+# --- Memory-specific sections (gated by memory:false in dream config) ---
 if [ "$MEMORY_ENABLED" = "false" ]; then
   dbg "EXIT: memory disabled"
   exit 0
@@ -96,13 +100,13 @@ fi
 
 # Logging (needs CWD and memory-enabled path — source after memory gate so log-paths
 # subprocess overhead (~15-20ms) is only paid when memory is actually enabled)
-source "$SCRIPT_DIR/hook-log-init" "sidecar-capture"
+source "$SCRIPT_DIR/hook-log-init" "dream-capture"
 
 # Auto-create .devflow/ and ensure .gitignore entries
 source "$SCRIPT_DIR/ensure-devflow-init" "$CWD" || exit 0
 
-source "$SCRIPT_DIR/get-mtime" || { echo "sidecar-capture: failed to source get-mtime" >&2; exit 1; }
-source "$SCRIPT_DIR/sidecar-lock" || { echo "sidecar-capture: failed to source sidecar-lock" >&2; exit 1; }
+source "$SCRIPT_DIR/get-mtime" || { echo "dream-capture: failed to source get-mtime" >&2; exit 1; }
+source "$SCRIPT_DIR/dream-lock" || { echo "dream-capture: failed to source dream-lock" >&2; exit 1; }
 
 # --- Append to queue ---
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
@@ -128,14 +132,14 @@ if [ -f "$QUEUE_FILE" ]; then
   LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
   if [ "$LINE_COUNT" -gt 200 ]; then
     _QUEUE_LOCK="$MEMORY_DIR/.pending-turns.lock"
-    if sidecar_lock_acquire "$_QUEUE_LOCK" 2; then
+    if dream_lock_acquire "$_QUEUE_LOCK" 2; then
       LINE_COUNT=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
       if [ "$LINE_COUNT" -gt 200 ]; then
         _TRUNC_TMP="$QUEUE_FILE.tmp.$$" && tail -100 "$QUEUE_FILE" > "$_TRUNC_TMP" && mv "$_TRUNC_TMP" "$QUEUE_FILE" || rm -f "$_TRUNC_TMP"
         log "Queue overflow: truncated from $LINE_COUNT to 100 lines"
         dbg "Queue overflow: truncated from $LINE_COUNT to 100 lines"
       fi
-      sidecar_lock_release "$_QUEUE_LOCK"
+      dream_lock_release "$_QUEUE_LOCK"
     fi
   fi
 fi
@@ -144,9 +148,9 @@ log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
 
 # --- Write memory marker if throttle expired ---
 # Skip if a .processing file already exists (in-flight update)
-PROCESSING_MARKER="$SIDECAR_DIR/memory.processing"
+PROCESSING_MARKER="$DREAM_DIR/memory.processing"
 if [ -f "$PROCESSING_MARKER" ]; then
-  log "Throttled: memory.processing exists (in-flight sidecar update)"
+  log "Throttled: memory.processing exists (in-flight dream update)"
   dbg "EXIT: memory.processing exists"
   exit 0
 fi
@@ -171,9 +175,9 @@ fi
 dbg "Throttle passed: AGE=${AGE}s >= 120s — writing memory marker"
 
 # Write memory marker
-mkdir -p "$SIDECAR_DIR"
+mkdir -p "$DREAM_DIR"
 
-_MEM_TMP="$SIDECAR_DIR/memory.json.tmp.$$"
+_MEM_TMP="$DREAM_DIR/memory.json.tmp.$$"
 if [ "$_HAS_JQ" = "true" ]; then
   jq -n \
     --arg pendingTurnsFile "$QUEUE_FILE" \
@@ -181,7 +185,7 @@ if [ "$_HAS_JQ" = "true" ]; then
     --arg model "haiku" \
     --argjson timestamp "$NOW" \
     '{pendingTurnsFile: $pendingTurnsFile, existingMemoryFile: $existingMemoryFile, model: $model, timestamp: $timestamp}' \
-    > "$_MEM_TMP" && mv "$_MEM_TMP" "$SIDECAR_DIR/memory.json" || rm -f "$_MEM_TMP"
+    > "$_MEM_TMP" && mv "$_MEM_TMP" "$DREAM_DIR/memory.json" || rm -f "$_MEM_TMP"
 else
   node -e "
     process.stdout.write(JSON.stringify({
@@ -190,10 +194,10 @@ else
       model: 'haiku',
       timestamp: parseInt(process.argv[3])
     }) + '\n')
-  " -- "$QUEUE_FILE" "$WORKING_MEMORY" "$NOW" > "$_MEM_TMP" && mv "$_MEM_TMP" "$SIDECAR_DIR/memory.json" || rm -f "$_MEM_TMP"
+  " -- "$QUEUE_FILE" "$WORKING_MEMORY" "$NOW" > "$_MEM_TMP" && mv "$_MEM_TMP" "$DREAM_DIR/memory.json" || rm -f "$_MEM_TMP"
 fi
 
-log "Wrote memory marker: $SIDECAR_DIR/memory.json"
+log "Wrote memory marker: $DREAM_DIR/memory.json"
 dbg "=== HOOK COMPLETE ==="
 
 exit 0

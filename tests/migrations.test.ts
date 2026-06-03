@@ -722,7 +722,7 @@ describe('consolidate-to-devflow-dir migration', () => {
     const content = await fs.readFile(gitignorePath, 'utf-8');
     // Spot-check key entries from DEVFLOW_GITIGNORE_CONTENT
     expect(content).toContain('memory/');
-    expect(content).toContain('sidecar/');
+    expect(content).toContain('dream/');
     expect(content).toContain('learning/learning-log.jsonl');
     expect(content).toContain('decisions/decisions-log.jsonl');
     expect(content).toContain('features/.knowledge.lock/');

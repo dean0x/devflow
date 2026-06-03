@@ -1,7 +1,7 @@
 #!/bin/bash
 # mkdir-based locking for macOS bash 3.2 (no flock)
 
-sidecar_lock_acquire() {
+dream_lock_acquire() {
   local lock_dir="$1"
   local timeout="${2:-3}"
   local stale_threshold=30
@@ -26,6 +26,6 @@ sidecar_lock_acquire() {
   return 1
 }
 
-sidecar_lock_release() {
+dream_lock_release() {
   rmdir "$1" 2>/dev/null || true
 }

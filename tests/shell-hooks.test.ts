@@ -2448,7 +2448,7 @@ describe('session-start-context pending-work directive', () => {
 
     const parsed = JSON.parse(stdout.trim());
     const context = parsed.hookSpecificOutput.additionalContext;
-    expect(context).toContain('SIDECAR MAINTENANCE');
+    expect(context).toContain('DREAM MAINTENANCE');
     expect(context).toContain('learning');
     expect(context).toContain('decisions');
   });
@@ -2471,7 +2471,7 @@ describe('session-start-context pending-work directive', () => {
 
     const parsed = JSON.parse(stdout.trim());
     const context = parsed.hookSpecificOutput.additionalContext;
-    expect(context).toContain('SIDECAR MAINTENANCE');
+    expect(context).toContain('DREAM MAINTENANCE');
     expect(context).toContain('learning');
     // The .processing should have been renamed to .json
     expect(fs.existsSync(procFile)).toBe(false);

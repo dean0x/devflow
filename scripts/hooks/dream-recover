@@ -1,19 +1,19 @@
 #!/bin/bash
-# Sidecar helper: sidecar-recover (sourced helper)
+# Dream helper: dream-recover (sourced helper)
 # Recovers stale .processing markers back to .json for retry.
 #
-# Source this file to get the sidecar_recover_stale function.
+# Source this file to get the dream_recover_stale function.
 #
-# Function: sidecar_recover_stale SIDECAR_DIR MEMORY_DIR
+# Function: dream_recover_stale DREAM_DIR MEMORY_DIR
 #
 # Inputs (positional args):
-#   $1  SIDECAR_DIR — path to .devflow/sidecar/
-#   $2  MEMORY_DIR  — path to .devflow/memory/ (for pending-turns.processing recovery)
+#   $1  DREAM_DIR  — path to .devflow/dream/
+#   $2  MEMORY_DIR — path to .devflow/memory/ (for pending-turns.processing recovery)
 #
 # Outputs (exported variable):
 #   JUST_RECOVERED — space-prefixed space-separated list of full basenames (without .processing)
 #                    that were recovered in this invocation.
-#                    Consumed by sidecar_collect_tasks to preserve .retries files.
+#                    Consumed by dream_collect_tasks to preserve .retries files.
 #
 # Behaviour:
 #   - PROC_LIMIT=10: cap on .processing files examined per run.
@@ -42,8 +42,8 @@
 #   actively-running processor.
 #
 # D56b: JUST_RECOVERED guard.
-#   When sidecar_recover_stale renames a .processing back to .json, it records
-#   the basename in JUST_RECOVERED. sidecar_collect_tasks reads this list and
+#   When dream_recover_stale renames a .processing back to .json, it records
+#   the basename in JUST_RECOVERED. dream_collect_tasks reads this list and
 #   preserves the existing .retries counter for recovered markers instead of
 #   resetting it. Without this guard, a marker that has failed 2/3 times would
 #   have its counter silently reset to 0 on recovery, defeating MAX_RETRIES.
@@ -55,20 +55,20 @@
 #   not already exist — this prevents clobbering a fresh .jsonl that a concurrent
 #   session may have written while the prior session's .processing was stale.
 
-# JUST_RECOVERED is the output variable — consumed by sidecar_collect_tasks
+# JUST_RECOVERED is the output variable — consumed by dream_collect_tasks
 JUST_RECOVERED=""
 
-# _sidecar_stale_threshold TYPE → echoes threshold in seconds for that marker type
-_sidecar_stale_threshold() {
+# _dream_stale_threshold TYPE → echoes threshold in seconds for that marker type
+_dream_stale_threshold() {
   case "${1:-}" in
     memory) echo "300" ;;
     *)      echo "1800" ;;
   esac
 }
 
-sidecar_recover_stale() {
-  local sidecar_dir="${1:?sidecar_recover_stale: sidecar_dir required}"
-  local memory_dir="${2:?sidecar_recover_stale: memory_dir required}"
+dream_recover_stale() {
+  local dream_dir="${1:?dream_recover_stale: dream_dir required}"
+  local memory_dir="${2:?dream_recover_stale: memory_dir required}"
 
   JUST_RECOVERED=""
 
@@ -76,8 +76,8 @@ sidecar_recover_stale() {
   now=$(date +%s)
 
   # --- Clean up .failed markers older than 24h ---
-  if compgen -G "$sidecar_dir/*.failed" > /dev/null 2>&1; then
-    for _failed_file in "$sidecar_dir"/*.failed; do
+  if compgen -G "$dream_dir/*.failed" > /dev/null 2>&1; then
+    for _failed_file in "$dream_dir"/*.failed; do
       [ -f "$_failed_file" ] || continue
       local _failed_mtime
       _failed_mtime=$(get_mtime "$_failed_file" 2>/dev/null || true)
@@ -85,19 +85,19 @@ sidecar_recover_stale() {
       local _failed_age=$(( now - _failed_mtime ))
       if [ "$_failed_age" -gt 86400 ]; then
         rm -f "$_failed_file" 2>/dev/null || true
-        dbg "sidecar_recover_stale: removed old .failed: $(basename "$_failed_file")"
+        dbg "dream_recover_stale: removed old .failed: $(basename "$_failed_file")"
       fi
     done
   fi
 
   # --- Recover stale .processing markers ---
-  if ! compgen -G "$sidecar_dir/*.processing" > /dev/null 2>&1; then
-    dbg "sidecar_recover_stale: no .processing markers"
+  if ! compgen -G "$dream_dir/*.processing" > /dev/null 2>&1; then
+    dbg "dream_recover_stale: no .processing markers"
   else
     local proc_count=0
     local proc_limit=10
     local max_retries=3
-    for _proc_file in "$sidecar_dir"/*.processing; do
+    for _proc_file in "$dream_dir"/*.processing; do
       [ -f "$_proc_file" ] || continue
       proc_count=$(( proc_count + 1 ))
       [ "$proc_count" -gt "$proc_limit" ] && break
@@ -117,7 +117,7 @@ sidecar_recover_stale() {
       esac
 
       local _threshold
-      _threshold=$(_sidecar_stale_threshold "$_proc_type")
+      _threshold=$(_dream_stale_threshold "$_proc_type")
 
       if [ "$_proc_age" -gt "$_threshold" ]; then
         local _base="${_proc_file%.processing}"
@@ -132,14 +132,14 @@ sidecar_recover_stale() {
           # Too many retries — mark as permanently failed
           mv "$_proc_file" "${_base}.failed" 2>/dev/null || true
           rm -f "$_retry_file" 2>/dev/null || true
-          dbg "sidecar_recover_stale: permanently failed after $_retry_count retries: $(basename "$_base")"
+          dbg "dream_recover_stale: permanently failed after $_retry_count retries: $(basename "$_base")"
           log "Stale marker permanently failed after $_retry_count retries: $(basename "$_base")"
         else
           # Bump retry counter and recover back to .json
           echo $(( _retry_count + 1 )) > "$_retry_file"
           mv "$_proc_file" "${_base}.json" 2>/dev/null || true
           JUST_RECOVERED="${JUST_RECOVERED} ${_proc_basename}"
-          dbg "sidecar_recover_stale: recovered (retry $(( _retry_count + 1 ))/$max_retries): $(basename "$_base")"
+          dbg "dream_recover_stale: recovered (retry $(( _retry_count + 1 ))/$max_retries): $(basename "$_base")"
           log "Stale marker recovered (retry $(( _retry_count + 1 ))/$max_retries): $(basename "$_base")"
         fi
       fi
@@ -155,16 +155,16 @@ sidecar_recover_stale() {
     _pt_mtime="${_pt_mtime:-0}"
     local _pt_age=$(( now - _pt_mtime ))
     local _pt_threshold
-    _pt_threshold=$(_sidecar_stale_threshold "memory")
+    _pt_threshold=$(_dream_stale_threshold "memory")
     if [ "$_pt_age" -gt "$_pt_threshold" ]; then
       if [ ! -f "$_pt_jsonl" ]; then
         # Safe to recover — no .jsonl exists to be clobbered
         mv "$_pt_proc" "$_pt_jsonl" 2>/dev/null || true
-        dbg "sidecar_recover_stale: recovered orphaned .pending-turns.processing → .pending-turns.jsonl"
+        dbg "dream_recover_stale: recovered orphaned .pending-turns.processing → .pending-turns.jsonl"
         log "Recovered orphaned .pending-turns.processing → .pending-turns.jsonl"
       else
         # .jsonl already exists — leave .processing for manual/next-run handling
-        dbg "sidecar_recover_stale: .pending-turns.processing stale but .pending-turns.jsonl exists — leaving for next run"
+        dbg "dream_recover_stale: .pending-turns.processing stale but .pending-turns.jsonl exists — leaving for next run"
         log "Stale .pending-turns.processing skipped: .pending-turns.jsonl already exists"
       fi
     fi

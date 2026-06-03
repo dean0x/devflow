@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Sidecar System: sidecar-evaluate (SessionEnd Hook)
+# Dream System: dream-evaluate (SessionEnd Hook)
 # Evaluates session-level features: learning batching, decisions detection, knowledge refresh.
-# Writes marker files to .devflow/sidecar/ for sidecar-dispatch to pick up.
+# Writes marker files to .devflow/dream/ for dream-dispatch to pick up.
 #
 # Orchestrator: sources eval-helpers + 4 feature modules after shared setup.
 
@@ -12,7 +12,7 @@ dbg() { :; }
 set -e
 
 # Feedback-loop guards — before hook-bootstrap to minimize background session overhead
-# Order: UPDATER, LEARNER, KNOWLEDGE — consistent with sidecar-capture and sidecar-dispatch.
+# Order: UPDATER, LEARNER, KNOWLEDGE — consistent with dream-capture and dream-dispatch.
 # dbg() is the pre-bootstrap no-op here; annotations are safe but silent without debug active.
 if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
 if [ "${DEVFLOW_BG_LEARNER:-}" = "1" ]; then dbg "EXIT: bg_learner"; exit 0; fi
@@ -20,9 +20,9 @@ if [ "${DEVFLOW_BG_KNOWLEDGE_REFRESH:-}" = "1" ]; then dbg "EXIT: bg_knowledge";
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-source "$SCRIPT_DIR/hook-bootstrap" "sidecar-evaluate"
+source "$SCRIPT_DIR/hook-bootstrap" "dream-evaluate"
 
-source "$SCRIPT_DIR/json-parse" || { echo "sidecar-evaluate: failed to source json-parse" >&2; exit 1; }
+source "$SCRIPT_DIR/json-parse" || { echo "dream-evaluate: failed to source json-parse" >&2; exit 1; }
 if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 INPUT=$(cat)
@@ -38,25 +38,29 @@ DEVFLOW_DIR="$CWD/.devflow"
 
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 FEATURES_DIR="$DEVFLOW_DIR/features"
-SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+DREAM_DIR="$DEVFLOW_DIR/dream"
 LEARNING_DIR="$DEVFLOW_DIR/learning"
 DECISIONS_DIR_DATA="$DEVFLOW_DIR/decisions"
 
-# Read sidecar config
-SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+# Read dream config
+# TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+DREAM_CONFIG="$DREAM_DIR/config.json"
+if [ ! -f "$DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
+  DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
+fi
 LEARNING_ENABLED="true"
 DECISIONS_ENABLED="true"
 KNOWLEDGE_ENABLED="true"
 
-if [ -f "$SIDECAR_CONFIG" ]; then
-  LEARNING_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "learning" "true")
-  DECISIONS_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "decisions" "true")
-  KNOWLEDGE_ENABLED=$(json_field_file "$SIDECAR_CONFIG" "knowledge" "true")
+if [ -f "$DREAM_CONFIG" ]; then
+  LEARNING_ENABLED=$(json_field_file "$DREAM_CONFIG" "learning" "true")
+  DECISIONS_ENABLED=$(json_field_file "$DREAM_CONFIG" "decisions" "true")
+  KNOWLEDGE_ENABLED=$(json_field_file "$DREAM_CONFIG" "knowledge" "true")
 fi
 
-# Log + sidecar-lock
-source "$SCRIPT_DIR/hook-log-init" "sidecar-evaluate"
-source "$SCRIPT_DIR/sidecar-lock" || { log "failed to source sidecar-lock"; exit 1; }
+# Log + dream-lock
+source "$SCRIPT_DIR/hook-log-init" "dream-evaluate"
+source "$SCRIPT_DIR/dream-lock" || { log "failed to source dream-lock"; exit 1; }
 
 log "SessionEnd hook triggered"
 dbg "LEARNING=$LEARNING_ENABLED DECISIONS=$DECISIONS_ENABLED KNOWLEDGE=$KNOWLEDGE_ENABLED"
@@ -105,7 +109,7 @@ else
   dbg "No transcript found"
 fi
 
-mkdir -p "$SIDECAR_DIR"
+mkdir -p "$DREAM_DIR"
 
 NOW=$(date +%s)
 TODAY=$(date '+%Y-%m-%d')
@@ -123,7 +127,7 @@ MARKER_SUFFIX="${SESSION_ID:-$$}"
 #   SESSION_DEEP   — "true" if session has ≥3 user turns
 #   FILTER_LIB     — absolute path to transcript-filter.cjs
 #   MARKER_SUFFIX  — suffix for per-session marker filenames (SESSION_ID or $$)
-#   SIDECAR_DIR    — absolute path to .devflow/sidecar/
+#   DREAM_DIR      — absolute path to .devflow/dream/
 #   LEARNING_DIR   — absolute path to .devflow/learning/
 #   DECISIONS_DIR_DATA — absolute path to .devflow/decisions/
 #   FEATURES_DIR   — absolute path to .devflow/features/

@@ -9,6 +9,9 @@ tools:
   - Edit
   - Glob
   - Grep
+skills:
+  - devflow:apply-decisions
+  - devflow:apply-feature-knowledge
 ---
 
 # Dream Agent

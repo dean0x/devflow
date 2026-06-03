@@ -1,24 +1,29 @@
 import { promises as fs } from 'fs';
 
-export interface SidecarData {
+export interface DreamData {
   referencedFiles?: string[];
   description?: string;
 }
 
 /**
- * Read a sidecar JSON file written by the Knowledge agent.
+ * @deprecated Use DreamData instead.
+ */
+export type SidecarData = DreamData;
+
+/**
+ * Read a dream JSON file written by the Knowledge agent.
  * Returns an empty object when the file is missing, corrupt, or non-object JSON.
  */
-export async function readSidecar(sidecarPath: string): Promise<SidecarData> {
+export async function readDream(dreamPath: string): Promise<DreamData> {
   let raw: unknown;
   try {
-    raw = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
+    raw = JSON.parse(await fs.readFile(dreamPath, 'utf8'));
   } catch {
     return {};
   }
   if (typeof raw !== 'object' || raw === null) return {};
   const data = raw as Record<string, unknown>;
-  const result: SidecarData = {};
+  const result: DreamData = {};
   if (Array.isArray(data.referencedFiles)) {
     result.referencedFiles = data.referencedFiles.filter(
       (f): f is string => typeof f === 'string'
@@ -28,4 +33,11 @@ export async function readSidecar(sidecarPath: string): Promise<SidecarData> {
     result.description = data.description;
   }
   return result;
+}
+
+/**
+ * @deprecated Use readDream instead.
+ */
+export async function readSidecar(sidecarPath: string): Promise<DreamData> {
+  return readDream(sidecarPath);
 }
