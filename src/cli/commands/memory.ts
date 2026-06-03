@@ -12,28 +12,28 @@ import {
   getPendingTurnsProcessingPath,
 } from '../utils/project-paths.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
-import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
+import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 
 /**
- * Map of hook event type → filename marker for the sidecar hooks.
+ * Map of hook event type → filename marker for the dream hooks.
  * Five hooks total: UserPromptSubmit, Stop, SessionEnd, SessionStart, PreCompact.
  */
 const MEMORY_HOOK_CONFIG: Record<string, string> = {
-  UserPromptSubmit: 'sidecar-dispatch',
-  Stop: 'sidecar-capture',
-  SessionEnd: 'sidecar-evaluate',
+  UserPromptSubmit: 'dream-dispatch',
+  Stop: 'dream-capture',
+  SessionEnd: 'dream-evaluate',
   SessionStart: 'session-start-memory',
   PreCompact: 'pre-compact-memory',
 };
 
 /**
- * Legacy hook filename markers from the pre-sidecar 8-hook system.
+ * Legacy hook filename markers from the pre-sidecar 8-hook system and the v3 sidecar→dream rename.
  * Used by removeMemoryHooks to clean up hooks from upgrading users.
  */
 const LEGACY_HOOK_MARKERS: Record<string, string[]> = {
-  UserPromptSubmit: ['prompt-capture-memory'],
-  Stop: ['stop-update-memory', 'stop-update-learning'],
-  SessionEnd: ['session-end-learning', 'session-end-decisions', 'session-end-knowledge-refresh'],
+  UserPromptSubmit: ['prompt-capture-memory', 'sidecar-dispatch'],
+  Stop: ['stop-update-memory', 'stop-update-learning', 'sidecar-capture'],
+  SessionEnd: ['session-end-learning', 'session-end-decisions', 'session-end-knowledge-refresh', 'sidecar-evaluate'],
 };
 
 /**
@@ -231,8 +231,8 @@ export async function cleanQueueFiles(projectPaths: string[]): Promise<{ cleaned
 
 export const memoryCommand = new Command('memory')
   .description('Enable, disable, or clean up working memory (session context preservation)')
-  .option('--enable', 'Enable working memory via sidecar config')
-  .option('--disable', 'Disable working memory via sidecar config')
+  .option('--enable', 'Enable working memory')
+  .option('--disable', 'Disable working memory')
   .option('--status', 'Show current state')
   .option('--clear', 'Clean up queue files from projects')
   .action(async (options: MemoryOptions) => {
@@ -357,16 +357,16 @@ export const memoryCommand = new Command('memory')
       if (alreadyEnabled) {
         p.log.info('Working memory already enabled');
       } else if (alreadyHasHooks) {
-        // Hooks are registered but sidecar config has memory:false — re-enable via config
-        p.log.success('Working memory enabled — sidecar config updated');
+        // Hooks are registered but config has memory:false — re-enable via config
+        p.log.success('Working memory enabled — configuration updated');
         p.log.info(color.dim('Session context will be automatically preserved across conversations'));
       } else {
         const updated = addMemoryHooks(settingsContent, devflowDir);
         await fs.writeFile(settingsPath, updated, 'utf-8');
-        p.log.success('Working memory enabled — sidecar hooks registered');
+        p.log.success('Working memory enabled — hooks registered');
         p.log.info(color.dim('Session context will be automatically preserved across conversations'));
       }
-      // Update sidecar config to enable memory feature
+      // Update config to enable memory feature
       if (gitRoot) {
         await updateFeature(gitRoot, 'memory', true);
       }
@@ -374,8 +374,8 @@ export const memoryCommand = new Command('memory')
     }
 
     if (options.disable) {
-      // In the sidecar system, hooks remain registered (shared with other features).
-      // Disable by writing memory: false to sidecar config only — hooks are not removed.
+      // Hooks remain registered (shared with other features).
+      // Disable by writing memory: false to config only — hooks are not removed.
       if (gitRoot) {
         await updateFeature(gitRoot, 'memory', false);
         // Drain orphaned queue files so stale turns don't process on re-enable
@@ -383,9 +383,9 @@ export const memoryCommand = new Command('memory')
           fs.unlink(getPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
           fs.unlink(getPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
         ]);
-        p.log.success('Working memory disabled — sidecar config updated');
+        p.log.success('Working memory disabled — configuration updated');
       } else {
-        p.log.warn('Could not resolve git root — sidecar config not updated');
+        p.log.warn('Could not resolve git root — configuration not updated');
       }
       return;
     }

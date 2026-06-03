@@ -27,9 +27,16 @@ export function getMemoryDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'memory');
 }
 
-/** .devflow/sidecar/ — sidecar state directory (promoted from .memory/.sidecar/) */
+/** .devflow/dream/ — dream state directory (renamed from .devflow/sidecar/) */
+export function getDreamDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream');
+}
+
+/**
+ * @deprecated Use getDreamDir instead. Kept as alias for migration compatibility.
+ */
 export function getSidecarDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'sidecar');
+  return getDreamDir(projectRoot);
 }
 
 /** .devflow/decisions/ — decisions and pitfalls subdirectory (promoted from .memory/decisions/) */
@@ -51,9 +58,16 @@ export function getDocsDir(projectRoot: string): string {
 // Sidecar files
 // ---------------------------------------------------------------------------
 
-/** .devflow/sidecar/config.json — sidecar feature config */
+/** .devflow/dream/config.json — dream feature config */
+export function getDreamConfigPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', 'config.json');
+}
+
+/**
+ * @deprecated Use getDreamConfigPath instead. Kept as alias for migration compatibility.
+ */
 export function getSidecarConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'sidecar', 'config.json');
+  return getDreamConfigPath(projectRoot);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,8 +304,8 @@ export function getDevflowGitignoreContent(): string {
   return `# Per-developer session state (fully transient)
 memory/
 
-# Sidecar dispatch system (fully transient)
-sidecar/
+# Dream dispatch system (fully transient)
+dream/
 
 # Per-developer observation logs and transient state
 learning/learning-log.jsonl

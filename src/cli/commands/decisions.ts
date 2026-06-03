@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
   getMemoryDir,
-  getSidecarDir,
+  getDreamDir,
   getDecisionsDir,
   getDecisionsConfigPath,
   getDecisionsLogPath,
@@ -16,7 +16,7 @@ import {
   getDecisionsBatchIdsPath,
   getDecisionsDisabledSentinel,
 } from '../utils/project-paths.js';
-import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
+import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 import { getGitRoot } from '../utils/git.js';
 import {
   type DecisionsEntryStatus,
@@ -48,8 +48,8 @@ interface DecisionsOptions {
 
 export const decisionsCommand = new Command('decisions')
   .description('Enable or disable decisions/pitfall learning (decision detection + knowledge base)')
-  .option('--enable', 'Enable decisions learning via sidecar config')
-  .option('--disable', 'Disable decisions learning via sidecar config')
+  .option('--enable', 'Enable decisions learning')
+  .option('--disable', 'Disable decisions learning')
   .option('--status', 'Show decisions status and observation counts')
   .option('--list', 'Show all decision/pitfall observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard for decisions.json')
@@ -294,20 +294,20 @@ export const decisionsCommand = new Command('decisions')
           await fs.rm(getDecisionsDir(process.cwd()), { recursive: true, force: true });
         } catch { /* best effort */ }
 
-        // Clean sidecar state files
-        const sidecarDir = getSidecarDir(process.cwd());
+        // Clean dream state files
+        const dreamDir = getDreamDir(process.cwd());
         for (const f of ['.decisions-runs-today']) {
-          try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* may not exist */ }
+          try { await fs.unlink(path.join(dreamDir, f)); } catch { /* may not exist */ }
         }
-        // Clean sidecar decisions markers
+        // Clean dream decisions markers
         try {
-          const sidecarFiles = await fs.readdir(sidecarDir);
-          for (const f of sidecarFiles) {
+          const dreamFiles = await fs.readdir(dreamDir);
+          for (const f of dreamFiles) {
             if (f.startsWith('decisions.') && f.endsWith('.json')) {
-              try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* ignore */ }
+              try { await fs.unlink(path.join(dreamDir, f)); } catch { /* ignore */ }
             }
           }
-        } catch { /* sidecar dir may not exist */ }
+        } catch { /* dream dir may not exist */ }
 
         p.log.success(`Reset complete — removed ${removed} file(s).`);
       } finally {
@@ -350,10 +350,10 @@ export const decisionsCommand = new Command('decisions')
         try {
           await fs.unlink(getDecisionsDisabledSentinel(gitRoot));
         } catch { /* may not exist */ }
-        p.log.success('Decisions learning enabled — sidecar config updated');
+        p.log.success('Decisions learning enabled — configuration updated');
         p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
       } else {
-        p.log.warn('Could not resolve git root — sidecar config not updated');
+        p.log.warn('Could not resolve git root — configuration not updated');
       }
       return;
     }
@@ -366,9 +366,9 @@ export const decisionsCommand = new Command('decisions')
         const decisionsDir = getDecisionsDir(gitRoot);
         await fs.mkdir(decisionsDir, { recursive: true });
         await fs.writeFile(getDecisionsDisabledSentinel(gitRoot), '', 'utf-8');
-        p.log.success('Decisions learning disabled — sidecar config updated');
+        p.log.success('Decisions learning disabled — configuration updated');
       } else {
-        p.log.warn('Could not resolve git root — sidecar config not updated');
+        p.log.warn('Could not resolve git root — configuration not updated');
       }
       return;
     }

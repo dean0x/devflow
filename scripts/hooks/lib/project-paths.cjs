@@ -26,9 +26,16 @@ function getMemoryDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'memory');
 }
 
-/** .devflow/sidecar/ — sidecar state directory (promoted from .memory/.sidecar/) */
+/** .devflow/dream/ — dream state directory (renamed from .devflow/sidecar/) */
+function getDreamDir(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'dream');
+}
+
+/**
+ * @deprecated Use getDreamDir instead. Kept as alias for migration compatibility.
+ */
 function getSidecarDir(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'sidecar');
+  return getDreamDir(projectRoot);
 }
 
 /** .devflow/decisions/ — decisions and pitfalls subdirectory (promoted from .memory/decisions/) */
@@ -50,9 +57,16 @@ function getDocsDir(projectRoot) {
 // Sidecar files
 // ---------------------------------------------------------------------------
 
-/** .devflow/sidecar/config.json — sidecar feature config */
+/** .devflow/dream/config.json — dream feature config */
+function getDreamConfigPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'dream', 'config.json');
+}
+
+/**
+ * @deprecated Use getDreamConfigPath instead. Kept as alias for migration compatibility.
+ */
 function getSidecarConfigPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'sidecar', 'config.json');
+  return getDreamConfigPath(projectRoot);
 }
 
 // ---------------------------------------------------------------------------
@@ -287,8 +301,8 @@ function getDevflowGitignoreContent() {
   return `# Per-developer session state (fully transient)
 memory/
 
-# Sidecar dispatch system (fully transient)
-sidecar/
+# Dream dispatch system (fully transient)
+dream/
 
 # Per-developer observation logs and transient state
 learning/learning-log.jsonl
@@ -336,12 +350,14 @@ manifest.json
 module.exports = {
   // Core directories
   getMemoryDir,
-  getSidecarDir,
+  getDreamDir,
+  getSidecarDir,    // deprecated alias → getDreamDir
   getDecisionsDir,
   getFeaturesDir,
   getDocsDir,
-  // Sidecar files
-  getSidecarConfigPath,
+  // Dream files
+  getDreamConfigPath,
+  getSidecarConfigPath, // deprecated alias → getDreamConfigPath
   // Decisions files
   getDecisionsFilePath,
   getPitfallsFilePath,

@@ -2,7 +2,7 @@ import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
-import { readSidecar, type SidecarData } from './sidecar.js';
+import { readDream, type DreamData } from './dream.js';
 import { getDevFlowDirectory } from './paths.js';
 import { getKnowledgePath } from './project-paths.js';
 
@@ -37,20 +37,20 @@ export interface RunKnowledgeAgentOptions {
   slug: string;
   /** Prompt to pass to the Knowledge agent. */
   prompt: string;
-  /** Sidecar filename: '.create-result.json' or '.refresh-result.json' */
+  /** Dream sidecar filename: '.create-result.json' or '.refresh-result.json' */
   sidecarName: string;
 }
 
 export interface RunKnowledgeAgentResult {
-  sidecar: SidecarData;
+  sidecar: DreamData;
 }
 
 /**
- * Spawn the Knowledge agent via `claude -p`, then read and clean up the sidecar file.
+ * Spawn the Knowledge agent via `claude -p`, then read and clean up the dream sidecar file.
  *
- * The agent is expected to write a sidecar JSON file at
+ * The agent is expected to write a JSON file at
  * `.devflow/features/{slug}/{sidecarName}` with `referencedFiles` and optionally `description`.
- * If the sidecar is absent (agent failure), an empty SidecarData is returned.
+ * If the file is absent (agent failure), an empty DreamData is returned.
  *
  * Using async execFile keeps the event loop free so the clack spinner can
  * animate while the agent runs.
@@ -62,10 +62,10 @@ export interface RunKnowledgeAgentResult {
  */
 export async function runKnowledgeAgent(opts: RunKnowledgeAgentOptions): Promise<RunKnowledgeAgentResult> {
   const { worktreePath, slug, prompt, sidecarName } = opts;
-  // Build sidecar path in .devflow/features/{slug}/ (same directory as KNOWLEDGE.md)
+  // Build dream sidecar path in .devflow/features/{slug}/ (same directory as KNOWLEDGE.md)
   const sidecarPath = path.join(path.dirname(getKnowledgePath(worktreePath, slug)), sidecarName);
 
-  // Pre-clean any leftover sidecar from a previous run
+  // Pre-clean any leftover file from a previous run
   try { await fs.unlink(sidecarPath); } catch { /* doesn't exist — that's fine */ }
 
   // Spawn Knowledge agent (async — keeps event loop free for spinner animation)
@@ -79,10 +79,10 @@ export async function runKnowledgeAgent(opts: RunKnowledgeAgentOptions): Promise
     timeout: 300_000,
   });
 
-  // Read sidecar written by the agent (returns {} if missing/invalid)
-  const sidecar = await readSidecar(sidecarPath);
+  // Read dream sidecar written by the agent (returns {} if missing/invalid)
+  const sidecar = await readDream(sidecarPath);
 
-  // Post-clean — best effort; callers should not rely on the sidecar persisting
+  // Post-clean — best effort; callers should not rely on the file persisting
   try { await fs.unlink(sidecarPath); } catch { /* already cleaned or never written */ }
 
   return { sidecar };

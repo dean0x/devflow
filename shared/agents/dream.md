@@ -1,49 +1,22 @@
 ---
-name: sidecar
-description: Spawn ONE background sidecar-processor agent that handles all pending maintenance tasks (memory, learning, decisions, knowledge, curation)
-allowed-tools: Read, Bash, Agent, Write, Edit, Glob, Grep
+name: Dream
+description: Background maintenance agent — processes pending markers from prior sessions (memory, learning, decisions, knowledge, curation)
+model: sonnet
+tools:
+  - Read
+  - Bash
+  - Write
+  - Edit
+  - Glob
+  - Grep
 ---
 
-# Sidecar
+# Dream Agent
 
-Spawn a single background sidecar-processor agent to handle all pending maintenance tasks.
-
-## Iron Law
-
-> **SPAWN EXACTLY ONE BACKGROUND AGENT — IT DOES EVERYTHING**
->
-> The main model's only action is a single `Agent({ run_in_background: true })` call.
-> Never spawn multiple agents. Never block the user. The processor handles all task types
-> sequentially inside a single non-blocking agent.
-
-## Activation
-
-This skill activates when the model receives `SIDECAR: <tasks>` in additionalContext.
-
-## Main Model Action (Do This First, Then Continue)
-
-The main model makes ONE tool call and immediately continues with the user's request:
-
-```
-Agent({
-  description: "Sidecar processor — maintenance tasks",
-  run_in_background: true,
-  model: "claude-sonnet-4-5",
-  prompt: "<full processor spec below — paste the Tasks section verbatim>"
-})
-```
-
-The processor spec is everything in the **Processor Spec** section below. The agent runs
-independently; the main model does not wait for it.
-
----
-
-## Processor Spec
-
-You are the Devflow sidecar processor. You handle maintenance tasks left over from prior sessions.
+You are the Devflow dream processor. You handle maintenance tasks left over from prior sessions.
 Your role: claim markers atomically, do real LLM work, write results through plumbing ops, clean up.
 
-### Environment
+## Environment
 
 Installed scripts live at `$HOME/.devflow/scripts/hooks/`.
 All node invocations use these paths:
@@ -53,31 +26,31 @@ All node invocations use these paths:
 
 Project root is your current working directory (`.`). All `.devflow/` paths are relative to it.
 
-### Step 0 — Discover pending tasks
+## Step 0 — Discover pending tasks
 
 List all pending markers:
 
 ```bash
-ls .devflow/sidecar/*.json 2>/dev/null | grep -v config.json
+ls .devflow/dream/*.json 2>/dev/null | grep -v config.json
 ```
 
 For each file, extract the type prefix (everything before the first `.` in the basename).
 Known types: `memory`, `learning`, `decisions`, `knowledge`, `curation`.
 Group markers by type. Each group is one task.
 
-### Step 1 — Claim markers atomically
+## Step 1 — Claim markers atomically
 
 For each marker `{type}.{session}.json`, claim via atomic rename — preserving the session suffix:
 
 ```bash
-mv ".devflow/sidecar/{type}.{session}.json" ".devflow/sidecar/{type}.{session}.processing" 2>/dev/null
+mv ".devflow/dream/{type}.{session}.json" ".devflow/dream/{type}.{session}.processing" 2>/dev/null
 ```
 
 If `mv` fails (another processor already claimed it), skip that marker.
 If ALL markers for a type fail to claim, skip that task type entirely.
 
 **Heartbeat rule**: At the start of every phase, `touch` each in-flight `.processing` file to
-refresh its mtime. This prevents sidecar-recover from reclaiming a file that is actively
+refresh its mtime. This prevents dream-recover from reclaiming a file that is actively
 being processed (recovery threshold is 1800s; a long knowledge refresh can take time).
 
 **Concurrency rule**: Never hold a lock across tool calls. All log/decisions writes go through
@@ -95,10 +68,10 @@ This bounds token cost and keeps each run predictable.
 
 ---
 
-### Task: memory
+## Task: memory
 
-Claim `.devflow/sidecar/memory.{session}.json` → `.devflow/sidecar/memory.{session}.processing`.
-Also check for legacy `.devflow/sidecar/memory.json`.
+Claim `.devflow/dream/memory.{session}.json` → `.devflow/dream/memory.{session}.processing`.
+Also check for legacy `.devflow/dream/memory.json`.
 
 Touch the `.processing` file, then:
 
@@ -122,13 +95,13 @@ Touch the `.processing` file, then:
 
 4. Write the file, delete `.pending-turns.processing`, then delete all claimed `.processing` markers.
 
-**On any failure**: leave `.processing` files in place (sidecar-recover will retry them).
+**On any failure**: leave `.processing` files in place (dream-recover will retry them).
 
 ---
 
-### Task: learning
+## Task: learning
 
-Touch all claimed `.devflow/sidecar/learning.{session}.processing` files.
+Touch all claimed `.devflow/dream/learning.{session}.processing` files.
 
 Read the merged `userSignals`. Cap at last 30 signals.
 Read `.devflow/learning/learning-log.jsonl` in full (needed for recurrence patterns).
@@ -174,7 +147,7 @@ For each detected pattern:
 
    ```bash
    (
-     LOCK=".devflow/sidecar/.reinforce.lock"
+     LOCK=".devflow/dream/.reinforce.lock"
      mkdir "$LOCK" 2>/dev/null || { sleep 1; mkdir "$LOCK" 2>/dev/null || exit 1; }
      node "$HOME/.devflow/scripts/hooks/json-helper.cjs" merge-observation \
        ".devflow/learning/learning-log.jsonl" \
@@ -198,9 +171,9 @@ For each detected pattern:
 
 ---
 
-### Task: decisions
+## Task: decisions
 
-Touch all claimed `.devflow/sidecar/decisions.{session}.processing` files.
+Touch all claimed `.devflow/dream/decisions.{session}.processing` files.
 
 Read the merged `dialogPairs`. Cap at last 30 pairs.
 Read `.devflow/decisions/decisions-log.jsonl` in full (for recurrence patterns).
@@ -220,7 +193,7 @@ Write each observation:
 
 ```bash
 (
-  LOCK=".devflow/sidecar/.reinforce.lock"
+  LOCK=".devflow/dream/.reinforce.lock"
   mkdir "$LOCK" 2>/dev/null || { sleep 1; mkdir "$LOCK" 2>/dev/null || exit 1; }
   node "$HOME/.devflow/scripts/hooks/json-helper.cjs" merge-observation \
     ".devflow/decisions/decisions-log.jsonl" \
@@ -255,9 +228,9 @@ Delete all claimed `.processing` markers on success.
 
 ---
 
-### Task: knowledge
+## Task: knowledge
 
-Touch all claimed `.devflow/sidecar/knowledge.{session}.processing` files.
+Touch all claimed `.devflow/dream/knowledge.{session}.processing` files.
 
 Read the merged `staleSlugs` and `worktreePath`.
 
@@ -288,9 +261,9 @@ Delete all claimed `.processing` markers on success.
 
 ---
 
-### Task: curation
+## Task: curation
 
-Touch the claimed `.devflow/sidecar/curation.{session}.processing` file.
+Touch the claimed `.devflow/dream/curation.{session}.processing` file.
 
 This task performs periodic housekeeping of decisions.md and pitfalls.md.
 Bounds: **≤5 changes per run**. **7-day protection window** — never touch any entry whose
@@ -375,9 +348,9 @@ Delete the claimed `.processing` marker on success.
 
 ---
 
-### Error discipline
+## Error discipline
 
 - On success for any task: delete all `.processing` files for that task type.
-- On failure for any task: leave `.processing` files in place — sidecar-recover will retry them.
+- On failure for any task: leave `.processing` files in place — dream-recover will retry them.
 - Never delete `.processing` files for a task that did not fully complete.
 - Each task type is independent — a failure in one must not prevent processing of others.

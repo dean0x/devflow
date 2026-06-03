@@ -1,15 +1,15 @@
 #!/bin/bash
-# sidecar-evaluate: Knowledge evaluation module.
+# dream-evaluate: Knowledge evaluation module.
 # Checks for stale feature knowledge bases and writes a knowledge refresh marker.
-# Source from sidecar-evaluate orchestrator after eval-helpers.
+# Source from dream-evaluate orchestrator after eval-helpers.
 #
 # Requires (from orchestrator namespace):
-#   KNOWLEDGE_ENABLED, FEATURES_DIR, CWD, SIDECAR_DIR, NOW, MARKER_SUFFIX,
+#   KNOWLEDGE_ENABLED, FEATURES_DIR, CWD, DREAM_DIR, NOW, MARKER_SUFFIX,
 #   SCRIPT_DIR, _HAS_JQ, log(), dbg()
 
 : "${FEATURES_DIR:?eval-knowledge: FEATURES_DIR must be set by orchestrator}"
 : "${CWD:?eval-knowledge: CWD must be set by orchestrator}"
-: "${SIDECAR_DIR:?eval-knowledge: SIDECAR_DIR must be set by orchestrator}"
+: "${DREAM_DIR:?eval-knowledge: DREAM_DIR must be set by orchestrator}"
 : "${NOW:?eval-knowledge: NOW must be set by orchestrator}"
 : "${MARKER_SUFFIX:?eval-knowledge: MARKER_SUFFIX must be set by orchestrator}"
 : "${SCRIPT_DIR:?eval-knowledge: SCRIPT_DIR must be set by orchestrator}"
@@ -43,7 +43,7 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
       if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Knowledge stale_slugs=$(echo "$_KNOW_STALE_SLUGS" | wc -l | tr -d ' ')"; fi
       if [ -n "$_KNOW_STALE_SLUGS" ]; then
         # Write knowledge marker (per-session name for concurrency safety)
-        _KNOW_MARKER="$SIDECAR_DIR/knowledge.${MARKER_SUFFIX}.json"
+        _KNOW_MARKER="$DREAM_DIR/knowledge.${MARKER_SUFFIX}.json"
         _KNOW_TMP="${_KNOW_MARKER}.tmp.$$"
         if [ "$_HAS_JQ" = "true" ]; then
           _KNOW_STALE_ARRAY=$(echo "$_KNOW_STALE_SLUGS" | jq -R . | jq -s .)
@@ -60,7 +60,7 @@ if [ "$KNOWLEDGE_ENABLED" = "true" ]; then
           " -- "$_KNOW_STALE_SLUGS" "$CWD" "$NOW" > "$_KNOW_TMP" && mv "$_KNOW_TMP" "$_KNOW_MARKER" || rm -f "$_KNOW_TMP"
         fi
         # Optimistically update throttle marker so the stale-slug query is skipped
-        # on the next session end — the sidecar agent will do the actual refresh.
+        # on the next session end — the dream agent will do the actual refresh.
         echo "$NOW" > "$_KNOW_MARKER_FILE"
         log "Wrote knowledge marker: $(echo "$_KNOW_STALE_SLUGS" | wc -l | tr -d ' ') stale slug(s)"
         dbg "Wrote knowledge marker: $_KNOW_MARKER"

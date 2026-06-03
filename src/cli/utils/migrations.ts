@@ -561,6 +561,71 @@ const MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE: Migration<'per-project'> 
  * All IDs are append-only — never rename an existing ID or already-applied
  * machines will re-run the migration.
  */
+/**
+ * Per PF-002: config.json FIRST (rename out), then merge remaining entries so the
+ * skip-list never leaves config.json behind to block the final rmdir.
+ *
+ * Per PF-003: Migration runs before hook reinstall and before the config write in
+ * init.ts — the ordering is already correct; keep migration-first.
+ *
+ * Per ADR-001 EXCEPTION: A migration IS required here because .devflow/sidecar/config.json
+ * holds the primary feature-toggle source of truth, and a silent toggle-reset on the
+ * D37 edge case (project cloned after the global migration marker is set) would lose
+ * user config. Do NOT skip this migration.
+ */
+const MIGRATION_RENAME_SIDECAR_TO_DREAM: Migration<'per-project'> = {
+  id: 'rename-sidecar-to-dream-v1',
+  description: 'Rename .devflow/sidecar/ to .devflow/dream/ — v3 internal name change',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const sidecarDir = path.join(ctx.projectRoot, '.devflow', 'sidecar');
+    const dreamDir = path.join(ctx.projectRoot, '.devflow', 'dream');
+
+    // Idempotent skip — nothing to migrate
+    try {
+      await fs.access(sidecarDir);
+    } catch {
+      return { infos: [], warnings: [] };
+    }
+
+    // Ensure destination exists
+    await fs.mkdir(dreamDir, { recursive: true });
+
+    // 1. config.json FIRST (old wins — overwrite fresh default) per PF-002
+    const sidecarConfig = path.join(sidecarDir, 'config.json');
+    const dreamConfig = path.join(dreamDir, 'config.json');
+    try {
+      await fs.access(sidecarConfig);
+      // Old config exists — move it (overwriting any fresh default at destination)
+      try {
+        await fs.rename(sidecarConfig, dreamConfig);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EXDEV') {
+          // Cross-device: copy + delete
+          await fs.copyFile(sidecarConfig, dreamConfig);
+          await fs.unlink(sidecarConfig);
+        } else if (code !== 'ENOENT') {
+          throw err;
+        }
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw err;
+      // config.json absent — nothing to move
+    }
+
+    // 2. Move remaining contents (no-overwrite) — markers, .processing, lock dirs, etc.
+    await moveDirContents(sidecarDir, dreamDir, new Set(['config.json']));
+
+    // 3. Best-effort rmdir (sidecar dir may still contain a live .reinforce.lock/ —
+    //    NEVER lock the whole dir to avoid deadlocking a live processor per migration note)
+    try { await fs.rmdir(sidecarDir); } catch { /* non-empty or already removed */ }
+
+    return { infos: ['Renamed .devflow/sidecar/ → .devflow/dream/'], warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -570,6 +635,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_CLEANUP_STALE_WORKING_MEMORY,
   MIGRATION_SYNC_DEVFLOW_GITIGNORE,
   MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE,
+  MIGRATION_RENAME_SIDECAR_TO_DREAM,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

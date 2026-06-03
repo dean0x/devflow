@@ -610,18 +610,18 @@ describe('CLI stale-slugs (empty index)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// json-helper.cjs read-sidecar
+// json-helper.cjs read-dream
 // ---------------------------------------------------------------------------
 
 const JSON_HELPER_CJS = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
 
-describe('json-helper read-sidecar', () => {
+describe('json-helper read-dream', () => {
   it('returns parsed JSON array for valid sidecar with array field', () => {
     const realTmp = realpathSync(os.tmpdir());
     const sidecar = path.join(realTmp, `test-sidecar-${Date.now()}.json`);
     writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'] }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(JSON.parse(output.trim())).toEqual(['src/a.ts', 'src/b.ts']);
     } finally {
@@ -630,7 +630,7 @@ describe('json-helper read-sidecar', () => {
   });
 
   it('returns [] for missing file', () => {
-    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', '/nonexistent/path/file.json', 'referencedFiles'], { encoding: 'utf8' });
+    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', '/nonexistent/path/file.json', 'referencedFiles'], { encoding: 'utf8' });
     expect(output.trim()).toBe('[]');
   });
 
@@ -639,7 +639,7 @@ describe('json-helper read-sidecar', () => {
     const sidecar = path.join(realTmp, `test-sidecar-bad-${Date.now()}.json`);
     writeFileSync(sidecar, 'not-json');
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
@@ -652,7 +652,7 @@ describe('json-helper read-sidecar', () => {
     const sidecar = path.join(realTmp, `test-sidecar-string-${Date.now()}.json`);
     writeFileSync(sidecar, JSON.stringify({ description: 'Use when working on auth' }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'description'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'description'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('Use when working on auth');
     } finally {
@@ -665,7 +665,7 @@ describe('json-helper read-sidecar', () => {
     const sidecar = path.join(realTmp, `test-sidecar-noarray-${Date.now()}.json`);
     writeFileSync(sidecar, JSON.stringify({ referencedFiles: 42 }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
@@ -674,7 +674,7 @@ describe('json-helper read-sidecar', () => {
   });
 
   it('returns [] when args are missing', () => {
-    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar'], { encoding: 'utf8' });
+    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream'], { encoding: 'utf8' });
     expect(output.trim()).toBe('[]');
   });
 
@@ -683,7 +683,7 @@ describe('json-helper read-sidecar', () => {
     const sidecar = path.join(realTmp, `test-sidecar-disallowed-${Date.now()}.json`);
     writeFileSync(sidecar, JSON.stringify({ secret: 'password123' }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'secret'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'secret'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
@@ -698,7 +698,7 @@ describe('json-helper read-sidecar', () => {
     const otherDir = path.join(realTmp, `test-other-${Date.now()}`);
     mkdirSync(otherDir, { recursive: true });
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
         { encoding: 'utf8', cwd: otherDir });
       expect(output.trim()).toBe('[]');
     } finally {
@@ -761,7 +761,7 @@ describe('readSidecar', () => {
   });
 
   function writeTmp(content: string): string {
-    const f = path.join(os.tmpdir(), `test-read-sidecar-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    const f = path.join(os.tmpdir(), `test-read-dream-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
     writeFileSync(f, content);
     tmpFiles.push(f);
     return f;

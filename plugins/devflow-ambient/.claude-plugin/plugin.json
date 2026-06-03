@@ -27,7 +27,8 @@
     "resolver",
     "designer",
     "knowledge",
-    "researcher"
+    "researcher",
+    "dream"
   ],
   "skills": [
     "review-methodology",
@@ -48,7 +49,6 @@
     "gap-analysis",
     "design-review",
     "feature-knowledge",
-    "apply-feature-knowledge",
-    "sidecar"
+    "apply-feature-knowledge"
   ]
 }

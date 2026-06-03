@@ -30,7 +30,7 @@
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
 //   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
 //   decisions-usage-scan                  Scan session context for ADR/PF cite counts
-//   read-sidecar <file> <field>           Read field from sidecar JSON (allowed fields only; returns [] on any error)
+//   read-dream <file> <field>             Read field from dream JSON (allowed fields only; returns [] on any error)
 
 'use strict';
 
@@ -342,9 +342,9 @@ function parseArgs(argList) {
 if (require.main === module) {
 try {
   // Route to domain modules first; fall through to the main switch if not handled.
-  if (op === 'read-sidecar') {
-    const sidecarOps = require('./lib/sidecar-ops.cjs');
-    if (sidecarOps.handle(op, args, process.cwd())) {
+  if (op === 'read-dream') {
+    const dreamOps = require('./lib/dream-ops.cjs');
+    if (dreamOps.handle(op, args, process.cwd())) {
       process.exit(0);
     }
   }
@@ -605,8 +605,8 @@ try {
     // If the id is new, insert a new entry with LLM-provided fields verbatim.
     // D11: ID collision with different-type entry → suffix _b to avoid trampling.
     // D12: evidence array capped at 10 (FIFO).
-    // D53: merge-observation is locked EXTERNALLY by the caller (SKILL.md processor acquires/
-    // releases .devflow/sidecar/.reinforce.lock around the Bash subshell call), while
+    // D53: merge-observation is locked EXTERNALLY by the caller (dream agent acquires/
+    // releases .devflow/dream/.reinforce.lock around the Bash subshell call), while
     // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
     // domains — merge-observation itself never acquires a lock; it relies on the caller to
     // serialize concurrent writes. This is intentional: the subshell pattern in the processor

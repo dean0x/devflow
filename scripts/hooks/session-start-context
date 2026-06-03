@@ -37,18 +37,22 @@ CONTEXT=""
 
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-SIDECAR_DIR="$DEVFLOW_DIR/sidecar"
+DREAM_DIR="$DEVFLOW_DIR/dream"
 LEARNING_DIR="$DEVFLOW_DIR/learning"
 DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
 
-# Read sidecar config for feature state (primary source of truth)
-_SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
+# Read dream config for feature state (primary source of truth)
+# TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+_DREAM_CONFIG="$DREAM_DIR/config.json"
+if [ ! -f "$_DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
+  _DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
+fi
 _LEARNING_SIDECAR="true"
-if [ -f "$_SIDECAR_CONFIG" ]; then
-  _LEARNING_SIDECAR=$(json_field_file "$_SIDECAR_CONFIG" "learning" "true")
+if [ -f "$_DREAM_CONFIG" ]; then
+  _LEARNING_SIDECAR=$(json_field_file "$_DREAM_CONFIG" "learning" "true")
 fi
 
 dbg "LEARNING_SIDECAR=$_LEARNING_SIDECAR"
@@ -198,11 +202,11 @@ fi
 # Source helpers — soft-fail if absent (e.g., on older installs before rebuild).
 # All sourced helpers follow the no-set-e discipline and exit cleanly on failure.
 _SC2_HELPERS_OK="false"
-if [ -f "$SCRIPT_DIR/get-mtime" ] && [ -f "$SCRIPT_DIR/sidecar-recover" ] && [ -f "$SCRIPT_DIR/sidecar-collect-tasks" ]; then
+if [ -f "$SCRIPT_DIR/get-mtime" ] && [ -f "$SCRIPT_DIR/dream-recover" ] && [ -f "$SCRIPT_DIR/dream-collect-tasks" ]; then
   source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
-  source "$SCRIPT_DIR/sidecar-lock" 2>/dev/null || true
-  source "$SCRIPT_DIR/sidecar-recover" 2>/dev/null || true
-  source "$SCRIPT_DIR/sidecar-collect-tasks" 2>/dev/null || true
+  source "$SCRIPT_DIR/dream-lock" 2>/dev/null || true
+  source "$SCRIPT_DIR/dream-recover" 2>/dev/null || true
+  source "$SCRIPT_DIR/dream-collect-tasks" 2>/dev/null || true
   _SC2_HELPERS_OK="true"
 fi
 
@@ -214,12 +218,16 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   _SC2_DEC_EN="true"
   _SC2_KNOW_EN="true"
 
-  _SC2_SIDECAR_CONFIG="$SIDECAR_DIR/config.json"
-  if [ -f "$_SC2_SIDECAR_CONFIG" ]; then
-    _SC2_MEM_EN=$(json_field_file   "$_SC2_SIDECAR_CONFIG" "memory"    "true")
-    _SC2_LEARN_EN=$(json_field_file "$_SC2_SIDECAR_CONFIG" "learning"  "true")
-    _SC2_DEC_EN=$(json_field_file   "$_SC2_SIDECAR_CONFIG" "decisions" "true")
-    _SC2_KNOW_EN=$(json_field_file  "$_SC2_SIDECAR_CONFIG" "knowledge" "true")
+  # TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json is absent
+  _SC2_DREAM_CONFIG="$DREAM_DIR/config.json"
+  if [ ! -f "$_SC2_DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
+    _SC2_DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
+  fi
+  if [ -f "$_SC2_DREAM_CONFIG" ]; then
+    _SC2_MEM_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "memory"    "true")
+    _SC2_LEARN_EN=$(json_field_file "$_SC2_DREAM_CONFIG" "learning"  "true")
+    _SC2_DEC_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "decisions" "true")
+    _SC2_KNOW_EN=$(json_field_file  "$_SC2_DREAM_CONFIG" "knowledge" "true")
   fi
   # Sentinel overrides
   [ -f "$MEMORY_DIR/.working-memory-disabled" ] && _SC2_MEM_EN="false"
@@ -230,23 +238,23 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   dbg "Section2: mem=$_SC2_MEM_EN learn=$_SC2_LEARN_EN dec=$_SC2_DEC_EN know=$_SC2_KNOW_EN"
 
   # Step 1: recover stale .processing markers so they become collectable in step 2
-  if [ -d "$SIDECAR_DIR" ]; then
-    sidecar_recover_stale "$SIDECAR_DIR" "$MEMORY_DIR" || true
+  if [ -d "$DREAM_DIR" ]; then
+    dream_recover_stale "$DREAM_DIR" "$MEMORY_DIR" || true
   fi
 
   # Step 2: collect pending marker task types
-  sidecar_collect_tasks "$SIDECAR_DIR" "$_SC2_MEM_EN" "$_SC2_LEARN_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
+  dream_collect_tasks "$DREAM_DIR" "$_SC2_MEM_EN" "$_SC2_LEARN_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
 
   # Step 3: raw-queue bridge — union in memory task if .pending-turns.jsonl is non-empty
-  # even when no memory sidecar marker exists (queue written but marker not yet written).
+  # even when no memory dream marker exists (queue written but marker not yet written).
   if [ "$_SC2_MEM_EN" = "true" ] && [ -s "$MEMORY_DIR/.pending-turns.jsonl" ]; then
-    case ",$_SIDECAR_TASKS," in
+    case ",$_DREAM_TASKS," in
       *,memory,*) ;;  # already present — skip
       *)
-        if [ -n "$_SIDECAR_TASKS" ]; then
-          _SIDECAR_TASKS="memory,$_SIDECAR_TASKS"
+        if [ -n "$_DREAM_TASKS" ]; then
+          _DREAM_TASKS="memory,$_DREAM_TASKS"
         else
-          _SIDECAR_TASKS="memory"
+          _DREAM_TASKS="memory"
         fi
         dbg "Section2: added memory task via raw-queue bridge"
         ;;
@@ -254,8 +262,8 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   fi
 
   # Step 4: emit directive if tasks pending, subject to processor-spawn throttle
-  if [ -n "$_SIDECAR_TASKS" ]; then
-    _SC2_SPAWNED_AT_FILE="$SIDECAR_DIR/.processor-spawned-at"
+  if [ -n "$_DREAM_TASKS" ]; then
+    _SC2_SPAWNED_AT_FILE="$DREAM_DIR/.processor-spawned-at"
     _SC2_THROTTLE=120
     _SC2_EMIT="true"
     _SC2_NOW=$(date +%s)
@@ -267,21 +275,20 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
       if [ "$_SC2_SPAWN_AGE" -lt "$_SC2_THROTTLE" ]; then
         _SC2_EMIT="false"
         dbg "Section2: processor-spawn throttled (spawned ${_SC2_SPAWN_AGE}s ago)"
-        log "Sidecar processor-spawn throttled (${_SC2_SPAWN_AGE}s < ${_SC2_THROTTLE}s): tasks=$_SIDECAR_TASKS"
+        log "Dream processor-spawn throttled (${_SC2_SPAWN_AGE}s < ${_SC2_THROTTLE}s): tasks=$_DREAM_TASKS"
       fi
     fi
 
     if [ "$_SC2_EMIT" = "true" ]; then
       # Write/refresh .processor-spawned-at atomically
-      _SC2_SPAWN_TMP="$SIDECAR_DIR/.processor-spawned-at.tmp.$$"
+      _SC2_SPAWN_TMP="$DREAM_DIR/.processor-spawned-at.tmp.$$"
       printf '%s' "$_SC2_NOW" > "$_SC2_SPAWN_TMP" 2>/dev/null && mv "$_SC2_SPAWN_TMP" "$_SC2_SPAWNED_AT_FILE" 2>/dev/null || rm -f "$_SC2_SPAWN_TMP" 2>/dev/null || true
 
-      _SC2_DIRECTIVE="--- SIDECAR MAINTENANCE (pending from previous session) ---
-Pending background maintenance: ${_SIDECAR_TASKS}.
-FIRST ACTION, before responding to the user: load the devflow:sidecar skill and
-spawn ONE background sidecar-processor agent (run_in_background: true).
-Single non-blocking tool call. Do it now, then continue normally.
-Do not summarize or ask about this — just spawn the processor."
+      _SC2_DIRECTIVE="--- DREAM MAINTENANCE (pending from previous session) ---
+Pending background maintenance: ${_DREAM_TASKS}.
+FIRST ACTION: spawn ONE background agent —
+Agent(subagent_type=\"Dream\", run_in_background: true, prompt: \"Process pending maintenance markers in the cwd.\").
+Single non-blocking call. Do not narrate, summarize, or ask — just spawn it, then continue."
 
       if [ -n "$CONTEXT" ]; then
         CONTEXT="${CONTEXT}
@@ -290,11 +297,11 @@ ${_SC2_DIRECTIVE}"
       else
         CONTEXT="$_SC2_DIRECTIVE"
       fi
-      dbg "Section2: emitted sidecar directive (tasks=$_SIDECAR_TASKS)"
-      log "Sidecar pending-work directive emitted: tasks=$_SIDECAR_TASKS"
+      dbg "Section2: emitted dream directive (tasks=$_DREAM_TASKS)"
+      log "Dream pending-work directive emitted: tasks=$_DREAM_TASKS"
     fi
   else
-    dbg "Section2: no pending sidecar tasks"
+    dbg "Section2: no pending dream tasks"
   fi
 else
   dbg "Section2: helpers not available — skip"

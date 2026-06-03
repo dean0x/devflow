@@ -24,9 +24,9 @@ const HOOK_SCRIPTS = [
   'json-parse',
   'get-mtime',
   'ensure-devflow-init',
-  'sidecar-capture',
-  'sidecar-evaluate',
-  'sidecar-dispatch',
+  'dream-capture',
+  'dream-evaluate',
+  'dream-dispatch',
   'eval-helpers',
   'eval-reinforce',
   'eval-learning',
@@ -179,7 +179,7 @@ describe('debug-trace helper behaviors', () => {
 });
 
 const EVAL_HELPERS = path.join(HOOKS_DIR, 'eval-helpers');
-const SIDECAR_LOCK = path.join(HOOKS_DIR, 'sidecar-lock');
+const DREAM_LOCK = path.join(HOOKS_DIR, 'dream-lock');
 
 describe('eval-helpers: read_daily_cap', () => {
   it('returns 0 when counter file absent', () => {
@@ -239,7 +239,7 @@ describe('eval-helpers: atomic_increment_daily', () => {
     try {
       execSync(`bash -c '
         TODAY=$(date +%Y-%m-%d)
-        source "${SIDECAR_LOCK}"
+        source "${DREAM_LOCK}"
         source "${EVAL_HELPERS}"
         atomic_increment_daily "${counterFile}" "$TODAY"
       '`, { stdio: 'pipe' });
@@ -258,7 +258,7 @@ describe('eval-helpers: atomic_increment_daily', () => {
       fs.writeFileSync(counterFile, `${today}\t3\n`);
       execSync(`bash -c '
         TODAY=$(date +%Y-%m-%d)
-        source "${SIDECAR_LOCK}"
+        source "${DREAM_LOCK}"
         source "${EVAL_HELPERS}"
         atomic_increment_daily "${counterFile}" "$TODAY"
       '`, { stdio: 'pipe' });
@@ -334,7 +334,7 @@ describe('eval-helpers: _eval_release_lock', () => {
       expect(fs.existsSync(lockDir)).toBe(true);
 
       execSync(`bash -c '
-        source "${SIDECAR_LOCK}"
+        source "${DREAM_LOCK}"
         source "${EVAL_HELPERS}"
         _eval_release_lock "${lockDir}"
       '`, { stdio: 'pipe' });
@@ -351,7 +351,7 @@ describe('eval-helpers: _eval_release_lock', () => {
     try {
       expect(() => {
         execSync(`bash -c '
-          source "${SIDECAR_LOCK}"
+          source "${DREAM_LOCK}"
           source "${EVAL_HELPERS}"
           _eval_release_lock "${lockDir}"
         '`, { stdio: 'pipe' });
@@ -639,9 +639,9 @@ describe('json-parse wrapper', () => {
 });
 
 describe('working memory queue behavior', () => {
-  const STOP_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+  const STOP_HOOK = path.join(HOOKS_DIR, 'dream-capture');
   const PREAMBLE_HOOK = path.join(HOOKS_DIR, 'preamble');
-  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
+  const PROMPT_CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-dispatch');
 
   let tmpDir: string;
 
@@ -654,7 +654,7 @@ describe('working memory queue behavior', () => {
   });
 
   // Helper: write a fresh WORKING-MEMORY.md with an old mtime so the throttle passes.
-  // sidecar-capture throttles if WORKING-MEMORY.md was updated <120s ago.
+  // dream-capture throttles if WORKING-MEMORY.md was updated <120s ago.
   // We write the file then backdate its mtime to 10 minutes ago.
   function writeStaleWorkingMemory(tmpDir: string): void {
     const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
@@ -706,7 +706,7 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('sidecar-dispatch captures user prompt to queue', () => {
+  it('dream-dispatch captures user prompt to queue', () => {
     // Create .devflow/memory/ directory so capture is triggered
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
@@ -730,7 +730,7 @@ describe('working memory queue behavior', () => {
     expect(typeof entry.ts).toBe('number');
   });
 
-  it('sidecar-dispatch with missing .devflow/ — creates it via ensure-devflow-init, exit 0', () => {
+  it('dream-dispatch with missing .devflow/ — creates it via ensure-devflow-init, exit 0', () => {
     // tmpDir exists but has no .devflow/ subdirectory — ensure-devflow-init creates it
     const input = JSON.stringify({
       cwd: tmpDir,
@@ -813,7 +813,7 @@ describe('working memory queue behavior', () => {
 
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     const now = Math.floor(Date.now() / 1000);
-    // Pre-populate with user-only entries (from sidecar-dispatch)
+    // Pre-populate with user-only entries (from dream-dispatch)
     const userLines = Array.from({ length: 5 }, (_, i) =>
       JSON.stringify({ role: 'user', content: `user prompt ${i}`, ts: now + i }),
     );
@@ -984,13 +984,13 @@ describe('working memory queue behavior', () => {
 
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
-    // Step 1: sidecar-dispatch writes user turn
+    // Step 1: dream-dispatch writes user turn
     execSync(`bash "${PROMPT_CAPTURE_HOOK}"`, {
       input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', prompt: 'implement feature X' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // Step 2: sidecar-capture writes assistant turn
+    // Step 2: dream-capture writes assistant turn
     execSync(`bash "${STOP_HOOK}"`, {
       input: JSON.stringify({ cwd: tmpDir, session_id: 'test-fresh', last_assistant_message: 'done' }),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1006,7 +1006,7 @@ describe('working memory queue behavior', () => {
     expect(second.content).toBe('done');
   });
 
-  it('sidecar-dispatch truncates prompts longer than 2000 chars', () => {
+  it('dream-dispatch truncates prompts longer than 2000 chars', () => {
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     const longPrompt = 'a'.repeat(3000);
@@ -1028,7 +1028,7 @@ describe('working memory queue behavior', () => {
     expect(entry.content).toContain('[truncated]');
   });
 
-  it('sidecar-capture truncates assistant content longer than 2000 chars', () => {
+  it('dream-capture truncates assistant content longer than 2000 chars', () => {
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     // Write stale WORKING-MEMORY.md so throttle passes
     writeStaleWorkingMemory(tmpDir);
@@ -1052,7 +1052,7 @@ describe('working memory queue behavior', () => {
     expect(entry.content).toContain('[truncated]');
   });
 
-  it('sidecar-capture exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+  it('dream-capture exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     // Hook exits at line 11 before reading stdin, so don't pipe input — would race
@@ -1065,7 +1065,7 @@ describe('working memory queue behavior', () => {
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
-  it('sidecar-dispatch exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
+  it('dream-dispatch exits cleanly when DEVFLOW_BG_UPDATER=1', () => {
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
 
     expect(() => {
@@ -1589,7 +1589,7 @@ function createTranscript(
 }
 
 function createSidecarConfig(cwdDir: string, config: Record<string, boolean>): void {
-  const dir = path.join(cwdDir, '.devflow', 'sidecar');
+  const dir = path.join(cwdDir, '.devflow', 'dream');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config));
 }
@@ -1618,11 +1618,11 @@ function runHook(hookPath: string, input: object, homeDir: string): { stdout: st
 }
 
 // =============================================================================
-// sidecar-evaluate business logic
+// dream-evaluate business logic
 // =============================================================================
 
-describe('sidecar-evaluate business logic', () => {
-  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+describe('dream-evaluate business logic', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
 
   let tmpDir: string;
   let homeDir: string;
@@ -1648,7 +1648,7 @@ describe('sidecar-evaluate business logic', () => {
     expect(exitCode).toBe(0);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Evaluating learning');
@@ -1664,11 +1664,11 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).not.toContain('Evaluating learning');
@@ -1682,9 +1682,9 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'decisions.json'))).toBe(false);
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'decisions.json'))).toBe(false);
   });
 
   it('deep session (5 turns) proceeds with evaluation', () => {
@@ -1695,18 +1695,18 @@ describe('sidecar-evaluate business logic', () => {
     }, homeDir);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Session depth: 5 turns');
   });
 
   it('learning batch accumulation triggers at batch_size threshold', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
 
     // Pre-write 2 session IDs (batch_size defaults to 3)
-    const sessionCountFile = path.join(sidecarDir, '.learning-sessions');
+    const sessionCountFile = path.join(dreamDir, '.learning-sessions');
     fs.writeFileSync(sessionCountFile, 'session-a\nsession-b\n');
 
     // Create a deep transcript for session-c (the 3rd session)
@@ -1717,7 +1717,7 @@ describe('sidecar-evaluate business logic', () => {
     }, homeDir);
 
     // Batch complete: per-session learning marker should be written (learning.session-c.json)
-    const learningMarker = path.join(sidecarDir, 'learning.session-c.json');
+    const learningMarker = path.join(dreamDir, 'learning.session-c.json');
     expect(fs.existsSync(learningMarker)).toBe(true);
     const marker = JSON.parse(fs.readFileSync(learningMarker, 'utf-8'));
     expect(marker).toHaveProperty('userSignals');
@@ -1728,15 +1728,15 @@ describe('sidecar-evaluate business logic', () => {
   });
 
   it('learning daily cap blocks marker creation', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
 
     // Set daily cap to max
     const today = localDateString();
-    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\t5\n`);
+    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), `${today}\t5\n`);
 
     // Pre-fill batch to trigger
-    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
 
     createTranscript(homeDir, tmpDir, 5);
     runHook(EVALUATE_HOOK, {
@@ -1744,10 +1744,10 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('daily cap reached');
@@ -1762,11 +1762,11 @@ describe('sidecar-evaluate business logic', () => {
     fs.mkdirSync(learningDir, { recursive: true });
     fs.writeFileSync(path.join(learningDir, 'learning-log.jsonl'), logLines.join('\n') + '\n');
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
 
     // Pre-fill only 3 sessions (less than adaptive batch_size=5)
-    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
 
     createTranscript(homeDir, tmpDir, 5);
     runHook(EVALUATE_HOOK, {
@@ -1775,18 +1775,18 @@ describe('sidecar-evaluate business logic', () => {
     }, homeDir);
 
     // 4 sessions total (3 pre-existing + 1 new) < 5 adaptive threshold
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('4/5 sessions');
   });
 
   it('learning session dedup: same ID twice counted once', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
 
     createTranscript(homeDir, tmpDir, 5, 5, 'dup-session');
 
@@ -1794,7 +1794,7 @@ describe('sidecar-evaluate business logic', () => {
     runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
     runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
 
-    const sessionCountFile = path.join(sidecarDir, '.learning-sessions');
+    const sessionCountFile = path.join(dreamDir, '.learning-sessions');
     if (fs.existsSync(sessionCountFile)) {
       const lines = fs.readFileSync(sessionCountFile, 'utf-8').trim().split('\n').filter(Boolean);
       expect(lines).toHaveLength(1);
@@ -1808,9 +1808,9 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     // Per-session marker: decisions.test-session.json
-    const decisionsMarker = path.join(sidecarDir, 'decisions.test-session.json');
+    const decisionsMarker = path.join(dreamDir, 'decisions.test-session.json');
     expect(fs.existsSync(decisionsMarker)).toBe(true);
 
     const marker = JSON.parse(fs.readFileSync(decisionsMarker, 'utf-8'));
@@ -1836,11 +1836,11 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    expect(fs.existsSync(path.join(dreamDir, 'knowledge.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Knowledge throttled');
@@ -1857,11 +1857,11 @@ describe('sidecar-evaluate business logic', () => {
       session_id: 'test-session',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.json'))).toBe(false);
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    expect(fs.existsSync(path.join(dreamDir, 'knowledge.json'))).toBe(false);
 
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Knowledge disabled by sentinel');
@@ -1878,7 +1878,7 @@ describe('sidecar-evaluate business logic', () => {
 
     // The hook should still work via ls -t fallback
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Session depth');
@@ -1886,11 +1886,11 @@ describe('sidecar-evaluate business logic', () => {
 });
 
 // =============================================================================
-// sidecar-evaluate artifact reinforcement
+// dream-evaluate artifact reinforcement
 // =============================================================================
 
-describe('sidecar-evaluate artifact reinforcement', () => {
-  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+describe('dream-evaluate artifact reinforcement', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
 
   let tmpDir: string;
   let homeDir: string;
@@ -2007,7 +2007,7 @@ describe('sidecar-evaluate artifact reinforcement', () => {
 
     runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
 
-    const hookLog = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir), '.sidecar-evaluate.log');
+    const hookLog = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir), '.dream-evaluate.log');
     if (fs.existsSync(hookLog)) {
       const log = fs.readFileSync(hookLog, 'utf-8');
       expect(log).not.toContain('Reinforced');
@@ -2016,11 +2016,11 @@ describe('sidecar-evaluate artifact reinforcement', () => {
 });
 
 // =============================================================================
-// sidecar-evaluate read_daily_cap sanitization
+// dream-evaluate read_daily_cap sanitization
 // =============================================================================
 
-describe('sidecar-evaluate read_daily_cap sanitization', () => {
-  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+describe('dream-evaluate read_daily_cap sanitization', () => {
+  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
 
   let tmpDir: string;
   let homeDir: string;
@@ -2028,7 +2028,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
@@ -2039,13 +2039,13 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   });
 
   it('tab-less counter file does not crash and returns default', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     const today = localDateString();
     // Write date string with no tab separator — cut -f2 returns the whole line
-    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\n`);
+    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), `${today}\n`);
 
     // Pre-fill batch to trigger learning evaluation
-    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
 
     createTranscript(homeDir, tmpDir, 5);
     const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
@@ -2053,10 +2053,10 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   });
 
   it('empty counter file does not crash', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), '');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), '');
 
-    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
 
     createTranscript(homeDir, tmpDir, 5);
     const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
@@ -2064,12 +2064,12 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
   });
 
   it('non-numeric count field returns default', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     const today = localDateString();
-    fs.writeFileSync(path.join(sidecarDir, '.learning-runs-today'), `${today}\tabc\n`);
+    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), `${today}\tabc\n`);
 
     // Pre-fill batch to trigger
-    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
 
     createTranscript(homeDir, tmpDir, 5);
     const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
@@ -2077,7 +2077,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
     // The marker should still be written because cap defaults to 0 (not at max)
     // Per-session marker: learning.test-session.json
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.test-session.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.test-session.json'))).toBe(true);
   });
 
   it('non-numeric config values do not crash', () => {
@@ -2086,9 +2086,9 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
       JSON.stringify({ max_daily_runs: 'xyz', batch_size: 'abc' }),
     );
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     // Pre-fill enough sessions for any reasonable batch_size default (3)
-    fs.writeFileSync(path.join(sidecarDir, '.learning-sessions'), 'a\nb\nc\n');
+    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
 
     createTranscript(homeDir, tmpDir, 5);
     const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
@@ -2110,7 +2110,7 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 
     // Hook should have attempted knowledge evaluation (no crash from bad timestamp)
     const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.sidecar-evaluate.log');
+    const logFile = path.join(logDir, '.dream-evaluate.log');
     if (fs.existsSync(logFile)) {
       const log = fs.readFileSync(logFile, 'utf-8');
       // Either throttled (with sanitized timestamp near 0 → stale) or "no stale slugs"
@@ -2125,8 +2125,8 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
     createTranscript(homeDir, tmpDir, 5);
 
     // Deliberately do NOT create WORKING-MEMORY.md
-    // We call sidecar-capture (not sidecar-evaluate) for this one since it does the get_mtime check
-    const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+    // We call dream-capture (not dream-evaluate) for this one since it does the get_mtime check
+    const CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-capture');
     const exitCode = (() => {
       try {
         execSync(`bash "${CAPTURE_HOOK}"`, {
@@ -2144,36 +2144,36 @@ describe('sidecar-evaluate read_daily_cap sanitization', () => {
 });
 
 // =============================================================================
-// sidecar-recover stale marker recovery
+// dream-recover stale marker recovery
 // =============================================================================
 
-// Bash harness that stubs dbg/log, sources get-mtime + sidecar-recover, then
-// calls sidecar_recover_stale and echoes JUST_RECOVERED so tests can assert it.
-const SIDECAR_RECOVER = path.join(HOOKS_DIR, 'sidecar-recover');
+// Bash harness that stubs dbg/log, sources get-mtime + dream-recover, then
+// calls dream_recover_stale and echoes JUST_RECOVERED so tests can assert it.
+const DREAM_RECOVER = path.join(HOOKS_DIR, 'dream-recover');
 const GET_MTIME = path.join(HOOKS_DIR, 'get-mtime');
 
-function runRecover(sidecarDir: string, memoryDir: string): { justRecovered: string } {
+function runRecover(dreamDir: string, memoryDir: string): { justRecovered: string } {
   const result = execSync(`bash -c '
     dbg() { :; }
     log() { :; }
     source "${GET_MTIME}"
-    source "${SIDECAR_RECOVER}"
-    sidecar_recover_stale "${sidecarDir}" "${memoryDir}"
+    source "${DREAM_RECOVER}"
+    dream_recover_stale "${dreamDir}" "${memoryDir}"
     printf "%s" "$JUST_RECOVERED"
   '`, { stdio: 'pipe' }).toString();
   return { justRecovered: result };
 }
 
-describe('sidecar-recover stale marker recovery', () => {
+describe('dream-recover stale marker recovery', () => {
   let tmpDir: string;
-  let sidecarDir: string;
+  let dreamDir: string;
   let memoryDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-recover-test-'));
-    sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    dreamDir = path.join(tmpDir, '.devflow', 'dream');
     memoryDir = path.join(tmpDir, '.devflow', 'memory');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.mkdirSync(dreamDir, { recursive: true });
     fs.mkdirSync(memoryDir, { recursive: true });
   });
 
@@ -2181,124 +2181,124 @@ describe('sidecar-recover stale marker recovery', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  // sidecar-dispatch still handles the capture-only path — fresh .processing is
-  // left alone by sidecar-recover (it checks age, not presence).
+  // dream-dispatch still handles the capture-only path — fresh .processing is
+  // left alone by dream-recover (it checks age, not presence).
   it('fresh .processing left alone (age below threshold)', () => {
-    const procFile = path.join(sidecarDir, 'learning.processing');
+    const procFile = path.join(dreamDir, 'learning.processing');
     fs.writeFileSync(procFile, '{}');
     // mtime is current — well below 1800s threshold
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(procFile)).toBe(true);
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
   });
 
   it('stale .processing retried — renamed back to .json', () => {
-    const procFile = path.join(sidecarDir, 'learning.processing');
+    const procFile = path.join(dreamDir, 'learning.processing');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000); // older than 1800s threshold
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(true);
 
-    const retryFile = path.join(sidecarDir, 'learning.retries');
+    const retryFile = path.join(dreamDir, 'learning.retries');
     expect(fs.existsSync(retryFile)).toBe(true);
     expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('1');
   });
 
   it('retry count increments on repeated stale recovery', () => {
-    const procFile = path.join(sidecarDir, 'learning.processing');
-    const retryFile = path.join(sidecarDir, 'learning.retries');
+    const procFile = path.join(dreamDir, 'learning.processing');
+    const retryFile = path.join(dreamDir, 'learning.retries');
 
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000);
     fs.writeFileSync(retryFile, '1');
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.readFileSync(retryFile, 'utf-8').trim()).toBe('2');
   });
 
   it('max retries exhausted — marked as .failed', () => {
-    const procFile = path.join(sidecarDir, 'learning.processing');
-    const retryFile = path.join(sidecarDir, 'learning.retries');
+    const procFile = path.join(dreamDir, 'learning.processing');
+    const retryFile = path.join(dreamDir, 'learning.retries');
 
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000);
     fs.writeFileSync(retryFile, '3');
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.failed'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.failed'))).toBe(true);
     expect(fs.existsSync(retryFile)).toBe(false);
   });
 
   // T2(a): per-type stale thresholds
   it('memory type recovers after 300s but NOT before', () => {
-    const procFile = path.join(sidecarDir, 'memory.abc123.processing');
+    const procFile = path.join(dreamDir, 'memory.abc123.processing');
     // Fresh — should NOT recover
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 200); // below 300s memory threshold
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
     expect(fs.existsSync(procFile)).toBe(true); // still .processing
 
     // Now age it past threshold
     backdateMtime(procFile, 400);
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'memory.abc123.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'memory.abc123.json'))).toBe(true);
   });
 
   it('learning type does NOT recover at 300s (needs 1800s)', () => {
-    const procFile = path.join(sidecarDir, 'learning.abc123.processing');
+    const procFile = path.join(dreamDir, 'learning.abc123.processing');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 400); // past memory threshold but below learning threshold (1800s)
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(procFile)).toBe(true); // should still be .processing
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.abc123.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.abc123.json'))).toBe(false);
   });
 
   it('decisions type recovers after 1800s', () => {
-    const procFile = path.join(sidecarDir, 'decisions.abc123.processing');
+    const procFile = path.join(dreamDir, 'decisions.abc123.processing');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000); // past 1800s threshold
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'decisions.abc123.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'decisions.abc123.json'))).toBe(true);
   });
 
   it('knowledge type recovers after 1800s', () => {
-    const procFile = path.join(sidecarDir, 'knowledge.abc123.processing');
+    const procFile = path.join(dreamDir, 'knowledge.abc123.processing');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000);
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.abc123.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'knowledge.abc123.json'))).toBe(true);
   });
 
   // T2(b): JUST_RECOVERED guard — recovered markers have .retries preserved, not reset
   it('JUST_RECOVERED guard: recovered marker basename is included in JUST_RECOVERED output', () => {
-    const procFile = path.join(sidecarDir, 'learning.sess1.processing');
-    const retryFile = path.join(sidecarDir, 'learning.sess1.retries');
+    const procFile = path.join(dreamDir, 'learning.sess1.processing');
+    const retryFile = path.join(dreamDir, 'learning.sess1.retries');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000);
     fs.writeFileSync(retryFile, '2'); // pre-existing retry count
 
-    const { justRecovered } = runRecover(sidecarDir, memoryDir);
+    const { justRecovered } = runRecover(dreamDir, memoryDir);
 
     // Marker should be recovered
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.sess1.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.sess1.json'))).toBe(true);
     // JUST_RECOVERED should contain the basename (without .processing)
     expect(justRecovered).toContain('learning.sess1');
     // Retry count should be bumped to 3, not reset to 1
@@ -2311,7 +2311,7 @@ describe('sidecar-recover stale marker recovery', () => {
     fs.writeFileSync(ptProc, 'some queued data\n');
     backdateMtime(ptProc, 400);
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(ptProc)).toBe(false);
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl'))).toBe(true);
@@ -2325,7 +2325,7 @@ describe('sidecar-recover stale marker recovery', () => {
     backdateMtime(ptProc, 400);
     fs.writeFileSync(ptJsonl, 'existing jsonl data\n');
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     // .processing should remain (non-destructive when .jsonl already exists)
     expect(fs.existsSync(ptProc)).toBe(true);
@@ -2338,7 +2338,7 @@ describe('sidecar-recover stale marker recovery', () => {
     fs.writeFileSync(ptProc, 'active data\n');
     backdateMtime(ptProc, 100); // below 300s memory threshold
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(ptProc)).toBe(true);
     expect(fs.existsSync(path.join(memoryDir, '.pending-turns.jsonl'))).toBe(false);
@@ -2346,32 +2346,32 @@ describe('sidecar-recover stale marker recovery', () => {
 
   // T2(d): heartbeat — a .processing whose mtime was just refreshed is NOT yanked
   it('recently heartbeated .processing is not recovered (mtime is fresh)', () => {
-    const procFile = path.join(sidecarDir, 'knowledge.live.processing');
+    const procFile = path.join(dreamDir, 'knowledge.live.processing');
     fs.writeFileSync(procFile, '{}');
     // Touch to current mtime — simulates a live heartbeat
     const now = new Date();
     fs.utimesSync(procFile, now, now);
 
-    runRecover(sidecarDir, memoryDir);
+    runRecover(dreamDir, memoryDir);
 
     expect(fs.existsSync(procFile)).toBe(true);
-    expect(fs.existsSync(path.join(sidecarDir, 'knowledge.live.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'knowledge.live.json'))).toBe(false);
   });
 });
 
 // =============================================================================
-// sidecar-dispatch: capture-only (no directive emission)
+// dream-dispatch: capture-only (no directive emission)
 // session-start-context: pending-work directive emission (Section 2)
 // =============================================================================
 
-describe('sidecar-dispatch capture-only (no directive emitted)', () => {
-  const DISPATCH_HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
+describe('dream-dispatch capture-only (no directive emitted)', () => {
+  const DISPATCH_HOOK = path.join(HOOKS_DIR, 'dream-dispatch');
 
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dispatch-test-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
   });
 
@@ -2379,11 +2379,11 @@ describe('sidecar-dispatch capture-only (no directive emitted)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  // sidecar-dispatch is now capture-only; it must never emit a directive
+  // dream-dispatch is now capture-only; it must never emit a directive
   it('emits no additionalContext even when pending .json markers exist (T6)', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.writeFileSync(path.join(sidecarDir, 'learning.json'), '{}');
-    fs.writeFileSync(path.join(sidecarDir, 'decisions.json'), '{}');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.writeFileSync(path.join(dreamDir, 'learning.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'decisions.json'), '{}');
 
     // Dispatch should exit 0 and produce no JSON output (capture-only)
     let stdout = '';
@@ -2401,8 +2401,8 @@ describe('sidecar-dispatch capture-only (no directive emitted)', () => {
     expect(stdout).toBe('');
   });
 
-  it('fresh .processing is left alone by sidecar-dispatch (dispatch does not recover)', () => {
-    const procFile = path.join(tmpDir, '.devflow', 'sidecar', 'learning.processing');
+  it('fresh .processing is left alone by dream-dispatch (dispatch does not recover)', () => {
+    const procFile = path.join(tmpDir, '.devflow', 'dream', 'learning.processing');
     fs.writeFileSync(procFile, '{}');
 
     execSync(`bash "${DISPATCH_HOOK}"`, {
@@ -2411,7 +2411,7 @@ describe('sidecar-dispatch capture-only (no directive emitted)', () => {
     });
 
     expect(fs.existsSync(procFile)).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'learning.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'dream', 'learning.json'))).toBe(false);
   });
 });
 
@@ -2424,11 +2424,11 @@ describe('session-start-context pending-work directive', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-context-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-context-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'sidecar'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
     // Do NOT disable learning/decisions sentinels here — doing so would also
-    // cause sidecar-collect-tasks to delete those marker types. Instead we
+    // cause dream-collect-tasks to delete those marker types. Instead we
     // rely on the absence of decisions.md, pitfalls.md, and learning-log.jsonl
     // to keep Sections 1.5 and 1.75 silent (no file → no output).
   });
@@ -2440,9 +2440,9 @@ describe('session-start-context pending-work directive', () => {
 
   // T5: directive lists expected task names from pending {type}.{session}.json markers
   it('pending marker directive includes multiple task names (T5)', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.writeFileSync(path.join(sidecarDir, 'learning.sess1.json'), '{}');
-    fs.writeFileSync(path.join(sidecarDir, 'decisions.sess1.json'), '{}');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.writeFileSync(path.join(dreamDir, 'learning.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
 
     const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
 
@@ -2461,9 +2461,9 @@ describe('session-start-context pending-work directive', () => {
   });
 
   it('stale .processing recovered and included in directive', () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     // Seed a stale learning .processing — should be recovered then emitted
-    const procFile = path.join(sidecarDir, 'learning.stale.processing');
+    const procFile = path.join(dreamDir, 'learning.stale.processing');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000); // past 1800s threshold
 
@@ -2475,16 +2475,16 @@ describe('session-start-context pending-work directive', () => {
     expect(context).toContain('learning');
     // The .processing should have been renamed to .json
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(sidecarDir, 'learning.stale.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.stale.json'))).toBe(true);
   });
 });
 
 // =============================================================================
-// sidecar-capture memory marker
+// dream-capture memory marker
 // =============================================================================
 
-describe('sidecar-capture memory marker', () => {
-  const CAPTURE_HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+describe('dream-capture memory marker', () => {
+  const CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-capture');
 
   let tmpDir: string;
   let homeDir: string;
@@ -2512,8 +2512,8 @@ describe('sidecar-capture memory marker', () => {
       last_assistant_message: 'test response',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    const memMarker = path.join(sidecarDir, 'memory.json');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    const memMarker = path.join(dreamDir, 'memory.json');
     expect(fs.existsSync(memMarker)).toBe(true);
 
     const marker = JSON.parse(fs.readFileSync(memMarker, 'utf-8'));
@@ -2528,9 +2528,9 @@ describe('sidecar-capture memory marker', () => {
     fs.writeFileSync(wmFile, '## Now\n- stale');
     backdateMtime(wmFile, 600);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'memory.processing'), '{}');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'memory.processing'), '{}');
 
     runHook(CAPTURE_HOOK, {
       cwd: tmpDir,
@@ -2538,7 +2538,7 @@ describe('sidecar-capture memory marker', () => {
       last_assistant_message: 'test response',
     }, homeDir);
 
-    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'memory.json'))).toBe(false);
 
     // Queue append still happens
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
@@ -2556,8 +2556,8 @@ describe('sidecar-capture memory marker', () => {
       last_assistant_message: 'test response',
     }, homeDir);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    expect(fs.existsSync(path.join(dreamDir, 'memory.json'))).toBe(false);
 
     // Queue append still happens
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
@@ -2576,8 +2576,8 @@ describe('sidecar-capture memory marker', () => {
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    expect(fs.existsSync(path.join(sidecarDir, 'memory.json'))).toBe(false);
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    expect(fs.existsSync(path.join(dreamDir, 'memory.json'))).toBe(false);
   });
 });
 

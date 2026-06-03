@@ -146,7 +146,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Keyword + plan auto-detection',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher', 'dream'],
     skills: [
       'review-methodology',
       'security',
@@ -167,7 +167,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'design-review',
       'feature-knowledge',
       'apply-feature-knowledge',
-      'sidecar',
     ],
     rules: [],
   },
@@ -508,6 +507,8 @@ const LEGACY_SKILLS_V2X: string[] = [
   'release:triage',
   // v2.x sidecar system: bare name for pre-namespace installs
   'sidecar',
+  // v3.x dream rename: namespaced sidecar skill name for cleanup on upgrade
+  'devflow:sidecar',
   // v2.x ambient simplification: devflow:-prefixed orch names for cleanup
   'devflow:implement:orch',
   'devflow:debug:orch',

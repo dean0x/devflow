@@ -4,7 +4,7 @@ import color from 'picocolors';
 import { getDevFlowDirectory } from '../../utils/paths.js';
 import { readManifest, writeManifest } from '../../utils/manifest.js';
 import { getFeatureKnowledge, getWorktreePath } from './shared.js';
-import { updateFeature, isFeatureEnabled } from '../../utils/sidecar-config.js';
+import { updateFeature, isFeatureEnabled } from '../../utils/dream-config.js';
 import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel } from '../../utils/project-paths.js';
 
 /**

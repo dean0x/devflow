@@ -2,7 +2,7 @@
 # Ensures .devflow/ and all subdirectories exist, .devflow/.gitignore is configured,
 # and .devflow/features/index.json is bootstrapped.
 # Merges functionality of the former ensure-memory-gitignore and ensure-features-init.
-# Called from sidecar-capture, sidecar-dispatch, and pre-compact-memory. Idempotent.
+# Called from dream-capture, dream-dispatch, and pre-compact-memory. Idempotent.
 # Usage: source ensure-devflow-init "$CWD"
 
 [ -z "$1" ] && return 1
@@ -11,7 +11,7 @@ _DEVFLOW_DIR="$1/.devflow"
 
 # Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
-   [ -d "$_DEVFLOW_DIR/sidecar" ] && [ -d "$_DEVFLOW_DIR/learning" ] && \
+   [ -d "$_DEVFLOW_DIR/dream" ] && [ -d "$_DEVFLOW_DIR/learning" ] && \
    [ -d "$_DEVFLOW_DIR/decisions" ] && [ -d "$_DEVFLOW_DIR/features" ] && \
    [ -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
   return 0
@@ -20,7 +20,7 @@ fi
 # Create all subdirectories
 mkdir -p \
   "$_DEVFLOW_DIR/memory" \
-  "$_DEVFLOW_DIR/sidecar" \
+  "$_DEVFLOW_DIR/dream" \
   "$_DEVFLOW_DIR/decisions" \
   "$_DEVFLOW_DIR/learning" \
   "$_DEVFLOW_DIR/features" \
@@ -41,8 +41,8 @@ if [ ! -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
 # Per-developer session state (fully transient)
 memory/
 
-# Sidecar dispatch system (fully transient)
-sidecar/
+# Dream dispatch system (fully transient)
+dream/
 
 # Per-developer observation logs and transient state
 learning/learning-log.jsonl

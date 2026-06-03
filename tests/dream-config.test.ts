@@ -8,13 +8,13 @@ import {
   writeConfig,
   updateFeature,
   isFeatureEnabled,
-  type SidecarConfig,
-} from '../src/cli/utils/sidecar-config.js';
+  type DreamConfig,
+} from '../src/cli/utils/dream-config.js';
 
 describe('getConfigPath', () => {
-  it('returns .devflow/sidecar/config.json under project root', () => {
+  it('returns .devflow/dream/config.json under project root', () => {
     const result = getConfigPath('/some/project');
-    expect(result).toBe('/some/project/.devflow/sidecar/config.json');
+    expect(result).toBe('/some/project/.devflow/dream/config.json');
   });
 });
 
@@ -22,7 +22,7 @@ describe('readConfig', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sidecar-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dream-test-'));
   });
 
   afterEach(() => {
@@ -38,10 +38,10 @@ describe('readConfig', () => {
   });
 
   it('reads a valid config file', async () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
     fs.writeFileSync(
-      path.join(sidecarDir, 'config.json'),
+      path.join(dreamDir, 'config.json'),
       JSON.stringify({ memory: false, learning: true, decisions: false, knowledge: true }),
     );
 
@@ -53,10 +53,10 @@ describe('readConfig', () => {
   });
 
   it('falls back to defaults for missing keys', async () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
     fs.writeFileSync(
-      path.join(sidecarDir, 'config.json'),
+      path.join(dreamDir, 'config.json'),
       JSON.stringify({ memory: false }),
     );
 
@@ -68,9 +68,9 @@ describe('readConfig', () => {
   });
 
   it('returns defaults for malformed JSON', async () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'config.json'), 'not json at all');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), 'not json at all');
 
     const config = await readConfig(tmpDir);
     expect(config.memory).toBe(true);
@@ -80,18 +80,18 @@ describe('readConfig', () => {
   });
 
   it('returns defaults when config is a non-object JSON value', async () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'config.json'), '"just a string"');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), '"just a string"');
 
     const config = await readConfig(tmpDir);
     expect(config.memory).toBe(true);
   });
 
   it('returns defaults when config is a JSON array', async () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'config.json'), '[false, true]');
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), '[false, true]');
 
     const config = await readConfig(tmpDir);
     expect(config.memory).toBe(true);
@@ -99,13 +99,48 @@ describe('readConfig', () => {
     expect(config.decisions).toBe(true);
     expect(config.knowledge).toBe(true);
   });
+
+  // M5: legacy fallback — stale sidecar/config.json, no dream/config.json → honors legacy toggles
+  it('M5: falls back to legacy sidecar/config.json when dream/config.json is absent', async () => {
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sidecarDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: false, decisions: true, knowledge: true }),
+    );
+
+    const config = await readConfig(tmpDir);
+    expect(config.learning).toBe(false); // honors legacy learning:false
+    expect(config.memory).toBe(true);
+  });
+
+  it('M5: dream/config.json takes precedence over legacy sidecar/config.json', async () => {
+    // Both exist — dream wins
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: true, decisions: true, knowledge: true }),
+    );
+    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sidecarDir, 'config.json'),
+      JSON.stringify({ memory: false, learning: false, decisions: false, knowledge: false }),
+    );
+
+    const config = await readConfig(tmpDir);
+    // Dream config wins — all true
+    expect(config.memory).toBe(true);
+    expect(config.learning).toBe(true);
+  });
 });
 
 describe('writeConfig', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sidecar-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dream-test-'));
   });
 
   afterEach(() => {
@@ -113,7 +148,7 @@ describe('writeConfig', () => {
   });
 
   it('creates directories and writes config', async () => {
-    const config: SidecarConfig = { memory: false, learning: true, decisions: false, knowledge: true };
+    const config: DreamConfig = { memory: false, learning: true, decisions: false, knowledge: true };
     await writeConfig(tmpDir, config);
 
     const configPath = getConfigPath(tmpDir);
@@ -127,15 +162,23 @@ describe('writeConfig', () => {
     expect(parsed.knowledge).toBe(true);
   });
 
+  it('writes to .devflow/dream/ directory', async () => {
+    const config: DreamConfig = { memory: true, learning: true, decisions: true, knowledge: true };
+    await writeConfig(tmpDir, config);
+    // Verify it wrote to dream/, not sidecar/
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'dream', 'config.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar', 'config.json'))).toBe(false);
+  });
+
   it('overwrites an existing config', async () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
     fs.writeFileSync(
-      path.join(sidecarDir, 'config.json'),
+      path.join(dreamDir, 'config.json'),
       JSON.stringify({ memory: true, learning: true, decisions: true, knowledge: true }),
     );
 
-    const config: SidecarConfig = { memory: false, learning: false, decisions: false, knowledge: false };
+    const config: DreamConfig = { memory: false, learning: false, decisions: false, knowledge: false };
     await writeConfig(tmpDir, config);
 
     const raw = fs.readFileSync(getConfigPath(tmpDir), 'utf-8');
@@ -149,7 +192,7 @@ describe('updateFeature', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sidecar-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dream-test-'));
   });
 
   afterEach(() => {
@@ -197,7 +240,7 @@ describe('isFeatureEnabled', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sidecar-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dream-test-'));
   });
 
   afterEach(() => {
@@ -233,7 +276,7 @@ describe('writeConfig atomic pattern', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-sidecar-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-dream-test-'));
   });
 
   afterEach(() => {
@@ -241,7 +284,7 @@ describe('writeConfig atomic pattern', () => {
   });
 
   it('writes valid JSON readable by readConfig (atomic pattern produces correct output)', async () => {
-    const config: SidecarConfig = { memory: false, learning: true, decisions: false, knowledge: true };
+    const config: DreamConfig = { memory: false, learning: true, decisions: false, knowledge: true };
     await writeConfig(tmpDir, config);
 
     // readConfig should be able to read the atomically-written config
@@ -253,11 +296,11 @@ describe('writeConfig atomic pattern', () => {
   });
 
   it('leaves no .tmp.* files behind after successful write', async () => {
-    const config: SidecarConfig = { memory: true, learning: false, decisions: true, knowledge: false };
+    const config: DreamConfig = { memory: true, learning: false, decisions: true, knowledge: false };
     await writeConfig(tmpDir, config);
 
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    const files = fs.readdirSync(sidecarDir);
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    const files = fs.readdirSync(dreamDir);
     const tmpFiles = files.filter(f => f.includes('.tmp.'));
     expect(tmpFiles).toHaveLength(0);
   });
