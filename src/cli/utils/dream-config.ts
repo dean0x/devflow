@@ -9,11 +9,6 @@ export interface DreamConfig {
   knowledge: boolean;
 }
 
-/**
- * @deprecated Use DreamConfig instead.
- */
-export type SidecarConfig = DreamConfig;
-
 const DEFAULT_CONFIG: DreamConfig = {
   memory: true,
   learning: true,

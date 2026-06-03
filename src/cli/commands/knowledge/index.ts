@@ -12,8 +12,8 @@ import { handleRefresh } from './refresh.js';
 import { handleRemove } from './remove.js';
 
 // Re-export dream helpers for callers that import from knowledge/index.js
-export type { DreamData, SidecarData } from '../../utils/dream.js';
-export { readDream, readSidecar } from '../../utils/dream.js';
+export type { DreamData } from '../../utils/dream.js';
+export { readDream } from '../../utils/dream.js';
 
 export const knowledgeCommand = new Command('knowledge')
   .description('Manage per-feature knowledge bases')

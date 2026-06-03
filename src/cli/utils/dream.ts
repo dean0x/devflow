@@ -6,11 +6,6 @@ export interface DreamData {
 }
 
 /**
- * @deprecated Use DreamData instead.
- */
-export type SidecarData = DreamData;
-
-/**
  * Read a dream JSON file written by the Knowledge agent.
  * Returns an empty object when the file is missing, corrupt, or non-object JSON.
  */
@@ -35,9 +30,3 @@ export async function readDream(dreamPath: string): Promise<DreamData> {
   return result;
 }
 
-/**
- * @deprecated Use readDream instead.
- */
-export async function readSidecar(sidecarPath: string): Promise<DreamData> {
-  return readDream(sidecarPath);
-}

@@ -17,12 +17,10 @@ import { fileURLToPath } from 'url';
 import {
   getMemoryDir,
   getDreamDir,
-  getSidecarDir,
   getDecisionsDir,
   getFeaturesDir,
   getDocsDir,
   getDreamConfigPath,
-  getSidecarConfigPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsDisabledSentinel,
@@ -82,10 +80,6 @@ describe('project-paths TypeScript module', () => {
       expect(getDreamDir(ROOT)).toBe('/some/project/.devflow/dream');
     });
 
-    it('getSidecarDir returns .devflow/dream/ (deprecated alias)', () => {
-      expect(getSidecarDir(ROOT)).toBe('/some/project/.devflow/dream');
-    });
-
     it('getDecisionsDir returns .devflow/decisions/', () => {
       expect(getDecisionsDir(ROOT)).toBe('/some/project/.devflow/decisions');
     });
@@ -102,10 +96,6 @@ describe('project-paths TypeScript module', () => {
   describe('dream files', () => {
     it('getDreamConfigPath returns .devflow/dream/config.json', () => {
       expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
-    });
-
-    it('getSidecarConfigPath returns .devflow/dream/config.json (deprecated alias)', () => {
-      expect(getSidecarConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
     });
   });
 
@@ -320,12 +310,10 @@ describe('CJS project-paths parity', () => {
   }> = [
     { name: 'getMemoryDir', ts: getMemoryDir, cjs: cjsPaths.getMemoryDir },
     { name: 'getDreamDir', ts: getDreamDir, cjs: cjsPaths.getDreamDir },
-    { name: 'getSidecarDir', ts: getSidecarDir, cjs: cjsPaths.getSidecarDir },
     { name: 'getDecisionsDir', ts: getDecisionsDir, cjs: cjsPaths.getDecisionsDir },
     { name: 'getFeaturesDir', ts: getFeaturesDir, cjs: cjsPaths.getFeaturesDir },
     { name: 'getDocsDir', ts: getDocsDir, cjs: cjsPaths.getDocsDir },
     { name: 'getDreamConfigPath', ts: getDreamConfigPath, cjs: cjsPaths.getDreamConfigPath },
-    { name: 'getSidecarConfigPath', ts: getSidecarConfigPath, cjs: cjsPaths.getSidecarConfigPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getDecisionsDisabledSentinel', ts: getDecisionsDisabledSentinel, cjs: cjsPaths.getDecisionsDisabledSentinel },

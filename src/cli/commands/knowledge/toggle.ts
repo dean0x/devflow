@@ -73,7 +73,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // options.status
     p.intro(color.cyan('Feature Knowledge Status'));
 
-    // Check sidecar config enabled state
+    // Check dream config enabled state
     const enabled = await isFeatureEnabled(worktreePath, 'knowledge');
 
     // Check sentinel
@@ -87,7 +87,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     const kbs = getFeatureKnowledge().listEntries(worktreePath);
 
     p.log.info(`Status: ${(enabled && !disabled) ? color.green('enabled') : color.yellow('disabled')}`);
-    p.log.info(`Sidecar: ${enabled ? color.green('enabled') : color.dim('disabled')}`);
+    p.log.info(`Dream config: ${enabled ? color.green('enabled') : color.dim('disabled')}`);
     p.log.info(`Knowledge bases: ${kbs.length}`);
     if (disabled) {
       p.log.info(`Sentinel: ${color.yellow('.devflow/features/.disabled present')}`);

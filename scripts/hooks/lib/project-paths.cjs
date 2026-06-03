@@ -26,16 +26,9 @@ function getMemoryDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'memory');
 }
 
-/** .devflow/dream/ — dream state directory (renamed from .devflow/sidecar/) */
+/** .devflow/dream/ — dream state directory */
 function getDreamDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'dream');
-}
-
-/**
- * @deprecated Use getDreamDir instead. Kept as alias for migration compatibility.
- */
-function getSidecarDir(projectRoot) {
-  return getDreamDir(projectRoot);
 }
 
 /** .devflow/decisions/ — decisions and pitfalls subdirectory (promoted from .memory/decisions/) */
@@ -54,19 +47,12 @@ function getDocsDir(projectRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidecar files
+// Dream files
 // ---------------------------------------------------------------------------
 
 /** .devflow/dream/config.json — dream feature config */
 function getDreamConfigPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'dream', 'config.json');
-}
-
-/**
- * @deprecated Use getDreamConfigPath instead. Kept as alias for migration compatibility.
- */
-function getSidecarConfigPath(projectRoot) {
-  return getDreamConfigPath(projectRoot);
 }
 
 // ---------------------------------------------------------------------------
@@ -351,13 +337,11 @@ module.exports = {
   // Core directories
   getMemoryDir,
   getDreamDir,
-  getSidecarDir,    // deprecated alias → getDreamDir
   getDecisionsDir,
   getFeaturesDir,
   getDocsDir,
   // Dream files
   getDreamConfigPath,
-  getSidecarConfigPath, // deprecated alias → getDreamConfigPath
   // Decisions files
   getDecisionsFilePath,
   getPitfallsFilePath,
