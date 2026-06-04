@@ -48,7 +48,14 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-core-skills',
     description: 'Auto-activating quality enforcement skills - foundation layer for all Devflow plugins',
     commands: [],
-    agents: [],
+    // The Dream agent lives here (always-installed foundation plugin) because the
+    // session-start-context hook spawns Agent(subagent_type="Dream") unconditionally
+    // for the memory/learning/decisions/knowledge subsystems — independent of whether
+    // the ambient plugin is installed. Declaring it only in devflow-ambient would break
+    // the dream subsystem under `devflow init --no-ambient` (agents install per selected
+    // plugin, unlike skills which install universally). Predecessor was the universally
+    // installed `devflow:sidecar` skill; core-skills preserves that guarantee.
+    agents: ['dream'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
@@ -146,7 +153,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     name: 'devflow-ambient',
     description: 'Keyword + plan auto-detection',
     commands: ['/ambient'],
-    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher'],
+    agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'skimmer', 'reviewer', 'git', 'synthesizer', 'resolver', 'designer', 'knowledge', 'researcher', 'dream'],
     skills: [
       'review-methodology',
       'security',
@@ -167,7 +174,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
       'design-review',
       'feature-knowledge',
       'apply-feature-knowledge',
-      'sidecar',
     ],
     rules: [],
   },
@@ -508,6 +514,8 @@ const LEGACY_SKILLS_V2X: string[] = [
   'release:triage',
   // v2.x sidecar system: bare name for pre-namespace installs
   'sidecar',
+  // v3.x dream rename: namespaced sidecar skill name for cleanup on upgrade
+  'devflow:sidecar',
   // v2.x ambient simplification: devflow:-prefixed orch names for cleanup
   'devflow:implement:orch',
   'devflow:debug:orch',

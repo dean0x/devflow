@@ -169,7 +169,7 @@ This framework is used by:
 - **Review agents**: Creates review reports
 - **Bug analysis agents**: Creates bug analysis reports
 - **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
-- **Sidecar processor**: background LLM agent (spawned at SessionStart) appends ADRs/PFs to `decisions.md` / `pitfalls.md` via `decisions-append`
+- **Dream agent**: background LLM agent (spawned at SessionStart) appends ADRs/PFs to `decisions.md` / `pitfalls.md` via `decisions-append`
 
 All persisting agents should load this skill to ensure consistent documentation.
 

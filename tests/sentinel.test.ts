@@ -21,7 +21,7 @@ function mkTmpDir(): string {
 
 function mkMemoryDir(base: string): void {
   fs.mkdirSync(path.join(base, '.devflow', 'memory'), { recursive: true });
-  fs.mkdirSync(path.join(base, '.devflow', 'sidecar'), { recursive: true });
+  fs.mkdirSync(path.join(base, '.devflow', 'dream'), { recursive: true });
   fs.mkdirSync(path.join(base, '.devflow', 'decisions'), { recursive: true });
   fs.mkdirSync(path.join(base, '.devflow', 'learning'), { recursive: true });
 }
@@ -52,10 +52,10 @@ function parseHookOutput(rawOutput: string): string {
   return hookOutput.additionalContext as string;
 }
 
-// ─── Part B: Sentinel guards for sidecar capture hooks ──────────────────────
+// ─── Part B: Sentinel guards for dream capture hooks ──────────────────────
 
-describe('sentinel guard: sidecar-dispatch', () => {
-  const HOOK = path.join(HOOKS_DIR, 'sidecar-dispatch');
+describe('sentinel guard: dream-dispatch', () => {
+  const HOOK = path.join(HOOKS_DIR, 'dream-dispatch');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
@@ -70,17 +70,17 @@ describe('sentinel guard: sidecar-dispatch', () => {
 
   it('exits early and writes nothing when config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir, { prompt: 'test prompt' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
   });
 });
 
-describe('sentinel guard: sidecar-capture', () => {
-  const HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+describe('sentinel guard: dream-capture', () => {
+  const HOOK = path.join(HOOKS_DIR, 'dream-capture');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
@@ -100,9 +100,9 @@ describe('sentinel guard: sidecar-capture', () => {
 
   it('exits early when config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir, { last_assistant_message: 'hello' });
     execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
@@ -160,10 +160,10 @@ describe('sentinel guard: sidecar-capture', () => {
         env: { ...process.env, HOME: tmpHome },
       });
       const slug = tmpDir.replace(/^\//, '').replace(/\//g, '-');
-      const logFile = path.join(tmpHome, '.devflow', 'logs', slug, '.sidecar-capture.log');
+      const logFile = path.join(tmpHome, '.devflow', 'logs', slug, '.dream-capture.log');
       expect(fs.existsSync(logFile)).toBe(true);
       const content = fs.readFileSync(logFile, 'utf-8');
-      expect(content).toContain('[sidecar-capture]');
+      expect(content).toContain('[dream-capture]');
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
@@ -177,11 +177,11 @@ describe('sentinel guard: pre-compact-memory', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('exits cleanly when sidecar config has memory: false', () => {
+  it('exits cleanly when dream config has memory: false', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
     const input = sessionInput(tmpDir);
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -208,11 +208,11 @@ describe('sentinel guard: session-start-memory', () => {
   beforeEach(() => { tmpDir = mkTmpDir(); });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('outputs nothing when sidecar config has memory: false (even with WORKING-MEMORY.md present)', () => {
+  it('outputs nothing when dream config has memory: false (even with WORKING-MEMORY.md present)', () => {
     mkMemoryDir(tmpDir);
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(path.join(sidecarDir, 'config.json'), JSON.stringify({ memory: false }));
+    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    fs.mkdirSync(dreamDir, { recursive: true });
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), JSON.stringify({ memory: false }));
     fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
@@ -231,10 +231,10 @@ describe('sentinel guard: session-start-memory', () => {
   });
 });
 
-// ─── Part C: Sentinel guard for sidecar-evaluate hook ────────────────────────
+// ─── Part C: Sentinel guard for dream-evaluate hook ────────────────────────
 
-describe('sentinel guard: sidecar-evaluate', () => {
-  const HOOK = path.join(HOOKS_DIR, 'sidecar-evaluate');
+describe('sentinel guard: dream-evaluate', () => {
+  const HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });
@@ -259,8 +259,8 @@ describe('sentinel guard: sidecar-evaluate', () => {
     expect(() => {
       execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
     }).not.toThrow();
-    // Should not create any sidecar marker files
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'sidecar'))).toBe(false);
+    // Should not create any dream marker files
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'dream'))).toBe(false);
   });
 });
 
@@ -298,8 +298,8 @@ describe('sentinel guard: decisions-usage-scan.cjs', () => {
   });
 });
 
-describe('sentinel guard: sidecar-capture decisions scanner gating', () => {
-  const HOOK = path.join(HOOKS_DIR, 'sidecar-capture');
+describe('sentinel guard: dream-capture decisions scanner gating', () => {
+  const HOOK = path.join(HOOKS_DIR, 'dream-capture');
   let tmpDir: string;
 
   beforeEach(() => { tmpDir = mkTmpDir(); });

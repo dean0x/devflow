@@ -524,14 +524,14 @@ describe('cleanSelfLearningArtifacts', () => {
 });
 
 describe('learn --enable / --disable sentinel management', () => {
-  it('--disable sidecar state file targets include .learning-disabled sentinel path', () => {
+  it('--disable dream state file targets include .learning-disabled sentinel path', () => {
     // Verify the sentinel path is under .devflow/memory (matching learn.ts code)
     const memoryDir = path.join('/project', '.devflow', 'memory');
     const sentinelPath = path.join(memoryDir, '.learning-disabled');
     expect(sentinelPath).toBe('/project/.devflow/memory/.learning-disabled');
   });
 
-  it('--enable sidecar integration removes .learning-disabled sentinel', async () => {
+  it('--enable dream integration removes .learning-disabled sentinel', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
     try {
       const memDir = path.join(tmpDir, '.devflow', 'memory');
@@ -549,7 +549,7 @@ describe('learn --enable / --disable sentinel management', () => {
     }
   });
 
-  it('--disable sidecar integration creates .learning-disabled sentinel', async () => {
+  it('--disable dream integration creates .learning-disabled sentinel', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
     try {
       const memDir = path.join(tmpDir, '.devflow', 'memory');
@@ -566,17 +566,17 @@ describe('learn --enable / --disable sentinel management', () => {
   });
 });
 
-describe('learn --reset sidecar state cleanup', () => {
-  it('sidecar cleanup targets .learning-runs-today and .learning-sessions', () => {
-    const sidecarFilesToClean = ['.learning-runs-today', '.learning-sessions'];
+describe('learn --reset dream state cleanup', () => {
+  it('dream cleanup targets .learning-runs-today and .learning-sessions', () => {
+    const dreamFilesToClean = ['.learning-runs-today', '.learning-sessions'];
 
     // All targeted state files should be learning-specific
-    for (const f of sidecarFilesToClean) {
+    for (const f of dreamFilesToClean) {
       expect(f).toContain('learning');
     }
   });
 
-  it('sidecar marker pattern matches per-session learning markers only', () => {
+  it('dream marker pattern matches per-session learning markers only', () => {
     const learningMarkerPattern = /^learning\..+\.json$/;
 
     expect(learningMarkerPattern.test('learning.abc123.json')).toBe(true);
@@ -586,24 +586,24 @@ describe('learn --reset sidecar state cleanup', () => {
     expect(learningMarkerPattern.test('learning.json')).toBe(false); // legacy (no session suffix)
   });
 
-  it('sidecar cleanup removes lock directories (.reinforce.lock, .learning-batch.lock)', async () => {
+  it('dream cleanup removes lock directories (.reinforce.lock, .learning-batch.lock)', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-learn-test-'));
     try {
-      const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-      fs.mkdirSync(sidecarDir, { recursive: true });
+      const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+      fs.mkdirSync(dreamDir, { recursive: true });
 
       // Create mock lock directories
       for (const lock of ['.reinforce.lock', '.learning-batch.lock']) {
-        fs.mkdirSync(path.join(sidecarDir, lock));
+        fs.mkdirSync(path.join(dreamDir, lock));
       }
 
       // Simulate the cleanup that --reset does
       for (const lockName of ['.reinforce.lock', '.learning-batch.lock']) {
-        try { fs.rmdirSync(path.join(sidecarDir, lockName)); } catch { /* ignore */ }
+        try { fs.rmdirSync(path.join(dreamDir, lockName)); } catch { /* ignore */ }
       }
 
-      expect(fs.existsSync(path.join(sidecarDir, '.reinforce.lock'))).toBe(false);
-      expect(fs.existsSync(path.join(sidecarDir, '.learning-batch.lock'))).toBe(false);
+      expect(fs.existsSync(path.join(dreamDir, '.reinforce.lock'))).toBe(false);
+      expect(fs.existsSync(path.join(dreamDir, '.learning-batch.lock'))).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

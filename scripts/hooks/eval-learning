@@ -1,16 +1,16 @@
 #!/bin/bash
-# sidecar-evaluate: Learning evaluation module.
+# dream-evaluate: Learning evaluation module.
 # Accumulates session IDs and triggers learning marker when batch threshold is reached.
-# Source from sidecar-evaluate orchestrator after eval-helpers.
+# Source from dream-evaluate orchestrator after eval-helpers.
 #
 # Requires (from orchestrator namespace):
-#   LEARNING_ENABLED, SESSION_DEEP, SESSION_ID, SIDECAR_DIR, LEARNING_DIR,
+#   LEARNING_ENABLED, SESSION_DEEP, SESSION_ID, DREAM_DIR, LEARNING_DIR,
 #   FILTER_LIB, TRANSCRIPT, NOW, TODAY, MARKER_SUFFIX,
 #   _HAS_JQ, json_field_file(), log(), dbg(),
 #   read_daily_cap(), atomic_increment_daily(), load_existing_ids(),
-#   sidecar_lock_acquire(), sidecar_lock_release(), _eval_release_lock()
+#   dream_lock_acquire(), dream_lock_release(), _eval_release_lock()
 
-: "${SIDECAR_DIR:?eval-learning: SIDECAR_DIR must be set by orchestrator}"
+: "${DREAM_DIR:?eval-learning: DREAM_DIR must be set by orchestrator}"
 : "${LEARNING_DIR:?eval-learning: LEARNING_DIR must be set by orchestrator}"
 : "${NOW:?eval-learning: NOW must be set by orchestrator}"
 : "${TODAY:?eval-learning: TODAY must be set by orchestrator}"
@@ -44,7 +44,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   fi
 
   # Daily cap check
-  _LEARN_RUNS_FILE="$SIDECAR_DIR/.learning-runs-today"
+  _LEARN_RUNS_FILE="$DREAM_DIR/.learning-runs-today"
   _LEARN_RUNS_TODAY=$(read_daily_cap "$_LEARN_RUNS_FILE" 0)
 
   dbg "Learning: RUNS_TODAY=$_LEARN_RUNS_TODAY MAX_DAILY=$_LEARN_MAX_DAILY BATCH_SIZE=$_LEARN_BATCH_SIZE"
@@ -53,7 +53,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
     dbg "Learning daily cap reached — skipping"
   else
     # Batch counting — accumulate session IDs
-    _LEARN_SESSION_COUNT_FILE="$SIDECAR_DIR/.learning-sessions"
+    _LEARN_SESSION_COUNT_FILE="$DREAM_DIR/.learning-sessions"
     _LEARN_CURRENT_COUNT=0
 
     # Validate session ID format
@@ -88,7 +88,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
       fi
       local existing_ids
       existing_ids=$(load_existing_ids "$LEARNING_DIR/learning-log.jsonl")
-      local marker="$SIDECAR_DIR/learning.${MARKER_SUFFIX}.json"
+      local marker="$DREAM_DIR/learning.${MARKER_SUFFIX}.json"
       local tmp="${marker}.tmp.$$"
       if [ "$_HAS_JQ" = "true" ]; then
         jq -n \
@@ -113,8 +113,8 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
     }
 
     if [ "$_LEARN_CURRENT_COUNT" -ge "$_LEARN_BATCH_SIZE" ] && [ -f "$_LEARN_SESSION_COUNT_FILE" ]; then
-      if sidecar_lock_acquire "$SIDECAR_DIR/.learning-batch.lock" 3; then
-        trap '_eval_release_lock "$SIDECAR_DIR/.learning-batch.lock"' EXIT
+      if dream_lock_acquire "$DREAM_DIR/.learning-batch.lock" 3; then
+        trap '_eval_release_lock "$DREAM_DIR/.learning-batch.lock"' EXIT
         # Re-read count under lock
         if [ -f "$_LEARN_SESSION_COUNT_FILE" ]; then
           _LEARN_CURRENT_COUNT=$(wc -l < "$_LEARN_SESSION_COUNT_FILE" | tr -d ' ')
@@ -128,7 +128,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
         if [ "$_LEARN_CURRENT_COUNT" -ge "$_LEARN_BATCH_SIZE" ] && [ -f "$_LEARN_SESSION_COUNT_FILE" ]; then
           _learn_write_marker "$_LEARN_CURRENT_COUNT" "$_LEARN_SESSION_COUNT_FILE"
         fi
-        sidecar_lock_release "$SIDECAR_DIR/.learning-batch.lock"
+        dream_lock_release "$DREAM_DIR/.learning-batch.lock"
         trap - EXIT
       else
         log "Learning batch skipped: could not acquire lock"

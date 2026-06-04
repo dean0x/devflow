@@ -16,7 +16,9 @@
     "enforcement",
     "foundation"
   ],
-  "agents": [],
+  "agents": [
+    "dream"
+  ],
   "skills": [
     "apply-decisions",
     "apply-feature-knowledge",

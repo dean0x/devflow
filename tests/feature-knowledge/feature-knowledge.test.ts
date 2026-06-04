@@ -610,99 +610,99 @@ describe('CLI stale-slugs (empty index)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// json-helper.cjs read-sidecar
+// json-helper.cjs read-dream
 // ---------------------------------------------------------------------------
 
 const JSON_HELPER_CJS = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
 
-describe('json-helper read-sidecar', () => {
-  it('returns parsed JSON array for valid sidecar with array field', () => {
+describe('json-helper read-dream', () => {
+  it('returns parsed JSON array for valid result with array field', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'] }));
+    const result = path.join(realTmp, `test-result-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'] }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(JSON.parse(output.trim())).toEqual(['src/a.ts', 'src/b.ts']);
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
   it('returns [] for missing file', () => {
-    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', '/nonexistent/path/file.json', 'referencedFiles'], { encoding: 'utf8' });
+    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', '/nonexistent/path/file.json', 'referencedFiles'], { encoding: 'utf8' });
     expect(output.trim()).toBe('[]');
   });
 
   it('returns [] for malformed JSON', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-bad-${Date.now()}.json`);
-    writeFileSync(sidecar, 'not-json');
+    const result = path.join(realTmp, `test-result-bad-${Date.now()}.json`);
+    writeFileSync(result, 'not-json');
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
   it('returns string value as-is for string fields', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-string-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ description: 'Use when working on auth' }));
+    const result = path.join(realTmp, `test-result-string-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ description: 'Use when working on auth' }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'description'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'description'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('Use when working on auth');
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
   it('returns [] when field value is not an array or string', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-noarray-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ referencedFiles: 42 }));
+    const result = path.join(realTmp, `test-result-noarray-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ referencedFiles: 42 }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
   it('returns [] when args are missing', () => {
-    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar'], { encoding: 'utf8' });
+    const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream'], { encoding: 'utf8' });
     expect(output.trim()).toBe('[]');
   });
 
   it('returns [] for disallowed field name', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-disallowed-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ secret: 'password123' }));
+    const result = path.join(realTmp, `test-result-disallowed-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ secret: 'password123' }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'secret'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'secret'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch {}
+      try { rmSync(result); } catch {}
     }
   });
 
-  it('returns [] when sidecar path is outside cwd', () => {
+  it('returns [] when result path is outside cwd', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-outside-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['a.ts'] }));
+    const result = path.join(realTmp, `test-result-outside-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ referencedFiles: ['a.ts'] }));
     const otherDir = path.join(realTmp, `test-other-${Date.now()}`);
     mkdirSync(otherDir, { recursive: true });
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-sidecar', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: otherDir });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch {}
+      try { rmSync(result); } catch {}
       try { rmdirSync(otherDir); } catch {}
     }
   });
@@ -745,12 +745,12 @@ describe('safePath', () => {
 });
 
 // ---------------------------------------------------------------------------
-// readSidecar helper (TypeScript)
+// readAgentResult helper (TypeScript)
 // ---------------------------------------------------------------------------
 
-import { readSidecar } from '../../src/cli/commands/knowledge/index.js';
+import { readAgentResult } from '../../src/cli/commands/knowledge/index.js';
 
-describe('readSidecar', () => {
+describe('readAgentResult', () => {
   const tmpFiles: string[] = [];
 
   afterEach(() => {
@@ -761,47 +761,47 @@ describe('readSidecar', () => {
   });
 
   function writeTmp(content: string): string {
-    const f = path.join(os.tmpdir(), `test-read-sidecar-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    const f = path.join(os.tmpdir(), `test-read-agent-result-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
     writeFileSync(f, content);
     tmpFiles.push(f);
     return f;
   }
 
-  it('returns referencedFiles and description for valid sidecar', async () => {
+  it('returns referencedFiles and description for valid result file', async () => {
     const f = writeTmp(JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'], description: 'Use when X' }));
-    const result = await readSidecar(f);
+    const result = await readAgentResult(f);
     expect(result.referencedFiles).toEqual(['src/a.ts', 'src/b.ts']);
     expect(result.description).toBe('Use when X');
   });
 
   it('returns {} for missing file', async () => {
-    const result = await readSidecar('/nonexistent/path/file.json');
+    const result = await readAgentResult('/nonexistent/path/file.json');
     expect(result).toEqual({});
   });
 
   it('returns {} for invalid JSON', async () => {
     const f = writeTmp('not-valid-json');
-    const result = await readSidecar(f);
+    const result = await readAgentResult(f);
     expect(result).toEqual({});
   });
 
   it('omits referencedFiles when value is a string not array', async () => {
     const f = writeTmp(JSON.stringify({ referencedFiles: 'should-be-array' }));
-    const result = await readSidecar(f);
+    const result = await readAgentResult(f);
     expect(result.referencedFiles).toBeUndefined();
   });
 
   it('filters mixed-type referencedFiles array to strings only', async () => {
     const f = writeTmp(JSON.stringify({ referencedFiles: ['src/a.ts', 42, null, 'src/b.ts'] }));
-    const result = await readSidecar(f);
+    const result = await readAgentResult(f);
     expect(result.referencedFiles).toEqual(['src/a.ts', 'src/b.ts']);
   });
 
   it('returns {} when JSON parses to a non-object (primitive)', async () => {
-    const tmp = path.join(os.tmpdir(), `sidecar-primitive-${Date.now()}.json`);
+    const tmp = path.join(os.tmpdir(), `agent-result-primitive-${Date.now()}.json`);
     writeFileSync(tmp, '42');
     try {
-      const result = await readSidecar(tmp);
+      const result = await readAgentResult(tmp);
       expect(result).toEqual({});
     } finally {
       rmSync(tmp, { force: true });

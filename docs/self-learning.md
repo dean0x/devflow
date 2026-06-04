@@ -24,31 +24,31 @@ Transcripts are split into two channels by `scripts/hooks/lib/transcript-filter.
 
 ### Detection: LLM-Driven Extraction at SessionStart
 
-All detection, semantic matching, and promotion decisions are made by the **sidecar processor** — a background LLM agent spawned at SessionStart via `Agent(run_in_background:true)` using the `devflow:sidecar` skill.
+All detection, semantic matching, and promotion decisions are made by the **Dream agent** — a background LLM agent spawned at SessionStart via `Agent(subagent_type="Dream", run_in_background:true)`. It is a real agent defined at `shared/agents/dream.md` (not a skill).
 
-The processor receives USER_SIGNALS and DIALOG_PAIRS from the pending sidecar markers and uses LLM judgment to extract observations, deduplicate semantically (reusing `obs_id` when a pattern matches an existing observation), and decide whether an observation warrants materialization. There are no deterministic thresholds, confidence formulas, or promotion rules in code — all judgment is LLM-authored.
+The Dream agent receives USER_SIGNALS and DIALOG_PAIRS from the pending dream markers and uses LLM judgment to extract observations, deduplicate semantically (reusing `obs_id` when a pattern matches an existing observation), and decide whether an observation warrants materialization. There are no deterministic thresholds, confidence formulas, or promotion rules in code — all judgment is LLM-authored.
 
 ### SessionEnd: Marker Writing (Plumbing Only)
 
-`sidecar-evaluate` (SessionEnd hook) is plumbing: it runs per-type evaluation modules that decide whether a marker is worth writing, then write it atomically.
+`dream-evaluate` (SessionEnd hook) is plumbing: it runs per-type evaluation modules that decide whether a marker is worth writing, then write it atomically.
 
-- **`eval-learning`** — Accumulates session IDs. When the batch threshold is reached (default 3 sessions, 5 at 15+ observations), writes `learning.{session_id}.json` in `.devflow/sidecar/`.
-- **`eval-decisions`** — Runs every session. Extracts DIALOG_PAIRS from the transcript and writes `decisions.{session_id}.json` in `.devflow/sidecar/`.
+- **`eval-learning`** — Accumulates session IDs. When the batch threshold is reached (default 3 sessions, 5 at 15+ observations), writes `learning.{session_id}.json` in `.devflow/dream/`.
+- **`eval-decisions`** — Runs every session. Extracts DIALOG_PAIRS from the transcript and writes `decisions.{session_id}.json` in `.devflow/dream/`.
 - **`eval-knowledge`** — Writes knowledge markers when staleness is detected.
 - **`eval-curation`** — Throttled to once per 7 days; writes a curation marker when triggered.
 
-### Merge: Sidecar Processor Writes via Plumbing Ops
+### Merge: Dream Agent Writes via Plumbing Ops
 
-When the processor materializes an observation, it calls atomic plumbing operations:
+When the Dream agent materializes an observation, it calls atomic plumbing operations:
 
-- **`merge-observation`** — Id-keyed reinforcement into `.devflow/learning/learning-log.jsonl`. Lock acquired externally by the processor via `.reinforce.lock` before the call.
-- **`decisions-append`** — Appends a new ADR-NNN or PF-NNN entry to `decisions.md` / `pitfalls.md`. Internally self-acquires `.decisions.lock`, assigns the next sequential number, writes the TL;DR and `- **Source**:` marker. The processor must NOT hold `.decisions.lock` when calling this op.
+- **`merge-observation`** — Id-keyed reinforcement into `.devflow/learning/learning-log.jsonl`. Lock acquired externally by the Dream agent via `.reinforce.lock` before the call.
+- **`decisions-append`** — Appends a new ADR-NNN or PF-NNN entry to `decisions.md` / `pitfalls.md`. Internally self-acquires `.decisions.lock`, assigns the next sequential number, writes the TL;DR and `- **Source**:` marker. The Dream agent must NOT hold `.decisions.lock` when calling this op.
 
 Observations accumulate in `.devflow/learning/learning-log.jsonl` (workflow/procedural) and `.devflow/decisions/decisions-log.jsonl` (decision/pitfall). Lifecycle: `observing → created → deprecated`.
 
 ### Curation
 
-The processor handles curation in the same background pass when a curation marker is present. It deprecates (never deletes) stale or low-value entries, updates `- **Status**: Deprecated` in place, and re-points citations. Maximum 5 changes per run; 7-day protection window for recently created entries.
+The Dream agent handles curation in the same background pass when a curation marker is present. It deprecates (never deletes) stale or low-value entries, updates `- **Status**: Deprecated` in place, and re-points citations. Maximum 5 changes per run; 7-day protection window for recently created entries.
 
 ## Decisions Index + On-Demand Read Pattern
 
@@ -76,7 +76,7 @@ PF-NNN  entries live in /path/to/project/.devflow/decisions/pitfalls.md
 Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
 ```
 
-> **Note**: Pre-v2 seeded entries may show `[unknown]` instead of `[Active]` if they predate the standard `- **Status**: Active` line format. New entries created by the sidecar processor always include the status line.
+> **Note**: Pre-v2 seeded entries may show `[unknown]` instead of `[Active]` if they predate the standard `- **Status**: Active` line format. New entries created by the Dream agent always include the status line.
 
 ### Step 2: Agent reads full body on demand
 
@@ -126,7 +126,7 @@ Use `devflow learn --configure` for interactive setup, or edit `.devflow/learnin
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Model | `sonnet` | Model alias for the background sidecar processor |
+| Model | `sonnet` | Model alias for the background Dream agent |
 | Batch size | 3 sessions (5 at 15+ obs) | Sessions accumulated before writing a learning marker |
 | Daily cap | 5 runs | Maximum learning marker writes per day |
 | Debug | `false` | Enable verbose logging |
@@ -140,13 +140,13 @@ Use `devflow learn --configure` for interactive setup, or edit `.devflow/learnin
 | `.devflow/learning/.learning-runs-today` | Daily run counter (date + count) |
 | `.devflow/learning/.learning-sessions` | Session IDs pending batch |
 | `.devflow/learning/.learning-notified-at` | New artifact notification marker |
-| `.devflow/decisions/decisions.md` | ADR entries (append-only, written by sidecar processor via decisions-append) |
-| `.devflow/decisions/pitfalls.md` | PF entries (append-only, written by sidecar processor via decisions-append) |
+| `.devflow/decisions/decisions.md` | ADR entries (append-only, written by Dream agent via decisions-append) |
+| `.devflow/decisions/pitfalls.md` | PF entries (append-only, written by Dream agent via decisions-append) |
 | `.devflow/decisions/.decisions-usage.json` | Citation counts (written by decisions-usage-scan.cjs) |
 
 ## Key Design Decisions
 
-- **D8**: Decisions writers removed from commands — agent-summaries at command-end were low-signal. Decisions now extracted directly from user transcripts by the sidecar processor.
-- **D9**: `decisions-format` SKILL is a format specification only. The actual writer is the sidecar processor via `decisions-append`.
+- **D8**: Decisions writers removed from commands — agent-summaries at command-end were low-signal. Decisions now extracted directly from user transcripts by the Dream agent.
+- **D9**: `decisions-format` SKILL is a format specification only. The actual writer is the Dream agent via `decisions-append`.
 - **D13**: User edits to generated artifacts are authoritative.
 - **D16**: Staleness detection is file-reference-based (grep for `.ts`, `.js`, `.py` paths). Function-level checks are not performed.

@@ -58,7 +58,7 @@ function escapeRegExp(str: string): string {
  * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
  *
  * The lock path MUST match the decisions-append writer in json-helper.cjs so CLI updates
- * serialize against the sidecar processor's decisions-append calls.
+ * serialize against the Dream agent's decisions-append calls.
  */
 export async function updateDecisionsStatus(
   filePath: string,

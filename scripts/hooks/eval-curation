@@ -1,11 +1,11 @@
 #!/bin/bash
-# sidecar-evaluate: Curation evaluation module.
+# dream-evaluate: Curation evaluation module.
 # Writes a throttled curation marker at most once per 7 days.
 # Curation has no feature-enabled flag — it always runs when the throttle allows.
-# Source from sidecar-evaluate orchestrator after eval-helpers.
+# Source from dream-evaluate orchestrator after eval-helpers.
 #
 # Requires (from orchestrator namespace):
-#   SIDECAR_DIR, NOW, MARKER_SUFFIX,
+#   DREAM_DIR, NOW, MARKER_SUFFIX,
 #   _HAS_JQ, log(), dbg()
 #
 # D58: 7-day curation throttle.
@@ -20,7 +20,7 @@
 #   next window will pick it up. This is intentional: a failed curation is less
 #   costly than repeatedly spawning curation work in a retry storm.
 
-: "${SIDECAR_DIR:?eval-curation: SIDECAR_DIR must be set by orchestrator}"
+: "${DREAM_DIR:?eval-curation: DREAM_DIR must be set by orchestrator}"
 : "${NOW:?eval-curation: NOW must be set by orchestrator}"
 : "${MARKER_SUFFIX:?eval-curation: MARKER_SUFFIX must be set by orchestrator}"
 : "${_HAS_JQ:?eval-curation: _HAS_JQ must be set by orchestrator}"
@@ -28,7 +28,7 @@
 # Curation is always-on (no feature-enabled flag).
 # Throttle: at most once per 7 days (604800 seconds).
 _CUR_THROTTLE=604800
-_CUR_LAST_FILE="$SIDECAR_DIR/.curation-last"
+_CUR_LAST_FILE="$DREAM_DIR/.curation-last"
 
 _CUR_LAST=0
 if [ -f "$_CUR_LAST_FILE" ]; then
@@ -44,7 +44,7 @@ if [ "$_CUR_AGE" -lt "$_CUR_THROTTLE" ]; then
   dbg "Curation throttled: AGE=${_CUR_AGE}s"
 else
   # Write curation marker (per-session name for concurrency safety)
-  _CUR_MARKER="$SIDECAR_DIR/curation.${MARKER_SUFFIX}.json"
+  _CUR_MARKER="$DREAM_DIR/curation.${MARKER_SUFFIX}.json"
   _CUR_TMP="${_CUR_MARKER}.tmp.$$"
 
   if [ "$_HAS_JQ" = "true" ]; then
@@ -59,7 +59,7 @@ else
   fi
 
   # Optimistically update throttle marker so subsequent sessions in the same 7-day
-  # window are skipped — the sidecar agent does the actual curation work.
+  # window are skipped — the dream agent does the actual curation work.
   printf '%s' "$NOW" > "$_CUR_LAST_FILE" 2>/dev/null || true
 
   log "Wrote curation marker"

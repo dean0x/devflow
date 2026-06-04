@@ -4,7 +4,7 @@ import color from 'picocolors';
 import { getDevFlowDirectory } from '../../utils/paths.js';
 import { readManifest, writeManifest } from '../../utils/manifest.js';
 import { getFeatureKnowledge, getWorktreePath } from './shared.js';
-import { updateFeature, isFeatureEnabled } from '../../utils/sidecar-config.js';
+import { updateFeature, isFeatureEnabled } from '../../utils/dream-config.js';
 import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel } from '../../utils/project-paths.js';
 
 /**
@@ -32,7 +32,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // Remove .disabled sentinel
     try { await fs.unlink(getFeaturesDisabledSentinel(worktreePath)); } catch { /* doesn't exist */ }
 
-    // Update sidecar config
+    // Update dream config
     await updateFeature(worktreePath, 'knowledge', true);
 
     // Update manifest
@@ -54,7 +54,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     await fs.mkdir(featuresDir, { recursive: true });
     await fs.writeFile(getFeaturesDisabledSentinel(worktreePath), '', 'utf-8');
 
-    // Update sidecar config
+    // Update dream config
     await updateFeature(worktreePath, 'knowledge', false);
 
     // Update manifest
@@ -73,7 +73,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     // options.status
     p.intro(color.cyan('Feature Knowledge Status'));
 
-    // Check sidecar config enabled state
+    // Check dream config enabled state
     const enabled = await isFeatureEnabled(worktreePath, 'knowledge');
 
     // Check sentinel
@@ -87,7 +87,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     const kbs = getFeatureKnowledge().listEntries(worktreePath);
 
     p.log.info(`Status: ${(enabled && !disabled) ? color.green('enabled') : color.yellow('disabled')}`);
-    p.log.info(`Sidecar: ${enabled ? color.green('enabled') : color.dim('disabled')}`);
+    p.log.info(`Config: ${enabled ? color.green('enabled') : color.dim('disabled')}`);
     p.log.info(`Knowledge bases: ${kbs.length}`);
     if (disabled) {
       p.log.info(`Sentinel: ${color.yellow('.devflow/features/.disabled present')}`);

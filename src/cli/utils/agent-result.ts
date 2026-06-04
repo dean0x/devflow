@@ -1,24 +1,24 @@
 import { promises as fs } from 'fs';
 
-export interface SidecarData {
+export interface AgentResult {
   referencedFiles?: string[];
   description?: string;
 }
 
 /**
- * Read a sidecar JSON file written by the Knowledge agent.
+ * Read the result JSON written by the Knowledge agent.
  * Returns an empty object when the file is missing, corrupt, or non-object JSON.
  */
-export async function readSidecar(sidecarPath: string): Promise<SidecarData> {
+export async function readAgentResult(resultPath: string): Promise<AgentResult> {
   let raw: unknown;
   try {
-    raw = JSON.parse(await fs.readFile(sidecarPath, 'utf8'));
+    raw = JSON.parse(await fs.readFile(resultPath, 'utf8'));
   } catch {
     return {};
   }
   if (typeof raw !== 'object' || raw === null) return {};
   const data = raw as Record<string, unknown>;
-  const result: SidecarData = {};
+  const result: AgentResult = {};
   if (Array.isArray(data.referencedFiles)) {
     result.referencedFiles = data.referencedFiles.filter(
       (f): f is string => typeof f === 'string'

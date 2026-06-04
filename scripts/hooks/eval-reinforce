@@ -1,14 +1,14 @@
 #!/bin/bash
-# sidecar-evaluate: Artifact reinforcement module.
+# dream-evaluate: Artifact reinforcement module.
 # Updates last_seen for self-learning artifacts loaded during this session.
-# Source from sidecar-evaluate orchestrator after eval-helpers.
+# Source from dream-evaluate orchestrator after eval-helpers.
 #
 # Requires (from orchestrator namespace):
-#   LEARNING_ENABLED, TRANSCRIPT, SIDECAR_DIR, LEARNING_DIR,
-#   _HAS_JQ, log(), dbg(), sidecar_lock_acquire(), sidecar_lock_release(),
+#   LEARNING_ENABLED, TRANSCRIPT, DREAM_DIR, LEARNING_DIR,
+#   _HAS_JQ, log(), dbg(), dream_lock_acquire(), dream_lock_release(),
 #   _eval_release_lock()
 
-: "${SIDECAR_DIR:?eval-reinforce: SIDECAR_DIR must be set by orchestrator}"
+: "${DREAM_DIR:?eval-reinforce: DREAM_DIR must be set by orchestrator}"
 : "${LEARNING_DIR:?eval-reinforce: LEARNING_DIR must be set by orchestrator}"
 : "${_HAS_JQ:?eval-reinforce: _HAS_JQ must be set by orchestrator}"
 
@@ -85,8 +85,8 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT
     if [ -n "$_REINF_LOADED_SLUGS" ]; then
       _REINF_NOW_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
       _REINF_SLUGS_PATTERN=$(echo "$_REINF_LOADED_SLUGS" | paste -sd '|' -)
-      if sidecar_lock_acquire "$SIDECAR_DIR/.reinforce.lock" 3; then
-        trap '_eval_release_lock "$SIDECAR_DIR/.reinforce.lock"' EXIT
+      if dream_lock_acquire "$DREAM_DIR/.reinforce.lock" 3; then
+        trap '_eval_release_lock "$DREAM_DIR/.reinforce.lock"' EXIT
         _REINF_TEMP_LOG="${_REINF_LEARNING_LOG}.tmp.$$"
         if [ "$_HAS_JQ" = "true" ]; then
           if _reinforce_via_jq "$_REINF_LEARNING_LOG" "$_REINF_NOW_ISO" "$_REINF_SLUGS_PATTERN" "$_REINF_TEMP_LOG"; then
@@ -98,7 +98,7 @@ if [ "$LEARNING_ENABLED" = "true" ] && [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT
             log "Reinforced artifacts for slugs: $_REINF_SLUGS_PATTERN (node)"
           fi
         fi
-        sidecar_lock_release "$SIDECAR_DIR/.reinforce.lock"
+        dream_lock_release "$DREAM_DIR/.reinforce.lock"
         trap - EXIT
       else
         log "Reinforcement skipped: could not acquire lock"

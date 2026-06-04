@@ -1,15 +1,15 @@
 #!/bin/bash
-# sidecar-evaluate: Decisions evaluation module.
+# dream-evaluate: Decisions evaluation module.
 # Extracts dialog pairs from transcript and writes decisions marker.
-# Source from sidecar-evaluate orchestrator after eval-helpers.
+# Source from dream-evaluate orchestrator after eval-helpers.
 #
 # Requires (from orchestrator namespace):
-#   DECISIONS_ENABLED, SESSION_DEEP, SIDECAR_DIR, DECISIONS_DIR_DATA,
+#   DECISIONS_ENABLED, SESSION_DEEP, DREAM_DIR, DECISIONS_DIR_DATA,
 #   FILTER_LIB, TRANSCRIPT, NOW, TODAY, MARKER_SUFFIX,
 #   _HAS_JQ, json_field_file(), log(), dbg(),
 #   read_daily_cap(), atomic_increment_daily(), load_existing_ids()
 
-: "${SIDECAR_DIR:?eval-decisions: SIDECAR_DIR must be set by orchestrator}"
+: "${DREAM_DIR:?eval-decisions: DREAM_DIR must be set by orchestrator}"
 : "${DECISIONS_DIR_DATA:?eval-decisions: DECISIONS_DIR_DATA must be set by orchestrator}"
 : "${NOW:?eval-decisions: NOW must be set by orchestrator}"
 : "${TODAY:?eval-decisions: TODAY must be set by orchestrator}"
@@ -22,7 +22,7 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   # Note: .devflow/decisions/.disabled is for session-start-context only — this hook uses DECISIONS_ENABLED.
 
   # Daily cap check
-  _DEC_RUNS_FILE="$SIDECAR_DIR/.decisions-runs-today"
+  _DEC_RUNS_FILE="$DREAM_DIR/.decisions-runs-today"
   _DEC_RUNS_TODAY=$(read_daily_cap "$_DEC_RUNS_FILE" 0)
 
   _DEC_MAX_RUNS=3
@@ -49,7 +49,7 @@ if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
       _DEC_EXISTING_IDS=$(load_existing_ids "$DECISIONS_DIR_DATA/decisions-log.jsonl")
 
       # Write decisions marker (per-session name for concurrency safety)
-      _DEC_MARKER="$SIDECAR_DIR/decisions.${MARKER_SUFFIX}.json"
+      _DEC_MARKER="$DREAM_DIR/decisions.${MARKER_SUFFIX}.json"
       _DEC_TMP="${_DEC_MARKER}.tmp.$$"
       if [ "$_HAS_JQ" = "true" ]; then
         jq -n \

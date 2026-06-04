@@ -6,7 +6,7 @@ import color from 'picocolors';
 import { getDevFlowDirectory, getClaudeDirectory } from '../utils/paths.js';
 import {
   getMemoryDir,
-  getSidecarDir,
+  getDreamDir,
   getLearningLogPath,
   getLearningConfigPath,
   getLearningManifestPath,
@@ -22,7 +22,7 @@ import {
 } from '../utils/project-paths.js';
 import { getGitRoot } from '../utils/git.js';
 import { cleanSelfLearningArtifacts, AUTO_GENERATED_MARKER } from '../utils/learning-cleanup.js';
-import { updateFeature, isFeatureEnabled } from '../utils/sidecar-config.js';
+import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 import {
   type LearningObservation,
 } from '../utils/observations.js';
@@ -50,7 +50,7 @@ export interface LearningConfig {
 
 /**
  * Format a human-readable status summary for learning state.
- * enabled: true when the sidecar config has learning: true (or no config).
+ * enabled: true when the dream config has learning: true (or no config).
  */
 export function formatLearningStatus(observations: LearningObservation[], enabled: boolean): string {
   const lines: string[] = [];
@@ -127,8 +127,8 @@ interface LearnOptions {
 
 export const learnCommand = new Command('learn')
   .description('Enable or disable self-learning (workflow detection + auto-commands)')
-  .option('--enable', 'Enable self-learning via sidecar config')
-  .option('--disable', 'Disable self-learning via sidecar config')
+  .option('--enable', 'Enable self-learning')
+  .option('--disable', 'Disable self-learning')
   .option('--status', 'Show learning status and observation counts')
   .option('--list', 'Show all observations sorted by confidence')
   .option('--configure', 'Interactive configuration wizard')
@@ -438,23 +438,23 @@ export const learnCommand = new Command('learn')
           await fs.rmdir(getDecisionsUsageLockDir(cwd));
         } catch { /* doesn't exist or already cleaned */ }
 
-        // Clean sidecar state files
-        const sidecarDir = getSidecarDir(cwd);
+        // Clean dream state files
+        const dreamDir = getDreamDir(cwd);
         for (const f of ['.learning-runs-today', '.learning-sessions']) {
-          try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* may not exist */ }
+          try { await fs.unlink(path.join(dreamDir, f)); } catch { /* may not exist */ }
         }
-        // Clean sidecar learning markers and locks
+        // Clean dream learning markers and locks
         try {
-          const sidecarFiles = await fs.readdir(sidecarDir);
-          for (const f of sidecarFiles) {
+          const dreamFiles = await fs.readdir(dreamDir);
+          for (const f of dreamFiles) {
             if (f.startsWith('learning.') && f.endsWith('.json')) {
-              try { await fs.unlink(path.join(sidecarDir, f)); } catch { /* ignore */ }
+              try { await fs.unlink(path.join(dreamDir, f)); } catch { /* ignore */ }
             }
           }
-        } catch { /* sidecar dir may not exist */ }
+        } catch { /* dream dir may not exist */ }
         // Clean lock directories
         for (const lockName of ['.reinforce.lock', '.learning-batch.lock']) {
-          try { await fs.rmdir(path.join(sidecarDir, lockName)); } catch { /* ignore */ }
+          try { await fs.rmdir(path.join(dreamDir, lockName)); } catch { /* ignore */ }
         }
 
         // Remove stale `enabled` field from learning.json (migration)
@@ -515,14 +515,14 @@ export const learnCommand = new Command('learn')
       const gitRoot = await getGitRoot();
       if (gitRoot) {
         await updateFeature(gitRoot, 'learning', true);
-        // Remove .learning-disabled sentinel (defense-in-depth with sidecar config)
+        // Remove .learning-disabled sentinel (defense-in-depth with dream config)
         try {
           await fs.unlink(getLearningDisabledSentinel(gitRoot));
         } catch { /* may not exist */ }
-        p.log.success('Self-learning enabled — sidecar config updated');
+        p.log.success('Self-learning enabled — configuration updated');
         p.log.info(color.dim('Repeated workflows will be detected and turned into slash commands'));
       } else {
-        p.log.warn('Could not resolve git root — sidecar config not updated');
+        p.log.warn('Could not resolve git root — configuration not updated');
       }
       return;
     }
@@ -535,9 +535,9 @@ export const learnCommand = new Command('learn')
         const memDir = getMemoryDir(gitRoot);
         await fs.mkdir(memDir, { recursive: true });
         await fs.writeFile(getLearningDisabledSentinel(gitRoot), '', 'utf-8');
-        p.log.success('Self-learning disabled — sidecar config updated');
+        p.log.success('Self-learning disabled — configuration updated');
       } else {
-        p.log.warn('Could not resolve git root — sidecar config not updated');
+        p.log.warn('Could not resolve git root — configuration not updated');
       }
       return;
     }

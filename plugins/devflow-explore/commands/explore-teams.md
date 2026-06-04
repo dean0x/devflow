@@ -232,15 +232,15 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
       Load the devflow:feature-knowledge skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
       exploring from scratch. Read .devflow/features/index.json for cross-referencing."
       ```
-   e. Read sidecar (`.devflow/features/{slug}/.create-result.json`), then run:
+   e. Read result file (`.devflow/features/{slug}/.create-result.json`), then run:
       ```bash
       node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
         --slug="{slug}" --name="{name}" --directories='[...]' \
-        --referencedFiles='{from_sidecar}' --description="{from_sidecar}" \
+        --referencedFiles='{from_result}' --description="{from_result}" \
         --createdBy="explore" 2>/dev/null
       ```
       Clean up: `rm -f .devflow/features/{slug}/.create-result.json`
-      If sidecar missing (agent failed), use empty defaults: `referencedFiles='[]'`, `description=""`.
+      If result file missing (agent failed), use empty defaults: `referencedFiles='[]'`, `description=""`.
    f. Report: "Created feature knowledge: {slug}"
    g. Set FEATURE_KNOWLEDGE_STATUS = created
 

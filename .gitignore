@@ -34,6 +34,7 @@ plugins/*/agents/designer.md
 plugins/*/agents/knowledge.md
 plugins/*/agents/researcher.md
 plugins/*/agents/bug-analyzer.md
+plugins/*/agents/dream.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

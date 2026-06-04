@@ -305,32 +305,32 @@ describe('decisions --reset target files', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --reset sidecar cleanup: verify sidecar state files are targeted
+// --reset dream cleanup: verify dream state files are targeted
 // ---------------------------------------------------------------------------
 
-describe('decisions --reset sidecar state cleanup', () => {
-  it('sidecar cleanup targets .decisions-runs-today and decisions.*.json markers', () => {
-    const sidecarFilesToClean = [
+describe('decisions --reset dream state cleanup', () => {
+  it('dream cleanup targets .decisions-runs-today and decisions.*.json markers', () => {
+    const dreamFilesToClean = [
       '.decisions-runs-today',
     ];
-    const sidecarMarkerPattern = /^decisions\..+\.json$/;
+    const dreamMarkerPattern = /^decisions\..+\.json$/;
 
-    for (const f of sidecarFilesToClean) {
+    for (const f of dreamFilesToClean) {
       expect(f).toContain('decisions');
     }
 
-    expect(sidecarMarkerPattern.test('decisions.abc123.json')).toBe(true);
-    expect(sidecarMarkerPattern.test('decisions.session-xyz.json')).toBe(true);
-    expect(sidecarMarkerPattern.test('learning.abc123.json')).toBe(false);
-    expect(sidecarMarkerPattern.test('decisions.json')).toBe(false);
+    expect(dreamMarkerPattern.test('decisions.abc123.json')).toBe(true);
+    expect(dreamMarkerPattern.test('decisions.session-xyz.json')).toBe(true);
+    expect(dreamMarkerPattern.test('learning.abc123.json')).toBe(false);
+    expect(dreamMarkerPattern.test('decisions.json')).toBe(false);
   });
 
-  it('sidecar cleanup does not target learning state files', () => {
-    const decisionsSidecarFiles = ['.decisions-runs-today'];
+  it('dream cleanup does not target learning state files', () => {
+    const decisionsDreamFiles = ['.decisions-runs-today'];
     const learningFiles = ['.learning-runs-today', '.learning-sessions'];
 
     for (const lf of learningFiles) {
-      expect(decisionsSidecarFiles).not.toContain(lf);
+      expect(decisionsDreamFiles).not.toContain(lf);
     }
   });
 });

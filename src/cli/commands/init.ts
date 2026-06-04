@@ -30,7 +30,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '.
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { manageSentinel } from '../utils/sentinel.js';
-import { writeConfig as writeSidecarConfig } from '../utils/sidecar-config.js';
+import { writeConfig as writeDreamConfig } from '../utils/dream-config.js';
 import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel, getDecisionsDisabledSentinel } from '../utils/project-paths.js';
 import * as os from 'os';
 
@@ -1095,7 +1095,7 @@ export const initCommand = new Command('init')
       'lib/feature-kb.cjs',
       // decisions agent decoupling: background-learning replaced by TypeScript CLI (devflow learn --run-background)
       'background-learning',
-      // Pre-sidecar hooks replaced by sidecar-capture/dispatch/evaluate
+      // Pre-sidecar hooks replaced by the dream hooks (dream-capture/dispatch/evaluate)
       'prompt-capture-memory',
       'stop-update-memory',
       'stop-update-learning',
@@ -1133,8 +1133,8 @@ export const initCommand = new Command('init')
       content = ambientEnabled ? await addAmbientHook(cleanedForAmbient, devflowDir) : cleanedForAmbient;
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
-      // Memory hooks include the unified sidecar hooks (sidecar-dispatch, sidecar-capture,
-      // sidecar-evaluate) which handle learning, decisions, and knowledge in the background.
+      // Memory hooks include the unified dream hooks (dream-dispatch, dream-capture,
+      // dream-evaluate) which handle learning, decisions, and knowledge in the background.
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 
@@ -1199,13 +1199,13 @@ export const initCommand = new Command('init')
       await manageSentinel(getDecisionsDisabledSentinel(gitRoot), decisionsEnabled);
     }
 
-    // Write sidecar config.json to manage per-feature enable/disable at runtime.
+    // Write dream config.json to manage per-feature enable/disable at runtime.
     // Uses writeConfig (full atomic write) rather than four updateFeature calls because
     // init always sets all four features at once and is never concurrent with toggle
-    // commands — it is a one-time setup action. See D1 in sidecar-config.ts for the
+    // commands — it is a one-time setup action. See D1 in dream-config.ts for the
     // concurrency assumption shared by both write strategies.
     if (gitRoot) {
-      await writeSidecarConfig(gitRoot, {
+      await writeDreamConfig(gitRoot, {
         memory: memoryEnabled,
         learning: learnEnabled,
         decisions: decisionsEnabled,

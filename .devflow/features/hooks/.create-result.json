@@ -5,12 +5,12 @@
     "scripts/hooks/lib/transcript-filter.cjs",
     "scripts/hooks/lib/staleness.cjs",
     "scripts/hooks/json-helper.cjs",
-    "scripts/hooks/sidecar-capture",
-    "scripts/hooks/sidecar-evaluate",
-    "scripts/hooks/sidecar-recover",
+    "scripts/hooks/dream-capture",
+    "scripts/hooks/dream-evaluate",
+    "scripts/hooks/dream-recover",
     "scripts/hooks/session-start-context",
-    "shared/skills/sidecar/SKILL.md",
+    "shared/agents/dream.md",
     "src/cli/commands/decisions.ts"
   ],
-  "description": "Use when modifying sidecar hooks, background maintenance, marker lifecycle, memory/learning/decisions/knowledge processing, or curation. Keywords: sidecar, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart."
+  "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/learning/decisions/knowledge processing, or curation. Keywords: dream, hooks, Dream agent, merge-observation, decisions-append, marker, .processing, SessionStart."
 }

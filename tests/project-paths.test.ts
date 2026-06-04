@@ -16,11 +16,11 @@ import { fileURLToPath } from 'url';
 // Import TypeScript module (ESM)
 import {
   getMemoryDir,
-  getSidecarDir,
+  getDreamDir,
   getDecisionsDir,
   getFeaturesDir,
   getDocsDir,
-  getSidecarConfigPath,
+  getDreamConfigPath,
   getDecisionsFilePath,
   getPitfallsFilePath,
   getDecisionsDisabledSentinel,
@@ -76,8 +76,8 @@ describe('project-paths TypeScript module', () => {
       expect(getMemoryDir(ROOT)).toBe('/some/project/.devflow/memory');
     });
 
-    it('getSidecarDir returns .devflow/sidecar/', () => {
-      expect(getSidecarDir(ROOT)).toBe('/some/project/.devflow/sidecar');
+    it('getDreamDir returns .devflow/dream/', () => {
+      expect(getDreamDir(ROOT)).toBe('/some/project/.devflow/dream');
     });
 
     it('getDecisionsDir returns .devflow/decisions/', () => {
@@ -93,9 +93,9 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('sidecar files', () => {
-    it('getSidecarConfigPath returns .devflow/sidecar/config.json', () => {
-      expect(getSidecarConfigPath(ROOT)).toBe('/some/project/.devflow/sidecar/config.json');
+  describe('dream files', () => {
+    it('getDreamConfigPath returns .devflow/dream/config.json', () => {
+      expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
     });
   });
 
@@ -276,6 +276,14 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
+  describe('getDevflowGitignoreContent', () => {
+    it('includes dream/ instead of sidecar/', () => {
+      const content = getDevflowGitignoreContent();
+      expect(content).toContain('dream/');
+      expect(content).not.toContain('sidecar/');
+    });
+  });
+
   describe('path normalisation', () => {
     it('handles a root path that ends with a slash', () => {
       // path.join strips trailing slashes
@@ -301,11 +309,11 @@ describe('CJS project-paths parity', () => {
     cjs: (root: string) => string;
   }> = [
     { name: 'getMemoryDir', ts: getMemoryDir, cjs: cjsPaths.getMemoryDir },
-    { name: 'getSidecarDir', ts: getSidecarDir, cjs: cjsPaths.getSidecarDir },
+    { name: 'getDreamDir', ts: getDreamDir, cjs: cjsPaths.getDreamDir },
     { name: 'getDecisionsDir', ts: getDecisionsDir, cjs: cjsPaths.getDecisionsDir },
     { name: 'getFeaturesDir', ts: getFeaturesDir, cjs: cjsPaths.getFeaturesDir },
     { name: 'getDocsDir', ts: getDocsDir, cjs: cjsPaths.getDocsDir },
-    { name: 'getSidecarConfigPath', ts: getSidecarConfigPath, cjs: cjsPaths.getSidecarConfigPath },
+    { name: 'getDreamConfigPath', ts: getDreamConfigPath, cjs: cjsPaths.getDreamConfigPath },
     { name: 'getDecisionsFilePath', ts: getDecisionsFilePath, cjs: cjsPaths.getDecisionsFilePath },
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getDecisionsDisabledSentinel', ts: getDecisionsDisabledSentinel, cjs: cjsPaths.getDecisionsDisabledSentinel },
@@ -363,5 +371,16 @@ describe('CJS project-paths parity', () => {
 
   it('getDevflowGitignoreContent — TypeScript and CJS agree', () => {
     expect(cjsPaths.getDevflowGitignoreContent()).toBe(getDevflowGitignoreContent());
+  });
+
+  // TS/CJS parity: getDreamDir and getDreamConfigPath return .devflow/dream/
+  it('getDreamDir returns .devflow/dream/ in both TS and CJS', () => {
+    expect(getDreamDir(ROOT)).toBe('/some/project/.devflow/dream');
+    expect(cjsPaths.getDreamDir(ROOT)).toBe('/some/project/.devflow/dream');
+  });
+
+  it('getDreamConfigPath returns .devflow/dream/config.json in both TS and CJS', () => {
+    expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
+    expect(cjsPaths.getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
   });
 });

@@ -8,8 +8,8 @@ Three shell hooks run behind the scenes:
 
 | Hook | When | What |
 |------|------|------|
-| **Stop** | After each response | Captures the user/assistant turns to `.pending-turns.jsonl` and writes a `memory.json` sidecar marker (throttled — skips if written <2 min ago). |
-| **SessionStart** | On startup, `/clear`, resume, compaction | Injects previous working memory + fresh git state as system context. Warns if memory is >1h stale. Also emits a SIDECAR MAINTENANCE directive when pending markers are present, spawning the background sidecar processor that rewrites `WORKING-MEMORY.md`. |
+| **Stop** | After each response | Captures the user/assistant turns to `.pending-turns.jsonl` and writes a `memory.json` dream marker (throttled — skips if written <2 min ago). |
+| **SessionStart** | On startup, `/clear`, resume, compaction | Injects previous working memory + fresh git state as system context. Warns if memory is >1h stale. Also emits a DREAM MAINTENANCE directive when pending markers are present, spawning the background Dream agent that rewrites `WORKING-MEMORY.md`. |
 | **PreCompact** | Before context compaction | Backs up git state to JSON. Bootstraps a minimal working memory from git if none exists yet. |
 
 Working memory is **per-project** — scoped to each repo's `.devflow/` directory. Multiple sessions across different repos don't interfere.
@@ -29,12 +29,12 @@ devflow memory --status                # Check current state
 ```
 .devflow/
 ├── memory/
-│   ├── WORKING-MEMORY.md         # Auto-maintained by sidecar processor (background LLM agent)
+│   ├── WORKING-MEMORY.md         # Auto-maintained by the Dream agent (background LLM agent)
 │   ├── backup.json               # Pre-compact git state snapshot
 │   ├── .pending-turns.jsonl      # Queue of captured user/assistant turns (JSONL, ephemeral)
 │   └── .pending-turns.processing # Atomic handoff during background processing (transient)
-├── sidecar/
-│   └── memory.{session}.json     # Pending memory update marker (claimed by sidecar processor)
+├── dream/
+│   └── memory.{session}.json     # Pending memory update marker (claimed by the Dream agent)
 ├── learning/
 │   ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
 │   ├── learning.json             # Project-level learning config
@@ -50,7 +50,7 @@ Debug logs are stored at `~/.devflow/logs/{project-slug}/`.
 
 ## Working Memory Sections
 
-The sidecar processor (background LLM agent spawned at SessionStart) maintains these sections in `WORKING-MEMORY.md`:
+The Dream agent (background LLM agent spawned at SessionStart) maintains these sections in `WORKING-MEMORY.md`:
 
 | Section | Purpose |
 |---------|---------|
@@ -72,7 +72,7 @@ These files are read by reviewers automatically during `/code-review`.
 
 ## Self-Learning (Sibling System)
 
-Self-learning shares the `.devflow/` directory but uses a completely different pipeline. Working memory captures every turn via a queue (`UserPromptSubmit` / Stop hook → `.devflow/memory/.pending-turns.jsonl`) and the sidecar processor rewrites `WORKING-MEMORY.md` from the queue. Self-learning instead uses `SessionEnd` evaluation modules that write sidecar markers; the same sidecar processor at SessionStart claims those markers and extracts 4 observation types (workflow, procedural, decision, pitfall) from transcript channels via LLM judgment. The two systems operate independently and do not interfere. See [Self-Learning](self-learning.md) for the full architecture.
+Self-learning shares the `.devflow/` directory but uses a completely different pipeline. Working memory captures every turn via a queue (`UserPromptSubmit` / Stop hook → `.devflow/memory/.pending-turns.jsonl`) and the Dream agent rewrites `WORKING-MEMORY.md` from the queue. Self-learning instead uses `SessionEnd` evaluation modules that write dream markers; the same Dream agent at SessionStart claims those markers and extracts 4 observation types (workflow, procedural, decision, pitfall) from transcript channels via LLM judgment. The two systems operate independently and do not interfere. See [Self-Learning](self-learning.md) for the full architecture.
 
 ## Documentation Structure
 
