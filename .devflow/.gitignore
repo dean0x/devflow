@@ -1,8 +1,8 @@
 # Per-developer session state (fully transient)
 memory/
 
-# Sidecar dispatch system (fully transient)
-sidecar/
+# Dream dispatch system (fully transient)
+dream/
 
 # Per-developer observation logs and transient state
 learning/learning-log.jsonl
