@@ -136,4 +136,4 @@ describe('staleness detection (D16)', () => {
 
 // process-observations integration block removed in Part A — op was removed (zero
 // production callers). The staleness signal is now consumed directly by the LLM
-// sidecar-processor via staleness.cjs invocation during the learning phase. See SKILL.md.
+// Dream agent via staleness.cjs invocation during the learning phase. See shared/agents/dream.md.

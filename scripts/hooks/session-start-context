@@ -172,7 +172,7 @@ ${LEARNED_SECTION}"
 fi
 
 # --- Section 2: Dream Pending-Work ---
-# Detects pending dream tasks and emits a directive to spawn a background processor agent.
+# Detects pending dream tasks and emits a directive to spawn a background Dream agent.
 # Guards: processor-spawn throttle (120s window) prevents duplicate emissions on rapid
 # SessionStart events (e.g., /clear or compact).
 # Requires: dream-recover + dream-collect-tasks helpers (sourced inline below).
@@ -180,9 +180,9 @@ fi
 #
 # D57a: Per-session .processing suffix (collision fix).
 #   Each eval-* module writes marker files as {type}.{session_id}.json, where
-#   session_id is the Claude session ID passed to the hook. When the processor
+#   session_id is the Claude session ID passed to the hook. When the Dream agent
 #   claims a marker it renames it to {type}.{session_id}.processing. This suffix
-#   prevents two concurrent processor instances (from two simultaneous SessionStart
+#   prevents two concurrent Dream agent instances (from two simultaneous SessionStart
 #   events) from racing on the same marker file — each session only claims its own
 #   markers.
 #
@@ -190,14 +190,14 @@ fi
 #   SessionStart fires on /clear, compact, and every new window open. Without
 #   a throttle, three rapid /clear commands would spawn three background agents
 #   all processing the same pending markers. The 120s window (.processor-spawned-at)
-#   ensures only one processor is spawned per burst. The throttle is written
+#   ensures only one Dream agent is spawned per burst. The throttle is written
 #   atomically (temp+mv) so concurrent SessionStart events read a consistent value.
 #
 # D57c: Heartbeat rationale.
-#   The processor agent touches each in-flight .processing file at the start of
+#   The Dream agent touches each in-flight .processing file at the start of
 #   every phase. dream-recover uses the mtime to determine staleness (1800s
 #   threshold for non-memory types). The touch refreshes the mtime so a legitimate
-#   long-running processor is not yanked mid-phase. Pairs with D56a thresholds.
+#   long-running Dream agent is not yanked mid-phase. Pairs with D56a thresholds.
 
 # Source helpers — soft-fail if absent (e.g., on older installs before rebuild).
 # All sourced helpers follow the no-set-e discipline and exit cleanly on failure.

@@ -381,7 +381,7 @@ describe('--dismiss-capacity notification', () => {
 
 describe('staleness filter (mayBeStale only)', () => {
   // After removal of needsReview and softCapExceeded, only mayBeStale remains as a
-  // stale-detection flag. The LLM sidecar processor uses staleness.cjs output as a
+  // stale-detection flag. The LLM Dream agent uses staleness.cjs output as a
   // signal (not auto-deletion) to deprioritize reinforcing observations whose
   // referenced files are missing.
 

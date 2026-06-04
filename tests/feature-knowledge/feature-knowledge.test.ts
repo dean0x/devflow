@@ -616,16 +616,16 @@ describe('CLI stale-slugs (empty index)', () => {
 const JSON_HELPER_CJS = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
 
 describe('json-helper read-dream', () => {
-  it('returns parsed JSON array for valid sidecar with array field', () => {
+  it('returns parsed JSON array for valid result with array field', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'] }));
+    const result = path.join(realTmp, `test-result-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ referencedFiles: ['src/a.ts', 'src/b.ts'] }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(JSON.parse(output.trim())).toEqual(['src/a.ts', 'src/b.ts']);
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
@@ -636,40 +636,40 @@ describe('json-helper read-dream', () => {
 
   it('returns [] for malformed JSON', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-bad-${Date.now()}.json`);
-    writeFileSync(sidecar, 'not-json');
+    const result = path.join(realTmp, `test-result-bad-${Date.now()}.json`);
+    writeFileSync(result, 'not-json');
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
   it('returns string value as-is for string fields', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-string-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ description: 'Use when working on auth' }));
+    const result = path.join(realTmp, `test-result-string-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ description: 'Use when working on auth' }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'description'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'description'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('Use when working on auth');
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
   it('returns [] when field value is not an array or string', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-noarray-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ referencedFiles: 42 }));
+    const result = path.join(realTmp, `test-result-noarray-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ referencedFiles: 42 }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch { /* best-effort */ }
+      try { rmSync(result); } catch { /* best-effort */ }
     }
   });
 
@@ -680,29 +680,29 @@ describe('json-helper read-dream', () => {
 
   it('returns [] for disallowed field name', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-disallowed-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ secret: 'password123' }));
+    const result = path.join(realTmp, `test-result-disallowed-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ secret: 'password123' }));
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'secret'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'secret'],
         { encoding: 'utf8', cwd: realTmp });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch {}
+      try { rmSync(result); } catch {}
     }
   });
 
-  it('returns [] when sidecar path is outside cwd', () => {
+  it('returns [] when result path is outside cwd', () => {
     const realTmp = realpathSync(os.tmpdir());
-    const sidecar = path.join(realTmp, `test-sidecar-outside-${Date.now()}.json`);
-    writeFileSync(sidecar, JSON.stringify({ referencedFiles: ['a.ts'] }));
+    const result = path.join(realTmp, `test-result-outside-${Date.now()}.json`);
+    writeFileSync(result, JSON.stringify({ referencedFiles: ['a.ts'] }));
     const otherDir = path.join(realTmp, `test-other-${Date.now()}`);
     mkdirSync(otherDir, { recursive: true });
     try {
-      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', sidecar, 'referencedFiles'],
+      const output = execFileSync('node', [JSON_HELPER_CJS, 'read-dream', result, 'referencedFiles'],
         { encoding: 'utf8', cwd: otherDir });
       expect(output.trim()).toBe('[]');
     } finally {
-      try { rmSync(sidecar); } catch {}
+      try { rmSync(result); } catch {}
       try { rmdirSync(otherDir); } catch {}
     }
   });

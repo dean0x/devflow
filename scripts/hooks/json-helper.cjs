@@ -609,8 +609,8 @@ try {
     // releases .devflow/dream/.reinforce.lock around the Bash subshell call), while
     // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
     // domains — merge-observation itself never acquires a lock; it relies on the caller to
-    // serialize concurrent writes. This is intentional: the subshell pattern in the processor
-    // spec acquires the lock, invokes this op, and releases — all in a single Bash call.
+    // serialize concurrent writes. This is intentional: the subshell pattern in the Dream
+    // agent acquires the lock, invokes this op, and releases — all in a single Bash call.
     // -------------------------------------------------------------------------
     case 'merge-observation': {
       const logFile = safePath(args[0]);

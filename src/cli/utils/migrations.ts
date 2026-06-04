@@ -647,7 +647,7 @@ const MIGRATION_RENAME_SIDECAR_TO_DREAM: Migration<'per-project'> = {
     const moveWarnings = await moveDirContents(sidecarDir, dreamDir, new Set(['config.json']));
 
     // 3. Best-effort rmdir (sidecar dir may still contain a live .reinforce.lock/ —
-    //    NEVER lock the whole dir to avoid deadlocking a live processor per migration note)
+    //    NEVER lock the whole dir to avoid deadlocking a live Dream agent per migration note)
     try { await fs.rmdir(sidecarDir); } catch { /* non-empty or already removed */ }
 
     return { infos: ['Renamed .devflow/sidecar/ → .devflow/dream/'], warnings: moveWarnings };

@@ -39,7 +39,7 @@
 #   running after 5 minutes the session almost certainly crashed. All other
 #   types (learning, decisions, knowledge, curation) run the LLM and may take
 #   up to 30 minutes on large logs or slow models; 1800s avoids yanking an
-#   actively-running processor.
+#   actively-running Dream agent.
 #
 # D56b: JUST_RECOVERED guard.
 #   When dream_recover_stale renames a .processing back to .json, it records

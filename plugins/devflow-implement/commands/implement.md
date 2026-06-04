@@ -439,17 +439,17 @@ If `.devflow/features/.disabled` exists, skip entirely.
    Read the FILES_CHANGED to understand the implemented code.
    Read .devflow/features/index.json to see existing feature knowledge for cross-referencing."
    ```
-3. Read sidecar (`.devflow/features/{slug}/.create-result.json`), then run:
+3. Read result file (`.devflow/features/{slug}/.create-result.json`), then run:
    ```bash
    node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
      --slug="{slug}" --name="{name}" \
      --directories='["{dir1}", "{dir2}"]' \
-     --referencedFiles='{referencedFiles_json_from_sidecar}' \
-     --description="{description_from_sidecar}" \
+     --referencedFiles='{referencedFiles_json_from_result}' \
+     --description="{description_from_result}" \
      --createdBy="implement" 2>/dev/null
    ```
    Clean up: `rm -f .devflow/features/{slug}/.create-result.json`
-   If the sidecar file does not exist (agent failed to write it), use empty defaults:
+   If the result file does not exist (agent failed to write it), use empty defaults:
    `referencedFiles='[]'`, `description=""`.
 4. Report: "Created feature knowledge: {slug}"
 
@@ -473,7 +473,7 @@ Skip if all touched areas already have matching feature knowledge.
    Write updated feature knowledge to .devflow/features/{slug}/KNOWLEDGE.md
    Write .devflow/features/{slug}/.refresh-result.json with referencedFiles and description."
    ```
-3. Read sidecar, update index (same CLI call as step 3 above), clean up sidecar.
+3. Read result file, update index (same CLI call as step 3 above), clean up the result file.
 
 **Failure handling**: Non-blocking. If Knowledge agent crashes, log failure and report results normally.
 
