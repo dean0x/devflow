@@ -18,7 +18,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-06-01
+updated: 2026-06-05
 ---
 
 # Rules System CLI
@@ -98,6 +98,8 @@ Four helper functions in `plugins.ts` serve distinct scopes:
 - `isValidRuleName(name)` — validates rule names match `/^[a-z0-9-]+$/`; called by `buildRulesMap` at map-build time as a path-traversal defense
 - `LEGACY_RULE_NAMES` — currently empty; add entries here when renaming or removing a rule
 
+The `devflow-core-skills` plugin's `skills` array in `plugins.ts` also registers the four Dream agent skills (`dream-memory`, `dream-decisions`, `dream-knowledge`, `dream-curation`). Their bare names appear in `LEGACY_SKILLS_V2X` for upgrade cleanup so old installs are swept during `devflow init`.
+
 ### Build Pipeline
 
 `scripts/build-plugins.ts` extends the skill/agent build to handle rules. The key difference from skills: rules are **flat files** (not directories), so no recursive copy is needed. The build script reads `plugin.json`'s `rules` array, clears and recreates the plugin's `rules/` directory, then copies each `shared/rules/{name}.md` into `plugins/{plugin}/rules/{name}.md`. The build fails with exit 1 if a declared rule is missing from `shared/rules/`.
@@ -140,7 +142,7 @@ Key install properties:
 
 ### Manifest Tracking
 
-`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs).
+`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs). The `features.learn` field was removed from `ManifestData` in this refactor; `DreamConfig` (in `src/cli/utils/dream-config.ts`) now tracks only `{memory, decisions, knowledge}`.
 
 ### `devflow rules` Command
 
@@ -214,7 +216,7 @@ export const WORKFLOW_ORDER: string[] = [
 
 - Rules have no namespace prefix (unlike skills which install as `devflow:{name}/`). The directory `~/.claude/rules/devflow/` itself provides the namespace.
 - Rules are plugin-scoped by design — no `buildFullRulesMap()` equivalent exists.
-- `LEGACY_RULE_NAMES` in `plugins.ts` is currently empty. Add entries when renaming or removing a rule.
+- `LEGACY_RULE_NAMES` in `plugins.ts` is currently empty. Add entries here when renaming or removing a rule.
 - The `paths` frontmatter key must always be present. Core rules use `paths: []` (global); language rules use a glob array (file-type-scoped). Omitting the key may break rule loading.
 - `buildRulesMap` throws if any rule name fails `isValidRuleName` — misconfigured `plugin.json` entries are caught at map-build time, not at path-construction time.
 - `partitionSelectablePlugins` uses the presence of `commands.length > 0` as the sole criterion for the workflow bucket — command-less selectable plugins always land in the language bucket. If a non-language command-less plugin is added, update the bucket name or add an explicit category field.
@@ -240,27 +242,30 @@ export const WORKFLOW_ORDER: string[] = [
 - **Scope prompt removed**: Interactive TTY runs no longer ask for scope — user scope is the automatic default. The `--scope` flag still works (for `local` installs or scripted `user` overrides), and non-TTY still logs and defaults to `user`.
 - **Two-step selection requires `partitionSelectablePlugins` for bucket assignment**: Do NOT sort or filter `DEVFLOW_PLUGINS` manually in init code. Always delegate to `partitionSelectablePlugins`. The workflow-bucket predicate is `commands.length > 0` — the language-bucket is every command-less selectable plugin (implicit convention; not enforced by types).
 - **`WORKFLOW_ORDER` regression guard is bidirectional**: `tests/plugins.test.ts` verifies WORKFLOW_ORDER entries correspond to real commands AND that commands not in the excluded set are covered. Adding a new workflow command requires updating WORKFLOW_ORDER or the test will fail.
-- **Rules have no runtime sentinel**: Unlike knowledge (`.devflow/features/.disabled`), decisions, memory, and learn, rules have no `.disabled` file. Disabling rules is destructive: `devflow rules --disable` removes the directory entirely. There is no temporary suppression path.
+- **Rules have no runtime sentinel**: Unlike knowledge (`.devflow/features/.disabled`), decisions, and memory, rules have no `.disabled` file. Disabling rules is destructive: `devflow rules --disable` removes the directory entirely. There is no temporary suppression path.
 - **Core vs language rules have different token behavior**: Core rules load on every prompt. Language rules only activate when Claude is working with a matching file type.
 - **manifest.ts contains a `kb → knowledge` migration self-heal**: `readManifest` detects `features.kb` and migrates it to `features.knowledge` in-place. This is the only backward-compat code in `manifest.ts`; do not add more. For rules, `LEGACY_RULE_NAMES` is the correct pattern when renaming rule files.
+- **`devflow learn` no longer exists**: The learning pipeline CLI (`src/cli/commands/learn.ts`) was removed. `manifest.features.learn` no longer exists. Two migrations (`purge-learning-pipeline-v1` per-project, `purge-learning-global-v1` global) in `src/cli/utils/migrations.ts` sweep legacy learning artifacts on `devflow init`.
 
 ## Key Files
 
 - `shared/rules/` — source of truth for all rule content; flat `.md` files (12 total)
-- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER`, `partitionSelectablePlugins()`
+- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER`, `partitionSelectablePlugins()`; also registers `dream-memory`/`dream-decisions`/`dream-knowledge`/`dream-curation` skills on `devflow-core-skills` and lists them in `LEGACY_SKILLS_V2X`
 - `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
 - `src/cli/commands/ambient.ts` — purges legacy `commands.md` via `COMMANDS_RULE_PATH` / `removeLegacyCommandsRule()`; called unconditionally from `addAmbientHook` and `removeAmbientHook` so stale files are cleaned up on every enable/disable/init
 - `src/cli/utils/installer.ts` — `installRuleFile` (exported); `installViaFileCopy` rules section
 - `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files
-- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default
+- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed
+- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; applies ADR-002
 - `scripts/build-plugins.ts` — build-time distribution from `shared/rules/` → `plugins/*/rules/`
 - `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional)
 - `tests/init.test.ts` — `combineSelection` and `shouldRetry` unit tests
 
 ## Related
 
-- ADR-001: No migration code for devflow refactors — clean break philosophy
+- ADR-002: Migrations leave a clean house — learning-pipeline purge migrations follow this pattern
+- ADR-012: `.devflow` knowledge committed to git — governs feature knowledge storage; rules themselves install outside the repo to `~/.claude/rules/devflow/`
 - Skills system (parallel architecture): `src/cli/utils/installer.ts` `installViaFileCopy` skills section is the model rules followed
 - Feature flags: `src/cli/utils/flags.ts` — another toggleable feature using the same manifest.features pattern
 - Ambient simplification (c51114d): introduced `commands.md` rule + ambient-managed separation

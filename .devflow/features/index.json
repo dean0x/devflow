@@ -24,15 +24,16 @@
         "shared/rules/quality.md",
         "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-06-02T09:53:33.387Z",
+      "lastUpdated": "2026-06-05T00:00:00.000Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
       "name": "Dream & Hooks System",
-      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/learning/decisions/knowledge processing, or curation. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, dream-evaluate.",
+      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, dream-evaluate, dream-memory, dream-decisions, dream-knowledge, dream-curation.",
       "directories": [
         "scripts/hooks/",
-        "shared/agents/"
+        "shared/agents/",
+        "shared/skills/"
       ],
       "referencedFiles": [
         "scripts/hooks/lib/feature-knowledge.cjs",
@@ -48,9 +49,13 @@
         "scripts/hooks/eval-curation",
         "scripts/hooks/session-start-context",
         "shared/agents/dream.md",
+        "shared/skills/dream-memory/SKILL.md",
+        "shared/skills/dream-decisions/SKILL.md",
+        "shared/skills/dream-knowledge/SKILL.md",
+        "shared/skills/dream-curation/SKILL.md",
         "src/cli/commands/decisions.ts"
       ],
-      "lastUpdated": "2026-06-03T20:40:04.080Z",
+      "lastUpdated": "2026-06-05T00:00:00.000Z",
       "createdBy": "devflow-knowledge"
     }
   }
