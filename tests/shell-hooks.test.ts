@@ -28,8 +28,6 @@ const HOOK_SCRIPTS = [
   'dream-evaluate',
   'dream-dispatch',
   'eval-helpers',
-  'eval-reinforce',
-  'eval-learning',
   'eval-decisions',
   'eval-knowledge',
 ];
@@ -510,56 +508,6 @@ describe('json-helper.js operations', () => {
     expect(parsed.id).toBe('b');
   });
 
-  it('learning-created extracts artifacts from JSONL', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-
-    try {
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95 }),
-        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/.claude/skills/debug-hooks/SKILL.md', confidence: 0.8 }),
-        JSON.stringify({ id: 'obs_3', type: 'workflow', status: 'observing', confidence: 0.3 }),
-      ].join('\n'));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" learning-created "${file}"`,
-        { stdio: 'pipe' },
-      ).toString().trim();
-      const parsed = JSON.parse(result);
-      expect(parsed.commands).toHaveLength(1);
-      expect(parsed.commands[0].name).toBe('deploy-flow');
-      expect(parsed.skills).toHaveLength(1);
-      expect(parsed.skills[0].name).toBe('debug-hooks');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('learning-new outputs new artifact notifications with self-learning prefix', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-
-    try {
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_1', type: 'workflow', status: 'created', artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95, last_seen: '2026-03-22T00:00:00Z' }),
-        JSON.stringify({ id: 'obs_2', type: 'procedural', status: 'created', artifact_path: '/.claude/skills/debug-hooks/SKILL.md', confidence: 0.8, last_seen: '2026-03-22T00:00:00Z' }),
-        JSON.stringify({ id: 'obs_3', type: 'workflow', status: 'observing', confidence: 0.3, last_seen: '2026-03-22T00:00:00Z' }),
-      ].join('\n'));
-
-      const result = execSync(
-        `node "${JSON_HELPER}" learning-new "${file}" 0`,
-        { stdio: 'pipe' },
-      ).toString().trim();
-      const lines = result.split('\n');
-      expect(lines).toHaveLength(2);
-      expect(lines[0]).toContain('self-learning/deploy-flow');
-      expect(lines[0]).toContain('command created');
-      expect(lines[1]).toContain('debug-hooks');
-      expect(lines[1]).toContain('skill created');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
 });
 
 describe('json-helper.cjs filter-observations', () => {
@@ -1658,31 +1606,13 @@ describe('dream-evaluate business logic', () => {
     const logFile = path.join(logDir, '.dream-evaluate.log');
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
-    expect(log).toContain('Evaluating learning');
     expect(log).toContain('Evaluating decisions');
     expect(log).toContain('Evaluating knowledge');
-  });
-
-  it('config disables learning: learning skipped, decisions still evaluated', () => {
-    createDreamConfig(tmpDir, { learning: false });
-    createTranscript(homeDir, tmpDir, 5);
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test-session',
-    }, homeDir);
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
-
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    expect(fs.existsSync(logFile)).toBe(true);
-    const log = fs.readFileSync(logFile, 'utf-8');
+    // learning pipeline removed — no 'Evaluating learning' should appear
     expect(log).not.toContain('Evaluating learning');
-    expect(log).toContain('Evaluating decisions');
   });
 
-  it('shallow session (2 turns) skips learning and decisions', () => {
+  it('shallow session (2 turns) skips decisions', () => {
     createTranscript(homeDir, tmpDir, 2);
     runHook(EVALUATE_HOOK, {
       cwd: tmpDir,
@@ -1690,7 +1620,6 @@ describe('dream-evaluate business logic', () => {
     }, homeDir);
 
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'decisions.json'))).toBe(false);
   });
 
@@ -1706,106 +1635,6 @@ describe('dream-evaluate business logic', () => {
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Session depth: 5 turns');
-  });
-
-  it('learning batch accumulation triggers at batch_size threshold', () => {
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-
-    // Pre-write 2 session IDs (batch_size defaults to 3)
-    const sessionCountFile = path.join(dreamDir, '.learning-sessions');
-    fs.writeFileSync(sessionCountFile, 'session-a\nsession-b\n');
-
-    // Create a deep transcript for session-c (the 3rd session)
-    createTranscript(homeDir, tmpDir, 5, 5, 'session-c');
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'session-c',
-    }, homeDir);
-
-    // Batch complete: per-session learning marker should be written (learning.session-c.json)
-    const learningMarker = path.join(dreamDir, 'learning.session-c.json');
-    expect(fs.existsSync(learningMarker)).toBe(true);
-    const marker = JSON.parse(fs.readFileSync(learningMarker, 'utf-8'));
-    expect(marker).toHaveProperty('userSignals');
-    expect(marker).toHaveProperty('existingObservationIds');
-
-    // Session count file should be cleaned up
-    expect(fs.existsSync(sessionCountFile)).toBe(false);
-  });
-
-  it('learning daily cap blocks marker creation', () => {
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-
-    // Set daily cap to max
-    const today = localDateString();
-    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), `${today}\t5\n`);
-
-    // Pre-fill batch to trigger
-    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test-session',
-    }, homeDir);
-
-    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
-
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    expect(fs.existsSync(logFile)).toBe(true);
-    const log = fs.readFileSync(logFile, 'utf-8');
-    expect(log).toContain('daily cap reached');
-  });
-
-  it('learning adaptive batch: >=15 obs requires batch_size=5', () => {
-    // Write 16 observation lines
-    const logLines = Array.from({ length: 16 }, (_, i) =>
-      JSON.stringify({ id: `obs_${i}`, type: 'workflow', pattern: `p${i}` }),
-    );
-    const learningDir = path.join(tmpDir, '.devflow', 'learning');
-    fs.mkdirSync(learningDir, { recursive: true });
-    fs.writeFileSync(path.join(learningDir, 'learning-log.jsonl'), logLines.join('\n') + '\n');
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-
-    // Pre-fill only 3 sessions (less than adaptive batch_size=5)
-    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test-session',
-    }, homeDir);
-
-    // 4 sessions total (3 pre-existing + 1 new) < 5 adaptive threshold
-    expect(fs.existsSync(path.join(dreamDir, 'learning.json'))).toBe(false);
-
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    expect(fs.existsSync(logFile)).toBe(true);
-    const log = fs.readFileSync(logFile, 'utf-8');
-    expect(log).toContain('4/5 sessions');
-  });
-
-  it('learning session dedup: same ID twice counted once', () => {
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-
-    createTranscript(homeDir, tmpDir, 5, 5, 'dup-session');
-
-    // Run twice with same session_id
-    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
-    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'dup-session' }, homeDir);
-
-    const sessionCountFile = path.join(dreamDir, '.learning-sessions');
-    if (fs.existsSync(sessionCountFile)) {
-      const lines = fs.readFileSync(sessionCountFile, 'utf-8').trim().split('\n').filter(Boolean);
-      expect(lines).toHaveLength(1);
-    }
   });
 
   it('decisions marker written for deep session with dialog pairs', () => {
@@ -1893,140 +1722,10 @@ describe('dream-evaluate business logic', () => {
 });
 
 // =============================================================================
-// dream-evaluate artifact reinforcement
+// dream-evaluate knowledge evaluation
 // =============================================================================
 
-describe('dream-evaluate artifact reinforcement', () => {
-  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
-
-  let tmpDir: string;
-  let homeDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-test-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-reinforce-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
-    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  });
-
-  it('reinforcement updates last_seen for matching slugs', () => {
-    const logFile = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
-    const obs = {
-      id: 'obs_reinforce_1',
-      type: 'workflow',
-      pattern: 'test pattern',
-      status: 'created',
-      artifact_path: '.claude/commands/self-learning/test-cmd.md',
-      confidence: 0.9,
-      last_seen: '2026-01-01T00:00:00Z',
-    };
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    // Create transcript that references the slug
-    const encoded = encodeCwd(tmpDir);
-    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
-    fs.mkdirSync(projDir, { recursive: true });
-    const transcriptPath = path.join(projDir, 'test-session.jsonl');
-    const lines = [
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Used self-learning:test-cmd in response' }] } }),
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
-    ];
-    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
-
-    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-
-    const updated = JSON.parse(fs.readFileSync(logFile, 'utf-8').trim());
-    expect(updated.last_seen).not.toBe('2026-01-01T00:00:00Z');
-    expect(new Date(updated.last_seen).getTime()).toBeGreaterThan(0);
-  });
-
-  it('reinforcement leaves non-matching slugs unchanged', () => {
-    const logFile = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
-    const obs = {
-      id: 'obs_reinforce_2',
-      type: 'workflow',
-      pattern: 'unrelated pattern',
-      status: 'created',
-      artifact_path: '.claude/commands/self-learning/unrelated-slug.md',
-      confidence: 0.9,
-      last_seen: '2026-01-01T00:00:00Z',
-    };
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    // Create transcript referencing a different slug
-    const encoded = encodeCwd(tmpDir);
-    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
-    fs.mkdirSync(projDir, { recursive: true });
-    const transcriptPath = path.join(projDir, 'test-session.jsonl');
-    const lines = [
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Used self-learning:other-slug here' }] } }),
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
-    ];
-    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
-
-    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-
-    const updated = JSON.parse(fs.readFileSync(logFile, 'utf-8').trim());
-    expect(updated.last_seen).toBe('2026-01-01T00:00:00Z');
-  });
-
-  it('reinforcement log is conditional — no message when nothing reinforced', () => {
-    const logFile = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
-    const obs = {
-      id: 'obs_reinforce_3',
-      type: 'workflow',
-      pattern: 'some pattern',
-      status: 'created',
-      artifact_path: '.claude/commands/self-learning/no-match.md',
-      confidence: 0.9,
-      last_seen: '2026-01-01T00:00:00Z',
-    };
-    fs.writeFileSync(logFile, JSON.stringify(obs) + '\n');
-
-    // Transcript with no self-learning references at all — but still 3+ turns for depth
-    const encoded = encodeCwd(tmpDir);
-    const projDir = path.join(homeDir, '.claude', 'projects', `-${encoded}`);
-    fs.mkdirSync(projDir, { recursive: true });
-    const transcriptPath = path.join(projDir, 'test-session.jsonl');
-    const lines = [
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 0' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 0' }] } }),
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 1' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 1' }] } }),
-      JSON.stringify({ type: 'user', message: { role: 'user', content: 'user turn 2' } }),
-      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'response 2' }] } }),
-    ];
-    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
-
-    runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-
-    const hookLog = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir), '.dream-evaluate.log');
-    if (fs.existsSync(hookLog)) {
-      const log = fs.readFileSync(hookLog, 'utf-8');
-      expect(log).not.toContain('Reinforced');
-    }
-  });
-});
-
-// =============================================================================
-// dream-evaluate read_daily_cap sanitization
-// =============================================================================
-
-describe('dream-evaluate read_daily_cap sanitization', () => {
+describe('dream-evaluate knowledge evaluation', () => {
   const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
 
   let tmpDir: string;
@@ -2036,70 +1735,12 @@ describe('dream-evaluate read_daily_cap sanitization', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-home-'));
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'learning'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
-  });
-
-  it('tab-less counter file does not crash and returns default', () => {
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    const today = localDateString();
-    // Write date string with no tab separator — cut -f2 returns the whole line
-    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), `${today}\n`);
-
-    // Pre-fill batch to trigger learning evaluation
-    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-    expect(exitCode).toBe(0);
-  });
-
-  it('empty counter file does not crash', () => {
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), '');
-
-    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-    expect(exitCode).toBe(0);
-  });
-
-  it('non-numeric count field returns default', () => {
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    const today = localDateString();
-    fs.writeFileSync(path.join(dreamDir, '.learning-runs-today'), `${today}\tabc\n`);
-
-    // Pre-fill batch to trigger
-    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-    expect(exitCode).toBe(0);
-
-    // The marker should still be written because cap defaults to 0 (not at max)
-    // Per-session marker: learning.test-session.json
-    expect(fs.existsSync(path.join(dreamDir, 'learning.test-session.json'))).toBe(true);
-  });
-
-  it('non-numeric config values do not crash', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, '.devflow', 'learning', 'learning.json'),
-      JSON.stringify({ max_daily_runs: 'xyz', batch_size: 'abc' }),
-    );
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    // Pre-fill enough sessions for any reasonable batch_size default (3)
-    fs.writeFileSync(path.join(dreamDir, '.learning-sessions'), 'a\nb\nc\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-    expect(exitCode).toBe(0);
   });
 
   it('LAST_REFRESH sanitization: non-numeric content in knowledge marker defaults to 0', () => {
@@ -2434,10 +2075,9 @@ describe('session-start-context pending-work directive', () => {
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-    // Do NOT disable learning/decisions sentinels here — doing so would also
+    // Do NOT disable decisions/knowledge sentinels here — doing so would also
     // cause dream-collect-tasks to delete those marker types. Instead we
-    // rely on the absence of decisions.md, pitfalls.md, and learning-log.jsonl
-    // to keep Sections 1.5 and 1.75 silent (no file → no output).
+    // rely on the absence of decisions.md and pitfalls.md to keep Section 1.5 silent.
   });
 
   afterEach(() => {
@@ -2446,8 +2086,9 @@ describe('session-start-context pending-work directive', () => {
   });
 
   // T5: directive lists expected task names from pending {type}.{session}.json markers
-  it('pending marker directive includes multiple task names (T5)', () => {
+  it('pending marker directive includes expected task names (T5)', () => {
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
+    // learning markers are deleted on sight (learning pipeline removed — R1)
     fs.writeFileSync(path.join(dreamDir, 'learning.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
 
@@ -2456,8 +2097,11 @@ describe('session-start-context pending-work directive', () => {
     const parsed = JSON.parse(stdout.trim());
     const context = parsed.hookSpecificOutput.additionalContext;
     expect(context).toContain('DREAM MAINTENANCE');
-    expect(context).toContain('learning');
     expect(context).toContain('decisions');
+    // learning marker deleted on sight — must NOT appear in directive
+    expect(context).not.toContain('learning');
+    // learning.sess1.json should be deleted
+    expect(fs.existsSync(path.join(dreamDir, 'learning.sess1.json'))).toBe(false);
   });
 
   it('no directive emitted when no pending markers present', () => {
@@ -2467,22 +2111,28 @@ describe('session-start-context pending-work directive', () => {
     expect(stdout.trim()).toBe('');
   });
 
-  it('stale .processing recovered and included in directive', () => {
+  it('stale learning .processing recovered then deleted on sight (not emitted in directive)', () => {
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    // Seed a stale learning .processing — should be recovered then emitted
+    // Seed a stale learning .processing — recovered to .json then deleted by dream-collect-tasks (R1)
     const procFile = path.join(dreamDir, 'learning.stale.processing');
     fs.writeFileSync(procFile, '{}');
     backdateMtime(procFile, 2000); // past 1800s threshold
 
+    // Also seed a decisions marker so there IS a valid directive to emit
+    fs.writeFileSync(path.join(dreamDir, 'decisions.stale.json'), '{}');
+
     const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
 
+    // Decisions marker should produce a directive
     const parsed = JSON.parse(stdout.trim());
     const context = parsed.hookSpecificOutput.additionalContext;
     expect(context).toContain('DREAM MAINTENANCE');
-    expect(context).toContain('learning');
-    // The .processing should have been renamed to .json
+    // learning must NOT appear in the directive
+    expect(context).not.toContain('learning');
+    // The stale .processing should have been recovered to .json then deleted
     expect(fs.existsSync(procFile)).toBe(false);
-    expect(fs.existsSync(path.join(dreamDir, 'learning.stale.json'))).toBe(true);
+    // learning.stale.json recovered, then deleted by dream-collect-tasks
+    expect(fs.existsSync(path.join(dreamDir, 'learning.stale.json'))).toBe(false);
   });
 });
 
@@ -2659,9 +2309,9 @@ describe('D37 fallback: dream-evaluate honors legacy sidecar config', () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it('learning:false in legacy sidecar/config.json skips learning evaluation when dream/config.json absent', () => {
-    // Seed ONLY the legacy path with learning disabled
-    createLegacySidecarConfig(tmpDir, { memory: true, learning: false, decisions: true, knowledge: true });
+  it('decisions:true in legacy sidecar/config.json still evaluates decisions when dream/config.json absent', () => {
+    // Seed ONLY the legacy path with decisions enabled (learning key irrelevant — pipeline removed)
+    createLegacySidecarConfig(tmpDir, { memory: true, learning: true, decisions: true, knowledge: true });
     createTranscript(homeDir, tmpDir, 5);
 
     runHook(EVALUATE_HOOK, {
@@ -2673,10 +2323,9 @@ describe('D37 fallback: dream-evaluate honors legacy sidecar config', () => {
     const logFile = path.join(logDir, '.dream-evaluate.log');
     const log = fs.readFileSync(logFile, 'utf-8');
 
-    // learning disabled via legacy config — no learning evaluation
-    expect(log).not.toContain('Evaluating learning');
-    // decisions is still enabled — should be evaluated
     expect(log).toContain('Evaluating decisions');
+    // learning pipeline removed — must not appear regardless of legacy config
+    expect(log).not.toContain('Evaluating learning');
   });
 
   it('decisions:false in legacy sidecar/config.json skips decisions evaluation when dream/config.json absent', () => {
@@ -2695,8 +2344,8 @@ describe('D37 fallback: dream-evaluate honors legacy sidecar config', () => {
 
     // decisions disabled via legacy config — should not appear
     expect(log).not.toContain('Evaluating decisions');
-    // learning still enabled
-    expect(log).toContain('Evaluating learning');
+    // learning pipeline removed — must not appear
+    expect(log).not.toContain('Evaluating learning');
   });
 });
 
@@ -2738,14 +2387,15 @@ describe('D37 fallback: session-start-context honors legacy sidecar config', () 
   });
 
   it('memory:false in legacy sidecar/config.json excludes memory tasks from directive when dream/config.json absent', () => {
-    // Seed ONLY the legacy path with memory disabled
+    // Seed ONLY the legacy path with memory disabled, decisions enabled
     createLegacySidecarConfig(tmpDir, { memory: false, learning: true, decisions: true, knowledge: true });
 
-    // Create dream dir with a pending memory marker and a learning marker
+    // Create dream dir with a pending memory marker, a learning marker (deleted on sight), and decisions
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     fs.mkdirSync(dreamDir, { recursive: true });
     fs.writeFileSync(path.join(dreamDir, 'memory.json'), '{}');
-    fs.writeFileSync(path.join(dreamDir, 'learning.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'learning.sess1.json'), '{}'); // deleted on sight (R1)
+    fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
 
     const { stdout } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
 
@@ -2753,8 +2403,10 @@ describe('D37 fallback: session-start-context honors legacy sidecar config', () 
     const parsed = JSON.parse(stdout.trim());
     const context = parsed.hookSpecificOutput.additionalContext;
     expect(context).not.toContain('memory');
-    // learning is still enabled — should be present
-    expect(context).toContain('learning');
+    // learning pipeline removed — must not appear in directive
+    expect(context).not.toContain('learning');
+    // decisions enabled — should appear
+    expect(context).toContain('decisions');
   });
 });
 

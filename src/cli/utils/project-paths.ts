@@ -121,60 +121,6 @@ export function getDecisionsBatchIdsPath(projectRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Learning files
-// ---------------------------------------------------------------------------
-
-/** .devflow/learning/learning-log.jsonl */
-export function getLearningLogPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'learning-log.jsonl');
-}
-
-/** .devflow/learning/learning.json — project-level learning config */
-export function getLearningConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
-}
-
-/** .devflow/learning/.learning-manifest.json */
-export function getLearningManifestPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-manifest.json');
-}
-
-/** .devflow/learning/.learning-notified-at */
-export function getLearningNotifiedAtPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-notified-at');
-}
-
-/** .devflow/learning/.learning-notifications.json */
-export function getLearningNotificationsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-notifications.json');
-}
-
-/** .devflow/learning/.learning-runs-today */
-export function getLearningRunsTodayPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-runs-today');
-}
-
-/** .devflow/learning/.learning-session-count */
-export function getLearningSessionCountPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-session-count');
-}
-
-/** .devflow/learning/.learning-batch-ids */
-export function getLearningBatchIdsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-batch-ids');
-}
-
-/** .devflow/memory/.learning-disabled — sentinel that gates learning sections */
-export function getLearningDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'memory', '.learning-disabled');
-}
-
-/** .devflow/memory/.learning.lock — mkdir-based lock directory for learning agent */
-export function getLearningLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'memory', '.learning.lock');
-}
-
-// ---------------------------------------------------------------------------
 // Memory / working-memory files
 // ---------------------------------------------------------------------------
 

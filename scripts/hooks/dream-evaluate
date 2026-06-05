@@ -39,7 +39,6 @@ DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 FEATURES_DIR="$DEVFLOW_DIR/features"
 DREAM_DIR="$DEVFLOW_DIR/dream"
-LEARNING_DIR="$DEVFLOW_DIR/learning"
 DECISIONS_DIR_DATA="$DEVFLOW_DIR/decisions"
 
 # Read dream config
@@ -48,12 +47,10 @@ DREAM_CONFIG="$DREAM_DIR/config.json"
 if [ ! -f "$DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
   DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
 fi
-LEARNING_ENABLED="true"
 DECISIONS_ENABLED="true"
 KNOWLEDGE_ENABLED="true"
 
 if [ -f "$DREAM_CONFIG" ]; then
-  LEARNING_ENABLED=$(json_field_file "$DREAM_CONFIG" "learning" "true")
   DECISIONS_ENABLED=$(json_field_file "$DREAM_CONFIG" "decisions" "true")
   KNOWLEDGE_ENABLED=$(json_field_file "$DREAM_CONFIG" "knowledge" "true")
 fi
@@ -63,7 +60,7 @@ source "$SCRIPT_DIR/hook-log-init" "dream-evaluate"
 source "$SCRIPT_DIR/dream-lock" || { log "failed to source dream-lock"; exit 1; }
 
 log "SessionEnd hook triggered"
-dbg "LEARNING=$LEARNING_ENABLED DECISIONS=$DECISIONS_ENABLED KNOWLEDGE=$KNOWLEDGE_ENABLED"
+dbg "DECISIONS=$DECISIONS_ENABLED KNOWLEDGE=$KNOWLEDGE_ENABLED"
 
 # --- Find transcript ---
 ENCODED_CWD=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
@@ -128,15 +125,12 @@ MARKER_SUFFIX="${SESSION_ID:-$$}"
 #   FILTER_LIB     — absolute path to transcript-filter.cjs
 #   MARKER_SUFFIX  — suffix for per-session marker filenames (SESSION_ID or $$)
 #   DREAM_DIR      — absolute path to .devflow/dream/
-#   LEARNING_DIR   — absolute path to .devflow/learning/
 #   DECISIONS_DIR_DATA — absolute path to .devflow/decisions/
 #   FEATURES_DIR   — absolute path to .devflow/features/
-#   LEARNING_ENABLED / DECISIONS_ENABLED / KNOWLEDGE_ENABLED — "true"/"false"
+#   DECISIONS_ENABLED / KNOWLEDGE_ENABLED — "true"/"false"
 #   _HAS_JQ        — "true" if jq is available on PATH
 #
 source "$SCRIPT_DIR/eval-helpers"
-source "$SCRIPT_DIR/eval-reinforce"
-source "$SCRIPT_DIR/eval-learning"
 source "$SCRIPT_DIR/eval-decisions"
 source "$SCRIPT_DIR/eval-knowledge"
 source "$SCRIPT_DIR/eval-curation"

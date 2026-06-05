@@ -120,60 +120,6 @@ function getDecisionsBatchIdsPath(projectRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// Learning files
-// ---------------------------------------------------------------------------
-
-/** .devflow/learning/learning-log.jsonl */
-function getLearningLogPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', 'learning-log.jsonl');
-}
-
-/** .devflow/learning/learning.json — project-level learning config */
-function getLearningConfigPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
-}
-
-/** .devflow/learning/.learning-manifest.json */
-function getLearningManifestPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-manifest.json');
-}
-
-/** .devflow/learning/.learning-notified-at */
-function getLearningNotifiedAtPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-notified-at');
-}
-
-/** .devflow/learning/.learning-notifications.json */
-function getLearningNotificationsPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-notifications.json');
-}
-
-/** .devflow/learning/.learning-runs-today */
-function getLearningRunsTodayPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-runs-today');
-}
-
-/** .devflow/learning/.learning-session-count */
-function getLearningSessionCountPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-session-count');
-}
-
-/** .devflow/learning/.learning-batch-ids */
-function getLearningBatchIdsPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-batch-ids');
-}
-
-/** .devflow/memory/.learning-disabled — sentinel that gates learning sections */
-function getLearningDisabledSentinel(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'memory', '.learning-disabled');
-}
-
-/** .devflow/memory/.learning.lock — mkdir-based lock directory for learning agent */
-function getLearningLockDir(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'memory', '.learning.lock');
-}
-
-// ---------------------------------------------------------------------------
 // Memory / working-memory files
 // ---------------------------------------------------------------------------
 
@@ -355,17 +301,6 @@ module.exports = {
   getDecisionsNotificationsPath,
   getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
-  // Learning files
-  getLearningLogPath,
-  getLearningConfigPath,
-  getLearningManifestPath,
-  getLearningNotifiedAtPath,
-  getLearningNotificationsPath,
-  getLearningRunsTodayPath,
-  getLearningSessionCountPath,
-  getLearningBatchIdsPath,
-  getLearningDisabledSentinel,
-  getLearningLockDir,
   // Memory files
   getWorkingMemoryDisabledSentinel,
   getWorkingMemoryPath,

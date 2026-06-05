@@ -1,11 +1,10 @@
 #!/bin/bash
 
 # SessionStart Hook: Cross-Feature Context Injection
-# Always-on hook that injects decisions TL;DR and learned behaviors as additionalContext.
+# Always-on hook that injects decisions TL;DR as additionalContext.
 # Sections are independently gated by feature sentinels — this hook itself is never disabled.
 #
 # Section 1.5: Decisions TL;DR (skipped if .devflow/decisions/.disabled)
-# Section 1.75: Learned behaviors + new artifact notifications (skipped if .devflow/memory/.learning-disabled)
 # Section 2: Dream pending-work (emits directive when pending tasks detected)
 
 # Safe no-op fallback: must exist before hook-bootstrap is sourced.
@@ -38,24 +37,10 @@ CONTEXT=""
 DEVFLOW_DIR="$CWD/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 DREAM_DIR="$DEVFLOW_DIR/dream"
-LEARNING_DIR="$DEVFLOW_DIR/learning"
 DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"
 
 # Normal logging
 source "$SCRIPT_DIR/hook-log-init" "session-start-context"
-
-# Read dream config for feature state (primary source of truth)
-# dream-fallback: transitional read of sidecar/config.json — REMOVE after one release once all projects migrated
-_DREAM_CONFIG="$DREAM_DIR/config.json"
-if [ ! -f "$_DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
-  _DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
-fi
-_LEARNING_DREAM="true"
-if [ -f "$_DREAM_CONFIG" ]; then
-  _LEARNING_DREAM=$(json_field_file "$_DREAM_CONFIG" "learning" "true")
-fi
-
-dbg "LEARNING_DREAM=$_LEARNING_DREAM"
 
 # --- Section 1.5: Project Decisions TL;DR ---
 # Skipped if decisions feature is disabled via sentinel.
@@ -85,87 +70,6 @@ $(printf '%b' "$DECISIONS_TLDR")"
 ${DECISIONS_SECTION}"
       else
         CONTEXT="$DECISIONS_SECTION"
-      fi
-    fi
-  fi
-fi
-
-# --- Section 1.75: Learned Behaviors ---
-# Skipped if learning feature is disabled via sentinel or dream config.
-#
-# _build_learned_section LEARNING_LOG NOTIFIED_MARKER
-#   Prints the LEARNED BEHAVIORS block to stdout, or nothing if no artifacts exist.
-#   Side-effect: updates NOTIFIED_MARKER when new artifacts are present.
-_build_learned_section() {
-  local log_file="$1" notified_marker="$2"
-
-  # Single-pass extraction of created artifacts (commands + skills)
-  local learned_json
-  learned_json=$(json_learning_created "$log_file")
-
-  local learned_commands="" learned_skills=""
-  if [ -n "$learned_json" ]; then
-    if [ "$_HAS_JQ" = "true" ]; then
-      learned_commands=$(echo "$learned_json" | jq -r '.commands | map("/self-learning/\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
-      learned_skills=$(echo "$learned_json" | jq -r '.skills | map("\(.name) (\(.conf))") | join(", ")' 2>/dev/null)
-    else
-      # Node fallback: parse the JSON and format
-      learned_commands=$(echo "$learned_json" | node -e "
-        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        console.log(d.commands.map(c=>\"/self-learning/\"+c.name+\" (\"+c.conf+\")\").join(', '));
-      " 2>/dev/null)
-      learned_skills=$(echo "$learned_json" | node -e "
-        const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-        console.log(d.skills.map(s=>s.name+\" (\"+s.conf+\")\").join(', '));
-      " 2>/dev/null)
-    fi
-  fi
-
-  if [ "${DEVFLOW_HOOK_DEBUG:-}" = "1" ]; then dbg "Learned artifacts: commands='$learned_commands' skills='$learned_skills'"; fi
-  [ -z "$learned_commands" ] && [ -z "$learned_skills" ] && return 0
-
-  local section="--- LEARNED BEHAVIORS ---"
-  [ -n "$learned_commands" ] && section="${section}
-Commands: $learned_commands"
-  [ -n "$learned_skills" ] && section="${section}
-Skills: $learned_skills"
-  section="${section}
-Edit or delete: .claude/commands/self-learning/ and .claude/skills/"
-
-  # Check for new artifacts since last notification (single jq -s pass)
-  local last_notified=0
-  [ -f "$notified_marker" ] && last_notified=$(cat "$notified_marker" 2>/dev/null || echo "0")
-
-  local new_artifacts
-  new_artifacts=$(json_learning_new "$log_file" "$last_notified")
-
-  if [ -n "$new_artifacts" ]; then
-    section="${section}
-
---- NEW LEARNED BEHAVIORS ---
-${new_artifacts}
-TIP: Type the command name to use it. Rename to shorter path for quicker access.
-Run \`devflow learn --list\` to see all."
-    # Only update notified marker when new artifacts exist
-    date +%s > "$notified_marker" 2>/dev/null || true
-  fi
-
-  printf '%s' "$section"
-}
-
-if [ "$_LEARNING_DREAM" = "true" ] && [ ! -f "$MEMORY_DIR/.learning-disabled" ]; then
-  LEARNING_LOG="$LEARNING_DIR/learning-log.jsonl"
-  NOTIFIED_MARKER="$LEARNING_DIR/.learning-notified-at"
-
-  if [ -f "$LEARNING_LOG" ]; then
-    LEARNED_SECTION=$(_build_learned_section "$LEARNING_LOG" "$NOTIFIED_MARKER")
-    if [ -n "$LEARNED_SECTION" ]; then
-      if [ -n "$CONTEXT" ]; then
-        CONTEXT="${CONTEXT}
-
-${LEARNED_SECTION}"
-      else
-        CONTEXT="$LEARNED_SECTION"
       fi
     fi
   fi
@@ -214,7 +118,6 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   # Determine feature enabled-state.
   # Primary: dream/config.json fields; secondary: runtime sentinels (defense-in-depth).
   _SC2_MEM_EN="true"
-  _SC2_LEARN_EN="true"
   _SC2_DEC_EN="true"
   _SC2_KNOW_EN="true"
 
@@ -225,17 +128,15 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   fi
   if [ -f "$_SC2_DREAM_CONFIG" ]; then
     _SC2_MEM_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "memory"    "true")
-    _SC2_LEARN_EN=$(json_field_file "$_SC2_DREAM_CONFIG" "learning"  "true")
     _SC2_DEC_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "decisions" "true")
     _SC2_KNOW_EN=$(json_field_file  "$_SC2_DREAM_CONFIG" "knowledge" "true")
   fi
   # Sentinel overrides
   [ -f "$MEMORY_DIR/.working-memory-disabled" ] && _SC2_MEM_EN="false"
-  [ -f "$MEMORY_DIR/.learning-disabled" ]       && _SC2_LEARN_EN="false"
   [ -f "$DEVFLOW_DIR/decisions/.disabled" ]     && _SC2_DEC_EN="false"
   [ -f "$DEVFLOW_DIR/features/.disabled" ]      && _SC2_KNOW_EN="false"
 
-  dbg "Section2: mem=$_SC2_MEM_EN learn=$_SC2_LEARN_EN dec=$_SC2_DEC_EN know=$_SC2_KNOW_EN"
+  dbg "Section2: mem=$_SC2_MEM_EN dec=$_SC2_DEC_EN know=$_SC2_KNOW_EN"
 
   # Step 1: recover stale .processing markers so they become collectable in step 2
   if [ -d "$DREAM_DIR" ]; then
@@ -243,7 +144,7 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   fi
 
   # Step 2: collect pending marker task types
-  dream_collect_tasks "$DREAM_DIR" "$_SC2_MEM_EN" "$_SC2_LEARN_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
+  dream_collect_tasks "$DREAM_DIR" "$_SC2_MEM_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
 
   # Step 3: raw-queue bridge — union in memory task if .pending-turns.jsonl is non-empty
   # even when no memory dream marker exists (queue written but marker not yet written).

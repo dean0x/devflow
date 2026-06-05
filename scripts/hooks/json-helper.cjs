@@ -46,7 +46,6 @@ const {
   getPitfallsFilePath,
   getDecisionsUsagePath,
   getDecisionsLockDir,
-  getLearningLogPath,
 } = require('./lib/project-paths.cjs');
 
 function readStdin() {

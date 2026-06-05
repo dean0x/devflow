@@ -4,14 +4,12 @@ import { getDreamConfigPath, getDreamDir } from './project-paths.js';
 
 export interface DreamConfig {
   memory: boolean;
-  learning: boolean;
   decisions: boolean;
   knowledge: boolean;
 }
 
 const DEFAULT_CONFIG: DreamConfig = {
   memory: true,
-  learning: true,
   decisions: true,
   knowledge: true,
 };
@@ -30,9 +28,9 @@ export function getConfigPath(projectRoot: string): string {
 function coerceConfig(parsed: unknown): DreamConfig | null {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   const p = parsed as Record<string, unknown>;
+  // Silently ignore legacy `learning` key — old configs may still contain it
   return {
     memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
-    learning: typeof p.learning === 'boolean' ? p.learning : DEFAULT_CONFIG.learning,
     decisions: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.decisions,
     knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
   };

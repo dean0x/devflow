@@ -24,7 +24,6 @@ function makeCtx(overrides: Partial<GatherContext> = {}): GatherContext {
     transcript: null,
     usage: null,
     configCounts: null,
-    learningCounts: null,
     costHistory: null,
     config: { enabled: true, detail: false, components: [] },
     devflowDir: '/test/.devflow',
