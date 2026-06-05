@@ -7,8 +7,8 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 # Dream Task: knowledge
 
 This skill is loaded by the Dream agent after it has claimed the knowledge marker(s).
-The agent has already done: claim (mv .json → .processing), heartbeat (touch .processing),
-and multi-marker merge (union staleSlugs arrays; use any worktreePath).
+The agent has already done: claim (mv .json → .processing) and multi-marker merge
+(union staleSlugs arrays; use any worktreePath).
 
 ## Procedure
 

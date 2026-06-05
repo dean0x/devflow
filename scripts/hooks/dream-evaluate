@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Dream System: dream-evaluate (SessionEnd Hook)
-# Evaluates session-level features: learning batching, decisions detection, knowledge refresh.
+# Evaluates session-level features: decisions detection, knowledge refresh.
 # Writes marker files to .devflow/dream/ for dream-dispatch to pick up.
 #
 # Orchestrator: sources eval-helpers + 4 feature modules after shared setup.

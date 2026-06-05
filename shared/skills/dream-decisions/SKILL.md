@@ -7,8 +7,8 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 # Dream Task: decisions
 
 This skill is loaded by the Dream agent after it has claimed the decisions marker(s).
-The agent has already done: claim (mv .json → .processing), heartbeat (touch .processing),
-and multi-marker merge (concatenate dialogPairs strings; union existingObservationIds arrays).
+The agent has already done: claim (mv .json → .processing) and multi-marker merge
+(concatenate dialogPairs strings; union existingObservationIds arrays).
 Cap at the last 30 dialog-pairs before proceeding.
 
 ## Procedure

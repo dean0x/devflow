@@ -7,8 +7,7 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 # Dream Task: curation
 
 This skill is loaded by the Dream agent after it has claimed the curation marker.
-The agent has already done: claim (mv .json → .processing) and heartbeat (touch .processing).
-Curation uses a single marker only.
+The agent has already done: claim (mv .json → .processing). Curation uses a single marker only.
 
 ## Procedure
 

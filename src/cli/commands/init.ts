@@ -1078,6 +1078,9 @@ export const initCommand = new Command('init')
       'session-end-knowledge-refresh',
       'background-memory-update',
       'background-knowledge-refresh',
+      // Learning pipeline removed: eval-learning/eval-reinforce no longer sourced by dream-evaluate
+      'eval-learning',
+      'eval-reinforce',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
@@ -1108,7 +1111,7 @@ export const initCommand = new Command('init')
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
       // Memory hooks include the unified dream hooks (dream-dispatch, dream-capture,
-      // dream-evaluate) which handle learning, decisions, and knowledge in the background.
+      // dream-evaluate) which handle memory, decisions, and knowledge in the background.
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 

@@ -1083,7 +1083,7 @@ describe('sync-devflow-gitignore-v1 migration', () => {
 
     const result = await getMigration().run(makeCtx());
 
-    expect(fs.access(devflowDir)).rejects.toThrow();
+    await expect(fs.access(devflowDir)).rejects.toThrow();
     expect(result?.infos ?? []).toHaveLength(0);
   });
 
