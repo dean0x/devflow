@@ -546,6 +546,38 @@ const MIGRATION_SYNC_DEVFLOW_GITIGNORE: Migration<'per-project'> = {
 };
 
 /**
+ * Re-sync .devflow/.gitignore to the new ignore-by-default allowlist policy.
+ *
+ * v1 already executed on existing machines (writing the old per-entry blocklist).
+ * v2 is required to overwrite those with the new template — a new ID forces
+ * machines that already ran v1 to re-fire.
+ *
+ * Applies PF-004 / PF-001: idempotent — no-op if content already matches
+ * (covers this very repo which was manually updated to the new policy). Also
+ * no-ops cleanly when .devflow/ does not exist.
+ */
+const MIGRATION_SYNC_DEVFLOW_GITIGNORE_V2: Migration<'per-project'> = {
+  id: 'sync-devflow-gitignore-v2',
+  description: 'Re-sync .devflow/.gitignore to new ignore-by-default allowlist policy',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const devflowDir = path.join(ctx.projectRoot, '.devflow');
+    try { await fs.access(devflowDir); } catch { return { infos: [], warnings: [] }; }
+
+    const canonical = getDevflowGitignoreContent();
+    const gitignorePath = path.join(devflowDir, '.gitignore');
+
+    try {
+      const existing = await fs.readFile(gitignorePath, 'utf-8');
+      if (existing === canonical) return { infos: [], warnings: [] };
+    } catch { /* file missing — will be created below */ }
+
+    await writeFileAtomicExclusive(gitignorePath, canonical);
+    return { infos: ['Synced .devflow/.gitignore to ignore-by-default allowlist policy'], warnings: [] };
+  },
+};
+
+/**
  * Phase 3 (reliable LLM sidecar consumption): remove orphaned state files
  * left by the removed deterministic capacity/manifest/reconcile features.
  *
@@ -795,6 +827,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_CONSOLIDATE_TO_DEVFLOW,
   MIGRATION_CLEANUP_STALE_WORKING_MEMORY,
   MIGRATION_SYNC_DEVFLOW_GITIGNORE,
+  MIGRATION_SYNC_DEVFLOW_GITIGNORE_V2,
   MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE,
   MIGRATION_RENAME_SIDECAR_TO_DREAM,
   MIGRATION_PURGE_LEARNING_PIPELINE,

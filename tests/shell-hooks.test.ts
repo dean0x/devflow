@@ -1358,12 +1358,14 @@ describe('ensure-devflow-init behavioral', () => {
     expect(content).toBe('{"existing":"data"}');
   });
 
-  it('creates .devflow/.gitignore with transient file entries', () => {
+  it('creates .devflow/.gitignore with ignore-by-default allowlist content', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
-    expect(gitignore).toContain('features/.knowledge.lock/');
-    expect(gitignore).toContain('memory/');
+    expect(gitignore).toContain('\n*\n');
+    expect(gitignore).toContain('!.gitignore');
+    expect(gitignore).toContain('!decisions/decisions.md');
+    expect(gitignore).toContain('!features/*/KNOWLEDGE.md');
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore-configured'))).toBe(true);
   });
 
@@ -1373,8 +1375,9 @@ describe('ensure-devflow-init behavioral', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
-    const lockEntries = gitignore.split('\n').filter(l => l === 'features/.knowledge.lock/');
-    expect(lockEntries).toHaveLength(1);
+    // The allowlist negation for decisions.md should appear exactly once
+    const decisionsEntries = gitignore.split('\n').filter(l => l === '!decisions/decisions.md');
+    expect(decisionsEntries).toHaveLength(1);
   });
 
   it('heredoc matches getDevflowGitignoreContent() from project-paths.cjs', () => {

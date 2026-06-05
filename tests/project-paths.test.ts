@@ -225,10 +225,25 @@ describe('project-paths TypeScript module', () => {
   });
 
   describe('getDevflowGitignoreContent', () => {
-    it('includes dream/ instead of sidecar/', () => {
+    it('uses ignore-by-default allowlist policy', () => {
       const content = getDevflowGitignoreContent();
-      expect(content).toContain('dream/');
+      // Allowlist header (ignore everything, re-include curated files)
+      expect(content).toContain('\n*\n');
+      expect(content).toContain('!.gitignore');
+      // Decisions knowledge tracked
+      expect(content).toContain('!decisions/');
+      expect(content).toContain('!decisions/decisions.md');
+      expect(content).toContain('!decisions/pitfalls.md');
+      // Feature knowledge tracked
+      expect(content).toContain('!features/');
+      expect(content).toContain('!features/index.json');
+      expect(content).toContain('!features/*/');
+      expect(content).toContain('!features/*/KNOWLEDGE.md');
+      // Transient/per-developer paths are NOT enumerated (no longer needed)
+      expect(content).not.toContain('dream/');
       expect(content).not.toContain('sidecar/');
+      expect(content).not.toContain('memory/');
+      expect(content).not.toContain('manifest.json');
     });
   });
 
