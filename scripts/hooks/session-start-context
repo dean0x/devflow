@@ -185,21 +185,58 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
       _SC2_SPAWN_TMP="$DREAM_DIR/.processor-spawned-at.tmp.$$"
       printf '%s' "$_SC2_NOW" > "$_SC2_SPAWN_TMP" 2>/dev/null && mv "$_SC2_SPAWN_TMP" "$_SC2_SPAWNED_AT_FILE" 2>/dev/null || rm -f "$_SC2_SPAWN_TMP" 2>/dev/null || true
 
-      _SC2_DIRECTIVE="--- DREAM MAINTENANCE (pending from previous session) ---
-Pending background maintenance: ${_DREAM_TASKS}.
-FIRST ACTION: spawn ONE background agent —
-Agent(subagent_type=\"Dream\", run_in_background: true, prompt: \"Process pending maintenance markers in the cwd.\").
-Single non-blocking call. Do not narrate, summarize, or ask — just spawn it, then continue."
+      # Per-task spawn directive: one Agent() call per pending task, with a hardcoded task→model map.
+      # Known map: memory=haiku, knowledge=sonnet, decisions=opus, curation=opus.
+      # decisions+curation co-pending → exactly ONE opus spawn (run decisions THEN curation sequentially).
+      # Unknown task types are skipped (belt-and-suspenders — dream-collect-tasks should never emit them).
+      _SC2_SPAWN_LINES=""
+      _SC2_MEM_PENDING="false"
+      _SC2_KNOW_PENDING="false"
+      _SC2_DEC_PENDING="false"
+      _SC2_CUR_PENDING="false"
+      case ",$_DREAM_TASKS," in *,memory,*)    _SC2_MEM_PENDING="true"  ;; esac
+      case ",$_DREAM_TASKS," in *,knowledge,*) _SC2_KNOW_PENDING="true" ;; esac
+      case ",$_DREAM_TASKS," in *,decisions,*) _SC2_DEC_PENDING="true"  ;; esac
+      case ",$_DREAM_TASKS," in *,curation,*)  _SC2_CUR_PENDING="true"  ;; esac
 
-      if [ -n "$CONTEXT" ]; then
-        CONTEXT="${CONTEXT}
+      if [ "$_SC2_MEM_PENDING" = "true" ]; then
+        _SC2_SPAWN_LINES="${_SC2_SPAWN_LINES}Agent(subagent_type=\"Dream\", model=\"haiku\", run_in_background: true, prompt: \"Process pending 'memory' marker(s): claim per your plumbing, then load devflow:dream-memory and follow it.\")
+"
+      fi
+      if [ "$_SC2_KNOW_PENDING" = "true" ]; then
+        _SC2_SPAWN_LINES="${_SC2_SPAWN_LINES}Agent(subagent_type=\"Dream\", model=\"sonnet\", run_in_background: true, prompt: \"Process pending 'knowledge' marker(s): claim per your plumbing, then load devflow:dream-knowledge and follow it.\")
+"
+      fi
+      if [ "$_SC2_DEC_PENDING" = "true" ] && [ "$_SC2_CUR_PENDING" = "true" ]; then
+        _SC2_SPAWN_LINES="${_SC2_SPAWN_LINES}Agent(subagent_type=\"Dream\", model=\"opus\", run_in_background: true, prompt: \"Process pending decisions and curation marker(s): claim each per your plumbing, then load devflow:dream-decisions and follow it, THEN load devflow:dream-curation and follow it (sequentially, never concurrently).\")
+"
+      elif [ "$_SC2_DEC_PENDING" = "true" ]; then
+        _SC2_SPAWN_LINES="${_SC2_SPAWN_LINES}Agent(subagent_type=\"Dream\", model=\"opus\", run_in_background: true, prompt: \"Process pending 'decisions' marker(s): claim per your plumbing, then load devflow:dream-decisions and follow it.\")
+"
+      elif [ "$_SC2_CUR_PENDING" = "true" ]; then
+        _SC2_SPAWN_LINES="${_SC2_SPAWN_LINES}Agent(subagent_type=\"Dream\", model=\"opus\", run_in_background: true, prompt: \"Process pending 'curation' marker(s): claim per your plumbing, then load devflow:dream-curation and follow it.\")
+"
+      fi
+
+      if [ -n "$_SC2_SPAWN_LINES" ]; then
+        _SC2_DIRECTIVE="--- DREAM MAINTENANCE (pending from previous session) ---
+Pending background maintenance: ${_DREAM_TASKS}.
+Spawn the following background agents (one non-blocking call each, in order). Do not narrate, summarize, or ask — just spawn them, then continue.
+${_SC2_SPAWN_LINES}"
+
+        if [ -n "$CONTEXT" ]; then
+          CONTEXT="${CONTEXT}
 
 ${_SC2_DIRECTIVE}"
+        else
+          CONTEXT="$_SC2_DIRECTIVE"
+        fi
+        dbg "Section2: emitted per-task dream directive (tasks=$_DREAM_TASKS)"
+        log "Dream per-task directive emitted: tasks=$_DREAM_TASKS"
       else
-        CONTEXT="$_SC2_DIRECTIVE"
+        dbg "Section2: tasks present but no known types to spawn — skipping directive"
+        log "Dream directive skipped: no known task types in tasks=$_DREAM_TASKS"
       fi
-      dbg "Section2: emitted dream directive (tasks=$_DREAM_TASKS)"
-      log "Dream pending-work directive emitted: tasks=$_DREAM_TASKS"
     fi
   else
     dbg "Section2: no pending dream tasks"
