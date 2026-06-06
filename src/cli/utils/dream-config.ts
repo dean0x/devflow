@@ -1,5 +1,4 @@
 import { promises as fs } from 'fs';
-import * as path from 'path';
 import { getDreamConfigPath, getDreamDir } from './project-paths.js';
 
 export interface DreamConfig {
@@ -39,9 +38,8 @@ function coerceConfig(parsed: unknown): DreamConfig | null {
 /**
  * Read the dream config for a project root.
  * Returns defaults when the file is missing or unreadable.
- *
- * TODO(dream-fallback): if dream/config.json is absent, fall back to legacy
- * sidecar/config.json before returning all-true defaults. Removable after one release.
+ * Applies ADR-001 clean-break: dream/config.json is the sole source of truth;
+ * the rename-sidecar-to-dream-v1 migration moves sidecar/config.json at init time.
  */
 export async function readConfig(projectRoot: string): Promise<DreamConfig> {
   const configPath = getDreamConfigPath(projectRoot);
@@ -50,15 +48,7 @@ export async function readConfig(projectRoot: string): Promise<DreamConfig> {
     if (config !== null) return config;
     return { ...DEFAULT_CONFIG };
   } catch {
-    // TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json absent
-    const legacyPath = path.join(projectRoot, '.devflow', 'sidecar', 'config.json');
-    try {
-      const config = coerceConfig(JSON.parse(await fs.readFile(legacyPath, 'utf-8')));
-      if (config !== null) return config;
-      return { ...DEFAULT_CONFIG };
-    } catch {
-      return { ...DEFAULT_CONFIG };
-    }
+    return { ...DEFAULT_CONFIG };
   }
 }
 

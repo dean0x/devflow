@@ -95,39 +95,21 @@ describe('readConfig', () => {
     expect(config.knowledge).toBe(true);
   });
 
-  // M5: legacy fallback — stale sidecar/config.json, no dream/config.json → honors legacy toggles
-  it('M5: falls back to legacy sidecar/config.json when dream/config.json is absent', async () => {
-    const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
-    fs.mkdirSync(sidecarDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(sidecarDir, 'config.json'),
-      JSON.stringify({ memory: false, decisions: true, knowledge: true }),
-    );
-
-    const config = await readConfig(tmpDir);
-    expect(config.memory).toBe(false); // honors legacy memory:false
-    expect(config.decisions).toBe(true);
-  });
-
-  it('M5: dream/config.json takes precedence over legacy sidecar/config.json', async () => {
-    // Both exist — dream wins
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dreamDir, 'config.json'),
-      JSON.stringify({ memory: true, decisions: true, knowledge: true }),
-    );
+  // AC-9 (clean break): sidecar/config.json alone (no dream/config.json) → DEFAULT_CONFIG
+  // The rename-sidecar-to-dream-v1 migration moves sidecar/config.json at init time;
+  // readConfig no longer falls back (ADR-001 clean break).
+  it('AC-9: only sidecar/config.json present (no dream/config.json) → returns DEFAULT_CONFIG', async () => {
     const sidecarDir = path.join(tmpDir, '.devflow', 'sidecar');
     fs.mkdirSync(sidecarDir, { recursive: true });
     fs.writeFileSync(
       path.join(sidecarDir, 'config.json'),
       JSON.stringify({ memory: false, decisions: false, knowledge: false }),
     );
-
+    // No .devflow/dream/config.json present — fallback removed (ADR-001).
     const config = await readConfig(tmpDir);
-    // Dream config wins — all true
-    expect(config.memory).toBe(true);
-    expect(config.decisions).toBe(true);
+    expect(config.memory).toBe(true);    // DEFAULT_CONFIG: memory:true
+    expect(config.decisions).toBe(true); // DEFAULT_CONFIG: decisions:true
+    expect(config.knowledge).toBe(true); // DEFAULT_CONFIG: knowledge:true
   });
 
   it('coerceConfig silently ignores legacy learning key (AC-C3)', async () => {

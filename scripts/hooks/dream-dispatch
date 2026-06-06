@@ -41,11 +41,7 @@ DREAM_DIR="$DEVFLOW_DIR/dream"
 source "$SCRIPT_DIR/hook-log-init" "dream-dispatch"
 
 # Read dream config — memory:false skips user turn capture
-# dream-fallback: transitional read of sidecar/config.json — REMOVE after one release once all projects migrated
 DREAM_CONFIG="$DREAM_DIR/config.json"
-if [ ! -f "$DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
-  DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
-fi
 MEMORY_ENABLED="true"
 if [ -f "$DREAM_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")

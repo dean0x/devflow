@@ -121,11 +121,7 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   _SC2_DEC_EN="true"
   _SC2_KNOW_EN="true"
 
-  # dream-fallback: transitional read of sidecar/config.json — REMOVE after one release once all projects migrated
   _SC2_DREAM_CONFIG="$DREAM_DIR/config.json"
-  if [ ! -f "$_SC2_DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
-    _SC2_DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
-  fi
   if [ -f "$_SC2_DREAM_CONFIG" ]; then
     _SC2_MEM_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "memory"    "true")
     _SC2_DEC_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "decisions" "true")

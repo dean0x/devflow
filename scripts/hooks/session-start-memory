@@ -39,11 +39,7 @@ source "$SCRIPT_DIR/hook-log-init" "session-start-memory"
 # The legacy .working-memory-disabled sentinel is intentionally NOT checked here:
 # dream config supersedes it per ADR-001 (clean break). Users who previously
 # disabled via sentinel have it replaced by config.json on first dream init.
-# dream-fallback: transitional read of sidecar/config.json — REMOVE after one release once all projects migrated
 DREAM_CONFIG="$DREAM_DIR/config.json"
-if [ ! -f "$DREAM_CONFIG" ] && [ -f "$DEVFLOW_DIR/sidecar/config.json" ]; then
-  DREAM_CONFIG="$DEVFLOW_DIR/sidecar/config.json"
-fi
 if [ -f "$DREAM_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
   if [ "$MEMORY_ENABLED" = "false" ]; then
