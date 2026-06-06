@@ -24,8 +24,6 @@
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
-//   learning-created <file>               Extract created artifacts from learning log
-//   learning-new <file> <since_epoch>     Find new artifacts since epoch
 //   filter-observations <file> [sort] [n] Filter valid observations, sort desc, limit
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
 //   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
@@ -538,41 +536,6 @@ try {
           diff_stat: data.diff || '',
         },
       }, null, 2));
-      break;
-    }
-
-    case 'learning-created': {
-      // Extract created artifacts from learning log JSONL
-      const file = args[0];
-      const parsed = parseJsonl(file);
-
-      const created = parsed.filter(o => o.status === 'created' && o.artifact_path);
-
-      const formatEntry = o => ({
-        name: artifactName(o),
-        conf: (Math.floor(o.confidence * 10) / 10).toString(),
-      });
-
-      const commands = created.filter(o => o.type === 'workflow').slice(0, 5).map(formatEntry);
-      const skills = created.filter(o => o.type === 'procedural').slice(0, 5).map(formatEntry);
-
-      console.log(JSON.stringify({ commands, skills }));
-      break;
-    }
-
-    case 'learning-new': {
-      const file = args[0];
-      const parsed = parseJsonl(file);
-
-      const created = parsed.filter(o => o.status === 'created' && o.last_seen);
-      const messages = created.map(o => {
-        const name = artifactName(o);
-        return o.type === 'workflow'
-          ? `NEW: /self-learning/${name} command created from repeated workflow`
-          : `NEW: ${name} skill created from procedural knowledge`;
-      });
-
-      console.log(messages.join('\n'));
       break;
     }
 

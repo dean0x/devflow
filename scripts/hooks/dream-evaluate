@@ -4,7 +4,7 @@
 # Evaluates session-level features: decisions detection, knowledge refresh.
 # Writes marker files to .devflow/dream/ for dream-dispatch to pick up.
 #
-# Orchestrator: sources eval-helpers + 4 feature modules after shared setup.
+# Orchestrator: sources eval-helpers + 3 feature modules after shared setup.
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
