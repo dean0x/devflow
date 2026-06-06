@@ -2,7 +2,7 @@
 # Dream helper: dream-collect-tasks (sourced helper)
 # Collects pending dream task types from .devflow/dream/*.json markers.
 #
-# Source this file to get the dream_collect_tasks function.
+# Source this file to get the dream_collect_tasks and dream_build_spawn_directive functions.
 #
 # Function: dream_collect_tasks DREAM_DIR MEMORY_ENABLED DECISIONS_ENABLED KNOWLEDGE_ENABLED
 #
@@ -204,5 +204,61 @@ EOF
   # Deduplicate and sort
   _DREAM_TASKS=$(printf '%s\n' "$raw_tasks" | sort -u | paste -sd ',' - 2>/dev/null || printf '%s\n' "$raw_tasks" | sort -u | tr '\n' ',' | sed 's/,$//')
   dbg "dream_collect_tasks: _DREAM_TASKS=$_DREAM_TASKS"
+  return 0
+}
+
+# _DREAM_DIRECTIVE is the output variable for dream_build_spawn_directive
+_DREAM_DIRECTIVE=""
+
+# dream_build_spawn_directive TASKS
+# Builds the DREAM MAINTENANCE per-task spawn directive for a comma-separated
+# task list and assigns it to the global _DREAM_DIRECTIVE (empty if no known
+# task types are present). Communicates via a global — mirroring the
+# dream_collect_tasks → _DREAM_TASKS contract — rather than stdout, so the
+# exact directive bytes (including trailing newlines) survive intact; command
+# substitution would strip them.
+#
+# Hardcoded task→model map: memory=haiku, knowledge=sonnet, decisions=opus,
+# curation=opus. decisions+curation co-pending → exactly ONE opus spawn that
+# runs decisions THEN curation sequentially (prevents .decisions.lock contention).
+# Unknown task types are skipped (belt-and-suspenders — dream_collect_tasks
+# should never emit them).
+dream_build_spawn_directive() {
+  local _dbsd_tasks="$1"
+  _DREAM_DIRECTIVE=""
+
+  local _dbsd_mem="false" _dbsd_know="false" _dbsd_dec="false" _dbsd_cur="false"
+  case ",$_dbsd_tasks," in *,memory,*)    _dbsd_mem="true"  ;; esac
+  case ",$_dbsd_tasks," in *,knowledge,*) _dbsd_know="true" ;; esac
+  case ",$_dbsd_tasks," in *,decisions,*) _dbsd_dec="true"  ;; esac
+  case ",$_dbsd_tasks," in *,curation,*)  _dbsd_cur="true"  ;; esac
+
+  local _dbsd_lines=""
+  if [ "$_dbsd_mem" = "true" ]; then
+    _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"haiku\", run_in_background: true, prompt: \"Process pending 'memory' marker(s): claim per your plumbing, then load devflow:dream-memory and follow it.\")
+"
+  fi
+  if [ "$_dbsd_know" = "true" ]; then
+    _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"sonnet\", run_in_background: true, prompt: \"Process pending 'knowledge' marker(s): claim per your plumbing, then load devflow:dream-knowledge and follow it.\")
+"
+  fi
+  if [ "$_dbsd_dec" = "true" ] && [ "$_dbsd_cur" = "true" ]; then
+    _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"opus\", run_in_background: true, prompt: \"Process pending decisions and curation marker(s): claim each per your plumbing, then load devflow:dream-decisions and follow it, THEN load devflow:dream-curation and follow it (sequentially, never concurrently).\")
+"
+  elif [ "$_dbsd_dec" = "true" ]; then
+    _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"opus\", run_in_background: true, prompt: \"Process pending 'decisions' marker(s): claim per your plumbing, then load devflow:dream-decisions and follow it.\")
+"
+  elif [ "$_dbsd_cur" = "true" ]; then
+    _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"opus\", run_in_background: true, prompt: \"Process pending 'curation' marker(s): claim per your plumbing, then load devflow:dream-curation and follow it.\")
+"
+  fi
+
+  # No known task types → leave _DREAM_DIRECTIVE empty so the caller skips emission.
+  [ -z "$_dbsd_lines" ] && return 0
+
+  _DREAM_DIRECTIVE="--- DREAM MAINTENANCE (pending from previous session) ---
+Pending background maintenance: ${_dbsd_tasks}.
+Spawn the following background agents (one non-blocking call each, in order). Do not narrate, summarize, or ask — just spawn them, then continue.
+${_dbsd_lines}"
   return 0
 }
