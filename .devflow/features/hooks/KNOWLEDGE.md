@@ -145,7 +145,7 @@ The filter rejects: `isMeta:true` entries, tool scaffolding, framework-injected 
 The old `dream-evaluate` / Dream agent used a give-up-fast `mkdir || { sleep; exit }` pattern. The per-task skills now use **bounded retry+backoff** for both lock types:
 
 ```bash
-# Pattern used in dream-decisions (.reinforce.lock) and dream-curation (.decisions.lock)
+# Pattern used in dream-decisions (.observations.lock) and dream-curation (.decisions.lock)
 LOCK="<lockpath>"
 _ACQUIRED=false
 _BACKOFF=1
@@ -171,7 +171,7 @@ Two key plumbing operations in `json-helper.cjs` handle all observation writes:
 - Finds existing entry by `id` field in the JSONL log, merges evidence (FIFO cap-10, D12)
 - If `id` type collides with an existing entry, appends `_b` suffix (D11)
 - Self-creates parent directory and empty log on first write
-- Caller holds `.devflow/dream/.reinforce.lock` (mkdir-based) EXTERNALLY — lock acquired by the per-task skill around the Bash call, then released. Never held across tool calls.
+- Caller holds `.devflow/dream/.observations.lock` (mkdir-based) EXTERNALLY — lock acquired by the per-task skill around the Bash call, then released. Never held across tool calls.
 - Writes atomically via temp+mv with O_EXCL flag
 
 **`decisions-append <file> <type> <obs>`** — ADR/PF append-only:
@@ -273,7 +273,7 @@ The primary source of truth for feature enabled-state is `.devflow/dream/config.
 - `scripts/hooks/lib/decisions-index.cjs` — compact decisions index with D-A filter for orchestrators
 - `shared/agents/dream.md` — Dream agent plumbing spec: Step 0 task discovery, Step 1 claim/heartbeat/multi-marker-merge, Step 2 per-task skill dispatch, error discipline
 - `shared/skills/dream-memory/SKILL.md` — memory task procedure: queue drain + WORKING-MEMORY.md authoring (haiku)
-- `shared/skills/dream-decisions/SKILL.md` — decisions task procedure: dialog-pair analysis, bounded retry+backoff on `.reinforce.lock`, `decisions-append` promotion (opus)
+- `shared/skills/dream-decisions/SKILL.md` — decisions task procedure: dialog-pair analysis, bounded retry+backoff on `.observations.lock`, `decisions-append` promotion (opus)
 - `shared/skills/dream-knowledge/SKILL.md` — knowledge task procedure: stale KB refresh + index update (sonnet)
 - `shared/skills/dream-curation/SKILL.md` — curation task procedure: deprecate/merge ADR/PF, bounded retry+backoff on `.decisions.lock`, Edit-tool deprecation (opus)
 

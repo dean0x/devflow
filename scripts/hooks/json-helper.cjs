@@ -568,7 +568,7 @@ try {
     // D11: ID collision with different-type entry → suffix _b to avoid trampling.
     // D12: evidence array capped at 10 (FIFO).
     // D53: merge-observation is locked EXTERNALLY by the caller (dream agent acquires/
-    // releases .devflow/dream/.reinforce.lock around the Bash subshell call), while
+    // releases .devflow/dream/.observations.lock around the Bash subshell call), while
     // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
     // domains — merge-observation itself never acquires a lock; it relies on the caller to
     // serialize concurrent writes. This is intentional: the subshell pattern in the Dream

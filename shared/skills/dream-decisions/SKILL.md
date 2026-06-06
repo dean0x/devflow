@@ -37,12 +37,12 @@ For each detected pattern:
 3. Author full `details` string: `"context: X; decision: Y; rationale: Z"` (decision) or
    `"area: X; issue: Y; impact: Z; resolution: W"` (pitfall).
 
-Write each observation using bounded retry+backoff on `.reinforce.lock`
+Write each observation using bounded retry+backoff on `.observations.lock`
 (explicit cap: 9 attempts, ~30s total backoff; on exhaustion leave `.processing` for retry):
 
 ```bash
 (
-  LOCK=".devflow/dream/.reinforce.lock"
+  LOCK=".devflow/dream/.observations.lock"
   _ACQUIRED=false
   _BACKOFF=1
   for _ATTEMPT in 1 2 3 4 5 6 7 8 9; do
@@ -54,7 +54,7 @@ Write each observation using bounded retry+backoff on `.reinforce.lock`
     _BACKOFF=$(( _BACKOFF < 8 ? _BACKOFF * 2 : 8 ))
   done
   if [ "$_ACQUIRED" != "true" ]; then
-    echo "dream-decisions: failed to acquire .reinforce.lock after 9 attempts — leaving .processing for retry" >&2
+    echo "dream-decisions: failed to acquire .observations.lock after 9 attempts — leaving .processing for retry" >&2
     exit 1
   fi
   node "$HOME/.devflow/scripts/hooks/json-helper.cjs" merge-observation \

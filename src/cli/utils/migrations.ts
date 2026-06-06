@@ -678,7 +678,7 @@ const MIGRATION_RENAME_SIDECAR_TO_DREAM: Migration<'per-project'> = {
     // 2. Move remaining contents (no-overwrite) — markers, .processing, lock dirs, etc.
     const moveWarnings = await moveDirContents(sidecarDir, dreamDir, new Set(['config.json']));
 
-    // 3. Best-effort rmdir (sidecar dir may still contain a live .reinforce.lock/ —
+    // 3. Best-effort rmdir (sidecar dir may still contain a live .observations.lock/ —
     //    NEVER lock the whole dir to avoid deadlocking a live Dream agent per migration note)
     try { await fs.rmdir(sidecarDir); } catch { /* non-empty or already removed */ }
 
