@@ -77,7 +77,7 @@ and acquires `.decisions.lock` internally — calling it while you already hold 
 would deadlock, and appending is the wrong operation for deprecating an existing entry.
 
 Editing the file requires holding `.decisions.lock` across the read-modify-write. Acquire the
-lock EXACTLY ONCE using bounded retry+backoff (explicit cap: 9 attempts, ~30s total backoff;
+lock EXACTLY ONCE using bounded retry+backoff (explicit cap: 9 attempts, ~47s total backoff;
 on exhaustion leave `.processing` for retry — NEVER silently drop the write).
 Because the Edit tool call cannot be nested inside a Bash call, split the lock lifecycle
 across three separate calls and NEVER re-acquire it inside this window:

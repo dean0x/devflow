@@ -510,64 +510,6 @@ describe('json-helper.js operations', () => {
 
 });
 
-describe('json-helper.cjs filter-observations', () => {
-  it('returns valid entries as sorted array', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_a', type: 'workflow', pattern: 'p1', confidence: 0.3 }),
-        JSON.stringify({ id: 'obs_b', type: 'procedural', pattern: 'p2', confidence: 0.9 }),
-        JSON.stringify({ id: 'obs_c', type: 'workflow', pattern: 'p3', confidence: 0.5 }),
-      ].join('\n') + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" filter-observations "${file}" confidence 2`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const parsed = JSON.parse(result);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].id).toBe('obs_b');
-      expect(parsed[1].id).toBe('obs_c');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('filters out malformed entries', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-test-'));
-    const file = path.join(tmpDir, 'learning.jsonl');
-    try {
-      fs.writeFileSync(file, [
-        JSON.stringify({ id: 'obs_valid', type: 'workflow', pattern: 'valid', confidence: 0.5 }),
-        JSON.stringify({ id: 'bad_id', type: 'workflow', pattern: 'bad id' }),
-        JSON.stringify({ id: 'obs_notype', pattern: 'no type' }),
-        JSON.stringify({ id: 'obs_nopattern', type: 'workflow' }),
-        'not json at all',
-      ].join('\n') + '\n');
-
-      const result = execSync(
-        `node "${JSON_HELPER}" filter-observations "${file}"`,
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ).toString().trim();
-      const parsed = JSON.parse(result);
-      expect(parsed).toHaveLength(1);
-      expect(parsed[0].id).toBe('obs_valid');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('returns empty array for missing file', () => {
-    const result = execSync(
-      `node "${JSON_HELPER}" filter-observations "/tmp/nonexistent-devflow-test-${Date.now()}.jsonl"`,
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    ).toString().trim();
-    expect(result).toBe('[]');
-  });
-});
-
-
 describe('json-parse wrapper', () => {
   it('can be sourced and provides function definitions', () => {
     const result = execSync(

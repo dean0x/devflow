@@ -24,7 +24,6 @@
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
-//   filter-observations <file> [sort] [n] Filter valid observations, sort desc, limit
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
 //   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
 //   decisions-usage-scan                  Scan session context for ADR/PF cite counts
@@ -308,15 +307,6 @@ function releaseLock(lockDir) {
   try { fs.rmdirSync(lockDir); } catch { /* already released */ }
 }
 
-/** Extract artifact display name from its file path. */
-function artifactName(obs) {
-  const parts = (obs.artifact_path || '').split('/');
-  if (obs.type === 'workflow') {
-    return (parts.pop() || '').replace(/\.md$/, '');
-  }
-  return parts.length >= 2 ? parts[parts.length - 2] : '';
-}
-
 function parseArgs(argList) {
   const result = {};
   const jsonArgs = {};
@@ -536,27 +526,6 @@ try {
           diff_stat: data.diff || '',
         },
       }, null, 2));
-      break;
-    }
-
-    case 'filter-observations': {
-      const file = args[0];
-      const sortField = args[1] || 'confidence';
-      const limit = parseInt(args[2]) || 30;
-      if (!fs.existsSync(safePath(file))) {
-        console.log('[]');
-        break;
-      }
-      const entries = parseJsonl(file);
-      // All 4 types now valid (D3)
-      const validTypes = new Set(['workflow', 'procedural', 'decision', 'pitfall']);
-      const valid = entries.filter(e =>
-        e.id && e.id.startsWith('obs_') &&
-        validTypes.has(e.type) &&
-        e.pattern
-      );
-      valid.sort((a, b) => (b[sortField] || 0) - (a[sortField] || 0));
-      console.log(JSON.stringify(valid.slice(0, limit)));
       break;
     }
 

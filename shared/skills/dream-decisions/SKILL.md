@@ -38,7 +38,7 @@ For each detected pattern:
    `"area: X; issue: Y; impact: Z; resolution: W"` (pitfall).
 
 Write each observation using bounded retry+backoff on `.observations.lock`
-(explicit cap: 9 attempts, ~30s total backoff; on exhaustion leave `.processing` for retry):
+(explicit cap: 9 attempts, ~47s total backoff; on exhaustion leave `.processing` for retry):
 
 ```bash
 (

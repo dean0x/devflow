@@ -176,10 +176,7 @@ EOF
     [ -f "$_marker_file" ] || continue
     _sel_base="${_marker_file##*/}"
     _sel_fbn="${_sel_base%.json}"
-    case "$_sel_fbn" in
-      *.*) _sel_type="${_sel_fbn%%.*}" ;;
-      *)   _sel_type="$_sel_fbn" ;;
-    esac
+    _sel_type=$(_derive_marker_type "$_sel_base")
 
     # Clean up any stale .retries file for this marker, unless it was just recovered
     # in this same run (JUST_RECOVERED guard from dream-recover).
