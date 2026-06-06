@@ -70,10 +70,6 @@ Beyond session memory, Devflow persists architectural decisions and known pitfal
 
 These files are read by reviewers automatically during `/code-review`.
 
-## Self-Learning (Sibling System)
-
-Self-learning shares the `.devflow/` directory but uses a completely different pipeline. Working memory captures every turn via a queue (`UserPromptSubmit` / Stop hook → `.devflow/memory/.pending-turns.jsonl`) and the Dream agent rewrites `WORKING-MEMORY.md` from the queue. Self-learning instead uses `SessionEnd` evaluation modules that write dream markers; the same Dream agent at SessionStart claims those markers and extracts 4 observation types (workflow, procedural, decision, pitfall) from transcript channels via LLM judgment. The two systems operate independently and do not interfere. See [Self-Learning](self-learning.md) for the full architecture.
-
 ## Documentation Structure
 
 Devflow creates project documentation in `.devflow/docs/`:

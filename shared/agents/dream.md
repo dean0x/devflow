@@ -24,6 +24,11 @@ You are spawned for the ONE task named in your prompt (or "decisions then curati
 combined Opus spawn). Your role: claim markers atomically, do real LLM work via the matching
 per-task skill, write results through plumbing ops, clean up.
 
+> **Model note**: The `model: sonnet` frontmatter is the fallback default. In practice
+> `session-start-context` overrides the model per spawn: sonnet for `memory` and `knowledge`
+> tasks; opus for the combined `decisions then curation` spawn. When you see "Opus spawn" in
+> this document, that refers to the model assigned by the orchestrator at spawn time.
+
 ## Environment
 
 Installed scripts live at `$HOME/.devflow/scripts/hooks/`.
@@ -71,7 +76,7 @@ read them all, then union/concat their payloads before processing:
 - `knowledge`: union `staleSlugs` arrays; use any `worktreePath`
 - `memory`, `curation`: single marker only
 
-**Input cap**: Process only the last **30** dialog-pairs / userSignals (truncate oldest if more).
+**Input cap**: Process only the last **30** dialog-pairs (truncate oldest if more).
 This bounds token cost and keeps each run predictable.
 
 ## Step 2 — Process each task via its skill

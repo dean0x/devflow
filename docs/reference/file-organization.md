@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (42 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (45 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -55,8 +55,6 @@ devflow/
 │       ├── dream-evaluate           # SessionEnd hook: orchestrator sourcing eval-* feature modules
 │       ├── dream-lock               # Shared helper: mkdir-based locking
 │       ├── eval-helpers             # SessionEnd module: shared setup sourced by dream-evaluate
-│       ├── eval-reinforce           # SessionEnd module: reinforcement operations
-│       ├── eval-learning            # SessionEnd module: learning batch accumulation + marker
 │       ├── eval-decisions           # SessionEnd module: decisions marker (DIALOG_PAIRS)
 │       ├── eval-knowledge           # SessionEnd module: knowledge staleness refresh
 │       ├── eval-curation            # SessionEnd module: curation marker
@@ -194,7 +192,7 @@ Three shell-script hooks (`dream-capture`, `dream-dispatch`, `dream-evaluate`) r
 |------|-------|---------|
 | `dream-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue, writes `.devflow/dream/memory.json` marker when throttle expires (>2min) |
 | `dream-dispatch` | UserPromptSubmit | Capture-only: appends the user turn to `.pending-turns.jsonl` (emits no directive) |
-| `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 5 feature modules (`eval-reinforce`, `eval-learning`, `eval-decisions`, `eval-knowledge`, `eval-curation`); writes per-session learning/decisions/knowledge/curation markers |
+| `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 3 feature modules (`eval-decisions`, `eval-knowledge`, `eval-curation`); writes per-session decisions/knowledge/curation markers |
 | `session-start-memory` | SessionStart | Injects previous memory + git state as `additionalContext`. Warns if >1h stale |
 | `session-start-context` | SessionStart | Recovers stale `.processing` markers, collects pending markers, emits the DREAM MAINTENANCE directive (throttled to 120s); also injects decisions TL;DR + learned behaviors |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |

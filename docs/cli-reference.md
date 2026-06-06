@@ -21,7 +21,6 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--teams` / `--no-teams` | Enable/disable Agent Teams (default: off) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
-| `--learn` / `--no-learn` | Enable/disable self-learning (default: on) |
 | `--decisions` / `--no-decisions` | Enable/disable decisions agent (default: on) |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
@@ -74,18 +73,6 @@ npx devflow-kit init --plugin=implement,code-review  # Install multiple
 npx devflow-kit ambient --enable     # Enable always-on ambient mode
 npx devflow-kit ambient --disable    # Disable ambient mode
 npx devflow-kit ambient --status     # Show current status
-```
-
-## Self-Learning
-
-```bash
-npx devflow-kit learn --enable       # Register the learning hook
-npx devflow-kit learn --disable      # Remove the learning hook
-npx devflow-kit learn --status       # Show status and observation counts
-npx devflow-kit learn --list         # Show all observations by confidence
-npx devflow-kit learn --configure    # Interactive config (model, throttle, caps)
-npx devflow-kit learn --clear        # Reset all observations
-npx devflow-kit learn --purge        # Remove invalid/corrupted entries
 ```
 
 ## Decisions
