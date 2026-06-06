@@ -735,7 +735,7 @@ const MIGRATION_PURGE_LEARNING_PIPELINE: Migration<'per-project'> = {
       }
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') { /* dream dir doesn't exist — skip */ }
+      if (code !== 'ENOENT') throw err;
     }
 
     // 3. Drop `learning` key from dream/config.json (non-destructive read-modify-write)
@@ -794,7 +794,12 @@ async function _dropLearningKeyFromConfig(configPath: string): Promise<void> {
 
   const tmp = configPath + '.tmp.' + process.pid;
   await fs.writeFile(tmp, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
-  await fs.rename(tmp, configPath);
+  try {
+    await fs.rename(tmp, configPath);
+  } catch (renameErr) {
+    try { await fs.unlink(tmp); } catch { /* best-effort cleanup */ }
+    throw renameErr;
+  }
 }
 
 /**

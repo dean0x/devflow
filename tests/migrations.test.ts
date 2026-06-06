@@ -1593,6 +1593,36 @@ describe('purge-learning-pipeline-v1 migration', () => {
     await expect(fs.access(selfLearningDir)).rejects.toThrow();
   });
 
+  it('removes auto-generated skills but preserves user skills (step 6)', async () => {
+    const claudeDir = path.join(projectRoot, '.claude');
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Auto-generated skill: non-devflow-prefixed dir, marker in first 10 lines
+    const markedSkillDir = path.join(skillsDir, 'my-workflow');
+    await fs.mkdir(markedSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(markedSkillDir, 'SKILL.md'),
+      `---\n# devflow-learning: auto-generated\n---\n\n# My workflow skill\n`,
+      'utf-8',
+    );
+
+    // User-authored skill: no marker — must survive
+    const userSkillDir = path.join(skillsDir, 'my-custom-skill');
+    await fs.mkdir(userSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(userSkillDir, 'SKILL.md'),
+      `# My Custom Skill\n\nUser-authored — no auto-generated marker here.\n`,
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    // Marked skill removed
+    await expect(fs.access(markedSkillDir)).rejects.toThrow();
+    // User skill preserved
+    await expect(fs.access(userSkillDir)).resolves.toBeUndefined();
+  });
+
   it('is idempotent — running twice produces no errors', async () => {
     // Set up full scenario
     const learningDir = path.join(devflowDir, 'learning');
