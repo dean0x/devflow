@@ -6,6 +6,14 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 
 # Dream Task: memory
 
+## Iron Law
+
+> **SYNTHESIZE FROM THE QUEUE — NEVER FABRICATE**
+>
+> WORKING-MEMORY.md must be authored from the captured turns in `.pending-turns.processing`.
+> Do not invent context, carry over assumptions from prior sessions, or fill sections with
+> canned text. If the queue is empty, write only what the marker and existing memory support.
+
 This skill is loaded by the Dream agent after it has claimed the memory marker(s).
 The agent has already done: claim (mv .json → .processing), heartbeat (touch .processing),
 and multi-marker merge (single marker only for memory type). The pending-turns queue

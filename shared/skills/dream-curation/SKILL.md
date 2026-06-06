@@ -6,6 +6,14 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 
 # Dream Task: curation
 
+## Iron Law
+
+> **DEPRECATE, NEVER DELETE — THE APPEND-ONLY INVARIANT IS ABSOLUTE**
+>
+> Curation may only flip an entry's status to `Deprecated` and rewrite the TL;DR comment.
+> Entries are never removed from decisions.md or pitfalls.md. The file is append-only;
+> `decisions-append` adds, curation flips status — nothing else touches the corpus.
+
 This skill is loaded by the Dream agent after it has claimed the curation marker.
 The agent has already done: claim (mv .json → .processing). Curation uses a single marker only.
 

@@ -6,6 +6,14 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 
 # Dream Task: decisions
 
+## Iron Law
+
+> **`decisions-append` OWNS ALL NUMBERING — NEVER HAND-EDIT IDs**
+>
+> ADR and PF numbers are assigned exclusively by `decisions-append`. Never write, edit,
+> or infer an ADR-NNN or PF-NNN number directly into decisions.md or pitfalls.md. One
+> invocation claims one set of markers; `decisions-append` handles the rest atomically.
+
 This skill is loaded by the Dream agent after it has claimed the decisions marker(s).
 The agent has already done: claim (mv .json → .processing) and multi-marker merge
 (concatenate dialogPairs strings; union existingObservationIds arrays).

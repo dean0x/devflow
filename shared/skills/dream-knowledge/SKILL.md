@@ -6,6 +6,14 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 
 # Dream Task: knowledge
 
+## Iron Law
+
+> **REFRESH FROM THE LIVE CODEBASE — NEVER FROM MEMORY OR STALE CONTEXT**
+>
+> Every KNOWLEDGE.md update must be grounded in the current files listed under
+> `directories` and `referencedFiles`. Do not carry forward assertions from the
+> existing KNOWLEDGE.md without re-verifying them against the current source.
+
 This skill is loaded by the Dream agent after it has claimed the knowledge marker(s).
 The agent has already done: claim (mv .json → .processing) and multi-marker merge
 (union staleSlugs arrays; use any worktreePath).
