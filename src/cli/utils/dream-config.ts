@@ -40,6 +40,16 @@ function coerceConfig(parsed: unknown): DreamConfig | null {
  * Returns defaults when the file is missing or unreadable.
  * Applies ADR-001 clean-break: dream/config.json is the sole source of truth;
  * the rename-sidecar-to-dream-v1 migration moves sidecar/config.json at init time.
+ *
+ * D37 edge case: a project cloned AFTER the global migration marker is set will
+ * have neither sidecar/config.json nor dream/config.json (no migration has ever
+ * run for it). readConfig falls through to DEFAULT_CONFIG (all features enabled).
+ * This is a bounded, non-fatal silent reset: the user re-disables any features
+ * they want off on their next `devflow init` run. The tradeoff is acceptable
+ * because: (1) DEFAULT_CONFIG is the safe-to-enable state, (2) re-running
+ * `devflow init` is the documented recovery path for fresh clones, and (3)
+ * re-adding a sidecar fallback would reintroduce compat code that ADR-001 removed.
+ * Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
  */
 export async function readConfig(projectRoot: string): Promise<DreamConfig> {
   const configPath = getDreamConfigPath(projectRoot);

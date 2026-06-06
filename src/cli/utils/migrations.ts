@@ -792,14 +792,9 @@ async function _dropLearningKeyFromConfig(configPath: string): Promise<void> {
 
   delete config['learning'];
 
-  const tmp = configPath + '.tmp.' + process.pid;
-  await fs.writeFile(tmp, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
-  try {
-    await fs.rename(tmp, configPath);
-  } catch (renameErr) {
-    try { await fs.unlink(tmp); } catch { /* best-effort cleanup */ }
-    throw renameErr;
-  }
+  // D34: use writeFileAtomicExclusive (O_EXCL temp+rename) — TOCTOU-safe.
+  // The sibling sync-devflow-gitignore migration uses the same helper.
+  await writeFileAtomicExclusive(configPath, JSON.stringify(config, null, 2) + '\n');
 }
 
 /**

@@ -240,7 +240,7 @@ export function getDevflowGitignoreContent(): string {
 #   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
 #
 # Everything else under .devflow/ is per-developer or transient (memory, dream,
-# learning, docs, locks, runtime state, manifest, scratch results) and is
+# docs, locks, runtime state, manifest, scratch results) and is
 # intentionally ignored. Model: ignore-by-default, then re-include the curated
 # files. Any NEW file under .devflow/ is ignored unless explicitly listed below.
 
