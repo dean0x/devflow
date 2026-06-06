@@ -73,7 +73,7 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 ```
 devflow/
 ├── shared/skills/          # 45 skills (single source of truth)
-├── shared/agents/          # 15 shared agents (single source of truth)
+├── shared/agents/          # 16 shared agents (single source of truth)
 ├── shared/rules/           # 12 rules (single source of truth; flat .md files)
 ├── plugins/devflow-*/      # 21 plugins (12 core + 9 optional language/ecosystem)
 ├── docs/reference/         # Detailed reference documentation
@@ -182,7 +182,7 @@ Per-project runtime files live under `.devflow/`:
 
 **Universal Skill Installation**: All skills from all plugins are always installed, regardless of plugin selection. Skills are tiny markdown files installed as `~/.claude/skills/devflow:{name}/` (namespaced to avoid collisions with other plugin ecosystems). Source directories in `shared/skills/` stay unprefixed — the `devflow:` prefix is applied at install-time only. Shadow overrides live at `~/.devflow/skills/{name}/` (unprefixed); when shadowed, the installer copies the user's version to the prefixed install target. Only commands and agents remain plugin-specific.
 
-**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher, bug-analyzer), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator).
+**Model Strategy**: Explicit model assignments in agent frontmatter override the user's session model. Opus for analysis agents (reviewer, scrutinizer, evaluator, designer, researcher, bug-analyzer), Sonnet for execution agents (coder, simplifier, resolver, skimmer, tester), Haiku for I/O agents (git, synthesizer, validator). Dream uses per-task overrides via `session-start-context`: haiku for memory, sonnet for knowledge, opus for decisions/curation (the latter two share one combined opus spawn).
 
 ## Agent & Command Roster
 
@@ -199,7 +199,7 @@ Per-project runtime files live under `.devflow/`:
 - `/bug-analysis` — BugAnalyzer agents + Git + Synthesizer; proactive bug finding with static and semantic analysis, incremental by default
 - `/audit-claude` — CLAUDE.md audit (optional plugin)
 
-**Shared agents** (15): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher, bug-analyzer
+**Shared agents** (16): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher, bug-analyzer, dream
 
 **Plugin-specific agents** (1): claude-md-auditor
 

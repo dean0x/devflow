@@ -86,7 +86,6 @@ devflow/
         │   ├── init.ts
         │   ├── list.ts
         │   ├── memory.ts
-        │   ├── learn.ts
         │   ├── decisions.ts
         │   ├── ambient.ts
         │   ├── flags.ts
@@ -100,7 +99,7 @@ devflow/
         │   ├── types.ts                  # StdinData, HudConfig, ComponentId, etc.
         │   ├── config.ts                 # PRESETS, loadConfig, saveConfig
         │   ├── render.ts                 # Smart multi-line layout assembly
-        │   └── components/               # 14 individual component renderers
+        │   └── components/               # 15 individual component renderers
         └── cli.ts
 ```
 
@@ -198,7 +197,7 @@ Three shell-script hooks (`dream-capture`, `dream-dispatch`, `dream-evaluate`) r
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
 | `preamble` | UserPromptSubmit | Ambient keyword + plan auto-detection (zero overhead for normal prompts) |
 
-**Flow**: User sends prompt → `dream-dispatch` appends the user turn to the queue → session ends → `dream-capture` appends the assistant turn to the queue, writes the memory marker when throttle has expired (>2min) → `dream-evaluate` writes learning/decisions/knowledge/curation markers. On `/clear` or new session → `session-start-memory` injects memory as `additionalContext` with staleness warning if >1h old, and `session-start-context` emits the DREAM MAINTENANCE directive instructing the main model to spawn ONE background Dream agent (`Agent(subagent_type="Dream", run_in_background:true)`) that claims each marker, performs all detection/materialization/curation, then deletes the marker.
+**Flow**: User sends prompt → `dream-dispatch` appends the user turn to the queue → session ends → `dream-capture` appends the assistant turn to the queue, writes the memory marker when throttle has expired (>2min) → `dream-evaluate` writes decisions/knowledge/curation markers. On `/clear` or new session → `session-start-memory` injects memory as `additionalContext` with staleness warning if >1h old, and `session-start-context` emits the DREAM MAINTENANCE directive instructing the main model to spawn ONE background Dream agent (`Agent(subagent_type="Dream", run_in_background:true)`) that claims each marker, performs all detection/materialization/curation, then deletes the marker.
 
 `devflow memory --disable` disables Working Memory. Use `devflow memory --clear` to clean up pending queue files across all projects.
 
@@ -217,7 +216,7 @@ Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL
 
 ## HUD (Heads-Up Display)
 
-The HUD (`scripts/hud.sh` → `scripts/hud/index.js`) is a configurable TypeScript status line with 14 components and 4 presets:
+The HUD (`scripts/hud.sh` → `scripts/hud/index.js`) is a configurable TypeScript status line with 15 components and 4 presets:
 
 | Preset | Components | Layout |
 |--------|-----------|--------|

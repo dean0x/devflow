@@ -25,9 +25,9 @@ combined Opus spawn). Your role: claim markers atomically, do real LLM work via 
 per-task skill, write results through plumbing ops, clean up.
 
 > **Model note**: The `model: sonnet` frontmatter is the fallback default. In practice
-> `session-start-context` overrides the model per spawn: sonnet for `memory` and `knowledge`
-> tasks; opus for the combined `decisions then curation` spawn. When you see "Opus spawn" in
-> this document, that refers to the model assigned by the orchestrator at spawn time.
+> `session-start-context` overrides the model per spawn: haiku for `memory`, sonnet for
+> `knowledge`, opus for the combined `decisions then curation` spawn. When you see "Opus
+> spawn" in this document, that refers to the model assigned by the orchestrator at spawn time.
 
 ## Environment
 

@@ -35,12 +35,6 @@ devflow memory --status                # Check current state
 │   └── .pending-turns.processing # Atomic handoff during background processing (transient)
 ├── dream/
 │   └── memory.{session}.json     # Pending memory update marker (claimed by the Dream agent)
-├── learning/
-│   ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
-│   ├── learning.json             # Project-level learning config
-│   ├── .learning-runs-today      # Daily run counter (date + count)
-│   ├── .learning-sessions        # Session IDs pending batch (one per line)
-│   └── .learning-notified-at     # New artifact notification marker (epoch timestamp)
 └── decisions/
     ├── decisions.md              # Architectural decisions (ADR-NNN, append-only)
     └── pitfalls.md               # Known pitfalls (PF-NNN, area-specific gotchas)

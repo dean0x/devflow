@@ -35,6 +35,17 @@
 # _DREAM_TASKS is the output variable
 _DREAM_TASKS=""
 
+# _derive_marker_type BASENAME — strips .json suffix then returns the component before the first dot.
+# Examples: "decisions.abc123.json" → "decisions", "memory.json" → "memory"
+# Called from both pass 1 and pass 2 so the naming rule has one source of truth.
+_derive_marker_type() {
+  local _fbn="${1%.json}"
+  case "$_fbn" in
+    *.*) printf '%s' "${_fbn%%.*}" ;;
+    *)   printf '%s' "$_fbn" ;;
+  esac
+}
+
 dream_collect_tasks() {
   local dream_dir="${1:?dream_collect_tasks: dream_dir required}"
   local mem_enabled="${2:-true}"
@@ -78,12 +89,8 @@ dream_collect_tasks() {
     _base="${_f##*/}"          # filename only — no basename subprocess
     # Skip config
     case "$_base" in config.json) continue ;; esac
-    # Derive type: "decisions.abc123.json" → base without .json → "decisions.abc123" → type before first dot
-    _full_basename="${_base%.json}"
-    case "$_full_basename" in
-      *.*) _type="${_full_basename%%.*}" ;;
-      *)   _type="$_full_basename" ;;
-    esac
+    # Derive type: "decisions.abc123.json" → "decisions" (via _derive_marker_type)
+    _type=$(_derive_marker_type "$_base")
 
     # Deletion sweep (runs for every marker — not capped)
     case "$_type" in
