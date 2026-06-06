@@ -1,17 +1,14 @@
 import { promises as fs } from 'fs';
-import * as path from 'path';
 import { getDreamConfigPath, getDreamDir } from './project-paths.js';
 
 export interface DreamConfig {
   memory: boolean;
-  learning: boolean;
   decisions: boolean;
   knowledge: boolean;
 }
 
 const DEFAULT_CONFIG: DreamConfig = {
   memory: true,
-  learning: true,
   decisions: true,
   knowledge: true,
 };
@@ -30,9 +27,9 @@ export function getConfigPath(projectRoot: string): string {
 function coerceConfig(parsed: unknown): DreamConfig | null {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   const p = parsed as Record<string, unknown>;
+  // Silently ignore legacy `learning` key — old configs may still contain it
   return {
     memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
-    learning: typeof p.learning === 'boolean' ? p.learning : DEFAULT_CONFIG.learning,
     decisions: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.decisions,
     knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
   };
@@ -41,9 +38,18 @@ function coerceConfig(parsed: unknown): DreamConfig | null {
 /**
  * Read the dream config for a project root.
  * Returns defaults when the file is missing or unreadable.
+ * Applies ADR-001 clean-break: dream/config.json is the sole source of truth;
+ * the rename-sidecar-to-dream-v1 migration moves sidecar/config.json at init time.
  *
- * TODO(dream-fallback): if dream/config.json is absent, fall back to legacy
- * sidecar/config.json before returning all-true defaults. Removable after one release.
+ * D37 edge case: a project cloned AFTER the global migration marker is set will
+ * have neither sidecar/config.json nor dream/config.json (no migration has ever
+ * run for it). readConfig falls through to DEFAULT_CONFIG (all features enabled).
+ * This is a bounded, non-fatal silent reset: the user re-disables any features
+ * they want off on their next `devflow init` run. The tradeoff is acceptable
+ * because: (1) DEFAULT_CONFIG is the safe-to-enable state, (2) re-running
+ * `devflow init` is the documented recovery path for fresh clones, and (3)
+ * re-adding a sidecar fallback would reintroduce compat code that ADR-001 removed.
+ * Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
  */
 export async function readConfig(projectRoot: string): Promise<DreamConfig> {
   const configPath = getDreamConfigPath(projectRoot);
@@ -52,15 +58,7 @@ export async function readConfig(projectRoot: string): Promise<DreamConfig> {
     if (config !== null) return config;
     return { ...DEFAULT_CONFIG };
   } catch {
-    // TODO(dream-fallback): fall back to legacy sidecar/config.json if dream/config.json absent
-    const legacyPath = path.join(projectRoot, '.devflow', 'sidecar', 'config.json');
-    try {
-      const config = coerceConfig(JSON.parse(await fs.readFile(legacyPath, 'utf-8')));
-      if (config !== null) return config;
-      return { ...DEFAULT_CONFIG };
-    } catch {
-      return { ...DEFAULT_CONFIG };
-    }
+    return { ...DEFAULT_CONFIG };
   }
 }
 

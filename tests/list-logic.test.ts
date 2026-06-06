@@ -9,7 +9,7 @@ import type { ManifestData } from '../src/cli/utils/manifest.js';
 
 const allOff: ManifestData['features'] = {
   teams: false, ambient: false, memory: false,
-  learn: false, knowledge: false, decisions: false,
+  knowledge: false, decisions: false,
   hud: false, rules: false, flags: [],
 };
 
@@ -38,18 +38,18 @@ describe('formatFeatures', () => {
     expect(formatFeatures(features)).toBe('teams, memory');
   });
 
-  it('includes learn, knowledge, decisions when enabled', () => {
+  it('includes knowledge, decisions when enabled', () => {
     const features: ManifestData['features'] = {
-      ...allOff, memory: true, learn: true, knowledge: true, decisions: true,
+      ...allOff, memory: true, knowledge: true, decisions: true,
     };
-    expect(formatFeatures(features)).toBe('memory, learn, knowledge, decisions');
+    expect(formatFeatures(features)).toBe('memory, knowledge, decisions');
   });
 
-  it('preserves feature order: memory, learn, knowledge, decisions, hud, rules', () => {
+  it('preserves feature order: memory, knowledge, decisions, hud, rules', () => {
     const features: ManifestData['features'] = {
-      ...allOff, memory: true, learn: true, knowledge: true, decisions: true, hud: true, rules: true,
+      ...allOff, memory: true, knowledge: true, decisions: true, hud: true, rules: true,
     };
-    expect(formatFeatures(features)).toBe('memory, learn, knowledge, decisions, hud, rules');
+    expect(formatFeatures(features)).toBe('memory, knowledge, decisions, hud, rules');
   });
 
   it('includes flags count when flags are present', () => {

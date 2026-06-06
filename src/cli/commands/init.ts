@@ -156,7 +156,6 @@ interface InitOptions {
   teams?: boolean;
   ambient?: boolean;
   memory?: boolean;
-  learn?: boolean;
   hud?: boolean;
   knowledge?: boolean;
   decisions?: boolean;
@@ -177,8 +176,6 @@ export const initCommand = new Command('init')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
   .option('--no-memory', 'Disable working memory hooks')
-  .option('--learn', 'Enable self-learning (workflow detection)')
-  .option('--no-learn', 'Disable self-learning')
   .option('--hud', 'Enable HUD (git info, context usage, session stats)')
   .option('--no-hud', 'Disable HUD status line')
   .option('--knowledge', 'Enable feature knowledge bases')
@@ -281,7 +278,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true, learn: false, knowledge: false, decisions: false, rules: false, flags: [] },
+          features: { teams: false, ambient: false, memory: false, hud: true, knowledge: false, decisions: false, rules: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -434,7 +431,6 @@ export const initCommand = new Command('init')
     let teamsEnabled = false;
     let ambientEnabled = true;
     let memoryEnabled = true;
-    let learnEnabled = true;
     let hudEnabled = true;
     let knowledgeEnabled = true;
     let decisionsEnabled = true;
@@ -465,7 +461,6 @@ export const initCommand = new Command('init')
       if (options.teams !== undefined) teamsEnabled = options.teams;
       if (options.ambient !== undefined) ambientEnabled = options.ambient;
       if (options.memory !== undefined) memoryEnabled = options.memory;
-      if (options.learn !== undefined) learnEnabled = options.learn;
       if (options.hud !== undefined) hudEnabled = options.hud;
       if (options.knowledge !== undefined) knowledgeEnabled = options.knowledge;
       if (options.decisions !== undefined) decisionsEnabled = options.decisions;
@@ -500,7 +495,6 @@ export const initCommand = new Command('init')
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
         `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
-        `Self-learning:   ${learnEnabled ? 'enabled' : 'disabled'}`,
         `Decisions:       ${decisionsEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
@@ -593,26 +587,6 @@ export const initCommand = new Command('init')
           process.exit(0);
         }
         memoryEnabled = memoryChoice;
-      }
-
-      if (options.learn !== undefined) {
-        learnEnabled = options.learn;
-      } else {
-        p.note(
-          'Detects repeated workflows and creates slash commands\n' +
-          'automatically. Runs a background agent on session stop\n' +
-          'that consumes additional tokens.',
-          'Self-Learning',
-        );
-        const learnChoice = await p.confirm({
-          message: 'Enable self-learning? (Recommended)',
-          initialValue: true,
-        });
-        if (p.isCancel(learnChoice)) {
-          p.cancel('Installation cancelled.');
-          process.exit(0);
-        }
-        learnEnabled = learnChoice;
       }
 
       if (options.hud !== undefined) {
@@ -1104,6 +1078,9 @@ export const initCommand = new Command('init')
       'session-end-knowledge-refresh',
       'background-memory-update',
       'background-knowledge-refresh',
+      // Learning pipeline removed: eval-learning/eval-reinforce no longer sourced by dream-evaluate
+      'eval-learning',
+      'eval-reinforce',
     ];
     const hooksDir = path.join(devflowDir, 'scripts', 'hooks');
     for (const legacy of LEGACY_HOOK_FILES) {
@@ -1134,7 +1111,7 @@ export const initCommand = new Command('init')
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
       // Memory hooks include the unified dream hooks (dream-dispatch, dream-capture,
-      // dream-evaluate) which handle learning, decisions, and knowledge in the background.
+      // dream-evaluate) which handle memory, decisions, and knowledge in the background.
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 
@@ -1207,7 +1184,6 @@ export const initCommand = new Command('init')
     if (gitRoot) {
       await writeDreamConfig(gitRoot, {
         memory: memoryEnabled,
-        learning: learnEnabled,
         decisions: decisionsEnabled,
         knowledge: knowledgeEnabled,
       });
@@ -1335,7 +1311,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, learn: learnEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode },
+      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

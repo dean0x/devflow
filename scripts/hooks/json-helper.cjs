@@ -24,9 +24,6 @@
 //   session-output <context>              Build SessionStart output envelope
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
-//   learning-created <file>               Extract created artifacts from learning log
-//   learning-new <file> <since_epoch>     Find new artifacts since epoch
-//   filter-observations <file> [sort] [n] Filter valid observations, sort desc, limit
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
 //   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
 //   decisions-usage-scan                  Scan session context for ADR/PF cite counts
@@ -46,7 +43,6 @@ const {
   getPitfallsFilePath,
   getDecisionsUsagePath,
   getDecisionsLockDir,
-  getLearningLogPath,
 } = require('./lib/project-paths.cjs');
 
 function readStdin() {
@@ -311,15 +307,6 @@ function releaseLock(lockDir) {
   try { fs.rmdirSync(lockDir); } catch { /* already released */ }
 }
 
-/** Extract artifact display name from its file path. */
-function artifactName(obs) {
-  const parts = (obs.artifact_path || '').split('/');
-  if (obs.type === 'workflow') {
-    return (parts.pop() || '').replace(/\.md$/, '');
-  }
-  return parts.length >= 2 ? parts[parts.length - 2] : '';
-}
-
 function parseArgs(argList) {
   const result = {};
   const jsonArgs = {};
@@ -542,62 +529,6 @@ try {
       break;
     }
 
-    case 'learning-created': {
-      // Extract created artifacts from learning log JSONL
-      const file = args[0];
-      const parsed = parseJsonl(file);
-
-      const created = parsed.filter(o => o.status === 'created' && o.artifact_path);
-
-      const formatEntry = o => ({
-        name: artifactName(o),
-        conf: (Math.floor(o.confidence * 10) / 10).toString(),
-      });
-
-      const commands = created.filter(o => o.type === 'workflow').slice(0, 5).map(formatEntry);
-      const skills = created.filter(o => o.type === 'procedural').slice(0, 5).map(formatEntry);
-
-      console.log(JSON.stringify({ commands, skills }));
-      break;
-    }
-
-    case 'learning-new': {
-      const file = args[0];
-      const parsed = parseJsonl(file);
-
-      const created = parsed.filter(o => o.status === 'created' && o.last_seen);
-      const messages = created.map(o => {
-        const name = artifactName(o);
-        return o.type === 'workflow'
-          ? `NEW: /self-learning/${name} command created from repeated workflow`
-          : `NEW: ${name} skill created from procedural knowledge`;
-      });
-
-      console.log(messages.join('\n'));
-      break;
-    }
-
-    case 'filter-observations': {
-      const file = args[0];
-      const sortField = args[1] || 'confidence';
-      const limit = parseInt(args[2]) || 30;
-      if (!fs.existsSync(safePath(file))) {
-        console.log('[]');
-        break;
-      }
-      const entries = parseJsonl(file);
-      // All 4 types now valid (D3)
-      const validTypes = new Set(['workflow', 'procedural', 'decision', 'pitfall']);
-      const valid = entries.filter(e =>
-        e.id && e.id.startsWith('obs_') &&
-        validTypes.has(e.type) &&
-        e.pattern
-      );
-      valid.sort((a, b) => (b[sortField] || 0) - (a[sortField] || 0));
-      console.log(JSON.stringify(valid.slice(0, limit)));
-      break;
-    }
-
     // -------------------------------------------------------------------------
     // merge-observation <log> <newObsJson>
     // ID-keyed reinforce op: if the id exists in the log, increment count, merge evidence,
@@ -606,7 +537,7 @@ try {
     // D11: ID collision with different-type entry → suffix _b to avoid trampling.
     // D12: evidence array capped at 10 (FIFO).
     // D53: merge-observation is locked EXTERNALLY by the caller (dream agent acquires/
-    // releases .devflow/dream/.reinforce.lock around the Bash subshell call), while
+    // releases .devflow/dream/.observations.lock around the Bash subshell call), while
     // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
     // domains — merge-observation itself never acquires a lock; it relies on the caller to
     // serialize concurrent writes. This is intentional: the subshell pattern in the Dream

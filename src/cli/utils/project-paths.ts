@@ -121,60 +121,6 @@ export function getDecisionsBatchIdsPath(projectRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Learning files
-// ---------------------------------------------------------------------------
-
-/** .devflow/learning/learning-log.jsonl */
-export function getLearningLogPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'learning-log.jsonl');
-}
-
-/** .devflow/learning/learning.json — project-level learning config */
-export function getLearningConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', 'learning.json');
-}
-
-/** .devflow/learning/.learning-manifest.json */
-export function getLearningManifestPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-manifest.json');
-}
-
-/** .devflow/learning/.learning-notified-at */
-export function getLearningNotifiedAtPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-notified-at');
-}
-
-/** .devflow/learning/.learning-notifications.json */
-export function getLearningNotificationsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-notifications.json');
-}
-
-/** .devflow/learning/.learning-runs-today */
-export function getLearningRunsTodayPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-runs-today');
-}
-
-/** .devflow/learning/.learning-session-count */
-export function getLearningSessionCountPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-session-count');
-}
-
-/** .devflow/learning/.learning-batch-ids */
-export function getLearningBatchIdsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'learning', '.learning-batch-ids');
-}
-
-/** .devflow/memory/.learning-disabled — sentinel that gates learning sections */
-export function getLearningDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'memory', '.learning-disabled');
-}
-
-/** .devflow/memory/.learning.lock — mkdir-based lock directory for learning agent */
-export function getLearningLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'memory', '.learning.lock');
-}
-
-// ---------------------------------------------------------------------------
 // Memory / working-memory files
 // ---------------------------------------------------------------------------
 
@@ -287,51 +233,32 @@ export function getGitignoreEntries(): string[] {
  * CJS is canonical source: scripts/hooks/lib/project-paths.cjs — this must mirror it exactly.
  */
 export function getDevflowGitignoreContent(): string {
-  return `# Per-developer session state (fully transient)
-memory/
+  return `# .devflow/ git-tracking policy
+# ---------------------------------------------------------------------------
+# Only curated, shared team knowledge is committed to git:
+#   - decisions/decisions.md, decisions/pitfalls.md      (ADR / pitfall records)
+#   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
+#
+# Everything else under .devflow/ is per-developer or transient (memory, dream,
+# docs, locks, runtime state, manifest, scratch results) and is
+# intentionally ignored. Model: ignore-by-default, then re-include the curated
+# files. Any NEW file under .devflow/ is ignored unless explicitly listed below.
 
-# Dream dispatch system (fully transient)
-dream/
+# 1. Ignore everything under .devflow/ by default
+*
 
-# Per-developer observation logs and transient state
-learning/learning-log.jsonl
-learning/learning-log.v1.jsonl.bak
-learning/learning.json
-learning/.learning-manifest.json
-learning/.learning-notified-at
-learning/.learning-notifications.json
-learning/.learning-runs-today
-learning/.learning-session-count
-learning/.learning-batch-ids
-learning/debug/
+# 2. Keep this policy file
+!.gitignore
 
-# Per-developer decisions observation log and transient state
-decisions/decisions-log.jsonl
-decisions/decisions.json
-decisions/.decisions-manifest.json
-decisions/.decisions.lock/
-decisions/.decisions-usage.json
-decisions/.decisions-usage.lock/
-decisions/.decisions-notifications.json
-decisions/.decisions-runs-today
-decisions/.decisions-batch-ids
-decisions/.disabled
+# 3. Track the decisions knowledge (not its log / config / locks / usage state)
+!decisions/
+!decisions/decisions.md
+!decisions/pitfalls.md
 
-# Ephemeral doc artifacts
-docs/handoff-*.md
-docs/reviews/*/.last-review-head
-
-# Transient files in features
-features/.knowledge.lock/
-features/.knowledge-last-refresh
-features/.knowledge-refresh.lock
-features/.disabled
-features/.gitignore-configured
-
-# Install state (local-scope only)
-manifest.json
-
-# Init marker
-.gitignore-configured
+# 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
+!features/
+!features/index.json
+!features/*/
+!features/*/KNOWLEDGE.md
 `;
 }

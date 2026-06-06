@@ -396,9 +396,13 @@ describe('sentinel guard: session-start-context', () => {
     expect(output).toBe('');
   });
 
-  it('outputs learned behaviors when learning enabled and learning-log.jsonl exists', () => {
+  it('session-start-context does not output LEARNED BEHAVIORS (learning pipeline removed)', () => {
+    // Section 1.75 removed — LEARNED BEHAVIORS must never appear
     mkMemoryDir(tmpDir);
-    const logPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
+    // Create a learning log that would have triggered the old section
+    const learningDir = path.join(tmpDir, '.devflow', 'learning');
+    fs.mkdirSync(learningDir, { recursive: true });
+    const logPath = path.join(learningDir, 'learning-log.jsonl');
     fs.writeFileSync(logPath, JSON.stringify({
       id: 'obs_abc123', type: 'workflow', status: 'created',
       artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95,
@@ -406,33 +410,12 @@ describe('sentinel guard: session-start-context', () => {
     }) + '\n');
     const input = sessionInput(tmpDir);
     const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    expect(output.length).toBeGreaterThan(0);
-    const additionalContext = parseHookOutput(output);
-    expect(additionalContext).toContain('LEARNED BEHAVIORS');
-  });
-
-  it('skips learned behaviors when .learning-disabled exists', () => {
-    mkMemoryDir(tmpDir);
-    const logPath = path.join(tmpDir, '.devflow', 'learning', 'learning-log.jsonl');
-    fs.writeFileSync(logPath, JSON.stringify({
-      id: 'obs_abc123', type: 'workflow', status: 'created',
-      artifact_path: '/.claude/commands/self-learning/deploy-flow.md', confidence: 0.95,
-      last_seen: new Date().toISOString(),
-    }) + '\n');
-    writeDisabledSentinel(path.join(tmpDir, '.devflow', 'memory', '.learning-disabled'));
-    const input = sessionInput(tmpDir);
-    const output = execSync(`bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    // The hook must produce no output when the only injectable section is disabled.
-    // Asserting unconditionally: either the output is empty (nothing to inject) or
-    // it contains content that does NOT include the learned behaviors section.
+    // LEARNED BEHAVIORS section must never appear (AC-F1)
     if (output.length > 0) {
       const additionalContext = parseHookOutput(output);
       expect(additionalContext).not.toContain('LEARNED BEHAVIORS');
-    } else {
-      // Empty output is the correct behavior when .learning-disabled suppresses the
-      // only available section. This is the expected path for this test.
-      expect(output).toBe('');
     }
+    // Empty output is also acceptable — hook correctly skips section
   });
 
   it('session-start-memory no longer outputs decisions TL;DR', () => {

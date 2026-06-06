@@ -22,7 +22,6 @@
 #   - JUST_RECOVERED guard: recovered markers have their .retries preserved (not reset).
 #   - Per-type stale thresholds:
 #       memory    = 300s  (5 minutes)
-#       learning  = 1800s (30 minutes)
 #       decisions = 1800s (30 minutes)
 #       knowledge = 1800s (30 minutes)
 #       unknown   = 1800s (default)

@@ -35,12 +35,6 @@ devflow memory --status                # Check current state
 │   └── .pending-turns.processing # Atomic handoff during background processing (transient)
 ├── dream/
 │   └── memory.{session}.json     # Pending memory update marker (claimed by the Dream agent)
-├── learning/
-│   ├── learning-log.jsonl        # Learning observations (JSONL, one entry per line)
-│   ├── learning.json             # Project-level learning config
-│   ├── .learning-runs-today      # Daily run counter (date + count)
-│   ├── .learning-sessions        # Session IDs pending batch (one per line)
-│   └── .learning-notified-at     # New artifact notification marker (epoch timestamp)
 └── decisions/
     ├── decisions.md              # Architectural decisions (ADR-NNN, append-only)
     └── pitfalls.md               # Known pitfalls (PF-NNN, area-specific gotchas)
@@ -69,10 +63,6 @@ Beyond session memory, Devflow persists architectural decisions and known pitfal
 - **`pitfalls.md`** — PF-numbered entries scoped by area. Reviewers check if changes reintroduce known pitfalls.
 
 These files are read by reviewers automatically during `/code-review`.
-
-## Self-Learning (Sibling System)
-
-Self-learning shares the `.devflow/` directory but uses a completely different pipeline. Working memory captures every turn via a queue (`UserPromptSubmit` / Stop hook → `.devflow/memory/.pending-turns.jsonl`) and the Dream agent rewrites `WORKING-MEMORY.md` from the queue. Self-learning instead uses `SessionEnd` evaluation modules that write dream markers; the same Dream agent at SessionStart claims those markers and extracts 4 observation types (workflow, procedural, decision, pitfall) from transcript channels via LLM judgment. The two systems operate independently and do not interfere. See [Self-Learning](self-learning.md) for the full architecture.
 
 ## Documentation Structure
 

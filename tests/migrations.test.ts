@@ -177,6 +177,19 @@ describe('MIGRATIONS', () => {
     expect(cleanupIdx).toBeGreaterThanOrEqual(0);
     expect(syncIdx).toBeGreaterThan(cleanupIdx);
   });
+
+  it('contains sync-devflow-gitignore-v2 with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v2');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('sync-devflow-gitignore-v2 follows sync-devflow-gitignore-v1 in array', () => {
+    const v1Idx = MIGRATIONS.findIndex(m => m.id === 'sync-devflow-gitignore-v1');
+    const v2Idx = MIGRATIONS.findIndex(m => m.id === 'sync-devflow-gitignore-v2');
+    expect(v1Idx).toBeGreaterThanOrEqual(0);
+    expect(v2Idx).toBeGreaterThan(v1Idx);
+  });
 });
 
 describe('runMigrations', () => {
@@ -720,12 +733,13 @@ describe('consolidate-to-devflow-dir migration', () => {
 
     const gitignorePath = path.join(devflowDir, '.gitignore');
     const content = await fs.readFile(gitignorePath, 'utf-8');
-    // Spot-check key entries from DEVFLOW_GITIGNORE_CONTENT
-    expect(content).toContain('memory/');
-    expect(content).toContain('dream/');
-    expect(content).toContain('learning/learning-log.jsonl');
-    expect(content).toContain('decisions/decisions-log.jsonl');
-    expect(content).toContain('features/.knowledge.lock/');
+    // Spot-check key entries from the ignore-by-default allowlist policy
+    expect(content).toContain('\n*\n');
+    expect(content).toContain('!.gitignore');
+    expect(content).toContain('!decisions/decisions.md');
+    expect(content).toContain('!decisions/pitfalls.md');
+    expect(content).toContain('!features/index.json');
+    expect(content).toContain('!features/*/KNOWLEDGE.md');
   });
 
   it('does not overwrite an existing .devflow/.gitignore', async () => {
@@ -1083,7 +1097,7 @@ describe('sync-devflow-gitignore-v1 migration', () => {
 
     const result = await getMigration().run(makeCtx());
 
-    expect(fs.access(devflowDir)).rejects.toThrow();
+    await expect(fs.access(devflowDir)).rejects.toThrow();
     expect(result?.infos ?? []).toHaveLength(0);
   });
 
@@ -1117,6 +1131,106 @@ describe('sync-devflow-gitignore-v1 migration', () => {
     expect(Array.isArray(result?.infos)).toBe(true);
     expect(Array.isArray(result?.warnings)).toBe(true);
     expect(result?.warnings).toHaveLength(0);
+  });
+});
+
+describe('sync-devflow-gitignore-v2 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-sync-gitignore-v2-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v2');
+    if (!m) throw new Error('sync-devflow-gitignore-v2 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('is registered with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v2');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('overwrites a stale old-format .devflow/.gitignore with the new canonical content', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    // Old-format content (blocklist style from v1)
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# old\nmemory/\ndream/\nlearning/learning-log.jsonl\nfeatures/.knowledge.lock/\nmanifest.json\n', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
+    expect(result?.infos).toContain('Synced .devflow/.gitignore to ignore-by-default allowlist policy');
+  });
+
+  it('is a no-op when content already matches the new canonical template', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), getDevflowGitignoreContent(), 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
+    expect(result?.infos ?? []).toHaveLength(0);
+  });
+
+  it('creates .devflow/.gitignore when file is missing but directory exists', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+
+    await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
+  });
+
+  it('skips when .devflow/ directory does not exist', async () => {
+    await fs.mkdir(projectRoot, { recursive: true });
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(devflowDir)).rejects.toThrow();
+    expect(result?.infos ?? []).toHaveLength(0);
+  });
+
+  it('is idempotent — running twice produces the same result', async () => {
+    await fs.mkdir(devflowDir, { recursive: true });
+    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# stale blocklist\nmemory/\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+    await getMigration().run(makeCtx());
+
+    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
+    expect(content).toBe(getDevflowGitignoreContent());
   });
 });
 
@@ -1315,5 +1429,273 @@ describe('rename-sidecar-to-dream-v1 migration', () => {
     expect(m?.scope).toBe('per-project');
     expect(m?.description).toContain('sidecar');
     expect(m?.description).toContain('dream');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purge-learning-pipeline-v1 (per-project)
+// ---------------------------------------------------------------------------
+
+describe('purge-learning-pipeline-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-learning-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-learning-pipeline-v1');
+    if (!m) throw new Error('purge-learning-pipeline-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('is registered in MIGRATIONS with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-learning-pipeline-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('removes .devflow/learning/ directory when it exists', async () => {
+    const learningDir = path.join(devflowDir, 'learning');
+    await fs.mkdir(learningDir, { recursive: true });
+    await fs.writeFile(path.join(learningDir, 'learning-log.jsonl'), '{"type":"workflow"}\n', 'utf-8');
+    await fs.writeFile(path.join(learningDir, 'learning.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(learningDir)).rejects.toThrow();
+  });
+
+  it('is a no-op when .devflow/learning/ does not exist', async () => {
+    // No learning dir created — migration should succeed without errors
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('removes learning.*.json dream markers', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'learning.abc123.json'), '{"ts":1}', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'learning.def456.json'), '{"ts":2}', 'utf-8');
+    // Non-learning markers should be preserved
+    await fs.writeFile(path.join(dreamDir, 'decisions.abc123.json'), '{"ts":3}', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'memory.abc123.json'), '{"ts":4}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(dreamDir, 'learning.abc123.json'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, 'learning.def456.json'))).rejects.toThrow();
+    // Non-learning markers preserved
+    await expect(fs.access(path.join(dreamDir, 'decisions.abc123.json'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dreamDir, 'memory.abc123.json'))).resolves.toBeUndefined();
+  });
+
+  it('removes learning.*.processing dream markers', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'learning.abc123.processing'), '{"ts":1}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(dreamDir, 'learning.abc123.processing'))).rejects.toThrow();
+  });
+
+  it('drops the learning key from .devflow/dream/config.json', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: true, decisions: true, knowledge: true }),
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    const config = JSON.parse(await fs.readFile(path.join(dreamDir, 'config.json'), 'utf-8'));
+    expect(config.learning).toBeUndefined();
+    expect(config.memory).toBe(true);
+    expect(config.decisions).toBe(true);
+    expect(config.knowledge).toBe(true);
+  });
+
+  it('drops the learning key from .devflow/sidecar/config.json when present (legacy)', async () => {
+    const sidecarDir = path.join(devflowDir, 'sidecar');
+    await fs.mkdir(sidecarDir, { recursive: true });
+    await fs.writeFile(
+      path.join(sidecarDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: false, decisions: true, knowledge: true }),
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    const config = JSON.parse(await fs.readFile(path.join(sidecarDir, 'config.json'), 'utf-8'));
+    expect(config.learning).toBeUndefined();
+    expect(config.memory).toBe(true);
+    expect(config.decisions).toBe(true);
+  });
+
+  it('does NOT delete sidecar/config.json — only drops the learning key', async () => {
+    const sidecarDir = path.join(devflowDir, 'sidecar');
+    await fs.mkdir(sidecarDir, { recursive: true });
+    await fs.writeFile(
+      path.join(sidecarDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: true, decisions: true, knowledge: false }),
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    // File must still exist
+    await expect(fs.access(path.join(sidecarDir, 'config.json'))).resolves.toBeUndefined();
+  });
+
+  it('removes .claude/commands/self-learning/ directory', async () => {
+    const claudeDir = path.join(projectRoot, '.claude');
+    const selfLearningDir = path.join(claudeDir, 'commands', 'self-learning');
+    await fs.mkdir(selfLearningDir, { recursive: true });
+    await fs.writeFile(
+      path.join(selfLearningDir, 'my-command.md'),
+      '---\n# devflow-learning: auto-generated\n---\n',
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(selfLearningDir)).rejects.toThrow();
+  });
+
+  it('removes auto-generated skills but preserves user skills (step 6)', async () => {
+    const claudeDir = path.join(projectRoot, '.claude');
+    const skillsDir = path.join(claudeDir, 'skills');
+
+    // Auto-generated skill: non-devflow-prefixed dir, marker in first 10 lines
+    const markedSkillDir = path.join(skillsDir, 'my-workflow');
+    await fs.mkdir(markedSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(markedSkillDir, 'SKILL.md'),
+      `---\n# devflow-learning: auto-generated\n---\n\n# My workflow skill\n`,
+      'utf-8',
+    );
+
+    // User-authored skill: no marker — must survive
+    const userSkillDir = path.join(skillsDir, 'my-custom-skill');
+    await fs.mkdir(userSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(userSkillDir, 'SKILL.md'),
+      `# My Custom Skill\n\nUser-authored — no auto-generated marker here.\n`,
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+
+    // Marked skill removed
+    await expect(fs.access(markedSkillDir)).rejects.toThrow();
+    // User skill preserved
+    await expect(fs.access(userSkillDir)).resolves.toBeUndefined();
+  });
+
+  it('is idempotent — running twice produces no errors', async () => {
+    // Set up full scenario
+    const learningDir = path.join(devflowDir, 'learning');
+    await fs.mkdir(learningDir, { recursive: true });
+    await fs.writeFile(path.join(learningDir, 'learning-log.jsonl'), '', 'utf-8');
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'learning.abc.json'), '{}', 'utf-8');
+    await fs.writeFile(
+      path.join(dreamDir, 'config.json'),
+      JSON.stringify({ memory: true, learning: true, decisions: true, knowledge: true }),
+      'utf-8',
+    );
+
+    await getMigration().run(makeCtx());
+    // Second run — everything already removed
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    // Config still has no learning key
+    const config = JSON.parse(await fs.readFile(path.join(dreamDir, 'config.json'), 'utf-8'));
+    expect(config.learning).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purge-learning-global-v1 (global)
+// ---------------------------------------------------------------------------
+
+describe('purge-learning-global-v1 migration', () => {
+  let tmpDir: string;
+  let fakeHome: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-global-learning-test-'));
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'global'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-learning-global-v1');
+    if (!m) throw new Error('purge-learning-global-v1 migration not found');
+    return m as Migration<'global'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').GlobalMigrationContext {
+    return { scope: 'global', devflowDir: fakeHome };
+  }
+
+  it('is registered in MIGRATIONS with global scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-learning-global-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('global');
+  });
+
+  it('removes learning.json from devflowDir when it exists', async () => {
+    await fs.writeFile(path.join(fakeHome, 'learning.json'), '{"max_daily_runs":5}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(fakeHome, 'learning.json'))).rejects.toThrow();
+  });
+
+  it('is a no-op when learning.json does not exist', async () => {
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('is idempotent — running twice produces no errors', async () => {
+    await fs.writeFile(path.join(fakeHome, 'learning.json'), '{"max_daily_runs":5}', 'utf-8');
+    await getMigration().run(makeCtx());
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
   });
 });

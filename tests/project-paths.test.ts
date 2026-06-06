@@ -33,16 +33,6 @@ import {
   getDecisionsNotificationsPath,
   getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
-  getLearningLogPath,
-  getLearningConfigPath,
-  getLearningManifestPath,
-  getLearningNotifiedAtPath,
-  getLearningNotificationsPath,
-  getLearningRunsTodayPath,
-  getLearningSessionCountPath,
-  getLearningBatchIdsPath,
-  getLearningDisabledSentinel,
-  getLearningLockDir,
   getWorkingMemoryDisabledSentinel,
   getWorkingMemoryPath,
   getBackupPath,
@@ -149,48 +139,6 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('learning files', () => {
-    it('getLearningLogPath returns .devflow/learning/learning-log.jsonl', () => {
-      expect(getLearningLogPath(ROOT)).toBe('/some/project/.devflow/learning/learning-log.jsonl');
-    });
-
-    it('getLearningConfigPath returns .devflow/learning/learning.json', () => {
-      expect(getLearningConfigPath(ROOT)).toBe('/some/project/.devflow/learning/learning.json');
-    });
-
-    it('getLearningManifestPath returns .devflow/learning/.learning-manifest.json', () => {
-      expect(getLearningManifestPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-manifest.json');
-    });
-
-    it('getLearningNotifiedAtPath returns .devflow/learning/.learning-notified-at', () => {
-      expect(getLearningNotifiedAtPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-notified-at');
-    });
-
-    it('getLearningNotificationsPath returns .devflow/learning/.learning-notifications.json', () => {
-      expect(getLearningNotificationsPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-notifications.json');
-    });
-
-    it('getLearningRunsTodayPath returns .devflow/learning/.learning-runs-today', () => {
-      expect(getLearningRunsTodayPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-runs-today');
-    });
-
-    it('getLearningSessionCountPath returns .devflow/learning/.learning-session-count', () => {
-      expect(getLearningSessionCountPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-session-count');
-    });
-
-    it('getLearningBatchIdsPath returns .devflow/learning/.learning-batch-ids', () => {
-      expect(getLearningBatchIdsPath(ROOT)).toBe('/some/project/.devflow/learning/.learning-batch-ids');
-    });
-
-    it('getLearningDisabledSentinel returns .devflow/memory/.learning-disabled', () => {
-      expect(getLearningDisabledSentinel(ROOT)).toBe('/some/project/.devflow/memory/.learning-disabled');
-    });
-
-    it('getLearningLockDir returns .devflow/memory/.learning.lock', () => {
-      expect(getLearningLockDir(ROOT)).toBe('/some/project/.devflow/memory/.learning.lock');
-    });
-  });
-
   describe('memory / working-memory files', () => {
     it('getWorkingMemoryDisabledSentinel returns .devflow/memory/.working-memory-disabled', () => {
       expect(getWorkingMemoryDisabledSentinel(ROOT)).toBe('/some/project/.devflow/memory/.working-memory-disabled');
@@ -277,10 +225,25 @@ describe('project-paths TypeScript module', () => {
   });
 
   describe('getDevflowGitignoreContent', () => {
-    it('includes dream/ instead of sidecar/', () => {
+    it('uses ignore-by-default allowlist policy', () => {
       const content = getDevflowGitignoreContent();
-      expect(content).toContain('dream/');
+      // Allowlist header (ignore everything, re-include curated files)
+      expect(content).toContain('\n*\n');
+      expect(content).toContain('!.gitignore');
+      // Decisions knowledge tracked
+      expect(content).toContain('!decisions/');
+      expect(content).toContain('!decisions/decisions.md');
+      expect(content).toContain('!decisions/pitfalls.md');
+      // Feature knowledge tracked
+      expect(content).toContain('!features/');
+      expect(content).toContain('!features/index.json');
+      expect(content).toContain('!features/*/');
+      expect(content).toContain('!features/*/KNOWLEDGE.md');
+      // Transient/per-developer paths are NOT enumerated (no longer needed)
+      expect(content).not.toContain('dream/');
       expect(content).not.toContain('sidecar/');
+      expect(content).not.toContain('memory/');
+      expect(content).not.toContain('manifest.json');
     });
   });
 
@@ -326,16 +289,6 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsNotificationsPath', ts: getDecisionsNotificationsPath, cjs: cjsPaths.getDecisionsNotificationsPath },
     { name: 'getDecisionsRunsTodayPath', ts: getDecisionsRunsTodayPath, cjs: cjsPaths.getDecisionsRunsTodayPath },
     { name: 'getDecisionsBatchIdsPath', ts: getDecisionsBatchIdsPath, cjs: cjsPaths.getDecisionsBatchIdsPath },
-    { name: 'getLearningLogPath', ts: getLearningLogPath, cjs: cjsPaths.getLearningLogPath },
-    { name: 'getLearningConfigPath', ts: getLearningConfigPath, cjs: cjsPaths.getLearningConfigPath },
-    { name: 'getLearningManifestPath', ts: getLearningManifestPath, cjs: cjsPaths.getLearningManifestPath },
-    { name: 'getLearningNotifiedAtPath', ts: getLearningNotifiedAtPath, cjs: cjsPaths.getLearningNotifiedAtPath },
-    { name: 'getLearningNotificationsPath', ts: getLearningNotificationsPath, cjs: cjsPaths.getLearningNotificationsPath },
-    { name: 'getLearningRunsTodayPath', ts: getLearningRunsTodayPath, cjs: cjsPaths.getLearningRunsTodayPath },
-    { name: 'getLearningSessionCountPath', ts: getLearningSessionCountPath, cjs: cjsPaths.getLearningSessionCountPath },
-    { name: 'getLearningBatchIdsPath', ts: getLearningBatchIdsPath, cjs: cjsPaths.getLearningBatchIdsPath },
-    { name: 'getLearningDisabledSentinel', ts: getLearningDisabledSentinel, cjs: cjsPaths.getLearningDisabledSentinel },
-    { name: 'getLearningLockDir', ts: getLearningLockDir, cjs: cjsPaths.getLearningLockDir },
     { name: 'getWorkingMemoryDisabledSentinel', ts: getWorkingMemoryDisabledSentinel, cjs: cjsPaths.getWorkingMemoryDisabledSentinel },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },

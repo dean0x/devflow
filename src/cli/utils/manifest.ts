@@ -14,7 +14,6 @@ export interface ManifestData {
     teams: boolean;
     ambient: boolean;
     memory: boolean;
-    learn: boolean;
     hud: boolean;
     knowledge: boolean;
     decisions: boolean;
@@ -64,7 +63,6 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         ambient: features.ambient as boolean,
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,
-        learn: typeof features.learn === 'boolean' ? features.learn : false,
         knowledge,
         decisions: typeof features.decisions === 'boolean' ? features.decisions : false,
         rules: typeof features.rules === 'boolean' ? features.rules : true,

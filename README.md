@@ -45,11 +45,11 @@ you: add rate limiting to the /api/upload endpoint
 
 **Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your AI picks up exactly where it left off. Architectural decisions and known pitfalls accumulate in `.devflow/decisions/` and inform every future session. No manual bookkeeping.
 
-**It learns how you work.** A self-learning mechanism detects 4 observation types across sessions — workflow patterns, procedural knowledge, architectural decisions, and recurring pitfalls. Workflow and procedural observations create reusable slash commands and skills automatically. Decisions and pitfalls are written directly to `.devflow/decisions/decisions.md` and `.devflow/decisions/pitfalls.md` — informing every future review and implementation session.
+**Decisions accumulate automatically.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/decisions/decisions.md` and `.devflow/decisions/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
 
 **18 parallel code reviewers.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional reviewers activate when relevant (TypeScript for `.ts` files, database for schema changes). Every finding gets validated and resolved automatically.
 
-**41 skills grounded in expert material.** Every skill is backed by peer-reviewed papers, canonical books, and industry standards — security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey). 200+ sources total.
+**45 skills.** 41 are grounded in expert material — backed by peer-reviewed papers, canonical books, and industry standards: security (OWASP, Shostack), architecture (Parnas, Evans, Fowler), performance (Brendan Gregg), testing (Beck, Meszaros), design (Wlaschin, Hickey), 200+ sources total. The remaining 4 are procedural Dream maintenance skills.
 
 **Skill shadowing.** Override any built-in skill with your own version. Drop a file into `~/.devflow/skills/{name}/` and the installer uses yours instead of the default — same activation, your rules.
 
@@ -75,7 +75,7 @@ Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 npx devflow-kit init
 ```
 
-That's it. The interactive wizard handles plugin selection, feature configuration, and security settings. Ambient mode, working memory, and self-learning are on by default.
+That's it. The interactive wizard handles plugin selection, feature configuration, and security settings. Ambient mode, working memory, and decisions tracking are on by default.
 
 ## Commands
 
@@ -106,7 +106,7 @@ npx devflow-kit init --plugin=typescript,react
 
 Devflow is a plugin system for Claude Code. Each plugin installs commands, agents, and skills into your Claude Code environment. Skills are tiny markdown files that activate automatically based on context. Agents are specialized workers (reviewer, coder, resolver, etc.) with explicit model assignments — Opus for analysis, Sonnet for execution, Haiku for I/O. Commands orchestrate agent pipelines.
 
-For deep dives: [Working Memory](docs/working-memory.md) | [Self-Learning](docs/self-learning.md) | [CLI Reference](docs/cli-reference.md) | [Commands](docs/commands.md)
+For deep dives: [Working Memory](docs/working-memory.md) | [CLI Reference](docs/cli-reference.md) | [Commands](docs/commands.md)
 
 ## CLI Reference
 
@@ -115,7 +115,7 @@ npx devflow-kit init                    # Install (interactive wizard)
 npx devflow-kit init --plugin=implement # Install specific plugin
 npx devflow-kit list                    # List available plugins
 npx devflow-kit ambient --enable        # Toggle ambient mode
-npx devflow-kit learn --enable          # Toggle self-learning (4-type extraction: workflow, procedural, decision, pitfall)
+npx devflow-kit decisions --enable      # Toggle decision/pitfall tracking
 npx devflow-kit rules --status          # Show installed rules
 npx devflow-kit uninstall               # Remove Devflow
 ```
@@ -127,7 +127,7 @@ See [docs/cli-reference.md](docs/cli-reference.md) for all options.
 | Tool | Role | What It Does |
 |------|------|-------------|
 | **[Skim](https://github.com/dean0x/skim)** | Context Optimization | Code-aware AST parsing, command rewriting, output compression |
-| **Devflow** | Quality Orchestration | Parallel reviewers, working memory, self-learning, composable plugins |
+| **Devflow** | Quality Orchestration | Parallel reviewers, working memory, decisions tracking, composable plugins |
 | **[Backbeat](https://github.com/dean0x/backbeat)** | Agent Orchestration | Karpathy optimization loops, multi-agent pipelines, DAG dependencies |
 
 ## Building from Source

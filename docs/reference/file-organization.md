@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (42 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (45 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -55,8 +55,6 @@ devflow/
 │       ├── dream-evaluate           # SessionEnd hook: orchestrator sourcing eval-* feature modules
 │       ├── dream-lock               # Shared helper: mkdir-based locking
 │       ├── eval-helpers             # SessionEnd module: shared setup sourced by dream-evaluate
-│       ├── eval-reinforce           # SessionEnd module: reinforcement operations
-│       ├── eval-learning            # SessionEnd module: learning batch accumulation + marker
 │       ├── eval-decisions           # SessionEnd module: decisions marker (DIALOG_PAIRS)
 │       ├── eval-knowledge           # SessionEnd module: knowledge staleness refresh
 │       ├── eval-curation            # SessionEnd module: curation marker
@@ -88,7 +86,6 @@ devflow/
         │   ├── init.ts
         │   ├── list.ts
         │   ├── memory.ts
-        │   ├── learn.ts
         │   ├── decisions.ts
         │   ├── ambient.ts
         │   ├── flags.ts
@@ -102,7 +99,7 @@ devflow/
         │   ├── types.ts                  # StdinData, HudConfig, ComponentId, etc.
         │   ├── config.ts                 # PRESETS, loadConfig, saveConfig
         │   ├── render.ts                 # Smart multi-line layout assembly
-        │   └── components/               # 14 individual component renderers
+        │   └── components/               # 15 individual component renderers
         └── cli.ts
 ```
 
@@ -194,13 +191,13 @@ Three shell-script hooks (`dream-capture`, `dream-dispatch`, `dream-evaluate`) r
 |------|-------|---------|
 | `dream-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue, writes `.devflow/dream/memory.json` marker when throttle expires (>2min) |
 | `dream-dispatch` | UserPromptSubmit | Capture-only: appends the user turn to `.pending-turns.jsonl` (emits no directive) |
-| `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 5 feature modules (`eval-reinforce`, `eval-learning`, `eval-decisions`, `eval-knowledge`, `eval-curation`); writes per-session learning/decisions/knowledge/curation markers |
+| `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 3 feature modules (`eval-decisions`, `eval-knowledge`, `eval-curation`); writes per-session decisions/knowledge/curation markers |
 | `session-start-memory` | SessionStart | Injects previous memory + git state as `additionalContext`. Warns if >1h stale |
 | `session-start-context` | SessionStart | Recovers stale `.processing` markers, collects pending markers, emits the DREAM MAINTENANCE directive (throttled to 120s); also injects decisions TL;DR + learned behaviors |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
 | `preamble` | UserPromptSubmit | Ambient keyword + plan auto-detection (zero overhead for normal prompts) |
 
-**Flow**: User sends prompt → `dream-dispatch` appends the user turn to the queue → session ends → `dream-capture` appends the assistant turn to the queue, writes the memory marker when throttle has expired (>2min) → `dream-evaluate` writes learning/decisions/knowledge/curation markers. On `/clear` or new session → `session-start-memory` injects memory as `additionalContext` with staleness warning if >1h old, and `session-start-context` emits the DREAM MAINTENANCE directive instructing the main model to spawn ONE background Dream agent (`Agent(subagent_type="Dream", run_in_background:true)`) that claims each marker, performs all detection/materialization/curation, then deletes the marker.
+**Flow**: User sends prompt → `dream-dispatch` appends the user turn to the queue → session ends → `dream-capture` appends the assistant turn to the queue, writes the memory marker when throttle has expired (>2min) → `dream-evaluate` writes decisions/knowledge/curation markers. On `/clear` or new session → `session-start-memory` injects memory as `additionalContext` with staleness warning if >1h old, and `session-start-context` emits the DREAM MAINTENANCE directive instructing the main model to spawn ONE background Dream agent (`Agent(subagent_type="Dream", run_in_background:true)`) that claims each marker, performs all detection/materialization/curation, then deletes the marker.
 
 `devflow memory --disable` disables Working Memory. Use `devflow memory --clear` to clean up pending queue files across all projects.
 
@@ -219,7 +216,7 @@ Each file has a `<!-- TL;DR: ... -->` comment on line 1. SessionStart injects TL
 
 ## HUD (Heads-Up Display)
 
-The HUD (`scripts/hud.sh` → `scripts/hud/index.js`) is a configurable TypeScript status line with 14 components and 4 presets:
+The HUD (`scripts/hud.sh` → `scripts/hud/index.js`) is a configurable TypeScript status line with 15 components and 4 presets:
 
 | Preset | Components | Layout |
 |--------|-----------|--------|

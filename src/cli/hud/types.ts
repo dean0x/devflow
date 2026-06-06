@@ -36,7 +36,6 @@ export type ComponentId =
   | 'sessionCost'
   | 'releaseInfo'
   | 'worktreeCount'
-  | 'learningCounts'
   | 'notifications';
 
 /**
@@ -116,18 +115,6 @@ export interface ConfigCountsData {
 }
 
 /**
- * Learning counts data for the learningCounts HUD component.
- * @devflow-design-decision D15: Counts promoted (status=created) entries by type.
- * We cannot reliably detect 'irrelevance' without human judgment.
- */
-export interface LearningCountsData {
-  workflows: number;
-  procedural: number;
-  decisions: number;
-  pitfalls: number;
-}
-
-/**
  * D24: Notification data for the HUD notifications component.
  */
 export interface NotificationData {
@@ -147,7 +134,6 @@ export interface GatherContext {
   transcript: TranscriptData | null;
   usage: UsageData | null;
   configCounts: ConfigCountsData | null;
-  learningCounts: LearningCountsData | null;
   notifications?: NotificationData | null;
   costHistory: CostAggregation | null;
   config: HudConfig & { components: ComponentId[] };
