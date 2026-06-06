@@ -2413,3 +2413,215 @@ describe('D37 fallback: session-start-context honors legacy sidecar config', () 
   });
 });
 
+// =============================================================================
+// dream-collect-tasks: single-pass scan + conditional get_mtime (AC-1–AC-5, AC-11–AC-12)
+// =============================================================================
+
+/**
+ * Runs dream_collect_tasks in a subprocess with an instrumented get_mtime that
+ * writes each invoked path to a counter file, enabling assertion AC-11 / AC-12.
+ *
+ * Returns { tasks, mtimeCount } where:
+ *   tasks      — the value of _DREAM_TASKS after the call
+ *   mtimeCount — number of times get_mtime was called
+ */
+function runCollectTasks(
+  dreamDir: string,
+  opts: { memEnabled?: boolean; decEnabled?: boolean; knowEnabled?: boolean },
+): { tasks: string; mtimeCount: number } {
+  const hooksDir = path.resolve(__dirname, '..', 'scripts', 'hooks');
+  const counterFile = path.join(os.tmpdir(), `devflow-mtime-counter-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  fs.writeFileSync(counterFile, '0');
+
+  // The instrumented script:
+  //  1. Provides a stub dbg/log that swallows output.
+  //  2. Overrides get_mtime to increment the counter and return a deterministic mtime.
+  //     We assign mtime = index of call (1, 2, 3…) so sort order is predictable.
+  //  3. Sources dream-collect-tasks and calls the function.
+  //  4. Prints _DREAM_TASKS to stdout.
+  const memEn = opts.memEnabled ?? true ? 'true' : 'false';
+  const decEn = opts.decEnabled ?? true ? 'true' : 'false';
+  const knowEn = opts.knowEnabled ?? true ? 'true' : 'false';
+
+  const script = `#!/bin/bash
+dbg() { :; }
+log() { :; }
+_HAS_JQ=false
+COUNTER_FILE="${counterFile}"
+# Instrumented get_mtime: increments counter; returns monotonically increasing mtime.
+get_mtime() {
+  local c
+  c=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)
+  c=$(( c + 1 ))
+  printf '%s' "$c" > "$COUNTER_FILE"
+  printf '%s' "$c"
+}
+source "${hooksDir}/dream-collect-tasks"
+dream_collect_tasks "${dreamDir}" "${memEn}" "${decEn}" "${knowEn}"
+printf '%s' "\$_DREAM_TASKS"
+`;
+
+  let stdout = '';
+  try {
+    stdout = execSync(`bash -s`, {
+      input: script,
+      env: { ...process.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).toString();
+  } catch (e: unknown) {
+    const err = e as { stdout?: Buffer };
+    stdout = err.stdout?.toString() ?? '';
+  }
+
+  const mtimeCount = parseInt(fs.readFileSync(counterFile, 'utf-8').trim() || '0', 10);
+  fs.unlinkSync(counterFile);
+  return { tasks: stdout.trim(), mtimeCount };
+}
+
+describe('dream-collect-tasks: single-pass scan', () => {
+  let dreamDir: string;
+
+  beforeEach(() => {
+    dreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-collect-'));
+    // Ensure the base dream dir itself exists
+  });
+
+  afterEach(() => {
+    fs.rmSync(dreamDir, { recursive: true, force: true });
+  });
+
+  // AC-1: <=50 enabled markers → _DREAM_TASKS is correct (same set, comma-sep, sort-u)
+  it('AC-1: <=50 enabled markers → correct task set in _DREAM_TASKS', () => {
+    fs.writeFileSync(path.join(dreamDir, 'config.json'), '{}'); // sentinel — skipped
+    fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
+
+    const { tasks } = runCollectTasks(dreamDir, {});
+    // Sort-u produces alphabetical: curation,decisions,memory
+    expect(tasks.split(',').sort()).toEqual(['curation', 'decisions', 'memory']);
+  });
+
+  // AC-2: learning.* deleted every run regardless of count/position
+  it('AC-2: learning.* markers deleted unconditionally', () => {
+    fs.writeFileSync(path.join(dreamDir, 'learning.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'learning.sess2.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
+
+    const { tasks } = runCollectTasks(dreamDir, {});
+    expect(tasks).toContain('decisions');
+    expect(tasks).not.toContain('learning');
+    expect(fs.existsSync(path.join(dreamDir, 'learning.sess1.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'learning.sess2.json'))).toBe(false);
+  });
+
+  // AC-3: disabled-feature markers deleted regardless of cap; type never in _DREAM_TASKS
+  it('AC-3: disabled memory/decisions/knowledge markers deleted; not in _DREAM_TASKS', () => {
+    fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
+
+    const { tasks } = runCollectTasks(dreamDir, { memEnabled: false, decEnabled: false, knowEnabled: false });
+    expect(tasks).toBe('curation');
+    expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'decisions.sess1.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'knowledge.sess1.json'))).toBe(false);
+    // curation survives
+    expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(true);
+  });
+
+  // AC-4: curation (and unknown types) never deleted, appear in _DREAM_TASKS
+  it('AC-4: curation and unknown types pass through unchanged', () => {
+    fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'noveltype.sess1.json'), '{}');
+
+    const { tasks } = runCollectTasks(dreamDir, {});
+    expect(tasks.split(',').sort()).toEqual(['curation', 'noveltype']);
+    expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dreamDir, 'noveltype.sess1.json'))).toBe(true);
+  });
+
+  // AC-11: with <=50 kept markers, get_mtime invoked ZERO times
+  it('AC-11: get_mtime invoked zero times when <=50 kept markers', () => {
+    for (let i = 0; i < 5; i++) {
+      fs.writeFileSync(path.join(dreamDir, `decisions.sess${i}.json`), '{}');
+    }
+    const { tasks, mtimeCount } = runCollectTasks(dreamDir, {});
+    expect(tasks).toBe('decisions');
+    expect(mtimeCount).toBe(0);
+  });
+
+  // AC-11 edge: exactly 50 markers — still zero get_mtime calls
+  it('AC-11 edge: exactly 50 kept markers → zero get_mtime calls', () => {
+    for (let i = 0; i < 50; i++) {
+      fs.writeFileSync(path.join(dreamDir, `decisions.sess${i}.json`), '{}');
+    }
+    const { mtimeCount } = runCollectTasks(dreamDir, {});
+    expect(mtimeCount).toBe(0);
+  });
+
+  // AC-12: with >50 kept markers, get_mtime invoked once per kept candidate
+  it('AC-12: get_mtime invoked once per kept candidate when >50 markers', () => {
+    // 55 enabled markers after pass-1 sweep
+    for (let i = 0; i < 55; i++) {
+      fs.writeFileSync(path.join(dreamDir, `decisions.sess${i}.json`), '{}');
+    }
+    const { tasks, mtimeCount } = runCollectTasks(dreamDir, {});
+    expect(tasks).toBe('decisions');
+    // get_mtime called once per kept candidate (55 total)
+    expect(mtimeCount).toBe(55);
+  });
+
+  // AC-5: with >50 kept markers, exactly 50 processed; rest remain on disk
+  it('AC-5: >50 markers → exactly 50 processed; rest remain on disk', () => {
+    // Create 55 decisions markers and 3 learning markers (deleted in pass 1)
+    for (let i = 0; i < 55; i++) {
+      fs.writeFileSync(path.join(dreamDir, `decisions.sess${i}.json`), '{}');
+    }
+    for (let i = 0; i < 3; i++) {
+      fs.writeFileSync(path.join(dreamDir, `learning.sess${i}.json`), '{}');
+    }
+
+    runCollectTasks(dreamDir, {});
+
+    // All 3 learning markers deleted
+    for (let i = 0; i < 3; i++) {
+      expect(fs.existsSync(path.join(dreamDir, `learning.sess${i}.json`))).toBe(false);
+    }
+
+    // All 55 decisions markers still on disk (never deleted — only cap selection, not deletion)
+    let remainingDecisions = 0;
+    for (let i = 0; i < 55; i++) {
+      if (fs.existsSync(path.join(dreamDir, `decisions.sess${i}.json`))) {
+        remainingDecisions++;
+      }
+    }
+    expect(remainingDecisions).toBe(55);
+  });
+
+  // AC-3 correctness: disabled markers beyond position 50 are still deleted (scoping bug fixed)
+  it('AC-3 beyond-cap: disabled markers past position 50 are still deleted', () => {
+    // 55 decisions markers (enabled) + 5 memory markers (disabled)
+    for (let i = 0; i < 55; i++) {
+      fs.writeFileSync(path.join(dreamDir, `decisions.sess${i}.json`), '{}');
+    }
+    for (let i = 0; i < 5; i++) {
+      fs.writeFileSync(path.join(dreamDir, `memory.sess${i}.json`), '{}');
+    }
+
+    runCollectTasks(dreamDir, { memEnabled: false });
+
+    // All 5 memory markers must be deleted regardless of cap position
+    for (let i = 0; i < 5; i++) {
+      expect(fs.existsSync(path.join(dreamDir, `memory.sess${i}.json`))).toBe(false);
+    }
+    // decisions markers still on disk
+    let remaining = 0;
+    for (let i = 0; i < 55; i++) {
+      if (fs.existsSync(path.join(dreamDir, `decisions.sess${i}.json`))) remaining++;
+    }
+    expect(remaining).toBe(55);
+  });
+});
+

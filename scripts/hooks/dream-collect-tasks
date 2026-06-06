@@ -18,11 +18,15 @@
 #
 # Behaviour:
 #   - Skips config.json (reserved).
-#   - Skips AND deletes markers whose feature is disabled.
-#   - ALWAYS deletes learning.* markers (learning pipeline removed) — R1.
-#   - Does NOT expire/delete markers by wall-clock age (markers persist until consumed).
-#   - COLLECT_LIMIT=50: when >50 markers exist, orders by mtime OLDEST-FIRST (FIFO)
-#     and takes the first 50. Markers beyond the cap are RETAINED (never deleted).
+#   - Pass 1: unconditional sweep — deletes learning.* markers always (R1) and
+#     markers whose feature is disabled (memory/decisions/knowledge). curation
+#     and unknown types pass through unchanged (no flag gates them).
+#   - Pass 1 runs over ALL markers regardless of cap, so no orphan survives by
+#     being pushed past position 50.
+#   - COLLECT_LIMIT=50: when >50 kept markers remain after pass 1, orders by
+#     mtime OLDEST-FIRST (FIFO) and takes the first 50. get_mtime is invoked
+#     ONLY on this overflow path — zero stat subprocesses for <=50 markers.
+#   - Markers beyond the cap (overflow path) are RETAINED (never deleted).
 #   - Requires: get_mtime() (source get-mtime before calling), _HAS_JQ, dbg(), log()
 #   - Uses JUST_RECOVERED (if set) to preserve .retries files for just-recovered markers.
 #
@@ -51,96 +55,138 @@ dream_collect_tasks() {
     return 0
   fi
 
-  # Build candidate list, applying COLLECT_LIMIT with FIFO ordering.
-  # Strategy: collect all .json filenames with their mtime, sort oldest-first,
-  # then take up to COLLECT_LIMIT.
   local collect_limit=50
 
-  # Gather all .json files and their mtimes into a sortable list
-  # Format: MTIME<TAB>FILEPATH
+  # ---------------------------------------------------------------------------
+  # Pass 1: single scan over all .json markers.
+  # - Skip config.json.
+  # - Derive type via parameter expansion (no basename subprocess).
+  # - Deletion (unconditional sweep — runs regardless of cap):
+  #     learning  → rm -f always (orphan sweep, R1)
+  #     memory    → rm -f if mem_enabled != true
+  #     decisions → rm -f if dec_enabled != true
+  #     knowledge → rm -f if know_enabled != true
+  #     curation / unknown → KEEP (pass through; no flag gates them)
+  # - Kept markers appended to newline-separated `candidates`; count tracked.
+  # ---------------------------------------------------------------------------
   local candidates=""
+  local count=0
+  local _f _base _type _full_basename
+
   for _f in "$dream_dir"/*.json; do
     [ -f "$_f" ] || continue
+    _base="${_f##*/}"          # filename only — no basename subprocess
     # Skip config
-    case "$(basename "$_f")" in config.json) continue ;; esac
-    local _mt
-    _mt=$(get_mtime "$_f" 2>/dev/null || true)
-    _mt="${_mt:-0}"
-    if [ -n "$candidates" ]; then
-      candidates="${candidates}
-${_mt}	${_f}"
-    else
-      candidates="${_mt}	${_f}"
-    fi
-  done
-
-  if [ -z "$candidates" ]; then
-    dbg "dream_collect_tasks: no non-config .json markers"
-    return 0
-  fi
-
-  # Sort by mtime (oldest first), take up to COLLECT_LIMIT
-  local selected
-  selected=$(printf '%s\n' "$candidates" | sort -t'	' -k1,1n | head -n "$collect_limit" | cut -f2-)
-
-  # Process selected markers
-  local raw_tasks=""
-  while IFS= read -r _marker_file; do
-    [ -f "$_marker_file" ] || continue
-    local _full_basename
-    _full_basename=$(basename "$_marker_file" .json)
-    # Extract type from session-scoped filename: learning.abc123 → learning
-    local _type
+    case "$_base" in config.json) continue ;; esac
+    # Derive type: "decisions.abc123.json" → base without .json → "decisions.abc123" → type before first dot
+    _full_basename="${_base%.json}"
     case "$_full_basename" in
       *.*) _type="${_full_basename%%.*}" ;;
       *)   _type="$_full_basename" ;;
     esac
 
-    # Skip disabled features — delete marker to prevent indefinite accumulation.
-    # learning markers are ALWAYS deleted (pipeline removed — R1).
+    # Deletion sweep (runs for every marker — not capped)
     case "$_type" in
+      learning)
+        # Learning pipeline removed — delete any orphaned learning markers on sight (R1)
+        rm -f "$_f" 2>/dev/null || true
+        dbg "dream_collect_tasks: deleted orphaned learning marker: $_base"
+        continue
+        ;;
       memory)
         if [ "$mem_enabled" != "true" ]; then
-          rm -f "$_marker_file" 2>/dev/null || true
-          dbg "dream_collect_tasks: deleted disabled-feature marker: $( basename "$_marker_file" )"
+          rm -f "$_f" 2>/dev/null || true
+          dbg "dream_collect_tasks: deleted disabled-feature marker: $_base"
           continue
         fi
         ;;
-      learning)
-        # Learning pipeline removed — delete any orphaned learning markers on sight (R1)
-        rm -f "$_marker_file" 2>/dev/null || true
-        dbg "dream_collect_tasks: deleted orphaned learning marker: $(basename "$_marker_file")"
-        continue
-        ;;
       decisions)
         if [ "$dec_enabled" != "true" ]; then
-          rm -f "$_marker_file" 2>/dev/null || true
-          dbg "dream_collect_tasks: deleted disabled-feature marker: $(basename "$_marker_file")"
+          rm -f "$_f" 2>/dev/null || true
+          dbg "dream_collect_tasks: deleted disabled-feature marker: $_base"
           continue
         fi
         ;;
       knowledge)
         if [ "$know_enabled" != "true" ]; then
-          rm -f "$_marker_file" 2>/dev/null || true
-          dbg "dream_collect_tasks: deleted disabled-feature marker: $(basename "$_marker_file")"
+          rm -f "$_f" 2>/dev/null || true
+          dbg "dream_collect_tasks: deleted disabled-feature marker: $_base"
           continue
         fi
         ;;
+      # curation and unknown types: pass through unchanged
+    esac
+
+    # Marker kept — accumulate
+    if [ -n "$candidates" ]; then
+      candidates="${candidates}
+${_f}"
+    else
+      candidates="${_f}"
+    fi
+    count=$(( count + 1 ))
+  done
+
+  if [ "$count" -eq 0 ]; then
+    dbg "dream_collect_tasks: no enabled markers found"
+    return 0
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Cap selection: if count <= collect_limit, use all candidates directly.
+  # get_mtime is invoked ONLY when count > collect_limit (overflow path).
+  # ---------------------------------------------------------------------------
+  local selected
+  if [ "$count" -le "$collect_limit" ]; then
+    selected="$candidates"
+  else
+    # Overflow: compute mtime per candidate, sort oldest-first, take first 50.
+    # Format: MTIME<TAB>FILEPATH  → sort -k1,1n → head -n 50 → strip mtime field.
+    local mtime_list="" _mt
+    while IFS= read -r _f; do
+      [ -f "$_f" ] || continue
+      _mt=$(get_mtime "$_f" 2>/dev/null || true)
+      _mt="${_mt:-0}"
+      if [ -n "$mtime_list" ]; then
+        mtime_list="${mtime_list}
+${_mt}	${_f}"
+      else
+        mtime_list="${_mt}	${_f}"
+      fi
+    done <<EOF
+$candidates
+EOF
+    selected=$(printf '%s\n' "$mtime_list" | sort -t'	' -k1,1n | head -n "$collect_limit" | cut -f2-)
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Pass 2: process selected markers — .retries cleanup and type accumulation.
+  # All deletion is done in pass 1; this loop ONLY handles retries + type output.
+  # ---------------------------------------------------------------------------
+  local raw_tasks=""
+  local _marker_file _sel_base _sel_fbn _sel_type
+  while IFS= read -r _marker_file; do
+    [ -f "$_marker_file" ] || continue
+    _sel_base="${_marker_file##*/}"
+    _sel_fbn="${_sel_base%.json}"
+    case "$_sel_fbn" in
+      *.*) _sel_type="${_sel_fbn%%.*}" ;;
+      *)   _sel_type="$_sel_fbn" ;;
     esac
 
     # Clean up any stale .retries file for this marker, unless it was just recovered
     # in this same run (JUST_RECOVERED guard from dream-recover).
     case " ${JUST_RECOVERED:-} " in
-      *" $_full_basename "*) ;;  # Just recovered — leave .retries in place
+      *" $_sel_fbn "*) ;;  # Just recovered — leave .retries in place
       *) rm -f "${_marker_file%.json}.retries" 2>/dev/null || true ;;
     esac
 
     # Accumulate type
     if [ -n "$raw_tasks" ]; then
       raw_tasks="${raw_tasks}
-${_type}"
+${_sel_type}"
     else
-      raw_tasks="${_type}"
+      raw_tasks="${_sel_type}"
     fi
   done <<EOF
 $selected
