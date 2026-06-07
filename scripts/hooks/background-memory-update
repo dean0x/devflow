@@ -146,11 +146,13 @@ if [ -f "$PROCESSING_FILE" ]; then
     log "Merged new queue entries into recovery batch"
   fi
   # Cap to prevent unbounded growth
+  PROC_OVERFLOW_CAP=200    # truncate when processing file exceeds this many lines
+  PROC_OVERFLOW_TARGET=100 # keep only the newest N lines after truncation
   _PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
-  if [ "$_PROC_LINES" -gt 200 ]; then
+  if [ "$_PROC_LINES" -gt "$PROC_OVERFLOW_CAP" ]; then
     _PROC_TMP="$PROCESSING_FILE.tmp.$$"
-    tail -100 "$PROCESSING_FILE" > "$_PROC_TMP" && mv "$_PROC_TMP" "$PROCESSING_FILE" || rm -f "$_PROC_TMP" 2>/dev/null || true
-    log "Processing overflow: truncated from $_PROC_LINES to 100 lines"
+    tail -"$PROC_OVERFLOW_TARGET" "$PROCESSING_FILE" > "$_PROC_TMP" && mv "$_PROC_TMP" "$PROCESSING_FILE" || rm -f "$_PROC_TMP" 2>/dev/null || true
+    log "Processing overflow: truncated from $_PROC_LINES to $PROC_OVERFLOW_TARGET lines"
   fi
 elif [ -f "$QUEUE_FILE" ]; then
   mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null || { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
@@ -253,8 +255,9 @@ log "Built $TURN_COUNT turns from queue"
 # --- Read existing memory ---
 EXISTING_MEMORY=""
 PRE_UPDATE_MTIME=0
+MEMORY_READ_LIMIT=65536  # bytes — keep prompt under context limit
 if [ -f "$MEMORY_FILE" ]; then
-  EXISTING_MEMORY=$(head -c 65536 "$MEMORY_FILE")
+  EXISTING_MEMORY=$(head -c "$MEMORY_READ_LIMIT" "$MEMORY_FILE")
   PRE_UPDATE_MTIME=$(get_mtime "$MEMORY_FILE")
 fi
 
@@ -330,15 +333,17 @@ DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
 CLAUDE_PID=$!
 set +m
 
+WATCHDOG_KILL_GRACE_SECS=5  # grace period between SIGTERM and SIGKILL
+
 # Watchdog: after WATCHDOG_SECS send SIGTERM to claude's process group (PGID == CLAUDE_PID
-# because set -m made it a group leader), then SIGKILL after 5s grace.
+# because set -m made it a group leader), then SIGKILL after WATCHDOG_KILL_GRACE_SECS.
 # Using -PGID (negative PID) kills claude's entire subtree so children it spawned
 # are also terminated — the worker itself is NOT in that group (set +m restored above).
 # Cancel watchdog immediately after claude exits to avoid hitting a recycled PID.
 (
   sleep "$WATCHDOG_SECS"
   kill -TERM -"$CLAUDE_PID" 2>/dev/null || true
-  sleep 5
+  sleep "$WATCHDOG_KILL_GRACE_SECS"
   kill -KILL -"$CLAUDE_PID" 2>/dev/null || true
 ) &
 WD_PID=$!
