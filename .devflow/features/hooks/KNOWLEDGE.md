@@ -1,7 +1,7 @@
 ---
 feature: hooks
 name: Dream & Hooks System
-description: "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, dream-evaluate, dream-memory, dream-decisions, dream-knowledge, dream-curation."
+description: "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation."
 category: architecture
 directories: ["scripts/hooks/", "shared/agents/"]
 referencedFiles:
@@ -11,49 +11,52 @@ referencedFiles:
   - scripts/hooks/lib/staleness.cjs
   - scripts/hooks/json-helper.cjs
   - scripts/hooks/dream-capture
+  - scripts/hooks/background-memory-update
   - scripts/hooks/dream-collect-tasks
   - scripts/hooks/dream-dispatch
   - scripts/hooks/dream-evaluate
   - scripts/hooks/dream-recover
   - scripts/hooks/eval-curation
+  - scripts/hooks/session-start-memory
   - scripts/hooks/session-start-context
   - shared/agents/dream.md
-  - shared/skills/dream-memory/SKILL.md
   - shared/skills/dream-decisions/SKILL.md
   - shared/skills/dream-knowledge/SKILL.md
   - shared/skills/dream-curation/SKILL.md
   - src/cli/commands/decisions.ts
 created: 2026-06-01
-updated: 2026-06-05
+updated: 2026-06-07
 ---
 
 # Dream & Hooks System
 
 ## Overview
 
-The Dream system is a three-hook pipeline that captures session context, evaluates what background work is needed, and coordinates per-task background LLM agents to do that work. The hooks are installed from `scripts/hooks/` (source of truth) to `~/.devflow/scripts/hooks/` at `devflow init` time. The background agent spec lives at `shared/agents/dream.md`; per-task procedures live in four skills (`dream-memory`, `dream-decisions`, `dream-knowledge`, `dream-curation`).
+The Dream system is a three-hook pipeline that captures session context, evaluates what background work is needed, and coordinates per-task background LLM agents to do that work. The hooks are installed from `scripts/hooks/` (source of truth) to `~/.devflow/scripts/hooks/` at `devflow init` time. The background agent spec lives at `shared/agents/dream.md`; per-task procedures live in three skills (`dream-decisions`, `dream-knowledge`, `dream-curation`).
 
-The system is explicitly split into two layers: **plumbing** (hooks, locks, marker files, atomic writes, JSONL logs) and **LLM** (all detection, semantic matching, content authoring, curation judgment). The Dream agent body is now minimal plumbing (claim + heartbeat + dispatch); all task intelligence lives in per-task skill files loaded dynamically at runtime.
+**Memory is NOT a Dream task.** Working-memory refresh happens eagerly via a detached `claude -p` worker (`background-memory-update`) spawned by `dream-capture` after the 120s throttle. This gives memory that is fresh during the session and ready before the next boot, instead of waiting until SessionStart.
+
+The system is explicitly split into two layers: **plumbing** (hooks, locks, marker files, atomic writes, JSONL logs) and **LLM** (all detection, semantic matching, content authoring, curation judgment). The Dream agent body holds shared plumbing (claim + heartbeat + dispatch); all task intelligence lives in per-task skill files loaded dynamically at runtime.
 
 ## System Context
 
-Four active task types can be pending at any session start: `memory`, `decisions`, `knowledge`, `curation`. Each gets its own marker file in `.devflow/dream/`. The three hooks are:
+Three active task types can be pending at any session start: `decisions`, `knowledge`, `curation`. Each gets its own marker file in `.devflow/dream/`. The hooks are:
 
-| Hook | Trigger | Role |
-|------|---------|------|
-| `dream-capture` | Stop (per turn) | Append assistant turn to queue; write `memory.json` marker when throttle (120s) expires |
+| Hook / Worker | Trigger | Role |
+|---------------|---------|------|
+| `dream-capture` | Stop (per turn) | Append assistant turn to queue; spawn `background-memory-update` worker after 120s throttle |
+| `background-memory-update` | Spawned by dream-capture | Drain queue → `claude -p haiku` → rewrite WORKING-MEMORY.md with git stamp |
 | `dream-evaluate` | SessionEnd | Source eval-* modules; write per-session markers for decisions/knowledge/curation |
 | `session-start-context` | SessionStart | Recover stale `.processing`, collect pending markers, emit per-task DREAM MAINTENANCE directives |
 
-The learning task type has been removed. `dream-collect-tasks` now unconditionally deletes any orphaned `learning.*` marker files on sight (R1).
+The learning task type has been removed. `dream-collect-tasks` now unconditionally deletes any orphaned `learning.*` AND `memory.*` marker files on sight.
 
 ## Spawn Model: Per-Task Background Agents
 
-`session-start-context` spawns **one background Dream agent per pending task type**, with a hardcoded task→model map:
+`session-start-context` spawns **one background Dream agent per pending task type**, using a hardcoded task→model map built by `dream_build_spawn_directive` (in `dream-collect-tasks`):
 
 | Task | Model | Rationale |
 |------|-------|-----------|
-| `memory` | haiku | Fast queue drain; no heavy LLM reasoning needed |
 | `knowledge` | sonnet | KB refresh needs code reading; no cross-cutting analysis |
 | `decisions` | opus | Semantic matching + quality ADR/PF authoring |
 | `curation` | opus | Nuanced deprecation judgment against live docs |
@@ -62,15 +65,16 @@ The learning task type has been removed. `dream-collect-tasks` now unconditional
 
 Unknown task types are silently skipped — `dream-collect-tasks` should never emit them, but the emitter has belt-and-suspenders defense.
 
+`dream_build_spawn_directive TASKS` sets the `_DREAM_DIRECTIVE` global (not stdout — preserves exact whitespace). The directive is a `--- DREAM MAINTENANCE ---` block with one `Agent()` call per task.
+
 ## Agent Architecture: Plumbing + Dynamic Skill
 
 `shared/agents/dream.md` now holds only shared plumbing — Steps 0–1 (discover task, claim/heartbeat/merge) and error discipline — plus a dispatch table in Step 2:
 
 > For each task type you claimed markers for, load the matching skill via the Skill tool and follow its procedure exactly.
 
-The four per-task procedures live in separate skill files:
+The three per-task procedures live in separate skill files:
 
-- `devflow:dream-memory` — queue drain + WORKING-MEMORY.md authoring
 - `devflow:dream-decisions` — dialog-pair analysis + ADR/PF creation via `decisions-append`
 - `devflow:dream-knowledge` — stale KB refresh + index update
 - `devflow:dream-curation` — ADR/PF housekeeping (deprecate, merge, TL;DR rewrite)
@@ -85,8 +89,7 @@ dream-evaluate writes:
 
 session-start-context reads:
   - dream_recover_stale()                        ← .processing → .json if stale
-  - dream_collect_tasks()                        ← collects .json marker types (4-arg: no learning)
-  - raw-queue bridge                             ← adds memory task if .pending-turns.jsonl non-empty
+  - dream_collect_tasks()                        ← collects .json marker types; sweeps memory.* + learning.* unconditionally
   - emits per-task DREAM MAINTENANCE directives  ← one Agent() call per task (or combined for dec+cur)
 
 Dream agent (background) claims:
@@ -99,7 +102,7 @@ Dream agent (background) claims:
 
 The session suffix on marker filenames (`{type}.{session_id}.json`) is a concurrency fix (D57a): two simultaneous SessionStart events each process their own markers without racing on the same file.
 
-**Multi-marker merge**: When multiple `{type}.{session}.processing` files exist for one type, the Dream agent reads them all and unions their payloads before processing: decisions concatenate `dialogPairs` strings and union `existingObservationIds`; knowledge unions `staleSlugs`; memory and curation use single markers only. Input cap: last 30 dialog-pairs (bounds token cost per run).
+**Multi-marker merge**: When multiple `{type}.{session}.processing` files exist for one type, the Dream agent reads them all and unions their payloads before processing: decisions concatenate `dialogPairs` strings and union `existingObservationIds`; knowledge unions `staleSlugs`; curation uses single marker only. Input cap: last 30 dialog-pairs (bounds token cost per run).
 
 ## Stale Recovery (dream-recover)
 
@@ -107,8 +110,9 @@ The session suffix on marker filenames (`{type}.{session_id}.json`) is a concurr
 
 | Marker type | Stale threshold | Rationale |
 |-------------|----------------|-----------|
-| `memory` | 300s (5 min) | Memory agent is fast; 5 min = session crash |
-| All others (`decisions`, `knowledge`, `curation`) | 1800s (30 min) | LLM runs can be slow; avoid yanking active processor |
+| All (`decisions`, `knowledge`, `curation`) | 1800s (30 min) | LLM runs can be slow; avoid yanking active processor |
+
+Note: `memory` markers are swept unconditionally by `dream_collect_tasks` (not retried). The `background-memory-update` worker uses its own 300s-stale worker lock at `.devflow/memory/.working-memory.lock/`.
 
 When a `.processing` file exceeds its threshold, it is renamed back to `.json` for retry. Retry count is stored in a sibling `.retries` file; at 3 retries the marker is renamed to `.failed` instead. `.failed` files are cleaned up after 24 hours. The `JUST_RECOVERED` variable (exported by `dream_recover_stale`) tells `dream_collect_tasks` to preserve existing `.retries` counters rather than resetting them (D56b).
 
@@ -118,13 +122,17 @@ The heartbeat rule pairs with these thresholds: the Dream agent `touch`es each `
 
 `session-start-context` enforces a 120s spawn throttle via `.devflow/dream/.processor-spawned-at` (D57b). SessionStart fires on `/clear`, compact, and every new window. Without this throttle, three rapid `/clear` commands would spawn three sets of background agents racing on the same markers. The throttle is written atomically (temp+mv).
 
-## Raw-Queue Bridge
-
-Section 2 of `session-start-context` includes a fallback that adds the `memory` task type even when no `memory.json` marker file exists — if `.pending-turns.jsonl` is non-empty and memory is enabled. This handles the race window where `dream-capture` wrote turns to the queue but the session ended before the 120s marker-write throttle expired.
-
 ## Queue: Memory Channel
 
-`dream-capture` (Stop hook) appends assistant turns to `.devflow/memory/.pending-turns.jsonl` (JSONL, each line `{role, content, ts}`). The Dream memory agent claims it atomically by renaming to `.pending-turns.processing`. If the session crashes mid-processing, `dream_recover_stale` in the next SessionStart renames `.processing` back to `.jsonl` — but only when no fresh `.jsonl` already exists (non-clobber guard, D56c).
+`dream-capture` (Stop hook) appends assistant turns to `.devflow/memory/.pending-turns.jsonl` (JSONL, each line `{role, content, ts}`). After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), it spawns `background-memory-update` as a detached worker. The worker claims the queue atomically by renaming `.pending-turns.jsonl` → `.pending-turns.processing`. If the worker crashes mid-processing, `dream_recover_stale` in the next SessionStart renames `.processing` back to `.jsonl` — but only when no fresh `.jsonl` already exists (non-clobber guard, D56c). The worker uses a dedicated 300s-stale lock at `.working-memory.lock/` (not `dream_lock_acquire` which has a 30s stale-break — too short for a ≤120s `claude -p` call).
+
+`session-start-memory` injects WORKING-MEMORY.md with a git-reconciled header (3-state rendering):
+- **State A (in-sync)**: stamp SHA matches HEAD → `--- WORKING MEMORY (synced @ <sha> on <branch>, <N>m ago) ---`
+- **State B (drifted)**: stamp SHA is an ancestor of HEAD but N commits behind → header notes drift + `git log --oneline STAMP..HEAD` (max 10)
+- **State C (refresh failing)**: queue non-empty AND `.last-refresh-ok` missing or >600s old → unmissable top banner
+- **Branch mismatch**: stamp branch ≠ current branch → prepend warning (shown for any state)
+
+No raw UNPROCESSED TURNS dump in session-start-memory (removed). The background worker handles synthesis.
 
 Queue overflow: capped at 200 lines, truncated to 100 under a mkdir-based lock to prevent multi-session truncation races.
 
@@ -161,7 +169,7 @@ if [ "$_ACQUIRED" != "true" ]; then
 fi
 ```
 
-9 attempts, ~30s total backoff cap. On exhaustion, exits with code 1 leaving `.processing` in place — dream-recover will retry rather than silently dropping the work.
+9 attempts, ~47s total backoff cap (sequence: 1+2+4+8+8+8+8+8+8 seconds of sleep between attempts). On exhaustion, exits with code 1 leaving `.processing` in place — dream-recover will retry rather than silently dropping the work.
 
 ## Plumbing Operations (json-helper.cjs)
 
@@ -255,21 +263,25 @@ The primary source of truth for feature enabled-state is `.devflow/dream/config.
 - **`feature-knowledge.cjs` uses `execFileSync` with array args** — never string-interpolate `lastUpdated` or worktree paths into shell strings. The module explicitly avoids shell injection via array arguments.
 - **Raw-queue bridge** — the memory task can be added without a `memory.json` marker file if `.pending-turns.jsonl` is non-empty. The Dream agent must handle the memory task even when no marker was claimed (queue claim via `mv` soft-fails).
 - **`dream-collect-tasks` 4-arg signature** — the function signature is now `dream_collect_tasks DREAM_DIR MEM_EN DEC_EN KNOW_EN`. There is no fifth `LEARN_EN` argument. Any call site passing 5 arguments is stale.
-- **Per-task skill model override** — `shared/agents/dream.md` has `model: sonnet` in its frontmatter, but `session-start-context` overrides this per spawn. The agent frontmatter model is never actually used in production; the spawn-time model is authoritative.
+- **Per-task skill model override** — `shared/agents/dream.md` has `model: sonnet` in its frontmatter, but `session-start-context` overrides this per spawn via `dream_build_spawn_directive`. The agent frontmatter model is never actually used in production; the spawn-time model is authoritative.
+- **`dream_build_spawn_directive` communicates via global** — uses `_DREAM_DIRECTIVE` global variable (not stdout) so exact directive bytes including trailing newlines survive intact; command substitution would strip them.
+- **eval-decisions daily cap blocks late-session writes** — at 3 runs/day (default), decisions markers stop being written mid-session. No marker = no Dream agent spawn for decisions that session. Configurable via `.devflow/decisions/decisions.json` → `max_daily_runs`.
 
 ## Key Files
 
-- `scripts/hooks/dream-capture` — Stop hook; queue append + memory marker write (120s throttle)
+- `scripts/hooks/dream-capture` — Stop hook; queue append + memory marker write (120s throttle); decisions usage scanner (independent of memory)
 - `scripts/hooks/dream-dispatch` — UserPromptSubmit hook; capture-only (user turn append to pending-turns queue); no directive emission
-- `scripts/hooks/dream-evaluate` — SessionEnd hook; orchestrator sourcing eval-helpers + eval-decisions + eval-knowledge + eval-curation (eval-learning and eval-reinforce removed)
+- `scripts/hooks/dream-evaluate` — SessionEnd hook; orchestrator sourcing eval-helpers + eval-decisions + eval-knowledge + eval-curation (eval-learning and eval-reinforce removed); exports shared vars to eval modules via orchestrator contract
+- `scripts/hooks/eval-decisions` — sourced by dream-evaluate; daily-cap check (default 3/day via `.decisions-runs-today`); extracts dialog pairs via transcript-filter.cjs; writes `decisions.{session}.json` marker
+- `scripts/hooks/eval-knowledge` — sourced by dream-evaluate; 2-hour throttle (`.knowledge-last-refresh`); queries `feature-knowledge.cjs stale-slugs`; writes `knowledge.{session}.json` marker; optimistically updates throttle
 - `scripts/hooks/eval-curation` — sourced by dream-evaluate; writes `curation.{session}.json` marker on 7-day throttle; `.curation-last` in `.devflow/dream/`
 - `scripts/hooks/dream-recover` — sourced helper; stale `.processing` recovery per-type thresholds; JUST_RECOVERED guard; orphaned pending-turns recovery
-- `scripts/hooks/dream-collect-tasks` — 4-arg sourced helper; collects pending `.json` markers; unconditionally deletes learning.* markers (R1); COLLECT_LIMIT=50 FIFO
-- `scripts/hooks/session-start-context` — SessionStart hook (no set -e); two independent sections: 1.5 decisions TL;DR, 2 per-task dream spawn directives (with raw-queue bridge)
+- `scripts/hooks/dream-collect-tasks` — 4-arg sourced helper; two-pass design: Pass 1 unconditional sweep (deletes `learning.*` + disabled-feature markers), Pass 2 type accumulation; `dream_build_spawn_directive` function; COLLECT_LIMIT=50 FIFO
+- `scripts/hooks/session-start-context` — SessionStart hook (no set -e); two independent sections: 1.5 decisions TL;DR, 2 per-task dream spawn directives (calls `dream_build_spawn_directive`, emits with raw-queue bridge)
 - `scripts/hooks/json-helper.cjs` — plumbing ops: `merge-observation`, `decisions-append`, `read-dream`, atomic writes; does NOT contain judgment logic
 - `scripts/hooks/lib/transcript-filter.cjs` — two-channel filter: USER_SIGNALS (orphaned, unused) + DIALOG_PAIRS (active, decisions only)
 - `scripts/hooks/lib/staleness.cjs` — annotates log entries with `mayBeStale` based on file existence; signal-only (no CLI display surface)
-- `scripts/hooks/lib/feature-knowledge.cjs` — KB index, staleness checks, `updateIndex`, slug validation
+- `scripts/hooks/lib/feature-knowledge.cjs` — KB index, staleness checks (`checkAllStaleness` batches all KBs in one git log call), `updateIndex`, `stale-slugs` CLI op, slug validation
 - `scripts/hooks/lib/decisions-index.cjs` — compact decisions index with D-A filter for orchestrators
 - `shared/agents/dream.md` — Dream agent plumbing spec: Step 0 task discovery, Step 1 claim/heartbeat/multi-marker-merge, Step 2 per-task skill dispatch, error discipline
 - `shared/skills/dream-memory/SKILL.md` — memory task procedure: queue drain + WORKING-MEMORY.md authoring (haiku)

@@ -1,4 +1,4 @@
-<!-- TL;DR: 14 decisions. Key: ADR-010, ADR-011, ADR-012, ADR-013, ADR-014 -->
+<!-- TL;DR: 17 decisions. Key: ADR-013, ADR-014, ADR-015, ADR-016, ADR-017 -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.
@@ -128,3 +128,30 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: test the preamble hook with four independent suites — (1) functionality truth table (prompt→expected output for all keyword variants, case permutations, non-matching inputs, boundary cases), (2) API contract (JSON schema assertions on hookSpecificOutput and hookEventName keys, zero-byte output on no-match, exit-0 on all paths, file-I/O snapshot, bash-4-construct guard), (3) security/fuzz (hostile prompt tails including backticks, command substitution, IFS injection, 200KB payload — assert output equals fixed template proving no user text leaks into the directive), (4) performance (length-independence methodology: compare 1KB vs 200KB payload, assert bounded delta/ratio — no absolute ms assertions, plus static no-subprocess check)
 - **Consequences**: the four suites map directly to the four risk dimensions of the hook — correctness, API stability, security injection, and performance predictability
 - **Source**: self-learning:obs_preamble2
+
+## ADR-015: Remove the learning pipeline (auto-generated workflow skills) — keep memory, decisions, knowledge, curation; auto-generating skills did not prove its value
+
+- **Date**: 2026-06-06
+- **Status**: Accepted
+- **Context**: the Dream subsystem ran a learning task that auto-generated self-learning workflow command/skill artifacts (.claude/commands/self-learning, generated SKILL.md)
+- **Decision**: remove the learning pipeline entirely — keep only memory, decisions, knowledge, and curation as Dream task types
+- **Consequences**: auto-generating workflow skills never demonstrated value in practice
+- **Source**: self-learning:obs_learnrm1
+
+## ADR-016: Split Dream into one agent + per-task skills loaded on demand, spawned per-model (haiku memory, sonnet knowledge, opus decisions+curation) — to stop context accumulation degrading later tasks and to match each task to its right model
+
+- **Date**: 2026-06-06
+- **Status**: Accepted
+- **Context**: the single Dream agent ran all task procedures in one context window
+- **Decision**: keep ONE Dream agent that dynamically loads a per-task skill (devflow:dream-memory|decisions|knowledge|curation), and assign models per task at spawn time via session-start-context — haiku for memory, sonnet for knowledge, opus for the combined decisions+curation spawn
+- **Consequences**: tasks already communicate only through marker files and JSONL (zero cross-task context synergy to lose), so a shared context window only hurts later tasks
+- **Source**: self-learning:obs_dreamsplit1
+
+## ADR-017: Keep the decisions lock through the Dream restructure but harden it from give-up-fast to bounded retry+backoff — the lock guards cross-session writes, which no agent restructuring eliminates
+
+- **Date**: 2026-06-06
+- **Status**: Accepted
+- **Context**: during the Dream restructure it was tempting to remove the .decisions.lock since the agent design changed
+- **Decision**: keep the cross-session lock and harden its acquisition from give-up-fast to a bounded retry+backoff (explicit attempt cap with exponential backoff, leave .processing for retry on exhaustion)
+- **Consequences**: the lock protects against concurrent writes to decisions.md/pitfalls.md from different sessions — a hazard that exists regardless of how the agent is structured
+- **Source**: self-learning:obs_dreamlock1

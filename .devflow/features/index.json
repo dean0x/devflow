@@ -24,7 +24,7 @@
         "shared/rules/quality.md",
         "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-06-05T00:00:00.000Z",
+      "lastUpdated": "2026-06-06T19:41:45.505Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
@@ -55,7 +55,7 @@
         "shared/skills/dream-curation/SKILL.md",
         "src/cli/commands/decisions.ts"
       ],
-      "lastUpdated": "2026-06-05T00:00:00.000Z",
+      "lastUpdated": "2026-06-06T19:41:38.931Z",
       "createdBy": "devflow-knowledge"
     }
   }

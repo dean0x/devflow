@@ -1,4 +1,4 @@
-<!-- TL;DR: 8 pitfalls. Key: PF-004, PF-005, PF-006, PF-007, PF-008 -->
+<!-- TL;DR: 9 pitfalls. Key: PF-005, PF-006, PF-007, PF-008, PF-009 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
@@ -74,3 +74,12 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: anchor critical directives to hook events where no user task competes (SessionStart is the correct hook)
 - **Status**: Active
 - **Source**: self-learning:obs_m5v2xt
+
+## PF-009: A subsystem rename leaves stale references and dead paths in untracked-by-grep places — reference docs, the runtime .gitignore template, and knowledge-base referencedFiles — that a code-only rename pass misses
+
+- **Area**: large subsystem/path renames (sidecar->Dream), reference docs, runtime templates, feature knowledge bases
+- **Issue**: a rename that focuses on source code and primary docs reliably leaves stragglers in lower-visibility surfaces — narrative reference docs (docs/working-memory.md, file-organization.md), the .devflow/.gitignore template, and knowledge-base index referencedFiles / .create-result.json — which a single grep-and-fix pass under-counts
+- **Impact**: user-facing docs describe a name that no longer exists, the gitignore silently stops ignoring transient state under the new name, and the KB staleness check tracks deleted files
+- **Resolution**: after any rename, sweep ALL surfaces — case-insensitive grep across tracked files for both the old name and any concept it renamed (e.g. processor), plus the runtime .gitignore template, every reference doc, and every feature KB referencedFiles list
+- **Status**: Active
+- **Source**: self-learning:obs_renamemiss1
