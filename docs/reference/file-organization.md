@@ -187,17 +187,18 @@ Included settings:
 
 Three shell-script hooks (`dream-capture`, `dream-dispatch`, `dream-evaluate`) replace the old 8-hook system with a background-maintenance (Dream) architecture. Toggleable via `devflow memory --enable/--disable/--status` or `devflow init --memory/--no-memory`.
 
-| Hook | Event | Purpose |
-|------|-------|---------|
-| `dream-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue, writes `.devflow/dream/memory.json` marker when throttle expires (>2min) |
+| Hook / Worker | Event | Purpose |
+|---------------|-------|---------|
+| `dream-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue; after the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p`). No `memory.json` marker is written — memory refresh no longer goes through the Dream subagent. |
+| `background-memory-update` | Detached worker (spawned by Stop) | Drains `.pending-turns.jsonl` → calls `claude -p --model haiku` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
 | `dream-dispatch` | UserPromptSubmit | Capture-only: appends the user turn to `.pending-turns.jsonl` (emits no directive) |
 | `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 3 feature modules (`eval-decisions`, `eval-knowledge`, `eval-curation`); writes per-session decisions/knowledge/curation markers |
-| `session-start-memory` | SessionStart | Injects previous memory + git state as `additionalContext`. Warns if >1h stale |
-| `session-start-context` | SessionStart | Recovers stale `.processing` markers, collects pending markers, emits the DREAM MAINTENANCE directive (throttled to 120s); also injects decisions TL;DR + learned behaviors |
+| `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner). Memory refresh is NOT triggered here — `session-start-memory` only reads and injects. |
+| `session-start-context` | SessionStart | Recovers stale `.processing` markers, collects pending Dream markers (decisions/knowledge/curation only — memory markers are swept unconditionally), emits the DREAM MAINTENANCE directive (throttled to 120s); also injects decisions TL;DR + learned behaviors |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
 | `preamble` | UserPromptSubmit | Ambient keyword + plan auto-detection (zero overhead for normal prompts) |
 
-**Flow**: User sends prompt → `dream-dispatch` appends the user turn to the queue → session ends → `dream-capture` appends the assistant turn to the queue, writes the memory marker when throttle has expired (>2min) → `dream-evaluate` writes decisions/knowledge/curation markers. On `/clear` or new session → `session-start-memory` injects memory as `additionalContext` with staleness warning if >1h old, and `session-start-context` emits the DREAM MAINTENANCE directive instructing the main model to spawn ONE background Dream agent (`Agent(subagent_type="Dream", run_in_background:true)`) that claims each marker, performs all detection/materialization/curation, then deletes the marker.
+**Flow**: User sends prompt → `dream-dispatch` appends the user turn to the queue → session ends → `dream-capture` appends the assistant turn to the queue; if the 120s throttle has expired, spawns `background-memory-update` detached worker that rewrites `WORKING-MEMORY.md` directly via `claude -p` → `dream-evaluate` writes decisions/knowledge/curation markers. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header), and `session-start-context` emits the DREAM MAINTENANCE directive instructing the main model to spawn ONE background Dream agent (`Agent(subagent_type="Dream", run_in_background:true)`) that claims each decisions/knowledge/curation marker, performs all detection/materialization/curation, then deletes the marker. **Memory is NOT a Dream task** — WORKING-MEMORY.md is authored by the detached `background-memory-update` Stop-hook worker.
 
 `devflow memory --disable` disables Working Memory. Use `devflow memory --clear` to clean up pending queue files across all projects.
 
