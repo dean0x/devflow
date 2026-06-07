@@ -846,3 +846,37 @@ describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after dream-captu
     expect(memMarkers).toHaveLength(0);
   });
 });
+
+// =============================================================================
+// S12 — Install survival: background-memory-update MUST NOT be in LEGACY_HOOK_FILES
+//
+// Regression test for: init.ts LEGACY_HOOK_FILES accidentally listed
+// background-memory-update, causing installViaFileCopy to install it and then
+// the cleanup loop to immediately delete it — memory refresh dead-on-arrival.
+// =============================================================================
+describe('S12: install survival — background-memory-update not deleted by init cleanup', () => {
+  it('background-memory-update is NOT in the LEGACY_HOOK_FILES deletion list in init.ts', () => {
+    const initSrc = fs.readFileSync(
+      path.resolve(__dirname, '..', 'src', 'cli', 'commands', 'init.ts'),
+      'utf-8'
+    );
+
+    // Extract the LEGACY_HOOK_FILES array text so we test the authoritative source
+    const match = initSrc.match(/const LEGACY_HOOK_FILES\s*=\s*\[([\s\S]*?)\];/);
+    expect(match).not.toBeNull();
+    const arrayBody = match![1];
+
+    // The worker must not appear as a quoted string entry in the array
+    expect(arrayBody).not.toContain("'background-memory-update'");
+    expect(arrayBody).not.toContain('"background-memory-update"');
+  });
+
+  it('background-memory-update exists and is executable in the source hooks dir', () => {
+    const workerPath = path.resolve(__dirname, '..', 'scripts', 'hooks', 'background-memory-update');
+    expect(fs.existsSync(workerPath)).toBe(true);
+    // Check executable bit for owner
+    const mode = fs.statSync(workerPath).mode;
+    // eslint-disable-next-line no-bitwise
+    expect(mode & 0o100).toBeGreaterThan(0);
+  });
+});
