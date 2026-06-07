@@ -170,7 +170,13 @@ if [ -f "$MEMORY_FILE" ]; then
     # git merge-base --is-ancestor exits 0 when $STAMP_SHA is ancestor of HEAD
     if cd "$CWD" 2>/dev/null && git merge-base --is-ancestor "$STAMP_SHA" "$HEAD" 2>/dev/null; then
       _DRIFT_LOG_FULL=$(git log --oneline "${STAMP_SHA}..${HEAD}" 2>/dev/null || echo "")
-      COMMITS=$(printf '%s\n' "$_DRIFT_LOG_FULL" | grep -c . 2>/dev/null || echo "0")
+      # grep -c exits 1 on zero matches (POSIX); || true prevents set -e abort.
+      # ${COMMITS:-0} defends the transient-failure case where grep emits nothing.
+      # The old `|| echo "0"` produced "0\n0" (a two-line string) because grep -c
+      # already printed "0" before exiting 1, causing [ "$COMMITS" -le 0 ] to fail
+      # with "integer expression expected" and misroute State A into State B.
+      COMMITS=$(printf '%s\n' "$_DRIFT_LOG_FULL" | grep -c . 2>/dev/null || true)
+      COMMITS=${COMMITS:-0}
       _DRIFT_LOG=$(printf '%s\n' "$_DRIFT_LOG_FULL" | head -10)
     fi
   fi
