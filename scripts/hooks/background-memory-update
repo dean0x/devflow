@@ -29,33 +29,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Source JSON parsing helpers (jq with node fallback)
 source "$SCRIPT_DIR/json-parse" || { echo "background-memory-update: failed to source json-parse" >&2; exit 1; }
 
-# Source log-paths for devflow_log_dir
-source "$SCRIPT_DIR/log-paths" || { echo "background-memory-update: failed to source log-paths" >&2; exit 1; }
-LOG_FILE="$(devflow_log_dir "$CWD")/.background-memory-update.log"
+# Source hook-log-init for log() and size guard (requires $SCRIPT_DIR and $CWD, both set above;
+# does NOT pull in hook-bootstrap so the detached-worker invariant is preserved)
+source "$SCRIPT_DIR/hook-log-init" "background-memory-update" \
+  || { echo "background-memory-update: failed to source hook-log-init" >&2; exit 1; }
 
 # Source get-mtime for mtime comparisons
 source "$SCRIPT_DIR/get-mtime" || { echo "background-memory-update: failed to source get-mtime" >&2; exit 1; }
 
-# --- Logging ---
-log() {
-  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [background-memory-update] $1" >> "$LOG_FILE" 2>/dev/null || true
-}
-
-rotate_log() {
-  if [ ! -f "$LOG_FILE" ]; then return; fi
-  local _sz
-  _sz=$(stat -f%z "$LOG_FILE" 2>/dev/null) \
-    || _sz=$(stat -c%s "$LOG_FILE" 2>/dev/null) \
-    || _sz=$(wc -c < "$LOG_FILE" 2>/dev/null) \
-    || _sz=0
-  if [ "$_sz" -gt 5242880 ]; then  # 5MB guard per debug-trace pattern
-    _LOG_TMP="$LOG_FILE.tmp.$$"
-    tail -c 2621440 "$LOG_FILE" > "$_LOG_TMP" 2>/dev/null && mv "$_LOG_TMP" "$LOG_FILE" 2>/dev/null || rm -f "$_LOG_TMP" 2>/dev/null || true
-  fi
-}
-
 log "Starting (CWD=$CWD)"
-rotate_log
 
 # --- Resolve paths ---
 DEVFLOW_DIR="$CWD/.devflow"
@@ -131,16 +113,21 @@ fi
 
 # --- Orphan-only auto-clean: if queue has no assistant turn, truncate and exit ---
 # This prevents fabrication-prone LLM runs with only user turns in the queue.
-if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+# When neither jq nor node is available (_JSON_AVAILABLE=false) we skip the check
+# and allow the run to proceed — conservative: better to attempt than to truncate blindly.
+if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
   if [ "$_HAS_JQ" = "true" ]; then
     _HAS_ASSISTANT=$(jq -r 'select(.role=="assistant") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
   else
-    _HAS_ASSISTANT=$(node -e "
-      const lines = require('fs').readFileSync('${QUEUE_FILE}','utf8').split('\n');
+    # SECURITY: pass path via argv, never interpolate into node -e source (avoids shell injection
+    # for repo paths containing quotes or special characters — applies ADR-008 plumbing principle)
+    _HAS_ASSISTANT=$(node -e '
+      const f = process.argv[1];
+      const lines = require("fs").readFileSync(f, "utf8").split("\n");
       for (const l of lines) {
-        try { const o = JSON.parse(l); if (o.role==='assistant') { process.stdout.write('assistant'); break; } } catch {}
+        try { const o = JSON.parse(l); if (o.role === "assistant") { process.stdout.write("assistant"); break; } } catch {}
       }
-    " 2>/dev/null || echo "")
+    ' "$QUEUE_FILE" 2>/dev/null || echo "")
   fi
   if [ -z "$_HAS_ASSISTANT" ]; then
     log "User-only queue (no assistant turn) — truncating without LLM run"
@@ -192,9 +179,10 @@ else
 fi
 
 # Single-pass extraction: role + content as TSV (newlines collapsed)
+# When neither jq nor node is available, EXTRACTED stays empty and TURN_COUNT will be 0 → early exit.
 if [ "$_HAS_JQ" = "true" ]; then
   EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -r '(.role // "") + "\t" + ((.content // "") | gsub("\n"; " "))' 2>/dev/null || echo "")
-else
+elif [ "$_HAS_NODE" = "true" ]; then
   EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
     const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
     for (const line of lines) {
@@ -207,6 +195,8 @@ else
       } catch {}
     }
   ' 2>/dev/null || echo "")
+else
+  EXTRACTED=""
 fi
 
 TURNS_TEXT=""
@@ -328,8 +318,23 @@ DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
   >> "$LOG_FILE" 2>&1 &
 CLAUDE_PID=$!
 
-# Watchdog: kill if still running after 120s; cancel watchdog immediately after claude exits
-( sleep 120 && kill "$CLAUDE_PID" 2>/dev/null ) &
+# Watchdog: after 120s send SIGTERM to the process group, then SIGKILL after 5s grace.
+# Using -PGID (negative PID) kills the process group so any children claude spawned
+# are also terminated — a single SIGTERM to one PID cannot escape if children are orphaned.
+# Cancel watchdog immediately after claude exits to avoid hitting a recycled PID.
+(
+  sleep 120
+  PGID=$(ps -o pgid= -p "$CLAUDE_PID" 2>/dev/null | tr -d ' ')
+  if [ -n "$PGID" ] && [ "$PGID" != "0" ]; then
+    kill -TERM -"$PGID" 2>/dev/null || true
+    sleep 5
+    kill -KILL -"$PGID" 2>/dev/null || true
+  else
+    kill -TERM "$CLAUDE_PID" 2>/dev/null || true
+    sleep 5
+    kill -KILL "$CLAUDE_PID" 2>/dev/null || true
+  fi
+) &
 WD_PID=$!
 
 if wait "$CLAUDE_PID" 2>/dev/null; then
@@ -344,11 +349,15 @@ wait "$WD_PID" 2>/dev/null || true
 
 if [ "$CLAUDE_EXIT" -gt 128 ]; then
   log "FAIL: claude -p killed by watchdog after 120s"
-  # Leave .processing for crash recovery (dream-recover D56c)
+  # Leave .processing for crash recovery (dream-recover D56c).
+  # Retry-count ceiling: this worker is rate-bounded to one spawn per 120s by dream-capture's
+  # throttle (.working-memory-last-trigger mtime). Persistent failure is surfaced to the user
+  # via session-start-memory State C (stale .last-refresh-ok) rather than a retry counter here,
+  # keeping this plumbing script simple (applies ADR-008).
   exit 0
 elif [ "$CLAUDE_EXIT" -ne 0 ]; then
   log "FAIL: claude -p exited with code $CLAUDE_EXIT"
-  # Leave .processing for crash recovery
+  # Leave .processing for crash recovery (see same rate-bound note above)
   exit 0
 fi
 
