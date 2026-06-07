@@ -76,6 +76,30 @@ if [ -f "$MEMORY_FILE" ]; then
       STAMP_BRANCH=$(echo "$FIRST_LINE" | sed -n 's/<!-- memory-head: [^ ]* branch: \([^ ]*\) -->/\1/p')
       ;;
   esac
+  # Validate STAMP_SHA before any git call — treat WORKING-MEMORY.md as untrusted input
+  # (engineering rule: validate at boundaries; assume input is malicious).
+  # A value beginning with '-' or containing '..' could be a git flag or unexpected
+  # revision range. Reject anything that is not a hex object-id (7–40 chars).
+  # On mismatch fall through to the no-stamp path, preserving 3-state logic intact.
+  if [ -n "$STAMP_SHA" ]; then
+    case "$STAMP_SHA" in
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
+        # Looks like a hex string; verify length ≤ 40 and only hex chars via sed
+        _SHA_CLEAN=$(echo "$STAMP_SHA" | sed 's/[^0-9a-f]//g')
+        _SHA_LEN=${#STAMP_SHA}
+        if [ "$_SHA_CLEAN" != "$STAMP_SHA" ] || [ "$_SHA_LEN" -gt 40 ]; then
+          dbg "STAMP_SHA rejected (non-hex chars or >40): $STAMP_SHA"
+          STAMP_SHA=""
+          STAMP_BRANCH=""
+        fi
+        ;;
+      *)
+        dbg "STAMP_SHA rejected (bad prefix): $STAMP_SHA"
+        STAMP_SHA=""
+        STAMP_BRANCH=""
+        ;;
+    esac
+  fi
   dbg "STAMP_SHA=$STAMP_SHA STAMP_BRANCH=$STAMP_BRANCH"
 
   # --- Strip stamp line from injected body ---
@@ -135,7 +159,7 @@ if [ -f "$MEMORY_FILE" ]; then
     else
       _OK_MIN_STR="${_OK_MIN}m"
     fi
-    _LOG_HINT="$HOME/.devflow/logs/$(echo "$CWD" | sed 's|^/||' | tr '/' '-')/.background-memory-update.log"
+    _LOG_HINT="$LOG_DIR/.background-memory-update.log"
     REFRESH_FAILING="⚠ MEMORY REFRESH MAY BE FAILING — ${QUEUE_DEPTH} turn(s) unprocessed, last refresh ${_OK_MIN_STR} ago; check ${_LOG_HINT}"
     dbg "State C: refresh failing (QUEUE_DEPTH=$QUEUE_DEPTH OK_AGE=${OK_AGE}s)"
   fi

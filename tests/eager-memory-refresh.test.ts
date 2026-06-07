@@ -366,6 +366,26 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(ctx).not.toContain('UNPROCESSED TURNS');
   });
 
+  it('malformed stamp (starts with "-") → treated as no-stamp, "synced @ unknown"', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, `<!-- memory-head: -malicious branch: main -->\n## Now\n- content\n`);
+
+    const ctx = getCtx(projectDir, homeDir);
+    // Rejected stamp falls through to the no-stamp path (State A "synced @ unknown")
+    expect(ctx).toContain('synced @ unknown');
+    // Must not pass the malicious value to a git command (no crash or unexpected output)
+    expect(ctx).not.toContain('-malicious');
+  });
+
+  it('malformed stamp (non-hex chars) → treated as no-stamp, "synced @ unknown"', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(memFile, `<!-- memory-head: abc..xyz123 branch: main -->\n## Now\n- content\n`);
+
+    const ctx = getCtx(projectDir, homeDir);
+    expect(ctx).toContain('synced @ unknown');
+    expect(ctx).not.toContain('abc..xyz123');
+  });
+
   it('raw UNPROCESSED TURNS dump is absent from all output (legacy format gone)', () => {
     const headSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
     const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
