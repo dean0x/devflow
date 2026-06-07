@@ -308,7 +308,18 @@ Instructions:
 log "Spawning claude -p (model haiku, ${TURN_COUNT} turns)"
 # SECURITY: never log PROMPT — it contains turn content which may include secrets
 
+# --- Watchdog timeout (overridable for tests: DEVFLOW_BG_WATCHDOG_SECS=2) ---
+WATCHDOG_SECS="${DEVFLOW_BG_WATCHDOG_SECS:-120}"
+
 # --- Run claude -p with watchdog ---
+# D37: Enable job control (set -m) only around the spawn so bash gives claude its OWN
+# process group (PGID == CLAUDE_PID) even in this non-interactive script.  Without
+# set -m the background child inherits the worker's process group and the watchdog
+# kill -TERM -"$CLAUDE_PID" would also kill the worker itself (self-kill bug).
+# Restore set +m immediately after capturing CLAUDE_PID so the watchdog subshell and
+# other subsequent background operations stay in the worker's group.
+# Job-control notifications go to stderr which is redirected to the log — suppress them.
+set -m
 DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
   --model haiku \
   --dangerously-skip-permissions \
@@ -317,23 +328,18 @@ DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
   <<< "$PROMPT" \
   >> "$LOG_FILE" 2>&1 &
 CLAUDE_PID=$!
+set +m
 
-# Watchdog: after 120s send SIGTERM to the process group, then SIGKILL after 5s grace.
-# Using -PGID (negative PID) kills the process group so any children claude spawned
-# are also terminated — a single SIGTERM to one PID cannot escape if children are orphaned.
+# Watchdog: after WATCHDOG_SECS send SIGTERM to claude's process group (PGID == CLAUDE_PID
+# because set -m made it a group leader), then SIGKILL after 5s grace.
+# Using -PGID (negative PID) kills claude's entire subtree so children it spawned
+# are also terminated — the worker itself is NOT in that group (set +m restored above).
 # Cancel watchdog immediately after claude exits to avoid hitting a recycled PID.
 (
-  sleep 120
-  PGID=$(ps -o pgid= -p "$CLAUDE_PID" 2>/dev/null | tr -d ' ')
-  if [ -n "$PGID" ] && [ "$PGID" != "0" ]; then
-    kill -TERM -"$PGID" 2>/dev/null || true
-    sleep 5
-    kill -KILL -"$PGID" 2>/dev/null || true
-  else
-    kill -TERM "$CLAUDE_PID" 2>/dev/null || true
-    sleep 5
-    kill -KILL "$CLAUDE_PID" 2>/dev/null || true
-  fi
+  sleep "$WATCHDOG_SECS"
+  kill -TERM -"$CLAUDE_PID" 2>/dev/null || true
+  sleep 5
+  kill -KILL -"$CLAUDE_PID" 2>/dev/null || true
 ) &
 WD_PID=$!
 
@@ -348,7 +354,7 @@ kill "$WD_PID" 2>/dev/null || true
 wait "$WD_PID" 2>/dev/null || true
 
 if [ "$CLAUDE_EXIT" -gt 128 ]; then
-  log "FAIL: claude -p killed by watchdog after 120s"
+  log "FAIL: claude -p killed by watchdog after ${WATCHDOG_SECS}s"
   # Leave .processing for crash recovery (dream-recover D56c).
   # Retry-count ceiling: this worker is rate-bounded to one spawn per 120s by dream-capture's
   # throttle (.working-memory-last-trigger mtime). Persistent failure is surfaced to the user

@@ -70,7 +70,8 @@ function runHookWithFakeClaude(
 function runWorker(
   projectDir: string,
   homeDir: string,
-  shimDir: string
+  shimDir: string,
+  extraEnv: Record<string, string> = {}
 ): { exitCode: number } {
   try {
     execSync(`bash "${BACKGROUND_UPDATER}" "${projectDir}"`, {
@@ -78,6 +79,7 @@ function runWorker(
         ...process.env,
         HOME: homeDir,
         PATH: `${shimDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+        ...extraEnv,
       },
       // stdio:'ignore' prevents Node.js blocking on open pipe (watchdog sleep 120 inherits fds)
       stdio: 'ignore',
@@ -489,7 +491,10 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
     const src = fs.readFileSync(BACKGROUND_UPDATER, 'utf-8');
     expect(src).toContain('kill "$WD_PID"');
     expect(src).toContain('wait "$WD_PID"');
-    expect(src).toContain('sleep 120');
+    // Watchdog sleep is now driven by WATCHDOG_SECS (overridable via DEVFLOW_BG_WATCHDOG_SECS)
+    expect(src).toContain('sleep "$WATCHDOG_SECS"');
+    // Default of 120s must be the fallback
+    expect(src).toContain('DEVFLOW_BG_WATCHDOG_SECS:-120');
   });
 
   it('AC-F3/failure: claude exits 1 → .processing retained, .last-refresh-ok NOT created', () => {
@@ -506,6 +511,31 @@ describe('S4: AC-F3/P3 — watchdog and failure path', () => {
     const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
     expect(fs.existsSync(okFile)).toBe(false);
   });
+
+  it('AC-F3/watchdog-behavioral: worker SURVIVES watchdog kill; .last-refresh-ok NOT touched; .processing retained', () => {
+    // Hanging fake claude — sleeps indefinitely so the watchdog must fire.
+    const hangBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(hangBin, '#!/bin/bash\nsleep 300\n');
+    fs.chmodSync(hangBin, 0o755);
+
+    // Set DEVFLOW_BG_WATCHDOG_SECS=2 so the watchdog fires after 2s, not 120s.
+    // The 5s SIGTERM->SIGKILL grace period is NOT made short here — the fake claude
+    // responds to SIGTERM immediately, so total elapsed is ~2s anyway.
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir, {
+      DEVFLOW_BG_WATCHDOG_SECS: '2',
+    });
+
+    // Worker must exit 0 (clean failure path executed, not self-killed).
+    expect(exitCode).toBe(0);
+
+    // .last-refresh-ok must NOT be touched on watchdog kill.
+    const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
+    expect(fs.existsSync(okFile)).toBe(false);
+
+    // .processing must be retained for dream-recover crash recovery.
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    expect(fs.existsSync(processingFile)).toBe(true);
+  }, 20000); // 20s timeout: 2s watchdog sleep + 5s SIGTERM grace + margin
 
   it('AC-P3/structural: worker lock uses 300s stale threshold (not 30s dream-lock)', () => {
     const src = fs.readFileSync(BACKGROUND_UPDATER, 'utf-8');
