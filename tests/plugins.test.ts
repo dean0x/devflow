@@ -6,6 +6,7 @@ import {
   buildAssetMaps,
   buildFullSkillsMap,
   partitionSelectablePlugins,
+  prefixSkillName,
   WORKFLOW_ORDER,
   SHADOW_RENAMES,
   LEGACY_SKILL_NAMES,
@@ -301,6 +302,27 @@ describe('LEGACY_AGENT_NAMES consistency', () => {
       expect(
         currentAgents,
         `LEGACY_AGENT_NAMES entry '${legacyName}' must not appear in getAllAgentNames() — remove it from LEGACY_AGENT_NAMES or update the plugin registry`,
+      ).not.toContain(legacyName);
+    }
+  });
+});
+
+describe('LEGACY_SKILL_NAMES consistency', () => {
+  it('no namespaced legacy skill name matches an active skill install path', () => {
+    // Active skills install at the namespaced path devflow:<bare-name>.
+    // Bare legacy entries (e.g. 'dream-decisions') are safe: they target pre-namespace
+    // install dirs and are no-ops on current installs because active skills always install
+    // under the devflow: prefix. Only namespaced legacy entries (those already carrying the
+    // devflow: prefix) directly target an install path — so this guard asserts that no already-namespaced
+    // entry in LEGACY_SKILL_NAMES collides with an active skill's install path. This
+    // prevents a future namespaced legacy entry from silently deleting a live skill.
+    const activeInstallPaths = new Set(getAllSkillNames().map(prefixSkillName));
+    const SKILL_NS = 'devflow:';
+    for (const legacyName of LEGACY_SKILL_NAMES) {
+      if (!legacyName.startsWith(SKILL_NS)) continue;
+      expect(
+        activeInstallPaths,
+        `LEGACY_SKILL_NAMES entry '${legacyName}' collides with an active skill install path — remove it from LEGACY_SKILL_NAMES or update the plugin registry`,
       ).not.toContain(legacyName);
     }
   });

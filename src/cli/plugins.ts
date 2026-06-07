@@ -526,7 +526,14 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:pipeline:orch',
   'devflow:research:orch',
   'devflow:release:orch',
-  // v3.x dream per-task skills: bare names for pre-namespace installs
+  // v3.x dream per-task skills: bare names for pre-namespace installs.
+  // NOTE: dream-decisions, dream-knowledge, and dream-curation are STILL-ACTIVE skills
+  // (declared in DEVFLOW_PLUGINS, installed at the namespaced path devflow:dream-*).
+  // These bare entries exist solely to clean up pre-namespace V2.x installs where
+  // skills were written without the devflow: prefix. On current installs the post-install
+  // fs.rm targets a bare path (e.g. ~/.claude/skills/dream-decisions) that does not exist
+  // — a harmless no-op. Do NOT remove these entries: upgrading users from V2.x need the
+  // stale bare-name dirs swept. (applies ADR-016; avoids PF-009)
   'dream-memory',
   'dream-decisions',
   'dream-knowledge',
