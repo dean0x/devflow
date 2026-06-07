@@ -156,6 +156,20 @@ dream_recover_stale() {
     local _pt_threshold
     _pt_threshold=$(_dream_stale_threshold "memory")
     if [ "$_pt_age" -gt "$_pt_threshold" ]; then
+      # Cold-path fallback: recovery is intentionally lock-free (no .working-memory.lock
+      # acquisition here). The worker (background-memory-update) is the PRIMARY recovery
+      # owner: it runs under .working-memory.lock and re-merges a leftover .processing
+      # into its own batch. This fallback fires only when the worker never re-spawned
+      # (i.e., SessionStart arrives >300s after the crash with no intervening Stop hook).
+      #
+      # Safe-by-construction: STALE_THRESHOLD (300s) strictly exceeds the worker's
+      # watchdog total (WATCHDOG_SECS 120s + WATCHDOG_KILL_GRACE_SECS 5s + margin ≈ 125s).
+      # By the time we can act, any live worker's claude -p has already been watchdog-killed
+      # and the worker has exited — the .working-memory.lock is gone.
+      #
+      # INVARIANT: if STALE_THRESHOLD is ever raised to ≥ worker-watchdog-total, the
+      # lock-free assumption breaks and a race window opens between this recovery and
+      # the worker's merge block. Preserve STALE_THRESHOLD > watchdog-total at all times.
       if [ ! -f "$_pt_jsonl" ]; then
         # Safe to recover — no .jsonl exists to be clobbered
         mv "$_pt_proc" "$_pt_jsonl" 2>/dev/null || true

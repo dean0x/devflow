@@ -117,22 +117,21 @@ fi
 if [ "$_SC2_HELPERS_OK" = "true" ]; then
   # Determine feature enabled-state.
   # Primary: dream/config.json fields; secondary: runtime sentinels (defense-in-depth).
-  _SC2_MEM_EN="true"
+  # Note: memory is NOT a Dream task (handled by background-memory-update worker) —
+  # mem_enabled was removed from dream_collect_tasks (applies ADR-016; avoids PF-009).
   _SC2_DEC_EN="true"
   _SC2_KNOW_EN="true"
 
   _SC2_DREAM_CONFIG="$DREAM_DIR/config.json"
   if [ -f "$_SC2_DREAM_CONFIG" ]; then
-    _SC2_MEM_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "memory"    "true")
     _SC2_DEC_EN=$(json_field_file   "$_SC2_DREAM_CONFIG" "decisions" "true")
     _SC2_KNOW_EN=$(json_field_file  "$_SC2_DREAM_CONFIG" "knowledge" "true")
   fi
   # Sentinel overrides
-  [ -f "$MEMORY_DIR/.working-memory-disabled" ] && _SC2_MEM_EN="false"
   [ -f "$DEVFLOW_DIR/decisions/.disabled" ]     && _SC2_DEC_EN="false"
   [ -f "$DEVFLOW_DIR/features/.disabled" ]      && _SC2_KNOW_EN="false"
 
-  dbg "Section2: mem=$_SC2_MEM_EN dec=$_SC2_DEC_EN know=$_SC2_KNOW_EN"
+  dbg "Section2: dec=$_SC2_DEC_EN know=$_SC2_KNOW_EN"
 
   # Step 1: recover stale .processing markers so they become collectable in step 2
   if [ -d "$DREAM_DIR" ]; then
@@ -140,25 +139,9 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   fi
 
   # Step 2: collect pending marker task types
-  dream_collect_tasks "$DREAM_DIR" "$_SC2_MEM_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
+  dream_collect_tasks "$DREAM_DIR" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
 
-  # Step 3: raw-queue bridge — union in memory task if .pending-turns.jsonl is non-empty
-  # even when no memory dream marker exists (queue written but marker not yet written).
-  if [ "$_SC2_MEM_EN" = "true" ] && [ -s "$MEMORY_DIR/.pending-turns.jsonl" ]; then
-    case ",$_DREAM_TASKS," in
-      *,memory,*) ;;  # already present — skip
-      *)
-        if [ -n "$_DREAM_TASKS" ]; then
-          _DREAM_TASKS="memory,$_DREAM_TASKS"
-        else
-          _DREAM_TASKS="memory"
-        fi
-        dbg "Section2: added memory task via raw-queue bridge"
-        ;;
-    esac
-  fi
-
-  # Step 4: emit directive if tasks pending, subject to processor-spawn throttle
+  # Emit directive if tasks pending, subject to processor-spawn throttle.
   if [ -n "$_DREAM_TASKS" ]; then
     _SC2_SPAWNED_AT_FILE="$DREAM_DIR/.processor-spawned-at"
     _SC2_THROTTLE=120

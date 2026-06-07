@@ -1076,7 +1076,6 @@ export const initCommand = new Command('init')
       'session-end-learning',
       'session-end-decisions',
       'session-end-knowledge-refresh',
-      'background-memory-update',
       'background-knowledge-refresh',
       // Learning pipeline removed: eval-learning/eval-reinforce no longer sourced by dream-evaluate
       'eval-learning',

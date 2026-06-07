@@ -24,12 +24,12 @@
         "shared/rules/quality.md",
         "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-06-05T00:00:00.000Z",
+      "lastUpdated": "2026-06-07T10:12:49.004Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
       "name": "Dream & Hooks System",
-      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, dream-evaluate, dream-memory, dream-decisions, dream-knowledge, dream-curation.",
+      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation.",
       "directories": [
         "scripts/hooks/",
         "shared/agents/",
@@ -42,21 +42,22 @@
         "scripts/hooks/lib/staleness.cjs",
         "scripts/hooks/json-helper.cjs",
         "scripts/hooks/dream-capture",
+        "scripts/hooks/background-memory-update",
         "scripts/hooks/dream-collect-tasks",
         "scripts/hooks/dream-dispatch",
         "scripts/hooks/dream-evaluate",
         "scripts/hooks/dream-recover",
         "scripts/hooks/eval-curation",
+        "scripts/hooks/session-start-memory",
         "scripts/hooks/session-start-context",
         "shared/agents/dream.md",
-        "shared/skills/dream-memory/SKILL.md",
         "shared/skills/dream-decisions/SKILL.md",
         "shared/skills/dream-knowledge/SKILL.md",
         "shared/skills/dream-curation/SKILL.md",
         "src/cli/commands/decisions.ts"
       ],
-      "lastUpdated": "2026-06-05T00:00:00.000Z",
-      "createdBy": "devflow-knowledge"
+      "lastUpdated": "2026-06-07T18:08:25.000Z",
+      "createdBy": "implement"
     }
   }
 }

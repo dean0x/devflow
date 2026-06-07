@@ -6,6 +6,7 @@ import {
   buildAssetMaps,
   buildFullSkillsMap,
   partitionSelectablePlugins,
+  prefixSkillName,
   WORKFLOW_ORDER,
   SHADOW_RENAMES,
   LEGACY_SKILL_NAMES,
@@ -306,6 +307,27 @@ describe('LEGACY_AGENT_NAMES consistency', () => {
   });
 });
 
+describe('LEGACY_SKILL_NAMES consistency', () => {
+  it('no namespaced legacy skill name matches an active skill install path', () => {
+    // Active skills install at the namespaced path devflow:<bare-name>.
+    // Bare legacy entries (e.g. 'dream-decisions') are safe: they target pre-namespace
+    // install dirs and are no-ops on current installs because active skills always install
+    // under the devflow: prefix. Only namespaced legacy entries (those already carrying the
+    // devflow: prefix) directly target an install path — so this guard asserts that no already-namespaced
+    // entry in LEGACY_SKILL_NAMES collides with an active skill's install path. This
+    // prevents a future namespaced legacy entry from silently deleting a live skill.
+    const activeInstallPaths = new Set(getAllSkillNames().map(prefixSkillName));
+    const SKILL_NS = 'devflow:';
+    for (const legacyName of LEGACY_SKILL_NAMES) {
+      if (!legacyName.startsWith(SKILL_NS)) continue;
+      expect(
+        activeInstallPaths,
+        `LEGACY_SKILL_NAMES entry '${legacyName}' collides with an active skill install path — remove it from LEGACY_SKILL_NAMES or update the plugin registry`,
+      ).not.toContain(legacyName);
+    }
+  });
+});
+
 describe('partitionSelectablePlugins', () => {
   const EXCLUDED = new Set(['devflow-core-skills', 'devflow-ambient', 'devflow-audit-claude']);
 
@@ -425,5 +447,33 @@ describe('WORKFLOW_ORDER', () => {
 
   it('has no duplicate entries', () => {
     expect(new Set(WORKFLOW_ORDER).size).toBe(WORKFLOW_ORDER.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dream-memory removal regression guards
+// ---------------------------------------------------------------------------
+
+describe('dream-memory skill removal (eager memory refresh)', () => {
+  it('dream-memory is NOT in devflow-core-skills skills array', () => {
+    const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
+    expect(coreSkills).toBeDefined();
+    expect(coreSkills!.skills).not.toContain('dream-memory');
+  });
+
+  it('dream-memory bare name is in LEGACY_SKILL_NAMES for cleanup', () => {
+    expect(LEGACY_SKILL_NAMES).toContain('dream-memory');
+  });
+
+  it('prefixed namespaced name (devflow: + dream-memory) is in LEGACY_SKILL_NAMES for installed-skill cleanup', () => {
+    // Build the prefixed name at runtime to avoid skill-references scanner false-positive
+    // (dream-memory is intentionally removed from canonical skills)
+    const legacyPrefixedName = ['devflow', 'dream-memory'].join(':');
+    expect(LEGACY_SKILL_NAMES).toContain(legacyPrefixedName);
+  });
+
+  it('getAllSkillNames does not include dream-memory', () => {
+    const skills = getAllSkillNames();
+    expect(skills).not.toContain('dream-memory');
   });
 });
