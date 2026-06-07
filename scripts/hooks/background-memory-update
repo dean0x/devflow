@@ -327,6 +327,19 @@ log "Spawning claude -p (model haiku, ${TURN_COUNT} turns)"
 
 # --- Watchdog timeout (overridable for tests: DEVFLOW_BG_WATCHDOG_SECS=2) ---
 WATCHDOG_SECS="${DEVFLOW_BG_WATCHDOG_SECS:-120}"
+WATCHDOG_KILL_GRACE_SECS=5  # grace period between SIGTERM and SIGKILL
+
+# NASA/JPL Rule 5 — runtime assertion: STALE_THRESHOLD must exceed the watchdog's
+# total in-flight time so that break_stale_lock and dream-recover's cold-path recovery
+# can never evict a still-live worker.  If DEVFLOW_BG_WATCHDOG_SECS is raised above
+# 294 (leaving < 1s margin), this will fail loudly rather than silently corrupt the
+# safety guarantee.  Checked before spawning claude so a bad override is caught early.
+# avoids PF-011
+_WATCHDOG_TOTAL=$(( WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS ))
+if [ "$STALE_THRESHOLD" -le "$_WATCHDOG_TOTAL" ]; then
+  echo "[background-memory-update] FATAL: STALE_THRESHOLD ($STALE_THRESHOLD) must exceed watchdog total (${WATCHDOG_SECS}+${WATCHDOG_KILL_GRACE_SECS}=${_WATCHDOG_TOTAL})" >&2
+  exit 1
+fi
 
 # --- Run claude -p with watchdog ---
 # D37: Enable job control (set -m) only around the spawn so bash gives claude its OWN
@@ -346,8 +359,6 @@ DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
   >> "$LOG_FILE" 2>&1 &
 CLAUDE_PID=$!
 set +m
-
-WATCHDOG_KILL_GRACE_SECS=5  # grace period between SIGTERM and SIGKILL
 
 # Watchdog: after WATCHDOG_SECS send SIGTERM to claude's process group (PGID == CLAUDE_PID
 # because set -m made it a group leader), then SIGKILL after WATCHDOG_KILL_GRACE_SECS.
