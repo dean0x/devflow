@@ -18,7 +18,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-06-06
+updated: 2026-06-07
 ---
 
 # Rules System CLI
@@ -44,7 +44,7 @@ Rules flow through four distinct stages that parallel the skill pipeline:
 
 Rules use a two-part structure, but the `paths` frontmatter differs by rule type:
 
-**Core rules** (security, engineering, quality) — apply to every file Claude touches:
+**Core rules** (security, engineering, quality, reliability) — apply to every file Claude touches:
 ```markdown
 ---
 paths: []
@@ -98,7 +98,7 @@ Four helper functions in `plugins.ts` serve distinct scopes:
 - `isValidRuleName(name)` — validates rule names match `/^[a-z0-9-]+$/`; called by `buildRulesMap` at map-build time as a path-traversal defense
 - `LEGACY_RULE_NAMES` — currently empty; add entries here when renaming or removing a rule
 
-The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the four per-task Dream skills (`dream-memory`, `dream-decisions`, `dream-knowledge`, `dream-curation`) added in v3.x. Their bare names (without the `devflow:` prefix) also appear in `LEGACY_SKILLS_V2X` so older installs that had them pre-namespace are swept during `devflow init`. The learning pipeline skills (`eval-learning`, `eval-reinforce`, and the `devflow learn` CLI) were removed in PR #238.
+The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the three active per-task Dream skills (`dream-decisions`, `dream-knowledge`, `dream-curation`). `dream-memory` was removed from the active skills list in PR #238 — memory is now handled entirely by the `background-memory-update` detached worker, not a Dream subagent. Both `dream-memory` (bare) and `devflow:dream-memory` (namespaced) are in `LEGACY_SKILLS_V2X` so older installs that had them are swept during `devflow init`. The learning pipeline skills (`eval-learning`, `eval-reinforce`, and the `devflow learn` CLI) were removed in PR #238.
 
 ### Build Pipeline
 
@@ -142,7 +142,7 @@ Key install properties:
 
 ### Manifest Tracking
 
-`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs). The `features.learn` field was removed from `ManifestData` (PR #238 learning pipeline removal); `DreamConfig` (in `src/cli/utils/dream-config.ts`) now tracks only `{memory, decisions, knowledge}`. The `--learn`/`--no-learn` CLI option and `learnEnabled` variable in `init.ts` no longer exist.
+`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs). The `features.learn` field was removed from `ManifestData` in PR #238 (learning pipeline removal); `DreamConfig` (in `src/cli/utils/dream-config.ts`) now tracks only `{memory, decisions, knowledge}`. The `--learn`/`--no-learn` CLI option and `learnEnabled` variable in `init.ts` no longer exist.
 
 ### `devflow rules` Command
 
@@ -196,6 +196,8 @@ export const WORKFLOW_ORDER: string[] = [
 ```
 `init.ts` imports it from `plugins.ts` rather than keeping a local duplicate. A regression guard test in `tests/plugins.test.ts` verifies every entry has a real backing command in `DEVFLOW_PLUGINS` (bidirectional: WORKFLOW_ORDER ⊆ commands AND commands ⊆ WORKFLOW_ORDER for the non-excluded set). `/bug-analysis` was added to WORKFLOW_ORDER in this same commit — the regression guard catches future omissions.
 
+**Learning pipeline removed (PR #238)**: The `--learn`/`--no-learn` init flags, `learnEnabled` variable, and `features.learn` manifest field no longer exist. The self-learning step in the Advanced mode prompt was removed. Legacy hook scripts `eval-learning` and `eval-reinforce` are now in the init's legacy hook cleanup list alongside their removal from `dream-evaluate` sourcing.
+
 **Excluded from plugin selection buckets**: `devflow-core-skills` (always installed), `devflow-ambient` (always installed), `devflow-audit-claude` (installable via `--plugin` only).
 
 **Rules in init**: `rulesEnabled` defaults to `true`. In Recommended mode, applied silently (no prompt). In Advanced mode, an explicit `p.note()` explains the per-language token model, followed by `p.confirm()`. CLI flag `--rules`/`--no-rules` overrides in both modes. `buildRulesMap(pluginsToInstall)` is called with the user's selected plugins — rules from non-selected optional plugins are excluded. Rules directory is NOT wiped on init (only on `devflow rules --enable`); stale rules are cleaned up via `LEGACY_RULE_NAMES` loop.
@@ -225,7 +227,7 @@ export const WORKFLOW_ORDER: string[] = [
 
 - **Adding a language rule to `devflow-core-skills`**: Core rules install for every user. Language-specific rules belong in their optional plugin.
 - **Using `paths: []` on a language-specific rule**: Language rules must scope to their file types. Using `paths: []` makes them load on every prompt, eliminating per-language token savings.
-- **Using a file-type path on a core rule**: Core rules (security, engineering, quality) must use `paths: []` — they apply cross-language.
+- **Using a file-type path on a core rule**: Core rules (security, engineering, quality, reliability) must use `paths: []` — they apply cross-language.
 - **Installing rules from `shared/rules/` directly at runtime**: The installer reads from `plugins/{plugin}/rules/` (build output). Skipping `npm run build` silently installs the old version.
 - **Unbounded plugin selection loop**: The bounded `while (attempts < MAX_ATTEMPTS)` + `shouldRetry` guard is the pattern — never replace with `while (true)`.
 - **Long rule files**: Rules should be ~10-15 lines. If a rule grows beyond ~20 lines, extract the detail into a skill's `references/` directory.
@@ -234,7 +236,7 @@ export const WORKFLOW_ORDER: string[] = [
 ## Gotchas
 
 - **Rules ARE wiped on full install but not on partial**: `installViaFileCopy` wipes `~/.claude/rules/devflow/` at the start of a full install. On a partial install (`devflow init --plugin=typescript`), the rules directory is NOT wiped. Use `devflow rules --enable` to get a clean reinstall — it always wipes first.
-- **`devflow rules --enable` resolves plugin dirs from dist/**: Computes the plugins directory relative to the compiled CLI file. Must build before running.
+- **`devflow rules --enable` resolves plugin dirs from dist/`**: Computes the plugins directory relative to the compiled CLI file. Must build before running.
 - **Shadow files are flat, not directories**: Skills shadow at `~/.devflow/skills/{name}/` (a directory). Rules shadow at `~/.devflow/rules/{name}.md` (a flat file).
 - **Manifest defaults `rules: true` on read**: Old manifests without the `rules` field are read as `rules: true`. Upgrading users get rules enabled automatically.
 - **`buildRulesMap` throws on invalid names**: Uppercase letters, dots, or slashes in a `plugin.json` rules entry cause an immediate throw — intentional early-catch.
@@ -245,19 +247,22 @@ export const WORKFLOW_ORDER: string[] = [
 - **Rules have no runtime sentinel**: Unlike knowledge (`.devflow/features/.disabled`), decisions, and memory, rules have no `.disabled` file. Disabling rules is destructive: `devflow rules --disable` removes the directory entirely. There is no temporary suppression path.
 - **Core vs language rules have different token behavior**: Core rules load on every prompt. Language rules only activate when Claude is working with a matching file type.
 - **manifest.ts contains a `kb → knowledge` migration self-heal**: `readManifest` detects `features.kb` and migrates it to `features.knowledge` in-place. This is the only backward-compat code in `manifest.ts`; do not add more. For rules, `LEGACY_RULE_NAMES` is the correct pattern when renaming rule files.
-- **`devflow learn` no longer exists**: The learning pipeline CLI (`src/cli/commands/learn.ts`) was removed in PR #238. `manifest.features.learn`, the `--learn`/`--no-learn` init flag, and `learnEnabled` in `init.ts` no longer exist. Two migrations (`purge-learning-pipeline-v1` per-project, `purge-learning-global-v1` global) in `src/cli/utils/migrations.ts` sweep legacy learning artifacts on `devflow init`. The `eval-learning` and `eval-reinforce` hook scripts are also removed and listed as legacy hooks for cleanup.
+- **`features.learn` no longer exists in ManifestData**: The learning pipeline was removed in PR #238. `manifest.features.learn`, `--learn`/`--no-learn` init flags, and `learnEnabled` in `init.ts` are all gone. Two migrations (`purge-learning-pipeline-v1` per-project, `purge-learning-global-v1` global) in `src/cli/utils/migrations.ts` sweep legacy learning artifacts on `devflow init`. `eval-learning` and `eval-reinforce` hook scripts are removed and in the legacy hook cleanup list.
+- **`dream-memory` skill is no longer active**: `dream-memory` was removed from `devflow-core-skills` skills array in PR #238. Memory refresh is handled by `background-memory-update` (detached worker), not a Dream subagent. Both `dream-memory` and `devflow:dream-memory` are in `LEGACY_SKILLS_V2X` and are swept by `devflow init`. New migration `purge-stale-memory-markers-v1` sweeps `dream/memory.*` marker files from old installations.
+- **`DreamConfig` tracks only 3 features**: `{memory, decisions, knowledge}` — the `learning` key was removed from `DreamConfig` in PR #238. Do not add it back or reference it.
+- **New migration `sync-devflow-gitignore-v2`**: Per-project migration added in PR #238 to re-sync `.devflow/.gitignore` to the ignore-by-default allowlist policy. Overwrites existing `.gitignore` if content differs from canonical template. ENOENT-safe (no-op if `.devflow/` does not exist).
 
 ## Key Files
 
 - `shared/rules/` — source of truth for all rule content; flat `.md` files (12 total)
-- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER`, `partitionSelectablePlugins()`; also registers `dream-memory`/`dream-decisions`/`dream-knowledge`/`dream-curation` skills on `devflow-core-skills` and lists them in `LEGACY_SKILLS_V2X`
-- `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop
+- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER`, `partitionSelectablePlugins()`; active Dream skills: `dream-decisions`, `dream-knowledge`, `dream-curation` (NOT `dream-memory`); `LEGACY_SKILLS_V2X` includes `dream-memory` and `devflow:dream-memory` for cleanup
+- `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; no `--learn`/`--no-learn` or `learnEnabled` (removed PR #238)
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
 - `src/cli/commands/ambient.ts` — purges legacy `commands.md` via `COMMANDS_RULE_PATH` / `removeLegacyCommandsRule()`; called unconditionally from `addAmbientHook` and `removeAmbientHook` so stale files are cleaned up on every enable/disable/init
 - `src/cli/utils/installer.ts` — `installRuleFile` (exported); `installViaFileCopy` rules section
 - `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files
-- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed
-- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore` to ignore-by-default allowlist policy; applies ADR-002; also adds `eval-learning` and `eval-reinforce` to the legacy hook cleanup list (PR #238)
+- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed in PR #238
+- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore` to ignore-by-default allowlist policy; `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; applies ADR-002; `eval-learning` and `eval-reinforce` in legacy hook cleanup list
 - `scripts/build-plugins.ts` — build-time distribution from `shared/rules/` → `plugins/*/rules/`
 - `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional)
 - `tests/init.test.ts` — `combineSelection` and `shouldRetry` unit tests
@@ -270,3 +275,4 @@ export const WORKFLOW_ORDER: string[] = [
 - Feature flags: `src/cli/utils/flags.ts` — another toggleable feature using the same manifest.features pattern
 - Ambient simplification (c51114d): introduced `commands.md` rule + ambient-managed separation
 - Init flow simplification (5143d73–154899b): two-step selection, `partitionSelectablePlugins`, `WORKFLOW_ORDER` export, `combineSelection`/`shouldRetry`
+- PR #238 (learning removal): removed `dream-memory` from active skills, removed `features.learn`, removed `--learn`/`--no-learn`, added `purge-learning-pipeline-v1` + `purge-stale-memory-markers-v1` + `sync-devflow-gitignore-v2` migrations

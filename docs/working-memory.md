@@ -56,7 +56,6 @@ The `background-memory-update` worker (detached `claude -p` process spawned by `
 | `## Now` | Current focus and immediate next steps |
 | `## Progress` | What's done, what remains, blockers |
 | `## Decisions` | Architectural and design decisions made this session |
-| `## Modified Files` | Files changed with status |
 | `## Context` | Repository state, build status, test results |
 | `## Session Log` | Timestamped log of significant actions |
 

@@ -146,6 +146,7 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: keep ONE Dream agent that dynamically loads a per-task skill (devflow:dream-memory|decisions|knowledge|curation), and assign models per task at spawn time via session-start-context — haiku for memory, sonnet for knowledge, opus for the combined decisions+curation spawn
 - **Consequences**: tasks already communicate only through marker files and JSONL (zero cross-task context synergy to lose), so a shared context window only hurts later tasks
 - **Source**: self-learning:obs_dreamsplit1
+- **Amendment (2026-06-07, PR #239)**: Memory is no longer a Dream task. Working-memory refresh moved to the detached `background-memory-update` worker (a Stop-hook-spawned `claude -p haiku` process), and the `devflow:dream-memory` skill was removed. Active Dream tasks are now decisions (opus), knowledge (sonnet), and curation (opus). The "haiku for memory" model assignment and the `dream-memory` skill reference above are **superseded** to this extent; the agent-plus-per-task-skill split and the sonnet/opus assignments remain in force.
 
 ## ADR-017: Keep the decisions lock through the Dream restructure but harden it from give-up-fast to bounded retry+backoff — the lock guards cross-session writes, which no agent restructuring eliminates
 
