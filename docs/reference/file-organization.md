@@ -48,7 +48,8 @@ devflow/
 │   ├── hud.sh                        # Thin wrapper: exec node hud/index.js
 │   ├── hud/                          # GENERATED — compiled HUD module (gitignored)
 │   └── hooks/                        # Dream + ambient + memory hooks
-│       ├── dream-capture            # Stop hook: captures turns to queue, writes markers when throttle expires
+│       ├── dream-capture            # Stop hook: captures turns to queue, spawns background-memory-update worker when throttle expires
+│       ├── background-memory-update # Detached claude -p haiku worker: rewrites WORKING-MEMORY.md (spawned by dream-capture)
 │       ├── dream-dispatch           # UserPromptSubmit hook: capture-only (appends user turn to queue)
 │       ├── dream-recover            # Shared helper: recovers stale .processing markers
 │       ├── dream-collect-tasks      # Shared helper: collects pending dream markers
