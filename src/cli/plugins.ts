@@ -50,7 +50,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: [],
     // The Dream agent lives here (always-installed foundation plugin) because the
     // session-start-context hook spawns Agent(subagent_type="Dream") unconditionally
-    // for the memory/learning/decisions/knowledge subsystems — independent of whether
+    // for the decisions/knowledge/curation subsystems — independent of whether
     // the ambient plugin is installed. Declaring it only in devflow-ambient would break
     // the dream subsystem under `devflow init --no-ambient` (agents install per selected
     // plugin, unlike skills which install universally). Predecessor was the universally

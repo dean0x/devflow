@@ -181,7 +181,6 @@ fi
 # WORKING-MEMORY.md with a summary, but the pre-compact snapshot may have richer context).
 BACKUP_FILE="$MEMORY_DIR/backup.json"
 if [ -f "$BACKUP_FILE" ]; then
-  source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
   BACKUP_MEMORY=$(json_field_file "$BACKUP_FILE" "memory_snapshot" "")
   if [ -n "$BACKUP_MEMORY" ]; then
     BACKUP_TS=$(json_field_file "$BACKUP_FILE" "timestamp" "")

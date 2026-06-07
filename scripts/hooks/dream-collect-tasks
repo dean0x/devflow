@@ -50,7 +50,7 @@ _derive_marker_type() {
 
 dream_collect_tasks() {
   local dream_dir="${1:?dream_collect_tasks: dream_dir required}"
-  local mem_enabled="${2:-true}"
+  local mem_enabled="${2:-true}"  # accepted for API compat; memory is always swept unconditionally
   local dec_enabled="${3:-true}"
   local know_enabled="${4:-true}"
 
@@ -76,7 +76,7 @@ dream_collect_tasks() {
   # - Derive type via parameter expansion (no basename subprocess).
   # - Deletion (unconditional sweep — runs regardless of cap):
   #     learning  → rm -f always (orphan sweep, R1)
-  #     memory    → rm -f if mem_enabled != true
+  #     memory    → rm -f always (no longer a Dream subagent task)
   #     decisions → rm -f if dec_enabled != true
   #     knowledge → rm -f if know_enabled != true
   #     curation / unknown → KEEP (pass through; no flag gates them)

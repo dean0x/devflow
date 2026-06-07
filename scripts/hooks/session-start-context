@@ -142,10 +142,7 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   # Step 2: collect pending marker task types
   dream_collect_tasks "$DREAM_DIR" "$_SC2_MEM_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
 
-  # Step 4: emit directive if tasks pending, subject to processor-spawn throttle
-  # (Step 3 raw-queue bridge removed: memory refresh is now handled by the
-  # background-memory-update worker spawned by dream-capture. Memory is no longer
-  # a Dream subagent task — dream_collect_tasks unconditionally sweeps memory.* markers.)
+  # Emit directive if tasks pending, subject to processor-spawn throttle.
   if [ -n "$_DREAM_TASKS" ]; then
     _SC2_SPAWNED_AT_FILE="$DREAM_DIR/.processor-spawned-at"
     _SC2_THROTTLE=120
