@@ -1,4 +1,4 @@
-<!-- TL;DR: 9 pitfalls. Key: PF-005, PF-006, PF-007, PF-008, PF-009 -->
+<!-- TL;DR: 11 pitfalls. Key: PF-007, PF-008, PF-009, PF-010, PF-011 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
@@ -83,3 +83,21 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: after any rename, sweep ALL surfaces — case-insensitive grep across tracked files for both the old name and any concept it renamed (e.g. processor), plus the runtime .gitignore template, every reference doc, and every feature KB referencedFiles list
 - **Status**: Active
 - **Source**: self-learning:obs_renamemiss1
+
+## PF-010: An init-time legacy-cleanup list (LEGACY_HOOK_FILES) contained a still-active hook file, so devflow init deleted the worker it had just installed
+
+- **Area**: devflow init install/cleanup, LEGACY_HOOK_FILES removal list, background-memory-update worker
+- **Issue**: the legacy-hook removal list (LEGACY_HOOK_FILES, also removeMemoryHooks) carried the name of a hook file that is part of the CURRENT install set (background-memory-update) — so devflow init deleted the worker immediately after installing it, leaving memory refresh permanently broken with no error
+- **Impact**: a ship-blocking self-deleting install — the feature appeared installed but the worker file was gone after every init
+- **Resolution**: removed background-memory-update from LEGACY_HOOK_FILES and added an install-survival test that asserts the worker exists on disk after init
+- **Status**: Active
+- **Source**: self-learning:obs_leghook1
+
+## PF-011: A watchdog that escalates to a process-group SIGKILL kills its own process group (self-kill) unless the supervised worker is isolated into a separate group with set -m
+
+- **Area**: background-memory-update watchdog, shell process-group signaling (kill -- -PGID), set -m job control
+- **Issue**: the first watchdog hardening escalated a timeout to a process-group kill (kill negative-PGID) but the watchdog and the worker shared a process group, so the group-kill also terminated the watchdog/parent itself — a self-kill regression
+- **Impact**: the timeout-escalation path could kill the wrong processes including its own supervisor, defeating the watchdog and risking the parent shell
+- **Resolution**: enable job control with set -m so the worker is launched in its OWN process group, making the group-targeted SIGKILL hit only the worker subtree
+- **Status**: Active
+- **Source**: self-learning:obs_wdogkill1
