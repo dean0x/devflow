@@ -124,7 +124,7 @@ The heartbeat rule pairs with these thresholds: the Dream agent `touch`es each `
 
 ## Queue: Memory Channel
 
-`dream-capture` (Stop hook) appends assistant turns to `.devflow/memory/.pending-turns.jsonl` (JSONL, each line `{role, content, ts}`). After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), it spawns `background-memory-update` as a detached worker (`nohup ... & disown`). The worker claims the queue atomically by renaming `.pending-turns.jsonl` → `.pending-turns.processing`. If the worker crashes mid-processing, `dream_recover_stale` in the next SessionStart renames `.processing` back to `.jsonl` — but only when no fresh `.jsonl` already exists (non-clobber guard, D56c). The worker uses a dedicated 300s-stale lock at `.working-memory.lock/` (not `dream_lock_acquire` which has a 30s stale-break — too short for a ≤120s `claude -p` call).
+`dream-capture` (Stop hook) appends assistant turns to `.devflow/memory/.pending-turns.jsonl` (JSONL, each line `{role, content, ts}`). After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), it spawns `background-memory-update` as a detached worker (`nohup ... & disown`). The worker claims the queue atomically by renaming `.pending-turns.jsonl` → `.pending-turns.processing`. If the worker crashes mid-processing, recovery has two lock-separated paths: the worker is the **primary** recovery owner — on its next spawn (under `.working-memory.lock/`) it merges any leftover `.processing` back into the queue; `dream_recover_stale` (SessionStart) is the **cold-path fallback** for when the worker never re-spawns, renaming `.processing` → `.jsonl` only after a 300s age gate and only when no fresh `.jsonl` already exists (non-clobber guard, D56c). This is safe-by-construction: the 300s gate strictly exceeds the worker's ~125s watchdog total (WATCHDOG_SECS 120 + grace + margin), so the fallback never races a live worker. The worker's lock is a dedicated 300s-stale mkdir lock (not `dream_lock_acquire`, whose 30s stale-break is too short for a ≤120s `claude -p` call).
 
 `session-start-memory` injects WORKING-MEMORY.md with a git-reconciled header (3-state rendering):
 - **State A (in-sync)**: stamp SHA matches HEAD → `--- WORKING MEMORY (synced @ <sha> on <branch>, <N>m ago) ---`
@@ -236,9 +236,9 @@ Note: `.curation-last` lives in `.devflow/dream/` (not `.devflow/decisions/`), c
 
 `scripts/hooks/lib/decisions-index.cjs` provides a compact index for orchestration surfaces. It applies the D-A filter: strips sections with `- **Status**: Deprecated` or `- **Status**: Superseded` before building the index. The compact format is what orchestrators inject as `DECISIONS_CONTEXT`. Never loads the full decisions.md/pitfalls.md body into context — consumers call Read on demand.
 
-## Dream Config & Legacy Fallback
+## Dream Config
 
-The primary source of truth for feature enabled-state is `.devflow/dream/config.json`. DreamConfig fields are now `{memory, decisions, knowledge}` — the `learning` field has been removed; `coerceConfig` drops it without error when migrating old configs. All three hooks and `session-start-context` include a transitional fallback that reads `.devflow/sidecar/config.json` when the dream config is absent — marked with `# dream-fallback: REMOVE after one release`.
+The sole source of truth for feature enabled-state is `.devflow/dream/config.json` (ADR-001 clean break — there is no runtime fallback). `DreamConfig` is `{memory, decisions, knowledge}` (`src/cli/utils/dream-config.ts`); the legacy `learning` field has been removed, and `coerceConfig` silently drops it when reading old configs. Legacy `.devflow/sidecar/config.json` files are migrated to `dream/config.json` once at `devflow init` time by the `rename-sidecar-to-dream-v1` migration — the hooks do **not** read the sidecar path at runtime. (The old transitional `# dream-fallback: REMOVE after one release` read of `sidecar/config.json` has been removed from all hooks; do not reintroduce it.)
 
 ## Anti-Patterns
 
