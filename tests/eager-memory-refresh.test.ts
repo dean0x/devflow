@@ -345,7 +345,7 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     expect(ctx).not.toContain('UNPROCESSED TURNS');
   });
 
-  it('State B: 2 commits after stamp sha → "commit(s) ago" + git log list', () => {
+  it('State B: 2 commits after stamp sha → "2 commit(s) ago" + git log list', () => {
     const stampSha = execSync('git rev-parse HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim();
     const branch = execSync('git branch --show-current', { cwd: projectDir, encoding: 'utf-8' }).trim() || 'main';
     writeMemoryWithStamp(projectDir, stampSha, branch);
@@ -356,7 +356,9 @@ describe('S2: AC-F4 — session-start-memory injection states', () => {
     execSync('git add file2.txt && git commit -qm "third commit"', { cwd: projectDir, shell: '/bin/bash' });
 
     const ctx = getCtx(projectDir, homeDir);
-    expect(ctx).toContain('commit(s) ago');
+    // Assert exact count — catches off-by-one in rev-walk dedup (the source was fixed in b3b5d6c
+    // to use `grep -c . || true; COMMITS=${COMMITS:-0}` guaranteeing a single-line integer).
+    expect(ctx).toContain('2 commit(s) ago');
     expect(ctx).toContain('reconcile');
     expect(ctx).toMatch(/second commit|third commit/);
     expect(ctx).not.toContain('UNPROCESSED TURNS');
@@ -620,7 +622,6 @@ describe('S5: AC-P3 — double-spawn blocked by .working-memory.lock/', () => {
       // The worker's acquire_lock loops with `sleep 1` per attempt (90s max).
       // After ~3s Node sends SIGTERM, aborting the lock-wait loop.
       // We catch the SIGTERM exit and read the log for positive evidence.
-      let workerRanAtAll = false;
       try {
         execSync(`bash "${BACKGROUND_UPDATER}" "${projectDir}"`, {
           env: {
@@ -631,7 +632,6 @@ describe('S5: AC-P3 — double-spawn blocked by .working-memory.lock/', () => {
           stdio: 'ignore',
           timeout: 3000,
         });
-        workerRanAtAll = true; // exited 0 before timeout
       } catch {
         // Expected: either SIGTERM from Node timeout (ETIMEDOUT) or non-zero exit.
         // Either way the worker ran — we verify via the log file.
@@ -645,10 +645,6 @@ describe('S5: AC-P3 — double-spawn blocked by .working-memory.lock/', () => {
 
       // The lock-blocked worker must NOT have written WORKING-MEMORY.md.
       expect(fs.existsSync(memFilePath)).toBe(false);
-
-      // Suppress unused variable warning — we don't assert workerRanAtAll directly
-      // because the log assertion above is the canonical positive evidence.
-      void workerRanAtAll;
     } finally {
       fs.rmSync(projectDir, { recursive: true, force: true });
       fs.rmSync(homeDir, { recursive: true, force: true });
@@ -1325,21 +1321,26 @@ describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue prese
 //
 // When both jq and node are absent from PATH, json-parse sets _JSON_AVAILABLE=false.
 // The worker then:
-//   (1) skips the orphan-only guard (conservative: no blind truncation)
-//   (2) claims the queue (mv to processing)
-//   (3) EXTRACTED="" → TURN_COUNT=0 → "No parseable turns — skipping" → removes processing → exit 0
+//   (1) passes the `command -v claude` binary gate (fake claude shim is on PATH)
+//   (2) skips the orphan-only guard (conservative: no blind truncation when JSON unavailable)
+//   (3) claims the queue (mv to processing)
+//   (4) EXTRACTED="" → TURN_COUNT=0 → logs "No parseable turns — skipping" → removes processing → exit 0
 //
-// A symlink farm excludes jq and node while providing all other required tools.
-// This test runs the worker end-to-end and asserts the conservative documented path.
+// A fake claude shim is prepended to a symlink farm that excludes jq and node,
+// so the binary gate passes while _JSON_AVAILABLE remains false.
+// Queue has user+assistant turns so the orphan guard would NOT exit early if it ran —
+// the "No parseable turns" exit is driven solely by EXTRACTED="" from the degraded path.
 // applies ADR-014 (behavioral coverage for degraded/edge paths)
 // =============================================================================
 describe('S17: degraded path — no jq + no node → conservative exit, no memory write', () => {
   let projectDir: string;
   let homeDir: string;
+  let shimDir: string;
 
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s17-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s17-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s17-shim-'));
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
     initGitRepo(projectDir);
@@ -1348,41 +1349,51 @@ describe('S17: degraded path — no jq + no node → conservative exit, no memor
   afterEach(() => {
     fs.rmSync(projectDir, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('user-only queue with no jq/node: worker exits 0, WORKING-MEMORY.md not written', () => {
+  it('no jq/node: worker passes binary gate, reaches "No parseable turns" exit, no memory write', () => {
     const memFile   = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
-    // Seed a user-only queue (no assistant turn)
+    // Seed a queue with BOTH user and assistant turns.
+    // This ensures the orphan guard (which is SKIPPED in degraded mode) would not have fired —
+    // the "No parseable turns" exit is purely from EXTRACTED="" when jq/node are absent.
     const ts = Math.floor(Date.now() / 1000);
     fs.writeFileSync(
       queueFile,
       [
-        JSON.stringify({ role: 'user', content: 'do something', ts }),
-        JSON.stringify({ role: 'user', content: 'still waiting', ts: ts + 1 }),
+        JSON.stringify({ role: 'user',      content: 'do something', ts }),
+        JSON.stringify({ role: 'assistant', content: 'done',         ts: ts + 1 }),
       ].join('\n') + '\n'
     );
 
-    // Build a PATH where jq and node are absent but all other required tools exist
-    const noJsonPath = buildNoJsonParsePath(os.tmpdir());
+    // Fake claude shim that exits 0 — placed in shimDir so `command -v claude` succeeds.
+    // The worker must NOT reach claude invocation (it exits earlier at "No parseable turns"),
+    // but the shim must exist so the binary gate does not SKIP before the degraded path.
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(claudeBin, '#!/bin/bash\nexit 0\n');
+    fs.chmodSync(claudeBin, 0o755);
 
-    const { exitCode } = runWorker(projectDir, homeDir, '/nonexistent-shim', {
-      PATH: noJsonPath,
+    // Build a PATH: shimDir (has claude) + symlink farm (no jq, no node) + /bin
+    const noJsonFarm = buildNoJsonParsePath(os.tmpdir());
+    const degradedPath = `${shimDir}:${noJsonFarm}`;
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir, {
+      PATH: degradedPath,
     });
 
     // Worker must exit 0 — degraded path is a clean graceful exit
     expect(exitCode).toBe(0);
 
-    // WORKING-MEMORY.md must NOT be written (no fabrication without parsing)
+    // WORKING-MEMORY.md must NOT be written (no parsing → no LLM invocation)
     expect(fs.existsSync(memFile)).toBe(false);
 
-    // Log must record graceful exit (either "No parseable turns" or "SKIP: no queue" path)
+    // Log must record the specific "No parseable turns" exit message,
+    // proving the worker reached the degraded JSON branch (not the binary-gate SKIP).
     const logFile = workerLogPath(projectDir, homeDir);
     const logContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
-    // Worker either couldn't find claude (SKIP) or reached no-parseable-turns exit
-    // Both are valid conservative behaviors — assert neither crashes nor writes memory
-    expect(logContent).toContain('Starting (CWD=');
+    expect(logContent).toContain('No parseable turns');
   });
 });
 
