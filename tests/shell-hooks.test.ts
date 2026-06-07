@@ -2228,7 +2228,7 @@ exit 0
  */
 function runCollectTasks(
   dreamDir: string,
-  opts: { memEnabled?: boolean; decEnabled?: boolean; knowEnabled?: boolean },
+  opts: { decEnabled?: boolean; knowEnabled?: boolean },
 ): { tasks: string; mtimeCount: number } {
   const hooksDir = path.resolve(__dirname, '..', 'scripts', 'hooks');
   const counterFile = path.join(os.tmpdir(), `devflow-mtime-counter-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2240,7 +2240,7 @@ function runCollectTasks(
   //     We assign mtime = index of call (1, 2, 3…) so sort order is predictable.
   //  3. Sources dream-collect-tasks and calls the function.
   //  4. Prints _DREAM_TASKS to stdout.
-  const memEn = opts.memEnabled ?? true ? 'true' : 'false';
+  // Note: memEnabled removed — memory is not a Dream task (applies ADR-016; avoids PF-009).
   const decEn = opts.decEnabled ?? true ? 'true' : 'false';
   const knowEn = opts.knowEnabled ?? true ? 'true' : 'false';
 
@@ -2258,7 +2258,7 @@ get_mtime() {
   printf '%s' "$c"
 }
 source "${hooksDir}/dream-collect-tasks"
-dream_collect_tasks "${dreamDir}" "${memEn}" "${decEn}" "${knowEn}"
+dream_collect_tasks "${dreamDir}" "${decEn}" "${knowEn}"
 printf '%s' "\$_DREAM_TASKS"
 `;
 
@@ -2326,8 +2326,8 @@ describe('dream-collect-tasks: single-pass scan', () => {
     fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
 
-    // Even with memEnabled=true, memory markers are swept (memory is no longer a Dream task)
-    const { tasks } = runCollectTasks(dreamDir, { memEnabled: true, decEnabled: false, knowEnabled: false });
+    // Memory markers are always swept unconditionally (memory is no longer a Dream task)
+    const { tasks } = runCollectTasks(dreamDir, { decEnabled: false, knowEnabled: false });
     expect(tasks).toBe('curation');
     expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'decisions.sess1.json'))).toBe(false);
@@ -2336,13 +2336,13 @@ describe('dream-collect-tasks: single-pass scan', () => {
     expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(true);
   });
 
-  // AC-3b: memory markers swept even when memEnabled=true (unconditional — not flag-gated)
-  it('AC-3b: memory.* markers deleted unconditionally regardless of memEnabled flag', () => {
+  // AC-3b: memory markers always swept unconditionally (not flag-gated — ADR-016)
+  it('AC-3b: memory.* markers deleted unconditionally (memory is not a Dream task)', () => {
     fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'memory.sess2.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
 
-    const { tasks } = runCollectTasks(dreamDir, { memEnabled: true });
+    const { tasks } = runCollectTasks(dreamDir, {});
     expect(tasks).toContain('decisions');
     expect(tasks).not.toContain('memory');
     expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
@@ -2418,9 +2418,9 @@ describe('dream-collect-tasks: single-pass scan', () => {
     expect(remainingDecisions).toBe(55);
   });
 
-  // AC-3 correctness: disabled markers beyond position 50 are still deleted (scoping bug fixed)
-  it('AC-3 beyond-cap: disabled markers past position 50 are still deleted', () => {
-    // 55 decisions markers (enabled) + 5 memory markers (disabled)
+  // AC-3 correctness: memory markers beyond position 50 are still deleted (scoping bug fixed)
+  it('AC-3 beyond-cap: memory markers past position 50 are still deleted unconditionally', () => {
+    // 55 decisions markers (enabled) + 5 memory markers (always swept)
     for (let i = 0; i < 55; i++) {
       fs.writeFileSync(path.join(dreamDir, `decisions.sess${i}.json`), '{}');
     }
@@ -2428,7 +2428,7 @@ describe('dream-collect-tasks: single-pass scan', () => {
       fs.writeFileSync(path.join(dreamDir, `memory.sess${i}.json`), '{}');
     }
 
-    runCollectTasks(dreamDir, { memEnabled: false });
+    runCollectTasks(dreamDir, {});
 
     // All 5 memory markers must be deleted regardless of cap position
     for (let i = 0; i < 5; i++) {

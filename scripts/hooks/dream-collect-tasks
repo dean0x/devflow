@@ -4,13 +4,12 @@
 #
 # Source this file to get the dream_collect_tasks and dream_build_spawn_directive functions.
 #
-# Function: dream_collect_tasks DREAM_DIR MEMORY_ENABLED DECISIONS_ENABLED KNOWLEDGE_ENABLED
+# Function: dream_collect_tasks DREAM_DIR DECISIONS_ENABLED KNOWLEDGE_ENABLED
 #
 # Inputs (positional args):
-#   $1  DREAM_DIR        — path to .devflow/dream/
-#   $2  MEMORY_ENABLED   — "true"/"false" (kept for API compat; memory is always swept)
-#   $3  DECISIONS_ENABLED — "true"/"false"
-#   $4  KNOWLEDGE_ENABLED — "true"/"false"
+#   $1  DREAM_DIR         — path to .devflow/dream/
+#   $2  DECISIONS_ENABLED — "true"/"false"
+#   $3  KNOWLEDGE_ENABLED — "true"/"false"
 #
 # Outputs (exported variable):
 #   _DREAM_TASKS — comma-separated, deduped, sorted list of pending task types.
@@ -50,9 +49,8 @@ _derive_marker_type() {
 
 dream_collect_tasks() {
   local dream_dir="${1:?dream_collect_tasks: dream_dir required}"
-  local mem_enabled="${2:-true}"  # accepted for API compat; memory is always swept unconditionally
-  local dec_enabled="${3:-true}"
-  local know_enabled="${4:-true}"
+  local dec_enabled="${2:-true}"
+  local know_enabled="${3:-true}"
 
   _DREAM_TASKS=""
 
