@@ -1323,13 +1323,25 @@ describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue prese
 // The worker then:
 //   (1) passes the `command -v claude` binary gate (fake claude shim is on PATH)
 //   (2) skips the orphan-only guard (conservative: no blind truncation when JSON unavailable)
-//   (3) claims the queue (mv to processing)
-//   (4) EXTRACTED="" → TURN_COUNT=0 → logs "No parseable turns — skipping" → removes processing → exit 0
+//   (3) claims the queue (mv to .processing)
+//   (4) attempts degraded shell extraction (EXTRACTED="" on macOS BSD tools,
+//       may extract partial data on Linux GNU tools)
 //
-// A fake claude shim is prepended to a symlink farm that excludes jq and node,
-// so the binary gate passes while _JSON_AVAILABLE remains false.
-// Queue has user+assistant turns so the orphan guard would NOT exit early if it ran —
-// the "No parseable turns" exit is driven solely by EXTRACTED="" from the degraded path.
+// Two platform-dependent conservative exit paths — BOTH are safe:
+//   Path A (macOS/BSD grep+sed):  EXTRACTED="" → TURN_COUNT=0 → logs
+//           "No parseable turns — skipping" → removes .processing → exit 0
+//   Path B (Linux/GNU grep+sed):  EXTRACTED non-empty → TURN_COUNT>0 → invokes
+//           no-op fake claude → verification fails → logs
+//           "FAIL: verification failed — leaving .processing for recovery" → exit 0
+//
+// The platform-independent SAFETY CONTRACT (asserted below):
+//   - Worker passed the binary gate (not a SKIP exit)
+//   - No WORKING-MEMORY.md written regardless of extraction result
+//   - Worker exited 0 (conservative, no crash)
+//   - Log contains at least one known conservative-exit marker
+//
+// A fake claude shim is prepended so `command -v claude` succeeds. Queue has
+// user+assistant turns so the orphan guard would NOT exit early if it ran.
 // applies ADR-014 (behavioral coverage for degraded/edge paths)
 // =============================================================================
 describe('S17: degraded path — no jq + no node → conservative exit, no memory write', () => {
@@ -1352,13 +1364,13 @@ describe('S17: degraded path — no jq + no node → conservative exit, no memor
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('no jq/node: worker passes binary gate, reaches "No parseable turns" exit, no memory write', () => {
+  it('no jq/node: worker passes binary gate, exits conservatively with no memory write', () => {
     const memFile   = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
     const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
 
     // Seed a queue with BOTH user and assistant turns.
     // This ensures the orphan guard (which is SKIPPED in degraded mode) would not have fired —
-    // the "No parseable turns" exit is purely from EXTRACTED="" when jq/node are absent.
+    // any conservative exit is driven by the degraded JSON path, not the orphan-only guard.
     const ts = Math.floor(Date.now() / 1000);
     fs.writeFileSync(
       queueFile,
@@ -1369,8 +1381,7 @@ describe('S17: degraded path — no jq + no node → conservative exit, no memor
     );
 
     // Fake claude shim that exits 0 — placed in shimDir so `command -v claude` succeeds.
-    // The worker must NOT reach claude invocation (it exits earlier at "No parseable turns"),
-    // but the shim must exist so the binary gate does not SKIP before the degraded path.
+    // The binary gate passes, so the worker enters the degraded JSON extraction path.
     const claudeBin = path.join(shimDir, 'claude');
     fs.writeFileSync(claudeBin, '#!/bin/bash\nexit 0\n');
     fs.chmodSync(claudeBin, 0o755);
@@ -1383,17 +1394,32 @@ describe('S17: degraded path — no jq + no node → conservative exit, no memor
       PATH: degradedPath,
     });
 
-    // Worker must exit 0 — degraded path is a clean graceful exit
-    expect(exitCode).toBe(0);
-
-    // WORKING-MEMORY.md must NOT be written (no parsing → no LLM invocation)
-    expect(fs.existsSync(memFile)).toBe(false);
-
-    // Log must record the specific "No parseable turns" exit message,
-    // proving the worker reached the degraded JSON branch (not the binary-gate SKIP).
     const logFile = workerLogPath(projectDir, homeDir);
     const logContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
-    expect(logContent).toContain('No parseable turns');
+
+    // (1) Non-vacuous guard: worker PASSED the binary gate (did not SKIP before degraded path).
+    //     If this fails, the shim setup is broken and the test is meaningless.
+    expect(logContent).not.toContain('SKIP: claude binary not found on PATH');
+
+    // (2) Safety outcome: no memory write regardless of platform extraction behaviour.
+    expect(fs.existsSync(memFile)).toBe(false);
+
+    // (3) Worker exited 0 — both conservative exit paths are clean (no crash).
+    expect(exitCode).toBe(0);
+
+    // (4) Log contains at least one conservative-exit marker, confirming the worker
+    //     reached and completed the degraded path (not a silent exit or unknown failure).
+    //     Both platform-dependent exit paths are accepted:
+    //       - macOS/BSD: "No parseable turns — skipping"  (EXTRACTED="" → TURN_COUNT=0)
+    //       - Linux/GNU: "FAIL: verification failed — leaving .processing for recovery"
+    const conservativeExitMarkers = [
+      'No parseable turns',
+      'verification failed — leaving .processing for recovery',
+    ];
+    const reachedConservativeExit = conservativeExitMarkers.some(marker =>
+      logContent.includes(marker)
+    );
+    expect(reachedConservativeExit).toBe(true);
   });
 });
 
