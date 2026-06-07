@@ -11,9 +11,14 @@
 #
 # Usage: background-memory-update <CWD>
 #
-# Success:   removes .pending-turns.processing; touches .last-refresh-ok
-# Failure:   leaves .pending-turns.processing for dream-recover D56c; no .last-refresh-ok touch
-# User-only: truncates queue without LLM run (no fabrication)
+# Success:      removes .pending-turns.processing; touches .last-refresh-ok
+# Failure:      leaves .pending-turns.processing; this worker is the PRIMARY recovery owner —
+#               on its next spawn it merges leftover .processing back into the queue (lines ~141-156).
+#               dream_recover_stale (session-start-context) is the COLD-PATH fallback for when this
+#               worker never re-spawns (e.g. memory disabled mid-flight, host offline); it applies a
+#               300s age gate before acting on .processing. No action needed here — the two paths
+#               are correctly separated by the lock boundary.
+# User-only:    truncates queue without LLM run (no fabrication)
 
 set -e
 
@@ -70,6 +75,12 @@ fi
 # --- Worker-level lock (300s stale-break — much longer than dream-lock's 30s) ---
 # This prevents a second worker (spawned 121s later) from double-writing WORKING-MEMORY.md
 # while the first worker's claude -p call (up to 120s) is still in flight.
+#
+# INVARIANT: STALE_THRESHOLD (300s) must always exceed the watchdog total in-flight time
+# (WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS = 120+5 = 125s, plus margin).
+# A live worker holding the lock will have been watchdog-killed within ~125s, so a
+# 300s stale-break is safe-by-construction. If either bound is raised, this invariant
+# MUST be re-verified: STALE_THRESHOLD > WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS + margin.
 
 STALE_THRESHOLD=300  # 5 minutes
 
@@ -86,7 +97,7 @@ break_stale_lock() {
 }
 
 acquire_lock() {
-  local _timeout=90  # wait up to 90s for the lock
+  local _timeout=90  # < WATCHDOG_SECS (120): waiter gives up before the holder's own watchdog fires; queue is preserved for next spawn
   local _waited=0
   while ! mkdir "$LOCK_DIR" 2>/dev/null; do
     if [ "$_waited" -ge "$_timeout" ]; then
@@ -205,6 +216,9 @@ TURNS_TEXT=""
 TURN_COUNT=0
 CURRENT_USER=""
 
+# FLUSH INVARIANT: a pending user turn (buffered in CURRENT_USER) is flushed in three cases:
+# (1) the next user row arrives — emit user-only stanza, replace buffer; (2) an assistant row
+# arrives — emit paired user+assistant stanza, clear buffer; (3) EOF — trailing flush block below.
 while IFS=$'\t' read -r ROLE CONTENT; do
   [ -z "$ROLE" ] && continue
   if [ "$ROLE" = "user" ]; then
