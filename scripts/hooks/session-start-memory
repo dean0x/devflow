@@ -54,19 +54,16 @@ CONTEXT=""
 
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 
-if [ -f "$MEMORY_FILE" ]; then
-  dbg "MEMORY_FILE exists: $MEMORY_FILE"
-  MEMORY_CONTENT=$(head -c 65536 "$MEMORY_FILE")
-
-  source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
-  FILE_MTIME=$(get_mtime "$MEMORY_FILE")
-  NOW=$(date +%s)
-  AGE_SEC=$(( NOW - FILE_MTIME ))
-  AGE_MIN=$(( AGE_SEC / 60 ))
-  dbg "MEMORY_FILE AGE=${AGE_SEC}s"
-
-  # --- Parse stamp from line 1: <!-- memory-head: <sha> branch: <name> --> ---
-  FIRST_LINE=$(head -1 "$MEMORY_FILE" 2>/dev/null || echo "")
+# --- parse_and_validate_stamp: parse <!-- memory-head: <sha> branch: <name> --> from
+# line 1 and apply hex-validation security gate.  Sets STAMP_SHA, STAMP_BRANCH,
+# FIRST_LINE, and MEMORY_BODY in the caller's scope.
+# Treat WORKING-MEMORY.md as untrusted input (engineering rule: validate at boundaries;
+# assume input is malicious).  A value beginning with '-' or containing '..' could be a
+# git flag or unexpected revision range.  Reject anything that is not a hex object-id
+# (7–40 chars).  On mismatch fall through to the no-stamp path, preserving 3-state logic.
+parse_and_validate_stamp() {
+  local _content="$1"
+  FIRST_LINE=$(printf '%s' "$_content" | head -1 2>/dev/null || echo "")
   STAMP_SHA=""
   STAMP_BRANCH=""
   case "$FIRST_LINE" in
@@ -76,17 +73,14 @@ if [ -f "$MEMORY_FILE" ]; then
       STAMP_BRANCH=$(echo "$FIRST_LINE" | sed -n 's/<!-- memory-head: [^ ]* branch: \([^ ]*\) -->/\1/p')
       ;;
   esac
-  # Validate STAMP_SHA before any git call — treat WORKING-MEMORY.md as untrusted input
-  # (engineering rule: validate at boundaries; assume input is malicious).
-  # A value beginning with '-' or containing '..' could be a git flag or unexpected
-  # revision range. Reject anything that is not a hex object-id (7–40 chars).
-  # On mismatch fall through to the no-stamp path, preserving 3-state logic intact.
+  # Hex-validation security gate — must stay before any git use of STAMP_SHA
   if [ -n "$STAMP_SHA" ]; then
     case "$STAMP_SHA" in
       [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
         # Looks like a hex string; verify length ≤ 40 and only hex chars via sed
+        local _SHA_CLEAN
         _SHA_CLEAN=$(echo "$STAMP_SHA" | sed 's/[^0-9a-f]//g')
-        _SHA_LEN=${#STAMP_SHA}
+        local _SHA_LEN=${#STAMP_SHA}
         if [ "$_SHA_CLEAN" != "$STAMP_SHA" ] || [ "$_SHA_LEN" -gt 40 ]; then
           dbg "STAMP_SHA rejected (non-hex chars or >40): $STAMP_SHA"
           STAMP_SHA=""
@@ -101,16 +95,62 @@ if [ -f "$MEMORY_FILE" ]; then
     esac
   fi
   dbg "STAMP_SHA=$STAMP_SHA STAMP_BRANCH=$STAMP_BRANCH"
-
-  # --- Strip stamp line from injected body ---
+  # Strip stamp line from injected body
   case "$FIRST_LINE" in
     "<!-- memory-head:"*)
-      MEMORY_BODY=$(printf '%s' "$MEMORY_CONTENT" | tail -n +2)
+      MEMORY_BODY=$(printf '%s' "$_content" | tail -n +2)
       ;;
     *)
-      MEMORY_BODY="$MEMORY_CONTENT"
+      MEMORY_BODY="$_content"
       ;;
   esac
+}
+
+# --- detect_refresh_failing: sets REFRESH_FAILING in caller's scope.
+# Condition: queue non-empty AND (.last-refresh-ok missing OR >600s old)
+detect_refresh_failing() {
+  local _now="$1"
+  local _memory_dir="$2"
+  local _log_dir="$3"
+  local _queue_file="$_memory_dir/.pending-turns.jsonl"
+  local _ok_file="$_memory_dir/.last-refresh-ok"
+  local _queue_depth=0
+  if [ -f "$_queue_file" ] && [ -s "$_queue_file" ]; then
+    _queue_depth=$(wc -l < "$_queue_file" | tr -d ' ')
+  fi
+  local _ok_age=9999999
+  if [ -f "$_ok_file" ]; then
+    local _ok_mtime
+    _ok_mtime=$(get_mtime "$_ok_file")
+    _ok_age=$(( _now - _ok_mtime ))
+  fi
+  REFRESH_FAILING=""
+  if [ "$_queue_depth" -gt 0 ] && { [ ! -f "$_ok_file" ] || [ "$_ok_age" -gt 600 ]; }; then
+    local _ok_min=$(( _ok_age / 60 ))
+    local _ok_min_str
+    if [ "$_ok_age" -ge 9999999 ]; then
+      _ok_min_str="never"
+    else
+      _ok_min_str="${_ok_min}m"
+    fi
+    REFRESH_FAILING="⚠ MEMORY REFRESH MAY BE FAILING — ${_queue_depth} turn(s) unprocessed, last refresh ${_ok_min_str} ago; check ${_log_dir}/.background-memory-update.log"
+    dbg "State C: refresh failing (QUEUE_DEPTH=$_queue_depth OK_AGE=${_ok_age}s)"
+  fi
+}
+
+if [ -f "$MEMORY_FILE" ]; then
+  dbg "MEMORY_FILE exists: $MEMORY_FILE"
+  MEMORY_CONTENT=$(head -c 65536 "$MEMORY_FILE")
+
+  source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
+  FILE_MTIME=$(get_mtime "$MEMORY_FILE")
+  NOW=$(date +%s)
+  AGE_SEC=$(( NOW - FILE_MTIME ))
+  AGE_MIN=$(( AGE_SEC / 60 ))
+  dbg "MEMORY_FILE AGE=${AGE_SEC}s"
+
+  # --- Parse stamp from line 1: <!-- memory-head: <sha> branch: <name> --> ---
+  parse_and_validate_stamp "$MEMORY_CONTENT"
 
   # --- Gather current git state ---
   BRANCH=""
@@ -122,11 +162,16 @@ if [ -f "$MEMORY_FILE" ]; then
   dbg "BRANCH=$BRANCH HEAD=$HEAD"
 
   # --- Compute drift (only when stamp SHA is provably an ancestor of HEAD) ---
+  # Single rev-walk: capture full git log output once, then derive count + display lines
+  # from the same data — avoids walking the same commit range twice (perf fix).
   COMMITS=0
+  _DRIFT_LOG=""
   if [ -n "$STAMP_SHA" ] && [ -n "$HEAD" ] && [ "$STAMP_SHA" != "$HEAD" ]; then
     # git merge-base --is-ancestor exits 0 when $STAMP_SHA is ancestor of HEAD
     if cd "$CWD" 2>/dev/null && git merge-base --is-ancestor "$STAMP_SHA" "$HEAD" 2>/dev/null; then
-      COMMITS=$(git rev-list --count "${STAMP_SHA}..${HEAD}" 2>/dev/null || echo "0")
+      _DRIFT_LOG_FULL=$(git log --oneline "${STAMP_SHA}..${HEAD}" 2>/dev/null || echo "")
+      COMMITS=$(printf '%s\n' "$_DRIFT_LOG_FULL" | grep -c . 2>/dev/null || echo "0")
+      _DRIFT_LOG=$(printf '%s\n' "$_DRIFT_LOG_FULL" | head -10)
     fi
   fi
   dbg "COMMITS=$COMMITS"
@@ -139,30 +184,7 @@ if [ -f "$MEMORY_FILE" ]; then
   fi
 
   # --- State C detection: refresh failing ---
-  # Condition: queue non-empty AND (.last-refresh-ok missing OR >600s old)
-  QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
-  OK_FILE="$MEMORY_DIR/.last-refresh-ok"
-  QUEUE_DEPTH=0
-  if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
-    QUEUE_DEPTH=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
-  fi
-  OK_AGE=9999999
-  if [ -f "$OK_FILE" ]; then
-    _OK_MTIME=$(get_mtime "$OK_FILE")
-    OK_AGE=$(( NOW - _OK_MTIME ))
-  fi
-  REFRESH_FAILING=""
-  if [ "$QUEUE_DEPTH" -gt 0 ] && { [ ! -f "$OK_FILE" ] || [ "$OK_AGE" -gt 600 ]; }; then
-    _OK_MIN=$(( OK_AGE / 60 ))
-    if [ "$OK_AGE" -ge 9999999 ]; then
-      _OK_MIN_STR="never"
-    else
-      _OK_MIN_STR="${_OK_MIN}m"
-    fi
-    _LOG_HINT="$LOG_DIR/.background-memory-update.log"
-    REFRESH_FAILING="⚠ MEMORY REFRESH MAY BE FAILING — ${QUEUE_DEPTH} turn(s) unprocessed, last refresh ${_OK_MIN_STR} ago; check ${_LOG_HINT}"
-    dbg "State C: refresh failing (QUEUE_DEPTH=$QUEUE_DEPTH OK_AGE=${OK_AGE}s)"
-  fi
+  detect_refresh_failing "$NOW" "$MEMORY_DIR" "$LOG_DIR"
 
   # --- Build state-specific header ---
   _STAMP_LABEL="${STAMP_SHA:-unknown}"
@@ -177,8 +199,7 @@ if [ -f "$MEMORY_FILE" ]; then
     MEMORY_HEADER="--- WORKING MEMORY (synced @ ${_STAMP_LABEL} on ${_BRANCH_LABEL}, ${AGE_MIN}m ago) ---"
     dbg "State A: in-sync"
   else
-    # State B: drifted
-    _DRIFT_LOG=$(cd "$CWD" 2>/dev/null && git log --oneline "${STAMP_SHA}..${HEAD}" 2>/dev/null | head -10 || echo "")
+    # State B: drifted — _DRIFT_LOG already populated from the single rev-walk above
     MEMORY_HEADER="--- WORKING MEMORY (${COMMITS} commit(s) ago @ ${_STAMP_LABEL} on ${_BRANCH_LABEL}, ${AGE_MIN}m ago — ⚠ reconcile) ---
 Commits since memory was written:
 ${_DRIFT_LOG}"
