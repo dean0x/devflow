@@ -833,9 +833,9 @@ const MIGRATION_PURGE_LEARNING_GLOBAL: Migration<'global'> = {
  *   - .devflow/dream/memory.*.retries   — retry counters
  *   - .devflow/dream/memory.*.failed    — permanently-failed markers
  *
- * Also removes the installed devflow:dream-memory skill dir (if still present —
- * init.ts's LEGACY_SKILL_NAMES sweep covers this, but the migration ensures it
- * is cleaned up even on machines that ran init before the skill was removed).
+ * The installed devflow:dream-memory skill dir is NOT removed here — that cleanup
+ * is owned by init.ts's LEGACY_SKILL_NAMES sweep (the bare + namespaced names are
+ * registered there). This migration is scoped to dream/ marker files only.
  *
  * Applies ADR-008 (LLM-vs-plumbing: artifact content authored by LLM, not Dream subagent).
  */
@@ -881,7 +881,7 @@ const MIGRATION_PURGE_STALE_MEMORY_MARKERS: Migration<'per-project'> = {
       }
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') { /* dream dir absent — skip */ }
+      if (code !== 'ENOENT') throw err; // unexpected — surface to runner
     }
 
     if (removed > 0) {
