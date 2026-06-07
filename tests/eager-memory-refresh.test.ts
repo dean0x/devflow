@@ -898,6 +898,293 @@ describe('S11: AC-C3 — no memory.* marker in .devflow/dream/ after dream-captu
 });
 
 // =============================================================================
+// S13 — D56c crash-recovery: leftover .processing merged with new queue entries
+//
+// Asserts the merge path in background-memory-update: when a leftover
+// .pending-turns.processing exists from a prior crashed worker, new queue
+// entries are appended into it (not dropped) before the LLM run.
+// Also covers the 200-line overflow cap on merged processing files.
+// applies ADR-008 (LLM-vs-plumbing: test the plumbing behavior, not LLM output)
+// =============================================================================
+describe('S13: D56c crash-recovery — leftover .processing merged with new queue', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s13-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s13-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s13-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  it('leftover .processing turns are NOT dropped — merged with new queue, fed to claude', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+
+    // Capture the stdin the fake claude receives so we can assert both batches are present
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+# Record stdin so the test can assert both turn-batches are present
+cat > "${stdinCapture}"
+# Write a valid stamped memory file so the worker treats this as success
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+echo "- crash-recovery test" >> "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const ts = Math.floor(Date.now() / 1000);
+
+    // Leftover .processing from the prior crashed worker (distinct sentinel content)
+    fs.writeFileSync(
+      processingFile,
+      [
+        JSON.stringify({ role: 'user',      content: 'PRIOR-CRASHED-USER-TURN',      ts }),
+        JSON.stringify({ role: 'assistant', content: 'PRIOR-CRASHED-ASSISTANT-TURN', ts: ts + 1 }),
+      ].join('\n') + '\n'
+    );
+
+    // New queue entries arrived since the crash
+    fs.writeFileSync(
+      queueFile,
+      [
+        JSON.stringify({ role: 'user',      content: 'NEW-QUEUE-USER-TURN',      ts: ts + 2 }),
+        JSON.stringify({ role: 'assistant', content: 'NEW-QUEUE-ASSISTANT-TURN', ts: ts + 3 }),
+      ].join('\n') + '\n'
+    );
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // The worker must have called claude (stdin capture file exists)
+    expect(fs.existsSync(stdinCapture)).toBe(true);
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+
+    // Both batches of turn content must appear in the prompt fed to claude
+    expect(capturedStdin).toContain('PRIOR-CRASHED-USER-TURN');
+    expect(capturedStdin).toContain('PRIOR-CRASHED-ASSISTANT-TURN');
+    expect(capturedStdin).toContain('NEW-QUEUE-USER-TURN');
+    expect(capturedStdin).toContain('NEW-QUEUE-ASSISTANT-TURN');
+
+    // Success: .processing removed, .last-refresh-ok touched
+    expect(fs.existsSync(processingFile)).toBe(false);
+    const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
+    expect(fs.existsSync(okFile)).toBe(true);
+  });
+
+  it('200-line overflow cap: merged processing file exceeding 200 lines is truncated to 100 lines', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    const queueFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+
+    // Use a fake claude that records stdin and writes a success memory file
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+# Drain stdin (required so the worker's <<< doesn't stall)
+cat > /dev/null
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+echo "- overflow cap test" >> "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const ts = Math.floor(Date.now() / 1000);
+
+    // Build a .processing file with 160 lines (assistant-heavy so it passes user-only guard)
+    const processingLines: string[] = [];
+    for (let i = 0; i < 80; i++) {
+      processingLines.push(JSON.stringify({ role: 'user',      content: `old-user-${i}`,      ts: ts + i }));
+      processingLines.push(JSON.stringify({ role: 'assistant', content: `old-assistant-${i}`, ts: ts + i + 1 }));
+    }
+    fs.writeFileSync(processingFile, processingLines.join('\n') + '\n');
+
+    // Add 60 new queue lines — merged total = 220 lines (> 200 cap)
+    const queueLines: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      queueLines.push(JSON.stringify({ role: 'user',      content: `new-user-${i}`,      ts: ts + 200 + i }));
+      queueLines.push(JSON.stringify({ role: 'assistant', content: `new-assistant-${i}`, ts: ts + 200 + i + 1 }));
+    }
+    fs.writeFileSync(queueFile, queueLines.join('\n') + '\n');
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // After success the processing file is removed — confirm the worker ran
+    const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
+    expect(fs.existsSync(okFile)).toBe(true);
+    expect(fs.existsSync(processingFile)).toBe(false);
+    // WORKING-MEMORY.md written by fake claude confirms the run was not skipped
+    expect(fs.existsSync(memFile)).toBe(true);
+  });
+});
+
+// =============================================================================
+// S14 — .last-refresh-ok baseline discipline: THIS run must perform the touch
+//
+// Tightens the weak mtime assertion in S1 AC-F3/success and the watchdog/failure
+// paths: capture a baseline BEFORE the run, then assert strictly-newer on success
+// and unchanged/absent on failure.
+// applies ADR-008 (behavioral assertion: observe the actual touch, not a stale file)
+// =============================================================================
+describe('S14: .last-refresh-ok baseline-before-run discipline', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s14-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s14-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s14-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+    seedQueue(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  it('success: .last-refresh-ok mtime is strictly NEWER than baseline captured before the run', () => {
+    const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    createFakeClaudeShim(shimDir, memFile);
+
+    // Ensure no stale .last-refresh-ok exists before the run
+    expect(fs.existsSync(okFile)).toBe(false);
+    const baselineMs = Date.now();
+
+    runWorker(projectDir, homeDir, shimDir);
+
+    expect(fs.existsSync(okFile)).toBe(true);
+    const afterMs = fs.statSync(okFile).mtimeMs;
+    // mtime must post-date the baseline — proves THIS run touched the file
+    expect(afterMs).toBeGreaterThanOrEqual(baselineMs);
+  });
+
+  it('failure (claude exits 1): .last-refresh-ok absent — baseline confirms absence is NOT from a pre-run cleanup', () => {
+    const okFile = path.join(projectDir, '.devflow', 'memory', '.last-refresh-ok');
+
+    // Pre-seed a stale .last-refresh-ok dated 10 minutes ago
+    fs.writeFileSync(okFile, '');
+    backdateMtime(okFile, 600);
+    const baselineMtimeMs = fs.statSync(okFile).mtimeMs;
+
+    const failBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(failBin, '#!/bin/bash\nexit 1\n');
+    fs.chmodSync(failBin, 0o755);
+
+    runWorker(projectDir, homeDir, shimDir);
+
+    // On failure the worker must NOT touch .last-refresh-ok
+    // File still exists (worker doesn't clean it up) but mtime is UNCHANGED from baseline
+    expect(fs.existsSync(okFile)).toBe(true);
+    expect(fs.statSync(okFile).mtimeMs).toBe(baselineMtimeMs);
+  });
+});
+
+// =============================================================================
+// S15 — Behavioral stdin/argv safety: prompt content reaches claude via STDIN,
+//        never via argv (where it would be visible to ps(1)/logs)
+//
+// Creates a fake claude shim that records both its argv and stdin to temp files,
+// then asserts turn content appears in STDIN and is absent from ARGV.
+// applies ADR-008 (behavior-over-implementation: observe actual process I/O)
+// =============================================================================
+describe('S15: stdin/argv safety — prompt content delivered via STDIN, not argv', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s15-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s15-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s15-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  it('turn content appears in recorded STDIN and NOT in recorded ARGV', () => {
+    const memFile  = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const argvLog  = path.join(shimDir, 'argv-captured.txt');
+    const stdinLog = path.join(shimDir, 'stdin-captured.txt');
+
+    // Fake claude records both argv and stdin, then writes a success memory file
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+# Record argv (all positional arguments as a single line)
+echo "$@" > "${argvLog}"
+# Record stdin (the full prompt)
+cat > "${stdinLog}"
+# Write a valid stamped memory file so the worker treats this as success
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+echo "- stdin safety test" >> "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    // Use a highly distinctive sentinel value that cannot appear in any argv flag
+    const SENTINEL = 'UNIQUE_TURN_CONTENT_FOR_STDIN_SAFETY_TEST';
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
+      [
+        JSON.stringify({ role: 'user',      content: `${SENTINEL}-user`,      ts }),
+        JSON.stringify({ role: 'assistant', content: `${SENTINEL}-assistant`, ts: ts + 1 }),
+      ].join('\n') + '\n'
+    );
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    // Both capture files must exist (claude was invoked)
+    expect(fs.existsSync(argvLog)).toBe(true);
+    expect(fs.existsSync(stdinLog)).toBe(true);
+
+    const recordedArgv  = fs.readFileSync(argvLog,  'utf-8');
+    const recordedStdin = fs.readFileSync(stdinLog, 'utf-8');
+
+    // Turn content MUST appear in stdin (the prompt was delivered)
+    expect(recordedStdin).toContain(SENTINEL);
+
+    // Turn content must NOT appear in argv (no leakage via ps/process table)
+    expect(recordedArgv).not.toContain(SENTINEL);
+  });
+});
+
+// =============================================================================
 // S12 — Install survival: background-memory-update MUST NOT be in LEGACY_HOOK_FILES
 //
 // Regression test for: init.ts LEGACY_HOOK_FILES accidentally listed

@@ -1805,4 +1805,47 @@ describe('purge-stale-memory-markers-v1 migration', () => {
     expect(learningIdx).toBeGreaterThanOrEqual(0);
     expect(memoryIdx).toBeGreaterThan(learningIdx);
   });
+
+  it('rethrows non-ENOENT errors from fixed-file unlink (avoids PF-004 silent-swallow)', async () => {
+    // avoids PF-004: migration idempotency means a buggy run is never re-swept —
+    // so the non-ENOENT error contract must be correct the first time.
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+
+    // Place a real file so readdir succeeds; spy on the unlink for the fixed-name file
+    await fs.writeFile(path.join(dreamDir, 'memory.json'), '{}', 'utf-8');
+
+    const originalUnlink = fs.unlink.bind(fs);
+    const spy = vi.spyOn(fs, 'unlink').mockImplementation(async (p: fs.PathLike) => {
+      const filePath = p.toString();
+      if (filePath.endsWith('memory.json')) {
+        const err = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        throw err;
+      }
+      return originalUnlink(p as Parameters<typeof originalUnlink>[0]);
+    });
+
+    try {
+      await expect(getMigration().run(makeCtx())).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('rethrows non-ENOENT errors from readdir (avoids PF-004 silent-swallow)', async () => {
+    // avoids PF-004: readdir on a non-existent dir is ENOENT (handled), but
+    // other errors (EACCES, EIO, etc.) must propagate to the migration runner.
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+
+    const spy = vi.spyOn(fs, 'readdir').mockRejectedValueOnce(
+      Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    );
+
+    try {
+      await expect(getMigration().run(makeCtx())).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
