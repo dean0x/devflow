@@ -1699,3 +1699,110 @@ describe('purge-learning-global-v1 migration', () => {
     await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
   });
 });
+
+// purge-stale-memory-markers-v1 (per-project)
+// ---------------------------------------------------------------------------
+
+describe('purge-stale-memory-markers-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-memory-markers-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-stale-memory-markers-v1');
+    if (!m) throw new Error('purge-stale-memory-markers-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('is registered in MIGRATIONS with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-stale-memory-markers-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('removes legacy memory.json and memory.processing (no session suffix)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'memory.json'), '{"model":"haiku"}', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'memory.processing'), '{}', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(dreamDir, 'memory.json'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, 'memory.processing'))).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+  });
+
+  it('removes per-session memory.*.json, memory.*.processing, memory.*.retries, memory.*.failed', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'memory.abc123.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'memory.abc123.processing'), '{}', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'memory.abc123.retries'), '2', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'memory.abc123.failed'), '{}', 'utf-8');
+    // Non-memory markers must survive
+    await fs.writeFile(path.join(dreamDir, 'decisions.abc123.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(dreamDir, 'config.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(path.join(dreamDir, 'memory.abc123.json'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, 'memory.abc123.processing'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, 'memory.abc123.retries'))).rejects.toThrow();
+    await expect(fs.access(path.join(dreamDir, 'memory.abc123.failed'))).rejects.toThrow();
+    // decisions and config survive
+    await expect(fs.access(path.join(dreamDir, 'decisions.abc123.json'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(dreamDir, 'config.json'))).resolves.toBeUndefined();
+  });
+
+  it('is a no-op when dream dir does not exist', async () => {
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('is idempotent (ENOENT-safe on second run)', async () => {
+    const dreamDir = path.join(devflowDir, 'dream');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.writeFile(path.join(dreamDir, 'memory.json'), '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('appears after purge-learning-global-v1 in MIGRATIONS array', () => {
+    const learningIdx = MIGRATIONS.findIndex(m => m.id === 'purge-learning-global-v1');
+    const memoryIdx = MIGRATIONS.findIndex(m => m.id === 'purge-stale-memory-markers-v1');
+    expect(learningIdx).toBeGreaterThanOrEqual(0);
+    expect(memoryIdx).toBeGreaterThan(learningIdx);
+  });
+});

@@ -2,7 +2,9 @@
 
 # Dream System: dream-capture (Stop Hook)
 # Captures assistant responses to .devflow/memory/.pending-turns.jsonl queue.
-# Writes .devflow/dream/memory.json marker when throttle has expired (>2 min).
+# After the 120s throttle, spawns a detached `claude -p` worker (background-memory-update)
+# to rewrite WORKING-MEMORY.md. No dream marker is written for memory — memory refresh
+# now happens eagerly in the background, not via the SessionStart Dream subagent.
 # On failure: does nothing (stale memory is better than fake data).
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
@@ -142,58 +144,50 @@ fi
 
 log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
 
-# --- Write memory marker if throttle expired ---
-# Skip if a .processing file already exists (in-flight update)
-PROCESSING_MARKER="$DREAM_DIR/memory.processing"
-if [ -f "$PROCESSING_MARKER" ]; then
-  log "Throttled: memory.processing exists (in-flight dream update)"
-  dbg "EXIT: memory.processing exists"
-  exit 0
-fi
-
-# Check time since last memory update or last marker
-WORKING_MEMORY="$MEMORY_DIR/WORKING-MEMORY.md"
+# --- Spawn detached worker if throttle expired ---
+# Throttle key: .working-memory-last-trigger mtime (120s window).
+# We touch it BEFORE spawning to prevent a second concurrent Stop hook from
+# double-spawning within the same 120s window.
+TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
 NOW=$(date +%s)
-LAST_UPDATE=0
-
-if [ -f "$WORKING_MEMORY" ]; then
-  LAST_UPDATE=$(get_mtime "$WORKING_MEMORY")
+LAST_TRIGGER=0
+if [ -f "$TRIGGER_FILE" ]; then
+  LAST_TRIGGER=$(get_mtime "$TRIGGER_FILE")
 fi
-LAST_UPDATE="${LAST_UPDATE:-0}"
+LAST_TRIGGER="${LAST_TRIGGER:-0}"
+TRIGGER_AGE=$(( NOW - LAST_TRIGGER ))
 
-AGE=$(( NOW - LAST_UPDATE ))
-if [ "$AGE" -lt 120 ]; then
-  log "Throttled: WORKING-MEMORY.md updated ${AGE}s ago"
-  dbg "EXIT: throttled AGE=${AGE}s"
+if [ "$TRIGGER_AGE" -lt 120 ]; then
+  log "Throttled: worker spawned ${TRIGGER_AGE}s ago"
+  dbg "EXIT: throttled TRIGGER_AGE=${TRIGGER_AGE}s"
   exit 0
 fi
 
-dbg "Throttle passed: AGE=${AGE}s >= 120s — writing memory marker"
+# Resolve worker and claude binary
+UPDATER="$SCRIPT_DIR/background-memory-update"
+CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
 
-# Write memory marker
-mkdir -p "$DREAM_DIR"
-
-_MEM_TMP="$DREAM_DIR/memory.json.tmp.$$"
-if [ "$_HAS_JQ" = "true" ]; then
-  jq -n \
-    --arg pendingTurnsFile "$QUEUE_FILE" \
-    --arg existingMemoryFile "$WORKING_MEMORY" \
-    --arg model "haiku" \
-    --argjson timestamp "$NOW" \
-    '{pendingTurnsFile: $pendingTurnsFile, existingMemoryFile: $existingMemoryFile, model: $model, timestamp: $timestamp}' \
-    > "$_MEM_TMP" && mv "$_MEM_TMP" "$DREAM_DIR/memory.json" || rm -f "$_MEM_TMP"
-else
-  node -e "
-    process.stdout.write(JSON.stringify({
-      pendingTurnsFile: process.argv[1],
-      existingMemoryFile: process.argv[2],
-      model: 'haiku',
-      timestamp: parseInt(process.argv[3])
-    }) + '\n')
-  " -- "$QUEUE_FILE" "$WORKING_MEMORY" "$NOW" > "$_MEM_TMP" && mv "$_MEM_TMP" "$DREAM_DIR/memory.json" || rm -f "$_MEM_TMP"
+if [ -z "$CLAUDE_BIN" ]; then
+  log "SKIP: claude binary not found — worker not spawned (queue intact)"
+  dbg "EXIT: no claude binary"
+  exit 0
 fi
 
-log "Wrote memory marker: $DREAM_DIR/memory.json"
+if [ ! -x "$UPDATER" ]; then
+  log "SKIP: background-memory-update not found or not executable: $UPDATER"
+  dbg "EXIT: worker missing"
+  exit 0
+fi
+
+dbg "Throttle passed: TRIGGER_AGE=${TRIGGER_AGE}s >= 120s — spawning worker"
+
+# Touch trigger BEFORE spawning (prevents concurrent Stop hooks from double-spawning)
+touch "$TRIGGER_FILE" 2>/dev/null || true
+
+# Spawn detached worker — nohup + disown so it survives the Stop hook process exit
+nohup "$UPDATER" "$CWD" </dev/null >>/dev/null 2>&1 & disown
+
+log "Spawned background-memory-update worker (CWD=$CWD)"
 dbg "=== HOOK COMPLETE ==="
 
 exit 0

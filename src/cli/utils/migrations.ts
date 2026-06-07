@@ -819,6 +819,79 @@ const MIGRATION_PURGE_LEARNING_GLOBAL: Migration<'global'> = {
   },
 };
 
+/**
+ * Per-project: remove stale memory dream markers left by the old Dream-subagent
+ * memory pipeline. Memory refresh is now handled by background-memory-update
+ * (a detached `claude -p` worker spawned from dream-capture). Dream markers for
+ * memory are no longer written or processed.
+ *
+ * Removes (ENOENT-idempotent):
+ *   - .devflow/dream/memory.json        — old marker (no session suffix)
+ *   - .devflow/dream/memory.processing  — old in-flight marker
+ *   - .devflow/dream/memory.*.json      — per-session variants
+ *   - .devflow/dream/memory.*.processing — per-session in-flight variants
+ *   - .devflow/dream/memory.*.retries   — retry counters
+ *   - .devflow/dream/memory.*.failed    — permanently-failed markers
+ *
+ * Also removes the installed devflow:dream-memory skill dir (if still present —
+ * init.ts's LEGACY_SKILL_NAMES sweep covers this, but the migration ensures it
+ * is cleaned up even on machines that ran init before the skill was removed).
+ *
+ * Applies ADR-008 (LLM-vs-plumbing: artifact content authored by LLM, not Dream subagent).
+ */
+const MIGRATION_PURGE_STALE_MEMORY_MARKERS: Migration<'per-project'> = {
+  id: 'purge-stale-memory-markers-v1',
+  description: 'Remove stale dream/memory.* markers from old Dream-subagent memory pipeline',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const dreamDir = path.join(ctx.projectRoot, '.devflow', 'dream');
+    const infos: string[] = [];
+    let removed = 0;
+
+    // Remove fixed-name legacy markers (no session suffix — pre-D57a format)
+    const fixed = [
+      path.join(dreamDir, 'memory.json'),
+      path.join(dreamDir, 'memory.processing'),
+    ];
+    for (const filePath of fixed) {
+      try {
+        await fs.unlink(filePath);
+        removed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err; // unexpected — surface to runner
+      }
+    }
+
+    // Remove per-session variants: memory.*.json, memory.*.processing, memory.*.retries, memory.*.failed
+    try {
+      const entries = await fs.readdir(dreamDir);
+      for (const entry of entries) {
+        if (entry.startsWith('memory.') &&
+          (entry.endsWith('.json') || entry.endsWith('.processing') ||
+           entry.endsWith('.retries') || entry.endsWith('.failed'))) {
+          try {
+            await fs.unlink(path.join(dreamDir, entry));
+            removed++;
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code !== 'ENOENT') throw err;
+          }
+        }
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') { /* dream dir absent — skip */ }
+    }
+
+    if (removed > 0) {
+      infos.push(`Removed ${removed} stale memory dream marker(s)`);
+    }
+
+    return { infos, warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -832,6 +905,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_RENAME_SIDECAR_TO_DREAM,
   MIGRATION_PURGE_LEARNING_PIPELINE,
   MIGRATION_PURGE_LEARNING_GLOBAL,
+  MIGRATION_PURGE_STALE_MEMORY_MARKERS,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

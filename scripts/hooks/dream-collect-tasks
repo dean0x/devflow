@@ -8,19 +8,21 @@
 #
 # Inputs (positional args):
 #   $1  DREAM_DIR        — path to .devflow/dream/
-#   $2  MEMORY_ENABLED   — "true"/"false"
+#   $2  MEMORY_ENABLED   — "true"/"false" (kept for API compat; memory is always swept)
 #   $3  DECISIONS_ENABLED — "true"/"false"
 #   $4  KNOWLEDGE_ENABLED — "true"/"false"
 #
 # Outputs (exported variable):
 #   _DREAM_TASKS — comma-separated, deduped, sorted list of pending task types.
 #                  Empty string if no pending tasks.
+#                  NOTE: "memory" never appears — memory markers are unconditionally swept
+#                  (background-memory-update worker handles refresh from dream-capture).
 #
 # Behaviour:
 #   - Skips config.json (reserved).
-#   - Pass 1: unconditional sweep — deletes learning.* markers always (R1) and
-#     markers whose feature is disabled (memory/decisions/knowledge). curation
-#     and unknown types pass through unchanged (no flag gates them).
+#   - Pass 1: unconditional sweep — deletes learning.* and memory.* markers always
+#     (both pipelines removed from Dream subagent); deletes disabled decisions/knowledge
+#     markers. curation and unknown types pass through unchanged (no flag gates them).
 #   - Pass 1 runs over ALL markers regardless of cap, so no orphan survives by
 #     being pushed past position 50.
 #   - COLLECT_LIMIT=50: when >50 kept markers remain after pass 1, orders by
@@ -101,11 +103,12 @@ dream_collect_tasks() {
         continue
         ;;
       memory)
-        if [ "$mem_enabled" != "true" ]; then
-          rm -f "$_f" 2>/dev/null || true
-          dbg "dream_collect_tasks: deleted disabled-feature marker: $_base"
-          continue
-        fi
+        # Memory is no longer a Dream subagent task — background-memory-update worker
+        # handles refresh directly from dream-capture. Delete any stale memory.* markers
+        # unconditionally (same treatment as learning.*).
+        rm -f "$_f" 2>/dev/null || true
+        dbg "dream_collect_tasks: deleted stale memory marker: $_base"
+        continue
         ;;
       decisions)
         if [ "$dec_enabled" != "true" ]; then
@@ -227,17 +230,14 @@ dream_build_spawn_directive() {
   local _dbsd_tasks="$1"
   _DREAM_DIRECTIVE=""
 
-  local _dbsd_mem="false" _dbsd_know="false" _dbsd_dec="false" _dbsd_cur="false"
-  case ",$_dbsd_tasks," in *,memory,*)    _dbsd_mem="true"  ;; esac
+  # memory is no longer a Dream subagent task (handled by background-memory-update worker).
+  # Map: knowledge=sonnet, decisions=opus, curation=opus. memory entries swept by collect.
+  local _dbsd_know="false" _dbsd_dec="false" _dbsd_cur="false"
   case ",$_dbsd_tasks," in *,knowledge,*) _dbsd_know="true" ;; esac
   case ",$_dbsd_tasks," in *,decisions,*) _dbsd_dec="true"  ;; esac
   case ",$_dbsd_tasks," in *,curation,*)  _dbsd_cur="true"  ;; esac
 
   local _dbsd_lines=""
-  if [ "$_dbsd_mem" = "true" ]; then
-    _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"haiku\", run_in_background: true, prompt: \"Process pending 'memory' marker(s): claim per your plumbing, then load devflow:dream-memory and follow it.\")
-"
-  fi
   if [ "$_dbsd_know" = "true" ]; then
     _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"sonnet\", run_in_background: true, prompt: \"Process pending 'knowledge' marker(s): claim per your plumbing, then load devflow:dream-knowledge and follow it.\")
 "

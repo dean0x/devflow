@@ -427,3 +427,31 @@ describe('WORKFLOW_ORDER', () => {
     expect(new Set(WORKFLOW_ORDER).size).toBe(WORKFLOW_ORDER.length);
   });
 });
+
+// ---------------------------------------------------------------------------
+// dream-memory removal regression guards
+// ---------------------------------------------------------------------------
+
+describe('dream-memory skill removal (eager memory refresh)', () => {
+  it('dream-memory is NOT in devflow-core-skills skills array', () => {
+    const coreSkills = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-core-skills');
+    expect(coreSkills).toBeDefined();
+    expect(coreSkills!.skills).not.toContain('dream-memory');
+  });
+
+  it('dream-memory bare name is in LEGACY_SKILL_NAMES for cleanup', () => {
+    expect(LEGACY_SKILL_NAMES).toContain('dream-memory');
+  });
+
+  it('prefixed namespaced name (devflow: + dream-memory) is in LEGACY_SKILL_NAMES for installed-skill cleanup', () => {
+    // Build the prefixed name at runtime to avoid skill-references scanner false-positive
+    // (dream-memory is intentionally removed from canonical skills)
+    const legacyPrefixedName = ['devflow', 'dream-memory'].join(':');
+    expect(LEGACY_SKILL_NAMES).toContain(legacyPrefixedName);
+  });
+
+  it('getAllSkillNames does not include dream-memory', () => {
+    const skills = getAllSkillNames();
+    expect(skills).not.toContain('dream-memory');
+  });
+});

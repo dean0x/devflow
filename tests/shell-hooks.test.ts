@@ -2075,82 +2075,93 @@ describe('session-start-context pending-work directive', () => {
 });
 
 // =============================================================================
-// dream-capture memory marker
+// dream-capture memory worker spawn (eager refresh — replaces old marker approach)
 // =============================================================================
+//
+// After PR #eager-memory-refresh: dream-capture no longer writes a memory.json
+// dream marker. Instead, after the 120s throttle, it:
+//   1. Touches .working-memory-last-trigger BEFORE spawning (prevents double-spawn)
+//   2. Spawns background-memory-update as a detached nohup worker
+//   3. Never creates a memory.json / memory.processing dream marker
+//
+// Tests use a fake `claude` shim on PATH that writes a deterministic stamped
+// WORKING-MEMORY.md to verify the worker contract without a real claude binary.
+// Throttle is verified via .working-memory-last-trigger mtime.
 
-describe('dream-capture memory marker', () => {
+describe('dream-capture memory worker spawn', () => {
   const CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-capture');
 
   let tmpDir: string;
   let homeDir: string;
+  let fakeClaudeBin: string;
+  let fakePathDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-test-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-capture-home-'));
     fs.mkdirSync(path.join(tmpDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+
+    // Create a fake `claude` binary on PATH so background-memory-update can find it.
+    // The shim writes a deterministic stamped WORKING-MEMORY.md when invoked with -p.
+    fakePathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-fake-claude-'));
+    fakeClaudeBin = path.join(fakePathDir, 'claude');
+    const memFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    fs.writeFileSync(fakeClaudeBin, `#!/bin/bash
+# Fake claude shim for tests: writes a deterministic stamped WORKING-MEMORY.md
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+echo "- test memory content" >> "${memFile}"
+exit 0
+`);
+    fs.chmodSync(fakeClaudeBin, 0o755);
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(fakePathDir, { recursive: true, force: true });
   });
 
-  it('marker written when throttle expired', () => {
-    const wmFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(wmFile, '## Now\n- stale');
-    backdateMtime(wmFile, 600);
+  function runCaptureWithFakeClaude(input: object): { stdout: string; stderr: string; exitCode: number } {
+    try {
+      const result = execSync(`bash "${CAPTURE_HOOK}"`, {
+        input: JSON.stringify(input),
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          PATH: `${fakePathDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return { stdout: result.toString(), stderr: '', exitCode: 0 };
+    } catch (e: unknown) {
+      const err = e as { stdout?: Buffer; stderr?: Buffer; status?: number };
+      return {
+        stdout: err.stdout?.toString() ?? '',
+        stderr: err.stderr?.toString() ?? '',
+        exitCode: err.status ?? 1,
+      };
+    }
+  }
 
-    runHook(CAPTURE_HOOK, {
+  it('AC-F1: trigger file touched and NO memory.json marker created when throttle expired', () => {
+    // Backdate the trigger file so throttle passes (>120s ago)
+    const triggerFile = path.join(tmpDir, '.devflow', 'memory', '.working-memory-last-trigger');
+    fs.writeFileSync(triggerFile, '');
+    backdateMtime(triggerFile, 600);
+
+    runCaptureWithFakeClaude({
       cwd: tmpDir,
       session_id: 'test',
       last_assistant_message: 'test response',
-    }, homeDir);
+    });
 
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    const memMarker = path.join(dreamDir, 'memory.json');
-    expect(fs.existsSync(memMarker)).toBe(true);
+    // Trigger file must be touched (mtime refreshed)
+    const triggerMtime = fs.statSync(triggerFile).mtimeMs;
+    expect(triggerMtime).toBeGreaterThan(Date.now() - 5000); // within last 5s
 
-    const marker = JSON.parse(fs.readFileSync(memMarker, 'utf-8'));
-    expect(marker).toHaveProperty('pendingTurnsFile');
-    expect(marker).toHaveProperty('existingMemoryFile');
-    expect(marker.model).toBe('haiku');
-    expect(typeof marker.timestamp).toBe('number');
-  });
-
-  it('marker skipped when .processing exists', () => {
-    const wmFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(wmFile, '## Now\n- stale');
-    backdateMtime(wmFile, 600);
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    fs.mkdirSync(dreamDir, { recursive: true });
-    fs.writeFileSync(path.join(dreamDir, 'memory.processing'), '{}');
-
-    runHook(CAPTURE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test',
-      last_assistant_message: 'test response',
-    }, homeDir);
-
-    expect(fs.existsSync(path.join(dreamDir, 'memory.json'))).toBe(false);
-
-    // Queue append still happens
-    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
-    expect(fs.existsSync(queueFile)).toBe(true);
-  });
-
-  it('marker skipped when memory recently updated', () => {
-    const wmFile = path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    fs.writeFileSync(wmFile, '## Now\n- fresh');
-    // mtime is current — within 120s threshold
-
-    runHook(CAPTURE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test',
-      last_assistant_message: 'test response',
-    }, homeDir);
-
+    // No dream memory.json marker must be created (memory is no longer a Dream task)
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     expect(fs.existsSync(path.join(dreamDir, 'memory.json'))).toBe(false);
 
@@ -2159,20 +2170,46 @@ describe('dream-capture memory marker', () => {
     expect(fs.existsSync(queueFile)).toBe(true);
   });
 
-  it('memory disabled via config skips all capture', () => {
+  it('AC-P1: worker spawn throttled when trigger recently touched (<120s)', () => {
+    const triggerFile = path.join(tmpDir, '.devflow', 'memory', '.working-memory-last-trigger');
+    // Fresh trigger file (within throttle window)
+    fs.writeFileSync(triggerFile, '');
+
+    const triggerMtimeBefore = fs.statSync(triggerFile).mtimeMs;
+
+    runCaptureWithFakeClaude({
+      cwd: tmpDir,
+      session_id: 'test',
+      last_assistant_message: 'another response',
+    });
+
+    // Trigger file must NOT be updated (still within throttle)
+    const triggerMtimeAfter = fs.statSync(triggerFile).mtimeMs;
+    // Allow 1s tolerance since filesystem mtime resolution varies
+    expect(triggerMtimeAfter - triggerMtimeBefore).toBeLessThan(1000);
+
+    // Queue append still happens even when throttled
+    const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(queueFile)).toBe(true);
+  });
+
+  it('AC-F7: memory disabled via config skips all capture and no trigger touch', () => {
     createDreamConfig(tmpDir, { memory: false });
 
-    runHook(CAPTURE_HOOK, {
+    runCaptureWithFakeClaude({
       cwd: tmpDir,
       session_id: 'test',
       last_assistant_message: 'test response',
-    }, homeDir);
+    });
 
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
 
     const dreamDir = path.join(tmpDir, '.devflow', 'dream');
     expect(fs.existsSync(path.join(dreamDir, 'memory.json'))).toBe(false);
+
+    const triggerFile = path.join(tmpDir, '.devflow', 'memory', '.working-memory-last-trigger');
+    expect(fs.existsSync(triggerFile)).toBe(false);
   });
 });
 
@@ -2254,16 +2291,19 @@ describe('dream-collect-tasks: single-pass scan', () => {
     fs.rmSync(dreamDir, { recursive: true, force: true });
   });
 
-  // AC-1: <=50 enabled markers → _DREAM_TASKS is correct (same set, comma-sep, sort-u)
-  it('AC-1: <=50 enabled markers → correct task set in _DREAM_TASKS', () => {
+  // AC-1: <=50 enabled markers → _DREAM_TASKS correct; memory.* swept unconditionally
+  it('AC-1: <=50 enabled markers → correct task set in _DREAM_TASKS (memory swept)', () => {
     fs.writeFileSync(path.join(dreamDir, 'config.json'), '{}'); // sentinel — skipped
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
-    fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');   // must be deleted
     fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
 
     const { tasks } = runCollectTasks(dreamDir, {});
-    // Sort-u produces alphabetical: curation,decisions,memory
-    expect(tasks.split(',').sort()).toEqual(['curation', 'decisions', 'memory']);
+    // memory is no longer a Dream task — background-memory-update handles it.
+    // Sort-u produces alphabetical: curation,decisions (no memory)
+    expect(tasks.split(',').sort()).toEqual(['curation', 'decisions']);
+    // memory.sess1.json must have been deleted unconditionally
+    expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
   });
 
   // AC-2: learning.* deleted every run regardless of count/position
@@ -2279,20 +2319,34 @@ describe('dream-collect-tasks: single-pass scan', () => {
     expect(fs.existsSync(path.join(dreamDir, 'learning.sess2.json'))).toBe(false);
   });
 
-  // AC-3: disabled-feature markers deleted regardless of cap; type never in _DREAM_TASKS
-  it('AC-3: disabled memory/decisions/knowledge markers deleted; not in _DREAM_TASKS', () => {
-    fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');
+  // AC-3: memory always swept (unconditional); disabled decisions/knowledge deleted; type never in _DREAM_TASKS
+  it('AC-3: memory always swept; disabled decisions/knowledge markers deleted; not in _DREAM_TASKS', () => {
+    fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');       // swept unconditionally
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
 
-    const { tasks } = runCollectTasks(dreamDir, { memEnabled: false, decEnabled: false, knowEnabled: false });
+    // Even with memEnabled=true, memory markers are swept (memory is no longer a Dream task)
+    const { tasks } = runCollectTasks(dreamDir, { memEnabled: true, decEnabled: false, knowEnabled: false });
     expect(tasks).toBe('curation');
     expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'decisions.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'knowledge.sess1.json'))).toBe(false);
     // curation survives
     expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(true);
+  });
+
+  // AC-3b: memory markers swept even when memEnabled=true (unconditional — not flag-gated)
+  it('AC-3b: memory.* markers deleted unconditionally regardless of memEnabled flag', () => {
+    fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'memory.sess2.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
+
+    const { tasks } = runCollectTasks(dreamDir, { memEnabled: true });
+    expect(tasks).toContain('decisions');
+    expect(tasks).not.toContain('memory');
+    expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dreamDir, 'memory.sess2.json'))).toBe(false);
   });
 
   // AC-4: curation (and unknown types) never deleted, appear in _DREAM_TASKS

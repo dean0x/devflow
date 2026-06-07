@@ -56,7 +56,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // plugin, unlike skills which install universally). Predecessor was the universally
     // installed `devflow:sidecar` skill; core-skills preserves that guarantee.
     agents: ['dream'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-memory', 'dream-decisions', 'dream-knowledge', 'dream-curation'],
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-decisions', 'dream-knowledge', 'dream-curation'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
   {
@@ -531,6 +531,8 @@ const LEGACY_SKILLS_V2X: string[] = [
   'dream-decisions',
   'dream-knowledge',
   'dream-curation',
+  // v3.x dream-memory removal: namespaced name for cleanup of installed devflow:dream-memory skill
+  'devflow:dream-memory',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
   'devflow:router',
   'devflow:implement:triage',

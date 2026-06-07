@@ -1,0 +1,386 @@
+#!/bin/bash
+
+# background-memory-update — Eager working-memory refresh worker
+# Spawned as a detached background process by dream-capture (Stop hook) after the
+# 120s throttle expires. Drains .pending-turns.jsonl → calls `claude -p` (haiku) →
+# rewrites WORKING-MEMORY.md with a git-reconciliation stamp on line 1.
+#
+# Applies ADR-008 (LLM-vs-plumbing): artifact content (WORKING-MEMORY.md) is
+# authored by the LLM; this script only does plumbing (lock, queue drain, spawn).
+# Avoids PF-006 (does NOT parse Stop hook JSON), PF-007 (edit source only).
+#
+# Usage: background-memory-update <CWD>
+#
+# Success:   removes .pending-turns.processing; touches .last-refresh-ok
+# Failure:   leaves .pending-turns.processing for dream-recover D56c; no .last-refresh-ok touch
+# User-only: truncates queue without LLM run (no fabrication)
+
+set -e
+
+CWD="$1"
+if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
+  echo "background-memory-update: CWD missing or not a directory: '$CWD'" >&2
+  exit 1
+fi
+
+# Resolve SCRIPT_DIR early — needed for sourcing helpers
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Source JSON parsing helpers (jq with node fallback)
+source "$SCRIPT_DIR/json-parse" || { echo "background-memory-update: failed to source json-parse" >&2; exit 1; }
+
+# Source log-paths for devflow_log_dir
+source "$SCRIPT_DIR/log-paths" || { echo "background-memory-update: failed to source log-paths" >&2; exit 1; }
+LOG_FILE="$(devflow_log_dir "$CWD")/.background-memory-update.log"
+
+# Source get-mtime for mtime comparisons
+source "$SCRIPT_DIR/get-mtime" || { echo "background-memory-update: failed to source get-mtime" >&2; exit 1; }
+
+# --- Logging ---
+log() {
+  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [background-memory-update] $1" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+rotate_log() {
+  if [ ! -f "$LOG_FILE" ]; then return; fi
+  local _sz
+  _sz=$(stat -f%z "$LOG_FILE" 2>/dev/null) \
+    || _sz=$(stat -c%s "$LOG_FILE" 2>/dev/null) \
+    || _sz=$(wc -c < "$LOG_FILE" 2>/dev/null) \
+    || _sz=0
+  if [ "$_sz" -gt 5242880 ]; then  # 5MB guard per debug-trace pattern
+    _LOG_TMP="$LOG_FILE.tmp.$$"
+    tail -c 2621440 "$LOG_FILE" > "$_LOG_TMP" 2>/dev/null && mv "$_LOG_TMP" "$LOG_FILE" 2>/dev/null || rm -f "$_LOG_TMP" 2>/dev/null || true
+  fi
+}
+
+log "Starting (CWD=$CWD)"
+rotate_log
+
+# --- Resolve paths ---
+DEVFLOW_DIR="$CWD/.devflow"
+MEMORY_DIR="$DEVFLOW_DIR/memory"
+DREAM_DIR="$DEVFLOW_DIR/dream"
+QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
+PROCESSING_FILE="$MEMORY_DIR/.pending-turns.processing"
+MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
+LOCK_DIR="$MEMORY_DIR/.working-memory.lock"
+TRIGGER_FILE="$MEMORY_DIR/.working-memory-last-trigger"
+OK_FILE="$MEMORY_DIR/.last-refresh-ok"
+DREAM_CONFIG="$DREAM_DIR/config.json"
+
+# --- Re-check memory:false at runtime (defense-in-depth: feature may be disabled since spawn) ---
+if [ -f "$DREAM_CONFIG" ]; then
+  _MEM_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
+  if [ "$_MEM_ENABLED" = "false" ]; then
+    log "ABORT: memory disabled in dream config (disabled after spawn)"
+    exit 0
+  fi
+fi
+
+# --- Resolve claude binary ---
+CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
+if [ -z "$CLAUDE_BIN" ]; then
+  log "SKIP: claude binary not found on PATH"
+  exit 0
+fi
+
+# --- Worker-level lock (300s stale-break — much longer than dream-lock's 30s) ---
+# This prevents a second worker (spawned 121s later) from double-writing WORKING-MEMORY.md
+# while the first worker's claude -p call (up to 120s) is still in flight.
+
+STALE_THRESHOLD=300  # 5 minutes
+
+break_stale_lock() {
+  if [ ! -d "$LOCK_DIR" ]; then return; fi
+  local _lock_mtime _now _age
+  _lock_mtime=$(get_mtime "$LOCK_DIR")
+  _now=$(date +%s)
+  _age=$(( _now - _lock_mtime ))
+  if [ "$_age" -gt "$STALE_THRESHOLD" ]; then
+    log "Breaking stale worker lock (age: ${_age}s, threshold: ${STALE_THRESHOLD}s)"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
+acquire_lock() {
+  local _timeout=90  # wait up to 90s for the lock
+  local _waited=0
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [ "$_waited" -ge "$_timeout" ]; then
+      return 1
+    fi
+    sleep 1
+    _waited=$(( _waited + 1 ))
+  done
+  return 0
+}
+
+cleanup_lock() {
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+trap cleanup_lock EXIT
+
+break_stale_lock
+
+if ! acquire_lock; then
+  log "SKIP: lock timeout after 90s — another worker is running"
+  trap - EXIT
+  exit 0
+fi
+
+# --- Orphan-only auto-clean: if queue has no assistant turn, truncate and exit ---
+# This prevents fabrication-prone LLM runs with only user turns in the queue.
+if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+  if [ "$_HAS_JQ" = "true" ]; then
+    _HAS_ASSISTANT=$(jq -r 'select(.role=="assistant") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
+  else
+    _HAS_ASSISTANT=$(node -e "
+      const lines = require('fs').readFileSync('${QUEUE_FILE}','utf8').split('\n');
+      for (const l of lines) {
+        try { const o = JSON.parse(l); if (o.role==='assistant') { process.stdout.write('assistant'); break; } } catch {}
+      }
+    " 2>/dev/null || echo "")
+  fi
+  if [ -z "$_HAS_ASSISTANT" ]; then
+    log "User-only queue (no assistant turn) — truncating without LLM run"
+    rm -f "$QUEUE_FILE" 2>/dev/null || true
+    exit 0
+  fi
+fi
+
+# --- Claim queue atomically (D56c contract: .pending-turns.processing recovered at SessionStart) ---
+# If a leftover .processing exists from a previous crash, merge new queue entries into it.
+if [ -f "$PROCESSING_FILE" ]; then
+  log "Found leftover .processing from previous crash — merging"
+  if [ -f "$QUEUE_FILE" ]; then
+    cat "$QUEUE_FILE" >> "$PROCESSING_FILE" 2>/dev/null || true
+    rm -f "$QUEUE_FILE" 2>/dev/null || true
+    log "Merged new queue entries into recovery batch"
+  fi
+  # Cap to prevent unbounded growth
+  _PROC_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+  if [ "$_PROC_LINES" -gt 200 ]; then
+    _PROC_TMP="$PROCESSING_FILE.tmp.$$"
+    tail -100 "$PROCESSING_FILE" > "$_PROC_TMP" && mv "$_PROC_TMP" "$PROCESSING_FILE" || rm -f "$_PROC_TMP" 2>/dev/null || true
+    log "Processing overflow: truncated from $_PROC_LINES to 100 lines"
+  fi
+elif [ -f "$QUEUE_FILE" ]; then
+  mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null || { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
+else
+  log "SKIP: no queue file to process"
+  exit 0
+fi
+
+TOTAL_LINES=$(wc -l < "$PROCESSING_FILE" | tr -d ' ')
+log "Processing $TOTAL_LINES queued entries"
+
+if [ "$TOTAL_LINES" -eq 0 ]; then
+  rm -f "$PROCESSING_FILE" 2>/dev/null || true
+  log "Processing file empty — skipping"
+  exit 0
+fi
+
+# --- Build last-10 turns from queue ---
+MAX_TURNS=10
+MAX_LINES=$(( MAX_TURNS * 2 ))
+if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
+  ENTRIES=$(tail -"$MAX_LINES" "$PROCESSING_FILE")
+  log "Capped to last $MAX_LINES entries (from $TOTAL_LINES)"
+else
+  ENTRIES=$(cat "$PROCESSING_FILE")
+fi
+
+# Single-pass extraction: role + content as TSV (newlines collapsed)
+if [ "$_HAS_JQ" = "true" ]; then
+  EXTRACTED=$(printf '%s\n' "$ENTRIES" | jq -r '(.role // "") + "\t" + ((.content // "") | gsub("\n"; " "))' 2>/dev/null || echo "")
+else
+  EXTRACTED=$(printf '%s\n' "$ENTRIES" | node -e '
+    const lines = require("fs").readFileSync("/dev/stdin","utf8").split("\n");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const role = obj.role || "";
+        const content = (obj.content || "").replace(/\n/g, " ");
+        process.stdout.write(role + "\t" + content + "\n");
+      } catch {}
+    }
+  ' 2>/dev/null || echo "")
+fi
+
+TURNS_TEXT=""
+TURN_COUNT=0
+CURRENT_USER=""
+
+while IFS=$'\t' read -r ROLE CONTENT; do
+  [ -z "$ROLE" ] && continue
+  if [ "$ROLE" = "user" ]; then
+    if [ -n "$CURRENT_USER" ]; then
+      TURN_COUNT=$(( TURN_COUNT + 1 ))
+      TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+User: ${CURRENT_USER}
+"
+    fi
+    CURRENT_USER="$CONTENT"
+  elif [ "$ROLE" = "assistant" ]; then
+    TURN_COUNT=$(( TURN_COUNT + 1 ))
+    if [ -n "$CURRENT_USER" ]; then
+      TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+User: ${CURRENT_USER}
+Assistant: ${CONTENT}
+"
+      CURRENT_USER=""
+    else
+      TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+Assistant: ${CONTENT}
+"
+    fi
+  fi
+done <<EOF
+$EXTRACTED
+EOF
+
+if [ -n "$CURRENT_USER" ]; then
+  TURN_COUNT=$(( TURN_COUNT + 1 ))
+  TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+User: ${CURRENT_USER}
+"
+fi
+
+if [ "$TURN_COUNT" -eq 0 ]; then
+  rm -f "$PROCESSING_FILE" 2>/dev/null || true
+  log "No parseable turns — skipping"
+  exit 0
+fi
+
+log "Built $TURN_COUNT turns from queue"
+
+# --- Read existing memory ---
+EXISTING_MEMORY=""
+PRE_UPDATE_MTIME=0
+if [ -f "$MEMORY_FILE" ]; then
+  EXISTING_MEMORY=$(head -c 65536 "$MEMORY_FILE")
+  PRE_UPDATE_MTIME=$(get_mtime "$MEMORY_FILE")
+fi
+
+# --- Gather git state + HEAD SHA for stamp ---
+HEAD_SHA=""
+BRANCH=""
+GIT_STATE=""
+if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
+  HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+  BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+  GIT_STATUS=$(git status --short 2>/dev/null | head -20)
+  GIT_LOG=$(git log --oneline -5 2>/dev/null || echo "")
+  GIT_DIFF=$(git diff --stat HEAD 2>/dev/null | tail -10)
+  GIT_STATE="Branch: ${BRANCH}
+HEAD: ${HEAD_SHA}
+Recent commits:
+${GIT_LOG}
+Changed files:
+${GIT_STATUS}
+Diff summary:
+${GIT_DIFF}"
+fi
+
+# --- Build prompt (passed via STDIN, not argv — turn content may hold secrets) ---
+# SECURITY: argv is visible to ps(1); all user/assistant content goes via stdin.
+PROMPT="You are a working memory updater. Your ONLY job is to update the file at ${MEMORY_FILE} using the Write tool. Do it immediately — do not ask questions or explain.
+
+CRITICAL: Write EXACTLY this as line 1 of the file (verbatim substituting the values):
+<!-- memory-head: ${HEAD_SHA:-unknown} branch: ${BRANCH:-unknown} -->
+
+Current working memory (existing content — integrate, don't discard):
+${EXISTING_MEMORY:-"(no existing content)"}
+
+Recent session turns to synthesize:
+${TURNS_TEXT}
+
+Git state:
+${GIT_STATE:-"(not a git repo or no git state)"}
+
+Instructions:
+- Write the file ${MEMORY_FILE} NOW using the Write tool
+- Line 1 MUST be: <!-- memory-head: ${HEAD_SHA:-unknown} branch: ${BRANCH:-unknown} -->
+- Keep under 120 lines total
+- Required sections: ## Now, ## Progress, ## Decisions, ## Context, ## Session Log
+- Synthesize from the queue turns — NEVER fabricate or invent context
+- Integrate new information with existing content; deduplicate overlapping information
+- ## Progress tracks Done (completed), Remaining (next steps), Blockers (if any)
+- ## Decisions entries: format as - **[Decision]** — [rationale] (YYYY-MM-DD) [ACTIVE|SUPERSEDED]
+- If queue is empty, preserve existing content as-is (still write line 1 stamp)"
+
+log "Spawning claude -p (model haiku, ${TURN_COUNT} turns)"
+# SECURITY: never log PROMPT — it contains turn content which may include secrets
+
+# --- Run claude -p with watchdog ---
+DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p \
+  --model haiku \
+  --dangerously-skip-permissions \
+  --allowedTools 'Read,Write' \
+  --output-format text \
+  <<< "$PROMPT" \
+  >> "$LOG_FILE" 2>&1 &
+CLAUDE_PID=$!
+
+# Watchdog: kill if still running after 120s; cancel watchdog immediately after claude exits
+( sleep 120 && kill "$CLAUDE_PID" 2>/dev/null ) &
+WD_PID=$!
+
+if wait "$CLAUDE_PID" 2>/dev/null; then
+  CLAUDE_EXIT=0
+else
+  CLAUDE_EXIT=$?
+fi
+
+# Cancel watchdog (avoids stray kill hitting a recycled PID after this process exits)
+kill "$WD_PID" 2>/dev/null || true
+wait "$WD_PID" 2>/dev/null || true
+
+if [ "$CLAUDE_EXIT" -gt 128 ]; then
+  log "FAIL: claude -p killed by watchdog after 120s"
+  # Leave .processing for crash recovery (dream-recover D56c)
+  exit 0
+elif [ "$CLAUDE_EXIT" -ne 0 ]; then
+  log "FAIL: claude -p exited with code $CLAUDE_EXIT"
+  # Leave .processing for crash recovery
+  exit 0
+fi
+
+# --- Verify success: mtime changed AND first-line stamp present ---
+UPDATED="false"
+if [ -f "$MEMORY_FILE" ]; then
+  NEW_MTIME=$(get_mtime "$MEMORY_FILE")
+  if [ "$NEW_MTIME" -gt "$PRE_UPDATE_MTIME" ]; then
+    FIRST_LINE=$(head -1 "$MEMORY_FILE" 2>/dev/null || echo "")
+    case "$FIRST_LINE" in
+      "<!-- memory-head:"*)
+        UPDATED="true"
+        log "Update verified (mtime changed, stamp present)"
+        ;;
+      *)
+        log "WARN: mtime changed but stamp missing on line 1 — treating as failure"
+        ;;
+    esac
+  else
+    log "WARN: memory file not modified (Write tool may have failed)"
+  fi
+else
+  log "WARN: memory file does not exist after claude -p run"
+fi
+
+if [ "$UPDATED" = "true" ]; then
+  rm -f "$PROCESSING_FILE" 2>/dev/null || true
+  touch "$OK_FILE" 2>/dev/null || true
+  log "SUCCESS: queue drained, .last-refresh-ok touched"
+else
+  # Leave .processing for dream-recover D56c; do NOT touch .last-refresh-ok
+  log "FAIL: verification failed — leaving .processing for recovery"
+fi
+
+exit 0

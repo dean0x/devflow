@@ -142,23 +142,10 @@ if [ "$_SC2_HELPERS_OK" = "true" ]; then
   # Step 2: collect pending marker task types
   dream_collect_tasks "$DREAM_DIR" "$_SC2_MEM_EN" "$_SC2_DEC_EN" "$_SC2_KNOW_EN" || true
 
-  # Step 3: raw-queue bridge — union in memory task if .pending-turns.jsonl is non-empty
-  # even when no memory dream marker exists (queue written but marker not yet written).
-  if [ "$_SC2_MEM_EN" = "true" ] && [ -s "$MEMORY_DIR/.pending-turns.jsonl" ]; then
-    case ",$_DREAM_TASKS," in
-      *,memory,*) ;;  # already present — skip
-      *)
-        if [ -n "$_DREAM_TASKS" ]; then
-          _DREAM_TASKS="memory,$_DREAM_TASKS"
-        else
-          _DREAM_TASKS="memory"
-        fi
-        dbg "Section2: added memory task via raw-queue bridge"
-        ;;
-    esac
-  fi
-
   # Step 4: emit directive if tasks pending, subject to processor-spawn throttle
+  # (Step 3 raw-queue bridge removed: memory refresh is now handled by the
+  # background-memory-update worker spawned by dream-capture. Memory is no longer
+  # a Dream subagent task — dream_collect_tasks unconditionally sweeps memory.* markers.)
   if [ -n "$_DREAM_TASKS" ]; then
     _SC2_SPAWNED_AT_FILE="$DREAM_DIR/.processor-spawned-at"
     _SC2_THROTTLE=120

@@ -2,7 +2,10 @@
 
 # SessionStart Hook
 # Injects working memory as additionalContext.
-# Memory: restores .devflow/memory/WORKING-MEMORY.md + git state + compact recovery.
+# Memory: restores .devflow/memory/WORKING-MEMORY.md with git-reconciled header
+# and 3-state rendering (in-sync / drifted / refresh-failing).
+# State detection uses the <!-- memory-head: <sha> branch: <name> --> stamp on line 1.
+# No raw UNPROCESSED TURNS dump — the background-memory-update worker handles refresh.
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
@@ -36,9 +39,6 @@ DREAM_DIR="$DEVFLOW_DIR/dream"
 source "$SCRIPT_DIR/hook-log-init" "session-start-memory"
 
 # Check dream config — single source of truth for memory enabled/disabled.
-# The legacy .working-memory-disabled sentinel is intentionally NOT checked here:
-# dream config supersedes it per ADR-001 (clean break). Users who previously
-# disabled via sentinel have it replaced by config.json on first dream init.
 DREAM_CONFIG="$DREAM_DIR/config.json"
 if [ -f "$DREAM_CONFIG" ]; then
   MEMORY_ENABLED=$(json_field_file "$DREAM_CONFIG" "memory" "true")
@@ -50,7 +50,7 @@ fi
 
 CONTEXT=""
 
-# --- Section 1: Working Memory ---
+# --- Section 1: Working Memory with git-reconciled header ---
 
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 
@@ -58,116 +58,157 @@ if [ -f "$MEMORY_FILE" ]; then
   dbg "MEMORY_FILE exists: $MEMORY_FILE"
   MEMORY_CONTENT=$(head -c 65536 "$MEMORY_FILE")
 
-  # Compute staleness warning
   source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
   FILE_MTIME=$(get_mtime "$MEMORY_FILE")
   NOW=$(date +%s)
-  AGE=$(( NOW - FILE_MTIME ))
-  dbg "MEMORY_FILE AGE=${AGE}s"
+  AGE_SEC=$(( NOW - FILE_MTIME ))
+  AGE_MIN=$(( AGE_SEC / 60 ))
+  dbg "MEMORY_FILE AGE=${AGE_SEC}s"
 
-  # Check for pre-compact memory snapshot (compaction recovery)
-  BACKUP_FILE="$MEMORY_DIR/backup.json"
-  COMPACT_NOTE=""
-  if [ -f "$BACKUP_FILE" ]; then
-    BACKUP_MEMORY=$(json_field_file "$BACKUP_FILE" "memory_snapshot" "")
-    if [ -n "$BACKUP_MEMORY" ]; then
-      BACKUP_TS=$(json_field_file "$BACKUP_FILE" "timestamp" "")
-      BACKUP_EPOCH=0
-      if [ -n "$BACKUP_TS" ]; then
-        BACKUP_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BACKUP_TS" +%s 2>/dev/null \
-          || date -d "$BACKUP_TS" +%s 2>/dev/null \
-          || echo "0")
-      fi
-      if [ "$BACKUP_EPOCH" -gt "$FILE_MTIME" ]; then
-        dbg "Compact recovery available: BACKUP_TS=$BACKUP_TS"
-        COMPACT_NOTE="
---- PRE-COMPACT SNAPSHOT ($BACKUP_TS) ---
-Context was compacted. This snapshot may contain decisions or progress not yet in working memory.
+  # --- Parse stamp from line 1: <!-- memory-head: <sha> branch: <name> --> ---
+  FIRST_LINE=$(head -1 "$MEMORY_FILE" 2>/dev/null || echo "")
+  STAMP_SHA=""
+  STAMP_BRANCH=""
+  case "$FIRST_LINE" in
+    "<!-- memory-head:"*)
+      # Extract sha and branch via sed (bash 3.2 compatible)
+      STAMP_SHA=$(echo "$FIRST_LINE" | sed -n 's/<!-- memory-head: \([^ ]*\) branch:.*/\1/p')
+      STAMP_BRANCH=$(echo "$FIRST_LINE" | sed -n 's/<!-- memory-head: [^ ]* branch: \([^ ]*\) -->/\1/p')
+      ;;
+  esac
+  dbg "STAMP_SHA=$STAMP_SHA STAMP_BRANCH=$STAMP_BRANCH"
 
-$BACKUP_MEMORY
-"
-      fi
+  # --- Strip stamp line from injected body ---
+  case "$FIRST_LINE" in
+    "<!-- memory-head:"*)
+      MEMORY_BODY=$(printf '%s' "$MEMORY_CONTENT" | tail -n +2)
+      ;;
+    *)
+      MEMORY_BODY="$MEMORY_CONTENT"
+      ;;
+  esac
+
+  # --- Gather current git state ---
+  BRANCH=""
+  HEAD=""
+  if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
+    BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+    HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+  fi
+  dbg "BRANCH=$BRANCH HEAD=$HEAD"
+
+  # --- Compute drift (only when stamp SHA is provably an ancestor of HEAD) ---
+  COMMITS=0
+  if [ -n "$STAMP_SHA" ] && [ -n "$HEAD" ] && [ "$STAMP_SHA" != "$HEAD" ]; then
+    # git merge-base --is-ancestor exits 0 when $STAMP_SHA is ancestor of HEAD
+    if cd "$CWD" 2>/dev/null && git merge-base --is-ancestor "$STAMP_SHA" "$HEAD" 2>/dev/null; then
+      COMMITS=$(git rev-list --count "${STAMP_SHA}..${HEAD}" 2>/dev/null || echo "0")
     fi
   fi
+  dbg "COMMITS=$COMMITS"
 
-  STALE_WARNING=""
-  if [ "$AGE" -gt 3600 ]; then
-    HOURS=$(( AGE / 3600 ))
-    dbg "Memory is stale: AGE=${AGE}s HOURS=${HOURS}"
-    STALE_WARNING="⚠ This working memory is ${HOURS}h old. Verify before relying on it.
-
+  # --- Branch mismatch warning (shown for any state) ---
+  BRANCH_MISMATCH_NOTE=""
+  if [ -n "$STAMP_BRANCH" ] && [ -n "$BRANCH" ] && [ "$STAMP_BRANCH" != "$BRANCH" ]; then
+    BRANCH_MISMATCH_NOTE="⚠ Memory was written on branch ${STAMP_BRANCH}; you are now on ${BRANCH}.
 "
   fi
 
-  # Capture fresh git state
-  GIT_BRANCH=""
-  GIT_STATUS=""
-  GIT_LOG=""
-
-  if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
-    GIT_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-    GIT_STATUS=$(git status --porcelain 2>/dev/null | head -20)
-    GIT_LOG=$(git log --oneline -5 2>/dev/null || echo "")
-    dbg "GIT_BRANCH=$GIT_BRANCH"
+  # --- State C detection: refresh failing ---
+  # Condition: queue non-empty AND (.last-refresh-ok missing OR >600s old)
+  QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
+  OK_FILE="$MEMORY_DIR/.last-refresh-ok"
+  QUEUE_DEPTH=0
+  if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+    QUEUE_DEPTH=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
+  fi
+  OK_AGE=9999999
+  if [ -f "$OK_FILE" ]; then
+    _OK_MTIME=$(get_mtime "$OK_FILE")
+    OK_AGE=$(( NOW - _OK_MTIME ))
+  fi
+  REFRESH_FAILING=""
+  if [ "$QUEUE_DEPTH" -gt 0 ] && { [ ! -f "$OK_FILE" ] || [ "$OK_AGE" -gt 600 ]; }; then
+    _OK_MIN=$(( OK_AGE / 60 ))
+    if [ "$OK_AGE" -ge 9999999 ]; then
+      _OK_MIN_STR="never"
+    else
+      _OK_MIN_STR="${_OK_MIN}m"
+    fi
+    _LOG_HINT="$HOME/.devflow/logs/$(echo "$CWD" | sed 's|^/||' | tr '/' '-')/.background-memory-update.log"
+    REFRESH_FAILING="⚠ MEMORY REFRESH MAY BE FAILING — ${QUEUE_DEPTH} turn(s) unprocessed, last refresh ${_OK_MIN_STR} ago; check ${_LOG_HINT}"
+    dbg "State C: refresh failing (QUEUE_DEPTH=$QUEUE_DEPTH OK_AGE=${OK_AGE}s)"
   fi
 
-  # Build memory context
-  CONTEXT="${STALE_WARNING}--- WORKING MEMORY (from previous session) ---
+  # --- Build state-specific header ---
+  _STAMP_LABEL="${STAMP_SHA:-unknown}"
+  _BRANCH_LABEL="${BRANCH:-unknown}"
 
-${MEMORY_CONTENT}"
-
-  CONTEXT="${CONTEXT}
-
---- CURRENT GIT STATE ---
-Branch: ${GIT_BRANCH}
-Recent commits:
-${GIT_LOG}"
-
-  if [ -n "$GIT_STATUS" ]; then
-    CONTEXT="${CONTEXT}
-Uncommitted changes:
-${GIT_STATUS}"
+  if [ -z "$STAMP_SHA" ]; then
+    # No stamp (legacy / killed mid-write) — render as A "synced @ unknown"
+    MEMORY_HEADER="--- WORKING MEMORY (synced @ unknown on ${_BRANCH_LABEL}, ${AGE_MIN}m ago) ---"
+    dbg "State A (no stamp)"
+  elif [ "$COMMITS" -le 0 ]; then
+    # State A: in-sync
+    MEMORY_HEADER="--- WORKING MEMORY (synced @ ${_STAMP_LABEL} on ${_BRANCH_LABEL}, ${AGE_MIN}m ago) ---"
+    dbg "State A: in-sync"
+  else
+    # State B: drifted
+    _DRIFT_LOG=$(cd "$CWD" 2>/dev/null && git log --oneline "${STAMP_SHA}..${HEAD}" 2>/dev/null | head -10 || echo "")
+    MEMORY_HEADER="--- WORKING MEMORY (${COMMITS} commit(s) ago @ ${_STAMP_LABEL} on ${_BRANCH_LABEL}, ${AGE_MIN}m ago — ⚠ reconcile) ---
+Commits since memory was written:
+${_DRIFT_LOG}"
+    dbg "State B: drifted COMMITS=$COMMITS"
   fi
 
-  if [ -n "$COMPACT_NOTE" ]; then
+  # --- Assemble context ---
+  CONTEXT="${BRANCH_MISMATCH_NOTE}${MEMORY_HEADER}
+${MEMORY_BODY}"
+
+  # State C banner shown IN ADDITION to A/B
+  if [ -n "$REFRESH_FAILING" ]; then
     CONTEXT="${CONTEXT}
-${COMPACT_NOTE}"
+
+${REFRESH_FAILING}"
+    dbg "State C appended"
   fi
 else
   dbg "MEMORY_FILE not found: $MEMORY_FILE"
 fi
 
-# --- Section 2: Unprocessed turns from previous session ---
-# If the queue has entries that haven't been summarized into WORKING-MEMORY.md yet,
-# inject them as raw context so the assistant starts with full information.
-
-QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"
-if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
-  QUEUE_LINES=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
-  dbg "Pending queue: $QUEUE_LINES entries"
-
-  if [ "$QUEUE_LINES" -gt 0 ]; then
-    if [ "$_HAS_JQ" = "true" ]; then
-      QUEUE_SUMMARY=$(tail -20 "$QUEUE_FILE" | jq -r '"[\(.role)]: \(.content[0:200])"' 2>/dev/null)
-    else
-      QUEUE_SUMMARY=$(tail -20 "$QUEUE_FILE" | node -e "
-        const lines = require('fs').readFileSync('/dev/stdin','utf8').trim().split('\n');
-        lines.forEach(l => { try { const o = JSON.parse(l); console.log('[' + o.role + ']: ' + (o.content||'').slice(0,200)); } catch(e) {} });
-      " 2>/dev/null)
+# --- PRE-COMPACT snapshot recovery (orthogonal to memory refresh, still valuable) ---
+# Re-inject compaction snapshot when it's more recent than the memory file (compact overwrote
+# WORKING-MEMORY.md with a summary, but the pre-compact snapshot may have richer context).
+BACKUP_FILE="$MEMORY_DIR/backup.json"
+if [ -f "$BACKUP_FILE" ]; then
+  source "$SCRIPT_DIR/get-mtime" 2>/dev/null || true
+  BACKUP_MEMORY=$(json_field_file "$BACKUP_FILE" "memory_snapshot" "")
+  if [ -n "$BACKUP_MEMORY" ]; then
+    BACKUP_TS=$(json_field_file "$BACKUP_FILE" "timestamp" "")
+    BACKUP_EPOCH=0
+    if [ -n "$BACKUP_TS" ]; then
+      BACKUP_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$BACKUP_TS" +%s 2>/dev/null \
+        || date -d "$BACKUP_TS" +%s 2>/dev/null \
+        || echo "0")
     fi
+    FILE_MTIME_CK=0
+    if [ -f "$MEMORY_FILE" ]; then
+      FILE_MTIME_CK=$(get_mtime "$MEMORY_FILE" 2>/dev/null || echo "0")
+    fi
+    if [ "$BACKUP_EPOCH" -gt "$FILE_MTIME_CK" ]; then
+      dbg "Compact recovery available: BACKUP_TS=$BACKUP_TS"
+      COMPACT_NOTE="
+--- PRE-COMPACT SNAPSHOT ($BACKUP_TS) ---
+Context was compacted. This snapshot may contain decisions or progress not yet in working memory.
 
-    if [ -n "$QUEUE_SUMMARY" ]; then
-      TRUNCATION_NOTE=""
-      if [ "$QUEUE_LINES" -gt 20 ]; then
-        TRUNCATION_NOTE="(showing last 20 of $QUEUE_LINES entries)
+$BACKUP_MEMORY
 "
+      if [ -n "$CONTEXT" ]; then
+        CONTEXT="${CONTEXT}
+${COMPACT_NOTE}"
+      else
+        CONTEXT="$COMPACT_NOTE"
       fi
-
-      CONTEXT="${CONTEXT}
-
---- UNPROCESSED TURNS (not yet in working memory) ---
-${TRUNCATION_NOTE}${QUEUE_SUMMARY}"
-      dbg "Injected $QUEUE_LINES pending queue entries"
     fi
   fi
 fi

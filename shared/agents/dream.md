@@ -1,6 +1,6 @@
 ---
 name: Dream
-description: Background maintenance agent — processes ONE pending task type named in its prompt (memory, decisions, knowledge, curation). Spawned per-task by session-start-context; loads the matching per-task skill via the Skill tool.
+description: Background maintenance agent — processes ONE pending task type named in its prompt (decisions, knowledge, curation). Spawned per-task by session-start-context; loads the matching per-task skill via the Skill tool. Memory is NOT a Dream task — it is handled by the background-memory-update worker spawned from dream-capture.
 model: sonnet
 tools:
   - Read
@@ -12,7 +12,6 @@ tools:
 skills:
   - devflow:apply-decisions
   - devflow:apply-feature-knowledge
-  - devflow:dream-memory
   - devflow:dream-decisions
   - devflow:dream-knowledge
   - devflow:dream-curation
@@ -25,9 +24,9 @@ combined Opus spawn). Your role: claim markers atomically, do real LLM work via 
 per-task skill, write results through plumbing ops, clean up.
 
 > **Model note**: The `model: sonnet` frontmatter is the fallback default. In practice
-> `session-start-context` overrides the model per spawn: haiku for `memory`, sonnet for
-> `knowledge`, opus for the combined `decisions then curation` spawn. When you see "Opus
-> spawn" in this document, that refers to the model assigned by the orchestrator at spawn time.
+> `session-start-context` overrides the model per spawn: sonnet for `knowledge`, opus for
+> the combined `decisions then curation` spawn. When you see "Opus spawn" in this document,
+> that refers to the model assigned by the orchestrator at spawn time.
 
 ## Environment
 
@@ -41,8 +40,10 @@ Project root is your current working directory (`.`). All `.devflow/` paths are 
 
 ## Step 0 — Identify your task
 
-Your prompt names the task type(s) to process: `memory`, `decisions`, `knowledge`, `curation`,
+Your prompt names the task type(s) to process: `decisions`, `knowledge`, `curation`,
 or `decisions then curation` (the combined Opus spawn). Process ONLY the task(s) named.
+**Memory is NOT a Dream task** — the background-memory-update worker (spawned by dream-capture)
+handles WORKING-MEMORY.md writes. If your prompt mentions `memory`, skip it.
 
 ## Step 1 — Claim markers atomically
 
@@ -60,9 +61,6 @@ mv ".devflow/dream/{type}.{session}.json" ".devflow/dream/{type}.{session}.proce
 If `mv` fails (another Dream agent already claimed it), skip that marker.
 If ALL markers for a task type fail to claim, skip that task entirely.
 
-**Legacy memory marker**: also check for `.devflow/dream/memory.json` (no session suffix) and
-claim it the same way (`mv memory.json memory.legacy.processing`).
-
 **Heartbeat rule**: At the start of every phase, `touch` each in-flight `.processing` file to
 refresh its mtime. This prevents dream-recover from reclaiming a file that is actively
 being processed (recovery threshold is 1800s; a long knowledge refresh can take time).
@@ -74,7 +72,7 @@ the plumbing ops in the per-task skills — they hold locks internally for one a
 read them all, then union/concat their payloads before processing:
 - `decisions`: concatenate `dialogPairs` strings; union `existingObservationIds` arrays
 - `knowledge`: union `staleSlugs` arrays; use any `worktreePath`
-- `memory`, `curation`: single marker only
+- `curation`: single marker only
 
 **Input cap**: Process only the last **30** dialog-pairs (truncate oldest if more).
 This bounds token cost and keeps each run predictable.
@@ -83,7 +81,6 @@ This bounds token cost and keeps each run predictable.
 
 For each task type you claimed markers for, load the matching skill and follow its procedure:
 
-- **memory** → load `devflow:dream-memory` via the Skill tool and follow its procedure exactly.
 - **decisions** → load `devflow:dream-decisions` via the Skill tool and follow its procedure exactly.
 - **knowledge** → load `devflow:dream-knowledge` via the Skill tool and follow its procedure exactly.
 - **curation** → load `devflow:dream-curation` via the Skill tool and follow its procedure exactly.
