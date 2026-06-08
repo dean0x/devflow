@@ -35,7 +35,7 @@ import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel, getD
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
-export { substituteSettingsTemplate, computeGitignoreAppend, applyTeamsConfig, stripTeamsConfig, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
+export { substituteSettingsTemplate, computeGitignoreAppend, mergeDenyList, discoverProjectGitRoots } from '../utils/post-install.js';
 export { addAmbientHook, removeAmbientHook, hasAmbientHook } from './ambient.js';
 export { addMemoryHooks, removeMemoryHooks, hasMemoryHooks } from './memory.js';
 export { addHudStatusLine, removeHudStatusLine, hasHudStatusLine } from './hud.js';
@@ -153,7 +153,6 @@ interface InitOptions {
   scope?: string;
   verbose?: boolean;
   plugin?: string;
-  teams?: boolean;
   ambient?: boolean;
   memory?: boolean;
   hud?: boolean;
@@ -170,8 +169,6 @@ export const initCommand = new Command('init')
   .option('--scope <type>', 'Installation scope: user or local (project-only)', /^(user|local)$/i)
   .option('--verbose', 'Show detailed installation output')
   .option('--plugin <names>', 'Install specific plugin(s), comma-separated (e.g., implement,code-review)')
-  .option('--teams', 'Enable Agent Teams (peer debate, adversarial review)')
-  .option('--no-teams', 'Disable Agent Teams (use parallel subagents instead)')
   .option('--ambient', 'Enable ambient mode (keyword + plan auto-detection)')
   .option('--no-ambient', 'Disable ambient mode')
   .option('--memory', 'Enable working memory (session context preservation)')
@@ -278,7 +275,7 @@ export const initCommand = new Command('init')
           version,
           plugins: [],
           scope,
-          features: { teams: false, ambient: false, memory: false, hud: true, knowledge: false, decisions: false, rules: false, flags: [] },
+          features: { ambient: false, memory: false, hud: true, knowledge: false, decisions: false, rules: false, flags: [] },
           installedAt: now,
           updatedAt: now,
         });
@@ -428,7 +425,6 @@ export const initCommand = new Command('init')
     const earlyGitRoot = await getGitRoot();
 
     // Feature decisions — defaults for recommended, prompts for advanced
-    let teamsEnabled = false;
     let ambientEnabled = true;
     let memoryEnabled = true;
     let hudEnabled = true;
@@ -458,7 +454,6 @@ export const initCommand = new Command('init')
       // ── Recommended path: apply all defaults silently ──
 
       // Respect explicit CLI flags even in recommended mode
-      if (options.teams !== undefined) teamsEnabled = options.teams;
       if (options.ambient !== undefined) ambientEnabled = options.ambient;
       if (options.memory !== undefined) memoryEnabled = options.memory;
       if (options.hud !== undefined) hudEnabled = options.hud;
@@ -499,7 +494,6 @@ export const initCommand = new Command('init')
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
         `Knowledge bases: ${knowledgeEnabled ? 'enabled' : 'disabled'}`,
-        `Agent Teams:     ${teamsEnabled ? 'enabled' : 'disabled'}`,
         `View mode:       ${viewMode}`,
         `Claude Code flags: ${defaultFlagCount} enabled`,
         `${claudeignoreEnabled ? '.claudeignore:   created' : ''}`,
@@ -514,32 +508,8 @@ export const initCommand = new Command('init')
       // Advanced mode requires a TTY for interactive prompts. In non-TTY
       // environments, fall back to --recommended or pass explicit flags.
       if (!process.stdin.isTTY) {
-        p.log.error('--advanced requires an interactive terminal. Use --recommended or pass explicit flags (e.g., --teams, --no-ambient).');
+        p.log.error('--advanced requires an interactive terminal. Use --recommended or pass explicit flags (e.g., --no-ambient).');
         process.exit(1);
-      }
-
-      // Respect explicit CLI flags — skip prompt when flag is set
-      if (options.teams !== undefined) {
-        teamsEnabled = options.teams;
-      } else {
-        p.note(
-          'Agent Teams enable peer debate between agents — adversarial\n' +
-          'review, competing hypotheses in debugging, and consensus-driven\n' +
-          'exploration. Experimental: may be unstable.',
-          'Agent Teams',
-        );
-        const teamsChoice = await p.select({
-          message: 'Enable Agent Teams?',
-          options: [
-            { value: false, label: 'Not yet', hint: 'Recommended' },
-            { value: true, label: 'Yes', hint: 'Experimental' },
-          ],
-        });
-        if (p.isCancel(teamsChoice)) {
-          p.cancel('Installation cancelled.');
-          process.exit(0);
-        }
-        teamsEnabled = teamsChoice as boolean;
       }
 
       if (options.ambient !== undefined) {
@@ -993,7 +963,6 @@ export const initCommand = new Command('init')
           agentsMap,
           rulesMap,
           isPartialInstall: !!options.plugin,
-          teamsEnabled,
           spinner: s,
         });
       } catch (error) {
@@ -1095,7 +1064,7 @@ export const initCommand = new Command('init')
     if (securityMode === 'managed' && !managedSettingsConfirmed) {
       effectiveSecurityMode = 'user';
     }
-    await installSettings(claudeDir, rootDir, devflowDir, verbose, teamsEnabled, effectiveSecurityMode);
+    await installSettings(claudeDir, rootDir, devflowDir, verbose, effectiveSecurityMode);
 
     const settingsPath = path.join(claudeDir, 'settings.json');
 
@@ -1310,7 +1279,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { teams: teamsEnabled, ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode },
+      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

@@ -50,7 +50,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true },
+      features: { ambient: true, memory: true },
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(partial), 'utf-8');
@@ -63,7 +63,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: 'yes', ambient: true, memory: true },
+      features: { ambient: 'yes', memory: true },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -72,12 +72,12 @@ describe('readManifest', () => {
     expect(result).toBeNull();
   });
 
-  it('returns parsed manifest for valid data', async () => {
+  it('returns parsed manifest for valid data (without teams)', async () => {
     const data: ManifestData = {
       version: '1.4.0',
       plugins: ['devflow-core-skills', 'devflow-implement'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 'verbose' },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 'verbose' },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -86,12 +86,32 @@ describe('readManifest', () => {
     expect(result).toEqual(data);
   });
 
+  it('parses legacy manifest WITH teams field (key ignored, not rejected)', async () => {
+    // Legacy manifests written before the teams field was removed must still parse.
+    const legacyData = {
+      version: '1.8.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { teams: true, ambient: true, memory: true, hud: true, knowledge: false, decisions: false, rules: true, flags: [] },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(legacyData), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    // teams key is silently dropped from the result
+    expect((result!.features as Record<string, unknown>)['teams']).toBeUndefined();
+    // Other fields preserved
+    expect(result!.features.ambient).toBe(true);
+    expect(result!.features.memory).toBe(true);
+  });
+
   it('normalizes old manifest without rules to default true', async () => {
     const oldData = {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: true, knowledge: true, decisions: true, flags: [] },
+      features: { ambient: true, memory: true, hud: true, knowledge: true, decisions: true, flags: [] },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -106,7 +126,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true },
+      features: { ambient: true, memory: true },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -127,7 +147,7 @@ describe('readManifest', () => {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: true, knowledge: true, flags: [] },
+      features: { ambient: true, memory: true, hud: true, knowledge: true, flags: [] },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -142,7 +162,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: true, flags: [] },
+      features: { ambient: true, memory: true, hud: true, flags: [] },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -157,7 +177,7 @@ describe('readManifest', () => {
       version: '2.0.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: true, kb: true, flags: [] },
+      features: { ambient: true, memory: true, hud: true, kb: true, flags: [] },
       installedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
@@ -177,7 +197,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [] },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [] },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -193,7 +213,7 @@ describe('readManifest', () => {
         version: '1.4.0',
         plugins: ['devflow-core-skills'],
         scope: 'user',
-        features: { teams: false, ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: mode },
+        features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: mode },
         installedAt: '2026-03-01T00:00:00.000Z',
         updatedAt: '2026-03-13T00:00:00.000Z',
       };
@@ -209,7 +229,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 'invalid-mode' },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 'invalid-mode' },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -224,7 +244,7 @@ describe('readManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 42 },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], viewMode: 42 },
       installedAt: '2026-03-01T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -251,7 +271,7 @@ describe('writeManifest', () => {
       version: '1.4.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -260,12 +280,26 @@ describe('writeManifest', () => {
     expect(JSON.parse(content)).toEqual(data);
   });
 
+  it('does NOT include teams field in written output', async () => {
+    const data: ManifestData = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
+      installedAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await writeManifest(tmpDir, data);
+    const content = JSON.parse(await fs.readFile(path.join(tmpDir, 'manifest.json'), 'utf-8'));
+    expect('teams' in (content.features ?? {})).toBe(false);
+  });
+
   it('overwrites existing manifest', async () => {
     const old: ManifestData = {
       version: '1.0.0',
       plugins: ['devflow-core-skills'],
       scope: 'user',
-      features: { teams: false, ambient: false, memory: false, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
+      features: { ambient: false, memory: false, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
       installedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
@@ -284,7 +318,7 @@ describe('writeManifest', () => {
       version: '1.4.0',
       plugins: [],
       scope: 'local',
-      features: { teams: false, ambient: false, memory: false, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
+      features: { ambient: false, memory: false, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
       installedAt: '2026-03-13T00:00:00.000Z',
       updatedAt: '2026-03-13T00:00:00.000Z',
     };
@@ -428,7 +462,7 @@ describe('resolvePluginList', () => {
     version: '1.0.0',
     plugins: ['devflow-core-skills', 'devflow-implement'],
     scope: 'user',
-    features: { teams: false, ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
+    features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: false, flags: [] },
     installedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };

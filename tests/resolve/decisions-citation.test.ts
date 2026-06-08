@@ -11,11 +11,9 @@
 //   2. Unit tests: filterDecisionsContext — imported from production module
 //   3. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
 //      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
-//   4. Structural tests: resolve-teams.md — parity with base
-//      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
-//   5. Structural tests: resolver.md — Input Context + Apply Decisions
+//   4. Structural tests: resolver.md — Input Context + Apply Decisions
 //      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
-//   7. Cross-cutting: all four surfaces reference DECISIONS_CONTEXT
+//   5. Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
@@ -131,27 +129,6 @@ describe('resolve.md — base command', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Structural tests: resolve-teams.md (teams variant — must match base)
-// ---------------------------------------------------------------------------
-
-describe('resolve-teams.md — teams variant parity', () => {
-  const content = loadFile('plugins/devflow-resolve/commands/resolve-teams.md');
-
-  it('contains Step 0d: Load Project Decisions', () => {
-    expect(content).toMatch(/Step 0d.*Load Project Decisions/i);
-  });
-
-  it('Phase 4 Resolver teammate prompt includes DECISIONS_CONTEXT variable', () => {
-    const phase4Section = extractSection(content, '### Phase 4', '### Phase 5');
-    expect(phase4Section).toContain('DECISIONS_CONTEXT');
-  });
-
-  it('mentions Decisions Citations for resolution-summary.md (D-B)', () => {
-    expect(content).toContain('Decisions Citations');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Structural tests: shared/agents/resolver.md
 // ---------------------------------------------------------------------------
 
@@ -188,17 +165,12 @@ describe('resolver.md — Input Context and Apply Decisions section', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cross-cutting: all four surfaces reference DECISIONS_CONTEXT
+// Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
 // ---------------------------------------------------------------------------
 
-describe('cross-cutting — DECISIONS_CONTEXT on all four surfaces', () => {
+describe('cross-cutting — DECISIONS_CONTEXT on resolve surfaces', () => {
   it('resolve.md contains DECISIONS_CONTEXT', () => {
     const content = loadFile('plugins/devflow-resolve/commands/resolve.md');
-    expect(content).toContain('DECISIONS_CONTEXT');
-  });
-
-  it('resolve-teams.md contains DECISIONS_CONTEXT', () => {
-    const content = loadFile('plugins/devflow-resolve/commands/resolve-teams.md');
     expect(content).toContain('DECISIONS_CONTEXT');
   });
 

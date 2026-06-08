@@ -25,8 +25,8 @@ describe('getAllSkillNames', () => {
     const skills = getAllSkillNames();
     // 'accessibility' appears in devflow-accessibility (optional plugin)
     expect(skills).toContain('accessibility');
-    // 'agent-teams' appears in multiple plugins
-    expect(skills).toContain('agent-teams');
+    // 'worktree-support' appears in multiple plugins
+    expect(skills).toContain('worktree-support');
   });
 });
 
@@ -252,8 +252,7 @@ describe('optional plugin flag', () => {
     expect(bugAnalysis!.agents).toContain('git');
     expect(bugAnalysis!.agents).toContain('bug-analyzer');
     expect(bugAnalysis!.agents).toContain('synthesizer');
-    // Skills: agent-teams for parallel spawning, worktree-support for discovery, apply-feature-knowledge for context
-    expect(bugAnalysis!.skills).toContain('agent-teams');
+    // Skills: worktree-support for discovery, apply-feature-knowledge for context
     expect(bugAnalysis!.skills).toContain('worktree-support');
     expect(bugAnalysis!.skills).toContain('apply-feature-knowledge');
     // Skills added in batch-2: apply-decisions + the 5 bug-analyzer category skills

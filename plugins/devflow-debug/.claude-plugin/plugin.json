@@ -11,15 +11,13 @@
   "keywords": [
     "debugging",
     "hypotheses",
-    "investigation",
-    "agent-teams"
+    "investigation"
   ],
   "agents": [
     "git",
     "synthesizer"
   ],
   "skills": [
-    "agent-teams",
     "git",
     "worktree-support",
     "apply-feature-knowledge"

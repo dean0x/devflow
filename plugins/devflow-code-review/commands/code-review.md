@@ -122,8 +122,6 @@ MAX_REVIEW_CYCLES = 10
 | denominator = 0 OR parsing failed | fp_ratio = 0, skip warning (degraded note on parse failure) |
 | fp_ratio > 0.7 AND CYCLE_NUMBER >= 3 | Warn in output, continue |
 
-NOTE: Convergence logic mirrored in code-review-teams.md — parity enforced by tests/review/convergence-detection.test.ts ("Cross-cutting convergence consistency").
-
 ### Phase 1: Analyze Changed Files
 
 **Produces:** REVIEWER_LIST

@@ -112,52 +112,6 @@ describe('code-review.md — convergence gate', () => {
 })
 
 // -------------------------------------------------------------------------
-// Group 3: code-review-teams.md — convergence parity
-// -------------------------------------------------------------------------
-
-describe('code-review-teams.md — convergence parity', () => {
-  const content = loadFile('plugins/devflow-code-review/commands/code-review-teams.md')
-
-  it('has Step 0d-i and Step 0d-ii', () => {
-    expect(content).toContain('Step 0d-i')
-    expect(content).toContain('Step 0d-ii')
-  })
-
-  it('convergence gate ordered between Step 0c and Phase 1', () => {
-    const idx0c = content.indexOf('Step 0c')
-    const idx0d = content.indexOf('Step 0d')
-    const idxPhase1 = content.indexOf('### Phase 1:')
-    expect(idx0c).not.toBe(-1)
-    expect(idx0d).not.toBe(-1)
-    expect(idxPhase1).not.toBe(-1)
-    expect(idx0d).toBeGreaterThan(idx0c)
-    expect(idx0d).toBeLessThan(idxPhase1)
-  })
-
-  // Intentional overlap with Group 6 all-surfaces check: this test pins PRIOR_RESOLUTIONS
-  // to Phase 2 specifically, while Group 6 verifies whole-file presence across all surfaces.
-  it('passes PRIOR_RESOLUTIONS to reviewer teammates', () => {
-    const phase2 = extractSection(content, '### Phase 2:', '### Phase 2b:')
-    expect(phase2).toContain('PRIOR_RESOLUTIONS')
-  })
-
-  it('passes CYCLE_NUMBER to Synthesizer/Lead', () => {
-    const phase3 = extractSection(content, '### Phase 3:', '### Phase 4:')
-    expect(phase3).toContain('CYCLE_NUMBER')
-  })
-
-  it('Step 0d-i documents --full loading PRIOR_RESOLUTIONS', () => {
-    const step0d = extractSection(content, 'Step 0d-i', 'Step 0d-ii')
-    expect(step0d).toContain('--full')
-  })
-
-  it('has cross-reference comment to code-review.md', () => {
-    expect(content).toMatch(/code-review\.md/)
-    expect(content).toMatch(/[Cc]onvergence.*sync|sync.*[Cc]onvergence|mirror/i)
-  })
-})
-
-// -------------------------------------------------------------------------
 // Group 4: synthesizer.md — convergence status
 // -------------------------------------------------------------------------
 
@@ -188,42 +142,36 @@ describe('synthesizer.md — convergence status', () => {
 })
 
 // -------------------------------------------------------------------------
-// Group 6: Cross-cutting convergence consistency
+// Group 6: Cross-cutting convergence consistency (single command surface)
 // -------------------------------------------------------------------------
 
 describe('Cross-cutting convergence consistency', () => {
   const reviewer = loadFile('shared/agents/reviewer.md')
   const codeReview = loadFile('plugins/devflow-code-review/commands/code-review.md')
-  const teamsReview = loadFile('plugins/devflow-code-review/commands/code-review-teams.md')
   const synthesizer = loadFile('shared/agents/synthesizer.md')
 
-  it('both command surfaces contain PRIOR_RESOLUTIONS', () => {
+  it('code-review command surface contains PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toContain('PRIOR_RESOLUTIONS')
-    expect(teamsReview).toContain('PRIOR_RESOLUTIONS')
   })
 
-  it('both surfaces use <prior-resolution-summary> containment markers', () => {
+  it('code-review uses <prior-resolution-summary> containment markers', () => {
     expect(codeReview).toContain('prior-resolution-summary')
-    expect(teamsReview).toContain('prior-resolution-summary')
   })
 
-  it('both surfaces document (none) default', () => {
+  it('code-review documents (none) default for PRIOR_RESOLUTIONS', () => {
     expect(codeReview).toMatch(/PRIOR_RESOLUTIONS.*\(none\)|set.*PRIOR_RESOLUTIONS.*\(none\)/is)
-    expect(teamsReview).toMatch(/PRIOR_RESOLUTIONS.*\(none\)|set.*PRIOR_RESOLUTIONS.*\(none\)/is)
   })
 
-  it('FP ratio formula consistent across surfaces that compute it', () => {
+  it('FP ratio formula present in code-review', () => {
     const formula = /fp_count\s*\/\s*\(fp_count\s*\+\s*fixed_count\s*\+\s*deferred_count\)/
     expect(codeReview).toMatch(formula)
-    expect(teamsReview).toMatch(formula)
   })
 
-  it('soft convergence threshold documented in command surfaces', () => {
+  it('soft convergence threshold documented in code-review', () => {
     expect(codeReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
-    expect(teamsReview).toMatch(/CYCLE_NUMBER\s*>=?\s*3|cycle\s*>=?\s*3/i)
   })
 
-  it('synthesizer FP note threshold matches command surfaces (>= 3)', () => {
+  it('synthesizer FP note threshold matches command surface (>= 3)', () => {
     expect(synthesizer).toMatch(/CYCLE_NUMBER\s*>=?\s*3/)
   })
 
@@ -232,18 +180,14 @@ describe('Cross-cutting convergence consistency', () => {
     expect(synthesizer).toMatch(/[Cc]onvergence/)
   })
 
-  it('--full documented in Step 0d-i of both command files', () => {
+  it('--full documented in Step 0d-i of code-review', () => {
     const crStep0di = extractSection(codeReview, 'Step 0d-i', 'Step 0d-ii')
-    const trStep0di = extractSection(teamsReview, 'Step 0d-i', 'Step 0d-ii')
     expect(crStep0di).toContain('--full')
-    expect(trStep0di).toContain('--full')
   })
 
-  it('no AskUserQuestion in convergence sections across command surfaces', () => {
+  it('no AskUserQuestion in convergence section of code-review', () => {
     const crStep0dii = extractSection(codeReview, 'Step 0d-ii', '### Phase 1:')
-    const trStep0dii = extractSection(teamsReview, 'Step 0d-ii', '### Phase 1:')
     expect(crStep0dii).not.toContain('AskUserQuestion')
-    expect(trStep0dii).not.toContain('AskUserQuestion')
   })
 })
 

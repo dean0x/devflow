@@ -38,10 +38,6 @@
       }
     ]
   },
-  "teammateMode": "auto",
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  },
   "extraKnownMarketplaces": {
     "devflow": {
       "source": {

@@ -64,7 +64,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Unified design planning with gap analysis and design review',
     commands: ['/plan'],
     agents: ['git', 'skimmer', 'synthesizer', 'designer', 'knowledge'],
-    skills: ['agent-teams', 'gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
+    skills: ['gap-analysis', 'design-review', 'patterns', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -72,7 +72,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
     agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
-    skills: ['agent-teams', 'patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -80,7 +80,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Comprehensive code review with parallel specialized agents',
     commands: ['/code-review'],
     agents: ['git', 'reviewer', 'synthesizer'],
-    skills: ['agent-teams', 'architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'reliability', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['architecture', 'complexity', 'consistency', 'database', 'dependencies', 'documentation', 'performance', 'regression', 'reliability', 'review-methodology', 'security', 'testing', 'worktree-support', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -88,7 +88,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Process and fix code review issues with risk assessment',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['agent-teams', 'patterns', 'security', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['patterns', 'security', 'worktree-support', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -96,7 +96,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Debugging workflows with competing hypothesis investigation using agent teams',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
-    skills: ['agent-teams', 'git', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['git', 'worktree-support', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -104,7 +104,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Codebase exploration with structured analysis and optional knowledge base creation',
     commands: ['/explore'],
     agents: ['skimmer', 'synthesizer', 'knowledge'],
-    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
+    skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge'],
     rules: [],
   },
   {
@@ -112,7 +112,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Multi-type research with parallel researchers and trust-aware synthesis',
     commands: ['/research'],
     agents: ['researcher', 'skimmer', 'synthesizer', 'knowledge'],
-    skills: ['agent-teams', 'worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology'],
+    skills: ['worktree-support', 'apply-feature-knowledge', 'feature-knowledge', 'research-codebase', 'research-external', 'research-market', 'research-competitor', 'research-technology'],
     rules: [],
   },
   {
@@ -120,7 +120,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Adaptive project release with learned configuration',
     commands: ['/release'],
     agents: ['git', 'synthesizer', 'validator'],
-    skills: ['agent-teams', 'git', 'worktree-support'],
+    skills: ['git', 'worktree-support'],
     rules: [],
   },
   {
@@ -137,7 +137,6 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     commands: ['/bug-analysis'],
     agents: ['git', 'bug-analyzer', 'synthesizer'],
     skills: [
-      'agent-teams',
       'apply-decisions',
       'apply-feature-knowledge',
       'complexity',
@@ -540,6 +539,8 @@ const LEGACY_SKILLS_V2X: string[] = [
   'dream-curation',
   // v3.x dream-memory removal: namespaced name for cleanup of installed devflow:dream-memory skill
   'devflow:dream-memory',
+  // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
+  'devflow:agent-teams',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
   'devflow:router',
   'devflow:implement:triage',

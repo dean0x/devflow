@@ -8,8 +8,6 @@ import {
   shouldRetry,
   substituteSettingsTemplate,
   computeGitignoreAppend,
-  applyTeamsConfig,
-  stripTeamsConfig,
   mergeDenyList,
   discoverProjectGitRoots,
   migrateShadowOverrides,
@@ -184,114 +182,6 @@ describe('computeGitignoreAppend', () => {
   });
 });
 
-describe('applyTeamsConfig', () => {
-  it('adds teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', () => {
-    const input = JSON.stringify({
-      hooks: { Stop: [] },
-      statusLine: { type: 'command', command: 'test' },
-    }, null, 2);
-
-    const result = JSON.parse(applyTeamsConfig(input));
-    expect(result.teammateMode).toBe('auto');
-    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
-    expect(result.hooks).toEqual({ Stop: [] });
-    expect(result.statusLine).toEqual({ type: 'command', command: 'test' });
-  });
-
-  it('preserves existing env vars', () => {
-    const input = JSON.stringify({
-      env: { ENABLE_TOOL_SEARCH: 'true' },
-    }, null, 2);
-
-    const result = JSON.parse(applyTeamsConfig(input));
-    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
-    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
-    expect(result.teammateMode).toBe('auto');
-  });
-
-  it('creates env object when missing', () => {
-    const input = JSON.stringify({ hooks: {} }, null, 2);
-
-    const result = JSON.parse(applyTeamsConfig(input));
-    expect(result.env).toEqual({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' });
-  });
-
-  it('is inverse of stripTeamsConfig (roundtrip)', () => {
-    const base = JSON.stringify({
-      hooks: { Stop: [] },
-      env: { ENABLE_TOOL_SEARCH: 'true' },
-    }, null, 2);
-
-    const withTeams = applyTeamsConfig(base);
-    const stripped = stripTeamsConfig(withTeams);
-    const result = JSON.parse(stripped);
-
-    expect(result.teammateMode).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined();
-    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
-    expect(result.hooks).toEqual({ Stop: [] });
-  });
-});
-
-describe('stripTeamsConfig', () => {
-  it('removes teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', () => {
-    const input = JSON.stringify({
-      statusLine: { type: 'command', command: 'test' },
-      teammateMode: 'auto',
-      env: {
-        ENABLE_TOOL_SEARCH: 'true',
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-      },
-    }, null, 2);
-
-    const result = JSON.parse(stripTeamsConfig(input));
-    expect(result.teammateMode).toBeUndefined();
-    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined();
-    expect(result.env.ENABLE_TOOL_SEARCH).toBe('true');
-    expect(result.statusLine).toEqual({ type: 'command', command: 'test' });
-  });
-
-  it('preserves all other settings', () => {
-    const input = JSON.stringify({
-      hooks: { Stop: [] },
-      teammateMode: 'auto',
-      env: {
-        ENABLE_TOOL_SEARCH: 'true',
-        ENABLE_LSP_TOOL: 'true',
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-      },
-      permissions: { deny: ['Bash(rm -rf /*)'] },
-    }, null, 2);
-
-    const result = JSON.parse(stripTeamsConfig(input));
-    expect(result.hooks).toEqual({ Stop: [] });
-    expect(result.env).toEqual({ ENABLE_TOOL_SEARCH: 'true', ENABLE_LSP_TOOL: 'true' });
-    expect(result.permissions).toEqual({ deny: ['Bash(rm -rf /*)'] });
-  });
-
-  it('handles missing env and teammateMode gracefully', () => {
-    const input = JSON.stringify({
-      hooks: { Stop: [] },
-      statusLine: { type: 'command' },
-    }, null, 2);
-
-    const result = JSON.parse(stripTeamsConfig(input));
-    expect(result.hooks).toEqual({ Stop: [] });
-    expect(result.statusLine).toEqual({ type: 'command' });
-    expect(result.teammateMode).toBeUndefined();
-    expect(result.env).toBeUndefined();
-  });
-
-  it('removes empty env object when AGENT_TEAMS is the only key', () => {
-    const input = JSON.stringify({
-      teammateMode: 'auto',
-      env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' },
-    }, null, 2);
-
-    const result = JSON.parse(stripTeamsConfig(input));
-    expect(result.env).toBeUndefined();
-  });
-});
 
 describe('getManagedSettingsPath', () => {
   it('returns macOS path on darwin', () => {
@@ -504,7 +394,6 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       skillsMap: new Map(),
       agentsMap: new Map(),
       isPartialInstall: false,
-      teamsEnabled: false,
       spinner: noopSpinner,
     });
 
@@ -523,7 +412,6 @@ describe('installViaFileCopy cleanup (isPartialInstall)', () => {
       skillsMap: new Map(),
       agentsMap: new Map(),
       isPartialInstall: true,
-      teamsEnabled: false,
       spinner: noopSpinner,
     });
 
@@ -862,7 +750,6 @@ describe('shadow migration → install ordering', () => {
       skillsMap,
       agentsMap: new Map(),
       isPartialInstall: true,
-      teamsEnabled: false,
       spinner: noopSpinner,
     });
 
@@ -900,7 +787,6 @@ describe('shadow migration → install ordering', () => {
       skillsMap,
       agentsMap: new Map(),
       isPartialInstall: true,
-      teamsEnabled: false,
       spinner: noopSpinner,
     });
 

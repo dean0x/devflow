@@ -29,36 +29,6 @@ export function substituteSettingsTemplate(template: string, devflowDir: string)
 }
 
 /**
- * Add Agent Teams configuration to settings JSON.
- * Sets teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var.
- */
-export function applyTeamsConfig(settingsJson: string): string {
-  const settings = JSON.parse(settingsJson);
-  settings.teammateMode = 'auto';
-  if (!settings.env) {
-    settings.env = {};
-  }
-  settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
- * Remove Agent Teams configuration from settings JSON.
- * Strips teammateMode and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var.
- */
-export function stripTeamsConfig(settingsJson: string): string {
-  const settings = JSON.parse(settingsJson);
-  delete settings.teammateMode;
-  if (settings.env) {
-    delete settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
-    if (Object.keys(settings.env).length === 0) {
-      delete settings.env;
-    }
-  }
-  return JSON.stringify(settings, null, 2) + '\n';
-}
-
-/**
  * Compute which entries need appending to a .gitignore file.
  * Returns only entries not already present.
  */
@@ -301,7 +271,6 @@ export async function installSettings(
   rootDir: string,
   devflowDir: string,
   verbose: boolean,
-  teamsEnabled: boolean = false,
   securityMode: SecurityMode = 'user',
 ): Promise<void> {
   const settingsPath = path.join(claudeDir, 'settings.json');
@@ -324,10 +293,6 @@ export async function installSettings(
           p.log.warn('Could not load security deny list — settings will be written without it');
         }
       }
-    }
-
-    if (!teamsEnabled) {
-      settingsContent = stripTeamsConfig(settingsContent);
     }
 
     let settingsExists = false;
@@ -354,14 +319,7 @@ export async function installSettings(
     } catch { /* parse error = treat as no hooks */ }
 
     if (hasHooks) {
-      const existing = await fs.readFile(settingsPath, 'utf-8');
-      const updated = teamsEnabled
-        ? applyTeamsConfig(existing)
-        : stripTeamsConfig(existing);
-      await fs.writeFile(settingsPath, updated, 'utf-8');
-      if (verbose) {
-        p.log.info(`Settings updated (teams ${teamsEnabled ? 'enabled' : 'disabled'})`);
-      }
+      // Settings already configured with hooks — no teams config to apply or strip
       return;
     }
 

@@ -892,6 +892,47 @@ const MIGRATION_PURGE_STALE_MEMORY_MARKERS: Migration<'per-project'> = {
   },
 };
 
+/**
+ * Global: remove Devflow-written `teammateMode: "auto"` from ~/.claude/settings.json.
+ *
+ * The env var (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) self-heals via the flags
+ * registry (default OFF → stripFlags removes it on every init/uninstall).
+ * Only the `teammateMode` key needs explicit cleanup.
+ *
+ * Applies ADR-001 EXCEPTION: this is the minimum required migration — only the
+ * teammateMode key needs cleanup since the env var and manifest field self-heal.
+ * Idempotent: no-op if key absent, file missing, or malformed JSON (PF-004).
+ */
+const MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL: Migration<'global'> = {
+  id: 'purge-devflow-teammate-mode-global-v1',
+  description: 'Remove Devflow-written teammateMode:"auto" from ~/.claude/settings.json',
+  scope: 'global',
+  async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
+    const { stripDevflowTeammateMode } = await import('./teammate-mode-cleanup.js');
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    stripDevflowTeammateMode(settingsPath);
+    return { infos: [], warnings: [] };
+  },
+};
+
+/**
+ * Per-project: remove Devflow-written `teammateMode: "auto"` from
+ * <projectRoot>/.claude/settings.json (local-scope installs).
+ *
+ * Idempotent: no-op if key absent, file missing, or malformed JSON (PF-004).
+ */
+const MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT: Migration<'per-project'> = {
+  id: 'purge-devflow-teammate-mode-v1',
+  description: 'Remove Devflow-written teammateMode:"auto" from <project>/.claude/settings.json',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const { stripDevflowTeammateMode } = await import('./teammate-mode-cleanup.js');
+    const settingsPath = path.join(ctx.projectRoot, '.claude', 'settings.json');
+    stripDevflowTeammateMode(settingsPath);
+    return { infos: [], warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -906,6 +947,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_LEARNING_PIPELINE,
   MIGRATION_PURGE_LEARNING_GLOBAL,
   MIGRATION_PURGE_STALE_MEMORY_MARKERS,
+  MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL,
+  MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

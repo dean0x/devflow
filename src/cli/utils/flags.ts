@@ -157,6 +157,14 @@ export const FLAG_REGISTRY: readonly ClaudeCodeFlag[] = [
     target: { type: 'env', key: 'DISABLE_AUTOUPDATER', value: 'true' },
     defaultEnabled: false,
   },
+  {
+    id: 'agent-teams',
+    label: 'Agent Teams (experimental)',
+    description: 'Enable Claude Code experimental Agent Teams',
+    hint: 'Peer agents / teammate mode — experimental',
+    target: { type: 'env', key: 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', value: '1' },
+    defaultEnabled: false,
+  },
 ];
 
 /**
