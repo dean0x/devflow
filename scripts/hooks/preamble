@@ -61,12 +61,11 @@ case "$WORD" in
 esac
 shopt -u nocasematch
 
-# Guard B: skip prompts ending in '?' — runs against the full $PROMPT, not $HEAD,
-# because the trailing '?' lives at the END of the prompt, well beyond the 256-byte
-# keyword window. This is O(n) over prompt length (bash 3.2 ERE walks the whole string;
-# the $ anchor does NOT enable a tail-only scan). Cost applies only to keyword-matched
-# prompts and is negligible in practice (~6ms at 200KB). No subprocess required.
-if [[ -n "$SKILL" && -n "$REST" ]] && ! [[ "$PROMPT" =~ [?][[:space:]]*$ ]]; then
+# Fire when the first word is a workflow keyword followed by at least one more word.
+# (The former trailing-'?' guard was removed: it produced false negatives on
+# command-style prompts that close with a clarifying/rhetorical question, e.g.
+# "implement X … should I use Redis?" or "Explore the ambient mode … could it be?".)
+if [[ -n "$SKILL" && -n "$REST" ]]; then
   dbg "WORKFLOW_KEYWORD detected: $SKILL — injecting directive"
   json_prompt_output "The user's prompt begins with the \`$SKILL\` keyword, which signals the \`devflow:$SKILL\` workflow. In one short sentence, tell the user you're invoking \`devflow:$SKILL\`. Then immediately invoke it with the Skill tool, passing the user's full request (everything after the leading \`$SKILL\` keyword) as the skill input. Do not pause to ask whether to proceed."
 elif [[ "$PROMPT" == *"## Goal"* ]] && [[ "$PROMPT" == *"## Steps"* ]] && [[ "$PROMPT" == *"## Files"* ]]; then

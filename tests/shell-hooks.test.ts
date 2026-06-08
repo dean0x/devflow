@@ -1017,6 +1017,10 @@ describe('preamble keyword detection', () => {
       { prompt: 'Explore the auth flow',     expectedSkill: 'explore',   label: 'F2a: Explore (mixed case)' },
       { prompt: 'RESEARCH options now',      expectedSkill: 'research',  label: 'F2b: RESEARCH (uppercase)' },
       { prompt: 'debug: why it hangs',       expectedSkill: 'debug',     label: 'F3: debug with trailing punct' },
+      // F6a/F6b: the trailing-'?' guard (Guard B) was removed — a command-style prompt that
+      // closes with a clarifying/rhetorical question still dispatches. Keyword + ≥1 word wins.
+      { prompt: 'explore A or B?',           expectedSkill: 'explore',   label: 'F6a: trailing-? no longer suppressed' },
+      { prompt: 'debug this?  ',             expectedSkill: 'debug',     label: 'F6b: trailing-? + whitespace no longer suppressed' },
       // F13: the hook strips leading whitespace/newlines from HEAD before extracting the
       // first token, so prompts with leading newlines/spaces still dispatch correctly (ADR-014).
       { prompt: '\n\n  implement the cache', expectedSkill: 'implement', label: 'F13: leading newlines/spaces still match' },
@@ -1029,8 +1033,6 @@ describe('preamble keyword detection', () => {
       { prompt: 'explorer mode',          label: 'F4d: explorer (suffix)' },
       { prompt: 'implement',              label: 'F5a: bare implement (no following word)' },
       { prompt: 'plan',                   label: 'F5b: bare plan (no following word)' },
-      { prompt: 'explore A or B?',        label: 'F6a: question form suppressed' },
-      { prompt: 'debug this?  ',          label: 'F6b: question with trailing whitespace suppressed' },
       { prompt: 'fix the auth bug',       label: 'F9: non-keyword first word' },
       { prompt: '# Implement Command\n## Usage\n...', label: 'F11: # prefix not a keyword' },
       // F12: WORD="${TOKEN%[[:punct:]]}" strips exactly ONE trailing punct char.
