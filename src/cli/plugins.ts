@@ -93,7 +93,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   },
   {
     name: 'devflow-debug',
-    description: 'Debugging workflows with competing hypothesis investigation using agent teams',
+    description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
     skills: ['git', 'worktree-support', 'apply-feature-knowledge'],
