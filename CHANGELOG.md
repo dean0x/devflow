@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`agent-teams` Claude Code flag**: bespoke Agent Teams machinery removed; teammate-mode enablement now via the optional `agent-teams` flag (`devflow flags --enable agent-teams`), which sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`. The flag defaults to OFF.
+
+### Removed
+- **Agent Teams init flags** (BREAKING): `--teams` / `--no-teams` flags removed from `devflow init`. Projects that were using Devflow-managed `teammateMode: "auto"` will have that setting cleaned up automatically on the next `devflow init` or `devflow uninstall` run.
 - Self-learning system: detects repeated workflows and creates slash commands/skills automatically
 - **Learning**: `devflow learn --purge` command to remove invalid entries from learning log
 - **Learning**: debug logging mode (`devflow learn --configure`) — logs to `~/.devflow/logs/`

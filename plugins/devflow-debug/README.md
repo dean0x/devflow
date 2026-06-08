@@ -1,6 +1,6 @@
 # devflow-debug
 
-Debugging workflow plugin for Claude Code. Investigates bugs using competing hypotheses with agent teams for adversarial debate.
+Debugging workflow plugin for Claude Code. Investigates bugs using competing hypotheses for adversarial debate.
 
 ## Installation
 
@@ -11,12 +11,6 @@ npx devflow-kit init --plugin=debug
 # Via Claude Code (when available)
 /plugin install dean0x/devflow-debug
 ```
-
-## Prerequisites
-
-Requires Agent Teams feature:
-- Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings (included in Devflow settings)
-- Or install Devflow with `--override-settings` to enable automatically
 
 ## Usage
 
@@ -41,7 +35,6 @@ Requires Agent Teams feature:
 - `/debug` - Competing hypothesis debugging
 
 ### Skills
-- `agent-teams` - Team coordination patterns
 - `git` - Git safety, commits, GitHub API
 
 ## Output

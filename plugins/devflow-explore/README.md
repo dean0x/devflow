@@ -12,12 +12,6 @@ npx devflow-kit init --plugin=explore
 /plugin install dean0x/devflow-explore
 ```
 
-## Prerequisites
-
-Requires Agent Teams feature (for teams variant):
-- Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings (included in Devflow settings)
-- Or install Devflow with `--override-settings` to enable automatically
-
 ## Usage
 
 ```
@@ -34,20 +28,12 @@ Requires Agent Teams feature (for teams variant):
 4. **Present** - Structured findings with file:line references and drill-down offer
 5. **Knowledge Base Creation** - Optionally create a feature knowledge base to capture discovered patterns
 
-### Teams Variant
-
-The teams variant adds cross-validation between explorers:
-1. **Team Spawning** - Creates named explorer agents (flow, dependency, pattern)
-2. **Cross-Validation** - Explorers validate and extend each other's findings
-3. **Convergence** - Findings categorized as validated, corrected, or unvalidated
-
 ## Components
 
 ### Command
 - `/explore` - Codebase exploration with structured analysis
 
 ### Skills
-- `agent-teams` - Team coordination patterns
 - `worktree-support` - Git worktree path resolution
 - `apply-feature-knowledge` - Feature knowledge base consumption
 - `feature-knowledge` - Feature knowledge base creation

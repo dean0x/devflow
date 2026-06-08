@@ -18,7 +18,6 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--scope <user\|local>` | Installation scope (default: user) |
-| `--teams` / `--no-teams` | Enable/disable Agent Teams (default: off) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode (default: on) |
 | `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
 | `--decisions` / `--no-decisions` | Enable/disable decisions agent (default: on) |
@@ -140,6 +139,12 @@ npx devflow-kit flags --enable <flag>  # Enable a flag
 npx devflow-kit flags --disable <flag> # Disable a flag
 npx devflow-kit flags --status         # Show enabled flags
 ```
+
+Notable flags (default OFF):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `agent-teams` | OFF | Enables Claude Code's experimental Agent Teams via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`. Enable with `devflow flags --enable agent-teams`. |
 
 ## Uninstall
 

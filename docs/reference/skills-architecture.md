@@ -18,7 +18,6 @@ Shared patterns used by multiple agents.
 | `docs-framework` | Documentation conventions (.devflow/docs/ structure, naming, templates) | Synthesizer |
 | `git` | Git safety, atomic commits, PR descriptions, GitHub API patterns | Coder, Git, Resolver |
 | `patterns` | CRUD, API endpoints, events, config, logging | Coder, Resolver |
-| `agent-teams` | Agent Teams patterns for peer-to-peer collaboration, debate, consensus | /code-review, /implement, /debug, /plan, /research, /release |
 | `qa` | Scenario-based acceptance testing methodology, evidence collection | Tester |
 
 ### Tier 1b: Pattern Skills
