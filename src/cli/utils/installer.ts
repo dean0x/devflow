@@ -200,16 +200,16 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   for (const plugin of plugins) {
     const pluginSourceDir = path.join(pluginsDir, plugin.name);
 
-    // Install commands (base .md files only — no teams variants)
+    // Install commands (every .md file — one variant per command)
     const commandsSource = path.join(pluginSourceDir, 'commands');
     const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
     try {
       const allFiles = await fs.readdir(commandsSource);
-      const baseCommands = allFiles.filter(f => f.endsWith('.md') && !f.endsWith('-teams.md'));
+      const commandFiles = allFiles.filter(f => f.endsWith('.md'));
 
-      if (baseCommands.length > 0) {
+      if (commandFiles.length > 0) {
         await fs.mkdir(commandsTarget, { recursive: true });
-        for (const file of baseCommands) {
+        for (const file of commandFiles) {
           await fs.copyFile(
             path.join(commandsSource, file),
             path.join(commandsTarget, file),

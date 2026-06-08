@@ -319,7 +319,7 @@ export async function installSettings(
     } catch { /* parse error = treat as no hooks */ }
 
     if (hasHooks) {
-      // Settings already configured with hooks — no teams config to apply or strip
+      // Settings already configured with hooks — nothing to do
       return;
     }
 

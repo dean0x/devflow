@@ -1,4 +1,27 @@
-import { promises as fs, readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
+
+/**
+ * Strip `teammateMode: "auto"` from a parsed settings object in-place.
+ * Returns the serialised JSON string (with trailing newline).
+ *
+ * Pure string→string — matches the pipeline pattern used by stripFlags /
+ * stripViewMode so uninstall.ts can chain it without a separate parse/stringify.
+ * Only removes the key when the value is exactly `"auto"`; user-set values
+ * (`"tmux"`, `"in-process"`, etc.) are preserved as-is.
+ *
+ * Tolerant: malformed JSON is returned unchanged (no-op).
+ */
+export function stripDevflowTeammateModeFromJson(settingsJson: string): string {
+  let settings: Record<string, unknown>;
+  try {
+    settings = JSON.parse(settingsJson) as Record<string, unknown>;
+  } catch {
+    return settingsJson; // Malformed JSON — leave untouched
+  }
+  if (settings['teammateMode'] !== 'auto') return settingsJson;
+  delete settings['teammateMode'];
+  return JSON.stringify(settings, null, 2) + '\n';
+}
 
 /**
  * Strip the Devflow-written `teammateMode: "auto"` from a settings JSON file.
@@ -35,37 +58,5 @@ export function stripDevflowTeammateMode(settingsPath: string): void {
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
   } catch {
     // Write failed — swallow; non-fatal (migration will retry on next init)
-  }
-}
-
-/**
- * Async variant of stripDevflowTeammateMode — same semantics, used in async
- * contexts (uninstall command).
- */
-export async function stripDevflowTeammateModeAsync(settingsPath: string): Promise<void> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(settingsPath, 'utf-8');
-  } catch {
-    return; // ENOENT or unreadable — no-op
-  }
-
-  let settings: Record<string, unknown>;
-  try {
-    settings = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return; // Malformed JSON — leave untouched
-  }
-
-  if (settings['teammateMode'] !== 'auto') {
-    return; // Not Devflow-written value — preserve
-  }
-
-  delete settings['teammateMode'];
-
-  try {
-    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-  } catch {
-    // Write failed — swallow; non-fatal
   }
 }

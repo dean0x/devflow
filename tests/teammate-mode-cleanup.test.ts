@@ -3,9 +3,34 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
+  stripDevflowTeammateModeFromJson,
   stripDevflowTeammateMode,
-  stripDevflowTeammateModeAsync,
 } from '../src/cli/utils/teammate-mode-cleanup.js';
+
+describe('stripDevflowTeammateModeFromJson (string pipeline)', () => {
+  it('removes teammateMode when value is exactly "auto"', () => {
+    const input = JSON.stringify({ teammateMode: 'auto', env: { TOOL: 'true' } }, null, 2) + '\n';
+    const result = JSON.parse(stripDevflowTeammateModeFromJson(input));
+    expect(result.teammateMode).toBeUndefined();
+    expect(result.env.TOOL).toBe('true');
+  });
+
+  it('preserves teammateMode when value is not "auto"', () => {
+    const input = JSON.stringify({ teammateMode: 'tmux' }, null, 2) + '\n';
+    const output = stripDevflowTeammateModeFromJson(input);
+    expect(JSON.parse(output).teammateMode).toBe('tmux');
+  });
+
+  it('is a no-op when teammateMode key is absent', () => {
+    const input = JSON.stringify({ hooks: { Stop: [] } }, null, 2) + '\n';
+    expect(stripDevflowTeammateModeFromJson(input)).toBe(input);
+  });
+
+  it('returns input unchanged for malformed JSON', () => {
+    const bad = 'not valid json {{{';
+    expect(stripDevflowTeammateModeFromJson(bad)).toBe(bad);
+  });
+});
 
 describe('stripDevflowTeammateMode (sync)', () => {
   let tmpDir: string;
@@ -93,64 +118,5 @@ describe('stripDevflowTeammateMode (sync)', () => {
     const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(result.teammateMode).toBeUndefined();
     expect(result.env.TOOL).toBe('true');
-  });
-});
-
-describe('stripDevflowTeammateModeAsync (async)', () => {
-  let tmpDir: string;
-  let settingsPath: string;
-
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-teammate-async-'));
-    settingsPath = path.join(tmpDir, 'settings.json');
-  });
-
-  afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
-
-  it('removes teammateMode when value is exactly "auto"', async () => {
-    const settings = { teammateMode: 'auto', hooks: { Stop: [] }, env: { TOOL: 'true' } };
-    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-
-    await stripDevflowTeammateModeAsync(settingsPath);
-
-    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-    expect(result.teammateMode).toBeUndefined();
-    expect(result.hooks).toEqual({ Stop: [] });
-    expect(result.env.TOOL).toBe('true');
-  });
-
-  it('preserves non-"auto" teammateMode values', async () => {
-    const settings = { teammateMode: 'tmux' };
-    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-
-    await stripDevflowTeammateModeAsync(settingsPath);
-
-    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-    expect(result.teammateMode).toBe('tmux');
-  });
-
-  it('is a no-op when file does not exist (ENOENT-safe)', async () => {
-    const missing = path.join(tmpDir, 'nonexistent.json');
-    await expect(stripDevflowTeammateModeAsync(missing)).resolves.not.toThrow();
-  });
-
-  it('is a no-op for malformed JSON', async () => {
-    await fs.writeFile(settingsPath, '{invalid}', 'utf-8');
-    await expect(stripDevflowTeammateModeAsync(settingsPath)).resolves.not.toThrow();
-    const content = await fs.readFile(settingsPath, 'utf-8');
-    expect(content).toBe('{invalid}');
-  });
-
-  it('has same semantics as sync variant (parallel correctness)', async () => {
-    const settings = { teammateMode: 'auto', otherKey: 'value' };
-    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-
-    await stripDevflowTeammateModeAsync(settingsPath);
-
-    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
-    expect(result.teammateMode).toBeUndefined();
-    expect(result.otherKey).toBe('value');
   });
 });
