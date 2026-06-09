@@ -999,6 +999,17 @@ export const initCommand = new Command('init')
         }
       }
     }
+    // Sweep orphaned *-teams.md workflow command variants left by the Agent Teams
+    // refactor. None are ever re-installed, so a blanket sweep is safe on any
+    // install type (the full-install dir wipe only covers full installs). (PF-009)
+    try {
+      for (const f of await fs.readdir(commandsDir)) {
+        if (f.endsWith('-teams.md')) {
+          try { await fs.rm(path.join(commandsDir, f)); staleCommandsRemoved++; }
+          catch { /* already gone */ }
+        }
+      }
+    } catch { /* commands dir absent — nothing to sweep */ }
     if (staleCommandsRemoved > 0 && verbose) {
       p.log.info(`Cleaned up ${staleCommandsRemoved} legacy command(s)`);
     }
