@@ -989,7 +989,7 @@ export const initCommand = new Command('init')
     const commandsDir = path.join(claudeDir, 'commands', 'devflow');
     let staleCommandsRemoved = 0;
     for (const legacy of LEGACY_COMMAND_NAMES) {
-      for (const suffix of ['.md', '-teams.md']) {
+      for (const suffix of ['.md']) {
         const legacyPath = path.join(commandsDir, `${legacy}${suffix}`);
         try {
           await fs.rm(legacyPath);

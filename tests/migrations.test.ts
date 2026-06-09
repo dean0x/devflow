@@ -1997,9 +1997,9 @@ describe('purge-devflow-teammate-mode-v1 migration', () => {
     expect(result.teammateMode).toBeUndefined();
   });
 
-  it('returns infos and warnings', async () => {
+  it('returns empty infos and warnings', async () => {
     const result = await getMigration().run(makeCtx());
-    expect(Array.isArray(result?.infos ?? [])).toBe(true);
-    expect(Array.isArray(result?.warnings ?? [])).toBe(true);
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
   });
 });
