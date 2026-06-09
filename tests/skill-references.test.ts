@@ -565,10 +565,6 @@ describe('Format 8: Skill cross-references within shared/skills/', () => {
 // ---------------------------------------------------------------------------
 
 describe('Format 9: Bare skill names in README "Skills" sections', () => {
-  // Skills removed in a refactor whose READMEs are updated separately (doc-only change).
-  // Listing them here prevents test breakage while the docs update is pending.
-  const PENDING_README_REMOVAL = new Set(['agent-teams']);
-
   it('every bare backtick skill name in plugin README "Skills" sections is canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
 
@@ -583,7 +579,6 @@ describe('Format 9: Bare skill names in README "Skills" sections', () => {
 
       const bareNames = extractSkillSectionNames(content);
       for (const name of bareNames) {
-        if (PENDING_README_REMOVAL.has(name)) continue; // doc-only cleanup pending
         expect(
           canonicalSkills.has(name),
           `plugins/${plugin.name}/README.md: bare skill name '${name}' in Skills section is not in canonical getAllSkillNames()`,
@@ -598,9 +593,6 @@ describe('Format 9: Bare skill names in README "Skills" sections', () => {
 // ---------------------------------------------------------------------------
 
 describe('Format 10: Bare skill names in skills-architecture.md tables', () => {
-  // Skills removed in a refactor whose docs are updated separately (doc-only change).
-  const PENDING_DOC_REMOVAL = new Set(['agent-teams']);
-
   it('every first-column backtick name in skills-architecture.md is canonical', () => {
     const canonicalSkills = new Set(getAllSkillNames());
     let content: string;
@@ -614,7 +606,6 @@ describe('Format 10: Bare skill names in skills-architecture.md tables', () => {
     expect(tableNames.length, 'should find backtick names in table rows').toBeGreaterThan(0);
 
     for (const name of tableNames) {
-      if (PENDING_DOC_REMOVAL.has(name)) continue; // doc-only cleanup pending
       expect(
         canonicalSkills.has(name),
         `docs/reference/skills-architecture.md: table entry '${name}' is not in canonical getAllSkillNames()`,

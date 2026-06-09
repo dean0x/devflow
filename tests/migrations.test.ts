@@ -1970,6 +1970,17 @@ describe('purge-devflow-teammate-mode-v1 migration', () => {
     expect(result.teammateMode).toBe('tmux');
   });
 
+  it('preserves user-set teammateMode values (e.g., "in-process")', async () => {
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    const settings = { teammateMode: 'in-process', hooks: {} };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(result.teammateMode).toBe('in-process');
+  });
+
   it('is a no-op when settings file does not exist', async () => {
     await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
   });
