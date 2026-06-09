@@ -32,7 +32,7 @@ describe('stripDevflowTeammateModeFromJson (string pipeline)', () => {
   });
 });
 
-describe('stripDevflowTeammateMode (sync)', () => {
+describe('stripDevflowTeammateMode (async)', () => {
   let tmpDir: string;
   let settingsPath: string;
 
@@ -53,7 +53,7 @@ describe('stripDevflowTeammateMode (sync)', () => {
     };
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 
-    stripDevflowTeammateMode(settingsPath);
+    await stripDevflowTeammateMode(settingsPath);
 
     const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(result.teammateMode).toBeUndefined();
@@ -66,7 +66,7 @@ describe('stripDevflowTeammateMode (sync)', () => {
     const settings = { teammateMode: 'tmux', hooks: {} };
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 
-    stripDevflowTeammateMode(settingsPath);
+    await stripDevflowTeammateMode(settingsPath);
 
     const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(result.teammateMode).toBe('tmux');
@@ -76,7 +76,7 @@ describe('stripDevflowTeammateMode (sync)', () => {
     const settings = { teammateMode: 'in-process', hooks: {} };
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 
-    stripDevflowTeammateMode(settingsPath);
+    await stripDevflowTeammateMode(settingsPath);
 
     const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(result.teammateMode).toBe('in-process');
@@ -87,22 +87,22 @@ describe('stripDevflowTeammateMode (sync)', () => {
     const original = JSON.stringify(settings, null, 2);
     await fs.writeFile(settingsPath, original, 'utf-8');
 
-    stripDevflowTeammateMode(settingsPath);
+    await stripDevflowTeammateMode(settingsPath);
 
     const content = await fs.readFile(settingsPath, 'utf-8');
     expect(JSON.parse(content)).toEqual(settings);
   });
 
-  it('is a no-op when file does not exist (ENOENT-safe)', () => {
+  it('is a no-op when file does not exist (ENOENT-safe)', async () => {
     const missing = path.join(tmpDir, 'nonexistent.json');
     // Must not throw
-    expect(() => stripDevflowTeammateMode(missing)).not.toThrow();
+    await expect(stripDevflowTeammateMode(missing)).resolves.not.toThrow();
   });
 
   it('is a no-op for malformed JSON (tolerant)', async () => {
     await fs.writeFile(settingsPath, 'not valid json {{{', 'utf-8');
     // Must not throw
-    expect(() => stripDevflowTeammateMode(settingsPath)).not.toThrow();
+    await expect(stripDevflowTeammateMode(settingsPath)).resolves.not.toThrow();
     // File left unchanged
     const content = await fs.readFile(settingsPath, 'utf-8');
     expect(content).toBe('not valid json {{{');
@@ -112,11 +112,27 @@ describe('stripDevflowTeammateMode (sync)', () => {
     const settings = { teammateMode: 'auto', env: { TOOL: 'true' } };
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 
-    stripDevflowTeammateMode(settingsPath);
-    stripDevflowTeammateMode(settingsPath); // second call — no-op
+    await stripDevflowTeammateMode(settingsPath);
+    await stripDevflowTeammateMode(settingsPath); // second call — no-op
 
     const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
     expect(result.teammateMode).toBeUndefined();
     expect(result.env.TOOL).toBe('true');
+  });
+
+  it('propagates write errors (avoids PF-004: swallowed failure masks failed migration)', async () => {
+    // Write a valid file with teammateMode:"auto" so a write is attempted.
+    const settings = { teammateMode: 'auto' };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    // Make the file read-only so readFile succeeds but writeFile rejects.
+    await fs.chmod(settingsPath, 0o444);
+
+    try {
+      await expect(stripDevflowTeammateMode(settingsPath)).rejects.toThrow();
+    } finally {
+      // Restore permissions so afterEach cleanup can delete the temp dir.
+      await fs.chmod(settingsPath, 0o644);
+    }
   });
 });

@@ -910,7 +910,7 @@ const MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL: Migration<'global'> = {
   async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
     const { stripDevflowTeammateMode } = await import('./teammate-mode-cleanup.js');
     const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
-    stripDevflowTeammateMode(settingsPath);
+    await stripDevflowTeammateMode(settingsPath);
     return { infos: [], warnings: [] };
   },
 };
@@ -928,7 +928,7 @@ const MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT: Migration<'per-project'> = {
   async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
     const { stripDevflowTeammateMode } = await import('./teammate-mode-cleanup.js');
     const settingsPath = path.join(ctx.projectRoot, '.claude', 'settings.json');
-    stripDevflowTeammateMode(settingsPath);
+    await stripDevflowTeammateMode(settingsPath);
     return { infos: [], warnings: [] };
   },
 };
