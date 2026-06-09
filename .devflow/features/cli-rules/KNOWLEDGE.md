@@ -18,7 +18,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-06-08
+updated: 2026-06-09
 ---
 
 # Rules System CLI
@@ -98,7 +98,13 @@ Four helper functions in `plugins.ts` serve distinct scopes:
 - `isValidRuleName(name)` — validates rule names match `/^[a-z0-9-]+$/`; called by `buildRulesMap` at map-build time as a path-traversal defense
 - `LEGACY_RULE_NAMES` — currently empty; add entries here when renaming or removing a rule
 
-The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the three active per-task Dream skills (`dream-decisions`, `dream-knowledge`, `dream-curation`). `dream-memory` was removed from the active skills list in PR #238 — memory is now handled entirely by the `background-memory-update` detached worker, not a Dream subagent. Both `dream-memory` (bare) and `devflow:dream-memory` (namespaced) are in `LEGACY_SKILLS_V2X` so older installs that had them are swept during `devflow init`. The learning pipeline skills (`eval-learning`, `eval-reinforce`, and the `devflow learn` CLI) were removed in PR #238.
+The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the three active per-task Dream skills (`dream-decisions`, `dream-knowledge`, `dream-curation`). `dream-memory` was removed from the active skills list in PR #239 — memory is now handled entirely by the `background-memory-update` detached worker, not a Dream subagent. Both `dream-memory` (bare) and `devflow:dream-memory` (namespaced) are in `LEGACY_SKILLS_V2X` so older installs that had them are swept during `devflow init`. The learning pipeline skills (`eval-learning`, `eval-reinforce`, and the `devflow learn` CLI) were removed in PR #238.
+
+**Agent Teams removal (PR #240)**: The bespoke Agent Teams machinery was removed. The eight `*-teams.md` command variants, the `agent-teams` skill, all `teamsEnabled`/`applyTeamsConfig`/`stripTeamsConfig` touch-points, and the `--teams`/`--no-teams` init flags were deleted. Agent Teams is re-exposed as a single optional flag `agent-teams` in `FLAG_REGISTRY` (defaultEnabled: false), toggled via `devflow flags --enable agent-teams`. Key cleanup mechanics:
+- `devflow:agent-teams` (namespaced) is in `LEGACY_SKILLS_V2X` for install cleanup
+- `init.ts` sweeps orphaned `*-teams.md` files from the commands directory unconditionally on every install type (full install clears the dir; partial install runs the explicit blanket sweep)
+- Two migrations clean stale `teammateMode: "auto"` written by prior Devflow installs: `purge-devflow-teammate-mode-global-v1` (global, `~/.claude/settings.json`) and `purge-devflow-teammate-mode-v1` (per-project, `<projectRoot>/.claude/settings.json`)
+- `stripDevflowTeammateModeFromJson` in `src/cli/utils/teammate-mode-cleanup.ts` is the pure function that handles the cleanup; called by both migrations and by `uninstall.ts`
 
 **Dual-role bare entries in `LEGACY_SKILLS_V2X`**: the bare entries `dream-decisions`, `dream-knowledge`, and `dream-curation` are still-active skills installed at `devflow:<bare-name>`. These bare entries in `LEGACY_SKILLS_V2X` exist only to clean up pre-namespace V2.x install directories (e.g., `~/.claude/skills/dream-decisions`). On current installs, the `fs.rm` targeting the bare path is a harmless no-op because active skills always install under the `devflow:` prefix. A block comment in `plugins.ts` documents this explicitly — do NOT remove these entries or V2.x upgraders will be left with stale bare-name dirs.
 
@@ -144,7 +150,7 @@ Key install properties:
 
 ### Manifest Tracking
 
-`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs). The `features.learn` field was removed from `ManifestData` in PR #238 (learning pipeline removal); `DreamConfig` (in `src/cli/utils/dream-config.ts`) now tracks only `{memory, decisions, knowledge}`. The `--learn`/`--no-learn` CLI option and `learnEnabled` variable in `init.ts` no longer exist.
+`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs). The `features.learn` field was removed from `ManifestData` in PR #238 (learning pipeline removal); `DreamConfig` (in `src/cli/utils/dream-config.ts`) now tracks only `{memory, decisions, knowledge}`. The `--learn`/`--no-learn` CLI option and `learnEnabled` variable in `init.ts` no longer exist. The `features.teams`/`teamsEnabled` manifest field was removed in PR #240 (agent-teams removal) — `manifest.features` no longer tracks agent-teams state at all; it is handled entirely by `features.flags: string[]`.
 
 ### `devflow rules` Command
 
@@ -198,6 +204,8 @@ export const WORKFLOW_ORDER: string[] = [
 ```
 `init.ts` imports it from `plugins.ts` rather than keeping a local duplicate. A regression guard test in `tests/plugins.test.ts` verifies every entry has a real backing command in `DEVFLOW_PLUGINS` (bidirectional: WORKFLOW_ORDER ⊆ commands AND commands ⊆ WORKFLOW_ORDER for the non-excluded set). `/bug-analysis` was added to WORKFLOW_ORDER in this same commit — the regression guard catches future omissions.
 
+**Agent Teams init flags removed (PR #240)**: The `--teams`/`--no-teams` init flags and `teamsEnabled` variable no longer exist. Users who want Agent Teams mode use `devflow flags --enable agent-teams` instead.
+
 **Learning pipeline removed (PR #238)**: The `--learn`/`--no-learn` init flags, `learnEnabled` variable, and `features.learn` manifest field no longer exist. The self-learning step in the Advanced mode prompt was removed. Legacy hook scripts `eval-learning` and `eval-reinforce` are now in the init's legacy hook cleanup list alongside their removal from `dream-evaluate` sourcing.
 
 **Excluded from plugin selection buckets**: `devflow-core-skills` (always installed), `devflow-ambient` (always installed), `devflow-audit-claude` (installable via `--plugin` only).
@@ -208,7 +216,7 @@ export const WORKFLOW_ORDER: string[] = [
 
 **init → rules**: `rulesEnabled` flows through to `buildRulesMap(pluginsToInstall)` → `installViaFileCopy`. When disabled, post-install removes `~/.claude/rules/devflow/` entirely.
 
-**uninstall → rules**: Full uninstall (`removeAllDevFlow`) includes `~/.claude/rules/devflow/` in its target list. Selective plugin uninstall (`computeAssetsToRemove`) computes which rules to remove using the same "retained by remaining plugins" logic as skills.
+**uninstall → rules**: Full uninstall (`removeAllDevFlow`) includes `~/.claude/rules/devflow/` in its target list. Selective plugin uninstall (`computeAssetsToRemove`) computes which rules to remove using the same "retained by remaining plugins" logic as skills. `uninstall.ts` also calls `stripDevflowTeammateModeFromJson` to clean `teammateMode: "auto"` written by prior Devflow installs.
 
 **list → rules**: `devflow list` shows `rules` in the Features line when `manifest.features.rules` is true.
 
@@ -234,6 +242,7 @@ export const WORKFLOW_ORDER: string[] = [
 - **Unbounded plugin selection loop**: The bounded `while (attempts < MAX_ATTEMPTS)` + `shouldRetry` guard is the pattern — never replace with `while (true)`.
 - **Long rule files**: Rules should be ~10-15 lines. If a rule grows beyond ~20 lines, extract the detail into a skill's `references/` directory.
 - **Omitting `rules: []` on a plugin**: The `rules` field is required on `PluginDefinition`. Omitting it causes TypeScript errors at build time.
+- **Adding a bespoke feature toggle to `manifest.features`**: Agent Teams was removed partly because it was a bespoke `teamsEnabled` field on the manifest. New optional toggleable Claude Code behaviours belong in `FLAG_REGISTRY` with `defaultEnabled: false`, not as custom manifest fields.
 
 ## Gotchas
 
@@ -251,31 +260,38 @@ export const WORKFLOW_ORDER: string[] = [
 - **Core vs language rules have different token behavior**: Core rules load on every prompt. Language rules only activate when Claude is working with a matching file type.
 - **manifest.ts contains a `kb → knowledge` migration self-heal**: `readManifest` detects `features.kb` and migrates it to `features.knowledge` in-place. This is the only backward-compat code in `manifest.ts`; do not add more. For rules, `LEGACY_RULE_NAMES` is the correct pattern when renaming rule files.
 - **`features.learn` no longer exists in ManifestData**: The learning pipeline was removed in PR #238. `manifest.features.learn`, `--learn`/`--no-learn` init flags, and `learnEnabled` in `init.ts` are all gone. Two migrations (`purge-learning-pipeline-v1` per-project, `purge-learning-global-v1` global) in `src/cli/utils/migrations.ts` sweep legacy learning artifacts on `devflow init`. `eval-learning` and `eval-reinforce` hook scripts are removed and in the legacy hook cleanup list.
-- **`dream-memory` skill is no longer active**: `dream-memory` was removed from `devflow-core-skills` skills array in PR #238. Memory refresh is handled by `background-memory-update` (detached worker), not a Dream subagent. Both `dream-memory` and `devflow:dream-memory` are in `LEGACY_SKILLS_V2X` and are swept by `devflow init`. New migration `purge-stale-memory-markers-v1` sweeps `dream/memory.*` marker files from old installations.
+- **`features.teams` no longer exists in ManifestData**: The agent-teams bespoke manifest field was removed in PR #240. Agent Teams is now a standard flag entry in `FLAG_REGISTRY` (`id: 'agent-teams'`, `defaultEnabled: false`). The env var `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is applied/stripped by the normal `applyFlags`/`stripFlags` machinery. Migration `purge-devflow-teammate-mode-global-v1` (global) and `purge-devflow-teammate-mode-v1` (per-project) clean up stale `teammateMode: "auto"` written by prior installs.
+- **`*-teams.md` command files are orphaned, not re-installed**: The blanket sweep in `init.ts` (`f.endsWith('-teams.md')`) runs on every install type including partial installs. This is safe because no `*-teams.md` command file is ever installed by current Devflow. Old installs that had these files will have them cleaned up on the next `devflow init`.
+- **`dream-memory` skill is no longer active**: `dream-memory` was removed from `devflow-core-skills` skills array in PR #239 (the `dream-memory` SKILL.md file was removed in PR #238; the skills array entry was removed in PR #239). Memory refresh is handled by `background-memory-update` (detached worker), not a Dream subagent. Both `dream-memory` and `devflow:dream-memory` are in `LEGACY_SKILLS_V2X` and are swept by `devflow init`. Migration `purge-stale-memory-markers-v1` (added in PR #239) sweeps `dream/memory.*` marker files from old installations.
 - **`DreamConfig` tracks only 3 features**: `{memory, decisions, knowledge}` — the `learning` key was removed from `DreamConfig` in PR #238. Do not add it back or reference it.
 - **New migration `sync-devflow-gitignore-v2`**: Per-project migration added in PR #238 to re-sync `.devflow/.gitignore` to the ignore-by-default allowlist policy. Overwrites existing `.gitignore` if content differs from canonical template. ENOENT-safe (no-op if `.devflow/` does not exist).
 
 ## Key Files
 
 - `shared/rules/` — source of truth for all rule content; flat `.md` files (12 total)
-- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER`, `partitionSelectablePlugins()`; active Dream skills: `dream-decisions`, `dream-knowledge`, `dream-curation` (NOT `dream-memory`); `LEGACY_SKILLS_V2X` includes `dream-memory` and `devflow:dream-memory` for cleanup
-- `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; no `--learn`/`--no-learn` or `learnEnabled` (removed PR #238)
+- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER`, `partitionSelectablePlugins()`; active Dream skills: `dream-decisions`, `dream-knowledge`, `dream-curation` (NOT `dream-memory`); `LEGACY_SKILLS_V2X` includes `dream-memory`, `devflow:dream-memory`, and `devflow:agent-teams` for cleanup
+- `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; blanket `*-teams.md` command sweep; no `--learn`/`--no-learn` or `learnEnabled` (removed PR #238); no `--teams`/`--no-teams` or `teamsEnabled` (removed PR #240)
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
 - `src/cli/commands/ambient.ts` — purges legacy `commands.md` via `COMMANDS_RULE_PATH` / `removeLegacyCommandsRule()`; called unconditionally from `addAmbientHook` and `removeAmbientHook` so stale files are cleaned up on every enable/disable/init
 - `src/cli/utils/installer.ts` — `installRuleFile` (exported); `installViaFileCopy` rules section
-- `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files
-- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed in PR #238
-- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore` to ignore-by-default allowlist policy; `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; applies ADR-002; `eval-learning` and `eval-reinforce` in legacy hook cleanup list
+- `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files; calls `stripDevflowTeammateModeFromJson` to clean `teammateMode`
+- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed in PR #238; no `features.teams` (removed PR #240)
+- `src/cli/utils/flags.ts` — `FLAG_REGISTRY` with 18 entries including `agent-teams` (defaultEnabled: false); `applyFlags`/`stripFlags`/`getDefaultFlags`; `applyViewMode`/`stripViewMode`
+- `src/cli/utils/teammate-mode-cleanup.ts` — `stripDevflowTeammateModeFromJson` (pure, tolerant) and `stripDevflowTeammateMode` (file I/O wrapper); used by both migrations and uninstall
+- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore`; `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; `purge-devflow-teammate-mode-global-v1` (global) + `purge-devflow-teammate-mode-v1` (per-project) remove `teammateMode: "auto"` from settings.json files; applies ADR-002
 - `scripts/build-plugins.ts` — build-time distribution from `shared/rules/` → `plugins/*/rules/`
-- `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional) + `LEGACY_SKILL_NAMES consistency` guard (asserts no namespaced legacy entry collides with an active skill install path; scoped to `devflow:`-prefixed entries only — bare entries legitimately double as active skill names)
+- `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional) + `LEGACY_SKILL_NAMES consistency` guard
 - `tests/init.test.ts` — `combineSelection` and `shouldRetry` unit tests
+- `tests/teammate-mode-cleanup.test.ts` — `stripDevflowTeammateModeFromJson` and `stripDevflowTeammateMode` tests
 
 ## Related
 
-- ADR-002: Migrations leave a clean house — learning-pipeline purge migrations follow this pattern
+- ADR-002: Migrations leave a clean house — learning-pipeline purge migrations and agent-teams cleanup migrations follow this pattern
 - ADR-012: `.devflow` knowledge committed to git — governs feature knowledge storage; rules themselves install outside the repo to `~/.claude/rules/devflow/`
 - Skills system (parallel architecture): `src/cli/utils/installer.ts` `installViaFileCopy` skills section is the model rules followed
-- Feature flags: `src/cli/utils/flags.ts` — another toggleable feature using the same manifest.features pattern
+- Feature flags: `src/cli/utils/flags.ts` — another toggleable feature using the same manifest.features pattern; now the home for `agent-teams` after bespoke pipeline removal
 - Ambient simplification (c51114d): introduced `commands.md` rule + ambient-managed separation
 - Init flow simplification (5143d73–154899b): two-step selection, `partitionSelectablePlugins`, `WORKFLOW_ORDER` export, `combineSelection`/`shouldRetry`
-- PR #238 (learning removal): removed `dream-memory` from active skills, removed `features.learn`, removed `--learn`/`--no-learn`, added `purge-learning-pipeline-v1` + `purge-stale-memory-markers-v1` + `sync-devflow-gitignore-v2` migrations
+- PR #238 (learning removal): removed `dream-memory` SKILL.md file, removed `features.learn`, removed `--learn`/`--no-learn`, added `purge-learning-pipeline-v1` + `sync-devflow-gitignore-v2` migrations; note — `dream-memory` was removed from the `devflow-core-skills` skills ARRAY in PR #239 (not #238)
+- PR #239 (eager memory refresh): removed `dream-memory` from `devflow-core-skills` skills array, added `background-memory-update` worker, added `purge-stale-memory-markers-v1` migration; `background-memory-update` is NOT in `LEGACY_HOOK_FILES` (fixed in `8c157db`)
+- PR #240 (agent-teams removal): removed bespoke Agent Teams machinery; re-exposed as `agent-teams` flag in `FLAG_REGISTRY`; added `purge-devflow-teammate-mode-global-v1` + `purge-devflow-teammate-mode-v1` migrations; blanket `*-teams.md` sweep in `init.ts`; `devflow:agent-teams` skill in `LEGACY_SKILLS_V2X`

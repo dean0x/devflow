@@ -1,4 +1,4 @@
-<!-- TL;DR: 17 decisions. Key: ADR-013, ADR-014, ADR-015, ADR-016, ADR-017 -->
+<!-- TL;DR: 17 decisions. Key: -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.
@@ -11,15 +11,6 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: remove all compat code except one-time cleanup items (legacy hook file removal, manifest self-heal write-back)
 - **Consequences**: 'Don't want to start accumulating backward compatible code. And we don't really have that many users of devflow yet' — avoid polluting codebase with compat cruft when user base is small
 - **Source**: self-learning:obs_c9d3m1
-
-## ADR-002: Migrations must leave a clean house — delete all legacy artifacts, not just move new-path files
-
-- **Date**: 2026-05-19
-- **Status**: Accepted
-- **Context**: The `consolidate-to-devflow-dir` migration moved files from `.memory/`, `.features/`, `.docs/` to `.devflow/` subdirectories, but deliberately skipped certain legacy files (`.knowledge-usage.json`, `.working-memory-last-trigger`, `.gitignore-configured`, `knowledge/` subdir) and then only attempted rmdir if directories were empty — which they never were
-- **Decision**: Migrations must explicitly delete all legacy files (including those previously in skip-lists) and clean up old empty directories. The goal is a fully clean post-migration state, not just successful file movement.
-- **Consequences**: Users get a clean slate after migration with no residual legacy directories alongside the new structure. Eliminates confusion from parallel old/new directory presence and removes the risk of stale writes from non-reinstalled hooks targeting legacy paths.
-- **Source**: self-learning:obs_u8elbu
 
 ## ADR-003: .devflow/.gitignore template must exclude transient per-developer artifacts
 
@@ -156,3 +147,12 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: keep the cross-session lock and harden its acquisition from give-up-fast to a bounded retry+backoff (explicit attempt cap with exponential backoff, leave .processing for retry on exhaustion)
 - **Consequences**: the lock protects against concurrent writes to decisions.md/pitfalls.md from different sessions — a hazard that exists regardless of how the agent is structured
 - **Source**: self-learning:obs_dreamlock1
+
+## ADR-018: Drop the preamble ambient hook trailing-? guard so command-style keyword prompts ending in a question mark still dispatch
+
+- **Date**: 2026-06-08
+- **Status**: Accepted
+- **Context**: the preamble ambient hook had a Guard B clause (! [[ $PROMPT =~ [?][[:space:]]*$ ]]) that suppressed first-word keyword dispatch whenever a prompt ended in a question mark, so command-style prompts phrased as questions (Explore X. Could it be?) silently failed to trigger the matching devflow skill
+- **Decision**: drop Guard B entirely from scripts/hooks/preamble so first-word keyword prompts dispatch regardless of a trailing question mark
+- **Consequences**: users routinely phrase command-style prompts as questions
+- **Source**: self-learning:obs_preamble3

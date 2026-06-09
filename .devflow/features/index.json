@@ -3,7 +3,7 @@
   "features": {
     "cli-rules": {
       "name": "Rules System CLI",
-      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry.",
+      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry, FLAG_REGISTRY, agent-teams, teammate-mode-cleanup, stripDevflowTeammateModeFromJson.",
       "directories": [
         "src/cli/commands/",
         "src/cli/utils/",
@@ -18,13 +18,15 @@
         "src/cli/plugins.ts",
         "src/cli/utils/installer.ts",
         "src/cli/utils/manifest.ts",
+        "src/cli/utils/flags.ts",
+        "src/cli/utils/teammate-mode-cleanup.ts",
         "scripts/build-plugins.ts",
         "shared/rules/security.md",
         "shared/rules/engineering.md",
         "shared/rules/quality.md",
         "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-06-07T18:24:35.525Z",
+      "lastUpdated": "2026-06-09T12:59:08.483Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
@@ -56,7 +58,7 @@
         "shared/skills/dream-curation/SKILL.md",
         "src/cli/commands/decisions.ts"
       ],
-      "lastUpdated": "2026-06-07T18:08:25.000Z",
+      "lastUpdated": "2026-06-08T20:16:14.327Z",
       "createdBy": "implement"
     }
   }

@@ -1,16 +1,7 @@
-<!-- TL;DR: 11 pitfalls. Key: PF-007, PF-008, PF-009, PF-010, PF-011 -->
+<!-- TL;DR: 9 pitfalls. Key: -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
-
-## PF-001: Adding migration code to a rename refactor without verifying user's clean-break philosophy
-
-- **Area**: migrations.ts, manifest.ts fallback, kb.ts shim, deprecated --kb/--no-kb flags, .alias('kb')
-- **Issue**: assistant planned and implemented a full backwards-compatibility layer (shim re-export, command alias, deprecated flags, manifest fallback, migration scripts) for a rename refactor without first confirming whether the user wanted backwards compat or a clean break
-- **Impact**: entire backward-compat codebase had to be removed after review, wasting planning and implementation effort
-- **Resolution**: before implementing any migration or compat code for a rename/refactor in devflow, explicitly confirm whether the user wants backwards compatibility or a clean break — the user's standing philosophy is 'clean break: start from scratch, users can be migrated manually if needed
-- **Status**: Active
-- **Source**: self-learning:obs_e5t2r8
 
 ## PF-002: Migration skip-list prevents directory cleanup — skipped legacy files block rmdir of old directories
 
@@ -21,15 +12,6 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Status**: Active
 - **Source**: self-learning:obs_wdyvxg
 
-## PF-003: Post-migration hook writes land at old path when hooks are not rebuilt and reinstalled after a path refactor
-
-- **Area**: Knowledge refresh hooks, `sidecar-evaluate`, any session-end hooks involving path-dependent writes
-- **Issue**: After a migration moves data to a new path, background hooks still point to the old path if the new code has not been rebuilt (`npm run build`) and reinstalled (`devflow init`) on the affected machine. Hooks silently regenerate files at the legacy location with no errors.
-- **Impact**: Data divergence between old and new paths — e.g., `knowledge refresh` updated `.features/portfolio-risk-flags/KNOWLEDGE.md` (236→268 lines) while `.devflow/features/` had the older version. Silent data divergence is hard to detect.
-- **Resolution**: Any hook path refactor requires explicit rebuild and reinstall before hooks write to the correct new location. Document this dependency in migration notes. Add a post-migration validation step that checks hook install timestamps vs build timestamps.
-- **Status**: Active
-- **Source**: self-learning:obs_6rp5ri
-
 ## PF-004: Migration idempotency means buggy-run projects are never re-swept — manual cross-project cleanup required when fixing migration bugs after first run
 
 - **Area**: `migrations.ts` idempotency, `consolidate-to-devflow-dir`, cross-project sweeps
@@ -38,15 +20,6 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: When fixing a migration bug post-release, either bump the migration version to force a re-sweep (e.g., `consolidate-to-devflow-dir-v2`) or document and execute a manual sweep script. Include a legacy decisions/pitfalls merge step in the sweep runbook.
 - **Status**: Active
 - **Source**: self-learning:obs_qmt7kz
-
-## PF-005: Assuming a capability doesn't exist without checking the existing agent roster first
-
-- **Area**: Workflow design, research phase, new feature planning (bug-analysis, any new orch command)
-- **Issue**: Research concluded "no tool performs plan-intent vs implementation comparison" and proceeded to design this as a novel capability — without first checking devflow's own Evaluator agent, which already does exactly this (receives ORIGINAL_REQUEST, EXECUTION_PLAN, FILES_CHANGED, ACCEPTANCE_CRITERIA and performs goal-backward verification). The gap was only caught by user pushback.
-- **Impact**: Wasted design effort framing a capability as unique when it already existed. Risk of implementing a duplicate agent or workflow that conflicts with existing ones.
-- **Resolution**: Before designing any new capability that conceptually overlaps with existing agents (Evaluator, Scrutinizer, Reviewer, Resolver), explicitly read the existing agent roster and their input/output contracts. Check `shared/agents/` and the agent roster section of CLAUDE.md before claiming a gap exists.
-- **Status**: Active
-- **Source**: self-learning:obs_3vt99r
 
 ## PF-006: Claude Code hook API changed silently — Stop hook field rename broke working memory across all projects
 
@@ -101,3 +74,12 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: enable job control with set -m so the worker is launched in its OWN process group, making the group-targeted SIGKILL hit only the worker subtree
 - **Status**: Active
 - **Source**: self-learning:obs_wdogkill1
+
+## PF-012: A trailing-? guard in the preamble ambient hook silently suppressed keyword dispatch for any prompt ending in a question mark — and the failure was misdiagnosed as a length problem
+
+- **Area**: scripts/hooks/preamble ambient first-word keyword dispatch
+- **Issue**: Guard B (! [[ $PROMPT =~ [?][[:space:]]*$ ]]) suppressed the ambient directive whenever a prompt ended in a question mark, so command-style keyword prompts phrased as questions silently never dispatched the matching devflow skill, with no error surfaced
+- **Impact**: keyword dispatch appeared flaky and was misattributed to prompt length (a red herring — length only correlated because longer prompts tend to end in a question) and to a stray mid-prompt ? (also wrong — a mid-prompt ? already fired under the old code
+- **Resolution**: drop Guard B, and diagnose hook flakiness by reproducing through the real run-hook preamble path with a truth table that varies only the trailing ? to isolate the actual cause
+- **Status**: Active
+- **Source**: self-learning:obs_preambleq1
