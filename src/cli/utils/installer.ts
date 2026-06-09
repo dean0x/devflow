@@ -137,7 +137,6 @@ export interface FileCopyOptions {
   /** Rules to install from selected plugins. Defaults to empty map (no rules). */
   rulesMap?: Map<string, string>;
   isPartialInstall: boolean;
-  teamsEnabled: boolean;
   spinner: Spinner;
 }
 
@@ -157,7 +156,6 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
     agentsMap,
     rulesMap = new Map<string, string>(),
     isPartialInstall,
-    teamsEnabled,
     spinner,
   } = options;
 
@@ -202,23 +200,19 @@ export async function installViaFileCopy(options: FileCopyOptions): Promise<void
   for (const plugin of plugins) {
     const pluginSourceDir = path.join(pluginsDir, plugin.name);
 
-    // Install commands (variant-aware: pick -teams.md or base .md)
+    // Install commands (every .md file — one variant per command)
     const commandsSource = path.join(pluginSourceDir, 'commands');
     const commandsTarget = path.join(claudeDir, 'commands', 'devflow');
     try {
       const allFiles = await fs.readdir(commandsSource);
-      const mdFiles = allFiles.filter(f => f.endsWith('.md'));
-      const teamsVariants = new Set(mdFiles.filter(f => f.endsWith('-teams.md')));
-      const baseCommands = mdFiles.filter(f => !teamsVariants.has(f));
+      const commandFiles = allFiles.filter(f => f.endsWith('.md'));
 
-      if (baseCommands.length > 0 || teamsVariants.size > 0) {
+      if (commandFiles.length > 0) {
         await fs.mkdir(commandsTarget, { recursive: true });
-        for (const file of baseCommands) {
-          const teamsFile = file.replace('.md', '-teams.md');
-          const sourceFile = (teamsEnabled && teamsVariants.has(teamsFile)) ? teamsFile : file;
+        for (const file of commandFiles) {
           await fs.copyFile(
-            path.join(commandsSource, sourceFile),
-            path.join(commandsTarget, file), // always install as base name
+            path.join(commandsSource, file),
+            path.join(commandsTarget, file),
           );
         }
       }

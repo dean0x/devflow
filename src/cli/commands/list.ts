@@ -13,7 +13,6 @@ import * as path from 'path';
  */
 export function formatFeatures(features: ManifestData['features']): string {
   const parts = [
-    features.teams ? 'teams' : null,
     features.ambient ? 'ambient' : null,
     features.memory ? 'memory' : null,
     features.knowledge ? 'knowledge' : null,

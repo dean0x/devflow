@@ -18,6 +18,7 @@ import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings } from '../utils/post-install.js';
 import { stripFlags, stripViewMode } from '../utils/flags.js';
+import { stripDevflowTeammateModeFromJson } from '../utils/teammate-mode-cleanup.js';
 
 /**
  * Compute which assets should be removed during selective plugin uninstall.
@@ -374,6 +375,7 @@ export const uninstallCommand = new Command('uninstall')
           settingsContent = removeContextHook(settingsContent);
           settingsContent = stripFlags(settingsContent);
           settingsContent = stripViewMode(settingsContent);
+          settingsContent = stripDevflowTeammateModeFromJson(settingsContent);
 
           if (settingsContent !== originalContent) {
             await fs.writeFile(settingsPath, settingsContent, 'utf-8');

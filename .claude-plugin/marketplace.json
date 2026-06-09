@@ -56,13 +56,12 @@
     {
       "name": "devflow-debug",
       "source": "./plugins/devflow-debug",
-      "description": "Debugging workflows with competing hypothesis investigation using agent teams",
+      "description": "Debugging workflows with competing hypothesis investigation via parallel subagents",
       "version": "1.8.3",
       "keywords": [
         "debugging",
         "hypotheses",
-        "investigation",
-        "agent-teams"
+        "investigation"
       ]
     },
     {

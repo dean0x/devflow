@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`agent-teams` Claude Code flag**: bespoke Agent Teams machinery removed; teammate-mode enablement now via the optional `agent-teams` flag (`devflow flags --enable agent-teams`), which sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. The flag defaults to OFF.
+
+### Removed
+- **Agent Teams init flags** (BREAKING): `--teams` / `--no-teams` flags removed from `devflow init`. Projects that were using Devflow-managed `teammateMode: "auto"` will have that setting cleaned up automatically on the next `devflow init` or `devflow uninstall` run.
 - Self-learning system: detects repeated workflows and creates slash commands/skills automatically
 - **Learning**: `devflow learn --purge` command to remove invalid entries from learning log
 - **Learning**: debug logging mode (`devflow learn --configure`) — logs to `~/.devflow/logs/`
 - **Knowledge citations in review & resolve outputs**: Resolvers and Reviewers cite matching ADR-NNN/PF-NNN IDs inline with an explicit hallucination guard (verbatim-only, no inference). `/resolve` aggregates cited IDs into a `## Knowledge Citations` section at the top of `resolution-summary.md`.
 
 ### Changed
-- **Knowledge index + on-demand Read pattern across all knowledge-consuming commands**: `/resolve`, `/plan`, `/self-review`, `/code-review`, and `/debug` (plus their Teams variants and ambient orch equivalents `resolve:orch`, `plan:orch`, `review:orch`, `debug:orch`) now fan a compact index instead of the full ADR/PF corpus. Downstream agents (resolver, designer, simplifier, scrutinizer, reviewer) Read full entry bodies on demand. For `/debug`, knowledge stays orchestrator-local (hypothesis generation) and is not fanned to Explore investigators. Shared algorithm extracted to new `devflow:apply-knowledge` skill. Unified placeholder convention: all 11 invocation sites use `"{worktree}"`. Closes PF-011 and fills pre-existing ambient gaps for plan:orch, review:orch, and debug:orch. Token savings: ~75K/run at 10 resolvers with current corpus; scales as O(1) instead of O(entries × agents) as corpus grows.
+- **Knowledge index + on-demand Read pattern across all knowledge-consuming commands**: `/resolve`, `/plan`, `/self-review`, `/code-review`, and `/debug` (plus ambient orch equivalents `resolve:orch`, `plan:orch`, `review:orch`, `debug:orch`) now fan a compact index instead of the full ADR/PF corpus. Downstream agents (resolver, designer, simplifier, scrutinizer, reviewer) Read full entry bodies on demand. For `/debug`, knowledge stays orchestrator-local (hypothesis generation) and is not fanned to Explore investigators. Shared algorithm extracted to new `devflow:apply-knowledge` skill. Unified placeholder convention: all 11 invocation sites use `"{worktree}"`. Closes PF-011 and fills pre-existing ambient gaps for plan:orch, review:orch, and debug:orch. Token savings: ~75K/run at 10 resolvers with current corpus; scales as O(1) instead of O(entries × agents) as corpus grows.
 - **Learning**: Moved from Stop → SessionEnd hook with 3-session batching (adaptive: 5 at 15+ observations)
 - **Learning**: Raised procedural thresholds from 2 to 3 observations with 24h+ temporal spread for both types
 - **Learning**: Reduced default `max_daily_runs` from 10 to 5

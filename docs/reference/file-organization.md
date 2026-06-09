@@ -9,7 +9,7 @@ devflow/
 ├── .claude-plugin/                   # Marketplace registry (repo root)
 │   └── marketplace.json
 ├── shared/
-│   ├── skills/                       # SINGLE SOURCE OF TRUTH (45 skills)
+│   ├── skills/                       # SINGLE SOURCE OF TRUTH (43 skills)
 │   │   ├── git/
 │   │   │   ├── SKILL.md
 │   │   │   └── references/
@@ -180,7 +180,7 @@ Included settings:
 - `hooks` - Dream hooks (UserPromptSubmit, Stop, SessionStart, SessionEnd, PreCompact)
 - `env.ENABLE_TOOL_SEARCH` - Deferred MCP tool loading (~85% token savings)
 - `env.ENABLE_LSP_TOOL` - Language Server Protocol support
-- `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams for peer-to-peer collaboration
+- `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` - Agent Teams (not in settings template by default; enabled on demand via the optional `agent-teams` Claude Code flag — `devflow flags --enable agent-teams`)
 - `extraKnownMarketplaces` - Devflow plugin marketplace (`dean0x/devflow`)
 - `permissions.deny` - Security deny list (140 blocked operations) + sensitive file patterns
 

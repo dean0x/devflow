@@ -14,31 +14,29 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 Plugin marketplace with 21 plugins (12 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
-| Plugin | Purpose | Teams Variant |
-|--------|---------|---------------|
-| `devflow-implement` | Complete task implementation lifecycle | Optional |
-| `devflow-plan` | Unified design planning with gap analysis | Optional |
-| `devflow-code-review` | Comprehensive code review | Optional |
-| `devflow-resolve` | Review issue resolution | Optional |
-| `devflow-debug` | Competing hypothesis debugging | Optional |
-| `devflow-explore` | Codebase exploration with knowledge base creation | Optional |
-| `devflow-research` | Multi-type research with trust-aware synthesis | Optional |
-| `devflow-release` | Adaptive project release with learned configuration | Optional |
-| `devflow-self-review` | Self-review (Simplifier + Scrutinizer) | No |
-| `devflow-bug-analysis` | Proactive bug finding with static and semantic analysis | No |
-| `devflow-ambient` | Ambient mode — plan auto-detection | No |
-| `devflow-core-skills` | Auto-activating quality enforcement | No |
-| `devflow-audit-claude` | Audit CLAUDE.md files (optional) | No |
-| `devflow-typescript` | TypeScript language patterns (optional) | No |
-| `devflow-react` | React framework patterns (optional) | No |
-| `devflow-accessibility` | Web accessibility patterns (optional) | No |
-| `devflow-ui-design` | UI design patterns (optional) | No |
-| `devflow-go` | Go language patterns (optional) | No |
-| `devflow-python` | Python language patterns (optional) | No |
-| `devflow-java` | Java language patterns (optional) | No |
-| `devflow-rust` | Rust language patterns (optional) | No |
-
-Commands with Teams Variant ship as `{name}.md` (parallel subagents) and `{name}-teams.md` (Agent Teams with debate). The installer copies the chosen variant based on `--teams`/`--no-teams` flag.
+| Plugin | Purpose |
+|--------|---------|
+| `devflow-implement` | Complete task implementation lifecycle |
+| `devflow-plan` | Unified design planning with gap analysis |
+| `devflow-code-review` | Comprehensive code review |
+| `devflow-resolve` | Review issue resolution |
+| `devflow-debug` | Competing hypothesis debugging |
+| `devflow-explore` | Codebase exploration with knowledge base creation |
+| `devflow-research` | Multi-type research with trust-aware synthesis |
+| `devflow-release` | Adaptive project release with learned configuration |
+| `devflow-self-review` | Self-review (Simplifier + Scrutinizer) |
+| `devflow-bug-analysis` | Proactive bug finding with static and semantic analysis |
+| `devflow-ambient` | Ambient mode — plan auto-detection |
+| `devflow-core-skills` | Auto-activating quality enforcement |
+| `devflow-audit-claude` | Audit CLAUDE.md files (optional) |
+| `devflow-typescript` | TypeScript language patterns (optional) |
+| `devflow-react` | React framework patterns (optional) |
+| `devflow-accessibility` | Web accessibility patterns (optional) |
+| `devflow-ui-design` | UI design patterns (optional) |
+| `devflow-go` | Go language patterns (optional) |
+| `devflow-python` | Python language patterns (optional) |
+| `devflow-java` | Java language patterns (optional) |
+| `devflow-rust` | Rust language patterns (optional) |
 
 **Build-time asset distribution**: Skills and agents are stored once in `shared/skills/` and `shared/agents/`, then copied to each plugin at build time based on `plugin.json` manifests. This eliminates duplication in git.
 
@@ -54,7 +52,7 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 **Debug Tracing**: Single global toggle covering all hooks. Enabled via `devflow debug --enable/--disable/--status` CLI or by setting `DEVFLOW_HOOK_DEBUG=1` in `~/.claude/settings.json` env block (survives reinstalls). All hooks share the `scripts/hooks/debug-trace` helper script (sourced via `hook-bootstrap`) so tracing behavior is consistent and updated in one place. Two-phase logging: pre-CWD traces go to global `~/.devflow/logs/.hook-debug.log`; post-CWD traces go to per-project `~/.devflow/logs/{project-slug}/.hook-debug.log`. A 5MB size guard prevents unbounded growth. applies ADR-007
 
-**Claude Code Flags**: Typed registry (`src/cli/utils/flags.ts`) for managing Claude Code feature flags (env vars and top-level settings). Pure functions `applyFlags`/`stripFlags`/`getDefaultFlags` follow the `applyTeamsConfig`/`stripTeamsConfig` pattern. Flags (17 total): default ON — `tui`, `tool-search`, `lsp`, `prompt-caching-1h`, `show-turn-duration`, `clear-context-on-plan`; default OFF — `brief`, `thinking-summaries`, `subprocess-env-scrub`, `disable-nonessential-traffic`, `forked-subagents`, `disable-adaptive-thinking`, `always-thinking`, `disable-git-instructions`, `disable-compact`, `disable-1m-context`, `disable-autoupdater`. Manageable via `devflow flags --enable/--disable/--status/--list`. Stored in manifest `features.flags: string[]`. View mode (`default`/`verbose`/`focus`) stored in manifest `features.viewMode?: string` and applied to `settings.json` as the `viewMode` key; `applyViewMode`/`stripViewMode` utilities colocated in `flags.ts`.
+**Claude Code Flags**: Typed registry (`src/cli/utils/flags.ts`) for managing Claude Code feature flags (env vars and top-level settings). Pure functions `applyFlags`/`stripFlags`/`getDefaultFlags` follow the `applyViewMode`/`stripViewMode` pattern. Flags (18 total): default ON — `tui`, `tool-search`, `lsp`, `prompt-caching-1h`, `show-turn-duration`, `clear-context-on-plan`; default OFF — `brief`, `thinking-summaries`, `subprocess-env-scrub`, `disable-nonessential-traffic`, `forked-subagents`, `disable-adaptive-thinking`, `always-thinking`, `disable-git-instructions`, `disable-compact`, `disable-1m-context`, `disable-autoupdater`, `agent-teams`. Manageable via `devflow flags --enable/--disable/--status/--list`. Stored in manifest `features.flags: string[]`. View mode (`default`/`verbose`/`focus`) stored in manifest `features.viewMode?: string` and applied to `settings.json` as the `viewMode` key; `applyViewMode`/`stripViewMode` utilities colocated in `flags.ts`.
 
 **Feature Knowledge Bases**: Per-feature `.devflow/features/` directory containing KNOWLEDGE.md files that capture area-specific patterns, conventions, architecture, and gotchas. Knowledge bases are created as side-effects of implementation (`/implement` Phase 12), loaded automatically across all workflows via `FEATURE_KNOWLEDGE` variable (companion to `DECISIONS_CONTEXT`), and use staleness detection via git log against `referencedFiles`. Index at `.devflow/features/index.json` (object keyed by slug). Managed via `devflow knowledge list|create|check|refresh|remove`. Knowledge agent (sonnet) structures exploration outputs into KNOWLEDGE.md. `apply-feature-knowledge` skill provides consumption algorithm for agents. `.devflow/features/.knowledge.lock` is gitignored (transient lock directory for concurrent index writes, added automatically by `devflow init`). `devflow knowledge list` — List all feature knowledge bases with staleness status. `devflow knowledge create <slug>` — Create a new knowledge base via claude -p exploration. `devflow knowledge check` — Check all knowledge bases for staleness. `devflow knowledge refresh [slug]` — Refresh stale knowledge base(s). `devflow knowledge remove <slug>` — Remove a knowledge base and its index entry. Note: `/debug` keeps FEATURE_KNOWLEDGE orchestrator-local (investigation workers examine code without pre-loaded context). Toggleable via `devflow knowledge --enable/--disable/--status` or `devflow init --knowledge/--no-knowledge`. SessionEnd hook auto-refreshes stale knowledge bases (throttled to once per 2 hours, max 3 per run). `.devflow/features/.disabled` sentinel gates Phase 12 generation and refresh hook.
 
@@ -64,7 +62,7 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 - `devflow decisions --enable/--disable` — Decisions pipeline (decision + pitfall detection, materialized by Dream agent from DIALOG_PAIRS)
 - `devflow knowledge --enable/--disable` — Feature knowledge bases (codebase area exploration)
 
-**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, decisions ON, rules ON, HUD ON, teams OFF, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list, viewMode preserved from existing settings.json. Advanced path adds a view mode selector (default/verbose/focus) after Claude Code flags. Use `--decisions/--no-decisions` to toggle the decisions agent independently. Use `--rules/--no-rules` to toggle rules independently.
+**Two-Mode Init**: `devflow init` offers Recommended (sensible defaults, quick setup) or Advanced (full interactive flow) after plugin selection. `--recommended` / `--advanced` CLI flags for non-interactive use. Recommended applies: ambient ON, memory ON, decisions ON, rules ON, HUD ON, default-ON flags, .claudeignore ON, auto-install safe-delete if trash CLI detected, user-mode security deny list, viewMode preserved from existing settings.json. Advanced path adds a view mode selector (default/verbose/focus) after Claude Code flags. Use `--decisions/--no-decisions` to toggle the decisions agent independently. Use `--rules/--no-rules` to toggle rules independently.
 
 **Migrations**: Run-once migrations execute automatically on `devflow init`, tracked at `~/.devflow/migrations.json` (scope-independent; single file regardless of user-scope vs local-scope installs). Registry: append an entry to `MIGRATIONS` in `src/cli/utils/migrations.ts`. Scopes: `global` (runs once per machine, no project context) vs `per-project` (sweeps all discovered Claude-enabled projects in parallel). Failures are non-fatal — migrations retry on next init. Currently registered per-project migrations include `purge-legacy-knowledge-v2` (removes 4 hardcoded pre-v2 ADR/PF IDs and orphan `PROJECT-PATTERNS.md`), `purge-legacy-knowledge-v3` (v3: sweeps all remaining pre-v2 seeded entries using the `- **Source**: self-learning:` format discriminator — any ADR/PF section lacking this marker is removed; entries the user edited to include the marker survive), `purge-orphaned-sidecar-judgment-state` (per-project; removes orphaned `.learning-manifest.json`, `.decisions-manifest.json`, `.decisions-notifications.json` — judgment-state files written by the now-removed deterministic render/reconcile layer), `purge-learning-pipeline-v1` (per-project; removes `.devflow/learning/` directory, learning dream markers, `learning` key from dream/sidecar config, `.claude/commands/self-learning/`, and auto-generated skills), `purge-stale-memory-markers-v1` (per-project; removes stale `dream/memory.*` markers left by the old Dream-subagent memory pipeline now that `background-memory-update` handles memory refresh — ENOENT-idempotent, rethrows non-ENOENT errors). Global migration `purge-learning-global-v1` removes `~/.devflow/learning.json`. **D37 edge case**: a project cloned *after* migrations have run won't be swept (the marker is global, not per-project). Recovery: `rm ~/.devflow/migrations.json` forces a re-sweep on next `devflow init`.
 
@@ -72,7 +70,7 @@ Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
 ```
 devflow/
-├── shared/skills/          # 45 skills (single source of truth)
+├── shared/skills/          # 43 skills (single source of truth)
 ├── shared/agents/          # 16 shared agents (single source of truth)
 ├── shared/rules/           # 12 rules (single source of truth; flat .md files)
 ├── plugins/devflow-*/      # 21 plugins (12 core + 9 optional language/ecosystem)
@@ -196,7 +194,7 @@ Per-project runtime files live under `.devflow/`:
 - `/code-review` — 8-12 Reviewer agents + Git + Synthesizer; consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/resolve` — N Resolver agents + Git; loads compact decisions index (`decisions-index.cjs index`) per worktree and passes it as `DECISIONS_CONTEXT` to each Resolver; Resolvers use `devflow:apply-decisions` to Read full bodies on demand; aggregates cited ADR-NNN/PF-NNN IDs into a `## Decisions Citations` section at the top of `resolution-summary.md`
 - `/explore` — Skimmer + Explore + Synthesizer + Knowledge (optional knowledge base creation)
-- `/debug` — Agent Teams competing hypotheses
+- `/debug` — competing hypotheses debugging
 - `/self-review` — Simplifier then Scrutinizer (sequential); consumes decisions via index + on-demand Read via `devflow:apply-decisions`
 - `/research` — Researcher agents + Skimmer + Synthesizer + Knowledge; multi-type research with trust-aware synthesis
 - `/release` — Git agent + Validator + Synthesizer; adaptive release with learned configuration
@@ -206,8 +204,6 @@ Per-project runtime files live under `.devflow/`:
 **Shared agents** (16): git, synthesizer, skimmer, simplifier, coder, reviewer, resolver, evaluator, tester, scrutinizer, validator, designer, knowledge, researcher, bug-analyzer, dream
 
 **Plugin-specific agents** (1): claude-md-auditor
-
-**Agent Teams**: 8 commands use Agent Teams (`/code-review`, `/implement`, `/plan`, `/explore`, `/debug`, `/resolve`, `/research`, `/release`). One-team-per-session constraint — must TeamDelete before creating next team.
 
 ## Key Conventions
 
@@ -249,7 +245,6 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore
 - Always run `npm run build` after modifying shared assets
 - Plugin manifests (`plugin.json`) declare `skills`, `agents`, and `rules` arrays
 - Rules are flat `.md` files (no subdirectory nesting), distributed from `shared/rules/{name}.md` → `plugins/{plugin}/rules/{name}.md`; build fails if a declared rule is missing from `shared/rules/`
-- Every `-teams.md` command variant **must** have a matching base `.md` file — the installer iterates base files and looks up teams variants, so orphaned `-teams.md` files are silently skipped
 
 ### Token Optimization
 - Sub-agents cannot invoke other sub-agents (by design)

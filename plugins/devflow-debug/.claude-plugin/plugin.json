@@ -1,6 +1,6 @@
 {
   "name": "devflow-debug",
-  "description": "Debugging workflows with competing hypothesis investigation using agent teams",
+  "description": "Debugging workflows with competing hypothesis investigation via parallel subagents",
   "author": {
     "name": "Dean0x"
   },
@@ -11,15 +11,13 @@
   "keywords": [
     "debugging",
     "hypotheses",
-    "investigation",
-    "agent-teams"
+    "investigation"
   ],
   "agents": [
     "git",
     "synthesizer"
   ],
   "skills": [
-    "agent-teams",
     "git",
     "worktree-support",
     "apply-feature-knowledge"

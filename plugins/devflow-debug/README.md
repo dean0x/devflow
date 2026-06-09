@@ -1,6 +1,6 @@
 # devflow-debug
 
-Debugging workflow plugin for Claude Code. Investigates bugs using competing hypotheses with agent teams for adversarial debate.
+Debugging workflow plugin for Claude Code. Investigates bugs using competing hypotheses for adversarial debate.
 
 ## Installation
 
@@ -11,12 +11,6 @@ npx devflow-kit init --plugin=debug
 # Via Claude Code (when available)
 /plugin install dean0x/devflow-debug
 ```
-
-## Prerequisites
-
-Requires Agent Teams feature:
-- Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings (included in Devflow settings)
-- Or install Devflow with `--override-settings` to enable automatically
 
 ## Usage
 
@@ -29,9 +23,9 @@ Requires Agent Teams feature:
 ## How It Works
 
 1. **Hypothesis Generation** - Analyzes the bug and generates 3-5 distinct hypotheses
-2. **Team Spawning** - Creates one investigator agent per hypothesis
+2. **Investigation Spawning** - Creates one investigator agent per hypothesis
 3. **Parallel Investigation** - Each agent independently gathers evidence
-4. **Adversarial Debate** - Agents challenge each other's findings with code evidence
+4. **Adversarial Evaluation** - Competing hypotheses are weighed against each other's evidence by the orchestrator
 5. **Convergence** - Hypotheses that survive scrutiny become the root cause
 6. **Report** - Root cause with confidence level, evidence, and fix recommendations
 
@@ -41,7 +35,6 @@ Requires Agent Teams feature:
 - `/debug` - Competing hypothesis debugging
 
 ### Skills
-- `agent-teams` - Team coordination patterns
 - `git` - Git safety, commits, GitHub API
 
 ## Output
@@ -61,5 +54,5 @@ Produces a root cause analysis report including:
 
 ## Related Plugins
 
-- [devflow-code-review](../devflow-code-review) - Code review with team-based debate
-- [devflow-implement](../devflow-implement) - Implementation with team exploration
+- [devflow-code-review](../devflow-code-review) - Comprehensive code review
+- [devflow-implement](../devflow-implement) - Implementation with quality gates

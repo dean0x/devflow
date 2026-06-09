@@ -11,7 +11,6 @@ export interface ManifestData {
   plugins: string[];
   scope: 'user' | 'local';
   features: {
-    teams: boolean;
     ambient: boolean;
     memory: boolean;
     hud: boolean;
@@ -40,7 +39,6 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       !data.scope ||
       typeof features !== 'object' ||
       features === null ||
-      typeof features.teams !== 'boolean' ||
       typeof features.ambient !== 'boolean' ||
       typeof features.memory !== 'boolean' ||
       typeof data.installedAt !== 'string' ||
@@ -59,7 +57,6 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       plugins: data.plugins as string[],
       scope: data.scope as 'user' | 'local',
       features: {
-        teams: features.teams as boolean,
         ambient: features.ambient as boolean,
         memory: features.memory as boolean,
         hud: typeof features.hud === 'boolean' ? features.hud : false,

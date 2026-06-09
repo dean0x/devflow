@@ -148,7 +148,6 @@ describe('installViaFileCopy skill lifecycle', () => {
       skillsMap: new Map([[testSkillName, 'devflow-test-plugin']]),
       agentsMap: new Map(),
       isPartialInstall: opts?.isPartialInstall ?? false,
-      teamsEnabled: false,
       spinner: noopSpinner,
     });
   }

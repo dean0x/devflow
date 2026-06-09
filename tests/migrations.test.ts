@@ -1849,3 +1849,157 @@ describe('purge-stale-memory-markers-v1 migration', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// purge-devflow-teammate-mode-global-v1 (global)
+// ---------------------------------------------------------------------------
+
+describe('purge-devflow-teammate-mode-global-v1 migration', () => {
+  let tmpDir: string;
+  let devflowDir: string;
+
+  const getMigration = () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-devflow-teammate-mode-global-v1');
+    if (!m) throw new Error('purge-devflow-teammate-mode-global-v1 migration not found');
+    return m;
+  };
+
+  const makeCtx = () => ({ devflowDir });
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-teammate-global-test-'));
+    devflowDir = path.join(tmpDir, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('is registered in MIGRATIONS array', () => {
+    expect(getMigration()).toBeDefined();
+    expect(getMigration().scope).toBe('global');
+  });
+
+  it('appears after purge-stale-memory-markers-v1 in MIGRATIONS array', () => {
+    const memoryIdx = MIGRATIONS.findIndex(m => m.id === 'purge-stale-memory-markers-v1');
+    const teammateIdx = MIGRATIONS.findIndex(m => m.id === 'purge-devflow-teammate-mode-global-v1');
+    expect(memoryIdx).toBeGreaterThanOrEqual(0);
+    expect(teammateIdx).toBeGreaterThan(memoryIdx);
+  });
+
+  it('runs without error even when settings file is absent', async () => {
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('returns empty infos and warnings', async () => {
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  it('is idempotent (second run also succeeds)', async () => {
+    await getMigration().run(makeCtx());
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purge-devflow-teammate-mode-v1 (per-project)
+// ---------------------------------------------------------------------------
+
+describe('purge-devflow-teammate-mode-v1 migration', () => {
+  let tmpDir: string;
+  let devflowDir: string;
+  let projectRoot: string;
+  let settingsPath: string;
+
+  const getMigration = () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-devflow-teammate-mode-v1');
+    if (!m) throw new Error('purge-devflow-teammate-mode-v1 migration not found');
+    return m;
+  };
+
+  const makeCtx = () => ({ devflowDir, projectRoot });
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-teammate-perproj-test-'));
+    devflowDir = path.join(tmpDir, '.devflow');
+    projectRoot = tmpDir;
+    settingsPath = path.join(projectRoot, '.claude', 'settings.json');
+    await fs.mkdir(devflowDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('is registered in MIGRATIONS array', () => {
+    expect(getMigration()).toBeDefined();
+    expect(getMigration().scope).toBe('per-project');
+  });
+
+  it('appears after purge-devflow-teammate-mode-global-v1 in MIGRATIONS array', () => {
+    const globalIdx = MIGRATIONS.findIndex(m => m.id === 'purge-devflow-teammate-mode-global-v1');
+    const perProjIdx = MIGRATIONS.findIndex(m => m.id === 'purge-devflow-teammate-mode-v1');
+    expect(globalIdx).toBeGreaterThanOrEqual(0);
+    expect(perProjIdx).toBeGreaterThan(globalIdx);
+  });
+
+  it('removes Devflow-written teammateMode:"auto" from project settings.json', async () => {
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    const settings = { teammateMode: 'auto', hooks: { Stop: [] }, env: { TOOL: 'true' } };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(result.teammateMode).toBeUndefined();
+    expect(result.hooks).toEqual({ Stop: [] });
+    expect(result.env.TOOL).toBe('true');
+  });
+
+  it('preserves user-set teammateMode values (e.g., "tmux")', async () => {
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    const settings = { teammateMode: 'tmux', hooks: {} };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(result.teammateMode).toBe('tmux');
+  });
+
+  it('preserves user-set teammateMode values (e.g., "in-process")', async () => {
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    const settings = { teammateMode: 'in-process', hooks: {} };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(result.teammateMode).toBe('in-process');
+  });
+
+  it('is a no-op when settings file does not exist', async () => {
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+  });
+
+  it('is idempotent (second run also succeeds)', async () => {
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    const settings = { teammateMode: 'auto' };
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+    await getMigration().run(makeCtx());
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+
+    const result = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(result.teammateMode).toBeUndefined();
+  });
+
+  it('returns empty infos and warnings', async () => {
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+});

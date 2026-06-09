@@ -8,14 +8,10 @@ import { loadFile, extractSection } from './helpers'
 describe('Command surfaces — decisions-index.cjs index invocation', () => {
   const surfaces: Array<[string, string]> = [
     ['plan.md', 'plugins/devflow-plan/commands/plan.md'],
-    ['plan-teams.md', 'plugins/devflow-plan/commands/plan-teams.md'],
     ['resolve.md', 'plugins/devflow-resolve/commands/resolve.md'],
-    ['resolve-teams.md', 'plugins/devflow-resolve/commands/resolve-teams.md'],
     ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
     ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
-    ['code-review-teams.md', 'plugins/devflow-code-review/commands/code-review-teams.md'],
     ['debug.md', 'plugins/devflow-debug/commands/debug.md'],
-    ['debug-teams.md', 'plugins/devflow-debug/commands/debug-teams.md'],
   ]
 
   for (const [label, relPath] of surfaces) {
@@ -27,7 +23,7 @@ describe('Command surfaces — decisions-index.cjs index invocation', () => {
 })
 
 // -------------------------------------------------------------------------
-// debug.md & debug-teams.md — decisions orchestrator-local, not fanned
+// debug.md — decisions orchestrator-local, not fanned
 // -------------------------------------------------------------------------
 
 describe('debug.md — decisions is orchestrator-local, not fanned to Explore investigators', () => {
@@ -43,19 +39,6 @@ describe('debug.md — decisions is orchestrator-local, not fanned to Explore in
   })
 })
 
-describe('debug-teams.md — decisions is orchestrator-local, not fanned to teammates', () => {
-  it('debug-teams.md contains DECISIONS_CONTEXT (orchestrator uses it)', () => {
-    const content = loadFile('plugins/devflow-debug/commands/debug-teams.md')
-    expect(content).toContain('DECISIONS_CONTEXT')
-  })
-
-  it('debug-teams.md teammate spawn block does NOT pass DECISIONS_CONTEXT to investigators', () => {
-    const content = loadFile('plugins/devflow-debug/commands/debug-teams.md')
-    const phase3 = extractSection(content, 'Phase 3: Spawn Investigation Team', '### Phase 4')
-    expect(phase3).not.toContain('DECISIONS_CONTEXT')
-  })
-})
-
 // -------------------------------------------------------------------------
 // DECISIONS_CONTEXT substitution template — single canonical form
 // -------------------------------------------------------------------------
@@ -63,12 +46,9 @@ describe('debug-teams.md — decisions is orchestrator-local, not fanned to team
 describe('DECISIONS_CONTEXT template — uses canonical {decisions_context} form without fallback', () => {
   const templateSurfaces: Array<[string, string]> = [
     ['plan.md', 'plugins/devflow-plan/commands/plan.md'],
-    ['plan-teams.md', 'plugins/devflow-plan/commands/plan-teams.md'],
     ['resolve.md', 'plugins/devflow-resolve/commands/resolve.md'],
-    ['resolve-teams.md', 'plugins/devflow-resolve/commands/resolve-teams.md'],
     ['self-review.md', 'plugins/devflow-self-review/commands/self-review.md'],
     ['code-review.md', 'plugins/devflow-code-review/commands/code-review.md'],
-    ['code-review-teams.md', 'plugins/devflow-code-review/commands/code-review-teams.md'],
   ]
 
   for (const [label, relPath] of templateSurfaces) {

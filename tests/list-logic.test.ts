@@ -8,15 +8,15 @@ import {
 import type { ManifestData } from '../src/cli/utils/manifest.js';
 
 const allOff: ManifestData['features'] = {
-  teams: false, ambient: false, memory: false,
+  ambient: false, memory: false,
   knowledge: false, decisions: false,
   hud: false, rules: false, flags: [],
 };
 
 describe('formatFeatures', () => {
   it('returns all enabled features comma-separated', () => {
-    const features: ManifestData['features'] = { ...allOff, teams: true, ambient: true, memory: true };
-    expect(formatFeatures(features)).toBe('teams, ambient, memory');
+    const features: ManifestData['features'] = { ...allOff, ambient: true, memory: true };
+    expect(formatFeatures(features)).toBe('ambient, memory');
   });
 
   it('returns subset of enabled features', () => {
@@ -25,17 +25,17 @@ describe('formatFeatures', () => {
   });
 
   it('returns single enabled feature', () => {
-    const features: ManifestData['features'] = { ...allOff, teams: true };
-    expect(formatFeatures(features)).toBe('teams');
+    const features: ManifestData['features'] = { ...allOff, ambient: true };
+    expect(formatFeatures(features)).toBe('ambient');
   });
 
   it('returns "none" when no features are enabled', () => {
     expect(formatFeatures(allOff)).toBe('none');
   });
 
-  it('preserves feature order: teams, ambient, memory', () => {
-    const features: ManifestData['features'] = { ...allOff, teams: true, memory: true };
-    expect(formatFeatures(features)).toBe('teams, memory');
+  it('preserves feature order: ambient, memory', () => {
+    const features: ManifestData['features'] = { ...allOff, ambient: true, memory: true };
+    expect(formatFeatures(features)).toBe('ambient, memory');
   });
 
   it('includes knowledge, decisions when enabled', () => {
@@ -54,15 +54,15 @@ describe('formatFeatures', () => {
 
   it('includes flags count when flags are present', () => {
     const features: ManifestData['features'] = {
-      ...allOff, teams: true,
+      ...allOff, ambient: true,
       flags: ['tool-search', 'lsp', 'clear-context-on-plan'],
     };
-    expect(formatFeatures(features)).toBe('teams, flags: 3');
+    expect(formatFeatures(features)).toBe('ambient, flags: 3');
   });
 
   it('omits flags when flags array is empty', () => {
-    const features: ManifestData['features'] = { ...allOff, teams: true };
-    expect(formatFeatures(features)).toBe('teams');
+    const features: ManifestData['features'] = { ...allOff, ambient: true };
+    expect(formatFeatures(features)).toBe('ambient');
   });
 
   it('shows only flags when no boolean features are enabled', () => {
@@ -71,8 +71,8 @@ describe('formatFeatures', () => {
   });
 
   it('handles missing flags gracefully for legacy manifests', () => {
-    const features = { teams: true, ambient: false, memory: false } as ManifestData['features'];
-    expect(formatFeatures(features)).toBe('teams');
+    const features = { ambient: true, memory: false } as ManifestData['features'];
+    expect(formatFeatures(features)).toBe('ambient');
   });
 });
 

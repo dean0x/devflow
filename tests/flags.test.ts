@@ -168,15 +168,19 @@ describe('stripFlags', () => {
     expect(result.env).toBeUndefined();
   });
 
-  it('preserves non-flag env vars', () => {
+  it('removes CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS when agent-teams flag is registered', () => {
+    // agent-teams is now a registered flag, so stripFlags removes its env var
     const input = JSON.stringify({
       env: {
         ENABLE_TOOL_SEARCH: 'true',
         CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        CUSTOM_VAR: 'keep',
       },
     }, null, 2);
     const result = JSON.parse(stripFlags(input));
-    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
+    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined();
+    expect(result.env.ENABLE_TOOL_SEARCH).toBeUndefined();
+    expect(result.env.CUSTOM_VAR).toBe('keep');
   });
 
   it('strips flag-managed env keys regardless of their value', () => {
@@ -225,6 +229,56 @@ describe('stripFlags', () => {
       }
     }
     expect(result.env.CUSTOM).toBe('value');
+    expect(result.hooks).toEqual({ Stop: [] });
+  });
+});
+
+describe('agent-teams flag', () => {
+  it('is registered in FLAG_REGISTRY', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'agent-teams');
+    expect(flag).toBeDefined();
+  });
+
+  it('is defaultEnabled: false (opt-in, not default)', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'agent-teams')!;
+    expect(flag.defaultEnabled).toBe(false);
+  });
+
+  it('maps to CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env var', () => {
+    const flag = FLAG_REGISTRY.find(f => f.id === 'agent-teams')!;
+    expect(flag.target.type).toBe('env');
+    if (flag.target.type === 'env') {
+      expect(flag.target.key).toBe('CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS');
+      expect(flag.target.value).toBe('1');
+    }
+  });
+
+  it('is NOT in getDefaultFlags() (off by default)', () => {
+    const defaults = getDefaultFlags();
+    expect(defaults).not.toContain('agent-teams');
+  });
+
+  it('applyFlags adds CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS when agent-teams is enabled', () => {
+    const input = JSON.stringify({ hooks: {} }, null, 2);
+    const result = JSON.parse(applyFlags(input, ['agent-teams']));
+    expect(result.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('1');
+  });
+
+  it('stripFlags removes CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', () => {
+    const input = JSON.stringify({
+      env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', CUSTOM: 'keep' },
+    }, null, 2);
+    const result = JSON.parse(stripFlags(input));
+    expect(result.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined();
+    expect(result.env?.CUSTOM).toBe('keep');
+  });
+
+  it('roundtrip: apply then strip is idempotent', () => {
+    const base = JSON.stringify({ hooks: { Stop: [] } }, null, 2);
+    const applied = applyFlags(base, ['agent-teams']);
+    const stripped = stripFlags(applied);
+    const result = JSON.parse(stripped);
+    expect(result.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined();
     expect(result.hooks).toEqual({ Stop: [] });
   });
 });

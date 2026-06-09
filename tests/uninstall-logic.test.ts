@@ -4,12 +4,10 @@ import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/cli/plugins.js';
 
 describe('computeAssetsToRemove', () => {
   it('removes skills unique to selected plugins', () => {
-    // devflow-debug has no unique skills (agent-teams + git shared), pick a plugin with unique assets
+    // devflow-debug has no unique skills (all are shared), pick a plugin with unique assets
     const debugPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-debug')!;
     const { skills } = computeAssetsToRemove([debugPlugin], DEVFLOW_PLUGINS);
 
-    // 'agent-teams' is shared with other plugins, should NOT be in removal list
-    expect(skills).not.toContain('agent-teams');
     // 'git' is also in core-skills, should NOT be in removal list
     expect(skills).not.toContain('git');
   });
