@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'fs/promises';
 
 /**
- * Strip `teammateMode: "auto"` from a parsed settings object in-place.
+ * Strip `teammateMode: "auto"` from a freshly parsed copy of the settings JSON.
  * Returns the serialised JSON string (with trailing newline).
  *
  * Pure string→string — matches the pipeline pattern used by stripFlags /
@@ -9,15 +9,23 @@ import { readFile, writeFile } from 'fs/promises';
  * Only removes the key when the value is exactly `"auto"`; user-set values
  * (`"tmux"`, `"in-process"`, etc.) are preserved as-is.
  *
- * Tolerant: malformed JSON is returned unchanged (no-op).
+ * Tolerant: malformed JSON is returned unchanged (no-op). Non-object roots
+ * (null, arrays, primitives) are treated as a no-op — only object roots can
+ * carry the key (avoids PF-004: a TypeError here would escape both functions
+ * and cause the migration to record a failure, retrying on every devflow init).
  */
 export function stripDevflowTeammateModeFromJson(settingsJson: string): string {
-  let settings: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    settings = JSON.parse(settingsJson) as Record<string, unknown>;
+    parsed = JSON.parse(settingsJson);
   } catch {
     return settingsJson; // Malformed JSON — leave untouched
   }
+  // Tolerant: only object roots can carry the key; null/arrays/primitives are no-ops.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return settingsJson;
+  }
+  const settings = parsed as Record<string, unknown>;
   if (settings['teammateMode'] !== 'auto') return settingsJson;
   delete settings['teammateMode'];
   return JSON.stringify(settings, null, 2) + '\n';

@@ -1,11 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
+import { writeFile } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import {
   stripDevflowTeammateModeFromJson,
   stripDevflowTeammateMode,
 } from '../src/cli/utils/teammate-mode-cleanup.js';
+
+// vi.mock is auto-hoisted before imports so the production module's named
+// writeFile binding resolves through this intercepted module copy.
+// writeFile is wrapped as vi.fn (delegates to real by default) so individual
+// tests can override it with mockRejectedValueOnce for uid-independent failure
+// simulation (avoids PF-004 test fragility from chmod-based root bypass).
+vi.mock('fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs/promises')>();
+  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+});
 
 describe('stripDevflowTeammateModeFromJson (string pipeline)', () => {
   it('removes teammateMode when value is exactly "auto"', () => {
@@ -29,6 +40,15 @@ describe('stripDevflowTeammateModeFromJson (string pipeline)', () => {
   it('returns input unchanged for malformed JSON', () => {
     const bad = 'not valid json {{{';
     expect(stripDevflowTeammateModeFromJson(bad)).toBe(bad);
+  });
+
+  it('returns input unchanged and does not throw for valid-JSON non-object roots (null, array, primitive)', () => {
+    // Regression for JSON.parse("null") → null → null['teammateMode'] TypeError.
+    // These inputs parse successfully but must be treated as no-ops because only
+    // plain-object roots can carry the key.
+    expect(stripDevflowTeammateModeFromJson('null')).toBe('null');
+    expect(stripDevflowTeammateModeFromJson('[]')).toBe('[]');
+    expect(stripDevflowTeammateModeFromJson('42')).toBe('42');
   });
 });
 
@@ -125,14 +145,14 @@ describe('stripDevflowTeammateMode (async)', () => {
     const settings = { teammateMode: 'auto' };
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 
-    // Make the file read-only so readFile succeeds but writeFile rejects.
-    await fs.chmod(settingsPath, 0o444);
+    // Reject deterministically via vi.mocked — chmod(0o444) is bypassed by root
+    // (common in CI Docker), making that approach uid-dependent. The vi.mock at
+    // module level routes the production module's writeFile through this mocked
+    // copy so mockRejectedValueOnce intercepts exactly one call.
+    const writeError = new Error('EACCES: permission denied') as NodeJS.ErrnoException;
+    writeError.code = 'EACCES';
+    vi.mocked(writeFile).mockRejectedValueOnce(writeError);
 
-    try {
-      await expect(stripDevflowTeammateMode(settingsPath)).rejects.toThrow();
-    } finally {
-      // Restore permissions so afterEach cleanup can delete the temp dir.
-      await fs.chmod(settingsPath, 0o644);
-    }
+    await expect(stripDevflowTeammateMode(settingsPath)).rejects.toThrow();
   });
 });
