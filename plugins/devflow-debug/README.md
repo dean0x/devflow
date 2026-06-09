@@ -23,9 +23,9 @@ npx devflow-kit init --plugin=debug
 ## How It Works
 
 1. **Hypothesis Generation** - Analyzes the bug and generates 3-5 distinct hypotheses
-2. **Team Spawning** - Creates one investigator agent per hypothesis
+2. **Investigation Spawning** - Creates one investigator agent per hypothesis
 3. **Parallel Investigation** - Each agent independently gathers evidence
-4. **Adversarial Debate** - Agents challenge each other's findings with code evidence
+4. **Adversarial Evaluation** - Competing hypotheses are weighed against each other's evidence by the orchestrator
 5. **Convergence** - Hypotheses that survive scrutiny become the root cause
 6. **Report** - Root cause with confidence level, evidence, and fix recommendations
 
@@ -54,5 +54,5 @@ Produces a root cause analysis report including:
 
 ## Related Plugins
 
-- [devflow-code-review](../devflow-code-review) - Code review with team-based debate
-- [devflow-implement](../devflow-implement) - Implementation with team exploration
+- [devflow-code-review](../devflow-code-review) - Comprehensive code review
+- [devflow-implement](../devflow-implement) - Implementation with quality gates
