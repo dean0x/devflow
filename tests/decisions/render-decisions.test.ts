@@ -188,14 +188,14 @@ describe('parseLedger', () => {
 describe('renderDecisionsFile — golden', () => {
   it('empty corpus: decisions.md header + empty TL;DR', () => {
     const result = renderDecisionsFile([], 'decisions');
-    expect(result.startsWith('<!-- TL;DR: 0 decisions. Key:  -->')).toBe(true);
+    expect(result.startsWith('<!-- TL;DR: 0 decisions. Key: -->')).toBe(true);
     expect(result).toContain('# Architectural Decisions');
     expect(result).not.toMatch(/## ADR-\d+:/);
   });
 
   it('empty corpus: pitfalls.md header + empty TL;DR', () => {
     const result = renderDecisionsFile([], 'pitfalls');
-    expect(result.startsWith('<!-- TL;DR: 0 pitfalls. Key:  -->')).toBe(true);
+    expect(result.startsWith('<!-- TL;DR: 0 pitfalls. Key: -->')).toBe(true);
     expect(result).toContain('# Known Pitfalls');
     expect(result).not.toMatch(/## PF-\d+:/);
   });
@@ -405,11 +405,11 @@ describe('CLI render subcommand', () => {
     expect(fs.existsSync(path.join(decisionsDir, 'pitfalls.md'))).toBe(true);
 
     const dContent = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
-    expect(dContent).toContain('<!-- TL;DR: 0 decisions. Key:  -->');
+    expect(dContent).toContain('<!-- TL;DR: 0 decisions. Key: -->');
     expect(dContent).toContain('# Architectural Decisions');
 
     const pContent = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
-    expect(pContent).toContain('<!-- TL;DR: 0 pitfalls. Key:  -->');
+    expect(pContent).toContain('<!-- TL;DR: 0 pitfalls. Key: -->');
     expect(pContent).toContain('# Known Pitfalls');
   });
 

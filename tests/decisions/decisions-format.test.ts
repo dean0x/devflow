@@ -228,9 +228,10 @@ describe('buildTldrLine', () => {
     expect(result).toBe('<!-- TL;DR: 8 decisions. Key: ADR-004, ADR-005, ADR-006, ADR-007, ADR-008 -->');
   });
 
-  it('empty corpus: count is 0, Key is empty string', () => {
+  it('empty corpus: count is 0, Key is empty with single trailing space (byte-compat with initDecisionsContent)', () => {
     const result = buildTldrLine('decisions', []);
-    expect(result).toBe('<!-- TL;DR: 0 decisions. Key:  -->');
+    // Must be byte-identical to initDecisionsContent's TL;DR (single space before -->)
+    expect(result).toBe('<!-- TL;DR: 0 decisions. Key: -->');
   });
 
   it('Key uses comma+space separator (AC-A5)', () => {

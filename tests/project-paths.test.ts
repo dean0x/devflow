@@ -25,11 +25,14 @@ import {
   getPitfallsFilePath,
   getDecisionsDisabledSentinel,
   getDecisionsConfigPath,
+  getDecisionsLedgerPath,
   getDecisionsLogPath,
+  getDecisionsArchivePath,
   getDecisionsManifestPath,
   getDecisionsLockDir,
   getDecisionsUsagePath,
   getDecisionsUsageLockDir,
+  getObservationsLockDir,
   getDecisionsNotificationsPath,
   getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
@@ -51,6 +54,7 @@ import {
   getGitignoreEntries,
   getDevflowGitignoreContent,
 } from '../src/cli/utils/project-paths.js';
+import * as tsPathsNs from '../src/cli/utils/project-paths.js';
 
 // Load CJS module
 const __filename = fileURLToPath(import.meta.url);
@@ -281,11 +285,14 @@ describe('CJS project-paths parity', () => {
     { name: 'getPitfallsFilePath', ts: getPitfallsFilePath, cjs: cjsPaths.getPitfallsFilePath },
     { name: 'getDecisionsDisabledSentinel', ts: getDecisionsDisabledSentinel, cjs: cjsPaths.getDecisionsDisabledSentinel },
     { name: 'getDecisionsConfigPath', ts: getDecisionsConfigPath, cjs: cjsPaths.getDecisionsConfigPath },
+    { name: 'getDecisionsLedgerPath', ts: getDecisionsLedgerPath, cjs: cjsPaths.getDecisionsLedgerPath },
     { name: 'getDecisionsLogPath', ts: getDecisionsLogPath, cjs: cjsPaths.getDecisionsLogPath },
+    { name: 'getDecisionsArchivePath', ts: getDecisionsArchivePath, cjs: cjsPaths.getDecisionsArchivePath },
     { name: 'getDecisionsManifestPath', ts: getDecisionsManifestPath, cjs: cjsPaths.getDecisionsManifestPath },
     { name: 'getDecisionsLockDir', ts: getDecisionsLockDir, cjs: cjsPaths.getDecisionsLockDir },
     { name: 'getDecisionsUsagePath', ts: getDecisionsUsagePath, cjs: cjsPaths.getDecisionsUsagePath },
     { name: 'getDecisionsUsageLockDir', ts: getDecisionsUsageLockDir, cjs: cjsPaths.getDecisionsUsageLockDir },
+    { name: 'getObservationsLockDir', ts: getObservationsLockDir, cjs: cjsPaths.getObservationsLockDir },
     { name: 'getDecisionsNotificationsPath', ts: getDecisionsNotificationsPath, cjs: cjsPaths.getDecisionsNotificationsPath },
     { name: 'getDecisionsRunsTodayPath', ts: getDecisionsRunsTodayPath, cjs: cjsPaths.getDecisionsRunsTodayPath },
     { name: 'getDecisionsBatchIdsPath', ts: getDecisionsBatchIdsPath, cjs: cjsPaths.getDecisionsBatchIdsPath },
@@ -335,5 +342,19 @@ describe('CJS project-paths parity', () => {
   it('getDreamConfigPath returns .devflow/dream/config.json in both TS and CJS', () => {
     expect(getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
     expect(cjsPaths.getDreamConfigPath(ROOT)).toBe('/some/project/.devflow/dream/config.json');
+  });
+
+  // Structural full-export parity: guards against silent drift where a function
+  // is added to one module but not the other. The hardcoded list above only
+  // covers enumerated functions; this asserts the COMPLETE export sets match so
+  // any future addition to one side without the other fails fast.
+  it('TypeScript and CJS export the identical set of function names', () => {
+    const tsNames = Object.keys(tsPathsNs)
+      .filter(k => typeof (tsPathsNs as Record<string, unknown>)[k] === 'function')
+      .sort();
+    const cjsNames = Object.keys(cjsPaths)
+      .filter(k => typeof (cjsPaths as Record<string, unknown>)[k] === 'function')
+      .sort();
+    expect(cjsNames).toEqual(tsNames);
   });
 });

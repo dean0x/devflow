@@ -115,6 +115,11 @@ export function getDecisionsUsageLockDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.lock');
 }
 
+/** .devflow/dream/.observations.lock — mkdir-based lock directory for observation log writes */
+export function getObservationsLockDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.observations.lock');
+}
+
 /** .devflow/decisions/.decisions-notifications.json */
 export function getDecisionsNotificationsPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-notifications.json');

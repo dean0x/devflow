@@ -124,6 +124,11 @@ function buildTldrLine(kind, rows) {
   const count = rows.length;
   const last5 = rows.slice(-5).map(r => r.anchor_id);
   const keyStr = last5.join(', ');
+  // Byte-compat: an empty key list must render `Key: -->` (single space) so the
+  // empty-corpus render is byte-identical to initDecisionsContent's header. A
+  // trailing space before `-->` would diverge from the documented contract and
+  // break the assertion that the render is the SOLE format authority.
+  if (!keyStr) return `<!-- TL;DR: ${count} ${kind}. Key: -->`;
   return `<!-- TL;DR: ${count} ${kind}. Key: ${keyStr} -->`;
 }
 
