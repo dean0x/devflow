@@ -31,15 +31,17 @@
 #   .devflow/features/**/KNOWLEDGE.md   (knowledge task only)
 #   .devflow/features/index.json         (knowledge task only)
 
-# Safe no-op fallback before set -e and hook-bootstrap
+# Safe no-op fallback — must exist before hook-bootstrap is sourced.
+# NOTE: no set -e here; dream-commit is agent-invoked best-effort plumbing,
+# not a registered Claude Code hook — failure must never block the session.
 dbg() { :; }
 
 # Resolve script directory (handles symlinks)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Soft-source debug tracing (non-fatal if missing)
-source "$SCRIPT_DIR/debug-trace" 2>/dev/null || true
-devflow_debug_init "dream-commit"
+# Source shared debug-trace bootstrap (preferred over inline sourcing; avoids
+# duplicating the debug-trace/devflow_debug_init pattern from hook-bootstrap).
+source "$SCRIPT_DIR/hook-bootstrap" "dream-commit"
 dbg "=== dream-commit START ==="
 
 # ---------------------------------------------------------------------------
@@ -85,19 +87,15 @@ devflow_debug_set_cwd "$PROJECT_ROOT"
 # ---------------------------------------------------------------------------
 
 DREAM_CONFIG="$PROJECT_ROOT/.devflow/dream/config.json"
+# Default ON — canonical source: src/cli/utils/dream-config.ts DEFAULT_CONFIG.autoCommit
 AUTO_COMMIT="true"
 
 if [ -f "$DREAM_CONFIG" ]; then
-  # Prefer jq; fall back to node; fall back to permissive default
+  # Prefer jq; fall back to json-helper.cjs get-field-file (path via argv, no interpolation)
   if command -v jq >/dev/null 2>&1; then
     _RAW=$(jq -r 'if (.autoCommit | type) == "null" then "true" else (.autoCommit | tostring) end' "$DREAM_CONFIG" 2>/dev/null) && AUTO_COMMIT="$_RAW"
   elif command -v node >/dev/null 2>&1; then
-    _RAW=$(node -e "
-      try {
-        const c = JSON.parse(require('fs').readFileSync('$DREAM_CONFIG','utf8'));
-        process.stdout.write(c.autoCommit === false ? 'false' : 'true');
-      } catch (e) { process.stdout.write('true'); }
-    " 2>/dev/null) && AUTO_COMMIT="${_RAW:-true}"
+    _RAW=$(node "$SCRIPT_DIR/json-helper.cjs" get-field-file "$DREAM_CONFIG" autoCommit true 2>/dev/null) && AUTO_COMMIT="${_RAW:-true}"
   fi
 fi
 
