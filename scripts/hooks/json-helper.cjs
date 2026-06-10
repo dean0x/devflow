@@ -280,7 +280,7 @@ function rotateObservations(logPath, archivePath, nowMs) {
   // so cost is O(stale) rather than O(archive) on the write path. The archive
   // is gitignored/recovery-only, so an incomplete final newline on ENOENT is
   // safe — parseLedger handles trailing-newline variance.
-  let existingArchiveIds = new Set();
+  const existingArchiveIds = new Set();
   if (fs.existsSync(archivePath)) {
     const existingRows = parseLedger(archivePath);
     for (const r of existingRows) {

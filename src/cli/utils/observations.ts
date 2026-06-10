@@ -86,10 +86,6 @@ export interface LearningObservation {
  *
  * Home: observations.ts (pure data module, no I/O) so decisions-ledger-migration.ts
  * and any future ledger consumers can import without circular deps.
- *
- * Migration batch note: decisions-ledger-migration.ts currently defines a private
- * `interface LedgerRow` with `decisions_status?: string` (untyped). The migration
- * batch that owns that file should replace it with `import { LedgerRow } from './observations.js'`.
  */
 export interface LedgerRow {
   /** Observation ID (may be synthetic: `obs_migrated_{anchor}` for no-Source entries). */
