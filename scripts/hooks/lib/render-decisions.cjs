@@ -237,6 +237,39 @@ function writeAtomic(filePath, content) {
 }
 
 // ---------------------------------------------------------------------------
+// Lock-free render+write helper (for callers that already hold .decisions.lock)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render both decisions.md and pitfalls.md from the given ledger rows and write
+ * them atomically. Does NOT acquire any lock — callers (assign-anchor, retire-anchor)
+ * must already hold .decisions.lock. The standalone `render` CLI takes the lock
+ * before calling this function.
+ *
+ * Creates the decisionsDir if it does not exist.
+ *
+ * @param {string} worktreePath - Absolute path to the worktree root.
+ * @param {object[]} rows - All rows from the ledger (unfiltered).
+ */
+function renderAndWriteAll(worktreePath, rows) {
+  const decisionsDir = path.join(worktreePath, '.devflow', 'decisions');
+  fs.mkdirSync(decisionsDir, { recursive: true });
+
+  const decisionsFilePath = getDecisionsFilePath(worktreePath);
+  const pitfallsFilePath = getPitfallsFilePath(worktreePath);
+
+  const decisionsContent = renderDecisionsFile(rows, 'decisions');
+  const pitfallsContent = renderDecisionsFile(rows, 'pitfalls');
+
+  writeAtomic(decisionsFilePath, decisionsContent);
+  writeAtomic(pitfallsFilePath, pitfallsContent);
+
+  process.stderr.write(
+    `[render-decisions] wrote decisions.md (${decisionsContent.length}B) + pitfalls.md (${pitfallsContent.length}B)\n`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
 
@@ -319,11 +352,8 @@ if (require.main === module) {
   }
 
   try {
-    writeAtomic(decisionsFilePath, decisionsContent);
-    writeAtomic(pitfallsFilePath, pitfallsContent);
-    process.stderr.write(
-      `[render-decisions] wrote decisions.md (${decisionsContent.length}B) + pitfalls.md (${pitfallsContent.length}B)\n`
-    );
+    // Use the lock-free helper — we already hold the lock.
+    renderAndWriteAll(worktreePath, rows);
   } finally {
     releaseLock(lockDir);
   }
@@ -337,6 +367,7 @@ if (require.main === module) {
 
 module.exports = {
   renderDecisionsFile,
+  renderAndWriteAll,
   parseLedger,
   isActive,
   anchorNumeric,

@@ -43,12 +43,20 @@ const {
   getPitfallsFilePath,
   getDecisionsUsagePath,
   getDecisionsLockDir,
+  getDecisionsLedgerPath,
+  getDecisionsLogPath,
+  getDecisionsArchivePath,
+  getObservationsLockDir,
 } = require('./lib/project-paths.cjs');
 const {
   initDecisionsContent: _initDecisionsContent,
   formatDecisionBody,
   formatPitfallBody,
 } = require('./lib/decisions-format.cjs');
+const {
+  renderAndWriteAll,
+  parseLedger,
+} = require('./lib/render-decisions.cjs');
 
 function readStdin() {
   try {
@@ -142,6 +150,7 @@ function initDecisionsContent(type) {
 
 /**
  * Find the highest numeric suffix (NNN) among heading matches and return next padded ID.
+ * Legacy signature kept for backward compat with decisions-append (Phase 5 will remove it).
  * @param {RegExpMatchArray[]} matches
  * @param {string} prefix - 'ADR' or 'PF'
  * @returns {{ nextN: string, anchorId: string }}
@@ -154,6 +163,51 @@ function nextDecisionsId(matches, prefix) {
   }
   const nextN = (maxN + 1).toString().padStart(3, '0');
   return { nextN, anchorId: `${prefix}-${nextN}` };
+}
+
+/**
+ * Compute the next anchor ID for the given type by scanning the anchored ledger.
+ * O(anchored) — single pass. Includes ALL anchored rows (Retired, Deprecated, Superseded).
+ * ADR and PF sequences are independent.
+ *
+ * @param {object[]} ledgerRows - All rows from the ledger (from parseLedger)
+ * @param {'decision'|'pitfall'} type
+ * @returns {{ anchorId: string, nextN: string }}
+ */
+function nextAnchorFromLedger(ledgerRows, type) {
+  const prefix = type === 'decision' ? 'ADR' : 'PF';
+  const prefixRe = new RegExp(`^${prefix}-`);
+  let maxN = 0;
+  for (const row of ledgerRows) {
+    if (!row.anchor_id || !prefixRe.test(row.anchor_id)) continue;
+    const m = row.anchor_id.match(/(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > maxN) maxN = n;
+    }
+  }
+  const nextN = (maxN + 1).toString().padStart(3, '0');
+  return { anchorId: `${prefix}-${nextN}`, nextN };
+}
+
+/**
+ * Count active anchored rows of the given type in the ledger.
+ * Active = decisions_status is undefined | 'Accepted' | 'Active'.
+ *
+ * @param {object[]} ledgerRows - All rows from the ledger
+ * @param {'decision'|'pitfall'} type
+ * @returns {number}
+ */
+function countActiveLedgerRows(ledgerRows, type) {
+  const INACTIVE = new Set(['Deprecated', 'Superseded', 'Retired']);
+  let count = 0;
+  for (const row of ledgerRows) {
+    if (row.type !== type) continue;
+    if (!row.anchor_id) continue;
+    if (row.decisions_status && INACTIVE.has(row.decisions_status)) continue;
+    count++;
+  }
+  return count;
 }
 
 /**
@@ -258,6 +312,64 @@ function registerUsageEntry(projectRoot, anchorId) {
     };
     writeUsageFile(projectRoot, data);
   }
+}
+
+/**
+ * Internal rotation logic for rotate-observations. Separated for testability.
+ * Moves rows where status === 'observing' AND no anchor_id AND age > 30 days
+ * from logPath to archivePath (append). Returns count of rotated rows.
+ *
+ * @param {string} logPath - Path to decisions-log.jsonl
+ * @param {string} archivePath - Path to decisions-log.archive.jsonl
+ * @param {number} nowMs - Current time as epoch ms (injectable for tests)
+ * @returns {number} count of rotated rows
+ */
+function rotateObservations(logPath, archivePath, nowMs) {
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  const cutoffMs = nowMs - THIRTY_DAYS_MS;
+
+  let logEntries = [];
+  if (fs.existsSync(logPath)) {
+    logEntries = parseLedger(logPath);
+  }
+
+  const kept = [];
+  const stale = [];
+
+  for (const row of logEntries) {
+    // Only move 'observing' rows without anchor_id (unanchored)
+    if (row.status !== 'observing' || row.anchor_id) {
+      kept.push(row);
+      continue;
+    }
+    // Check age using last_seen if present, else first_seen
+    const tsField = row.last_seen || row.first_seen;
+    if (!tsField) {
+      kept.push(row);
+      continue;
+    }
+    const rowMs = new Date(tsField).getTime();
+    if (isNaN(rowMs) || rowMs > cutoffMs) {
+      kept.push(row);
+    } else {
+      stale.push(row);
+    }
+  }
+
+  if (stale.length === 0) return 0;
+
+  // Append stale rows to archive
+  let existingArchive = [];
+  if (fs.existsSync(archivePath)) {
+    existingArchive = parseLedger(archivePath);
+  }
+  const archiveContent = [...existingArchive, ...stale].map(r => JSON.stringify(r)).join('\n') + '\n';
+  writeFileAtomic(archivePath, archiveContent);
+
+  // Write remaining rows back to log
+  writeJsonlAtomic(logPath, kept);
+
+  return stale.length;
 }
 
 function mergeEvidence(oldEvidence, newEvidence) {
@@ -705,19 +817,234 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // count-active <file> <type>
-    // D23: Single source of truth bridge — TS CLI calls this to get active count
-    // from countActiveHeadings without duplicating the logic.
+    // count-active <worktree-or-file> <type>
+    // D23: Count active anchored rows from the ledger (preferred) or from
+    // .md heading scan (legacy/pre-migration fallback).
+    //
+    // Two calling conventions (backward compat):
+    //   count-active <worktree> <type>    — reads ledger, falls back to .md scan
+    //   count-active <file.md> <type>     — legacy: reads the .md file directly
+    //
+    // Detection: if the argument ends with '.md' OR is a regular file (not dir),
+    // treat as legacy .md file path. Otherwise treat as worktree.
     // -------------------------------------------------------------------------
     case 'count-active': {
-      const filePath = safePath(args[0]);
+      const caArg = safePath(args[0]);
       const entryType = args[1]; // 'decision' or 'pitfall'
-      let content = '';
+
+      // Detect legacy .md file path vs worktree path
+      let caIsLegacyFilePath = caArg.endsWith('.md');
+      if (!caIsLegacyFilePath) {
+        try {
+          const st = fs.statSync(caArg);
+          caIsLegacyFilePath = st.isFile();
+        } catch { /* path doesn't exist — treat as worktree */ }
+      }
+
+      if (caIsLegacyFilePath) {
+        // Legacy: .md file path passed directly
+        let content = '';
+        try {
+          content = fs.readFileSync(caArg, 'utf8');
+        } catch { /* file doesn't exist — count is 0 */ }
+        const count = countActiveHeadings(content, entryType);
+        console.log(JSON.stringify({ count }));
+      } else {
+        // Worktree path: read from ledger, fallback to .md scan when no ledger
+        const caLedgerPath = getDecisionsLedgerPath(caArg);
+        const caLedgerRows = parseLedger(caLedgerPath);
+        if (caLedgerRows.length > 0) {
+          const count = countActiveLedgerRows(caLedgerRows, entryType);
+          console.log(JSON.stringify({ count }));
+        } else {
+          const mdPath = entryType === 'decision'
+            ? getDecisionsFilePath(caArg)
+            : getPitfallsFilePath(caArg);
+          let content = '';
+          try {
+            content = fs.readFileSync(mdPath, 'utf8');
+          } catch { /* file doesn't exist — count is 0 */ }
+          const count = countActiveHeadings(content, entryType);
+          console.log(JSON.stringify({ count }));
+        }
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // assign-anchor <type> <obs_id>
+    // AC-A2: Assign next anchor ID for the given type (decision|pitfall) to the
+    // observation identified by obs_id in decisions-log.jsonl. Atomic under a
+    // single .decisions.lock acquisition. Registers usage, re-renders both .md.
+    //
+    // Locking discipline: holds ONLY .decisions.lock (never .observations.lock).
+    // O(anchored) — single pass for max numeric suffix (AC-P2).
+    // -------------------------------------------------------------------------
+    case 'assign-anchor': {
+      const assignType = args[0]; // 'decision' or 'pitfall'
+      const assignObsId = args[1];
+
+      if (!assignType || !assignObsId) {
+        process.stderr.write('assign-anchor: usage: assign-anchor <type> <obs_id>\n');
+        process.exit(1);
+      }
+      if (assignType !== 'decision' && assignType !== 'pitfall') {
+        process.stderr.write(`assign-anchor: type must be 'decision' or 'pitfall', got '${assignType}'\n`);
+        process.exit(1);
+      }
+
+      const aaProjectRoot = process.cwd();
+      const aaDecisionsDir = path.join(aaProjectRoot, '.devflow', 'decisions');
+      const aaLedgerPath = getDecisionsLedgerPath(aaProjectRoot);
+      const aaLogPath = getDecisionsLogPath(aaProjectRoot);
+      const aaLockDir = getDecisionsLockDir(aaProjectRoot);
+
+      fs.mkdirSync(aaDecisionsDir, { recursive: true });
+
+      if (!acquireMkdirLock(aaLockDir, 30000, 60000)) {
+        process.stderr.write(`assign-anchor: timeout acquiring lock at ${aaLockDir}\n`);
+        process.exit(1);
+      }
+
       try {
-        content = fs.readFileSync(filePath, 'utf8');
-      } catch { /* file doesn't exist — count is 0 */ }
-      const count = countActiveHeadings(content, entryType);
-      console.log(JSON.stringify({ count }));
+        // Read existing ledger (absent = empty)
+        const aaLedgerRows = parseLedger(aaLedgerPath);
+
+        // Compute next anchor — O(anchored), single pass
+        const { anchorId: aaAnchorId } = nextAnchorFromLedger(aaLedgerRows, assignType);
+
+        // Read observation from log
+        let aaLogEntries = parseLedger(aaLogPath);
+        const aaObsIdx = aaLogEntries.findIndex(e => e.id === assignObsId);
+        if (aaObsIdx === -1) {
+          process.stderr.write(`assign-anchor: obs_id '${assignObsId}' not found in ${aaLogPath}\n`);
+          process.exit(1);
+        }
+        const aaObs = aaLogEntries[aaObsIdx];
+
+        // Build anchored ledger row
+        const aaDate = new Date().toISOString().slice(0, 10);
+        const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
+
+        const aaLedgerRow = Object.assign({}, aaObs, {
+          anchor_id: aaAnchorId,
+          decisions_status: aaActiveStatus,
+        });
+        // Set date on decisions only (not pitfalls — byte-compat asymmetry from formatDecisionBody)
+        if (assignType === 'decision') {
+          aaLedgerRow.date = aaObs.date || aaDate;
+        }
+
+        // Append anchored row to ledger (atomic)
+        const aaNewLedgerRows = [...aaLedgerRows, aaLedgerRow];
+        const aaLedgerContent = aaNewLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
+        writeFileAtomic(aaLedgerPath, aaLedgerContent);
+
+        // Mark log row as created
+        aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created' });
+        writeJsonlAtomic(aaLogPath, aaLogEntries);
+
+        // Register usage entry
+        registerUsageEntry(aaProjectRoot, aaAnchorId);
+
+        // Re-render both .md files (lock-free — we already hold .decisions.lock)
+        renderAndWriteAll(aaProjectRoot, aaNewLedgerRows);
+
+        // Print assigned anchor id to stdout
+        process.stdout.write(aaAnchorId + '\n');
+      } finally {
+        releaseLock(aaLockDir);
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // retire-anchor <anchor_id> <status>
+    // AC-A3, AC-F5, AC-F7: Flip decisions_status on the ledger row. Idempotent.
+    // Re-renders both .md (retired entry vanishes from .md, stays in ledger).
+    //
+    // status must be Deprecated | Superseded | Retired.
+    // Locking discipline: holds ONLY .decisions.lock.
+    // -------------------------------------------------------------------------
+    case 'retire-anchor': {
+      const retireAnchorId = args[0];
+      const retireStatus = args[1];
+
+      const RETIRE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
+
+      if (!retireAnchorId || !retireStatus) {
+        process.stderr.write('retire-anchor: usage: retire-anchor <anchor_id> <status>\n');
+        process.exit(1);
+      }
+      if (!RETIRE_STATUSES.has(retireStatus)) {
+        process.stderr.write(`retire-anchor: status must be Deprecated|Superseded|Retired, got '${retireStatus}'\n`);
+        process.exit(1);
+      }
+
+      const raProjectRoot = process.cwd();
+      const raLedgerPath = getDecisionsLedgerPath(raProjectRoot);
+      const raLockDir = getDecisionsLockDir(raProjectRoot);
+
+      fs.mkdirSync(path.join(raProjectRoot, '.devflow', 'decisions'), { recursive: true });
+
+      if (!acquireMkdirLock(raLockDir, 30000, 60000)) {
+        process.stderr.write(`retire-anchor: timeout acquiring lock at ${raLockDir}\n`);
+        process.exit(1);
+      }
+
+      try {
+        const raRows = parseLedger(raLedgerPath);
+        const raIdx = raRows.findIndex(r => r.anchor_id === retireAnchorId);
+        if (raIdx === -1) {
+          process.stderr.write(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger\n`);
+          process.exit(1);
+        }
+
+        // Idempotent: if already set to same status, still write (no-op equivalent)
+        raRows[raIdx] = Object.assign({}, raRows[raIdx], { decisions_status: retireStatus });
+        const raLedgerContent = raRows.map(r => JSON.stringify(r)).join('\n') + '\n';
+        writeFileAtomic(raLedgerPath, raLedgerContent);
+
+        // Re-render both .md (lock-free — we already hold .decisions.lock)
+        renderAndWriteAll(raProjectRoot, raRows);
+      } finally {
+        releaseLock(raLockDir);
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // rotate-observations [<log>] [<archive>]
+    // AC-F9, AC-P3: Move stale observing rows (>30 days old) to archive.
+    // NEVER moves anchored or created/ready rows — only stale 'observing' rows.
+    // Runs under .observations.lock (NOT .decisions.lock).
+    //
+    // Default paths derived from cwd. Accepts explicit log/archive paths as args.
+    // For testability, _now_ is injectable via the _nowMs parameter in the
+    // internal function; CLI always uses Date.now().
+    // -------------------------------------------------------------------------
+    case 'rotate-observations': {
+      // Args may be: [] | [log] | [log, archive]
+      const roProjectRoot = process.cwd();
+      const roLogPath = args[0] ? safePath(args[0]) : getDecisionsLogPath(roProjectRoot);
+      const roArchivePath = args[1] ? safePath(args[1]) : getDecisionsArchivePath(roProjectRoot);
+      const roLockDir = getObservationsLockDir(roProjectRoot);
+
+      fs.mkdirSync(path.dirname(roLogPath), { recursive: true });
+      fs.mkdirSync(path.dirname(roArchivePath), { recursive: true });
+      fs.mkdirSync(path.dirname(roLockDir), { recursive: true });
+
+      if (!acquireMkdirLock(roLockDir, 30000, 60000)) {
+        process.stderr.write('rotate-observations: timeout acquiring .observations.lock\n');
+        process.exit(1);
+      }
+
+      try {
+        const roRotated = rotateObservations(roLogPath, roArchivePath, Date.now());
+        process.stdout.write(`rotated ${roRotated} observing rows\n`);
+      } finally {
+        releaseLock(roLockDir);
+      }
       break;
     }
 
@@ -735,11 +1062,15 @@ try {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     countActiveHeadings,
+    countActiveLedgerRows,
     readUsageFile,
     writeUsageFile,
     registerUsageEntry,
     writeFileAtomic,
+    writeJsonlAtomic,
     initDecisionsContent,
     nextDecisionsId,
+    nextAnchorFromLedger,
+    rotateObservations,
   };
 }

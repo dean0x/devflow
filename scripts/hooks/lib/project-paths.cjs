@@ -79,9 +79,19 @@ function getDecisionsConfigPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions.json');
 }
 
+/** .devflow/decisions/decisions-ledger.jsonl — committed anchored rows (single source of truth for rendering) */
+function getDecisionsLedgerPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+}
+
 /** .devflow/decisions/decisions-log.jsonl */
 function getDecisionsLogPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.jsonl');
+}
+
+/** .devflow/decisions/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
+function getDecisionsArchivePath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.archive.jsonl');
 }
 
 /** .devflow/decisions/.decisions-manifest.json */
@@ -102,6 +112,11 @@ function getDecisionsUsagePath(projectRoot) {
 /** .devflow/decisions/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
 function getDecisionsUsageLockDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.lock');
+}
+
+/** .devflow/dream/.observations.lock — mkdir-based lock directory for observation log writes */
+function getObservationsLockDir(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'dream', '.observations.lock');
 }
 
 /** .devflow/decisions/.decisions-notifications.json */
@@ -274,9 +289,12 @@ module.exports = {
   getPitfallsFilePath,
   getDecisionsDisabledSentinel,
   getDecisionsConfigPath,
+  getDecisionsLedgerPath,
   getDecisionsLogPath,
+  getDecisionsArchivePath,
   getDecisionsManifestPath,
   getDecisionsLockDir,
+  getObservationsLockDir,
   getDecisionsUsagePath,
   getDecisionsUsageLockDir,
   getDecisionsNotificationsPath,
