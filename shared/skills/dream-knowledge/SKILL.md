@@ -47,6 +47,16 @@ After all slugs, write the refresh timestamp:
 date +%s > .devflow/features/.knowledge-last-refresh
 ```
 
+**Auto-commit** (after all slugs refreshed and refresh timestamp written):
+
+Run the installed commit helper — summarise the refreshed slugs as the action:
+```bash
+"$HOME/.devflow/scripts/hooks/dream-commit" knowledge "refresh <slug> knowledge" "<session_id>"
+```
+Use `"refresh <slug1>, <slug2> knowledge"` when multiple slugs were refreshed.
+Pass the session id from the marker you claimed. This is best-effort: the helper exits 0
+silently on no-op or if auto-commit is disabled.
+
 Delete all claimed `.processing` markers on success.
 
 **On any failure**: leave `.processing` files in place (dream-recover will retry them).

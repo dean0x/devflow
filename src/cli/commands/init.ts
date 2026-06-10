@@ -1161,10 +1161,15 @@ export const initCommand = new Command('init')
     // commands — it is a one-time setup action. See D1 in dream-config.ts for the
     // concurrency assumption shared by both write strategies.
     if (gitRoot) {
+      // autoCommit: preserve existing value (if set by user), default ON for new installs.
+      // We read the current config to avoid clobbering a user-set autoCommit=false.
+      const { readConfig: readDreamConfig } = await import('../utils/dream-config.js');
+      const existingDreamConfig = await readDreamConfig(gitRoot);
       await writeDreamConfig(gitRoot, {
         memory: memoryEnabled,
         decisions: decisionsEnabled,
         knowledge: knowledgeEnabled,
+        autoCommit: existingDreamConfig.autoCommit,
       });
     }
 

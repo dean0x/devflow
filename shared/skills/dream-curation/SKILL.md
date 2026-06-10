@@ -128,6 +128,17 @@ entry instead (update the ledger rows via `merge-observation`, then re-render).
 
 **Cap enforcement**: stop after 5 changes regardless of remaining candidates.
 
+**Auto-commit** (after all retire-anchor calls complete, all locks released):
+
+Run the installed commit helper — summarise what changed as the action:
+```bash
+"$HOME/.devflow/scripts/hooks/dream-commit" curation "<action>" "<session_id>"
+```
+Where `<action>` describes what happened, e.g. `"retire 2 stale entries"` or
+`"retire ADR-007 (superseded)"`. Pass the session id from the marker you claimed.
+This is best-effort: the helper exits 0 silently on no-op or if auto-commit is disabled.
+Run it AFTER all `retire-anchor` calls complete (each self-releases `.decisions.lock`).
+
 **Transparency**: after curation, emit a brief note in the agent output listing what was
 retired/merged. If nothing was changed, stay silent.
 
