@@ -560,3 +560,239 @@ Phase 7 must NOT call `git commit` while holding `.decisions.lock` or `.observat
 - `decisions-index.cjs` still has a `KNOWN_STATUSES` set and Deprecated/Superseded filter — Phase 8 removes this since the .md files no longer contain non-active entries (the renderer filters them out before writing). This unlocks ~25 filter tests to remove.
 - After Phase 8, `count-active` from `.md` file content (the legacy path in json-helper.cjs that does `countActiveHeadings`) is dead code — every project will have migrated to the ledger. Phase 8 can remove the `.endsWith('.md')` fallback.
 - `npm run build` in Phase 8 must succeed with no errors (the build already succeeds; Phase 8 just needs to not break it).
+
+---
+
+## Phase 7 Implementation Summary
+
+### Commit: (see `git log --oneline -1`)
+
+### Files Created
+
+- `scripts/hooks/dream-commit` — NEW executable shell helper. Deterministic plumbing (ADR-008).
+  - CLI: `dream-commit <task> <action> [session_id]`; task ∈ {decisions, curation, knowledge}
+  - Commit subject: `chore(dream): <action>`; trailers: `Dream-Task: <task>`, `Dream-Session: <id>`, `Co-Authored-By: Devflow Dream <dream@devflow.local>`
+  - Config gate: reads `autoCommit` from `.devflow/dream/config.json` (default ON when absent)
+  - Safety rails: skips during rebase-merge, rebase-apply, MERGE_HEAD, CHERRY_PICK_HEAD, detached HEAD; uses `git rev-parse --git-dir` (worktree-safe); exits 0 cleanly on any skip
+  - Staged paths: `.devflow/decisions/{decisions-ledger.jsonl,decisions.md,pitfalls.md}` always; `.devflow/features/**/KNOWLEDGE.md` + `.devflow/features/index.json` for knowledge task only. NEVER `git add -A`.
+  - Best-effort: git commit failure exits 0 (maintenance must never block session)
+  - Installer: `copyDirectory(scripts/, ~/.devflow/scripts/)` is a full recursive copy — no file list to update (avoids PF-010)
+
+- `tests/decisions/dream-commit.test.ts` — 50 tests covering:
+  - Commit format: subject, Dream-Task, Dream-Session, Co-Authored-By trailers
+  - Path scope: decisions files committed, user files NOT committed, decisions-log.jsonl NOT committed, KNOWLEDGE.md only for knowledge task
+  - No-op when clean (nothing staged → no commit)
+  - Safety rails: MERGE_HEAD, CHERRY_PICK_HEAD, rebase-merge, rebase-apply, detached HEAD all produce exit 0, no commit
+  - Config gate: autoCommit false → no commit; true / absent key / no config file → commit
+  - Argument validation: missing task exits 1, missing action exits 1, unknown task exits 1
+  - SKILL wiring assertions for dream-decisions, dream-curation, dream-knowledge
+  - DreamConfig autoCommit key assertions
+
+### Files Modified
+
+- `scripts/hooks/dream-commit` — (NEW, see above)
+- `shared/skills/dream-decisions/SKILL.md` — Added auto-commit step after assign-anchor: `dream-commit decisions "add <anchor_id>" <session_id>`. Runs AFTER `.decisions.lock` is released.
+- `shared/skills/dream-curation/SKILL.md` — Added auto-commit step after all retire-anchor calls: `dream-commit curation "<action>" <session_id>`.
+- `shared/skills/dream-knowledge/SKILL.md` — Added auto-commit step after all slugs refreshed: `dream-commit knowledge "refresh <slug> knowledge" <session_id>`.
+- `src/cli/utils/dream-config.ts` — Added `autoCommit: boolean` to `DreamConfig` interface (default ON); `coerceConfig` reads it with `typeof p.autoCommit === 'boolean'` guard.
+- `src/cli/commands/decisions.ts` — `--status` now reports auto-commit state (`Auto-commit: ON|OFF`) from dream config.
+- `src/cli/commands/init.ts` — `writeDreamConfig` call now preserves existing `autoCommit` value to avoid clobbering user-set `autoCommit=false` on reinit.
+
+### Config Key Summary
+
+- **Key**: `autoCommit` in `.devflow/dream/config.json`
+- **Default**: `true` (absent key or missing file → ON)
+- **Source of truth**: `DreamConfig` in `src/cli/utils/dream-config.ts`
+- **Status reporting**: `devflow decisions --status` prints `Auto-commit: ON (chore(dream): commits after each Dream write)` or `Auto-commit: OFF`
+- **Shell reading**: `dream-commit` reads via `jq` or `node` fallback; `autoCommit=false` → exit 0
+
+### Gotchas for Phase 8 (final cleanup)
+
+1. **decisions-index.cjs KNOWN_STATUSES filter**: Remove the `Deprecated`/`Superseded` filter from `decisions-index.cjs` — the renderer now filters before writing, so the .md files never contain non-active entries. This was blocked on Phase 7 (needed the full pipeline to be correct first). Removing this unlocks ~25 filter tests in the decisions index test file.
+
+2. **count-active .md fallback**: The `.endsWith('.md')` fallback in `json-helper.cjs count-active` op is dead code after all projects migrate. Phase 8 removes the `countActiveHeadings` function and the fallback branch.
+
+3. **AC-A8 static sweep**: grep for `decisions-append` across all source/test/skill files. Only expected survivors:
+   - `tests/decisions/decisions-format.test.ts` — AC-A8 test asserting op is rejected + comment
+   - `shared/skills/dream-decisions/SKILL.md` — "NEVER call `decisions-append`" prohibition
+   - `shared/skills/dream-curation/SKILL.md` — may still have a prohibition reference (check)
+   - `src/cli/utils/observation-io.ts` header comment
+   - `scripts/hooks/lib/decisions-format.cjs` — historical comment
+
+4. **dream-commit not wired into the knowledge auto-refresh SessionEnd hook**: Phase 7 wired the Dream subagent skills (dream-knowledge) but the Shell SessionEnd hook (`eval-knowledge`) that refreshes stale KBs writes `.devflow/features/` but does NOT call `dream-commit`. The Plan says to wire it in the hook itself. This was intentionally deferred: the `eval-knowledge` hook only WRITES a marker; the Dream subagent does the actual refresh. The subagent (dream-knowledge SKILL) does call `dream-commit`. So coverage is correct — no shell-to-dream-commit wiring needed in `eval-knowledge` itself. Confirm this understanding in Phase 8.
+
+5. **Build**: `npm run build` passes clean (1787 tests, all green) at end of Phase 7.
+
+---
+
+## Phase 8 Implementation Summary
+
+### Commit: 614f789
+
+### Status: COMPLETE — all three deliverables done, build clean, 1787 tests green.
+
+### Dead code removed
+
+**1. `scripts/hooks/lib/decisions-index.cjs`**
+- Removed `isDeprecatedOrSuperseded()` function
+- Removed `filterDecisionsContext()` function
+- Removed `isDeprecatedOrSuperseded(section)` guard call from `extractIndexEntries`
+- `KNOWN_STATUSES` trimmed from `['Active', 'Deprecated', 'Superseded']` to `['Active', 'Accepted']` — only active-entry statuses appear in rendered .md files
+- Removed `filterDecisionsContext` from `module.exports`
+- Removed unused `hasDecisionsFile` / `hasPitfallsFile` variables in `loadDecisionsIndex`
+- Updated header comment: documents that filtering is now renderer's responsibility
+
+**2. `scripts/hooks/json-helper.cjs`**
+- Removed `countActiveHeadings()` function (D18 comment + full impl)
+- Removed legacy `.md`-file-path detection branch from `count-active` op: `.endsWith('.md')`, `fs.statSync().isFile()`, and the `if (caIsLegacyFilePath)` read path
+- `count-active` now reads exclusively from `decisions-ledger.jsonl` via `countActiveLedgerRows`; returns `{ count: 0 }` when ledger absent
+- Removed `countActiveHeadings` from `module.exports`
+
+### AC-A4 proof: index output byte-identical for active-only input
+
+Before and after the change, running `loadDecisionsIndex` against a fixture with one Accepted decision and one Active pitfall produces:
+
+```
+Decisions (1):
+  ADR-001  Use Result types everywhere across the codebase for errors  [Active]
+
+Pitfalls (1):
+  PF-004  Background hook scripts grow into god scripts over time  [Active]  —  scripts/hooks/foo.cjs
+
+ADR-NNN entries live in /path/.devflow/decisions/decisions.md
+PF-NNN  entries live in /path/.devflow/decisions/pitfalls.md
+Read the relevant file and locate the matching `## ADR-NNN:` or `## PF-NNN:` heading for the full body.
+```
+
+The `Accepted` status tag (used by decision entries) also works: `[Accepted]`. Active entries are formatted identically — heading lines, titles, status tags, area suffix, footer pointer text, `(none)` for empty corpora. AC-A4 holds.
+
+### AC-A8 final grep result
+
+The following are the ONLY surviving mentions of the swept symbols:
+
+| Symbol | Location | Category |
+|--------|----------|----------|
+| `KNOWN_STATUSES` | `decisions-index.cjs:31,89` | Active — formatting tag `['Active', 'Accepted']` |
+| `decisions-append` | `dream-decisions/SKILL.md:15,111` | Prohibition text ("Never call") |
+| `updateDecisionsStatus` | `observation-io.ts:12,17` | Historical removal comment |
+| `updateDecisionsStatus` | `review-command.test.ts` | Historical test of removal |
+| `decisions-append` | `decisions-format.test.ts` | AC-A8 op-rejection test + prohibition assertions |
+| `decisions-append` | `dream-curation.test.ts` | Prohibition assertion test |
+| `updateDecisionsStatus` | `dream-curation.test.ts` | Historical test of removal |
+
+Zero live callers. Zero callers of the removed legacy `.md` path. Sweep is clean.
+
+### Test delta
+
+Net count: 1787 → 1787 (zero change — removed tests replaced 1:1).
+
+Files updated:
+- `tests/decisions/index-generator.test.ts` — removed 2 filter tests; added 2 active-only contract tests; removed `filterDecisionsContext` import; removed `DEPRECATED_ADR`/`SUPERSEDED_PF` fixture imports
+- `tests/resolve/decisions-citation.test.ts` — removed 8 `filterDecisionsContext` unit tests; added 8 active-only contract tests including `filterDecisionsContext not exported` guard
+- `tests/learning/review-command.test.ts` — removed 3 legacy `.md`-path count-active tests; added 3 ledger-based count-active tests (worktree path)
+
+### Build
+
+`npm run build` clean: 21 plugins, 96 skill copies, 52 agent copies, 12 rule copies. No errors. TypeScript compile (via `build:cli`) passes. HUD distribution passes.
+
+---
+
+## VERIFICATION CHECKLIST FOR ORCHESTRATOR
+
+These steps verify the full 8-phase pipeline end-to-end without touching this repo's live `.devflow/decisions/`.
+
+**1. Build clean**
+```bash
+npm run build
+```
+Expected: exits 0, "Build complete!" in output.
+
+**2. Full test suite**
+```bash
+npx vitest run
+```
+Expected: 1787 tests pass, 0 fail.
+
+**3. TypeScript typecheck (included in build, but explicit check)**
+```bash
+npm run build:cli
+```
+Expected: exits 0, no type errors.
+
+**4. AC-A4: index output unchanged for active-only input**
+```bash
+node -e "
+const fs = require('fs'), os = require('os'), path = require('path');
+const { loadDecisionsIndex } = require('./scripts/hooks/lib/decisions-index.cjs');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-'));
+const d = path.join(tmp, '.devflow', 'decisions');
+fs.mkdirSync(d, { recursive: true });
+fs.writeFileSync(path.join(d, 'decisions.md'), '## ADR-001: Use Result types\n\n- **Status**: Accepted\n- **Decision**: Always Result<T,E>\n');
+fs.writeFileSync(path.join(d, 'pitfalls.md'), '## PF-004: God scripts\n\n- **Status**: Active\n- **Area**: scripts/hooks/\n- **Description**: Watch out\n');
+console.log(loadDecisionsIndex(tmp));
+fs.rmSync(tmp, { recursive: true, force: true });
+"
+```
+Expected: shows `Decisions (1):`, `ADR-001`, `[Accepted]`, `Pitfalls (1):`, `PF-004`, `[Active]`, area suffix, footer.
+
+**5. AC-A8 grep: zero live callers**
+```bash
+grep -rn "decisions-append\|decisionsAppend\|nextDecisionsId\|buildUpdatedTldr\|countActiveHeadings\|updateDecisionsStatus" scripts/ shared/ src/ tests/ | grep -v "NEVER\|removed\|prohibition\|no longer\|was removed\|not export\|does NOT"
+```
+Expected: empty output (or only historical/prohibition lines already in the list above).
+
+**6. Dry-run migration on a copy of live decisions**
+```bash
+cp -r .devflow/decisions /tmp/decisions-test-copy
+node -e "
+const { migrateDecisionsLedger } = require('./dist/utils/decisions-ledger-migration.js');
+migrateDecisionsLedger('/tmp/decisions-test-copy-root', { dryRun: true }).then(r => console.log(JSON.stringify(r, null, 2)));
+" 2>&1
+```
+Note: adjust path setup as needed for the test (the migration reads from projectRoot/.devflow/decisions).
+Expected: `anchored: N`, `synthesized: 0 or 1`, `retired: N`, `observingKept: N`, `warnings: []`.
+
+**7. render --check on live repo**
+```bash
+node scripts/hooks/lib/render-decisions.cjs --check .
+```
+Expected: exit 0 (no drift between on-disk .md and what the renderer would produce).
+
+**8. decisions-index index on live repo**
+```bash
+node scripts/hooks/lib/decisions-index.cjs index .
+```
+Expected: prints active entries with `[Accepted]`/`[Active]` tags; no `[Deprecated]` or `[Superseded]` lines.
+
+**9. Manual retire + assign-anchor number-skip check**
+Create a temp ledger, retire current max, then assign-anchor → should give max+1 (gap-safe):
+```bash
+TMPDIR=$(mktemp -d)
+mkdir -p "$TMPDIR/.devflow/decisions"
+echo '{"anchor_id":"ADR-005","type":"decision","pattern":"test","decisions_status":"Accepted","id":"obs_001"}' > "$TMPDIR/.devflow/decisions/decisions-ledger.jsonl"
+node scripts/hooks/json-helper.cjs retire-anchor ADR-005 Retired "$TMPDIR"
+echo '{"id":"obs_new","type":"decision","pattern":"new","status":"ready","confidence":0.9,"observations":1,"first_seen":"2026-01-01","last_seen":"2026-01-01","evidence":[],"details":"x"}' > "$TMPDIR/.devflow/decisions/decisions-log.jsonl"
+node scripts/hooks/json-helper.cjs assign-anchor decision obs_new "$TMPDIR"
+```
+Expected stdout on assign-anchor: `ADR-006` (not ADR-005).
+
+**10. dream-commit wiring check**
+```bash
+grep -c "dream-commit" shared/skills/dream-decisions/SKILL.md
+grep -c "dream-commit" shared/skills/dream-curation/SKILL.md
+grep -c "dream-commit" shared/skills/dream-knowledge/SKILL.md
+```
+Expected: each prints ≥ 1.
+
+**11. Gitignore tracking check**
+```bash
+git check-ignore -v .devflow/decisions/decisions-ledger.jsonl
+```
+Expected: output shows `!decisions/decisions-ledger.jsonl` (re-included by .devflow/.gitignore template).
+
+**12. Trigger / inspect a dream-commit (manual)**
+With `autoCommit: true` in `.devflow/dream/config.json` (or absent → default ON), run a Dream cycle that calls `assign-anchor`, then inspect:
+```bash
+git log --oneline -3
+```
+Expected: top commit is `chore(dream): add ADR-NNN` with `Dream-Task: decisions` and `Co-Authored-By: Devflow Dream` trailers.

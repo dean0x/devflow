@@ -48,7 +48,7 @@ const {
   getObservationsLockDir,
 } = require('./lib/project-paths.cjs');
 const {
-  initDecisionsContent: _initDecisionsContent,
+  initDecisionsContent,
   formatDecisionBody,
   formatPitfallBody,
 } = require('./lib/decisions-format.cjs');
@@ -56,6 +56,7 @@ const {
   renderAndWriteAll,
   parseLedger,
 } = require('./lib/render-decisions.cjs');
+const { acquireMkdirLock, releaseLock } = require('./lib/mkdir-lock.cjs');
 
 function readStdin() {
   try {
@@ -135,16 +136,6 @@ function writeFileAtomic(file, content) {
   const tmp = file + '.tmp';
   writeExclusive(tmp, content);
   fs.renameSync(tmp, file);
-}
-
-/**
- * Return the initial header content for a new decisions file.
- * Delegates to decisions-format.cjs so the byte-compat strings live in one place.
- * @param {'decision'|'pitfall'} type
- * @returns {string}
- */
-function initDecisionsContent(type) {
-  return _initDecisionsContent(type);
 }
 
 /**
@@ -295,51 +286,6 @@ function mergeEvidence(oldEvidence, newEvidence) {
   const flat = [...(oldEvidence || []), ...(newEvidence || [])];
   const unique = [...new Set(flat)];
   return unique.slice(0, 10);
-}
-
-/**
- * Acquire a mkdir-based lock. Returns true on success, false on timeout.
- * DESIGN: Shared locking utility used by assign-anchor, retire-anchor, rotate-observations,
- * and the render-decisions.cjs CLI. Callers pass their own timeoutMs/staleMs to suit their
- * workload: .decisions.lock writers use 30 000 ms / 60 000 ms stale.
- *
- * @param {string} lockDir - path to lock directory
- * @param {number} [timeoutMs=30000] - max wait in milliseconds
- * @param {number} [staleMs=60000] - age after which lock is considered stale
- * @returns {boolean}
- */
-function acquireMkdirLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
-  const start = Date.now();
-  while (true) {
-    try {
-      fs.mkdirSync(lockDir, { recursive: false });
-      return true; // acquired
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      // Check staleness
-      try {
-        const stat = fs.statSync(lockDir);
-        const age = Date.now() - stat.mtimeMs;
-        if (age > staleMs) {
-          try { fs.rmdirSync(lockDir); } catch { /* already gone */ }
-          continue;
-        }
-      } catch { /* lock gone between check and stat */ }
-      if (Date.now() - start >= timeoutMs) return false;
-      // Busy-wait with tiny sleep via sync trick (Atomics.wait on SharedArrayBuffer)
-      // Falls back to a do-nothing loop if SharedArrayBuffer is unavailable.
-      try {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-      } catch {
-        const end = Date.now() + 50;
-        while (Date.now() < end) { /* spin */ }
-      }
-    }
-  }
-}
-
-function releaseLock(lockDir) {
-  try { fs.rmdirSync(lockDir); } catch { /* already released */ }
 }
 
 function parseArgs(argList) {

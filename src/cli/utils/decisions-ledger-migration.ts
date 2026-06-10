@@ -370,9 +370,6 @@ export async function migrateDecisionsLedger(
   // Start with existing rows (to preserve already-migrated entries)
   const newLedgerRows: LedgerRow[] = [...existingLedgerRows];
 
-  // Track obs_ids we've consumed from the log to avoid duplicate Source warnings
-  const consumedObsIds = new Set<string>();
-
   // 4a. Process .md sections → anchored rows
   for (const section of allMdSections) {
     // Idempotency: skip if already in ledger
@@ -407,7 +404,6 @@ export async function migrateDecisionsLedger(
 
       if (logRow) {
         // Enrich the log row into the ledger
-        consumedObsIds.add(obsId);
         const enriched: LedgerRow = {
           ...logRow,
           anchor_id: anchorId,

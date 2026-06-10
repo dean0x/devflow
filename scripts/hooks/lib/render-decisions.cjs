@@ -38,6 +38,7 @@ const {
   getPitfallsFilePath,
   getDecisionsLockDir,
 } = require('./project-paths.cjs');
+const { acquireMkdirLock, releaseLock } = require('./mkdir-lock.cjs');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -48,50 +49,6 @@ const INACTIVE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
 
 /** Ledger filename relative to .devflow/decisions/ */
 const LEDGER_FILENAME = 'decisions-ledger.jsonl';
-
-// ---------------------------------------------------------------------------
-// Locking helpers (reused from json-helper.cjs pattern)
-// ---------------------------------------------------------------------------
-
-/**
- * Acquire a mkdir-based lock. Returns true on success, false on timeout.
- * Same semantics as acquireMkdirLock in json-helper.cjs.
- *
- * @param {string} lockDir
- * @param {number} [timeoutMs=30000]
- * @param {number} [staleMs=60000]
- * @returns {boolean}
- */
-function acquireMkdirLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
-  const start = Date.now();
-  while (true) {
-    try {
-      fs.mkdirSync(lockDir, { recursive: false });
-      return true;
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      try {
-        const stat = fs.statSync(lockDir);
-        const age = Date.now() - stat.mtimeMs;
-        if (age > staleMs) {
-          try { fs.rmdirSync(lockDir); } catch { /* already gone */ }
-          continue;
-        }
-      } catch { /* lock gone between check and stat */ }
-      if (Date.now() - start >= timeoutMs) return false;
-      try {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-      } catch {
-        const end = Date.now() + 50;
-        while (Date.now() < end) { /* spin */ }
-      }
-    }
-  }
-}
-
-function releaseLock(lockDir) {
-  try { fs.rmdirSync(lockDir); } catch { /* already released */ }
-}
 
 // ---------------------------------------------------------------------------
 // Ledger parsing

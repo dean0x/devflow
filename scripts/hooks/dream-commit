@@ -217,7 +217,7 @@ if git -C "$PROJECT_ROOT" commit -m "$COMMIT_MSG" >/dev/null 2>&1; then
   dbg "Commit succeeded: $SUBJECT"
 else
   _EXIT=$?
-  dbg "Commit failed (exit $EXIT): $SUBJECT — treating as no-op (maintenance is best-effort)"
+  dbg "Commit failed (exit $_EXIT): $SUBJECT — treating as no-op (maintenance is best-effort)"
 fi
 
 dbg "=== dream-commit COMPLETE ==="
