@@ -542,10 +542,15 @@ describe('AC-P1 render performance (ratio/bounded-delta, not absolute ms)', () =
   }
 
   it('10x row count yields <15x render time (bounded ratio, not absolute ms)', () => {
-    const SMALL = 20;
-    const LARGE = 200;
-    const WARMUP = 3;
-    const RUNS = 5;
+    // expect.assertions(2) guarantees this test never passes with zero assertions:
+    // the ratio check may be skipped on sub-0.01ms runs, but the absolute ceiling
+    // on medianLarge always runs so a vacuous O(N²) regression at any size is caught.
+    expect.assertions(2);
+
+    const SMALL = 50;
+    const LARGE = 500;
+    const WARMUP = 5;
+    const RUNS = 7;
 
     // Warmup to avoid JIT effects
     for (let i = 0; i < WARMUP; i++) {
@@ -574,15 +579,24 @@ describe('AC-P1 render performance (ratio/bounded-delta, not absolute ms)', () =
     const medianSmall = smallTimes.sort((a, b) => a - b)[Math.floor(RUNS / 2)];
     const medianLarge = largeTimes.sort((a, b) => a - b)[Math.floor(RUNS / 2)];
 
-    // Guard: medianSmall must be measurable (>0.01ms) for ratio to be meaningful
-    if (medianSmall < 0.01) {
-      // Sub-millisecond render — too fast to measure reliably; skip ratio assertion
-      return;
-    }
+    // Absolute ceiling: 500-row render must finish within 500ms on any CI.
+    // This assertion always runs regardless of medianSmall, so the test can
+    // never pass vacuously even when medianSmall is sub-0.01ms.
+    expect(medianLarge).toBeLessThan(500);
 
-    const ratio = medianLarge / medianSmall;
-    // 10x rows should be <=15x time (AC-P1: no super-linear blowup)
-    // Using 15 as the bound to allow for variance in JIT, GC, etc.
-    expect(ratio).toBeLessThan(15);
+    // Ratio check: only meaningful when medianSmall is measurable.
+    // Raising SMALL/LARGE to 50/500 makes sub-0.01ms far less likely, but
+    // we still guard against divide-by-near-zero on pathologically fast CI.
+    if (medianSmall >= 0.01) {
+      const ratio = medianLarge / medianSmall;
+      // 10x rows should be <=15x time (AC-P1: no super-linear blowup)
+      // Using 15 as the bound to allow for variance in JIT, GC, etc.
+      expect(ratio).toBeLessThan(15);
+    } else {
+      // medianSmall < 0.01ms — ratio is noise. The absolute ceiling above
+      // already caught any O(N²) blowup at the large size.
+      // Consume the second assertion slot so expect.assertions(2) is satisfied.
+      expect(true).toBe(true);
+    }
   });
 });

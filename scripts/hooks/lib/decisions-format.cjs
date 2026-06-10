@@ -109,6 +109,41 @@ function formatPitfallBody(row) {
 }
 
 /**
+ * Project a full observation row into the canonical committed-ledger shape.
+ * Whitelists ONLY the fields that belong in decisions-ledger.jsonl:
+ *   { id, type, pattern, details, anchor_id, decisions_status, date?, raw_body?, amendments? }
+ *
+ * All observation-lifecycle fields (evidence, confidence, quality_ok, count,
+ * first_seen, last_seen, artifact_path, status, …) are intentionally excluded
+ * from the committed ledger — they are log-only state.
+ *
+ * D001: The projected shape is a DISTINCT COMMITTED shape, not a full obs copy.
+ * This function is the single source of truth for that projection so both the
+ * add-path (assign-anchor) and the migration's preserve-verbatim path produce
+ * byte-identical committed shapes. applies ADR-008.
+ *
+ * @param {object} obs - Full observation row from decisions-log.jsonl
+ * @param {{ anchorId: string, status: string, date?: string }} opts
+ * @returns {object} Canonical ledger row
+ */
+function toLedgerRow(obs, { anchorId, status, date }) {
+  /** @type {Record<string, unknown>} */
+  const row = {
+    id: obs.id,
+    type: obs.type,
+    pattern: obs.pattern,
+    details: obs.details,
+    anchor_id: anchorId,
+    decisions_status: status,
+  };
+  // Optional fields — include only when present in the observation or explicitly provided
+  if (date !== undefined) row.date = date;
+  if (obs.raw_body !== undefined) row.raw_body = obs.raw_body;
+  if (obs.amendments !== undefined) row.amendments = obs.amendments;
+  return row;
+}
+
+/**
  * Build the TL;DR comment line for a rendered decisions or pitfalls file.
  * Format: `<!-- TL;DR: N {decisions|pitfalls}. Key: id1, id2 -->`
  *
@@ -137,4 +172,5 @@ module.exports = {
   formatDecisionBody,
   formatPitfallBody,
   buildTldrLine,
+  toLedgerRow,
 };

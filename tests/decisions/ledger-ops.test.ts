@@ -753,16 +753,261 @@ describe('rotate-observations CLI op', () => {
 });
 
 // ---------------------------------------------------------------------------
+// assign-anchor precondition assertions (Issue 1)
+// ---------------------------------------------------------------------------
+
+describe('assign-anchor precondition assertions', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-precond-test-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('(b) exits non-zero when obs already has an anchor_id set', () => {
+    // The obs in the log already has anchor_id set → double-anchor attempt
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_already_anchored', type: 'decision', status: 'created', anchor_id: 'ADR-001' }),
+    ]);
+    const result = runHelper('assign-anchor decision obs_already_anchored', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('obs_already_anchored');
+    expect(result.stderr).toContain('already anchored');
+  });
+
+  it('(b) error message names the existing anchor_id', () => {
+    writeLog(tmpDir, [
+      makeObsRow({ id: 'obs_with_anchor', type: 'pitfall', status: 'created', anchor_id: 'PF-007' }),
+    ]);
+    const result = runHelper('assign-anchor pitfall obs_with_anchor', tmpDir);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('PF-007');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toLedgerRow projector: canonical ledger shape (Issue 3)
+// ---------------------------------------------------------------------------
+
+describe('toLedgerRow projector — canonical committed shape', () => {
+  const formatModule = require(
+    path.join(ROOT, 'scripts/hooks/lib/decisions-format.cjs')
+  ) as {
+    toLedgerRow: (
+      obs: Record<string, unknown>,
+      opts: { anchorId: string; status: string; date?: string }
+    ) => Record<string, unknown>;
+  };
+  const projector = formatModule.toLedgerRow;
+
+  it('includes only canonical fields for a decision with date', () => {
+    const obs: Record<string, unknown> = {
+      id: 'obs_proj_001',
+      type: 'decision',
+      pattern: 'Use Result types',
+      details: 'context: foo; decision: bar; rationale: baz',
+      // observation-lifecycle fields that must be excluded
+      confidence: 0.9,
+      quality_ok: true,
+      observations: 3,
+      first_seen: '2026-01-01T00:00:00Z',
+      last_seen: '2026-06-01T00:00:00Z',
+      evidence: ['evidence1'],
+      artifact_path: '/some/path',
+      status: 'ready',
+    };
+
+    const row = projector(obs, { anchorId: 'ADR-042', status: 'Accepted', date: '2026-06-11' });
+
+    // Required canonical fields
+    expect(row.id).toBe('obs_proj_001');
+    expect(row.type).toBe('decision');
+    expect(row.pattern).toBe('Use Result types');
+    expect(row.details).toBe('context: foo; decision: bar; rationale: baz');
+    expect(row.anchor_id).toBe('ADR-042');
+    expect(row.decisions_status).toBe('Accepted');
+    expect(row.date).toBe('2026-06-11');
+
+    // Lifecycle fields must be absent
+    expect(row.confidence).toBeUndefined();
+    expect(row.quality_ok).toBeUndefined();
+    expect(row.observations).toBeUndefined();
+    expect(row.first_seen).toBeUndefined();
+    expect(row.last_seen).toBeUndefined();
+    expect(row.evidence).toBeUndefined();
+    expect(row.artifact_path).toBeUndefined();
+    expect(row.status).toBeUndefined();
+  });
+
+  it('omits date field when not provided (pitfall path)', () => {
+    const obs: Record<string, unknown> = {
+      id: 'obs_proj_pf',
+      type: 'pitfall',
+      pattern: 'Some pitfall',
+      details: 'area: test; issue: foo',
+    };
+    const row = projector(obs, { anchorId: 'PF-003', status: 'Active', date: undefined });
+    expect(row.date).toBeUndefined();
+  });
+
+  it('preserves raw_body when present in obs', () => {
+    const obs: Record<string, unknown> = {
+      id: 'obs_proj_rb',
+      type: 'decision',
+      pattern: 'Pattern',
+      details: '',
+      raw_body: '\n## ADR-001: Pattern\n\n- **Status**: Accepted\n',
+    };
+    const row = projector(obs, { anchorId: 'ADR-001', status: 'Accepted', date: '2026-01-01' });
+    expect(row.raw_body).toBe('\n## ADR-001: Pattern\n\n- **Status**: Accepted\n');
+  });
+
+  it('preserves amendments when present in obs', () => {
+    const obs: Record<string, unknown> = {
+      id: 'obs_proj_amd',
+      type: 'decision',
+      pattern: 'Pattern',
+      details: '',
+      amendments: [{ date: '2026-05-01', note: 'Updated' }],
+    };
+    const row = projector(obs, { anchorId: 'ADR-002', status: 'Accepted', date: '2026-01-01' });
+    expect(row.amendments).toEqual([{ date: '2026-05-01', note: 'Updated' }]);
+  });
+
+  it('omits raw_body and amendments when absent from obs', () => {
+    const obs: Record<string, unknown> = { id: 'obs_proj_bare', type: 'decision', pattern: 'P', details: 'd' };
+    const row = projector(obs, { anchorId: 'ADR-003', status: 'Accepted', date: '2026-01-01' });
+    expect(row.raw_body).toBeUndefined();
+    expect(row.amendments).toBeUndefined();
+  });
+
+  it('assign-anchor CLI emits only canonical fields in ledger row', () => {
+    // End-to-end: obs has extra lifecycle fields; ledger row must not contain them
+    const tmpE2e = fs.mkdtempSync(path.join(os.tmpdir(), 'aa-proj-test-'));
+    fs.mkdirSync(path.join(tmpE2e, '.devflow', 'decisions'), { recursive: true });
+    try {
+      const logPathE2e = path.join(tmpE2e, '.devflow', 'decisions', 'decisions-log.jsonl');
+      const obsWithLifecycle = makeObsRow({
+        id: 'obs_e2e_proj',
+        type: 'decision',
+        status: 'ready',
+        confidence: 0.95,
+        quality_ok: true,
+        artifact_path: '/some/file.ts',
+      });
+      fs.writeFileSync(logPathE2e, JSON.stringify(obsWithLifecycle) + '\n', 'utf8');
+
+      const result = runHelper('assign-anchor decision obs_e2e_proj', tmpE2e);
+      expect(result.code).toBe(0);
+
+      const ledgerPath = path.join(tmpE2e, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+      const rows = parseLedger(ledgerPath);
+      expect(rows).toHaveLength(1);
+      const r = rows[0];
+      // Required canonical
+      expect(r.anchor_id).toBe('ADR-001');
+      expect(r.id).toBe('obs_e2e_proj');
+      // Excluded lifecycle fields
+      expect(r.confidence).toBeUndefined();
+      expect(r.quality_ok).toBeUndefined();
+      expect(r.artifact_path).toBeUndefined();
+      expect(r.evidence).toBeUndefined();
+      expect(r.first_seen).toBeUndefined();
+      expect(r.last_seen).toBeUndefined();
+    } finally {
+      fs.rmSync(tmpE2e, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rotateObservations dedup — interrupt-then-retry safety (Issue 4)
+// ---------------------------------------------------------------------------
+
+describe('rotateObservations — archive dedup by id (interrupt-retry safety)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-dedup-test-'));
+    fs.mkdirSync(path.join(tmpDir, 'decisions'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const THIRTY_ONE_DAYS_MS = 31 * 24 * 60 * 60 * 1000;
+  const NOW = new Date('2026-06-10T12:00:00Z').getTime();
+
+  function makeObsLog2(dir: string, rows: Record<string, unknown>[]): string {
+    const logPath = path.join(dir, 'decisions', 'decisions-log.jsonl');
+    jsonHelper.writeJsonlAtomic(logPath, rows);
+    return logPath;
+  }
+
+  function makeObsArchive2(dir: string): string {
+    return path.join(dir, 'decisions', 'decisions-log.archive.jsonl');
+  }
+
+  it('does not duplicate archive rows when the same stale row is rotated twice (retry simulation)', () => {
+    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
+
+    // Simulate an interrupted first run: the stale row was appended to the
+    // archive but the log was NOT yet rewritten (crash window between the two
+    // writes). On retry the row would appear stale again.
+    const archivePath = makeObsArchive2(tmpDir);
+    // Pre-seed archive with the row as if the first run partially succeeded
+    const staleRow = makeObsRow({ id: 'obs_interrupted', status: 'observing', last_seen: staleDate });
+    fs.appendFileSync(archivePath, JSON.stringify(staleRow) + '\n', 'utf8');
+
+    // Log still has the row (crash happened before log rewrite)
+    const logPath = makeObsLog2(tmpDir, [staleRow]);
+
+    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
+    expect(rotated).toBe(1);
+
+    // Archive must contain exactly one copy of the row
+    const archive = parseLedger(archivePath);
+    const ids = archive.map((r: Record<string, unknown>) => r.id);
+    expect(ids.filter((id: unknown) => id === 'obs_interrupted')).toHaveLength(1);
+  });
+
+  it('normal rotation (no prior archive) still works correctly', () => {
+    const staleDate = new Date(NOW - THIRTY_ONE_DAYS_MS).toISOString();
+    const logPath = makeObsLog2(tmpDir, [
+      makeObsRow({ id: 'obs_fresh_dd', status: 'observing', last_seen: staleDate }),
+    ]);
+    const archivePath = makeObsArchive2(tmpDir);
+
+    const rotated = jsonHelper.rotateObservations(logPath, archivePath, NOW);
+    expect(rotated).toBe(1);
+
+    const archive = parseLedger(archivePath);
+    expect(archive).toHaveLength(1);
+    expect(archive[0].id).toBe('obs_fresh_dd');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AC-P2: assign-anchor O(anchored) — structural check (no N^2 scan)
 // Per ADR-014: ratio/bounded-delta methodology, not absolute ms.
 // ---------------------------------------------------------------------------
 
 describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology, per ADR-014)', () => {
   it('nextAnchorFromLedger is O(N) — 10x rows yields <15x time', () => {
+    // expect.assertions(2) guarantees this test never passes with zero assertions:
+    // the ratio check may be skipped on sub-0.01ms runs, but the absolute ceiling
+    // on medianLarge always runs so a vacuous O(N²) regression is always caught.
+    expect.assertions(2);
+
     const SMALL = 50;
     const LARGE = 500;
-    const WARMUP = 3;
-    const RUNS = 5;
+    const WARMUP = 5;
+    const RUNS = 7;
 
     function buildRows(n: number): Record<string, unknown>[] {
       return Array.from({ length: n }, (_, i) =>
@@ -795,13 +1040,109 @@ describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology, per A
     const medianSmall = smallTimes.sort((a, b) => a - b)[Math.floor(RUNS / 2)];
     const medianLarge = largeTimes.sort((a, b) => a - b)[Math.floor(RUNS / 2)];
 
-    if (medianSmall < 0.01) {
-      // Sub-millisecond — too fast to measure reliably; skip ratio assertion
-      return;
+    // Absolute ceiling: 500-row scan must finish within 100ms on any CI.
+    // This assertion always runs regardless of medianSmall, so the test can
+    // never pass vacuously even when medianSmall is sub-0.01ms.
+    expect(medianLarge).toBeLessThan(100);
+
+    // Ratio check: only meaningful when medianSmall is measurable.
+    if (medianSmall >= 0.01) {
+      const ratio = medianLarge / medianSmall;
+      expect(ratio).toBeLessThan(15); // 10x rows should be <15x time (linear or better)
+    } else {
+      // medianSmall < 0.01ms — ratio is noise. The absolute ceiling above
+      // already caught any O(N²) blowup at the large size.
+      // Consume the second assertion slot so expect.assertions(2) is satisfied.
+      expect(true).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-P2b: full assign-anchor write-path O(anchored) — CLI-level timing
+//
+// The in-memory nextAnchorFromLedger test above validates the scan logic, but
+// the real write path (lock → read ledger → compute next → append → update log
+// → render both .md) dominates runtime in production. This test times full CLI
+// invocations at ~50 vs ~500 seeded ledger rows to bound the REAL write path's
+// growth.
+//
+// Note: each CLI invocation spawns a child process, so absolute times are
+// dominated by Node.js startup (~50–200ms per call). We assert a structural
+// bound (the 500-row run must not take >10x the 50-row run when both are in the
+// same order of magnitude) and add an absolute ceiling. If the ratio is not
+// meaningful (startup noise dwarfs the work), we log a note and accept the run —
+// the absolute ceiling is the primary regression guard.
+// ---------------------------------------------------------------------------
+
+describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'assign-anchor-perf-'));
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('500-row ledger assign-anchor is not >10x slower than 50-row (write-path bound)', () => {
+    // expect.assertions(2): absolute ceiling always runs; ratio check conditional.
+    expect.assertions(2);
+
+    const SMALL_N = 50;
+    const LARGE_N = 500;
+
+    function seedLedger(dir: string, n: number): void {
+      const rows = Array.from({ length: n }, (_, i) =>
+        makeLedgerRow({ anchor_id: `ADR-${String(i + 1).padStart(3, '0')}`, id: `obs_seed${i}` })
+      );
+      writeLedger(dir, rows);
     }
 
-    const ratio = medianLarge / medianSmall;
-    expect(ratio).toBeLessThan(15); // 10x rows should be <15x time (linear or better)
+    function seedLog(dir: string, obsId: string): void {
+      writeLog(dir, [makeObsRow({ id: obsId, status: 'ready', type: 'decision' })]);
+    }
+
+    function timeAssignAnchor(n: number): number {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aa-perf-${n}-`));
+      try {
+        fs.mkdirSync(path.join(dir, '.devflow', 'decisions'), { recursive: true });
+        seedLedger(dir, n);
+        seedLog(dir, 'obs_time_target');
+        const start = performance.now();
+        runHelper('assign-anchor decision obs_time_target', dir);
+        return performance.now() - start;
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+
+    // Warmup: one invocation each to avoid cold-start skewing
+    timeAssignAnchor(SMALL_N);
+    timeAssignAnchor(LARGE_N);
+
+    // Measure: single timed invocation for each (CLI startup noise is large;
+    // multiple runs would multiply test time without improving signal).
+    const smallMs = timeAssignAnchor(SMALL_N);
+    const largeMs = timeAssignAnchor(LARGE_N);
+
+    // Absolute ceiling: a 500-row assign-anchor must complete within 10 seconds
+    // even on the slowest CI (Node startup + file I/O + render).
+    expect(largeMs).toBeLessThan(10_000);
+
+    // Ratio guard: only assert when startup noise is not the dominant factor.
+    // If both runs take >200ms (well above typical startup noise), the ratio
+    // reflects real work. If smallMs is very small (startup-dominated) the
+    // ratio is noise and we skip it — the ceiling above is the regression guard.
+    if (smallMs > 200 && largeMs / smallMs > 0) {
+      expect(largeMs / smallMs).toBeLessThan(10);
+    } else {
+      // Startup noise dominates — ratio is not meaningful.
+      // The absolute ceiling above is the regression guard.
+      expect(true).toBe(true);
+    }
   });
 });
 

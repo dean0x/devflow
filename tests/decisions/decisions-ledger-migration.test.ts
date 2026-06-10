@@ -800,6 +800,61 @@ describe('migrateDecisionsLedger — edge cases', () => {
     const lockDir = path.join(decisionsDir, '.decisions.lock');
     await expect(fs.access(lockDir)).rejects.toThrow();
   });
+
+  it('throws when .decisions.lock cannot be acquired (timeout path)', async () => {
+    // Arrange: pre-write a non-empty ledger so the migration reaches Step 6
+    // (acquireMkdirLock call). An empty ledger+log triggers the early-return
+    // at "newRowsAdded === 0 && existingLedgerRows.length === 0" before the lock.
+    const adr001LedgerRow = {
+      id: 'obs_c9d3m1',
+      type: 'decision',
+      pattern: 'Clean break philosophy',
+      status: 'created',
+      anchor_id: 'ADR-001',
+      decisions_status: 'Accepted',
+      date: '2026-05-06',
+      raw_body: DECISION_BODY_ADR001,
+    };
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      JSON.stringify(adr001LedgerRow) + '\n',
+      'utf-8',
+    );
+    // Also write matching .md so idempotency check will find newRowsAdded === 0
+    // and still need the lock (crash-heal path).
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions.md'),
+      buildDecisionsContent([DECISION_BODY_ADR001]),
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(decisionsDir, 'pitfalls.md'),
+      buildPitfallsContent([]),
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-log.jsonl'),
+      JSON.stringify({ id: 'obs_c9d3m1', type: 'decision', pattern: 'Clean break philosophy', status: 'created', first_seen: '2026-05-06T00:00:00Z' }) + '\n',
+      'utf-8',
+    );
+
+    // Pre-hold the lock: mkdir the lock directory before calling the migration.
+    // The migration uses acquireMkdirLock with a timeout. To make the test fast
+    // we pass a very short timeoutMs so the wait doesn't add 30 seconds.
+    const lockDir = path.join(decisionsDir, '.decisions.lock');
+    await fs.mkdir(lockDir);
+
+    try {
+      // Act + Assert: migration must throw (not hang) when the lock is unavailable.
+      // Pass timeoutMs=100 so the test completes in ~100ms rather than 30s.
+      await expect(
+        migrateDecisionsLedger(projectRoot, { rendererPath: RENDERER_PATH, timeoutMs: 100 }),
+      ).rejects.toThrow('decisions-ledger-migration: timeout acquiring .decisions.lock');
+    } finally {
+      // Clean up the pre-held lock so the afterEach rm can remove the directory.
+      try { await fs.rmdir(lockDir); } catch { /* already gone */ }
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

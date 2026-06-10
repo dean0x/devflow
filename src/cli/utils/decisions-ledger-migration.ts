@@ -251,6 +251,11 @@ export async function migrateDecisionsLedger(
     rendererPath?: string;
     /** import.meta.url of calling module; used to locate bundled scripts. */
     moduleUrl?: string;
+    /**
+     * Lock acquisition timeout in milliseconds. Defaults to 30 000 ms.
+     * Exposed for tests that need fast timeout verification without waiting 30 s.
+     */
+    timeoutMs?: number;
   } = {},
 ): Promise<MigrateDecisionsLedgerResult> {
   const decisionsDir = getDecisionsDir(projectRoot);
@@ -529,7 +534,7 @@ export async function migrateDecisionsLedger(
   // renderAndWriteAll call. Re-rendering from an already-in-sync ledger is
   // idempotent (byte-identical output) and safe to do unconditionally.
   // -------------------------------------------------------------------------
-  const lockAcquired = await acquireMkdirLock(lockDir);
+  const lockAcquired = await acquireMkdirLock(lockDir, opts.timeoutMs ?? 30_000);
   if (!lockAcquired) {
     throw new Error('decisions-ledger-migration: timeout acquiring .decisions.lock');
   }

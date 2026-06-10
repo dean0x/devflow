@@ -51,6 +51,7 @@ const {
   initDecisionsContent,
   formatDecisionBody,
   formatPitfallBody,
+  toLedgerRow,
 } = require('./lib/decisions-format.cjs');
 const {
   renderAndWriteAll,
@@ -268,13 +269,31 @@ function rotateObservations(logPath, archivePath, nowMs) {
 
   if (stale.length === 0) return 0;
 
-  // Append stale rows to archive
-  let existingArchive = [];
+  // D003: Dedup stale rows against the existing archive by id before appending.
+  // An interrupt-then-retry (process killed after archive write but before log
+  // rewrite) would re-classify the same rows as stale and attempt to archive
+  // them a second time. Reading existing archive IDs into a Set and filtering
+  // prevents duplicate rows in the archive. Cost is O(archive) on retry; O(1)
+  // on the normal path when the archive is absent.
+  //
+  // True append (appendFileSync) is used instead of read-entire-archive+rewrite
+  // so cost is O(stale) rather than O(archive) on the write path. The archive
+  // is gitignored/recovery-only, so an incomplete final newline on ENOENT is
+  // safe — parseLedger handles trailing-newline variance.
+  let existingArchiveIds = new Set();
   if (fs.existsSync(archivePath)) {
-    existingArchive = parseLedger(archivePath);
+    const existingRows = parseLedger(archivePath);
+    for (const r of existingRows) {
+      if (r.id) existingArchiveIds.add(r.id);
+    }
   }
-  const archiveContent = [...existingArchive, ...stale].map(r => JSON.stringify(r)).join('\n') + '\n';
-  writeFileAtomic(archivePath, archiveContent);
+
+  const newStale = stale.filter(r => !existingArchiveIds.has(r.id));
+  if (newStale.length > 0) {
+    // True append — O(newStale), not O(archive)
+    const appendContent = newStale.map(r => JSON.stringify(r)).join('\n') + '\n';
+    fs.appendFileSync(archivePath, appendContent, 'utf8');
+  }
 
   // Write remaining rows back to log
   writeJsonlAtomic(logPath, kept);
@@ -680,20 +699,59 @@ try {
         }
         const aaObs = aaLogEntries[aaObsIdx];
 
-        // Build anchored ledger row
-        const aaDate = new Date().toISOString().slice(0, 10);
-        const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
-
-        const aaLedgerRow = Object.assign({}, aaObs, {
-          anchor_id: aaAnchorId,
-          decisions_status: aaActiveStatus,
-        });
-        // Set date on decisions only (not pitfalls — byte-compat asymmetry from formatDecisionBody)
-        if (assignType === 'decision') {
-          aaLedgerRow.date = aaObs.date || aaDate;
+        // Precondition assertions — both checked under the lock so they are
+        // race-free against concurrent assign-anchor callers (avoids silent
+        // ledger corruption; assert-preconditions per reliability rule).
+        //
+        // (a) The newly computed anchor_id must not already appear in the ledger.
+        //     nextAnchorFromLedger is deterministic-monotone, so this should
+        //     never fire in normal operation — it guards against double-assign
+        //     bugs (e.g. assign called twice for the same obs_id in a crash loop).
+        if (aaLedgerRows.some(r => r.anchor_id === aaAnchorId)) {
+          process.stderr.write(
+            `assign-anchor: anchor_id '${aaAnchorId}' already present in ledger — ` +
+            `possible double-assign; refusing to overwrite committed entry\n`
+          );
+          process.exit(1);
+        }
+        //
+        // (b) The target observation must not already have an anchor_id set.
+        //     Re-anchoring an already-anchored obs would mint a duplicate number
+        //     (the old anchor would remain in the ledger AND the new one would
+        //     be added), corrupting the committed source of truth.
+        if (aaObs.anchor_id) {
+          process.stderr.write(
+            `assign-anchor: obs_id '${assignObsId}' is already anchored as '${aaObs.anchor_id}'; ` +
+            `use retire-anchor to change its status instead\n`
+          );
+          process.exit(1);
         }
 
-        // Append anchored row to ledger (atomic)
+        // Build canonical committed-ledger row via toLedgerRow projector.
+        // Whitelists only the canonical fields — excludes all observation-lifecycle
+        // state (evidence, confidence, quality_ok, count, first_seen, last_seen, …)
+        // that must stay in the log only. applies ADR-008.
+        const aaDate = new Date().toISOString().slice(0, 10);
+        const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
+        // Date set on decisions only (byte-compat asymmetry — formatDecisionBody
+        // emits "- **Date**: …"; pitfall rows have no date field)
+        const aaDecisionDate = assignType === 'decision' ? (aaObs.date || aaDate) : undefined;
+        const aaLedgerRow = toLedgerRow(aaObs, {
+          anchorId: aaAnchorId,
+          status: aaActiveStatus,
+          date: aaDecisionDate,
+        });
+
+        // Append anchored row to ledger (atomic temp+rename).
+        //
+        // D002: Crash window — if the process is killed between this write and
+        // renderAndWriteAll below, the ledger will be ahead of decisions.md /
+        // pitfalls.md. This is git-recoverable (the ledger is the source of
+        // truth; `render-decisions.cjs render <worktree>` heals the .md files)
+        // and is also auto-healed by the migration idempotency path on the next
+        // `devflow init` run (migrateDecisionsLedger re-renders when the existing
+        // ledger is non-empty and newRowsAdded === 0). The render is kept as the
+        // FINAL write under the lock so the window is as narrow as possible.
         const aaNewLedgerRows = [...aaLedgerRows, aaLedgerRow];
         const aaLedgerContent = aaNewLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
         writeFileAtomic(aaLedgerPath, aaLedgerContent);
@@ -705,7 +763,8 @@ try {
         // Register usage entry
         registerUsageEntry(aaProjectRoot, aaAnchorId);
 
-        // Re-render both .md files (lock-free — we already hold .decisions.lock)
+        // Re-render both .md files (lock-free — we already hold .decisions.lock).
+        // This is the FINAL write in the lock scope — see D002 above.
         renderAndWriteAll(aaProjectRoot, aaNewLedgerRows);
 
         // Print assigned anchor id to stdout
