@@ -12,6 +12,11 @@ import {
   getDecisionsLogPath,
 } from './project-paths.js';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import {
+  LedgerRow,
+  DecisionsEntryStatus,
+  DECISIONS_ENTRY_STATUSES,
+} from './observations.js';
 
 /**
  * @file decisions-ledger-migration.ts
@@ -76,8 +81,22 @@ interface ParsedMdSection {
   amendments: { date: string; note: string }[];
 }
 
-// Shape of a row in decisions-log.jsonl
-interface LedgerRow {
+/**
+ * D301: LogRow represents the raw shape of a row stored in decisions-log.jsonl.
+ *
+ * This is intentionally a permissive type — log rows come from JSON.parse and
+ * may be LearningObservation-shaped (with confidence/observations/evidence) or
+ * older seed rows (with artifact_path#ANCHOR). All fields are optional except
+ * `id`, which is required for set-membership lookups. The `[key: string]: unknown`
+ * index preserves any unknown fields through spread-merge when enriching a log
+ * row into a LedgerRow.
+ *
+ * LogRow is ONLY used to represent raw input from decisions-log.jsonl. Final
+ * output rows written to decisions-ledger.jsonl are always typed as the shared
+ * `LedgerRow` (from observations.ts), which enforces required fields and a
+ * typed decisions_status discriminant.
+ */
+interface LogRow {
   id: string;
   type?: string;
   pattern?: string;
@@ -113,7 +132,6 @@ interface LedgerRow {
  */
 function parseMdSections(content: string, kind: 'decision' | 'pitfall'): ParsedMdSection[] {
   // Split on heading boundaries using lookahead to keep heading in each chunk
-  const prefix = kind === 'decision' ? 'ADR' : 'PF';
   const splitRegex = /(?=^## (?:ADR|PF)-\d+:)/m;
   const parts = content.split(splitRegex);
 
@@ -186,7 +204,7 @@ function parseMdSections(content: string, kind: 'decision' | 'pitfall'): ParsedM
  * Format: `/absolute/path/to/decisions.md#ADR-002` or `...#PF-005`
  * Returns null if the field is absent or does not contain a `#ANCHOR` suffix.
  */
-function extractAnchorFromArtifactPath(row: LedgerRow): string | null {
+function extractAnchorFromArtifactPath(row: LogRow): string | null {
   if (!row.artifact_path) return null;
   const hashIdx = row.artifact_path.indexOf('#');
   if (hashIdx === -1) return null;
@@ -220,6 +238,362 @@ function resolveRendererPath(thisModuleUrl: string): string {
   // dist/utils/ → up two levels → package root → scripts/hooks/lib/
   const packageRoot = path.resolve(thisDir, '../..');
   return path.join(packageRoot, 'scripts', 'hooks', 'lib', 'render-decisions.cjs');
+}
+
+// ---------------------------------------------------------------------------
+// Status normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * D302: Normalize a raw .md Status string to a typed DecisionsEntryStatus.
+ *
+ * Pitfall entries always map to 'Active' (they have no Status field in the
+ * byte-compat format — but the parser defaults to 'Accepted' for missing Status
+ * lines, so we override to 'Active' at the kind level here).
+ *
+ * Decision entries map via DECISIONS_ENTRY_STATUSES. Any status string that is
+ * not in the canonical vocabulary pushes a warning and falls back to 'Accepted'
+ * rather than silently downgrading the entry. This preserves 'Retired' and
+ * 'Active' values from .md files that already carried those statuses — a plain
+ * `else → 'Accepted'` branch would re-activate a Retired entry on migration.
+ */
+function normalizeDecisionsStatus(
+  rawStatus: string,
+  kind: 'decision' | 'pitfall',
+  warnings: string[],
+  anchorId: string,
+): DecisionsEntryStatus {
+  if (kind === 'pitfall') {
+    return 'Active';
+  }
+  // Decision: check if rawStatus is a known member of the vocabulary
+  const candidate = rawStatus as DecisionsEntryStatus;
+  if ((DECISIONS_ENTRY_STATUSES as readonly string[]).includes(candidate)) {
+    return candidate;
+  }
+  // Unrecognized status: warn and fall back to 'Accepted'
+  warnings.push(
+    `Unrecognized decisions_status '${rawStatus}' for ${anchorId} — defaulting to 'Accepted'`,
+  );
+  return 'Accepted';
+}
+
+// ---------------------------------------------------------------------------
+// Migration inputs reader
+// ---------------------------------------------------------------------------
+
+/**
+ * D303: readMigrationInputs reads all three source artifacts (decisions.md,
+ * pitfalls.md, decisions-log.jsonl) and the existing ledger for idempotency.
+ *
+ * Returns raw strings / parsed arrays. All ENOENT cases are handled gracefully
+ * (missing files produce empty strings / empty arrays). Non-ENOENT errors are
+ * re-thrown.
+ *
+ * Malformed JSONL lines in the existing ledger push a warning rather than
+ * silently dropping the corruption — surfaces ledger file corruption to the
+ * caller rather than treating it as a recoverable clean state.
+ */
+async function readMigrationInputs(
+  projectRoot: string,
+  warnings: string[],
+): Promise<{
+  decisionsContent: string;
+  pitfallsContent: string;
+  logRows: LogRow[];
+  existingLedgerRows: LedgerRow[];
+}> {
+  const decisionsFilePath = getDecisionsFilePath(projectRoot);
+  const pitfallsFilePath = getPitfallsFilePath(projectRoot);
+  const ledgerPath = getDecisionsLedgerPath(projectRoot);
+  const logPath = getDecisionsLogPath(projectRoot);
+
+  let decisionsContent = '';
+  let pitfallsContent = '';
+  const logRows: LogRow[] = [];
+  const existingLedgerRows: LedgerRow[] = [];
+
+  try {
+    decisionsContent = await fs.readFile(decisionsFilePath, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    // Missing decisions.md — we can still handle pitfalls and log
+  }
+
+  try {
+    pitfallsContent = await fs.readFile(pitfallsFilePath, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+
+  try {
+    const logRaw = await fs.readFile(logPath, 'utf-8');
+    for (const line of logRaw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        logRows.push(JSON.parse(trimmed) as LogRow);
+      } catch {
+        // Skip malformed log lines — log is informational; migration does not fail
+      }
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    // No log file — proceed with empty log
+  }
+
+  try {
+    const ledgerRaw = await fs.readFile(ledgerPath, 'utf-8');
+    for (const line of ledgerRaw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        existingLedgerRows.push(JSON.parse(trimmed) as LedgerRow);
+      } catch {
+        // D304: surface malformed ledger lines as warnings so corruption is
+        // visible to callers instead of silently shrinking the ledger on the
+        // idempotency-heal path.
+        warnings.push(`Skipped malformed line in decisions-ledger.jsonl: ${line.slice(0, 80)}`);
+      }
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    // No ledger yet — start fresh
+  }
+
+  return { decisionsContent, pitfallsContent, logRows, existingLedgerRows };
+}
+
+// ---------------------------------------------------------------------------
+// Ledger row builder
+// ---------------------------------------------------------------------------
+
+/**
+ * D305: synthesizeRow builds a single LedgerRow from a parsed .md section
+ * and an optional enrichment source (log row).
+ *
+ * When logRow is provided: the log row fields are spread as the base so that
+ * any extra observation-lifecycle fields (confidence, first_seen, etc.) are
+ * preserved in the ledger. Required LedgerRow fields are then layered on top.
+ *
+ * When logRow is absent: a minimal synthetic row is constructed from the .md
+ * section data alone. `details` defaults to the section title so the shared
+ * LedgerRow `details: string` required field is always satisfied.
+ *
+ * The two synthesis branches are collapsed by computing `id` upfront —
+ * obsId (from the Source marker) or syntheticId (obs_migrated_{anchor}).
+ */
+function synthesizeRow(
+  section: ParsedMdSection,
+  id: string,
+  normalizedStatus: DecisionsEntryStatus,
+  logRow: LogRow | undefined,
+): LedgerRow {
+  const { anchorId, kind, title, date, rawBody, amendments } = section;
+
+  if (logRow) {
+    // Enrich path: spread log row fields, then overlay required ledger fields
+    const enriched: LedgerRow = {
+      ...(logRow as Record<string, unknown>),
+      id: logRow.id,
+      type: logRow.type ?? kind,
+      pattern: logRow.pattern ?? title,
+      details: logRow.details ?? title,
+      anchor_id: anchorId,
+      decisions_status: normalizedStatus,
+      raw_body: rawBody,
+      amendments: amendments.length > 0 ? amendments : logRow.amendments,
+      status: 'created',
+    };
+    if (kind === 'decision' && date) {
+      enriched.date = date;
+    }
+    return enriched;
+  }
+
+  // Synthesized path: build from .md section only
+  const synthesized: LedgerRow = {
+    id,
+    type: kind,
+    pattern: title,
+    details: title,
+    anchor_id: anchorId,
+    decisions_status: normalizedStatus,
+    status: 'created',
+    raw_body: rawBody,
+    amendments: amendments.length > 0 ? amendments : undefined,
+  };
+  if (kind === 'decision' && date) {
+    synthesized.date = date;
+  }
+  return synthesized;
+}
+
+/**
+ * D306: buildLedgerRows builds the complete set of LedgerRows for the new ledger.
+ *
+ * Starts from existingLedgerRows (idempotency baseline), then processes each
+ * .md section (anchored rows), then sweeps log rows for hand-deleted anchors
+ * (Retired rows), then counts observing-only rows for the result summary.
+ *
+ * Returns the full new row list plus result counters.
+ */
+function buildLedgerRows(
+  allMdSections: ParsedMdSection[],
+  logRows: LogRow[],
+  existingLedgerRows: LedgerRow[],
+  existingLedgerAnchors: Set<string>,
+  result: MigrateDecisionsLedgerResult,
+): LedgerRow[] {
+  const newLedgerRows: LedgerRow[] = [...existingLedgerRows];
+
+  // Build lookup: anchor_id → ParsedMdSection
+  const mdByAnchor = new Map<string, ParsedMdSection>();
+  for (const section of allMdSections) {
+    mdByAnchor.set(section.anchorId, section);
+  }
+
+  // Build lookup: obs_id → LogRow
+  const logById = new Map<string, LogRow>();
+  for (const row of logRows) {
+    if (logById.has(row.id)) {
+      result.warnings.push(`Duplicate log row id '${row.id}' — keeping first occurrence`);
+      continue;
+    }
+    logById.set(row.id, row);
+  }
+
+  // Track seen obs/synthetic IDs within this run to detect duplicates
+  const seenObsIds = new Set<string>();
+
+  // 4a. Process .md sections → anchored rows
+  for (const section of allMdSections) {
+    // Idempotency: skip if already in ledger
+    if (existingLedgerAnchors.has(section.anchorId)) continue;
+
+    const { anchorId, kind, decisionsStatus, obsId } = section;
+
+    const normalizedStatus = normalizeDecisionsStatus(
+      decisionsStatus,
+      kind,
+      result.warnings,
+      anchorId,
+    );
+
+    if (obsId) {
+      // Duplicate Source guard
+      if (seenObsIds.has(obsId)) {
+        result.warnings.push(
+          `Duplicate Source obs_id '${obsId}' (anchor ${anchorId}) — keeping first .md entry`,
+        );
+        continue;
+      }
+      seenObsIds.add(obsId);
+
+      const logRow = logById.get(obsId);
+      newLedgerRows.push(synthesizeRow(section, obsId, normalizedStatus, logRow));
+      if (logRow) {
+        result.anchored++;
+      } else {
+        result.synthesized++;
+      }
+    } else {
+      // No Source marker — synthesize with deterministic ID
+      const syntheticId = `obs_migrated_${anchorId.toLowerCase().replace('-', '_')}`;
+      if (seenObsIds.has(syntheticId)) {
+        result.warnings.push(
+          `Would synthesize duplicate id '${syntheticId}' for anchor ${anchorId} — skipping`,
+        );
+        continue;
+      }
+      seenObsIds.add(syntheticId);
+      result.warnings.push(
+        `No Source marker for ${anchorId} — synthesized id '${syntheticId}'`,
+      );
+      newLedgerRows.push(synthesizeRow(section, syntheticId, normalizedStatus, undefined));
+      result.synthesized++;
+    }
+  }
+
+  // 4b. Hand-deletions: log rows with artifact_path#ANCHOR whose anchor is NOT in .md
+  const allAnchorsInLedger = new Set<string>(
+    newLedgerRows.map(r => r.anchor_id).filter(Boolean) as string[],
+  );
+
+  for (const row of logRows) {
+    const anchor = extractAnchorFromArtifactPath(row);
+    if (!anchor) continue; // not an anchored log row
+
+    // Already accounted for in the ledger (from .md migration or pre-existing)
+    if (allAnchorsInLedger.has(anchor)) continue;
+
+    // Is this anchor absent from .md? → hand-deleted entry
+    if (!mdByAnchor.has(anchor)) {
+      const retired: LedgerRow = {
+        ...(row as Record<string, unknown>),
+        id: row.id,
+        type: row.type ?? 'decision',
+        pattern: row.pattern ?? anchor,
+        details: row.details ?? anchor,
+        anchor_id: anchor,
+        decisions_status: 'Retired',
+        status: 'created',
+      };
+      newLedgerRows.push(retired);
+      allAnchorsInLedger.add(anchor); // prevent duplicates from multiple log rows with same anchor
+      result.retired++;
+    }
+  }
+
+  // 4c. Count observing-only rows (no anchor_id, status observing)
+  for (const row of logRows) {
+    if (row.status === 'observing' && !row.anchor_id && !extractAnchorFromArtifactPath(row)) {
+      result.observingKept++;
+    }
+  }
+
+  return newLedgerRows;
+}
+
+// ---------------------------------------------------------------------------
+// Write and render
+// ---------------------------------------------------------------------------
+
+/**
+ * D307: writeAndRender performs the atomic ledger write + deterministic render.
+ *
+ * When newRowsAdded > 0: writes the full ledger to disk first (crash-safe
+ * ordering), then renders both .md files from the new rows. If the process
+ * crashes between these two steps, the next migration run will detect
+ * newRowsAdded === 0 (existing ledger is complete) and take the heal path.
+ *
+ * When newRowsAdded === 0 (heal path): skips the ledger write and only
+ * re-renders the .md files from the existing rows — reconciling stale .md
+ * state left by a prior crash.
+ *
+ * The caller MUST already hold .decisions.lock before calling this function.
+ * renderAndWriteAll is the lock-free helper (avoids double-lock deadlock per
+ * the KNOWLEDGE.md lock discipline section).
+ */
+async function writeAndRender(
+  projectRoot: string,
+  decisionsDir: string,
+  ledgerPath: string,
+  newLedgerRows: LedgerRow[],
+  existingLedgerRows: LedgerRow[],
+  newRowsAdded: number,
+  renderer: { renderAndWriteAll: (worktreePath: string, rows: LedgerRow[]) => void },
+): Promise<void> {
+  if (newRowsAdded === 0) {
+    // Heal path: re-render from the authoritative existing ledger rows only
+    renderer.renderAndWriteAll(projectRoot, existingLedgerRows);
+  } else {
+    // Normal path: write new ledger first (crash-safe), then render
+    await fs.mkdir(decisionsDir, { recursive: true });
+    const ledgerContent = newLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
+    await writeFileAtomicExclusive(ledgerPath, ledgerContent);
+    renderer.renderAndWriteAll(projectRoot, newLedgerRows);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -260,10 +634,7 @@ export async function migrateDecisionsLedger(
 ): Promise<MigrateDecisionsLedgerResult> {
   const decisionsDir = getDecisionsDir(projectRoot);
   const lockDir = getDecisionsLockDir(projectRoot);
-  const decisionsFilePath = getDecisionsFilePath(projectRoot);
-  const pitfallsFilePath = getPitfallsFilePath(projectRoot);
   const ledgerPath = getDecisionsLedgerPath(projectRoot);
-  const logPath = getDecisionsLogPath(projectRoot);
 
   const result: MigrateDecisionsLedgerResult = {
     anchored: 0,
@@ -283,40 +654,10 @@ export async function migrateDecisionsLedger(
   }
 
   // -------------------------------------------------------------------------
-  // Step 1: Read existing .md files (side A) and decisions-log.jsonl (side B)
+  // Step 1-3: Read inputs (applies ADR-017 — lock acquired below before writes)
   // -------------------------------------------------------------------------
-  let decisionsContent = '';
-  let pitfallsContent = '';
-  let logRows: LedgerRow[] = [];
-
-  try {
-    decisionsContent = await fs.readFile(decisionsFilePath, 'utf-8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    // Missing decisions.md — we can still handle pitfalls and log
-  }
-
-  try {
-    pitfallsContent = await fs.readFile(pitfallsFilePath, 'utf-8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-
-  try {
-    const logRaw = await fs.readFile(logPath, 'utf-8');
-    for (const line of logRaw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        logRows.push(JSON.parse(trimmed) as LedgerRow);
-      } catch {
-        // Skip malformed lines
-      }
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    // No log file — proceed with empty log
-  }
+  const { decisionsContent, pitfallsContent, logRows, existingLedgerRows } =
+    await readMigrationInputs(projectRoot, result.warnings);
 
   // -------------------------------------------------------------------------
   // Step 2: Parse .md sections from both files
@@ -324,44 +665,6 @@ export async function migrateDecisionsLedger(
   const decisionSections = parseMdSections(decisionsContent, 'decision');
   const pitfallSections = parseMdSections(pitfallsContent, 'pitfall');
   const allMdSections = [...decisionSections, ...pitfallSections];
-
-  // Build lookup: anchor_id → ParsedMdSection
-  const mdByAnchor = new Map<string, ParsedMdSection>();
-  for (const section of allMdSections) {
-    mdByAnchor.set(section.anchorId, section);
-  }
-
-  // Build lookup: obs_id → LedgerRow (from log)
-  const logById = new Map<string, LedgerRow>();
-  const seenObsIds = new Set<string>();
-  for (const row of logRows) {
-    if (logById.has(row.id)) {
-      // Duplicate id in log — keep first
-      result.warnings.push(`Duplicate log row id '${row.id}' — keeping first occurrence`);
-      continue;
-    }
-    logById.set(row.id, row);
-  }
-
-  // -------------------------------------------------------------------------
-  // Step 3: Read existing ledger (for idempotency check)
-  // -------------------------------------------------------------------------
-  let existingLedgerRows: LedgerRow[] = [];
-  try {
-    const ledgerRaw = await fs.readFile(ledgerPath, 'utf-8');
-    for (const line of ledgerRaw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        existingLedgerRows.push(JSON.parse(trimmed) as LedgerRow);
-      } catch {
-        // Skip malformed lines
-      }
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    // No ledger yet — start fresh
-  }
 
   // Build set of anchors already in the ledger (for idempotency)
   const existingLedgerAnchors = new Set<string>();
@@ -372,140 +675,13 @@ export async function migrateDecisionsLedger(
   // -------------------------------------------------------------------------
   // Step 4: Build the new ledger rows
   // -------------------------------------------------------------------------
-  // Start with existing rows (to preserve already-migrated entries)
-  const newLedgerRows: LedgerRow[] = [...existingLedgerRows];
-
-  // 4a. Process .md sections → anchored rows
-  for (const section of allMdSections) {
-    // Idempotency: skip if already in ledger
-    if (existingLedgerAnchors.has(section.anchorId)) continue;
-
-    const { anchorId, kind, title, date, decisionsStatus, obsId, rawBody, amendments } = section;
-
-    // Determine decisions_status: map .md Status to our enum
-    let normalizedStatus: string = 'Accepted';
-    const sl = decisionsStatus.toLowerCase();
-    if (kind === 'pitfall') {
-      normalizedStatus = 'Active';
-    } else if (sl === 'deprecated') {
-      normalizedStatus = 'Deprecated';
-    } else if (sl === 'superseded') {
-      normalizedStatus = 'Superseded';
-    } else {
-      normalizedStatus = 'Accepted';
-    }
-
-    if (obsId) {
-      // Duplicate Source guard
-      if (seenObsIds.has(obsId)) {
-        result.warnings.push(
-          `Duplicate Source obs_id '${obsId}' (anchor ${anchorId}) — keeping first .md entry`,
-        );
-        continue;
-      }
-      seenObsIds.add(obsId);
-
-      const logRow = logById.get(obsId);
-
-      if (logRow) {
-        // Enrich the log row into the ledger
-        const enriched: LedgerRow = {
-          ...logRow,
-          anchor_id: anchorId,
-          decisions_status: normalizedStatus,
-          raw_body: rawBody,
-          amendments: amendments.length > 0 ? amendments : logRow.amendments,
-          status: 'created', // ensure lifecycle status reflects that this has been rendered
-        };
-        if (kind === 'decision' && date) {
-          enriched.date = date;
-        }
-        newLedgerRows.push(enriched);
-        result.anchored++;
-      } else {
-        // obs_id not in log (e.g. obs_c9d3m1 for ADR-001) → synthesize
-        const synthesized: LedgerRow = {
-          id: obsId,
-          type: kind,
-          pattern: title,
-          status: 'created',
-          anchor_id: anchorId,
-          decisions_status: normalizedStatus,
-          raw_body: rawBody,
-          amendments: amendments.length > 0 ? amendments : undefined,
-        };
-        if (kind === 'decision' && date) {
-          synthesized.date = date;
-        }
-        // Minimal details from the raw body if possible
-        synthesized.details = title;
-        newLedgerRows.push(synthesized);
-        result.synthesized++;
-      }
-    } else {
-      // No Source marker — synthesize with deterministic ID
-      const syntheticId = `obs_migrated_${anchorId.toLowerCase().replace('-', '_')}`;
-      if (seenObsIds.has(syntheticId)) {
-        result.warnings.push(
-          `Would synthesize duplicate id '${syntheticId}' for anchor ${anchorId} — skipping`,
-        );
-        continue;
-      }
-      seenObsIds.add(syntheticId);
-      result.warnings.push(
-        `No Source marker for ${anchorId} — synthesized id '${syntheticId}'`,
-      );
-      const synthesized: LedgerRow = {
-        id: syntheticId,
-        type: kind,
-        pattern: title,
-        status: 'created',
-        anchor_id: anchorId,
-        decisions_status: normalizedStatus,
-        raw_body: rawBody,
-        amendments: amendments.length > 0 ? amendments : undefined,
-      };
-      if (kind === 'decision' && date) {
-        synthesized.date = date;
-      }
-      synthesized.details = title;
-      newLedgerRows.push(synthesized);
-      result.synthesized++;
-    }
-  }
-
-  // 4b. Hand-deletions: log rows with artifact_path#ANCHOR whose anchor is NOT in .md
-  // Build the set of all anchors in the new ledger so far (existing + just added)
-  const allAnchorsInLedger = new Set<string>(newLedgerRows.map(r => r.anchor_id).filter(Boolean) as string[]);
-
-  for (const row of logRows) {
-    const anchor = extractAnchorFromArtifactPath(row);
-    if (!anchor) continue; // not an anchored log row
-
-    // Already accounted for in the ledger (from .md migration or pre-existing)
-    if (allAnchorsInLedger.has(anchor)) continue;
-
-    // Is this anchor absent from .md? → hand-deleted entry
-    if (!mdByAnchor.has(anchor)) {
-      // Hand-deleted: reserve the number as Retired
-      const retired: LedgerRow = {
-        ...row,
-        anchor_id: anchor,
-        decisions_status: 'Retired',
-        status: 'created',
-      };
-      newLedgerRows.push(retired);
-      allAnchorsInLedger.add(anchor); // prevent duplicates from multiple log rows with same anchor
-      result.retired++;
-    }
-  }
-
-  // 4c. Count observing-only rows (no anchor_id, status observing)
-  for (const row of logRows) {
-    if (row.status === 'observing' && !row.anchor_id && !extractAnchorFromArtifactPath(row)) {
-      result.observingKept++;
-    }
-  }
+  const newLedgerRows = buildLedgerRows(
+    allMdSections,
+    logRows,
+    existingLedgerRows,
+    existingLedgerAnchors,
+    result,
+  );
 
   // -------------------------------------------------------------------------
   // Step 5: Idempotency check
@@ -545,26 +721,27 @@ export async function migrateDecisionsLedger(
 
     // Use createRequire to load the CJS module from the ESM context
     const req = createRequire(import.meta.url);
-    const renderer = req(rendererPath) as {
-      renderAndWriteAll: (worktreePath: string, rows: LedgerRow[]) => void;
-    };
+    const mod: unknown = req(rendererPath);
 
-    if (newRowsAdded === 0) {
-      // 6 (idempotency path): ledger already has all anchors. Only re-render
-      // the .md files to heal stale state left by a prior crash between the
-      // atomic ledger write and renderAndWriteAll. The existing ledger rows are
-      // the authoritative source. We do NOT re-write the ledger file.
-      renderer.renderAndWriteAll(projectRoot, existingLedgerRows);
-    } else {
-      // 6a. Write the new ledger atomically (crash-safe: do this FIRST)
-      await fs.mkdir(decisionsDir, { recursive: true });
-      const ledgerContent = newLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
-      await writeFileAtomicExclusive(ledgerPath, ledgerContent);
-
-      // 6b. Render both .md from the ledger using the BUNDLED renderer (PF-007)
-      // We already hold .decisions.lock so call renderAndWriteAll (lock-free helper)
-      renderer.renderAndWriteAll(projectRoot, newLedgerRows);
+    // D308: validate renderer shape before use — a path mismatch (e.g. wrong
+    // dist layout after a build change) would otherwise throw an unhelpful
+    // TypeError at the call site rather than surfacing the root cause.
+    if (typeof (mod as { renderAndWriteAll?: unknown })?.renderAndWriteAll !== 'function') {
+      throw new Error(
+        `decisions-ledger-migration: renderer at ${rendererPath} is missing the renderAndWriteAll export`,
+      );
     }
+    const renderer = mod as { renderAndWriteAll: (worktreePath: string, rows: LedgerRow[]) => void };
+
+    await writeAndRender(
+      projectRoot,
+      decisionsDir,
+      ledgerPath,
+      newLedgerRows,
+      existingLedgerRows,
+      newRowsAdded,
+      renderer,
+    );
 
     // Success — lock released in finally
   } finally {
