@@ -80,9 +80,19 @@ export function getDecisionsConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions.json');
 }
 
+/** .devflow/decisions/decisions-ledger.jsonl — committed anchored rows (single source of truth for rendering) */
+export function getDecisionsLedgerPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+}
+
 /** .devflow/decisions/decisions-log.jsonl */
 export function getDecisionsLogPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.jsonl');
+}
+
+/** .devflow/decisions/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
+export function getDecisionsArchivePath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.archive.jsonl');
 }
 
 /** .devflow/decisions/.decisions-manifest.json */
@@ -254,6 +264,7 @@ export function getDevflowGitignoreContent(): string {
 !decisions/
 !decisions/decisions.md
 !decisions/pitfalls.md
+!decisions/decisions-ledger.jsonl
 
 # 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
 !features/

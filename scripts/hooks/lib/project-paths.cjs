@@ -266,6 +266,7 @@ function getDevflowGitignoreContent() {
 !decisions/
 !decisions/decisions.md
 !decisions/pitfalls.md
+!decisions/decisions-ledger.jsonl
 
 # 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
 !features/

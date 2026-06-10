@@ -933,6 +933,94 @@ const MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT: Migration<'per-project'> = {
   },
 };
 
+/**
+ * Per-project: add `!decisions/decisions-ledger.jsonl` re-include to the
+ * .devflow/.gitignore of any project that already ran `sync-devflow-gitignore-v2`
+ * and therefore has an older template that lacks the new ledger re-include.
+ *
+ * Idempotent: only adds the line if absent. Preserves existing content.
+ * Applies ADR-012 (decisions artifacts committed to git) and PF-004 (idempotent).
+ */
+const MIGRATION_SYNC_DEVFLOW_GITIGNORE_V3: Migration<'per-project'> = {
+  id: 'sync-devflow-gitignore-v3',
+  description: 'Add !decisions/decisions-ledger.jsonl re-include to .devflow/.gitignore',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const devflowDir = path.join(ctx.projectRoot, '.devflow');
+    try { await fs.access(devflowDir); } catch { return { infos: [], warnings: [] }; }
+
+    const gitignorePath = path.join(devflowDir, '.gitignore');
+    const ledgerLine = '!decisions/decisions-ledger.jsonl';
+
+    let existing: string;
+    try {
+      existing = await fs.readFile(gitignorePath, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      // .gitignore absent — no-op (full template sync is v1/v2's job)
+      return { infos: [], warnings: [] };
+    }
+
+    // Idempotent: only add if absent
+    if (existing.includes(ledgerLine)) {
+      return { infos: [], warnings: [] };
+    }
+
+    // Insert the new line immediately after `!decisions/pitfalls.md`
+    const insertAfter = '!decisions/pitfalls.md';
+    let updated: string;
+    if (existing.includes(insertAfter)) {
+      updated = existing.replace(insertAfter, `${insertAfter}\n${ledgerLine}`);
+    } else {
+      // Fallback: append before the features section or at end
+      updated = existing.trimEnd() + '\n' + ledgerLine + '\n';
+    }
+
+    await writeFileAtomicExclusive(gitignorePath, updated);
+    return {
+      infos: ['Added !decisions/decisions-ledger.jsonl to .devflow/.gitignore'],
+      warnings: [],
+    };
+  },
+};
+
+/**
+ * Per-project: migrate existing decisions.md + pitfalls.md + decisions-log.jsonl
+ * to the two-file split layout (committed anchored ledger + gitignored raw log).
+ *
+ * Preserve-verbatim: every existing .md entry body is captured as raw_body and
+ * re-rendered byte-identically (except the TL;DR Key list which is repopulated).
+ *
+ * Runs AFTER the legacy purge migrations so it operates on the already-cleaned
+ * corpus. Non-fatal (PF-004 pattern): failures retry on next init.
+ *
+ * Applies ADR-001 EXCEPTION (data-preserving migration explicitly approved).
+ * Applies ADR-008 (renderer is deterministic plumbing; content was LLM-authored).
+ * Applies ADR-012 (decisions-ledger.jsonl committed to git).
+ * Applies ADR-017 (.decisions.lock held for the full operation).
+ * Avoids PF-007 (renderer resolved from bundled package, not installed ~/.devflow).
+ */
+const MIGRATION_DECISIONS_LEDGER_UNIFY: Migration<'per-project'> = {
+  id: 'decisions-ledger-unify-v1',
+  description: 'Migrate decisions.md + pitfalls.md to two-file split: committed anchored ledger + gitignored raw log',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const { migrateDecisionsLedger } = await import('./decisions-ledger-migration.js');
+    const result = await migrateDecisionsLedger(ctx.projectRoot);
+
+    const infos: string[] = [];
+    if (result.anchored > 0 || result.synthesized > 0 || result.retired > 0) {
+      const parts: string[] = [];
+      if (result.anchored > 0) parts.push(`${result.anchored} anchored`);
+      if (result.synthesized > 0) parts.push(`${result.synthesized} synthesized`);
+      if (result.retired > 0) parts.push(`${result.retired} retired`);
+      infos.push(`decisions-ledger-unify-v1: ${parts.join(', ')}`);
+    }
+
+    return { infos, warnings: result.warnings };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -949,6 +1037,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_STALE_MEMORY_MARKERS,
   MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL,
   MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,
+  MIGRATION_SYNC_DEVFLOW_GITIGNORE_V3,
+  MIGRATION_DECISIONS_LEDGER_UNIFY,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';
