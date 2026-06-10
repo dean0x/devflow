@@ -251,6 +251,7 @@ export function getDevflowGitignoreContent(): string {
   return `# .devflow/ git-tracking policy
 # ---------------------------------------------------------------------------
 # Only curated, shared team knowledge is committed to git:
+#   - decisions/decisions-ledger.jsonl                    (anchored render source)
 #   - decisions/decisions.md, decisions/pitfalls.md      (ADR / pitfall records)
 #   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
 #

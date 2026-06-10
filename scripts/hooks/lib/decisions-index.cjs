@@ -31,6 +31,15 @@ const { getDecisionsFilePath, getPitfallsFilePath } = require('./project-paths.c
 const KNOWN_STATUSES = ['Active', 'Accepted'];
 
 /**
+ * Belt-and-suspenders: statuses that must be excluded from the index even if
+ * a stale or manually-edited .md file contains them.  The renderer
+ * (render-decisions.cjs) is the primary gate; this is a defense-in-depth
+ * fallback so active-only correctness does not rest on the renderer alone.
+ * Mirrors the INACTIVE_STATUSES set in render-decisions.cjs.
+ */
+const INACTIVE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
+
+/**
  * Extract index entries from raw decisions.md / pitfalls.md content.
  * The .md files are a pure render of the active ledger — no in-memory
  * filtering is needed; all sections present are already active entries.
@@ -58,6 +67,11 @@ function extractIndexEntries(raw) {
     // Extract area line (pitfalls only, optional)
     const areaMatch = section.match(/- \*\*Area\*\*: (.+)/);
     const area = areaMatch ? areaMatch[1].trim() : null;
+
+    // Belt-and-suspenders: skip inactive entries even if they somehow appear
+    // in the .md file (e.g. stale or manually-edited file).  Primary gate is
+    // render-decisions.cjs; this is a defense-in-depth fallback.
+    if (status && INACTIVE_STATUSES.has(status)) continue;
 
     entries.push({ id, title: rawTitle, status, area });
   }

@@ -14,7 +14,7 @@ import * as path from 'path'
 import { execSync } from 'child_process'
 import { createRequire } from 'module'
 import {
-  ACTIVE_ADR, ACTIVE_PF,
+  ACTIVE_ADR, ACTIVE_PF, DEPRECATED_ADR, SUPERSEDED_ADR, DEPRECATED_PF, SUPERSEDED_PF,
   makeTmpWorktree, cleanupTmpWorktrees,
 } from './fixtures'
 
@@ -167,6 +167,51 @@ describe('loadDecisionsIndex — formatting', () => {
     const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Decisions (')
     expect(result).not.toContain('Pitfalls (')
+  })
+
+  // Belt-and-suspenders: inactive status entries must be absent from the index
+  // even if they appear in a stale or manually-edited .md file.
+  it('excludes Deprecated ADR from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(DEPRECATED_ADR)
+    const result = loadDecisionsIndex(tmpDir)
+    // A Deprecated-only file produces no active entries → (none)
+    expect(result).toBe('(none)')
+  })
+
+  it('excludes Superseded ADR from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(SUPERSEDED_ADR)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toBe('(none)')
+  })
+
+  it('excludes Deprecated PF from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(undefined, DEPRECATED_PF)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toBe('(none)')
+  })
+
+  it('excludes Superseded PF from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(undefined, SUPERSEDED_PF)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toBe('(none)')
+  })
+
+  it('keeps active ADR when mixed with Deprecated ADR in same file', () => {
+    const mixed = ACTIVE_ADR + '\n' + DEPRECATED_ADR
+    const tmpDir = makeTmpWorktree(mixed)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toContain('ADR-001')
+    expect(result).not.toContain('ADR-002')
+    expect(result).toContain('Decisions (1):')
+  })
+
+  it('keeps active PF when mixed with Superseded PF in same file', () => {
+    const mixed = ACTIVE_PF + '\n' + SUPERSEDED_PF
+    const tmpDir = makeTmpWorktree(undefined, mixed)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toContain('PF-004')
+    expect(result).not.toContain('PF-005')
+    expect(result).toContain('Pitfalls (1):')
   })
 })
 

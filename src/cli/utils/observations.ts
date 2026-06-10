@@ -6,11 +6,23 @@
  */
 
 /**
- * Status values for a rendered decisions.md / pitfalls.md entry.
+ * D201: Canonical status vocabulary for rendered decisions.md / pitfalls.md entries.
+ *
+ * Derived from an `as const` literal array so the union type, the runtime set,
+ * and the VALID_DECISIONS_STATUSES guard below are always in sync — no manual
+ * duplication. `Retired` is the output of the `retire-anchor` op and MUST be
+ * present; `Unknown` was never produced by any operation and has been removed.
+ *
  * Defined here (pure data module) so both observation-io.ts and decisions.ts
- * can import it without creating a utility→command circular dependency.
+ * can import without creating a utility→command circular dependency.
+ * Re-exported through src/cli/commands/decisions.ts for external consumers.
+ * Consumed by LedgerRow (this file) and LearningObservation.decisions_status (this file).
  */
-export type DecisionsEntryStatus = 'Accepted' | 'Active' | 'Deprecated' | 'Superseded' | 'Unknown';
+export const DECISIONS_ENTRY_STATUSES = [
+  'Accepted', 'Active', 'Deprecated', 'Superseded', 'Retired',
+] as const;
+
+export type DecisionsEntryStatus = (typeof DECISIONS_ENTRY_STATUSES)[number];
 
 /**
  * Learning observation stored in learning-log.jsonl (one JSON object per line).
@@ -51,17 +63,59 @@ export interface LearningObservation {
   /** Decision date (YYYY-MM-DD). Decisions only; pitfalls omit this field. */
   date?: string;
   /** Rendered entry status — distinct from observation lifecycle `status`. */
-  decisions_status?: 'Accepted' | 'Active' | 'Deprecated' | 'Superseded' | 'Retired';
+  decisions_status?: DecisionsEntryStatus;
   /** Ordered amendment notes appended to an ADR entry. */
   amendments?: { date: string; note: string }[];
   /** Verbatim .md body for migrated entries — emitted as-is by the renderer. */
   raw_body?: string;
 }
 
-/** Valid values for the decisions_status optional field. */
-const VALID_DECISIONS_STATUSES = new Set([
-  'Accepted', 'Active', 'Deprecated', 'Superseded', 'Retired',
-]);
+/**
+ * D202: Projected shape of a committed decisions-ledger.jsonl row.
+ *
+ * This is distinct from LearningObservation — it represents the anchored ledger
+ * row written by `assign-anchor` / `retire-anchor` / the migration, NOT the raw
+ * log observation. Key distinctions:
+ *   - `id` is required (obs ID, may be synthetic: `obs_migrated_{anchor}`)
+ *   - `anchor_id` is required (set once by assign-anchor, never recomputed)
+ *   - `decisions_status` is typed against DecisionsEntryStatus (no loose string)
+ *   - Observation-lifecycle fields (`confidence`, `observations`, `evidence`, etc.)
+ *     are optional — they are present for enriched rows but absent for synthesized rows
+ *   - `[key: string]: unknown` index signature preserves round-trip JSON safety for
+ *     fields added by future ops (the renderer and migration always spread-merge rows)
+ *
+ * Home: observations.ts (pure data module, no I/O) so decisions-ledger-migration.ts
+ * and any future ledger consumers can import without circular deps.
+ *
+ * Migration batch note: decisions-ledger-migration.ts currently defines a private
+ * `interface LedgerRow` with `decisions_status?: string` (untyped). The migration
+ * batch that owns that file should replace it with `import { LedgerRow } from './observations.js'`.
+ */
+export interface LedgerRow {
+  /** Observation ID (may be synthetic: `obs_migrated_{anchor}` for no-Source entries). */
+  id: string;
+  /** Entry type — determines which .md file the entry is rendered into. */
+  type: string;
+  /** Short summary / title of the decision or pitfall. */
+  pattern: string;
+  /** Full description; parsed into sections by the format helpers. */
+  details: string;
+  /** Stable anchor ID (e.g. 'ADR-016'). Set once by assign-anchor, never recomputed. */
+  anchor_id: string;
+  /** Rendered entry status in decisions.md / pitfalls.md. Typed to prevent illegal values. */
+  decisions_status: DecisionsEntryStatus;
+  /** Decision date (YYYY-MM-DD). Decisions only; pitfalls omit this field. */
+  date?: string;
+  /** Verbatim .md body for migrated entries — emitted as-is by the renderer. */
+  raw_body?: string;
+  /** Ordered amendment notes appended to an ADR entry. */
+  amendments?: { date: string; note: string }[];
+  /** Index signature preserves unknown fields across JSON round-trips (spread-merge safety). */
+  [key: string]: unknown;
+}
+
+/** Valid values for the decisions_status optional field — derived from DECISIONS_ENTRY_STATUSES. */
+const VALID_DECISIONS_STATUSES = new Set<string>(DECISIONS_ENTRY_STATUSES);
 
 /**
  * Type guard for validating raw JSON as a LearningObservation.
