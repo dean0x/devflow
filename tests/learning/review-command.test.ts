@@ -174,16 +174,17 @@ describe('observation attention flags detection', () => {
   });
 });
 
-describe('decisions capacity review (--review capacity mode)', () => {
-  // These tests verify the parsing and sorting logic, not the interactive flow
-  // (p.multiselect is hard to test non-interactively).
+describe('count-active op (ledger-based)', () => {
+  // Phase 8: count-active now reads from decisions-ledger.jsonl exclusively.
+  // The legacy .md-file-path calling convention (count-active <file.md> type)
+  // has been removed since all projects are now on the ledger model.
 
   let tmpDir: string;
   let decisionsDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-review-'));
-    decisionsDir = path.join(tmpDir, '.memory', 'decisions');
+    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.mkdirSync(decisionsDir, { recursive: true });
   });
 
@@ -191,58 +192,31 @@ describe('decisions capacity review (--review capacity mode)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('parseDecisionsEntries extracts active entries from decisions.md', () => {
-    // This test validates the entry parsing logic that the --review capacity
-    // mode uses internally. We test it via the count-active op which uses
-    // the same countActiveHeadings function.
-    const content = [
-      '<!-- TL;DR: 3 decisions. Key: ADR-003 -->',
-      '# Decisions',
-      '',
-      '## ADR-001: Active entry',
-      '- **Date**: 2026-01-01',
-      '- **Status**: Accepted',
-      '',
-      '## ADR-002: Deprecated entry',
-      '- **Date**: 2026-01-01',
-      '- **Status**: Deprecated',
-      '',
-      '## ADR-003: Another active',
-      '- **Date**: 2026-04-01',
-      '- **Status**: Accepted',
-      '',
-    ].join('\n');
+  function writeLedger(rows: object[]): void {
+    const ledgerPath = path.join(decisionsDir, 'decisions-ledger.jsonl');
+    fs.writeFileSync(ledgerPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+  }
 
-    const decisionsPath = path.join(decisionsDir, 'decisions.md');
-    fs.writeFileSync(decisionsPath, content);
-
-    // Use count-active to verify
-    const result = JSON.parse(runHelper(`count-active "${decisionsPath}" decision`));
+  it('count-active counts Accepted decision anchors from ledger', () => {
+    writeLedger([
+      { anchor_id: 'ADR-001', type: 'decision', pattern: 'Active entry', decisions_status: 'Accepted' },
+      { anchor_id: 'ADR-002', type: 'decision', pattern: 'Another active', decisions_status: 'Accepted' },
+    ]);
+    const result = JSON.parse(runHelper(`count-active "${tmpDir}" decision`));
     expect(result.count).toBe(2);
   });
 
-  it('count-active returns 0 for non-existent file', () => {
-    const result = JSON.parse(runHelper(`count-active "/tmp/nonexistent-${Date.now()}.md" decision`));
+  it('count-active returns 0 when ledger is absent', () => {
+    // No ledger file — absent ledger means 0 active
+    const result = JSON.parse(runHelper(`count-active "${tmpDir}" decision`));
     expect(result.count).toBe(0);
   });
 
-  it('count-active handles pitfalls correctly', () => {
-    const content = [
-      '<!-- TL;DR: 2 pitfalls. Key: PF-002 -->',
-      '# Pitfalls',
-      '',
-      '## PF-001: Active pitfall',
-      '- **Status**: Active',
-      '',
-      '## PF-002: Deprecated pitfall',
-      '- **Status**: Deprecated',
-      '',
-    ].join('\n');
-
-    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
-    fs.writeFileSync(pitfallsPath, content);
-
-    const result = JSON.parse(runHelper(`count-active "${pitfallsPath}" pitfall`));
+  it('count-active counts Active pitfall anchors from ledger', () => {
+    writeLedger([
+      { anchor_id: 'PF-001', type: 'pitfall', pattern: 'Active pitfall', decisions_status: 'Active' },
+    ]);
+    const result = JSON.parse(runHelper(`count-active "${tmpDir}" pitfall`));
     expect(result.count).toBe(1);
   });
 });

@@ -193,36 +193,6 @@ function countActiveLedgerRows(ledgerRows, type) {
 }
 
 /**
- * D18: Count only non-deprecated headings in a decisions file.
- * Scans ## ADR-NNN: or ## PF-NNN: headings, then checks the next Status
- * line — if `Deprecated` or `Superseded`, the entry is excluded from the count.
- * @param {string} content - File content
- * @param {'decision'|'pitfall'} entryType
- * @returns {number}
- */
-function countActiveHeadings(content, entryType) {
-  const prefix = entryType === 'decision' ? 'ADR' : 'PF';
-  const headingRe = new RegExp(`^## ${prefix}-(\\d+):`, 'gm');
-  let count = 0;
-  let match;
-  while ((match = headingRe.exec(content)) !== null) {
-    // Limit search to the section between this heading and the next ## heading
-    const sectionStart = match.index;
-    const nextHeadingIdx = content.indexOf('\n## ', sectionStart + 1);
-    const section = nextHeadingIdx !== -1
-      ? content.slice(sectionStart, nextHeadingIdx)
-      : content.slice(sectionStart);
-    const statusMatch = section.match(/- \*\*Status\*\*:\s*(\w+)/);
-    if (statusMatch) {
-      const status = statusMatch[1];
-      if (status === 'Deprecated' || status === 'Superseded') continue;
-    }
-    count++;
-  }
-  return count;
-}
-
-/**
  * Read .decisions-usage.json. Returns {version, entries} or empty default.
  * @param {string} projectRoot - Path to project root (cwd)
  * @returns {{version: number, entries: Object}}
@@ -694,57 +664,22 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // count-active <worktree-or-file> <type>
-    // D23: Count active anchored rows from the ledger (preferred) or from
-    // .md heading scan (legacy/pre-migration fallback).
+    // count-active <worktree> <type>
+    // D23: Count active anchored rows from the ledger.
     //
-    // Two calling conventions (backward compat):
-    //   count-active <worktree> <type>    — reads ledger, falls back to .md scan
-    //   count-active <file.md> <type>     — legacy: reads the .md file directly
+    //   count-active <worktree> <type>    — reads ledger; returns 0 when absent
     //
-    // Detection: if the argument ends with '.md' OR is a regular file (not dir),
-    // treat as legacy .md file path. Otherwise treat as worktree.
+    // The legacy .md-file-path calling convention (count-active <file.md> type)
+    // has been removed — all projects are now on the ledger model.
     // -------------------------------------------------------------------------
     case 'count-active': {
       const caArg = safePath(args[0]);
       const entryType = args[1]; // 'decision' or 'pitfall'
 
-      // Detect legacy .md file path vs worktree path
-      let caIsLegacyFilePath = caArg.endsWith('.md');
-      if (!caIsLegacyFilePath) {
-        try {
-          const st = fs.statSync(caArg);
-          caIsLegacyFilePath = st.isFile();
-        } catch { /* path doesn't exist — treat as worktree */ }
-      }
-
-      if (caIsLegacyFilePath) {
-        // Legacy: .md file path passed directly
-        let content = '';
-        try {
-          content = fs.readFileSync(caArg, 'utf8');
-        } catch { /* file doesn't exist — count is 0 */ }
-        const count = countActiveHeadings(content, entryType);
-        console.log(JSON.stringify({ count }));
-      } else {
-        // Worktree path: read from ledger, fallback to .md scan when no ledger
-        const caLedgerPath = getDecisionsLedgerPath(caArg);
-        const caLedgerRows = parseLedger(caLedgerPath);
-        if (caLedgerRows.length > 0) {
-          const count = countActiveLedgerRows(caLedgerRows, entryType);
-          console.log(JSON.stringify({ count }));
-        } else {
-          const mdPath = entryType === 'decision'
-            ? getDecisionsFilePath(caArg)
-            : getPitfallsFilePath(caArg);
-          let content = '';
-          try {
-            content = fs.readFileSync(mdPath, 'utf8');
-          } catch { /* file doesn't exist — count is 0 */ }
-          const count = countActiveHeadings(content, entryType);
-          console.log(JSON.stringify({ count }));
-        }
-      }
+      const caLedgerPath = getDecisionsLedgerPath(caArg);
+      const caLedgerRows = parseLedger(caLedgerPath);
+      const count = countActiveLedgerRows(caLedgerRows, entryType);
+      console.log(JSON.stringify({ count }));
       break;
     }
 
@@ -938,7 +873,6 @@ try {
 // Expose helpers for unit testing (only when required as a module, not run as CLI)
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    countActiveHeadings,
     countActiveLedgerRows,
     readUsageFile,
     writeUsageFile,

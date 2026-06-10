@@ -1,91 +1,102 @@
 // tests/resolve/decisions-citation.test.ts
 // Tests for Fix 1: /resolve reads and cites project decisions.
 //
-// Strategy: The filter + loader logic lives in the production module
+// Strategy: The loader logic lives in the production module
 // scripts/hooks/lib/decisions-index.cjs; these tests import it directly
 // for real coverage. The markdown structural tests verify that the instruction
 // to invoke the module (or follow its algorithm) is present on every surface.
 //
 // Test groups:
-//   1. Unit tests: filterDecisionsContext (D-A filter) — imported from production module
-//   2. Unit tests: filterDecisionsContext — imported from production module
-//   3. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
+//   1. Active-only contract — decisions-index.cjs parses active-only .md input correctly
+//      (Deprecated/Superseded/Retired are hidden by the renderer before writing; the index
+//       never sees them — filterDecisionsContext has been removed)
+//   2. Structural tests: resolve.md — Step 0d presence + DECISIONS_CONTEXT in Phase 4
 //      (decisions-index.cjs index invocation covered by tests/decisions/command-adoption.test.ts)
-//   4. Structural tests: resolver.md — Input Context + Apply Decisions
+//   3. Structural tests: resolver.md — Input Context + Apply Decisions
 //      (ADR/PF citation format + hallucination guard covered by tests/decisions/apply-decisions-skill.test.ts)
-//   5. Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
+//   4. Cross-cutting: all resolve surfaces reference DECISIONS_CONTEXT
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { createRequire } from 'module';
 import {
-  ACTIVE_ADR, ACTIVE_PF, DEPRECATED_ADR, DEPRECATED_PF,
-  SUPERSEDED_ADR,
+  ACTIVE_ADR, ACTIVE_PF,
 } from '../decisions/fixtures';
 import { loadFile, extractSection } from '../decisions/helpers';
+import { makeTmpWorktree, cleanupTmpWorktrees } from '../decisions/fixtures';
+import { afterAll } from 'vitest';
+
+afterAll(() => cleanupTmpWorktrees());
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(import.meta.url);
 
 // Import the production module — this is the real implementation, not a test copy.
-const { filterDecisionsContext } = require(
+const { loadDecisionsIndex } = require(
   path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
 ) as {
-  filterDecisionsContext: (raw: string) => string;
+  loadDecisionsIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string;
 };
 
 // ---------------------------------------------------------------------------
-// Unit tests: filterDecisionsContext (D-A filter) — production module
+// Active-only contract: decisions-index.cjs parses active-only .md input
+//
+// The renderer guarantees .md files only contain active entries.
+// filterDecisionsContext has been removed — these tests validate the
+// active-only parse path that the index will always receive in practice.
 // ---------------------------------------------------------------------------
 
-describe('filterDecisionsContext — Deprecated/Superseded filtering (D-A)', () => {
-  it('returns empty string when input is empty', () => {
-    expect(filterDecisionsContext('')).toBe('');
+describe('decisions-index active-only contract (post-render .md input)', () => {
+  it('parses Active ADR sections correctly', () => {
+    const tmpDir = makeTmpWorktree(ACTIVE_ADR);
+    const result = loadDecisionsIndex(tmpDir);
+    expect(result).toContain('ADR-001');
+    expect(result).toContain('Use Result types everywhere');
   });
 
-  it('preserves Active ADR sections unchanged', () => {
-    const output = filterDecisionsContext(ACTIVE_ADR);
-    expect(output).toContain('ADR-001');
-    expect(output).toContain('Always return Result<T,E>');
+  it('parses Active PF sections correctly', () => {
+    const tmpDir = makeTmpWorktree(undefined, ACTIVE_PF);
+    const result = loadDecisionsIndex(tmpDir);
+    expect(result).toContain('PF-004');
+    expect(result).toContain('Background hook scripts');
   });
 
-  it('removes Deprecated ADR sections', () => {
-    const output = filterDecisionsContext(DEPRECATED_ADR);
-    expect(output).not.toContain('ADR-002');
-    expect(output).not.toContain('Do the old thing');
+  it('returns "(none)" when both files are empty (no active entries)', () => {
+    const tmpDir = makeTmpWorktree('', '');
+    expect(loadDecisionsIndex(tmpDir)).toBe('(none)');
   });
 
-  it('removes Superseded ADR sections', () => {
-    const output = filterDecisionsContext(SUPERSEDED_ADR);
-    expect(output).not.toContain('ADR-003');
+  it('returns "(none)" when both files are absent', () => {
+    const tmpDir = makeTmpWorktree();
+    expect(loadDecisionsIndex(tmpDir)).toBe('(none)');
   });
 
-  it('removes Deprecated PF sections', () => {
-    const output = filterDecisionsContext(DEPRECATED_PF);
-    expect(output).not.toContain('PF-001');
+  it('tags Accepted decisions with [Accepted] (renderer default for decisions)', () => {
+    const adr = `## ADR-010: Use ledger for decisions\n\n- **Status**: Accepted\n- **Decision**: Always use the ledger\n`;
+    const tmpDir = makeTmpWorktree(adr);
+    const result = loadDecisionsIndex(tmpDir);
+    expect(result).toContain('[Accepted]');
+    expect(result).toContain('ADR-010');
   });
 
-  it('keeps Active PF sections', () => {
-    const output = filterDecisionsContext(ACTIVE_PF);
-    expect(output).toContain('PF-004');
-    expect(output).toContain('Watch out for growing scripts');
+  it('tags Active pitfalls with [Active] (renderer default for pitfalls)', () => {
+    const pf = `## PF-010: Watch for lock contention\n\n- **Status**: Active\n- **Area**: scripts/hooks/\n- **Description**: Lock ordering matters\n`;
+    const tmpDir = makeTmpWorktree(undefined, pf);
+    const result = loadDecisionsIndex(tmpDir);
+    expect(result).toContain('[Active]');
+    expect(result).toContain('PF-010');
   });
 
-  it('preserves Active sections when mixed with Deprecated sections', () => {
-    const input = [ACTIVE_ADR, DEPRECATED_ADR, ACTIVE_PF].join('\n');
-    const output = filterDecisionsContext(input);
-    expect(output).toContain('ADR-001');
-    expect(output).toContain('Always return Result<T,E>');
-    expect(output).not.toContain('ADR-002');
-    expect(output).not.toContain('Do the old thing');
-    expect(output).toContain('PF-004');
-    expect(output).toContain('Watch out for growing scripts');
+  it('shows both Decisions and Pitfalls blocks with correct counts', () => {
+    const tmpDir = makeTmpWorktree(ACTIVE_ADR, ACTIVE_PF);
+    const result = loadDecisionsIndex(tmpDir);
+    expect(result).toContain('Decisions (1):');
+    expect(result).toContain('Pitfalls (1):');
   });
 
-  it('returns empty string when all sections are removed (orchestrator emits "(none)")', () => {
-    const output = filterDecisionsContext(DEPRECATED_ADR);
-    // Empty string signals orchestrator to emit "(none)"
-    expect(output).toBe('');
+  it('filterDecisionsContext is NOT exported (removed in Phase 8 cleanup)', () => {
+    const mod = require(path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')) as Record<string, unknown>;
+    expect(mod.filterDecisionsContext).toBeUndefined();
   });
 });
 
