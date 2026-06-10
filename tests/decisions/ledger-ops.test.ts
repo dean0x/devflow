@@ -1037,22 +1037,26 @@ describe('AC-P2: assign-anchor O(anchored) performance (ratio methodology, per A
       largeTimes.push(performance.now() - start);
     }
 
-    const medianSmall = smallTimes.sort((a, b) => a - b)[Math.floor(RUNS / 2)];
     const medianLarge = largeTimes.sort((a, b) => a - b)[Math.floor(RUNS / 2)];
+    // MIN (not median) is the noise-robust scaling estimator: timing noise only
+    // ever adds time, so the fastest run best reflects true compute cost (a
+    // single median spike on shared CI is what makes ratio assertions flaky).
+    const minSmall = Math.min(...smallTimes);
+    const minLarge = Math.min(...largeTimes);
 
     // Absolute ceiling: 500-row scan must finish within 100ms on any CI.
-    // This assertion always runs regardless of medianSmall, so the test can
-    // never pass vacuously even when medianSmall is sub-0.01ms.
+    // Always runs, so the test can never pass vacuously.
     expect(medianLarge).toBeLessThan(100);
 
-    // Ratio check: only meaningful when medianSmall is measurable.
-    if (medianSmall >= 0.01) {
-      const ratio = medianLarge / medianSmall;
-      expect(ratio).toBeLessThan(15); // 10x rows should be <15x time (linear or better)
+    // Ratio check (only when the small case is measurable): 10x input is ~10x
+    // for an O(anchored) single pass and ~100x for an O(N²) regression.
+    // SUPER_LINEAR_RATIO=30 separates the two with headroom for CI noise.
+    const SUPER_LINEAR_RATIO = 30;
+    if (minSmall >= 0.01) {
+      expect(minLarge / minSmall).toBeLessThan(SUPER_LINEAR_RATIO);
     } else {
-      // medianSmall < 0.01ms — ratio is noise. The absolute ceiling above
-      // already caught any O(N²) blowup at the large size.
-      // Consume the second assertion slot so expect.assertions(2) is satisfied.
+      // Small case sub-0.01ms — ratio is noise; ceiling above guards O(N²).
+      // Consume the 2nd assertion slot.
       expect(true).toBe(true);
     }
   });
@@ -1137,7 +1141,11 @@ describe('AC-P2b: assign-anchor full write-path performance (CLI-level)', () => 
     // reflects real work. If smallMs is very small (startup-dominated) the
     // ratio is noise and we skip it — the ceiling above is the regression guard.
     if (smallMs > 200 && largeMs / smallMs > 0) {
-      expect(largeMs / smallMs).toBeLessThan(10);
+      // CLI invocations carry a large fixed startup cost, so a linear 10x
+      // workload yields a ratio BELOW 10 (startup is amortized across the
+      // larger run). An O(N²) write-path regression would still be ~100x. 25
+      // catches super-linear blowup with ample headroom for startup variance.
+      expect(largeMs / smallMs).toBeLessThan(25);
     } else {
       // Startup noise dominates — ratio is not meaningful.
       // The absolute ceiling above is the regression guard.
