@@ -113,10 +113,11 @@ numbers are never reused.
 Do NOT attempt to hold `.decisions.lock` across multiple `retire-anchor` invocations; that
 would deadlock against `retire-anchor`'s own lock acquisition.
 
-**Recoverability**: to re-activate a retired entry (AC-F6), flip `decisions_status` back
-by calling `retire-anchor` is NOT applicable (it only accepts retiring statuses). Instead,
-directly update the ledger row's `decisions_status` to `Accepted` or `Active` via
-`merge-observation` or a direct ledger write, then re-render:
+**Recoverability**: to re-activate a retired entry (AC-F6), edit its row in
+`decisions-ledger.jsonl` directly — set `decisions_status` back to `Accepted` (decisions)
+or `Active` (pitfalls) — then re-render. (`retire-anchor` only accepts retiring statuses,
+and `merge-observation` writes the raw observation log, not the ledger, so neither
+re-activates an entry.)
 
 ```bash
 node "$HOME/.devflow/scripts/hooks/lib/render-decisions.cjs" render "$(pwd)"
@@ -124,7 +125,7 @@ node "$HOME/.devflow/scripts/hooks/lib/render-decisions.cjs" render "$(pwd)"
 
 **Citation preservation**: if an entry being retired has inbound `applies ADR-NNN` citations
 in other entries, update those entries' `pattern` or `details` to reference the surviving
-entry instead (update the ledger rows via `merge-observation`, then re-render).
+entry instead (edit those ledger rows directly, then re-render).
 
 **Cap enforcement**: stop after 5 changes regardless of remaining candidates.
 
