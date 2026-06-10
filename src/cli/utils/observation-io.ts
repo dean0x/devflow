@@ -1,15 +1,20 @@
 import { promises as fs } from 'fs';
-import * as path from 'path';
 import * as p from '@clack/prompts';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { acquireMkdirLock } from './mkdir-lock.js';
-import { type LearningObservation, type DecisionsEntryStatus, loadAndCountObservations } from './observations.js';
+import { type LearningObservation, loadAndCountObservations } from './observations.js';
 
 /**
  * @file observation-io.ts
  *
  * File I/O for observations and user-facing warnings.
  * Bridges the pure data module (observations.ts) with the filesystem.
+ *
+ * NOTE: `updateDecisionsStatus` was removed in Phase 6 of the decisions-ledger-render
+ * refactor. The `.md` files are now a pure render of the decisions ledger — they must
+ * not be edited directly. To change the status of a decision or pitfall, use the
+ * `retire-anchor` op in `json-helper.cjs`, which flips `decisions_status` on the
+ * ledger row and re-renders both `.md` files atomically. At the time of removal,
+ * `updateDecisionsStatus` had zero callers in the TypeScript codebase.
  */
 
 /**
@@ -45,65 +50,5 @@ export async function writeObservations(logPath: string, observations: LearningO
 export function warnIfInvalid(invalidCount: number): void {
   if (invalidCount > 0) {
     p.log.warn(`Note: ${invalidCount} invalid entry(ies) found. They will be cleaned up automatically.`);
-  }
-}
-
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Update the Status: field for a decision or pitfall entry in a decisions file.
- * Locates the entry by anchor ID (from artifact_path fragment), sets Status to the given value.
- * Acquires a mkdir-based lock before writing. Returns true if the file was updated.
- *
- * The lock path MUST match the assign-anchor writer in json-helper.cjs so CLI updates
- * serialize against the Dream agent's assign-anchor calls.
- */
-export async function updateDecisionsStatus(
-  filePath: string,
-  anchorId: string,
-  newStatus: DecisionsEntryStatus,
-): Promise<boolean> {
-  const memoryDir = path.dirname(path.dirname(filePath));
-  const lockPath = path.join(memoryDir, '.decisions.lock');
-
-  const acquired = await acquireMkdirLock(lockPath);
-  if (!acquired) return false;
-
-  try {
-    let content: string;
-    try {
-      content = await fs.readFile(filePath, 'utf-8');
-    } catch {
-      return false;
-    }
-
-    const anchorPattern = new RegExp(`(##[^#][^\n]*${escapeRegExp(anchorId)}[^\n]*\n(?:(?!^##)[^\n]*\n)*?)(- \\*\\*Status\\*\\*: )[^\n]+`, 'm');
-    const updated = content.replace(anchorPattern, `$1$2${newStatus}`);
-
-    if (updated === content) {
-      const lines = content.split('\n');
-      let inSection = false;
-      let changed = false;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes(anchorId)) {
-          inSection = true;
-        } else if (inSection && lines[i].startsWith('## ')) {
-          break;
-        } else if (inSection && lines[i].match(/^- \*\*Status\*\*: /)) {
-          lines[i] = `- **Status**: ${newStatus}`;
-          changed = true;
-          break;
-        }
-      }
-      if (!changed) return false;
-      await writeFileAtomicExclusive(filePath, lines.join('\n'));
-    } else {
-      await writeFileAtomicExclusive(filePath, updated);
-    }
-    return true;
-  } finally {
-    try { await fs.rmdir(lockPath); } catch { /* already cleaned */ }
   }
 }

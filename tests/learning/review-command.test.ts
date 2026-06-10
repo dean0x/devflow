@@ -1,6 +1,13 @@
 // tests/learning/review-command.test.ts
 // Tests for devflow learn --review CLI command.
 // Validates flagged observation detection, log mutation, and decisions file Status updates.
+//
+// NOTE (Phase 6): updateDecisionsStatus was removed from observation-io.ts.
+// The .md files are now a pure render of the decisions ledger. Status changes
+// must go through `retire-anchor` (json-helper.cjs), which flips decisions_status
+// on the ledger row and re-renders both .md files atomically. Tests that directly
+// tested updateDecisionsStatus have been removed; see tests/decisions/dream-curation.test.ts
+// for the retire-anchor/render-based status-change tests.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -11,7 +18,6 @@ import {
   isLearningObservation,
   type LearningObservation,
 } from '../../src/cli/utils/observations.js';
-import { updateDecisionsStatus } from '../../src/cli/utils/observation-io.js';
 import { runHelper } from './helpers.js';
 
 // Helper: serialize an array of observations to JSONL
@@ -92,119 +98,14 @@ describe('isLearningObservation v2', () => {
   });
 });
 
-describe('updateDecisionsStatus', () => {
-  let tmpDir: string;
-  let decisionsDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-cmd-test-'));
-    // Mirror the production layout (`.devflow/decisions/{file}.md`) so the lock
-    // directory computed by updateDecisionsStatus lands inside tmpDir rather
-    // than the system temp root shared across tests.
-    decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
-    fs.mkdirSync(decisionsDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('updates Status field in decisions.md for a known anchor', async () => {
-    const decisionsPath = path.join(decisionsDir, 'decisions.md');
-    fs.writeFileSync(decisionsPath, [
-      '<!-- TL;DR: 1 decisions. Key: -->',
-      '# Architectural Decisions',
-      '',
-      '## ADR-001: Use Result Types',
-      '',
-      '- **Date**: 2026-01-01',
-      '- **Status**: Accepted',
-      '- **Context**: Avoid exception-based control flow',
-      '- **Decision**: Return Result<T,E> from all fallible operations',
-      '- **Consequences**: Consistent error handling',
-      '- **Source**: session-abc123',
-      '',
-    ].join('\n'), 'utf-8');
-
-    const updated = await updateDecisionsStatus(decisionsPath, 'ADR-001', 'Deprecated');
-    expect(updated).toBe(true);
-
-    const content = fs.readFileSync(decisionsPath, 'utf-8');
-    expect(content).toContain('- **Status**: Deprecated');
-    expect(content).not.toContain('- **Status**: Accepted');
-  });
-
-  it('updates Status field in pitfalls.md for a known anchor', async () => {
-    const pitfallsPath = path.join(decisionsDir, 'pitfalls.md');
-    fs.writeFileSync(pitfallsPath, [
-      '<!-- TL;DR: 1 pitfalls. Key: -->',
-      '# Known Pitfalls',
-      '',
-      '## PF-001: Avoid try/catch around Result',
-      '',
-      '- **Area**: src/cli/commands/',
-      '- **Issue**: Wrapping Result types in try/catch defeats the purpose',
-      '- **Impact**: Inconsistent error handling',
-      '- **Resolution**: Use .match() or check .ok',
-      '- **Status**: Active',
-      '- **Source**: session-def456',
-      '',
-    ].join('\n'), 'utf-8');
-
-    const updated = await updateDecisionsStatus(pitfallsPath, 'PF-001', 'Deprecated');
-    expect(updated).toBe(true);
-
-    const content = fs.readFileSync(pitfallsPath, 'utf-8');
-    expect(content).toContain('- **Status**: Deprecated');
-    expect(content).not.toContain('- **Status**: Active');
-  });
-
-  it('returns false when file does not exist', async () => {
-    const result = await updateDecisionsStatus(
-      path.join(decisionsDir, 'nonexistent.md'),
-      'ADR-001',
-      'Deprecated',
-    );
-    expect(result).toBe(false);
-  });
-
-  it('does not corrupt file when anchor not found', async () => {
-    const decisionsPath = path.join(decisionsDir, 'decisions.md');
-    const originalContent = [
-      '<!-- TL;DR: 1 decisions. Key: -->',
-      '# Architectural Decisions',
-      '',
-      '## ADR-001: Some Decision',
-      '',
-      '- **Status**: Accepted',
-      '',
-    ].join('\n');
-    fs.writeFileSync(decisionsPath, originalContent, 'utf-8');
-
-    // Wrong anchor
-    const updated = await updateDecisionsStatus(decisionsPath, 'ADR-999', 'Deprecated');
-    expect(updated).toBe(false);
-
-    // File should be unchanged
-    const content = fs.readFileSync(decisionsPath, 'utf-8');
-    expect(content).toBe(originalContent);
-  });
-
-  it('does not corrupt file when Status field is absent in section', async () => {
-    const decisionsPath = path.join(decisionsDir, 'decisions.md');
-    const originalContent = [
-      '# Architectural Decisions',
-      '',
-      '## ADR-001: No Status Field',
-      '',
-      '- **Date**: 2026-01-01',
-      '- **Context**: something',
-      '',
-    ].join('\n');
-    fs.writeFileSync(decisionsPath, originalContent, 'utf-8');
-
-    const updated = await updateDecisionsStatus(decisionsPath, 'ADR-001', 'Deprecated');
-    expect(updated).toBe(false);
+// updateDecisionsStatus was removed in Phase 6 of the decisions-ledger-render refactor.
+// The .md files are now a pure render of the decisions ledger. Status changes must go
+// through `retire-anchor` (json-helper.cjs). Tests covering retire-anchor + render-based
+// status changes live in tests/decisions/dream-curation.test.ts.
+describe('updateDecisionsStatus (removed in Phase 6)', () => {
+  it('observation-io module does not export updateDecisionsStatus', async () => {
+    const mod = await import('../../src/cli/utils/observation-io.js');
+    expect((mod as Record<string, unknown>).updateDecisionsStatus).toBeUndefined();
   });
 });
 
