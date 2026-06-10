@@ -44,6 +44,11 @@ const {
   getDecisionsUsagePath,
   getDecisionsLockDir,
 } = require('./lib/project-paths.cjs');
+const {
+  initDecisionsContent: _initDecisionsContent,
+  formatDecisionBody,
+  formatPitfallBody,
+} = require('./lib/decisions-format.cjs');
 
 function readStdin() {
   try {
@@ -127,13 +132,12 @@ function writeFileAtomic(file, content) {
 
 /**
  * Return the initial header content for a new decisions file.
+ * Delegates to decisions-format.cjs so the byte-compat strings live in one place.
  * @param {'decision'|'pitfall'} type
  * @returns {string}
  */
 function initDecisionsContent(type) {
-  return type === 'decision'
-    ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
-    : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
+  return _initDecisionsContent(type);
 }
 
 /**
@@ -583,6 +587,12 @@ try {
         if (newObs.pattern) existing.pattern = newObs.pattern;
         if (newObs.details) existing.details = newObs.details;
         if (newObs.quality_ok === true) existing.quality_ok = true;
+        // Passthrough new ledger fields from incoming obs (if LLM sets them)
+        if (newObs.anchor_id !== undefined) existing.anchor_id = newObs.anchor_id;
+        if (newObs.date !== undefined) existing.date = newObs.date;
+        if (newObs.decisions_status !== undefined) existing.decisions_status = newObs.decisions_status;
+        if (newObs.amendments !== undefined) existing.amendments = newObs.amendments;
+        if (newObs.raw_body !== undefined) existing.raw_body = newObs.raw_body;
 
         merged = true;
         learningLog(`merge-observation: merged into ${existing.id} (count=${newCount})`);
@@ -606,6 +616,12 @@ try {
           details: newObs.details || '',
           quality_ok: newObs.quality_ok === true,
         };
+        // Passthrough new ledger fields if present on the new obs
+        if (newObs.anchor_id !== undefined) entry.anchor_id = newObs.anchor_id;
+        if (newObs.date !== undefined) entry.date = newObs.date;
+        if (newObs.decisions_status !== undefined) entry.decisions_status = newObs.decisions_status;
+        if (newObs.amendments !== undefined) entry.amendments = newObs.amendments;
+        if (newObs.raw_body !== undefined) entry.raw_body = newObs.raw_body;
 
         logMap.set(newId, entry);
         learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
@@ -659,20 +675,16 @@ try {
 
         const { anchorId } = nextDecisionsId(existingMatches, entryPrefix);
 
-        const detailsStr = obs.details || '';
-        let entry;
-        if (isDecision) {
-          const contextM = detailsStr.match(/context:\s*([^;]+)/i);
-          const decisionM = detailsStr.match(/decision:\s*([^;]+)/i);
-          const rationaleM = detailsStr.match(/rationale:\s*([^;]+)/i);
-          entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Date**: ${artDate}\n- **Status**: Accepted\n- **Context**: ${(contextM||[])[1]||detailsStr}\n- **Decision**: ${(decisionM||[])[1]||obs.pattern}\n- **Consequences**: ${(rationaleM||[])[1]||''}\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
-        } else {
-          const areaM = detailsStr.match(/area:\s*([^;]+)/i);
-          const issueM = detailsStr.match(/issue:\s*([^;]+)/i);
-          const impactM = detailsStr.match(/impact:\s*([^;]+)/i);
-          const resM = detailsStr.match(/resolution:\s*([^;]+)/i);
-          entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Area**: ${(areaM||[])[1]||detailsStr}\n- **Issue**: ${(issueM||[])[1]||detailsStr}\n- **Impact**: ${(impactM||[])[1]||''}\n- **Resolution**: ${(resM||[])[1]||''}\n- **Status**: Active\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
-        }
+        // Build a row-like object for the shared format helpers.
+        // anchor_id, date, and id are resolved here; details/pattern come from obs.
+        const entryRow = {
+          anchor_id: anchorId,
+          id: obs.id || 'unknown',
+          pattern: obs.pattern,
+          details: obs.details || '',
+          date: artDate,
+        };
+        const entry = isDecision ? formatDecisionBody(entryRow) : formatPitfallBody(entryRow);
 
         const newContent = existingContent + entry;
 
