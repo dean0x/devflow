@@ -132,8 +132,8 @@ source .devflow/scripts/docs-helpers.sh 2>/dev/null || {
 | Resolver | `.devflow/docs/reviews/{branch-slug}/{timestamp}/resolution-summary.md` | Creates new in timestamped dir |
 | Code-review cmd | `.devflow/docs/reviews/{branch-slug}/.last-review-head` | Overwrites with HEAD SHA |
 | Working Memory | `.devflow/memory/WORKING-MEMORY.md` | Overwrites (auto-maintained by Stop hook) |
-| Decisions | `.devflow/decisions/decisions.md` | Append-only (ADR-NNN sequential IDs) |
-| Pitfalls | `.devflow/decisions/pitfalls.md` | Append-only (PF-NNN sequential IDs) |
+| Decisions | `.devflow/decisions/decisions.md` | Rendered from `decisions-ledger.jsonl` (active ADR-NNN rows; retired rows dropped) |
+| Pitfalls | `.devflow/decisions/pitfalls.md` | Rendered from `decisions-ledger.jsonl` (active PF-NNN rows; retired rows dropped) |
 | Designer (via /plan) | `.devflow/docs/design/{issue}-{topic-slug}.{timestamp}.md` | Creates new design artifact |
 | Researcher | `.devflow/docs/research/{topic-slug}/{timestamp}/{type}.md` | Creates new in timestamped dir |
 | Synthesizer (research) | `.devflow/docs/research/{topic-slug}/{timestamp}/research-summary.md` | Creates new in timestamped dir |
