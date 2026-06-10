@@ -363,6 +363,102 @@ describe('migrateDecisionsLedger — golden', () => {
     );
     expect(ledgerAfterSecond).toBe(ledgerAfterFirst);
   });
+
+  it('re-renders .md from ledger even when newRowsAdded === 0 (crash-window heal)', async () => {
+    // Simulates a crash that occurred BETWEEN the atomic ledger write and the
+    // subsequent renderAndWriteAll call in a prior run. The ledger is complete
+    // but decisions.md / pitfalls.md are stale (missing or wrong). A re-run
+    // should detect newRowsAdded === 0 yet still re-render the .md files so
+    // they are reconciled with the committed ledger.
+
+    // --- Arrange: build the ledger directly as if a prior run wrote it ---
+    const adr001LedgerRow = {
+      id: 'obs_c9d3m1',
+      type: 'decision',
+      pattern: 'Clean break philosophy',
+      status: 'created',
+      anchor_id: 'ADR-001',
+      decisions_status: 'Accepted',
+      date: '2026-05-06',
+      raw_body: DECISION_BODY_ADR001,
+    };
+    const pf001LedgerRow = {
+      id: 'obs_pf_known1',
+      type: 'pitfall',
+      pattern: 'A known pitfall',
+      status: 'created',
+      anchor_id: 'PF-001',
+      decisions_status: 'Active',
+      raw_body: PITFALL_BODY_PF001,
+    };
+
+    // Write the ledger as if a prior run succeeded
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'),
+      [adr001LedgerRow, pf001LedgerRow].map(r => JSON.stringify(r)).join('\n') + '\n',
+      'utf-8',
+    );
+
+    // Write the original .md files (the source that was used in the prior run)
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions.md'),
+      buildDecisionsContent([DECISION_BODY_ADR001]),
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(decisionsDir, 'pitfalls.md'),
+      buildPitfallsContent([PITFALL_BODY_PF001]),
+      'utf-8',
+    );
+
+    // Simulate stale .md: overwrite decisions.md with wrong/stale content and
+    // delete pitfalls.md entirely — mimicking what a crash between ledger write
+    // and renderAndWriteAll would leave behind.
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions.md'),
+      '<!-- STALE: crash left this behind -->\n',
+      'utf-8',
+    );
+    await fs.rm(path.join(decisionsDir, 'pitfalls.md'), { force: true });
+
+    // Log: same anchors as the ledger so newRowsAdded will be 0
+    await fs.writeFile(
+      path.join(decisionsDir, 'decisions-log.jsonl'),
+      JSON.stringify({ id: 'obs_c9d3m1', type: 'decision', pattern: 'Clean break philosophy', status: 'created', first_seen: '2026-05-06T00:00:00Z' }) + '\n' +
+      JSON.stringify({ id: 'obs_pf_known1', type: 'pitfall', pattern: 'A known pitfall', status: 'created', first_seen: '2026-06-01T00:00:00Z' }) + '\n',
+      'utf-8',
+    );
+
+    // --- Act: run migration; the ledger already has all anchors so newRowsAdded === 0 ---
+    const result = await migrateDecisionsLedger(projectRoot, { rendererPath: RENDERER_PATH });
+
+    // --- Assert: counts reflect idempotency (nothing new added) ---
+    expect(result.anchored).toBe(0);
+    expect(result.synthesized).toBe(0);
+    expect(result.retired).toBe(0);
+
+    // --- Assert: .md files are now reconciled with the committed ledger ---
+    const renderedDecisions = await fs.readFile(path.join(decisionsDir, 'decisions.md'), 'utf-8');
+    const renderedPitfalls = await fs.readFile(path.join(decisionsDir, 'pitfalls.md'), 'utf-8');
+
+    // decisions.md must contain ADR-001 (from the ledger), NOT the stale content
+    expect(renderedDecisions).not.toContain('STALE: crash left this behind');
+    expect(renderedDecisions).toContain('ADR-001');
+    expect(renderedDecisions).toContain('Clean break philosophy');
+
+    // pitfalls.md must exist and contain PF-001 (was deleted by the simulated crash)
+    expect(renderedPitfalls).toContain('PF-001');
+    expect(renderedPitfalls).toContain('A known pitfall');
+
+    // Ledger itself must be unchanged (re-render must not rewrite the ledger)
+    const ledgerAfterRun = await fs.readFile(
+      path.join(decisionsDir, 'decisions-ledger.jsonl'), 'utf-8',
+    );
+    const ledgerRows = ledgerAfterRun.split('\n').filter(Boolean).map(l => JSON.parse(l));
+    expect(ledgerRows).toHaveLength(2);
+    expect(ledgerRows[0].anchor_id).toBe('ADR-001');
+    expect(ledgerRows[1].anchor_id).toBe('PF-001');
+  });
 });
 
 // ---------------------------------------------------------------------------

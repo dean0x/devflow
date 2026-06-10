@@ -503,19 +503,31 @@ export async function migrateDecisionsLedger(
   }
 
   // -------------------------------------------------------------------------
-  // Step 5: Idempotency check — if we have nothing new, return early
+  // Step 5: Idempotency check
   // -------------------------------------------------------------------------
   const newRowsAdded = result.anchored + result.synthesized + result.retired;
-  if (newRowsAdded === 0) {
-    return result; // pure no-op (all anchors already present in ledger)
-  }
 
   if (opts.dryRun) {
     return result; // dry-run: don't write anything
   }
 
+  // Pure no-op: nothing new AND no existing ledger rows → nothing to write or
+  // render. Return early without acquiring the lock or loading the renderer.
+  // This path is safe because there is no crash window to heal: a crash between
+  // a ledger write and renderAndWriteAll can only occur when the ledger has
+  // rows — if the ledger is empty, the first run never got past the dry-run.
+  if (newRowsAdded === 0 && existingLedgerRows.length === 0) {
+    return result;
+  }
+
   // -------------------------------------------------------------------------
-  // Step 6: Acquire .decisions.lock and write atomically (ADR-017)
+  // Step 6: Acquire .decisions.lock and write/render atomically (ADR-017)
+  //
+  // We acquire the lock even when newRowsAdded === 0 (idempotency path with a
+  // non-empty existing ledger) because we must re-render the .md files to heal
+  // a crash that occurred between the atomic ledger write and the previous
+  // renderAndWriteAll call. Re-rendering from an already-in-sync ledger is
+  // idempotent (byte-identical output) and safe to do unconditionally.
   // -------------------------------------------------------------------------
   const lockAcquired = await acquireMkdirLock(lockDir);
   if (!lockAcquired) {
@@ -523,13 +535,7 @@ export async function migrateDecisionsLedger(
   }
 
   try {
-    // 6a. Write the new ledger atomically (crash-safe: do this FIRST)
-    await fs.mkdir(decisionsDir, { recursive: true });
-    const ledgerContent = newLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
-    await writeFileAtomicExclusive(ledgerPath, ledgerContent);
-
-    // 6b. Render both .md from the ledger using the BUNDLED renderer (PF-007)
-    // We already hold .decisions.lock so call renderAndWriteAll (lock-free helper)
+    // Resolve and load the renderer (used on both paths below)
     const rendererPath = opts.rendererPath ?? resolveRendererPath(import.meta.url);
 
     // Use createRequire to load the CJS module from the ESM context
@@ -538,7 +544,22 @@ export async function migrateDecisionsLedger(
       renderAndWriteAll: (worktreePath: string, rows: LedgerRow[]) => void;
     };
 
-    renderer.renderAndWriteAll(projectRoot, newLedgerRows);
+    if (newRowsAdded === 0) {
+      // 6 (idempotency path): ledger already has all anchors. Only re-render
+      // the .md files to heal stale state left by a prior crash between the
+      // atomic ledger write and renderAndWriteAll. The existing ledger rows are
+      // the authoritative source. We do NOT re-write the ledger file.
+      renderer.renderAndWriteAll(projectRoot, existingLedgerRows);
+    } else {
+      // 6a. Write the new ledger atomically (crash-safe: do this FIRST)
+      await fs.mkdir(decisionsDir, { recursive: true });
+      const ledgerContent = newLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
+      await writeFileAtomicExclusive(ledgerPath, ledgerContent);
+
+      // 6b. Render both .md from the ledger using the BUNDLED renderer (PF-007)
+      // We already hold .decisions.lock so call renderAndWriteAll (lock-free helper)
+      renderer.renderAndWriteAll(projectRoot, newLedgerRows);
+    }
 
     // Success — lock released in finally
   } finally {
