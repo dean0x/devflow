@@ -25,7 +25,6 @@
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
-//   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
 //   decisions-usage-scan                  Scan session context for ADR/PF cite counts
 //   read-dream <file> <field>             Read field from dream JSON (allowed fields only; returns [] on any error)
 
@@ -149,23 +148,6 @@ function initDecisionsContent(type) {
 }
 
 /**
- * Find the highest numeric suffix (NNN) among heading matches and return next padded ID.
- * Legacy signature kept for backward compat with decisions-append (Phase 5 will remove it).
- * @param {RegExpMatchArray[]} matches
- * @param {string} prefix - 'ADR' or 'PF'
- * @returns {{ nextN: string, anchorId: string }}
- */
-function nextDecisionsId(matches, prefix) {
-  let maxN = 0;
-  for (const m of matches) {
-    const n = parseInt(m[1], 10);
-    if (n > maxN) maxN = n;
-  }
-  const nextN = (maxN + 1).toString().padStart(3, '0');
-  return { nextN, anchorId: `${prefix}-${nextN}` };
-}
-
-/**
  * Compute the next anchor ID for the given type by scanning the anchored ledger.
  * O(anchored) — single pass. Includes ALL anchored rows (Retired, Deprecated, Superseded).
  * ADR and PF sequences are independent.
@@ -265,39 +247,6 @@ function writeUsageFile(projectRoot, data) {
 }
 
 /**
- * D26: Build the updated TL;DR comment for a decisions file after appending a new entry.
- * Scans existingContent for active (non-deprecated/superseded) headings, appends the new
- * anchorId, takes the last 5, and returns the replacement comment string.
- *
- * @param {string} existingContent - File content BEFORE the new entry was appended
- * @param {string} entryPrefix - 'ADR' or 'PF'
- * @param {boolean} isDecision
- * @param {string} anchorId - The newly appended anchor ID
- * @param {number} newCount - Total active count after append
- * @returns {string} Complete updated content with TL;DR replaced
- */
-function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newCount) {
-  const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
-  const activeIds = [];
-  let hMatch;
-  while ((hMatch = headingRe.exec(existingContent)) !== null) {
-    const sectionStart = hMatch.index;
-    const nextH = existingContent.indexOf('\n## ', sectionStart + 1);
-    const section = nextH !== -1 ? existingContent.slice(sectionStart, nextH) : existingContent.slice(sectionStart);
-    const statusM = section.match(/- \*\*Status\*\*:\s*(\w+)/);
-    if (statusM && (statusM[1] === 'Deprecated' || statusM[1] === 'Superseded')) continue;
-    activeIds.push(`${entryPrefix}-${hMatch[1].padStart(3, '0')}`);
-  }
-  activeIds.push(anchorId);
-  const allIds = activeIds.slice(-5);
-  const tldrLabel = isDecision ? 'decisions' : 'pitfalls';
-  return newContent.replace(
-    /^<!-- TL;DR:.*-->/m,
-    `<!-- TL;DR: ${newCount} ${tldrLabel}. Key: ${allIds.join(', ')} -->`
-  );
-}
-
-/**
  * Register an entry in .decisions-usage.json with initial cite count.
  * @param {string} projectRoot - Path to project root (cwd)
  * @param {string} anchorId - e.g. 'ADR-001' or 'PF-003'
@@ -380,9 +329,9 @@ function mergeEvidence(oldEvidence, newEvidence) {
 
 /**
  * Acquire a mkdir-based lock. Returns true on success, false on timeout.
- * DESIGN: Shared locking utility used by merge-observation and decisions-append.
- * Callers pass their own timeoutMs/staleMs to suit their workload:
- *   - .decisions.lock writes (decisions-append): 30 000 ms / 60 000 ms stale
+ * DESIGN: Shared locking utility used by assign-anchor, retire-anchor, rotate-observations,
+ * and the render-decisions.cjs CLI. Callers pass their own timeoutMs/staleMs to suit their
+ * workload: .decisions.lock writers use 30 000 ms / 60 000 ms stale.
  *
  * @param {string} lockDir - path to lock directory
  * @param {number} [timeoutMs=30000] - max wait in milliseconds
@@ -654,7 +603,7 @@ try {
     // D12: evidence array capped at 10 (FIFO).
     // D53: merge-observation is locked EXTERNALLY by the caller (dream agent acquires/
     // releases .devflow/dream/.observations.lock around the Bash subshell call), while
-    // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
+    // assign-anchor self-locks INTERNALLY via .decisions.lock. These are two distinct lock
     // domains — merge-observation itself never acquires a lock; it relies on the caller to
     // serialize concurrent writes. This is intentional: the subshell pattern in the Dream
     // agent acquires the lock, invokes this op, and releases — all in a single Bash call.
@@ -741,78 +690,6 @@ try {
 
       writeJsonlAtomic(logFile, Array.from(logMap.values()));
       console.log(JSON.stringify({ merged, id: existing ? existing.id : newObs.id }));
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // decisions-append <file> <type> <obsJson>
-    // Standalone op for appending to decisions files (decisions.md or pitfalls.md).
-    // Acquires the shared `.devflow/decisions/.decisions.lock` to serialize concurrent
-    // decisions-append writers and CLI updateDecisionsStatus callers. Lock path derivation
-    // (sibling of the `decisions/` directory) must match updateDecisionsStatus in observation-io.ts.
-    // -------------------------------------------------------------------------
-    case 'decisions-append': {
-      const decisionsFile = safePath(args[0]);
-      const entryType = args[1]; // 'decision' or 'pitfall'
-      let obs;
-      try { obs = JSON.parse(args[2]); } catch {
-        process.stderr.write('decisions-append: invalid JSON for observation\n');
-        process.exit(1);
-      }
-
-      const isDecision = entryType === 'decision';
-      const entryPrefix = isDecision ? 'ADR' : 'PF';
-      const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
-      const artDate = new Date().toISOString().slice(0, 10);
-
-      const decisionsDir = path.dirname(decisionsFile);
-      const devflowDir = path.dirname(decisionsDir);
-      const projectRoot = path.dirname(devflowDir);
-      const decisionsLockDir = getDecisionsLockDir(projectRoot);
-
-      fs.mkdirSync(decisionsDir, { recursive: true });
-
-      if (!acquireMkdirLock(decisionsLockDir, 30000, 60000)) {
-        process.stderr.write(`decisions-append: timeout acquiring lock at ${decisionsLockDir}\n`);
-        process.exit(1);
-      }
-
-      try {
-        const existingContent = fs.existsSync(decisionsFile)
-          ? fs.readFileSync(decisionsFile, 'utf8')
-          : initDecisionsContent(entryType);
-
-        // existingMatches needed for nextDecisionsId (uses Math.max on match groups)
-        const existingMatches = [...existingContent.matchAll(headingRe)];
-
-        const { anchorId } = nextDecisionsId(existingMatches, entryPrefix);
-
-        // Build a row-like object for the shared format helpers.
-        // anchor_id, date, and id are resolved here; details/pattern come from obs.
-        const entryRow = {
-          anchor_id: anchorId,
-          id: obs.id || 'unknown',
-          pattern: obs.pattern,
-          details: obs.details || '',
-          date: artDate,
-        };
-        const entry = isDecision ? formatDecisionBody(entryRow) : formatPitfallBody(entryRow);
-
-        const newContent = existingContent + entry;
-
-        // Count active headings for TL;DR (D26: excludes deprecated/superseded)
-        const newActiveCount = countActiveHeadings(newContent, entryType);
-
-        const updatedContent = buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newActiveCount);
-        writeFileAtomic(decisionsFile, updatedContent);
-
-        // Register in usage tracking so cite counts start at 0
-        registerUsageEntry(projectRoot, anchorId);
-
-        console.log(JSON.stringify({ anchorId, file: decisionsFile }));
-      } finally {
-        releaseLock(decisionsLockDir);
-      }
       break;
     }
 
@@ -1069,7 +946,6 @@ if (typeof module !== 'undefined' && module.exports) {
     writeFileAtomic,
     writeJsonlAtomic,
     initDecisionsContent,
-    nextDecisionsId,
     nextAnchorFromLedger,
     rotateObservations,
   };

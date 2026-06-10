@@ -7,7 +7,7 @@
 // and propagated to all consumers (session-start-context, decisions-index,
 // apply-decisions, decisions-usage-scan, render-decisions).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import * as path from 'path';
 
@@ -110,8 +110,8 @@ describe('formatDecisionBody', () => {
     expect(result).toContain('- **Source**: self-learning:unknown\n');
   });
 
-  it('matches byte-compat strings produced by decisions-append for a real example', () => {
-    // This golden string matches what decisions-append would write for this obs.
+  it('matches byte-compat strings produced by assign-anchor for a real example', () => {
+    // This golden string matches what assign-anchor (via formatDecisionBody) would write for this obs.
     const row = {
       anchor_id: 'ADR-007',
       id: 'obs_h9bw3c',
@@ -241,11 +241,12 @@ describe('buildTldrLine', () => {
 });
 
 // ---------------------------------------------------------------------------
-// json-helper.cjs byte-compat: decisions-append still delegates correctly
+// json-helper.cjs byte-compat: assign-anchor delegates to decisions-format
 // ---------------------------------------------------------------------------
-// We verify this by running decisions-append via the CLI and checking the
-// output matches what formatDecisionBody/formatPitfallBody would produce.
-// This ensures json-helper.cjs delegates to decisions-format.cjs correctly.
+// We verify this by running merge-observation + assign-anchor via the CLI and
+// checking the output matches what formatDecisionBody/formatPitfallBody would
+// produce.  This ensures the write path delegates to decisions-format.cjs
+// correctly (AC-A8: decisions-append is removed; assign-anchor is the writer).
 
 import { execSync } from 'child_process';
 import * as fs from 'fs';
@@ -253,12 +254,12 @@ import * as os from 'os';
 
 const JSON_HELPER = path.join(ROOT, 'scripts/hooks/json-helper.cjs');
 
-describe('json-helper.cjs decisions-append delegates to decisions-format', () => {
-  it('decision entry in written .md matches formatDecisionBody output', () => {
+describe('json-helper.cjs assign-anchor delegates to decisions-format', () => {
+  it('decision entry written via assign-anchor matches formatDecisionBody output', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-test-'));
     const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.mkdirSync(decisionsDir, { recursive: true });
-    const decisionsFile = path.join(decisionsDir, 'decisions.md');
+    const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
 
     const obs = JSON.stringify({
       id: 'obs_formattest1',
@@ -268,18 +269,24 @@ describe('json-helper.cjs decisions-append delegates to decisions-format', () =>
       observations: 1,
       first_seen: '2026-01-01T00:00:00Z',
       last_seen: '2026-01-01T00:00:00Z',
-      status: 'ready',
+      status: 'observing',
       evidence: [],
       details: 'context: all state; decision: always return new objects; rationale: no mutation bugs',
       quality_ok: true,
     });
 
     try {
-      execSync(`node "${JSON_HELPER}" decisions-append "${decisionsFile}" decision '${obs}'`, {
-        encoding: 'utf8',
-      });
+      // Write observation to log, then promote via assign-anchor
+      execSync(
+        `node "${JSON_HELPER}" merge-observation "${logFile}" '${obs}'`,
+        { cwd: tmpDir, encoding: 'utf8' }
+      );
+      execSync(
+        `node "${JSON_HELPER}" assign-anchor decision obs_formattest1`,
+        { cwd: tmpDir, encoding: 'utf8' }
+      );
 
-      const written = fs.readFileSync(decisionsFile, 'utf8');
+      const written = fs.readFileSync(path.join(decisionsDir, 'decisions.md'), 'utf8');
       // Heading format
       expect(written).toContain('\n## ADR-001: Use immutable data structures\n');
       // Date line present
@@ -293,32 +300,38 @@ describe('json-helper.cjs decisions-append delegates to decisions-format', () =>
     }
   });
 
-  it('pitfall entry in written .md matches formatPitfallBody output', () => {
+  it('pitfall entry written via assign-anchor matches formatPitfallBody output', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fmt-compat-pf-test-'));
     const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
     fs.mkdirSync(decisionsDir, { recursive: true });
-    const pitfallsFile = path.join(decisionsDir, 'pitfalls.md');
+    const logFile = path.join(decisionsDir, 'decisions-log.jsonl');
 
     const obs = JSON.stringify({
       id: 'obs_pfformattest1',
       type: 'pitfall',
       pattern: 'Editing installed files directly',
-      confidence: 0.95,
+      confidence: 0.8,
       observations: 2,
       first_seen: '2026-01-01T00:00:00Z',
       last_seen: '2026-01-02T00:00:00Z',
-      status: 'ready',
+      status: 'observing',
       evidence: [],
       details: 'area: scripts/hooks/; issue: changes overwritten on reinstall; impact: lost changes; resolution: edit source + rebuild',
       quality_ok: true,
     });
 
     try {
-      execSync(`node "${JSON_HELPER}" decisions-append "${pitfallsFile}" pitfall '${obs}'`, {
-        encoding: 'utf8',
-      });
+      // Write observation to log, then promote via assign-anchor
+      execSync(
+        `node "${JSON_HELPER}" merge-observation "${logFile}" '${obs}'`,
+        { cwd: tmpDir, encoding: 'utf8' }
+      );
+      execSync(
+        `node "${JSON_HELPER}" assign-anchor pitfall obs_pfformattest1`,
+        { cwd: tmpDir, encoding: 'utf8' }
+      );
 
-      const written = fs.readFileSync(pitfallsFile, 'utf8');
+      const written = fs.readFileSync(path.join(decisionsDir, 'pitfalls.md'), 'utf8');
       // Heading format
       expect(written).toContain('\n## PF-001: Editing installed files directly\n');
       // Area present, NO Date
@@ -331,5 +344,83 @@ describe('json-helper.cjs decisions-append delegates to decisions-format', () =>
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('decisions-append op is removed — unknown op exits with error', () => {
+    // AC-A8: decisions-append must no longer exist as a json-helper op.
+    // Verify the op is rejected as unknown (exit code 1).
+    expect(() => {
+      execSync(
+        `node "${JSON_HELPER}" decisions-append /tmp/dummy.md decision '{}'`,
+        { encoding: 'utf8' }
+      );
+    }).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dream-decisions SKILL.md content-presence assertions (AC-F1, AC-F2)
+// ---------------------------------------------------------------------------
+// These lightweight checks verify that the SKILL contains the creation-bar
+// elements required by the plan. They do not test LLM judgment — that is
+// validated by the Tester agent via scenarios. They lock the prose contract
+// so that the SKILL cannot accidentally regress on the key phrases.
+
+describe('dream-decisions SKILL.md creation-bar contract', () => {
+  const SKILL_PATH = path.join(ROOT, 'shared/skills/dream-decisions/SKILL.md');
+
+  let skillContent: string;
+  beforeAll(() => {
+    skillContent = fs.readFileSync(SKILL_PATH, 'utf8');
+  });
+
+  it('contains abstain-by-default stance', () => {
+    expect(skillContent).toContain('Most sessions produce nothing');
+    expect(skillContent).toContain('If unsure, record nothing');
+  });
+
+  it('contains ADR-XOR-PF hard rule', () => {
+    expect(skillContent).toContain('ADR-XOR-PF');
+    // "never both" may span a line break — check both forms
+    expect(skillContent).toMatch(/never\s+both/);
+    expect(skillContent).toContain('Concrete failure');
+    expect(skillContent).toContain('forward-looking');
+  });
+
+  it('contains dedup-before-create rule', () => {
+    expect(skillContent).toContain('Dedup before creating');
+    expect(skillContent).toContain('reinforce it');
+  });
+
+  it('instructs agent to use assign-anchor and prohibits decisions-append', () => {
+    // The SKILL must instruct the agent to use assign-anchor for promotion
+    expect(skillContent).toContain('assign-anchor');
+    // The SKILL must prohibit decisions-append (mentioning it only to forbid it)
+    expect(skillContent).toContain('NEVER call `decisions-append`');
+    // Must NOT contain a positive instruction to call decisions-append
+    expect(skillContent).not.toMatch(/\bjson-helper\.cjs\b.*\bdecisions-append\b/);
+  });
+
+  it('has no numeric confidence gate (ADR-008)', () => {
+    // Must not contain a numeric confidence threshold that acts as a gate
+    expect(skillContent).not.toMatch(/confidence\s*[>=]+\s*0\.\d+/);
+    expect(skillContent).not.toContain('0.65');
+    expect(skillContent).not.toContain('0.95');
+  });
+
+  it('states confidence is metadata, not a gate', () => {
+    expect(skillContent).toContain('NOT a gate');
+  });
+
+  it('Iron Law references assign-anchor and render, not decisions-append', () => {
+    // Verify Iron Law line
+    expect(skillContent).toContain('assign-anchor OWNS NUMBERING');
+    expect(skillContent).toContain('render OWNS THE .md');
+    expect(skillContent).toContain('NEVER HAND-EDIT');
+  });
+
+  it('negative examples list both NOT-a-decision and NOT-a-pitfall', () => {
+    expect(skillContent).toContain('NOT a decision');
+    expect(skillContent).toContain('NOT a pitfall');
   });
 });

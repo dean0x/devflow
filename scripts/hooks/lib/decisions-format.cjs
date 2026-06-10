@@ -2,10 +2,10 @@
 //
 // Shared pure formatting helpers for decisions.md and pitfalls.md output.
 //
-// DESIGN: Extracted from json-helper.cjs so that both decisions-append (via
-// json-helper.cjs) and the new render-decisions.cjs share the EXACT same format
-// functions. This is the single source of truth for the byte-compat output strings
-// — any drift here will break the renderer/session-start-context TL;DR parser.
+// DESIGN: Shared pure formatting helpers used by assign-anchor (via json-helper.cjs)
+// and render-decisions.cjs so both share the EXACT same format functions. This is
+// the single source of truth for the byte-compat output strings — any drift here
+// will break the renderer/session-start-context TL;DR parser.
 //
 // BYTE-COMPAT CONTRACT (must not change without updating all consumers):
 //   Decision heading:  \n## {anchorId}: {title}\n
