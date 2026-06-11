@@ -1,6 +1,6 @@
 ---
 name: dream-decisions
-description: "Dream agent per-task procedure for the 'decisions' task. Loaded EXPLICITLY by the Dream agent via the Skill tool when the agent is spawned for a decisions task — not auto-activated. Handles decision/pitfall detection from dialog pairs and materialization via decisions-append."
+description: "Dream agent per-task procedure for the 'decisions' task. Loaded EXPLICITLY by the Dream agent via the Skill tool when the agent is spawned for a decisions task — not auto-activated. Handles decision/pitfall detection from dialog pairs and materialization via assign-anchor."
 allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 ---
 
@@ -8,11 +8,12 @@ allowed-tools: Read, Bash, Write, Edit, Glob, Grep
 
 ## Iron Law
 
-> **`decisions-append` OWNS ALL NUMBERING — NEVER HAND-EDIT IDs**
+> **assign-anchor OWNS NUMBERING; render OWNS THE .md; NEVER HAND-EDIT**
 >
-> ADR and PF numbers are assigned exclusively by `decisions-append`. Never write, edit,
-> or infer an ADR-NNN or PF-NNN number directly into decisions.md or pitfalls.md. One
-> invocation claims one set of markers; `decisions-append` handles the rest atomically.
+> ADR and PF numbers are assigned exclusively by `assign-anchor`. The `.md` files are
+> written exclusively by `render-decisions.cjs`. Never write, edit, or infer an ADR-NNN
+> or PF-NNN number directly into decisions.md or pitfalls.md. Never call `decisions-append`.
+> One `assign-anchor` invocation claims one number and re-renders both files atomically.
 
 This skill is loaded by the Dream agent after it has claimed the decisions marker(s).
 The agent has already done: claim (mv .json → .processing) and multi-marker merge
@@ -24,20 +25,40 @@ Cap at the last 30 dialog-pairs before proceeding.
 Touch all claimed `.devflow/dream/decisions.{session}.processing` files.
 
 Read the merged `dialogPairs`. Cap at last 30 pairs.
-Read `.devflow/decisions/decisions-log.jsonl` in full (for recurrence patterns).
+Read `.devflow/decisions/decisions-log.jsonl` in full (for dedup and recurrence patterns).
 
-**LLM judgment — detect DECISION and PITFALL patterns**:
+**LLM judgment — creation bar (abstain-by-default)**:
 
-Decision: explicit architectural choice, technology selection, or design trade-off discussed and agreed.
-Pitfall: mistake made, issue discovered, or failure mode identified that others should avoid.
+Most sessions produce nothing. If unsure, record nothing. Only capture what a future
+contributor would need and could not reconstruct from the code.
 
-For each detected pattern:
-1. Scan the log for an existing observation with matching semantic content. REUSE its `obs_` id.
-2. Decide `confidence` (decisions: default 0.95 on first occurrence; pitfalls: 0.9+), `status`, `quality_ok`.
+**NOT a decision**: bug fix, one-off UX tweak, routine refactor, applying an existing
+pattern, dependency bump, or anything already covered by an existing ADR in the log.
+
+**NOT a pitfall**: typo, transient flake, mistake with no general lesson, or a problem
+fully prevented by existing tooling.
+
+**Positive bar**:
+- Decision = a deliberate architectural choice or trade-off with rationale that
+  constrains future work. It must be a real fork in the road, not an obvious choice.
+- Pitfall = a non-obvious failure mode with a transferable lesson that the next
+  contributor cannot recover from the code alone.
+
+**ADR-XOR-PF (hard rule)**: one incident yields exactly one of an ADR or a PF — never
+both. Concrete failure → PF; forward-looking architectural choice → ADR.
+
+**Dedup before creating**: read the log first. If an existing row (any status, including
+Retired) already covers this concern, reinforce it (reuse its `obs_` id via
+`merge-observation`) instead of creating a new entry. Duplication is worse than silence.
+
+For each pattern that clears the creation bar:
+1. Scan the log for a matching existing entry. REUSE its `obs_` id if found.
+2. Estimate `confidence` honestly — this is curation metadata only, NOT a gate. Estimate
+   what the evidence actually supports; do not inflate it.
 3. Author full `details` string: `"context: X; decision: Y; rationale: Z"` (decision) or
    `"area: X; issue: Y; impact: Z; resolution: W"` (pitfall).
 
-Write each observation using bounded retry+backoff on `.observations.lock`
+Write (or reinforce) each observation using bounded retry+backoff on `.observations.lock`
 (explicit cap: 9 attempts, ~47s total backoff; on exhaustion leave `.processing` for retry):
 
 ```bash
@@ -59,34 +80,44 @@ Write each observation using bounded retry+backoff on `.observations.lock`
   fi
   node "$HOME/.devflow/scripts/hooks/json-helper.cjs" merge-observation \
     ".devflow/decisions/decisions-log.jsonl" \
-    '{"id":"obs_xxx","type":"decision","pattern":"...","evidence":["..."],"details":"context: ...; decision: ...; rationale: ...","confidence":0.95,"status":"observing","quality_ok":true}'
+    '{"id":"obs_xxx","type":"decision","pattern":"...","evidence":["..."],"details":"context: ...; decision: ...; rationale: ...","confidence":0.8,"status":"observing","quality_ok":true}'
   rmdir "$LOCK" 2>/dev/null || true
 )
 ```
 
 Replace the JSON with actual LLM-authored observation data (full fields shown above).
 
-**If promoting** (quality_ok=true, confidence ≥ 0.65, pattern recurs or is clearly significant):
-Author the full ADR or PF body text (LLM-written — not canned), then append via:
+**If promoting** (quality_ok=true, pattern recurs or is clearly significant after clearing
+the creation bar above): promote via `assign-anchor`:
 
 ```bash
-node "$HOME/.devflow/scripts/hooks/json-helper.cjs" decisions-append \
-  ".devflow/decisions/decisions.md" \
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor \
   "decision" \
-  '{"id":"obs_xxx","pattern":"...","details":"context: ...; decision: ...; rationale: ..."}'
+  "obs_xxx"
 ```
 
 For pitfalls:
 ```bash
-node "$HOME/.devflow/scripts/hooks/json-helper.cjs" decisions-append \
-  ".devflow/decisions/pitfalls.md" \
+node "$HOME/.devflow/scripts/hooks/json-helper.cjs" assign-anchor \
   "pitfall" \
-  '{"id":"obs_xxx","pattern":"...","details":"area: ...; issue: ...; impact: ...; resolution: ..."}'
+  "obs_xxx"
 ```
 
-`decisions-append` assigns the ADR/PF number, appends to the file, updates the TL;DR, and embeds
-`- **Source**: self-learning:{obs_id}` — all atomically under `.decisions.lock`. NEVER hand-edit
-the numbering in decisions.md or pitfalls.md.
+`assign-anchor` scans the ledger for the current max anchor number (including Retired),
+assigns max+1 as a zero-padded 3-digit ID, writes an anchored row to
+`decisions-ledger.jsonl`, marks the log row as `created`, registers usage, and re-renders
+both `decisions.md` and `pitfalls.md` — all atomically under `.decisions.lock`.
+
+NEVER call `decisions-append`. NEVER hand-edit `decisions.md` or `pitfalls.md`.
+
+**Auto-commit** (after assign-anchor succeeds, lock released):
+
+Run the installed commit helper — pass the session id from the marker you claimed:
+```bash
+"$HOME/.devflow/scripts/hooks/dream-commit" decisions "add <anchor_id>" "<session_id>"
+```
+This is best-effort: the helper exits 0 silently on no-op or if auto-commit is disabled.
+Run it AFTER the lock is released (assign-anchor releases `.decisions.lock` before returning).
 
 Delete all claimed `.processing` markers on success.
 

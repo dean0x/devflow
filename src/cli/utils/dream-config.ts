@@ -5,12 +5,20 @@ export interface DreamConfig {
   memory: boolean;
   decisions: boolean;
   knowledge: boolean;
+  /**
+   * When true (default), Dream tasks auto-commit maintenance writes to .devflow/ using
+   * the `dream-commit` helper. Greppable via `git log --grep 'chore(dream)'`.
+   * Set to false to disable Dream auto-commits project-wide.
+   * Single source of truth: .devflow/dream/config.json (key: autoCommit, default: true).
+   */
+  autoCommit: boolean;
 }
 
 const DEFAULT_CONFIG: DreamConfig = {
   memory: true,
   decisions: true,
   knowledge: true,
+  autoCommit: true,
 };
 
 export function getConfigPath(projectRoot: string): string {
@@ -32,6 +40,7 @@ function coerceConfig(parsed: unknown): DreamConfig | null {
     memory: typeof p.memory === 'boolean' ? p.memory : DEFAULT_CONFIG.memory,
     decisions: typeof p.decisions === 'boolean' ? p.decisions : DEFAULT_CONFIG.decisions,
     knowledge: typeof p.knowledge === 'boolean' ? p.knowledge : DEFAULT_CONFIG.knowledge,
+    autoCommit: typeof p.autoCommit === 'boolean' ? p.autoCommit : DEFAULT_CONFIG.autoCommit,
   };
 }
 

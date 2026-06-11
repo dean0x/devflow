@@ -2,17 +2,17 @@
 // Deterministic project decisions loader for orchestration surfaces.
 //
 // DESIGN: Orchestration surfaces (resolve.md, plan.md, code-review.md, etc.)
-// instruct the orchestrator to strip Deprecated and Superseded decisions entries
-// before passing DECISIONS_CONTEXT to consumer agents.
+// instruct the orchestrator to pass DECISIONS_CONTEXT to consumer agents.
 // Having this logic as a pure CJS module gives us:
-//   1. Deterministic filtering — not LLM-interpreted, always consistent.
+//   1. Deterministic parsing — not LLM-interpreted, always consistent.
 //   2. Real test coverage — tests import this module directly.
 //   3. CLI interface — orchestrators invoke as:
 //        node scripts/hooks/lib/decisions-index.cjs index {worktree}
 //      and capture the output as DECISIONS_CONTEXT (compact index format).
 //
-// This module is the single source of truth for the D-A filter algorithm
-// (strip ## ADR-NNN / ## PF-NNN sections marked Deprecated or Superseded).
+// NOTE: Deprecated/Superseded/Retired entries are excluded at render time
+// (render-decisions.cjs). The .md files this module parses contain only
+// active entries — no in-memory filtering needed here.
 
 'use strict';
 
@@ -22,56 +22,30 @@ const { getDecisionsFilePath, getPitfallsFilePath } = require('./project-paths.c
 
 /** @typedef {{ id: string, title: string, status: string, area: string|null }} IndexEntry */
 
-/** Statuses recognised by the index formatter — everything else renders as [unknown]. */
-const KNOWN_STATUSES = ['Active', 'Deprecated', 'Superseded'];
+/**
+ * Statuses recognised by the index formatter — everything else renders as
+ * [unknown].  Post-render the .md files only ever contain active entries
+ * (Accepted for decisions, Active for pitfalls), so this list no longer needs
+ * Deprecated / Superseded — they are hidden by the renderer before writing.
+ */
+const KNOWN_STATUSES = ['Active', 'Accepted'];
 
 /**
- * Return true when a markdown section is marked Deprecated or Superseded.
- * This is the single predicate backing the D-A filter algorithm described in
- * the DESIGN comment above — every call-site that needs to strip inactive
- * decisions entries should use this function.
- *
- * @param {string} section - raw text of one ## ADR-NNN / ## PF-NNN section
- * @returns {boolean}
+ * Belt-and-suspenders: statuses that must be excluded from the index even if
+ * a stale or manually-edited .md file contains them.  The renderer
+ * (render-decisions.cjs) is the primary gate; this is a defense-in-depth
+ * fallback so active-only correctness does not rest on the renderer alone.
+ * Mirrors the INACTIVE_STATUSES set in render-decisions.cjs.
  */
-function isDeprecatedOrSuperseded(section) {
-  return (
-    /- \*\*Status\*\*: Deprecated/.test(section) ||
-    /- \*\*Status\*\*: Superseded/.test(section)
-  );
-}
-
-/**
- * Filter raw decisions.md / pitfalls.md content, removing any ## ADR-NNN: or
- * ## PF-NNN: section whose body contains `- **Status**: Deprecated` or
- * `- **Status**: Superseded`.
- *
- * Section boundary = next ## ADR/PF heading or end of string.
- * Non-decisions content before the first section header (e.g., a file-level
- * title) is preserved in sections[0] and always kept.
- *
- * @param {string} raw - raw content from decisions.md or pitfalls.md
- * @returns {string} filtered content (trimmed), or '' if nothing remains
- */
-function filterDecisionsContext(raw) {
-  if (!raw.trim()) return '';
-  // Split on ADR-NNN / PF-NNN section boundaries using a lookahead so each
-  // section includes its own heading.
-  const sections = raw.split(/(?=^## (?:ADR|PF)-\d+:)/m);
-  const kept = sections.filter(section => {
-    const isDecisionsSection = /^## (?:ADR|PF)-\d+:/m.test(section);
-    if (!isDecisionsSection) return true; // keep preamble / non-decisions content
-    return !isDeprecatedOrSuperseded(section);
-  });
-  return kept.join('').trim();
-}
+const INACTIVE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
 
 /**
  * Extract index entries from raw decisions.md / pitfalls.md content.
- * Applies the same D-A filter as filterDecisionsContext before extracting.
+ * The .md files are a pure render of the active ledger — no in-memory
+ * filtering is needed; all sections present are already active entries.
  *
  * @param {string} raw - raw content from decisions.md or pitfalls.md
- * @returns {IndexEntry[]} array of index entries (empty if none survive filter)
+ * @returns {IndexEntry[]} array of index entries
  */
 function extractIndexEntries(raw) {
   if (!raw.trim()) return [];
@@ -83,8 +57,6 @@ function extractIndexEntries(raw) {
     const headingMatch = section.match(/^## ((?:ADR|PF)-\d+): (.+)/m);
     if (!headingMatch) continue; // preamble or non-decisions content
 
-    if (isDeprecatedOrSuperseded(section)) continue;
-
     const id = headingMatch[1];
     const rawTitle = headingMatch[2].trim();
 
@@ -95,6 +67,11 @@ function extractIndexEntries(raw) {
     // Extract area line (pitfalls only, optional)
     const areaMatch = section.match(/- \*\*Area\*\*: (.+)/);
     const area = areaMatch ? areaMatch[1].trim() : null;
+
+    // Belt-and-suspenders: skip inactive entries even if they somehow appear
+    // in the .md file (e.g. stale or manually-edited file).  Primary gate is
+    // render-decisions.cjs; this is a defense-in-depth fallback.
+    if (status && INACTIVE_STATUSES.has(status)) continue;
 
     entries.push({ id, title: rawTitle, status, area });
   }
@@ -154,12 +131,9 @@ function loadDecisionsIndex(worktreePath, opts = {}) {
   let adrEntries = [];
   /** @type {IndexEntry[]} */
   let pfEntries = [];
-  let hasDecisionsFile = false;
-  let hasPitfallsFile = false;
 
   try {
     const raw = fs.readFileSync(decisionsFile, 'utf8');
-    hasDecisionsFile = true;
     adrEntries = extractIndexEntries(raw);
   } catch {
     // Skip silently if absent
@@ -167,7 +141,6 @@ function loadDecisionsIndex(worktreePath, opts = {}) {
 
   try {
     const raw = fs.readFileSync(pitfallsFile, 'utf8');
-    hasPitfallsFile = true;
     pfEntries = extractIndexEntries(raw);
   } catch {
     // Skip silently if absent
@@ -245,4 +218,4 @@ if (require.main === module) {
   process.exit(0);
 }
 
-module.exports = { filterDecisionsContext, loadDecisionsIndex, extractIndexEntries };
+module.exports = { loadDecisionsIndex, extractIndexEntries };

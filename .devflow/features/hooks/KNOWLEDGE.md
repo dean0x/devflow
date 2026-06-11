@@ -1,7 +1,7 @@
 ---
 feature: hooks
 name: Dream & Hooks System
-description: "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation."
+description: "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, assign-anchor, retire-anchor, rotate-observations, render-decisions, decisions-ledger, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation."
 category: architecture
 directories: ["scripts/hooks/", "shared/agents/"]
 referencedFiles:
@@ -75,7 +75,7 @@ Unknown task types are silently skipped — `dream-collect-tasks` should never e
 
 The three per-task procedures live in separate skill files:
 
-- `devflow:dream-decisions` — dialog-pair analysis + ADR/PF creation via `decisions-append`
+- `devflow:dream-decisions` — dialog-pair analysis + ADR/PF creation via `assign-anchor` (renders `decisions.md`/`pitfalls.md` from the ledger)
 - `devflow:dream-knowledge` — stale KB refresh + index update
 - `devflow:dream-curation` — ADR/PF housekeeping (deprecate, merge, TL;DR rewrite)
 
@@ -182,13 +182,17 @@ Two key plumbing operations in `json-helper.cjs` handle all observation writes:
 - Caller holds `.devflow/dream/.observations.lock` (mkdir-based) EXTERNALLY — lock acquired by the per-task skill around the Bash call, then released. Never held across tool calls.
 - Writes atomically via temp+mv with O_EXCL flag
 
-**`decisions-append <file> <type> <obs>`** — ADR/PF append-only:
-- Assigns the next sequential `ADR-NNN` or `PF-NNN` number (scans existing headings)
-- Appends the full section body with `- **Source**: self-learning:{obs_id}` marker
-- Updates the `<!-- TL;DR: N decisions. Key: ... -->` header comment (last 5 active IDs)
-- Acquires `.devflow/decisions/.decisions.lock` INTERNALLY — this is a self-locking op
-- Never call `decisions-append` from a context that already holds `.decisions.lock` (deadlock)
-- Append-only invariant: never deletes entries; curation deprecates by editing `- **Status**:`
+**`assign-anchor <obs>`** — anchor an observation into the committed ledger (replaces the removed `decisions-append`):
+- Assigns the next `ADR-NNN` or `PF-NNN` anchor (max+1 over all anchored rows incl. Retired; ADR/PF numbered independently; 3-digit pad). Retired numbers are reserved, never resurrected.
+- Appends a projected row (`toLedgerRow`: id, type, pattern, details, anchor_id, decisions_status, date?, raw_body?, amendments?) to `decisions-ledger.jsonl`, then deterministically renders `decisions.md`/`pitfalls.md` from the ledger via `render-decisions.cjs` (active entries only — Deprecated/Superseded/Retired are dropped from the `.md`).
+- Acquires `.devflow/decisions/.decisions.lock` INTERNALLY — self-locking; asserts the anchor isn't already present and the obs isn't already anchored.
+- Never call from a context that already holds `.decisions.lock` (deadlock).
+
+**`retire-anchor <anchor_id>`** — recoverable removal:
+- Flips the row's `decisions_status` (e.g. → `Retired`/`Deprecated`/`Superseded`) and re-renders. The ledger row is never deleted, so the entry is recoverable; the rendered `.md` simply drops it. Errors if the anchor_id isn't found. Self-locks `.decisions.lock`.
+
+**`rotate-observations`** — log bound:
+- Archives observing rows older than 30d from `decisions-log.jsonl` to `decisions-log.archive.jsonl` (dedup-by-id append). Keeps the active log small.
 
 **`read-dream <file> <field>`** — reads a field from a dream JSON marker file; returns `[]` on any error.
 
@@ -201,7 +205,7 @@ The boundary is strict:
 | Hook triggers, throttles, locks | Detection of patterns from dialog pairs |
 | Atomic file writes, marker management | Semantic matching for obs_id reuse |
 | JSONL log structure, id-keyed records | Content authoring (artifacts, ADR/PF bodies) |
-| `decisions-append` numbering | Curation judgment (what to deprecate, what to merge) |
+| `assign-anchor`/`retire-anchor` numbering + `render-decisions` | Curation judgment (what to retire, what to merge) |
 | `staleness.cjs` annotation | Interpretation of staleness signal |
 | `decisions-index.cjs` filtering | Promotion decisions (status, confidence) |
 
@@ -216,10 +220,10 @@ The boundary is strict:
 `eval-curation` (sourced by `dream-evaluate`) writes a `curation.{session}.json` marker, throttled to once every 7 days via `.devflow/dream/.curation-last` epoch file. The `devflow:dream-curation` skill (loaded by the Dream agent) then:
 
 - Reads `.decisions-usage.json` directly for cite counts (never calls `decisions-usage-scan.cjs`)
-- Deprecates by directly editing the `- **Status**:` line and TL;DR comment using the Edit tool
-- Holds `.decisions.lock` once across the read-modify-write via bounded retry+backoff (3-call lock lifecycle: acquire Bash / Edit tool(s) / release Bash)
-- Never calls `decisions-append` during curation (would deadlock — `decisions-append` acquires `.decisions.lock` internally)
-- 5 changes per run maximum; 7-day protection window per entry
+- Retires/deprecates/supersedes by calling `retire-anchor <anchor_id> <status>` — flips `decisions_status` on the ledger row and re-renders both `.md` files atomically. The `.md` files are rendered views of the ledger and are NEVER hand-edited; retired entries vanish from the `.md` but survive (recoverable) in the committed ledger.
+- `retire-anchor` self-locks `.decisions.lock` internally per call; call it once per entry. Do NOT hold `.decisions.lock` across multiple calls (deadlocks). Re-activating a retired entry is done by editing its ledger row directly, then re-rendering.
+- Runs under `.observations.lock`; if both locks are needed, `.decisions.lock` is the outer (ADR-017)
+- 5 changes per run maximum; 7-day protection window per entry; auto-commits via `dream-commit` after all `retire-anchor` calls complete
 
 Note: `.curation-last` lives in `.devflow/dream/` (not `.devflow/decisions/`), co-located with other Dream state.
 
@@ -234,7 +238,7 @@ Note: `.curation-last` lives in `.devflow/dream/` (not `.devflow/decisions/`), c
 
 ## Decisions Index (decisions-index.cjs)
 
-`scripts/hooks/lib/decisions-index.cjs` provides a compact index for orchestration surfaces. It applies the D-A filter: strips sections with `- **Status**: Deprecated` or `- **Status**: Superseded` before building the index. The compact format is what orchestrators inject as `DECISIONS_CONTEXT`. Never loads the full decisions.md/pitfalls.md body into context — consumers call Read on demand.
+`scripts/hooks/lib/decisions-index.cjs` provides a compact index for orchestration surfaces. It applies a belt-and-suspenders status filter (`INACTIVE_STATUSES`): strips sections with `- **Status**: Deprecated`, `Superseded`, or `Retired` before building the index (defense-in-depth — the renderer already excludes inactive entries from the `.md`). The compact format is what orchestrators inject as `DECISIONS_CONTEXT`. Never loads the full decisions.md/pitfalls.md body into context — consumers call Read on demand.
 
 ## Dream Config
 
@@ -243,7 +247,7 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 ## Anti-Patterns
 
 - **Editing installed copies** — always edit `scripts/hooks/`, then `npm run build` + `devflow init`. Changes to `~/.devflow/scripts/hooks/` are silently overwritten on reinstall (PF-007).
-- **Calling `decisions-append` during curation** — it acquires `.decisions.lock` internally; calling it while holding that lock deadlocks. Use the Edit tool for deprecation as documented in `dream-curation` skill.
+- **Hand-editing the rendered `.md` to deprecate** — `decisions.md`/`pitfalls.md` are rendered views of the ledger; hand-edits are overwritten on the next render. Retire via `retire-anchor <anchor_id> <status>` (flips ledger status + re-renders), as documented in the `dream-curation` skill. Each call self-locks `.decisions.lock`, so never hold that lock across multiple `retire-anchor` calls (deadlocks).
 - **Holding a lock across tool calls** — the Dream agent's lock lifecycle must be: acquire Bash → Edit tool(s) → release Bash. Never span multiple unrelated tool calls under one lock.
 - **Spawning one agent to handle all tasks** — the new model is N per-task background agents (one per task type), not one agent doing all tasks sequentially. The only exception is decisions+curation co-pending, which shares one opus spawn to avoid lock contention.
 - **Assuming `dream-dispatch` injects the DREAM directive** — `dream-dispatch` is capture-only (UserPromptSubmit); the DREAM MAINTENANCE directives are emitted by `session-start-context` (SessionStart) (ADR-009).
@@ -277,13 +281,13 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 - `scripts/hooks/dream-recover` — sourced helper; stale `.processing` recovery per-type thresholds; JUST_RECOVERED guard; orphaned pending-turns recovery
 - `scripts/hooks/dream-collect-tasks` — 3-arg sourced helper; two-pass design: Pass 1 unconditional sweep (deletes `learning.*` + `memory.*` + disabled-feature markers), Pass 2 type accumulation; `dream_build_spawn_directive` function; COLLECT_LIMIT=50 FIFO
 - `scripts/hooks/session-start-context` — SessionStart hook (no set -e); two independent sections: 1.5 decisions TL;DR, 2 per-task dream spawn directives (calls `dream_build_spawn_directive`)
-- `scripts/hooks/json-helper.cjs` — plumbing ops: `merge-observation`, `decisions-append`, `read-dream`, atomic writes; does NOT contain judgment logic
+- `scripts/hooks/json-helper.cjs` — plumbing ops: `merge-observation`, `assign-anchor`, `retire-anchor`, `rotate-observations`, `read-dream`, atomic writes; does NOT contain judgment logic
 - `scripts/hooks/lib/transcript-filter.cjs` — two-channel filter: USER_SIGNALS (orphaned, unused) + DIALOG_PAIRS (active, decisions only)
 - `scripts/hooks/lib/staleness.cjs` — annotates log entries with `mayBeStale` based on file existence; signal-only (no CLI display surface)
 - `scripts/hooks/lib/feature-knowledge.cjs` — KB index, staleness checks (`checkAllStaleness` batches all KBs in one git log call), `updateIndex`, `stale-slugs` CLI op, slug validation
 - `scripts/hooks/lib/decisions-index.cjs` — compact decisions index with D-A filter for orchestrators
 - `shared/agents/dream.md` — Dream agent plumbing spec: Step 0 task discovery, Step 1 claim/heartbeat/multi-marker-merge, Step 2 per-task skill dispatch, error discipline
-- `shared/skills/dream-decisions/SKILL.md` — decisions task procedure: dialog-pair analysis, bounded retry+backoff on `.observations.lock`, `decisions-append` promotion (opus)
+- `shared/skills/dream-decisions/SKILL.md` — decisions task procedure: dialog-pair analysis, bounded retry+backoff on `.observations.lock`, `assign-anchor` promotion (opus)
 - `shared/skills/dream-knowledge/SKILL.md` — knowledge task procedure: stale KB refresh + index update (sonnet)
 - `shared/skills/dream-curation/SKILL.md` — curation task procedure: deprecate/merge ADR/PF, bounded retry+backoff on `.decisions.lock`, Edit-tool deprecation (opus)
 

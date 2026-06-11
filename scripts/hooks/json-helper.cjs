@@ -25,7 +25,6 @@
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
 //   merge-observation <log> <newObsJson>  Reinforce existing observation by id (D14)
-//   decisions-append <file> <type> <obs>  Append ADR/PF entry to decisions file
 //   decisions-usage-scan                  Scan session context for ADR/PF cite counts
 //   read-dream <file> <field>             Read field from dream JSON (allowed fields only; returns [] on any error)
 
@@ -43,7 +42,22 @@ const {
   getPitfallsFilePath,
   getDecisionsUsagePath,
   getDecisionsLockDir,
+  getDecisionsLedgerPath,
+  getDecisionsLogPath,
+  getDecisionsArchivePath,
+  getObservationsLockDir,
 } = require('./lib/project-paths.cjs');
+const {
+  initDecisionsContent,
+  formatDecisionBody,
+  formatPitfallBody,
+  toLedgerRow,
+} = require('./lib/decisions-format.cjs');
+const {
+  renderAndWriteAll,
+  parseLedger,
+} = require('./lib/render-decisions.cjs');
+const { acquireMkdirLock, releaseLock } = require('./lib/mkdir-lock.cjs');
 
 function readStdin() {
   try {
@@ -126,57 +140,45 @@ function writeFileAtomic(file, content) {
 }
 
 /**
- * Return the initial header content for a new decisions file.
+ * Compute the next anchor ID for the given type by scanning the anchored ledger.
+ * O(anchored) — single pass. Includes ALL anchored rows (Retired, Deprecated, Superseded).
+ * ADR and PF sequences are independent.
+ *
+ * @param {object[]} ledgerRows - All rows from the ledger (from parseLedger)
  * @param {'decision'|'pitfall'} type
- * @returns {string}
+ * @returns {{ anchorId: string, nextN: string }}
  */
-function initDecisionsContent(type) {
-  return type === 'decision'
-    ? '<!-- TL;DR: 0 decisions. Key: -->\n# Architectural Decisions\n\nAppend-only. Status changes allowed; deletions prohibited.\n'
-    : '<!-- TL;DR: 0 pitfalls. Key: -->\n# Known Pitfalls\n\nArea-specific gotchas, fragile areas, and past bugs.\n';
-}
-
-/**
- * Find the highest numeric suffix (NNN) among heading matches and return next padded ID.
- * @param {RegExpMatchArray[]} matches
- * @param {string} prefix - 'ADR' or 'PF'
- * @returns {{ nextN: string, anchorId: string }}
- */
-function nextDecisionsId(matches, prefix) {
+function nextAnchorFromLedger(ledgerRows, type) {
+  const prefix = type === 'decision' ? 'ADR' : 'PF';
+  const prefixRe = new RegExp(`^${prefix}-`);
   let maxN = 0;
-  for (const m of matches) {
-    const n = parseInt(m[1], 10);
-    if (n > maxN) maxN = n;
+  for (const row of ledgerRows) {
+    if (!row.anchor_id || !prefixRe.test(row.anchor_id)) continue;
+    const m = row.anchor_id.match(/(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > maxN) maxN = n;
+    }
   }
   const nextN = (maxN + 1).toString().padStart(3, '0');
-  return { nextN, anchorId: `${prefix}-${nextN}` };
+  return { anchorId: `${prefix}-${nextN}`, nextN };
 }
 
 /**
- * D18: Count only non-deprecated headings in a decisions file.
- * Scans ## ADR-NNN: or ## PF-NNN: headings, then checks the next Status
- * line — if `Deprecated` or `Superseded`, the entry is excluded from the count.
- * @param {string} content - File content
- * @param {'decision'|'pitfall'} entryType
+ * Count active anchored rows of the given type in the ledger.
+ * Active = decisions_status is undefined | 'Accepted' | 'Active'.
+ *
+ * @param {object[]} ledgerRows - All rows from the ledger
+ * @param {'decision'|'pitfall'} type
  * @returns {number}
  */
-function countActiveHeadings(content, entryType) {
-  const prefix = entryType === 'decision' ? 'ADR' : 'PF';
-  const headingRe = new RegExp(`^## ${prefix}-(\\d+):`, 'gm');
+function countActiveLedgerRows(ledgerRows, type) {
+  const INACTIVE = new Set(['Deprecated', 'Superseded', 'Retired']);
   let count = 0;
-  let match;
-  while ((match = headingRe.exec(content)) !== null) {
-    // Limit search to the section between this heading and the next ## heading
-    const sectionStart = match.index;
-    const nextHeadingIdx = content.indexOf('\n## ', sectionStart + 1);
-    const section = nextHeadingIdx !== -1
-      ? content.slice(sectionStart, nextHeadingIdx)
-      : content.slice(sectionStart);
-    const statusMatch = section.match(/- \*\*Status\*\*:\s*(\w+)/);
-    if (statusMatch) {
-      const status = statusMatch[1];
-      if (status === 'Deprecated' || status === 'Superseded') continue;
-    }
+  for (const row of ledgerRows) {
+    if (row.type !== type) continue;
+    if (!row.anchor_id) continue;
+    if (row.decisions_status && INACTIVE.has(row.decisions_status)) continue;
     count++;
   }
   return count;
@@ -207,39 +209,6 @@ function writeUsageFile(projectRoot, data) {
 }
 
 /**
- * D26: Build the updated TL;DR comment for a decisions file after appending a new entry.
- * Scans existingContent for active (non-deprecated/superseded) headings, appends the new
- * anchorId, takes the last 5, and returns the replacement comment string.
- *
- * @param {string} existingContent - File content BEFORE the new entry was appended
- * @param {string} entryPrefix - 'ADR' or 'PF'
- * @param {boolean} isDecision
- * @param {string} anchorId - The newly appended anchor ID
- * @param {number} newCount - Total active count after append
- * @returns {string} Complete updated content with TL;DR replaced
- */
-function buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newCount) {
-  const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
-  const activeIds = [];
-  let hMatch;
-  while ((hMatch = headingRe.exec(existingContent)) !== null) {
-    const sectionStart = hMatch.index;
-    const nextH = existingContent.indexOf('\n## ', sectionStart + 1);
-    const section = nextH !== -1 ? existingContent.slice(sectionStart, nextH) : existingContent.slice(sectionStart);
-    const statusM = section.match(/- \*\*Status\*\*:\s*(\w+)/);
-    if (statusM && (statusM[1] === 'Deprecated' || statusM[1] === 'Superseded')) continue;
-    activeIds.push(`${entryPrefix}-${hMatch[1].padStart(3, '0')}`);
-  }
-  activeIds.push(anchorId);
-  const allIds = activeIds.slice(-5);
-  const tldrLabel = isDecision ? 'decisions' : 'pitfalls';
-  return newContent.replace(
-    /^<!-- TL;DR:.*-->/m,
-    `<!-- TL;DR: ${newCount} ${tldrLabel}. Key: ${allIds.join(', ')} -->`
-  );
-}
-
-/**
  * Register an entry in .decisions-usage.json with initial cite count.
  * @param {string} projectRoot - Path to project root (cwd)
  * @param {string} anchorId - e.g. 'ADR-001' or 'PF-003'
@@ -256,55 +225,86 @@ function registerUsageEntry(projectRoot, anchorId) {
   }
 }
 
+/**
+ * Internal rotation logic for rotate-observations. Separated for testability.
+ * Moves rows where status === 'observing' AND no anchor_id AND age > 30 days
+ * from logPath to archivePath (append). Returns count of rotated rows.
+ *
+ * @param {string} logPath - Path to decisions-log.jsonl
+ * @param {string} archivePath - Path to decisions-log.archive.jsonl
+ * @param {number} nowMs - Current time as epoch ms (injectable for tests)
+ * @returns {number} count of rotated rows
+ */
+function rotateObservations(logPath, archivePath, nowMs) {
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  const cutoffMs = nowMs - THIRTY_DAYS_MS;
+
+  let logEntries = [];
+  if (fs.existsSync(logPath)) {
+    logEntries = parseLedger(logPath);
+  }
+
+  const kept = [];
+  const stale = [];
+
+  for (const row of logEntries) {
+    // Only move 'observing' rows without anchor_id (unanchored)
+    if (row.status !== 'observing' || row.anchor_id) {
+      kept.push(row);
+      continue;
+    }
+    // Check age using last_seen if present, else first_seen
+    const tsField = row.last_seen || row.first_seen;
+    if (!tsField) {
+      kept.push(row);
+      continue;
+    }
+    const rowMs = new Date(tsField).getTime();
+    if (isNaN(rowMs) || rowMs > cutoffMs) {
+      kept.push(row);
+    } else {
+      stale.push(row);
+    }
+  }
+
+  if (stale.length === 0) return 0;
+
+  // D003: Dedup stale rows against the existing archive by id before appending.
+  // An interrupt-then-retry (process killed after archive write but before log
+  // rewrite) would re-classify the same rows as stale and attempt to archive
+  // them a second time. Reading existing archive IDs into a Set and filtering
+  // prevents duplicate rows in the archive. Cost is O(archive) on retry; O(1)
+  // on the normal path when the archive is absent.
+  //
+  // True append (appendFileSync) is used instead of read-entire-archive+rewrite
+  // so cost is O(stale) rather than O(archive) on the write path. The archive
+  // is gitignored/recovery-only, so an incomplete final newline on ENOENT is
+  // safe — parseLedger handles trailing-newline variance.
+  const existingArchiveIds = new Set();
+  if (fs.existsSync(archivePath)) {
+    const existingRows = parseLedger(archivePath);
+    for (const r of existingRows) {
+      if (r.id) existingArchiveIds.add(r.id);
+    }
+  }
+
+  const newStale = stale.filter(r => !existingArchiveIds.has(r.id));
+  if (newStale.length > 0) {
+    // True append — O(newStale), not O(archive)
+    const appendContent = newStale.map(r => JSON.stringify(r)).join('\n') + '\n';
+    fs.appendFileSync(archivePath, appendContent, 'utf8');
+  }
+
+  // Write remaining rows back to log
+  writeJsonlAtomic(logPath, kept);
+
+  return stale.length;
+}
+
 function mergeEvidence(oldEvidence, newEvidence) {
   const flat = [...(oldEvidence || []), ...(newEvidence || [])];
   const unique = [...new Set(flat)];
   return unique.slice(0, 10);
-}
-
-/**
- * Acquire a mkdir-based lock. Returns true on success, false on timeout.
- * DESIGN: Shared locking utility used by merge-observation and decisions-append.
- * Callers pass their own timeoutMs/staleMs to suit their workload:
- *   - .decisions.lock writes (decisions-append): 30 000 ms / 60 000 ms stale
- *
- * @param {string} lockDir - path to lock directory
- * @param {number} [timeoutMs=30000] - max wait in milliseconds
- * @param {number} [staleMs=60000] - age after which lock is considered stale
- * @returns {boolean}
- */
-function acquireMkdirLock(lockDir, timeoutMs = 30000, staleMs = 60000) {
-  const start = Date.now();
-  while (true) {
-    try {
-      fs.mkdirSync(lockDir, { recursive: false });
-      return true; // acquired
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      // Check staleness
-      try {
-        const stat = fs.statSync(lockDir);
-        const age = Date.now() - stat.mtimeMs;
-        if (age > staleMs) {
-          try { fs.rmdirSync(lockDir); } catch { /* already gone */ }
-          continue;
-        }
-      } catch { /* lock gone between check and stat */ }
-      if (Date.now() - start >= timeoutMs) return false;
-      // Busy-wait with tiny sleep via sync trick (Atomics.wait on SharedArrayBuffer)
-      // Falls back to a do-nothing loop if SharedArrayBuffer is unavailable.
-      try {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-      } catch {
-        const end = Date.now() + 50;
-        while (Date.now() < end) { /* spin */ }
-      }
-    }
-  }
-}
-
-function releaseLock(lockDir) {
-  try { fs.rmdirSync(lockDir); } catch { /* already released */ }
 }
 
 function parseArgs(argList) {
@@ -538,7 +538,7 @@ try {
     // D12: evidence array capped at 10 (FIFO).
     // D53: merge-observation is locked EXTERNALLY by the caller (dream agent acquires/
     // releases .devflow/dream/.observations.lock around the Bash subshell call), while
-    // decisions-append self-locks INTERNALLY via .decisions.lock. These are two distinct lock
+    // assign-anchor self-locks INTERNALLY via .decisions.lock. These are two distinct lock
     // domains — merge-observation itself never acquires a lock; it relies on the caller to
     // serialize concurrent writes. This is intentional: the subshell pattern in the Dream
     // agent acquires the lock, invokes this op, and releases — all in a single Bash call.
@@ -583,6 +583,12 @@ try {
         if (newObs.pattern) existing.pattern = newObs.pattern;
         if (newObs.details) existing.details = newObs.details;
         if (newObs.quality_ok === true) existing.quality_ok = true;
+        // Passthrough new ledger fields from incoming obs (if LLM sets them)
+        if (newObs.anchor_id !== undefined) existing.anchor_id = newObs.anchor_id;
+        if (newObs.date !== undefined) existing.date = newObs.date;
+        if (newObs.decisions_status !== undefined) existing.decisions_status = newObs.decisions_status;
+        if (newObs.amendments !== undefined) existing.amendments = newObs.amendments;
+        if (newObs.raw_body !== undefined) existing.raw_body = newObs.raw_body;
 
         merged = true;
         learningLog(`merge-observation: merged into ${existing.id} (count=${newCount})`);
@@ -606,6 +612,12 @@ try {
           details: newObs.details || '',
           quality_ok: newObs.quality_ok === true,
         };
+        // Passthrough new ledger fields if present on the new obs
+        if (newObs.anchor_id !== undefined) entry.anchor_id = newObs.anchor_id;
+        if (newObs.date !== undefined) entry.date = newObs.date;
+        if (newObs.decisions_status !== undefined) entry.decisions_status = newObs.decisions_status;
+        if (newObs.amendments !== undefined) entry.amendments = newObs.amendments;
+        if (newObs.raw_body !== undefined) entry.raw_body = newObs.raw_body;
 
         logMap.set(newId, entry);
         learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
@@ -617,95 +629,239 @@ try {
     }
 
     // -------------------------------------------------------------------------
-    // decisions-append <file> <type> <obsJson>
-    // Standalone op for appending to decisions files (decisions.md or pitfalls.md).
-    // Acquires the shared `.devflow/decisions/.decisions.lock` to serialize concurrent
-    // decisions-append writers and CLI updateDecisionsStatus callers. Lock path derivation
-    // (sibling of the `decisions/` directory) must match updateDecisionsStatus in observation-io.ts.
+    // count-active <worktree> <type>
+    // D23: Count active anchored rows from the ledger.
+    //
+    //   count-active <worktree> <type>    — reads ledger; returns 0 when absent
+    //
+    // The legacy .md-file-path calling convention (count-active <file.md> type)
+    // has been removed — all projects are now on the ledger model.
     // -------------------------------------------------------------------------
-    case 'decisions-append': {
-      const decisionsFile = safePath(args[0]);
+    case 'count-active': {
+      const caArg = safePath(args[0]);
       const entryType = args[1]; // 'decision' or 'pitfall'
-      let obs;
-      try { obs = JSON.parse(args[2]); } catch {
-        process.stderr.write('decisions-append: invalid JSON for observation\n');
+
+      const caLedgerPath = getDecisionsLedgerPath(caArg);
+      const caLedgerRows = parseLedger(caLedgerPath);
+      const count = countActiveLedgerRows(caLedgerRows, entryType);
+      console.log(JSON.stringify({ count }));
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // assign-anchor <type> <obs_id>
+    // AC-A2: Assign next anchor ID for the given type (decision|pitfall) to the
+    // observation identified by obs_id in decisions-log.jsonl. Atomic under a
+    // single .decisions.lock acquisition. Registers usage, re-renders both .md.
+    //
+    // Locking discipline: holds ONLY .decisions.lock (never .observations.lock).
+    // O(anchored) — single pass for max numeric suffix (AC-P2).
+    // -------------------------------------------------------------------------
+    case 'assign-anchor': {
+      const assignType = args[0]; // 'decision' or 'pitfall'
+      const assignObsId = args[1];
+
+      if (!assignType || !assignObsId) {
+        process.stderr.write('assign-anchor: usage: assign-anchor <type> <obs_id>\n');
+        process.exit(1);
+      }
+      if (assignType !== 'decision' && assignType !== 'pitfall') {
+        process.stderr.write(`assign-anchor: type must be 'decision' or 'pitfall', got '${assignType}'\n`);
         process.exit(1);
       }
 
-      const isDecision = entryType === 'decision';
-      const entryPrefix = isDecision ? 'ADR' : 'PF';
-      const headingRe = isDecision ? /^## ADR-(\d+):/gm : /^## PF-(\d+):/gm;
-      const artDate = new Date().toISOString().slice(0, 10);
+      const aaProjectRoot = process.cwd();
+      const aaDecisionsDir = path.join(aaProjectRoot, '.devflow', 'decisions');
+      const aaLedgerPath = getDecisionsLedgerPath(aaProjectRoot);
+      const aaLogPath = getDecisionsLogPath(aaProjectRoot);
+      const aaLockDir = getDecisionsLockDir(aaProjectRoot);
 
-      const decisionsDir = path.dirname(decisionsFile);
-      const devflowDir = path.dirname(decisionsDir);
-      const projectRoot = path.dirname(devflowDir);
-      const decisionsLockDir = getDecisionsLockDir(projectRoot);
+      fs.mkdirSync(aaDecisionsDir, { recursive: true });
 
-      fs.mkdirSync(decisionsDir, { recursive: true });
-
-      if (!acquireMkdirLock(decisionsLockDir, 30000, 60000)) {
-        process.stderr.write(`decisions-append: timeout acquiring lock at ${decisionsLockDir}\n`);
+      if (!acquireMkdirLock(aaLockDir, 30000, 60000)) {
+        process.stderr.write(`assign-anchor: timeout acquiring lock at ${aaLockDir}\n`);
         process.exit(1);
       }
 
       try {
-        const existingContent = fs.existsSync(decisionsFile)
-          ? fs.readFileSync(decisionsFile, 'utf8')
-          : initDecisionsContent(entryType);
+        // Read existing ledger (absent = empty)
+        const aaLedgerRows = parseLedger(aaLedgerPath);
 
-        // existingMatches needed for nextDecisionsId (uses Math.max on match groups)
-        const existingMatches = [...existingContent.matchAll(headingRe)];
+        // Compute next anchor — O(anchored), single pass
+        const { anchorId: aaAnchorId } = nextAnchorFromLedger(aaLedgerRows, assignType);
 
-        const { anchorId } = nextDecisionsId(existingMatches, entryPrefix);
+        // Read observation from log
+        let aaLogEntries = parseLedger(aaLogPath);
+        const aaObsIdx = aaLogEntries.findIndex(e => e.id === assignObsId);
+        if (aaObsIdx === -1) {
+          process.stderr.write(`assign-anchor: obs_id '${assignObsId}' not found in ${aaLogPath}\n`);
+          process.exit(1);
+        }
+        const aaObs = aaLogEntries[aaObsIdx];
 
-        const detailsStr = obs.details || '';
-        let entry;
-        if (isDecision) {
-          const contextM = detailsStr.match(/context:\s*([^;]+)/i);
-          const decisionM = detailsStr.match(/decision:\s*([^;]+)/i);
-          const rationaleM = detailsStr.match(/rationale:\s*([^;]+)/i);
-          entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Date**: ${artDate}\n- **Status**: Accepted\n- **Context**: ${(contextM||[])[1]||detailsStr}\n- **Decision**: ${(decisionM||[])[1]||obs.pattern}\n- **Consequences**: ${(rationaleM||[])[1]||''}\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
-        } else {
-          const areaM = detailsStr.match(/area:\s*([^;]+)/i);
-          const issueM = detailsStr.match(/issue:\s*([^;]+)/i);
-          const impactM = detailsStr.match(/impact:\s*([^;]+)/i);
-          const resM = detailsStr.match(/resolution:\s*([^;]+)/i);
-          entry = `\n## ${anchorId}: ${obs.pattern}\n\n- **Area**: ${(areaM||[])[1]||detailsStr}\n- **Issue**: ${(issueM||[])[1]||detailsStr}\n- **Impact**: ${(impactM||[])[1]||''}\n- **Resolution**: ${(resM||[])[1]||''}\n- **Status**: Active\n- **Source**: self-learning:${obs.id || 'unknown'}\n`;
+        // Precondition assertions — both checked under the lock so they are
+        // race-free against concurrent assign-anchor callers (avoids silent
+        // ledger corruption; assert-preconditions per reliability rule).
+        //
+        // (a) The newly computed anchor_id must not already appear in the ledger.
+        //     nextAnchorFromLedger is deterministic-monotone, so this should
+        //     never fire in normal operation — it guards against double-assign
+        //     bugs (e.g. assign called twice for the same obs_id in a crash loop).
+        if (aaLedgerRows.some(r => r.anchor_id === aaAnchorId)) {
+          process.stderr.write(
+            `assign-anchor: anchor_id '${aaAnchorId}' already present in ledger — ` +
+            `possible double-assign; refusing to overwrite committed entry\n`
+          );
+          process.exit(1);
+        }
+        //
+        // (b) The target observation must not already have an anchor_id set.
+        //     Re-anchoring an already-anchored obs would mint a duplicate number
+        //     (the old anchor would remain in the ledger AND the new one would
+        //     be added), corrupting the committed source of truth.
+        if (aaObs.anchor_id) {
+          process.stderr.write(
+            `assign-anchor: obs_id '${assignObsId}' is already anchored as '${aaObs.anchor_id}'; ` +
+            `use retire-anchor to change its status instead\n`
+          );
+          process.exit(1);
         }
 
-        const newContent = existingContent + entry;
+        // Build canonical committed-ledger row via toLedgerRow projector.
+        // Whitelists only the canonical fields — excludes all observation-lifecycle
+        // state (evidence, confidence, quality_ok, count, first_seen, last_seen, …)
+        // that must stay in the log only. applies ADR-008.
+        const aaDate = new Date().toISOString().slice(0, 10);
+        const aaActiveStatus = assignType === 'decision' ? 'Accepted' : 'Active';
+        // Date set on decisions only (byte-compat asymmetry — formatDecisionBody
+        // emits "- **Date**: …"; pitfall rows have no date field)
+        const aaDecisionDate = assignType === 'decision' ? (aaObs.date || aaDate) : undefined;
+        const aaLedgerRow = toLedgerRow(aaObs, {
+          anchorId: aaAnchorId,
+          status: aaActiveStatus,
+          date: aaDecisionDate,
+        });
 
-        // Count active headings for TL;DR (D26: excludes deprecated/superseded)
-        const newActiveCount = countActiveHeadings(newContent, entryType);
+        // Append anchored row to ledger (atomic temp+rename).
+        //
+        // D002: Crash window — if the process is killed between this write and
+        // renderAndWriteAll below, the ledger will be ahead of decisions.md /
+        // pitfalls.md. This is git-recoverable (the ledger is the source of
+        // truth; `render-decisions.cjs render <worktree>` heals the .md files)
+        // and is also auto-healed by the migration idempotency path on the next
+        // `devflow init` run (migrateDecisionsLedger re-renders when the existing
+        // ledger is non-empty and newRowsAdded === 0). The render is kept as the
+        // FINAL write under the lock so the window is as narrow as possible.
+        const aaNewLedgerRows = [...aaLedgerRows, aaLedgerRow];
+        const aaLedgerContent = aaNewLedgerRows.map(r => JSON.stringify(r)).join('\n') + '\n';
+        writeFileAtomic(aaLedgerPath, aaLedgerContent);
 
-        const updatedContent = buildUpdatedTldr(existingContent, newContent, entryPrefix, isDecision, anchorId, newActiveCount);
-        writeFileAtomic(decisionsFile, updatedContent);
+        // Mark log row as created
+        aaLogEntries[aaObsIdx] = Object.assign({}, aaObs, { status: 'created' });
+        writeJsonlAtomic(aaLogPath, aaLogEntries);
 
-        // Register in usage tracking so cite counts start at 0
-        registerUsageEntry(projectRoot, anchorId);
+        // Register usage entry
+        registerUsageEntry(aaProjectRoot, aaAnchorId);
 
-        console.log(JSON.stringify({ anchorId, file: decisionsFile }));
+        // Re-render both .md files (lock-free — we already hold .decisions.lock).
+        // This is the FINAL write in the lock scope — see D002 above.
+        renderAndWriteAll(aaProjectRoot, aaNewLedgerRows);
+
+        // Print assigned anchor id to stdout
+        process.stdout.write(aaAnchorId + '\n');
       } finally {
-        releaseLock(decisionsLockDir);
+        releaseLock(aaLockDir);
       }
       break;
     }
 
     // -------------------------------------------------------------------------
-    // count-active <file> <type>
-    // D23: Single source of truth bridge — TS CLI calls this to get active count
-    // from countActiveHeadings without duplicating the logic.
+    // retire-anchor <anchor_id> <status>
+    // AC-A3, AC-F5, AC-F7: Flip decisions_status on the ledger row. Idempotent.
+    // Re-renders both .md (retired entry vanishes from .md, stays in ledger).
+    //
+    // status must be Deprecated | Superseded | Retired.
+    // Locking discipline: holds ONLY .decisions.lock.
     // -------------------------------------------------------------------------
-    case 'count-active': {
-      const filePath = safePath(args[0]);
-      const entryType = args[1]; // 'decision' or 'pitfall'
-      let content = '';
+    case 'retire-anchor': {
+      const retireAnchorId = args[0];
+      const retireStatus = args[1];
+
+      const RETIRE_STATUSES = new Set(['Deprecated', 'Superseded', 'Retired']);
+
+      if (!retireAnchorId || !retireStatus) {
+        process.stderr.write('retire-anchor: usage: retire-anchor <anchor_id> <status>\n');
+        process.exit(1);
+      }
+      if (!RETIRE_STATUSES.has(retireStatus)) {
+        process.stderr.write(`retire-anchor: status must be Deprecated|Superseded|Retired, got '${retireStatus}'\n`);
+        process.exit(1);
+      }
+
+      const raProjectRoot = process.cwd();
+      const raLedgerPath = getDecisionsLedgerPath(raProjectRoot);
+      const raLockDir = getDecisionsLockDir(raProjectRoot);
+
+      fs.mkdirSync(path.join(raProjectRoot, '.devflow', 'decisions'), { recursive: true });
+
+      if (!acquireMkdirLock(raLockDir, 30000, 60000)) {
+        process.stderr.write(`retire-anchor: timeout acquiring lock at ${raLockDir}\n`);
+        process.exit(1);
+      }
+
       try {
-        content = fs.readFileSync(filePath, 'utf8');
-      } catch { /* file doesn't exist — count is 0 */ }
-      const count = countActiveHeadings(content, entryType);
-      console.log(JSON.stringify({ count }));
+        const raRows = parseLedger(raLedgerPath);
+        const raIdx = raRows.findIndex(r => r.anchor_id === retireAnchorId);
+        if (raIdx === -1) {
+          process.stderr.write(`retire-anchor: anchor_id '${retireAnchorId}' not found in ledger\n`);
+          process.exit(1);
+        }
+
+        // Idempotent: if already set to same status, still write (no-op equivalent)
+        raRows[raIdx] = Object.assign({}, raRows[raIdx], { decisions_status: retireStatus });
+        const raLedgerContent = raRows.map(r => JSON.stringify(r)).join('\n') + '\n';
+        writeFileAtomic(raLedgerPath, raLedgerContent);
+
+        // Re-render both .md (lock-free — we already hold .decisions.lock)
+        renderAndWriteAll(raProjectRoot, raRows);
+      } finally {
+        releaseLock(raLockDir);
+      }
+      break;
+    }
+
+    // -------------------------------------------------------------------------
+    // rotate-observations [<log>] [<archive>]
+    // AC-F9, AC-P3: Move stale observing rows (>30 days old) to archive.
+    // NEVER moves anchored or created/ready rows — only stale 'observing' rows.
+    // Runs under .observations.lock (NOT .decisions.lock).
+    //
+    // Default paths derived from cwd. Accepts explicit log/archive paths as args.
+    // For testability, _now_ is injectable via the _nowMs parameter in the
+    // internal function; CLI always uses Date.now().
+    // -------------------------------------------------------------------------
+    case 'rotate-observations': {
+      // Args may be: [] | [log] | [log, archive]
+      const roProjectRoot = process.cwd();
+      const roLogPath = args[0] ? safePath(args[0]) : getDecisionsLogPath(roProjectRoot);
+      const roArchivePath = args[1] ? safePath(args[1]) : getDecisionsArchivePath(roProjectRoot);
+      const roLockDir = getObservationsLockDir(roProjectRoot);
+
+      fs.mkdirSync(path.dirname(roLogPath), { recursive: true });
+      fs.mkdirSync(path.dirname(roArchivePath), { recursive: true });
+      fs.mkdirSync(path.dirname(roLockDir), { recursive: true });
+
+      if (!acquireMkdirLock(roLockDir, 30000, 60000)) {
+        process.stderr.write('rotate-observations: timeout acquiring .observations.lock\n');
+        process.exit(1);
+      }
+
+      try {
+        const roRotated = rotateObservations(roLogPath, roArchivePath, Date.now());
+        process.stdout.write(`rotated ${roRotated} observing rows\n`);
+      } finally {
+        releaseLock(roLockDir);
+      }
       break;
     }
 
@@ -722,12 +878,14 @@ try {
 // Expose helpers for unit testing (only when required as a module, not run as CLI)
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    countActiveHeadings,
+    countActiveLedgerRows,
     readUsageFile,
     writeUsageFile,
     registerUsageEntry,
     writeFileAtomic,
+    writeJsonlAtomic,
     initDecisionsContent,
-    nextDecisionsId,
+    nextAnchorFromLedger,
+    rotateObservations,
   };
 }

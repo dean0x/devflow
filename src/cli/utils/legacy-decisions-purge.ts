@@ -20,13 +20,26 @@ import { getDecisionsDir, getDecisionsLockDir } from './project-paths.js';
  *    tests with temp directories and no environment coupling.
  *
  * The function acquires `.decisions.lock` (same mkdir-based lock used by
- * json-helper.cjs render-ready and updateDecisionsStatus in learn.ts) to
- * serialize against concurrent writers.
+ * json-helper.cjs render-ready) to serialize against concurrent writers.
  *
  * D39: Atomic writes delegate to `writeFileAtomicExclusive` in fs-atomic.ts,
  * using `{ flag: 'wx' }` (O_EXCL | O_WRONLY) to guard against TOCTOU symlink
  * attacks. The unlink on EEXIST is race-tolerant (wrapped in try/catch before
  * the retry write), matching the CJS counterpart in json-helper.cjs.
+ *
+ * ORDERING NOTE (Phase 6): Both exported functions in this file operate on the
+ * PRE-LEDGER `.md` files directly. They are registered as migrations that run
+ * BEFORE `decisions-ledger-unify-v1` (which creates `decisions-ledger.jsonl`).
+ * This ordering is correct and must not change: the purge cleans stale/seeded
+ * entries from the `.md` files first, then the unify migration reads the cleaned
+ * `.md` to build the canonical ledger.
+ *
+ * DEPRECATION: This file is superseded by the ledger render model introduced in
+ * Phase 6. The `.md` files are now a pure render of the decisions ledger — any
+ * future purge of decisions entries should target `decisions-ledger.jsonl`
+ * directly (flip `decisions_status` to `Retired` via `retire-anchor`, then
+ * re-render). This file is kept as-is for its existing one-time migration role;
+ * it must not be extended or called after the ledger exists.
  */
 
 /**

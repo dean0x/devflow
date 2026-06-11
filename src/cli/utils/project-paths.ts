@@ -80,9 +80,19 @@ export function getDecisionsConfigPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions.json');
 }
 
+/** .devflow/decisions/decisions-ledger.jsonl — committed anchored rows (single source of truth for rendering) */
+export function getDecisionsLedgerPath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+}
+
 /** .devflow/decisions/decisions-log.jsonl */
 export function getDecisionsLogPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.jsonl');
+}
+
+/** .devflow/decisions/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
+export function getDecisionsArchivePath(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.archive.jsonl');
 }
 
 /** .devflow/decisions/.decisions-manifest.json */
@@ -103,6 +113,11 @@ export function getDecisionsUsagePath(projectRoot: string): string {
 /** .devflow/decisions/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
 export function getDecisionsUsageLockDir(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.lock');
+}
+
+/** .devflow/dream/.observations.lock — mkdir-based lock directory for observation log writes */
+export function getObservationsLockDir(projectRoot: string): string {
+  return path.join(projectRoot, '.devflow', 'dream', '.observations.lock');
 }
 
 /** .devflow/decisions/.decisions-notifications.json */
@@ -236,6 +251,7 @@ export function getDevflowGitignoreContent(): string {
   return `# .devflow/ git-tracking policy
 # ---------------------------------------------------------------------------
 # Only curated, shared team knowledge is committed to git:
+#   - decisions/decisions-ledger.jsonl                    (anchored render source)
 #   - decisions/decisions.md, decisions/pitfalls.md      (ADR / pitfall records)
 #   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
 #
@@ -254,6 +270,7 @@ export function getDevflowGitignoreContent(): string {
 !decisions/
 !decisions/decisions.md
 !decisions/pitfalls.md
+!decisions/decisions-ledger.jsonl
 
 # 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
 !features/

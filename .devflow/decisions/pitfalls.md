@@ -1,4 +1,4 @@
-<!-- TL;DR: 9 pitfalls. Key: -->
+<!-- TL;DR: 9 pitfalls. Key: PF-008, PF-009, PF-010, PF-011, PF-012 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.

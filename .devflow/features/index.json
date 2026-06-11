@@ -31,7 +31,7 @@
     },
     "hooks": {
       "name": "Dream & Hooks System",
-      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, decisions-append, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation.",
+      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, assign-anchor, retire-anchor, rotate-observations, render-decisions, decisions-ledger, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation.",
       "directories": [
         "scripts/hooks/",
         "shared/agents/",
@@ -59,6 +59,30 @@
         "src/cli/commands/decisions.ts"
       ],
       "lastUpdated": "2026-06-08T20:16:14.327Z",
+      "createdBy": "implement"
+    },
+    "decisions": {
+      "name": "Decisions & Pitfalls Ledger",
+      "description": "Use when working on the decisions/pitfalls pipeline, adding ops to json-helper.cjs, modifying render output, writing migrations, or modifying Dream SKILL behavior for decisions/curation. Keywords: decisions, pitfalls, ADR, ledger, assign-anchor, retire-anchor, render, dream-decisions, dream-curation, observations, decisions-log, decisions-ledger.",
+      "directories": [
+        "scripts/hooks",
+        "scripts/hooks/lib",
+        "src/cli/utils"
+      ],
+      "referencedFiles": [
+        "scripts/hooks/lib/decisions-format.cjs",
+        "scripts/hooks/lib/render-decisions.cjs",
+        "scripts/hooks/lib/decisions-index.cjs",
+        "scripts/hooks/lib/project-paths.cjs",
+        "scripts/hooks/lib/mkdir-lock.cjs",
+        "scripts/hooks/json-helper.cjs",
+        "scripts/hooks/dream-commit",
+        "src/cli/utils/decisions-ledger-migration.ts",
+        "src/cli/utils/observations.ts",
+        "shared/skills/dream-decisions/SKILL.md",
+        "shared/skills/dream-curation/SKILL.md"
+      ],
+      "lastUpdated": "2026-06-10T19:55:57.221Z",
       "createdBy": "implement"
     }
   }

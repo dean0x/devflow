@@ -1,9 +1,20 @@
+// tests/decisions/index-generator.test.ts
+//
+// AC-A4: decisions-index.cjs index output UNCHANGED for active entries.
+// AC-A6: Heading/Status/Area/Source formats preserved for active entries.
+//
+// The renderer (render-decisions.cjs) guarantees that .md files only ever
+// contain active entries (Deprecated/Superseded/Retired are hidden before
+// writing). The in-memory filter (isDeprecatedOrSuperseded / filterDecisionsContext)
+// has been removed — all tests here use active-only input, which is the only
+// input the index will ever see in practice.
+
 import { describe, it, expect, afterAll } from 'vitest'
 import * as path from 'path'
 import { execSync } from 'child_process'
 import { createRequire } from 'module'
 import {
-  ACTIVE_ADR, ACTIVE_PF, DEPRECATED_ADR, SUPERSEDED_PF,
+  ACTIVE_ADR, ACTIVE_PF, DEPRECATED_ADR, SUPERSEDED_ADR, DEPRECATED_PF, SUPERSEDED_PF,
   makeTmpWorktree, cleanupTmpWorktrees,
 } from './fixtures'
 
@@ -12,10 +23,9 @@ afterAll(() => cleanupTmpWorktrees())
 const ROOT = path.resolve(import.meta.dirname, '../..')
 const require = createRequire(import.meta.url)
 
-const { filterDecisionsContext, loadDecisionsIndex } = require(
+const { loadDecisionsIndex } = require(
   path.join(ROOT, 'scripts/hooks/lib/decisions-index.cjs')
 ) as {
-  filterDecisionsContext: (raw: string) => string
   loadDecisionsIndex: (worktree: string, opts?: { decisionsFile?: string; pitfallsFile?: string }) => string
 }
 
@@ -31,8 +41,9 @@ describe('loadDecisionsIndex — formatting', () => {
     expect(loadDecisionsIndex(tmpDir)).toBe('(none)')
   })
 
-  it('returns "(none)" when all entries are Deprecated/Superseded after filter', () => {
-    const tmpDir = makeTmpWorktree(DEPRECATED_ADR, SUPERSEDED_PF)
+  it('returns "(none)" when both decisions files are present but empty', () => {
+    // The renderer only writes active entries; an empty file means no active entries.
+    const tmpDir = makeTmpWorktree('', '')
     expect(loadDecisionsIndex(tmpDir)).toBe('(none)')
   })
 
@@ -57,22 +68,28 @@ describe('loadDecisionsIndex — formatting', () => {
     expect(result).toContain('Pitfalls (1):')
   })
 
-  it('strips Deprecated entries from Decisions block', () => {
-    const mixed = ACTIVE_ADR + '\n' + DEPRECATED_ADR
-    const tmpDir = makeTmpWorktree(mixed)
+  it('shows all Accepted decision entries (active-only .md contract)', () => {
+    // Post-render .md files only ever contain active entries (Accepted for decisions).
+    // The index must show all of them — count and IDs both correct.
+    const adr2 = `## ADR-002: Second decision\n\n- **Status**: Accepted\n- **Decision**: Something else\n`
+    const both = ACTIVE_ADR + '\n' + adr2
+    const tmpDir = makeTmpWorktree(both)
     const result = loadDecisionsIndex(tmpDir)
-    expect(result).toContain('Decisions (1):')
+    expect(result).toContain('Decisions (2):')
     expect(result).toContain('ADR-001')
-    expect(result).not.toContain('ADR-002')
+    expect(result).toContain('ADR-002')
   })
 
-  it('strips Superseded entries from Pitfalls block', () => {
-    const mixed = ACTIVE_PF + '\n' + SUPERSEDED_PF
-    const tmpDir = makeTmpWorktree(undefined, mixed)
+  it('shows all Active pitfall entries (active-only .md contract)', () => {
+    // Post-render .md files only ever contain active entries (Active for pitfalls).
+    // The index must show all of them — count and IDs both correct.
+    const pf2 = `## PF-005: Second pitfall\n\n- **Status**: Active\n- **Area**: some/path.ts\n- **Description**: Another one\n`
+    const both = ACTIVE_PF + '\n' + pf2
+    const tmpDir = makeTmpWorktree(undefined, both)
     const result = loadDecisionsIndex(tmpDir)
-    expect(result).toContain('Pitfalls (1):')
+    expect(result).toContain('Pitfalls (2):')
     expect(result).toContain('PF-004')
-    expect(result).not.toContain('PF-005')
+    expect(result).toContain('PF-005')
   })
 
   it('truncates title to 60 characters with ellipsis', () => {
@@ -150,6 +167,51 @@ describe('loadDecisionsIndex — formatting', () => {
     const result = loadDecisionsIndex(tmpDir)
     expect(result).toContain('Decisions (')
     expect(result).not.toContain('Pitfalls (')
+  })
+
+  // Belt-and-suspenders: inactive status entries must be absent from the index
+  // even if they appear in a stale or manually-edited .md file.
+  it('excludes Deprecated ADR from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(DEPRECATED_ADR)
+    const result = loadDecisionsIndex(tmpDir)
+    // A Deprecated-only file produces no active entries → (none)
+    expect(result).toBe('(none)')
+  })
+
+  it('excludes Superseded ADR from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(SUPERSEDED_ADR)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toBe('(none)')
+  })
+
+  it('excludes Deprecated PF from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(undefined, DEPRECATED_PF)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toBe('(none)')
+  })
+
+  it('excludes Superseded PF from index (belt-and-suspenders active-only filter)', () => {
+    const tmpDir = makeTmpWorktree(undefined, SUPERSEDED_PF)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toBe('(none)')
+  })
+
+  it('keeps active ADR when mixed with Deprecated ADR in same file', () => {
+    const mixed = ACTIVE_ADR + '\n' + DEPRECATED_ADR
+    const tmpDir = makeTmpWorktree(mixed)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toContain('ADR-001')
+    expect(result).not.toContain('ADR-002')
+    expect(result).toContain('Decisions (1):')
+  })
+
+  it('keeps active PF when mixed with Superseded PF in same file', () => {
+    const mixed = ACTIVE_PF + '\n' + SUPERSEDED_PF
+    const tmpDir = makeTmpWorktree(undefined, mixed)
+    const result = loadDecisionsIndex(tmpDir)
+    expect(result).toContain('PF-004')
+    expect(result).not.toContain('PF-005')
+    expect(result).toContain('Pitfalls (1):')
   })
 })
 

@@ -1,4 +1,4 @@
-<!-- TL;DR: 17 decisions. Key: -->
+<!-- TL;DR: 17 decisions. Key: ADR-014, ADR-015, ADR-016, ADR-017, ADR-018 -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.

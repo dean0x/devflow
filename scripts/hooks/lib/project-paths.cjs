@@ -79,9 +79,19 @@ function getDecisionsConfigPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions.json');
 }
 
+/** .devflow/decisions/decisions-ledger.jsonl — committed anchored rows (single source of truth for rendering) */
+function getDecisionsLedgerPath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-ledger.jsonl');
+}
+
 /** .devflow/decisions/decisions-log.jsonl */
 function getDecisionsLogPath(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.jsonl');
+}
+
+/** .devflow/decisions/decisions-log.archive.jsonl — rotated-out stale observing rows (gitignored) */
+function getDecisionsArchivePath(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'decisions', 'decisions-log.archive.jsonl');
 }
 
 /** .devflow/decisions/.decisions-manifest.json */
@@ -102,6 +112,11 @@ function getDecisionsUsagePath(projectRoot) {
 /** .devflow/decisions/.decisions-usage.lock/ — mkdir-based lock directory for usage file */
 function getDecisionsUsageLockDir(projectRoot) {
   return path.join(projectRoot, '.devflow', 'decisions', '.decisions-usage.lock');
+}
+
+/** .devflow/dream/.observations.lock — mkdir-based lock directory for observation log writes */
+function getObservationsLockDir(projectRoot) {
+  return path.join(projectRoot, '.devflow', 'dream', '.observations.lock');
 }
 
 /** .devflow/decisions/.decisions-notifications.json */
@@ -233,6 +248,7 @@ function getDevflowGitignoreContent() {
   return `# .devflow/ git-tracking policy
 # ---------------------------------------------------------------------------
 # Only curated, shared team knowledge is committed to git:
+#   - decisions/decisions-ledger.jsonl                    (anchored render source)
 #   - decisions/decisions.md, decisions/pitfalls.md      (ADR / pitfall records)
 #   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
 #
@@ -251,6 +267,7 @@ function getDevflowGitignoreContent() {
 !decisions/
 !decisions/decisions.md
 !decisions/pitfalls.md
+!decisions/decisions-ledger.jsonl
 
 # 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
 !features/
@@ -274,9 +291,12 @@ module.exports = {
   getPitfallsFilePath,
   getDecisionsDisabledSentinel,
   getDecisionsConfigPath,
+  getDecisionsLedgerPath,
   getDecisionsLogPath,
+  getDecisionsArchivePath,
   getDecisionsManifestPath,
   getDecisionsLockDir,
+  getObservationsLockDir,
   getDecisionsUsagePath,
   getDecisionsUsageLockDir,
   getDecisionsNotificationsPath,

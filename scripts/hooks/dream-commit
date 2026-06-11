@@ -1,0 +1,222 @@
+#!/bin/bash
+# dream-commit — Deterministic plumbing helper for attributable Dream maintenance commits.
+#
+# Applies ADR-008 (LLM-vs-plumbing: this is DETERMINISTIC PLUMBING — no judgment here).
+# Applies ADR-012 (.devflow knowledge artifacts are committed to git as shared team knowledge).
+#
+# Usage:
+#   dream-commit <task> <action> [session_id]
+#
+#   <task>       One of: decisions | curation | knowledge
+#   <action>     Short action suffix for the commit subject
+#                  e.g. "add ADR-019", "retire 2 stale entries", "refresh cli-rules knowledge"
+#   [session_id] Optional session identifier; defaults to "unknown"
+#
+# Commit format:
+#   Subject:  chore(dream): <action>
+#   Trailers: Dream-Task: <task>
+#             Dream-Session: <session_id>
+#             Co-Authored-By: Devflow Dream <dream@devflow.local>
+#
+# Safe skip conditions (exit 0, no commit):
+#   - autoCommit disabled in .devflow/dream/config.json
+#   - mid-rebase, mid-merge, mid-cherry-pick, or detached HEAD
+#   - nothing staged after explicit staging of allowed paths
+#   - git commit fails for any reason (best-effort maintenance, never blocks session)
+#
+# Staged paths (ONLY these, never git add -A):
+#   .devflow/decisions/decisions-ledger.jsonl
+#   .devflow/decisions/decisions.md
+#   .devflow/decisions/pitfalls.md
+#   .devflow/features/**/KNOWLEDGE.md   (knowledge task only)
+#   .devflow/features/index.json         (knowledge task only)
+
+# Safe no-op fallback — must exist before hook-bootstrap is sourced.
+# NOTE: no set -e here; dream-commit is agent-invoked best-effort plumbing,
+# not a registered Claude Code hook — failure must never block the session.
+dbg() { :; }
+
+# Resolve script directory (handles symlinks)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Source shared debug-trace bootstrap (preferred over inline sourcing; avoids
+# duplicating the debug-trace/devflow_debug_init pattern from hook-bootstrap).
+source "$SCRIPT_DIR/hook-bootstrap" "dream-commit"
+dbg "=== dream-commit START ==="
+
+# ---------------------------------------------------------------------------
+# Argument validation
+# ---------------------------------------------------------------------------
+
+TASK="${1:-}"
+ACTION="${2:-}"
+SESSION_ID="${3:-unknown}"
+
+if [ -z "$TASK" ] || [ -z "$ACTION" ]; then
+  echo "dream-commit: usage: dream-commit <task> <action> [session_id]" >&2
+  echo "  task: decisions | curation | knowledge" >&2
+  echo "  action: short subject suffix (e.g. 'add ADR-019')" >&2
+  exit 1
+fi
+
+case "$TASK" in
+  decisions|curation|knowledge) ;;
+  *)
+    echo "dream-commit: unknown task '$TASK' — must be decisions, curation, or knowledge" >&2
+    exit 1
+    ;;
+esac
+
+dbg "TASK=$TASK ACTION=$ACTION SESSION_ID=$SESSION_ID"
+
+# ---------------------------------------------------------------------------
+# Locate project root (git rev-parse, handle worktrees)
+# ---------------------------------------------------------------------------
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  dbg "EXIT: git rev-parse --show-toplevel failed — not in a git repo"
+  exit 0
+}
+
+dbg "PROJECT_ROOT=$PROJECT_ROOT"
+
+devflow_debug_set_cwd "$PROJECT_ROOT"
+
+# ---------------------------------------------------------------------------
+# Config gate: read autoCommit from .devflow/dream/config.json (default ON)
+# ---------------------------------------------------------------------------
+
+DREAM_CONFIG="$PROJECT_ROOT/.devflow/dream/config.json"
+# Default ON — canonical source: src/cli/utils/dream-config.ts DEFAULT_CONFIG.autoCommit
+AUTO_COMMIT="true"
+
+if [ -f "$DREAM_CONFIG" ]; then
+  # Prefer jq; fall back to json-helper.cjs get-field-file (path via argv, no interpolation)
+  if command -v jq >/dev/null 2>&1; then
+    _RAW=$(jq -r 'if (.autoCommit | type) == "null" then "true" else (.autoCommit | tostring) end' "$DREAM_CONFIG" 2>/dev/null) && AUTO_COMMIT="$_RAW"
+  elif command -v node >/dev/null 2>&1; then
+    _RAW=$(node "$SCRIPT_DIR/json-helper.cjs" get-field-file "$DREAM_CONFIG" autoCommit true 2>/dev/null) && AUTO_COMMIT="${_RAW:-true}"
+  fi
+fi
+
+dbg "AUTO_COMMIT=$AUTO_COMMIT"
+
+if [ "$AUTO_COMMIT" = "false" ]; then
+  dbg "EXIT: autoCommit disabled in dream config"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Safety rails: detect rebase / merge / cherry-pick / detached HEAD
+# ---------------------------------------------------------------------------
+
+# Use git rev-parse --git-dir to locate .git (handles worktrees where .git is a file)
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || {
+  dbg "EXIT: git rev-parse --git-dir failed"
+  exit 0
+}
+
+# Resolve absolute path for GIT_DIR state file checks
+if [[ "$GIT_DIR" != /* ]]; then
+  GIT_DIR="$(pwd)/$GIT_DIR"
+fi
+
+dbg "GIT_DIR=$GIT_DIR"
+
+# Mid-rebase
+if [ -d "$GIT_DIR/rebase-merge" ] || [ -d "$GIT_DIR/rebase-apply" ]; then
+  dbg "EXIT: mid-rebase detected"
+  exit 0
+fi
+
+# Mid-merge
+if [ -f "$GIT_DIR/MERGE_HEAD" ]; then
+  dbg "EXIT: mid-merge detected"
+  exit 0
+fi
+
+# Mid-cherry-pick
+if [ -f "$GIT_DIR/CHERRY_PICK_HEAD" ]; then
+  dbg "EXIT: mid-cherry-pick detected"
+  exit 0
+fi
+
+# Detached HEAD — git symbolic-ref -q HEAD exits non-zero when detached
+if ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
+  dbg "EXIT: detached HEAD"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Stage ONLY the allowed paths (never git add -A)
+# ---------------------------------------------------------------------------
+
+DECISIONS_DIR="$PROJECT_ROOT/.devflow/decisions"
+FEATURES_DIR="$PROJECT_ROOT/.devflow/features"
+
+# Stage decisions files (for all tasks that touch decisions)
+for _F in \
+  "$DECISIONS_DIR/decisions-ledger.jsonl" \
+  "$DECISIONS_DIR/decisions.md" \
+  "$DECISIONS_DIR/pitfalls.md"
+do
+  if [ -f "$_F" ]; then
+    git -C "$PROJECT_ROOT" add -- "$_F" 2>/dev/null || true
+    dbg "Staged: $_F"
+  fi
+done
+
+# Stage knowledge files (only for knowledge task)
+if [ "$TASK" = "knowledge" ]; then
+  # Stage index.json
+  if [ -f "$FEATURES_DIR/index.json" ]; then
+    git -C "$PROJECT_ROOT" add -- "$FEATURES_DIR/index.json" 2>/dev/null || true
+    dbg "Staged: $FEATURES_DIR/index.json"
+  fi
+  # Stage all KNOWLEDGE.md files under features/
+  if [ -d "$FEATURES_DIR" ]; then
+    find "$FEATURES_DIR" -name "KNOWLEDGE.md" | while IFS= read -r _KF; do
+      git -C "$PROJECT_ROOT" add -- "$_KF" 2>/dev/null || true
+      dbg "Staged: $_KF"
+    done
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# No-op check: exit cleanly if nothing staged
+# ---------------------------------------------------------------------------
+
+if git -C "$PROJECT_ROOT" diff --cached --quiet 2>/dev/null; then
+  dbg "EXIT: nothing staged — no-op"
+  exit 0
+fi
+
+dbg "Staged diff is non-empty — proceeding to commit"
+
+# ---------------------------------------------------------------------------
+# Commit with documented format
+# ---------------------------------------------------------------------------
+
+SUBJECT="chore(dream): $ACTION"
+
+# Build the commit message with a blank separator line between subject and trailers,
+# so git parses the trailers correctly (git trailer convention: blank line before trailers).
+COMMIT_MSG="$SUBJECT
+
+Dream-Task: $TASK
+Dream-Session: $SESSION_ID
+Co-Authored-By: Devflow Dream <dream@devflow.local>"
+
+dbg "COMMIT_MSG subject: $SUBJECT"
+
+# Best-effort commit — if it fails (e.g. pre-commit hook rejects, nothing to do),
+# exit 0 without throwing. Maintenance commits must never block the session.
+if git -C "$PROJECT_ROOT" commit -m "$COMMIT_MSG" >/dev/null 2>&1; then
+  dbg "Commit succeeded: $SUBJECT"
+else
+  _EXIT=$?
+  dbg "Commit failed (exit $_EXIT): $SUBJECT — treating as no-op (maintenance is best-effort)"
+fi
+
+dbg "=== dream-commit COMPLETE ==="
+exit 0

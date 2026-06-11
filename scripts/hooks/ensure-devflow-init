@@ -40,6 +40,7 @@ if [ ! -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
 # .devflow/ git-tracking policy
 # ---------------------------------------------------------------------------
 # Only curated, shared team knowledge is committed to git:
+#   - decisions/decisions-ledger.jsonl                    (anchored render source)
 #   - decisions/decisions.md, decisions/pitfalls.md      (ADR / pitfall records)
 #   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
 #
@@ -58,6 +59,7 @@ if [ ! -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
 !decisions/
 !decisions/decisions.md
 !decisions/pitfalls.md
+!decisions/decisions-ledger.jsonl
 
 # 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
 !features/
