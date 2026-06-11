@@ -17,7 +17,7 @@ referencedFiles:
   - shared/skills/dream-decisions/SKILL.md
   - shared/skills/dream-curation/SKILL.md
 created: 2026-06-10
-updated: 2026-06-10
+updated: 2026-06-11
 ---
 
 # Decisions & Pitfalls Ledger
@@ -121,7 +121,7 @@ Three ledger-mutating operations (all run from `process.cwd()` as project root):
 - Caller-locked: the Dream agent acquires `.observations.lock` externally before calling this
 - Passthrough for ledger fields: `anchor_id`, `date`, `decisions_status`, `amendments`, `raw_body`
 
-**`count-active <worktree> <type>`** — Reads ledger; returns count of active anchored rows.
+**`count-active <worktree> <type>`** — Reads ledger; returns count of active anchored rows. Note: unlike `assign-anchor`, `retire-anchor`, and `rotate-observations` (which derive project root from `process.cwd()`), `count-active` requires the worktree path as `args[0]` and the type as `args[1]` — always call as `count-active "$(pwd)" "decision"` or `count-active "$(pwd)" "pitfall"`. The `devflow:dream-curation` SKILL.md example shows `count-active "decision"` (single arg), which would resolve `"decision"` as a filesystem path — use `"$(pwd)"` as the first arg in practice.
 
 ### Locking Discipline (ADR-017)
 
@@ -173,6 +173,8 @@ Co-Authored-By: Devflow Dream <dream@devflow.local>
 Staged paths depend on task: decisions/curation tasks stage `decisions-ledger.jsonl`, `decisions.md`, `pitfalls.md`; knowledge task additionally stages `features/index.json` and all `KNOWLEDGE.md` files.
 
 Safety rails: skips if `autoCommit: false` in dream config (default ON), mid-rebase, mid-merge, mid-cherry-pick, or detached HEAD. Best-effort: git commit failure exits 0 (never blocks session).
+
+The `autoCommit` gate is read from `.devflow/dream/config.json` — the `DreamConfig` interface (`src/cli/utils/dream-config.ts`) now has four fields: `{memory, decisions, knowledge, autoCommit}` (default all `true`). Toggling auto-commit per-project requires editing `config.json` directly or implementing a CLI toggle; `devflow decisions --status` reports the current `autoCommit` value. `dream-commit` reads `autoCommit` via jq (preferred) or `node json-helper.cjs get-field-file` as fallback — both accept the file path directly (no shell interpolation of file content).
 
 ## Constraints
 

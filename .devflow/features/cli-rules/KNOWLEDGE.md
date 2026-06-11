@@ -1,7 +1,7 @@
 ---
 feature: cli-rules
 name: Rules System CLI
-description: "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry."
+description: "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry, autoCommit, DreamConfig, decisions-ledger-unify-v1, sync-devflow-gitignore-v3."
 category: architecture
 directories: [src/cli/commands/, src/cli/utils/, shared/rules/, scripts/]
 referencedFiles:
@@ -18,7 +18,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-06-09
+updated: 2026-06-11
 ---
 
 # Rules System CLI
@@ -99,6 +99,8 @@ Four helper functions in `plugins.ts` serve distinct scopes:
 - `LEGACY_RULE_NAMES` — currently empty; add entries here when renaming or removing a rule
 
 The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the three active per-task Dream skills (`dream-decisions`, `dream-knowledge`, `dream-curation`). `dream-memory` was removed from the active skills list in PR #239 — memory is now handled entirely by the `background-memory-update` detached worker, not a Dream subagent. Both `dream-memory` (bare) and `devflow:dream-memory` (namespaced) are in `LEGACY_SKILLS_V2X` so older installs that had them are swept during `devflow init`. The learning pipeline skills (`eval-learning`, `eval-reinforce`, and the `devflow learn` CLI) were removed in PR #238.
+
+**PR #241 (decisions ledger + deterministic render)**: Added `decisions-ledger-unify-v1` (per-project migration) and `sync-devflow-gitignore-v3` (per-project) migrations in `src/cli/utils/migrations.ts`. The `DreamConfig` interface in `src/cli/utils/dream-config.ts` now has a fourth field: `autoCommit: boolean` (default `true`). When `autoCommit` is true (the default), the Dream agent's `dream-commit` helper automatically creates `chore(dream):` commits after each Dream maintenance write. `devflow decisions --status` now outputs an `Auto-commit: ON/OFF` line. `coerceConfig` in `dream-config.ts` silently drops the legacy `learning` key AND reads `autoCommit` — the interface is `{memory, decisions, knowledge, autoCommit}`. Do NOT reference `features.teams` (removed PR #240) or `features.learn` (removed PR #238) as fields of `DreamConfig`.
 
 **Agent Teams removal (PR #240)**: The bespoke Agent Teams machinery was removed. The eight `*-teams.md` command variants, the `agent-teams` skill, all `teamsEnabled`/`applyTeamsConfig`/`stripTeamsConfig` touch-points, and the `--teams`/`--no-teams` init flags were deleted. Agent Teams is re-exposed as a single optional flag `agent-teams` in `FLAG_REGISTRY` (defaultEnabled: false), toggled via `devflow flags --enable agent-teams`. Key cleanup mechanics:
 - `devflow:agent-teams` (namespaced) is in `LEGACY_SKILLS_V2X` for install cleanup
@@ -263,8 +265,10 @@ export const WORKFLOW_ORDER: string[] = [
 - **`features.teams` no longer exists in ManifestData**: The agent-teams bespoke manifest field was removed in PR #240. Agent Teams is now a standard flag entry in `FLAG_REGISTRY` (`id: 'agent-teams'`, `defaultEnabled: false`). The env var `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is applied/stripped by the normal `applyFlags`/`stripFlags` machinery. Migration `purge-devflow-teammate-mode-global-v1` (global) and `purge-devflow-teammate-mode-v1` (per-project) clean up stale `teammateMode: "auto"` written by prior installs.
 - **`*-teams.md` command files are orphaned, not re-installed**: The blanket sweep in `init.ts` (`f.endsWith('-teams.md')`) runs on every install type including partial installs. This is safe because no `*-teams.md` command file is ever installed by current Devflow. Old installs that had these files will have them cleaned up on the next `devflow init`.
 - **`dream-memory` skill is no longer active**: `dream-memory` was removed from `devflow-core-skills` skills array in PR #239 (the `dream-memory` SKILL.md file was removed in PR #238; the skills array entry was removed in PR #239). Memory refresh is handled by `background-memory-update` (detached worker), not a Dream subagent. Both `dream-memory` and `devflow:dream-memory` are in `LEGACY_SKILLS_V2X` and are swept by `devflow init`. Migration `purge-stale-memory-markers-v1` (added in PR #239) sweeps `dream/memory.*` marker files from old installations.
-- **`DreamConfig` tracks only 3 features**: `{memory, decisions, knowledge}` — the `learning` key was removed from `DreamConfig` in PR #238. Do not add it back or reference it.
+- **`DreamConfig` tracks 4 features**: `{memory, decisions, knowledge, autoCommit}` — the `learning` key was removed in PR #238; `autoCommit` was added in PR #241 (default `true`; governs whether Dream tasks auto-commit maintenance writes). Do not add `learning` back or reference `features.learn`.
 - **New migration `sync-devflow-gitignore-v2`**: Per-project migration added in PR #238 to re-sync `.devflow/.gitignore` to the ignore-by-default allowlist policy. Overwrites existing `.gitignore` if content differs from canonical template. ENOENT-safe (no-op if `.devflow/` does not exist).
+- **New migration `sync-devflow-gitignore-v3`**: Per-project migration added in PR #241 to push the gitignore update that explicitly allows `decisions-ledger.jsonl` (the committed ledger). Without this, projects that had `.gitignore` from `sync-devflow-gitignore-v2` would not track the ledger file.
+- **New migration `decisions-ledger-unify-v1`**: Per-project migration added in PR #241. Backfills `decisions-ledger.jsonl` from the existing `decisions.md`/`pitfalls.md` and `decisions-log.jsonl`. Preserves every existing body verbatim via `raw_body`, synthesizes rows whose source obs is missing, marks hand-deleted anchors `Retired` (numbers reserved). Idempotent + crash-safe (always reconciles `.md` from ledger after write). Located in `src/cli/utils/decisions-ledger-migration.ts`.
 
 ## Key Files
 
@@ -278,7 +282,7 @@ export const WORKFLOW_ORDER: string[] = [
 - `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed in PR #238; no `features.teams` (removed PR #240)
 - `src/cli/utils/flags.ts` — `FLAG_REGISTRY` with 18 entries including `agent-teams` (defaultEnabled: false); `applyFlags`/`stripFlags`/`getDefaultFlags`; `applyViewMode`/`stripViewMode`
 - `src/cli/utils/teammate-mode-cleanup.ts` — `stripDevflowTeammateModeFromJson` (pure, tolerant) and `stripDevflowTeammateMode` (file I/O wrapper); used by both migrations and uninstall
-- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore`; `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; `purge-devflow-teammate-mode-global-v1` (global) + `purge-devflow-teammate-mode-v1` (per-project) remove `teammateMode: "auto"` from settings.json files; applies ADR-002
+- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore` (PR #238); `sync-devflow-gitignore-v3` pushes gitignore change for decisions-ledger allowlist (PR #241); `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; `purge-devflow-teammate-mode-global-v1` (global) + `purge-devflow-teammate-mode-v1` (per-project) remove `teammateMode: "auto"` from settings.json files; `decisions-ledger-unify-v1` (per-project) backfills `decisions-ledger.jsonl` from existing `.md` + log, preserving every body verbatim (`raw_body`), marking hand-deleted anchors `Retired`; applies ADR-002
 - `scripts/build-plugins.ts` — build-time distribution from `shared/rules/` → `plugins/*/rules/`
 - `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional) + `LEGACY_SKILL_NAMES consistency` guard
 - `tests/init.test.ts` — `combineSelection` and `shouldRetry` unit tests
@@ -295,3 +299,4 @@ export const WORKFLOW_ORDER: string[] = [
 - PR #238 (learning removal): removed `dream-memory` SKILL.md file, removed `features.learn`, removed `--learn`/`--no-learn`, added `purge-learning-pipeline-v1` + `sync-devflow-gitignore-v2` migrations; note — `dream-memory` was removed from the `devflow-core-skills` skills ARRAY in PR #239 (not #238)
 - PR #239 (eager memory refresh): removed `dream-memory` from `devflow-core-skills` skills array, added `background-memory-update` worker, added `purge-stale-memory-markers-v1` migration; `background-memory-update` is NOT in `LEGACY_HOOK_FILES` (fixed in `8c157db`)
 - PR #240 (agent-teams removal): removed bespoke Agent Teams machinery; re-exposed as `agent-teams` flag in `FLAG_REGISTRY`; added `purge-devflow-teammate-mode-global-v1` + `purge-devflow-teammate-mode-v1` migrations; blanket `*-teams.md` sweep in `init.ts`; `devflow:agent-teams` skill in `LEGACY_SKILLS_V2X`
+- PR #241 (decisions ledger + deterministic render): added `decisions-ledger.jsonl` as committed render source of truth; new `assign-anchor`/`retire-anchor`/`rotate-observations` ops in `json-helper.cjs`; `dream-commit` shell helper for attributable maintenance commits; `autoCommit: boolean` added to `DreamConfig`; `devflow decisions --status` now surfaces auto-commit state; `decisions-ledger-unify-v1` + `sync-devflow-gitignore-v3` per-project migrations added
