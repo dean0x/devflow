@@ -22,6 +22,11 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 
 ---
 
+**Requires:** ticket or task description; optional plan document and acceptance criteria from `/devflow:dynamic-plan`
+**Produces:** implemented and reviewed branch per ticket; wave run report at `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`
+
+---
+
 ### Preflight checks
 
 Before authoring, verify:

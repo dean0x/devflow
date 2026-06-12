@@ -18,6 +18,11 @@ The profile is then consumed by `/devflow:dynamic-plan` to pre-resolve design de
 
 ---
 
+**Requires:** read access to `~/.claude/projects/*/` session transcripts and `~/.claude/rules/`
+**Produces:** `~/.devflow/preference-profile.md` — plain-prose decision-preference profile
+
+---
+
 ### Privacy note
 
 This command mines session transcripts across **all projects** on this machine — `~/.claude/projects/*/*.jsonl`, `~/.claude/history.jsonl`, and feedback memories. The resulting profile is then injected into planning prompts as context. This is a cross-project surface: patterns from one project's decisions may influence planning in another.

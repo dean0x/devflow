@@ -12,7 +12,7 @@ Devflow enhances Claude Code with intelligent development workflows. Modificatio
 
 ## Architecture Overview
 
-Plugin marketplace with 21 plugins (12 core + 9 optional language/ecosystem), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
+Plugin marketplace with 22 plugins (12 core + 9 optional language/ecosystem + 1 optional workflow), each following the Claude plugins format (`.claude-plugin/plugin.json`, `commands/`, `agents/`, `skills/`).
 
 | Plugin | Purpose |
 |--------|---------|
@@ -29,6 +29,7 @@ Plugin marketplace with 21 plugins (12 core + 9 optional language/ecosystem), ea
 | `devflow-ambient` | Ambient mode — plan auto-detection |
 | `devflow-core-skills` | Auto-activating quality enforcement |
 | `devflow-audit-claude` | Audit CLAUDE.md files (optional) |
+| `devflow-dynamic` | Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline (optional) |
 | `devflow-typescript` | TypeScript language patterns (optional) |
 | `devflow-react` | React framework patterns (optional) |
 | `devflow-accessibility` | Web accessibility patterns (optional) |
@@ -73,7 +74,8 @@ devflow/
 ├── shared/skills/          # 43 skills (single source of truth)
 ├── shared/agents/          # 16 shared agents (single source of truth)
 ├── shared/rules/           # 12 rules (single source of truth; flat .md files)
-├── plugins/devflow-*/      # 21 plugins (12 core + 9 optional language/ecosystem)
+├── shared/recipes/         # MDS recipe sources (single source of truth, compiled to plugins/devflow-dynamic/commands/ at build)
+├── plugins/devflow-*/      # 22 plugins (12 core + 9 optional language/ecosystem + 1 optional workflow)
 ├── docs/reference/         # Detailed reference documentation
 ├── scripts/                # Helper scripts (statusline, docs-helpers)
 │   └── hooks/              # Dream + ambient + memory hooks (dream-capture, dream-dispatch [capture-only], background-memory-update [Stop-hook worker], dream-recover, dream-collect-tasks, dream-evaluate, dream-lock, session-start-memory, session-start-context, pre-compact-memory, preamble, get-mtime, hook-bootstrap, hook-log-init, eval-helpers, eval-decisions, eval-knowledge, eval-curation)
@@ -111,7 +113,7 @@ node dist/cli.js init --plugin=code-review       # Single plugin
 /code-review
 ```
 
-**Build commands**: `npm run build` (full), `npm run build:cli` (TypeScript only), `npm run build:plugins` (skill/agent distribution only)
+**Build commands**: `npm run build` (full), `npm run build:cli` (TypeScript only), `npm run build:plugins` (skill/agent distribution only), `npm run build:recipes` (MDS recipe compilation only)
 
 ## Documentation Artifacts
 

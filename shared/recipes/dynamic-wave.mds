@@ -50,6 +50,9 @@ Do not proceed until the user confirms.
 
 ### Step 1 — Run /devflow:dynamic-tickets
 
+**Requires:** confirmed initiative input from Gate 0
+**Produces:** ticket files at `.devflow/docs/tickets/\{slug\}/\{ts\}/`, tracking-issue.md
+
 Invoke `/devflow:dynamic-tickets` with the initiative as input.
 
 The tickets command will:
@@ -69,6 +72,9 @@ After `/devflow:dynamic-tickets` completes:
 ---
 
 ### Step 2 — Run /devflow:dynamic-plan
+
+**Requires:** ticket files from Step 1 (user-confirmed via Gate 1)
+**Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `.devflow/docs/design/\{slug\}/\{ts\}/`
 
 Invoke `/devflow:dynamic-plan` with the tickets directory from Step 1 as input.
 
@@ -96,6 +102,9 @@ Do not proceed until the user confirms.
 ---
 
 ### Step 3 — Run /devflow:dynamic-build
+
+**Requires:** ticket files from Step 1 + per-ticket plans from Step 2 (open decisions answered via Gate 2)
+**Produces:** wave run report at `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`, integration branch `wave/\{slug\}`
 
 Invoke `/devflow:dynamic-build` in WAVE mode with:
 - The wave tickets (from Step 1)

@@ -21,6 +21,11 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 
 ---
 
+**Requires:** initiative description or spec document path; optional `gh` CLI authentication for GitHub issue creation
+**Produces:** ticket `.md` files at `.devflow/docs/tickets/\{slug\}/\{ts\}/`, `tracking-issue.md`
+
+---
+
 ### Preflight checks
 
 Before authoring, verify:

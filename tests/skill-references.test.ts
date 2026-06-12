@@ -139,6 +139,11 @@ const COMMAND_REFS = new Set([
   'plan',
   'review',
   'pipeline',
+  'dynamic-tickets',
+  'dynamic-plan',
+  'dynamic-build',
+  'dynamic-profile',
+  'dynamic-wave',
 ]);
 
 /**

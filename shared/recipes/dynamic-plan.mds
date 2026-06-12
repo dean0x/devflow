@@ -20,6 +20,11 @@ This command instructs you to construct and run a Claude Code dynamic Workflow t
 
 ---
 
+**Requires:** ticket files directory or GitHub issue list; optional `~/.devflow/preference-profile.md`
+**Produces:** per-ticket plan files + `DECISIONS-NEEDED.md` at `.devflow/docs/design/\{slug\}/\{ts\}/`
+
+---
+
 ### Preflight checks
 
 Before authoring, verify:

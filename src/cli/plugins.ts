@@ -728,13 +728,15 @@ export const LEGACY_RULE_NAMES: string[] = [];
 /**
  * Canonical display order for workflow commands shown at end of init.
  * Mirrors the user-facing pipeline: research → explore → plan → implement →
- * code-review → resolve → self-review → bug-analysis → debug → release → audit-claude.
+ * code-review → resolve → self-review → bug-analysis → debug → release → audit-claude →
+ * dynamic pipeline (dynamic-tickets → dynamic-plan → dynamic-build → dynamic-wave → dynamic-profile).
  * Export so init.ts can import it rather than keeping a local copy.
  */
 export const WORKFLOW_ORDER: string[] = [
   '/research', '/explore', '/plan', '/implement',
   '/code-review', '/resolve', '/self-review', '/bug-analysis',
   '/debug', '/release', '/audit-claude',
+  '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-wave', '/dynamic-profile',
 ];
 
 /**
