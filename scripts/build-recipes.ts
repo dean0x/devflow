@@ -32,14 +32,9 @@ function isPartial(basename: string): boolean {
   return basename.startsWith("_");
 }
 
-function sourceToDestPath(sourcePath: string): string {
-  const basename = path.basename(sourcePath, ".mds");
-  return path.join(OUTPUT_DIR, `${basename}.md`);
-}
-
 async function compileRecipe(sourcePath: string): Promise<CompileOutcome> {
   const result = await compileFile(sourcePath);
-  const dest = sourceToDestPath(sourcePath);
+  const dest = path.join(OUTPUT_DIR, `${path.basename(sourcePath, ".mds")}.md`);
   fs.writeFileSync(dest, result.output, "utf-8");
   return {
     source: path.relative(ROOT, sourcePath),
@@ -97,16 +92,12 @@ async function main(): Promise<void> {
   const errors: string[] = [];
 
   for (const sourcePath of commands) {
-    const basename = path.basename(sourcePath);
     try {
       const outcome = await compileRecipe(sourcePath);
       outcomes.push(outcome);
 
-      const warnSuffix =
-        outcome.warnings.length > 0
-          ? ` (${outcome.warnings.length} warning(s))`
-          : "";
-      console.log(`  compiled: ${outcome.source} → ${outcome.dest}${warnSuffix}`);
+      const warnNote = outcome.warnings.length > 0 ? ` (${outcome.warnings.length} warning(s))` : "";
+      console.log(`  compiled: ${outcome.source} → ${outcome.dest}${warnNote}`);
 
       for (const w of outcome.warnings) {
         console.warn(`    WARNING: ${w}`);
@@ -114,7 +105,7 @@ async function main(): Promise<void> {
     } catch (err) {
       const formatted = formatMdsError(err, sourcePath);
       errors.push(formatted);
-      console.error(`  FAILED:   ${basename}`);
+      console.error(`  FAILED:   ${path.basename(sourcePath)}`);
       console.error(`    ${formatted}`);
     }
   }
