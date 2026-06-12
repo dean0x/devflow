@@ -1,0 +1,126 @@
+---
+description: Decision-preference profile distiller — mine past session transcripts across all projects to write ~/.devflow/preference-profile.md
+argument-hint: "[--dry-run]"
+---
+@import { authoring_preamble } from "./_preamble.mds"
+
+{authoring_preamble()}
+
+---
+
+## dynamic-profile — distill a decision-preference profile from past sessions
+
+This command spawns an agent (or a small set of parallel readers + a synthesizer) that reads past session history across ALL projects on this machine, finds the `AskUserQuestion` moments and the user's chosen answers, and writes a plain-prose preference profile to `~/.devflow/preference-profile.md`.
+
+The profile is then consumed by `/devflow:dynamic-plan` to pre-resolve design decisions matching established taste, so only genuinely new decisions reach the user.
+
+**This is a plain Agent spawn — not a Workflow.** No `Workflow` tool required. The agent does the reading and writing directly.
+
+---
+
+### Privacy note
+
+This command mines session transcripts across **all projects** on this machine — `~/.claude/projects/*/*.jsonl`, `~/.claude/history.jsonl`, and feedback memories. The resulting profile is then injected into planning prompts as context. This is a cross-project surface: patterns from one project's decisions may influence planning in another.
+
+Mitigation: the profile is plain prose that you review and edit before use. You can trim, redact, or rewrite any section. The profile is at `~/.devflow/preference-profile.md` — open it, read it, adjust it. It is never committed to any repo.
+
+---
+
+### Bounded reading — mandatory
+
+Session transcripts on a typical machine are gigabytes. **The agent MUST NOT full-read transcripts into context.** Instead:
+
+1. Use `rg` (ripgrep) or `grep` to search for `AskUserQuestion` occurrences across transcript files — extracting just the question text and the surrounding user response (a few lines each).
+2. Sample the results — take up to ~200 instances spread across projects and time; do not feed everything into context at once.
+3. Read `~/.claude/rules/` files (these are small) to supplement with explicitly stated preferences.
+4. Read existing feedback memory files (`~/.claude/projects/*/memory/*.md`) — these are small and already distilled.
+
+This grep-and-sample approach is both efficient and Iron-Rule-safe: the agent uses `rg`/`grep` as tools — no extractor or clustering logic is authored.
+
+---
+
+### When --dry-run is passed
+
+Print what the agent would do (a summary of which paths it would search, what it would write) and STOP — do not spawn the agent.
+
+---
+
+### Agent task
+
+Spawn a single Knowledge agent with this task:
+
+```
+You are distilling a decision-preference profile from past session history.
+
+BOUNDED READING — MANDATORY: transcripts are gigabytes; never full-read them.
+1. Run: rg -l "AskUserQuestion" ~/.claude/projects/ 2>/dev/null | head -50
+   to find transcript files that contain AskUserQuestion moments.
+2. For each found file, run: rg -A 5 "AskUserQuestion" <file> | head -200
+   to extract the question + nearby user response context. Sample broadly —
+   aim for ~150-200 instances spread across projects and time windows.
+3. Read ~/.claude/history.jsonl if it exists (rg "AskUserQuestion" ... similarly).
+4. Read all files in ~/.claude/rules/ (small — read fully).
+5. Read all *.md files in ~/.claude/projects/*/memory/ (small — read fully).
+
+From this evidence, identify the recurring patterns in how the user answers design
+questions. Look for preferences about:
+- Error handling style (Result types vs exceptions, etc.)
+- Fix-all-issues vs defer-and-tech-debt stance
+- Architectural tradeoffs (coupling vs performance, etc.)
+- Code review behavior (accept suggestions or push back)
+- Testing discipline
+- Security stance
+- Any other recurrent taste patterns with at least 3 examples
+
+Write ~/.devflow/preference-profile.md as plain prose:
+- ## Overview: 1 paragraph summary of the user's overall decision style
+- ## Preferences (one ## section per identified pattern):
+  - Pattern name
+  - Observed behavior (plain language, no quotes from transcripts)
+  - Confidence: high / medium / low (based on number of examples seen)
+  - Example context: describe a scenario where this preference applies
+- ## Uncertain / incomplete: patterns with only 1-2 examples, flagged for user review
+
+Keep the profile scannable and honest. Do not fabricate preferences with no evidence.
+If a section has low confidence, say so. The user will review and edit this file.
+
+After writing, return: { path: "~/.devflow/preference-profile.md", patternCount: N, lowConfidenceCount: N }.
+```
+
+Invoke the agent directly (not via a Workflow):
+
+```js
+// Spawn a single Knowledge agent — no Workflow tool needed
+const result = await agent(
+  `<the task above>`,
+  { agentType: "Knowledge" }
+);
+```
+
+After the agent completes, tell the user:
+- The profile was written to `~/.devflow/preference-profile.md`
+- How many patterns were found (and how many are low-confidence)
+- Prompt them to review and edit the file before running `/devflow:dynamic-plan`
+- Note: re-run this command any time to refresh the profile as new sessions accumulate
+
+---
+
+### Output
+
+After the agent returns, report:
+
+```
+Profile written to ~/.devflow/preference-profile.md
+Patterns found: {patternCount} ({lowConfidenceCount} low-confidence — review these)
+
+Next steps:
+1. Open ~/.devflow/preference-profile.md and review/edit the profile.
+2. Run /devflow:dynamic-plan — it will read the profile and auto-resolve decisions matching your taste.
+3. Re-run /devflow:dynamic-profile periodically to keep the profile fresh.
+```
+
+---
+
+### Maintenance note
+
+This command mines ALL projects' history on this machine. The bounded-reading discipline (grep/rg + sample — never full-read) is mandatory and must be preserved in every revision. The agent writes prose; no extraction or clustering algorithm is authored here. Per ADR-008 Iron Rule: the agent does the reading and summarizing — not a script we maintain.
