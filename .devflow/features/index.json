@@ -3,7 +3,7 @@
   "features": {
     "cli-rules": {
       "name": "Rules System CLI",
-      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry, autoCommit, DreamConfig, decisions-ledger-unify-v1, sync-devflow-gitignore-v3.",
+      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry, autoCommit, DreamConfig, decisions-ledger-unify-v1, sync-devflow-gitignore-v3, devflow-dynamic, build-recipes, shared/recipes.",
       "directories": [
         "src/cli/commands/",
         "src/cli/utils/",
@@ -23,12 +23,13 @@
         "src/cli/utils/dream-config.ts",
         "src/cli/utils/migrations.ts",
         "scripts/build-plugins.ts",
+        "scripts/build-recipes.ts",
         "shared/rules/security.md",
         "shared/rules/engineering.md",
         "shared/rules/quality.md",
         "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-06-11T20:00:04.520Z",
+      "lastUpdated": "2026-06-12T08:53:49.520Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
