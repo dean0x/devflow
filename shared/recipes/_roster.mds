@@ -1,0 +1,31 @@
+@define agent_roster():
+### Confirmed agent roster
+
+The following agentType values are valid. Model tiers are shown for reference — OMIT `opts.model` in all `agent()` calls; each agent's frontmatter carries its own tier.
+
+| agentType | Model tier | Role |
+|-----------|-----------|------|
+| Coder | sonnet | Writes all code and all fixes — the ONLY agent that writes code |
+| Validator | haiku | Build / typecheck / lint / test — fast correctness gate |
+| Simplifier | sonnet | Reduces complexity, removes duplication, improves readability |
+| Scrutinizer | opus | 9-pillar self-review — deep structural analysis |
+| Evaluator | opus | Plan-fidelity / alignment — "was the plan implemented correctly?" |
+| Tester | sonnet | Scenario-based acceptance tests against acceptance criteria |
+| Reviewer | opus | Focus-parameterized code review — spawn ONE agent() per focus area |
+| Git | haiku | Git operations — branches, commits, merges, worktree management |
+| Synthesizer | haiku | Summarizes and aggregates multi-agent outputs |
+| Knowledge | sonnet | Codebase exploration — feature knowledge base creation/update |
+| Designer | opus | Architecture and design — plans, gap analysis, design review |
+@end
+
+@define agent_caveats():
+### Agent caveats
+
+- **Resolver is deliberately NOT used for writing fixes.** A Coder writes every fix. Finding-verification uses adversarial Reviewer-style passes (§6.3 of design doc). Resolver's risk-assessment / tech-debt logic is folded into the Coder + post-code pipeline + escalation doctrine.
+- **Always omit `opts.model` with `agentType`.** Each agent honors its own frontmatter model tier; overriding it defeats the per-agent specialization.
+- **Reviewers are focus-parameterized.** Each focus is a SEPARATE `agent()` call with `agentType: "Reviewer"` and the focus baked into the prompt. Do NOT batch multiple focuses into one Reviewer call — that defeats parallel specialization.
+- **Do not depend on agents enumerating their own skills.** Skills are loaded (spike F5 confirmed) but self-reporting is imperfect. Write agent prompts that give the agent full context directly.
+@end
+
+@export agent_roster
+@export agent_caveats

@@ -1,0 +1,78 @@
+@define authoring_preamble():
+## Your task: author a Claude Code dynamic Workflow and run it
+
+You (the main model) will construct a Claude Code dynamic Workflow script inline and execute it using the `Workflow` tool. You do NOT write a static file — you author the script body right here, then pass it to the Workflow tool.
+
+### Workflow runtime contract
+
+A workflow script MUST begin with a pure-literal export:
+
+```js
+export const meta = {
+  name: "devflow-dynamic-...",   // flat hyphenated namespace — always prefix devflow-dynamic-
+  description: "...",
+  phases: ["..."]
+};
+```
+
+The script body uses ONLY these hooks — nothing else:
+
+```js
+agent(prompt, opts)      // spawn a sub-agent; opts.agentType resolves devflow installed agents
+parallel(thunks)         // barrier — awaits all; concurrency capped ~min(16, cores-2)
+pipeline(items, ...fns)  // stream items through stages (no barrier between stages)
+phase(name, fn)          // named phase boundary for resume / progress
+log(msg)                 // structured log
+workflow(fn)             // nest one level
+```
+
+Globals available in the script body: `args`, `budget`, `workflow()`.
+
+**The script body has NO filesystem / Node.js / `gh` CLI access.** All file reading, issue fetching, git operations, and shell commands happen INSIDE the agents the script spawns — never in the script body itself. There is no `fs`, no `exec`, no `fetch` in scope.
+
+### Agent reuse via agentType
+
+Spawn devflow agents with:
+
+```js
+agent("your prompt here", { agentType: "Coder" })
+```
+
+Valid `agentType` values: Coder, Validator, Simplifier, Scrutinizer, Evaluator, Tester, Reviewer, Git, Synthesizer, Knowledge, Designer.
+
+**OMIT `opts.model` whenever `agentType` is set.** The agent frontmatter carries its own model tier (Coder→sonnet, Validator→haiku, Reviewer→opus, etc.) and that tier is honored automatically. Passing `opts.model` overrides it — always a mistake.
+
+Do not write logic that depends on an agent enumerating its own skills. Skills are loaded (confirmed by spike F5) but agents do not reliably self-report them.
+
+### --dry-run affordance
+
+If the user's input includes `--dry-run`, PRINT the authored workflow script (inside a fenced code block) for inspection, then STOP — do not invoke the Workflow tool. This lets the user review the script before execution.
+
+### Budget scaling
+
+The `budget` global governs depth. Scale reviewer roster, review cycle count, and verification votes to `budget`. A low-budget run uses a leaner roster and fewer cycles; a high-budget run expands both. Never hardcode a roster size — let budget guide it.
+
+### DECISIONS_CONTEXT — obtain BEFORE authoring
+
+Before you author the workflow script, run the decisions-index tool to load the DECISIONS_CONTEXT for the current worktree:
+
+```bash
+node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "<current-worktree-path>"
+```
+
+The script body cannot run this — you (the main model) run it before authoring. Then inject the relevant DECISIONS_CONTEXT into agent prompts using the `devflow:apply-decisions` consumption algorithm (scan index → Read relevant entries → cite verbatim IDs in agent prompts). Only agents that need architectural context (Coder, Evaluator, Reviewer, Scrutinizer) need DECISIONS_CONTEXT injected; lightweight agents (Validator, Simplifier) do not.
+
+### Handoff convention for sequential Coders within a ticket
+
+When a ticket requires multiple sequential Coder phases, each Coder writes `.devflow/docs/handoff-\{branch_slug\}.md` (branch-scoped to prevent concurrent session clobber). The next Coder reads it via HANDOFF_FILE input. PRIOR_PHASE_SUMMARY is the compact in-context form; the handoff file is the durable form that survives context compaction. Always read the handoff file directly — code is authoritative, summaries are supplementary.
+
+### IRON RULE (ADR-008: LLM-vs-plumbing)
+
+**Author ZERO deterministic feature code.** No parsers, no schedulers, no topological-sort, no dependency-graph helpers, no cycle-counters, no confidence formulas. ALL issue reading, dependency reasoning, scheduling decisions, and cycle counts are LLM judgment at runtime, performed by the workflow's agents. The recipe is instructions. The workflow script Claude authors IS the runtime logic — keep it free of hand-coded feature algorithms.
+
+### SAFETY BANNER
+
+**NEVER merge to main or master** — the workflow merges to an integration branch only. The user merges to main themselves after reviewing. This rule is absolute and must appear as an `engine_invariants()` note in every workflow that touches git.
+@end
+
+@export authoring_preamble

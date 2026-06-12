@@ -1,0 +1,179 @@
+@define gate1_postcode():
+### GATE 1 — Post-code pipeline (fires after EVERY code mutation)
+
+ORDER IS LOAD-BEARING. Run exactly in this sequence:
+
+1. **Validator** — build / typecheck / lint / test
+   - FAIL → Coder fix (max 2 retries) → re-Validator
+   - If still FAIL after 2 retries → escalate (do not loop endlessly)
+2. **Simplifier** — reduce complexity, remove duplication
+3. **Scrutinizer** — 9-pillar self-review (deep structural analysis)
+   - If Scrutinizer changed code → re-Validator (verify the Scrutinizer's edits compile/pass)
+
+**Gate 1 contains NO Evaluator and NO Tester.** Those are Gate 2 only.
+
+Depth scales to change size + budget: a trivial one-line fix warrants a lighter pass; a multi-file refactor warrants the full depth. But Gate 1 is **never skipped**, regardless of change size.
+
+Gate 1 runs after: initial Coder implementation, every review-fix, every alignment-fix (Gate 2 demanded change), every QA-fix. It is the invariant that all written code must pass.
+@end
+
+@define gate2_acceptance():
+### GATE 2 — Acceptance gate (per ticket, plan-scoped — fires ONCE at implementation acceptance)
+
+Gate 2 fires ONCE: after the implement-bundle and BEFORE the review loop. It does NOT re-run after review-fixes (those get Gate 1 only).
+
+Gate 2 inputs are produced by `/devflow:dynamic-plan`'s plan-challenge step — the acceptance criteria and test plan written for the Evaluator and Tester.
+
+**Evaluator panel** (only if a plan exists):
+- Run `evaluator_panel()` — see that block for the panel composition
+- If any critical lens returns MISALIGNED: Coder fix (max 2 retries) → Gate 1 → re-evaluate (Gate 2 loops within itself on its own demanded change)
+
+**Tester** (only if acceptance criteria exist):
+- Scenario-based acceptance tests covering functionality, API contracts, performance
+- FAIL → Coder fix (max 2 retries) → Gate 1 → re-test
+
+**When Gate 2 inputs are absent:**
+- No plan → skip Evaluator panel silently (note in output: "Gate 2 Evaluator skipped — no plan available")
+- No acceptance criteria → skip Tester silently (note in output: "Gate 2 Tester skipped — no criteria available")
+- Build proceeds Gate-1-only. Never refuse to build; never force-generate fake criteria. Trust the user.
+@end
+
+@define evaluator_panel():
+### Evaluator panel (§12 — diverse-lens verification)
+
+Run 2–3 Evaluator agents with DISTINCT lenses. Diversity not redundancy — each agent asks a different question:
+
+1. **Acceptance-criteria evaluator** — "Does the implementation satisfy each numbered acceptance criterion, INCLUDING the negative criteria (what it must NOT do)?"
+2. **Scope / intent-drift evaluator** — "Did the Coder smuggle in unplanned changes, deviate from the plan's intent, or introduce anti-features?"
+3. **Cross-ticket-consistency evaluator** — (wave-only; skip for single-ticket runs) "Does this ticket honor the API contracts and invariants that other wave tickets depend on?"
+
+Gate = **all-critical-must-pass**: a single critical FAIL from any lens blocks acceptance.
+
+Keep the panel to 2–3 agents. Do not spawn redundant agents asking the same question — that is cost with no diversity benefit.
+@end
+
+@define implement_bundle():
+### Implement bundle
+
+The standard implementation unit for one ticket. Run in order:
+
+```
+Coder(agentType:"Coder", prompt: full task + plan + DECISIONS_CONTEXT + handoff if sequential)
+  → gate1_postcode()
+  → gate2_acceptance()   ← Gate 2 runs HERE — before the review loop, not after
+```
+
+The Coder prompt must include: task description, implementation plan (if one exists), relevant DECISIONS_CONTEXT (from decisions-index.cjs), and any PRIOR_PHASE_SUMMARY / HANDOFF_FILE for sequential multi-phase tickets.
+
+Gate 2 runs at implementation acceptance — this matches devflow's deliberate placement: "evaluation is part of implementation acceptance, not post-review" (§6.1).
+@end
+
+@define review_loop():
+### Review → verify → fix loop (bounded)
+
+Cycle count = LLM judgment, not a formula. Heuristic: files changed ≤ ~20 → 2 cycles; > ~20 → 3 cycles. Scale to budget. Always early-exit on a clean review (no surviving findings).
+
+For each cycle:
+
+**Step 1 — Spawn reviewers in parallel (one agent() per focus)**
+
+Core reviewers (always, 8 total): security, architecture, performance, complexity, consistency, regression, testing, reliability
+
+Conditional by file type detected in the diff (add these when relevant):
+- `.ts` / `.tsx` → typescript
+- `.tsx` / `.jsx` → react, accessibility, ui-design
+- `.tsx` / `.jsx` / `.css` / `.scss` → ui-design (deduplicate with above)
+- `.go` → go
+- `.java` → java
+- `.py` → python
+- `.rs` → rust
+- database schema / query files → database
+- `package.json` / `go.mod` / `Cargo.toml` / etc. → dependencies
+- Markdown / doc files → documentation
+
+Each Reviewer gets `agentType: "Reviewer"` with its focus baked into the prompt. Total: 8–19 reviewers per cycle.
+
+**Step 2 — Adversarial finding verification**
+
+Before any fix, verify findings with perspective-diverse lenses. Run 2–3 agents asking:
+- "Does this finding actually reproduce given the current code?"
+- "Is this a real issue or a false positive in context?"
+- "Does the cited rule/principle actually apply here?"
+
+Majority-survives: a finding needs >50% of verification lenses to confirm it. Strip unconfirmed findings.
+
+**Step 3 — Early exit or fix**
+
+If no surviving findings: break (early exit — do not run unnecessary cycles).
+
+If survivors remain: Coder fixes them (batched per concurrency doctrine — see `concurrency_doctrine()`). Then → Gate 1 ONLY. Review-fixes do NOT get Gate 2 (no Evaluator, no Tester).
+@end
+
+@define concurrency_doctrine():
+### Coder concurrency doctrine (§7.1 — LOAD-BEARING)
+
+**DEFAULT: SEQUENTIAL.** Parallelism is the rare, tightly-gated exception.
+
+- **Same task → sequential Coders with handoff. NEVER parallel.** Sequential Coders passing a handoff artifact produce far more coherent code than parallel Coders dividing one task. Two Coders splitting one task is a coherence hazard, not a speedup.
+- **Different tasks MAY parallelize, but ONLY when ALL THREE bars hold:**
+  1. Completely different areas of the code — different files/modules, no imports between them, no shared contracts/interfaces
+  2. Different feature logic — they do not touch the same feature's logic or cooperate on a single outcome
+  3. Different goals — they are not two steps converging on the same end state
+- **Default-sequential even across multiple tasks.** "They look independent" is NOT sufficient. If two tasks are somewhat related — they touch the same feature, one's completion makes the other meaningful, or they march toward a shared goal — run them sequentially.
+- **When in doubt, sequential.** Parallel must be affirmatively justified against all three bars. The cost of a wrong parallel call (incoherent merge, contended edits) dwarfs the wall-clock saved.
+
+This applies to both: multi-Coder work on a single ticket AND multi-ticket scheduling in a wave.
+@end
+
+@define engine_output_schema():
+### Engine output schema
+
+Each ticket engine run returns a structured result. The Synthesizer or the wave loop reads this to decide next steps.
+
+```json
+{
+  "ticket": "string — ticket ID or description",
+  "branch": "string — branch name for this ticket",
+  "verdict": "PASS | FAIL | ESCALATED",
+  "cyclesRun": "number — review cycles completed",
+  "survivingFindings": [
+    {
+      "focus": "string — reviewer focus area",
+      "finding": "string — description",
+      "severity": "critical | high | medium | low"
+    }
+  ],
+  "escalations": [
+    {
+      "type": "merge-conflict | gate2-fail | validation-exhausted | ambiguous-resolution",
+      "description": "string"
+    }
+  ],
+  "filesChanged": ["string — list of modified file paths"],
+  "gate2": {
+    "evaluatorVerdict": "PASS | FAIL | SKIPPED",
+    "testerVerdict": "PASS | FAIL | SKIPPED",
+    "skipReasons": ["string — why a gate was skipped, if applicable"]
+  }
+}
+```
+@end
+
+@define engine_invariants():
+### Engine invariants (non-negotiable)
+
+1. **Code is written ONLY by Coders.** No other agent type writes code — not Resolver, not Reviewer, not Evaluator.
+2. **Findings are verified before any fix is written.** The adversarial verification step is not optional; unverified findings are not passed to the Coder.
+3. **All written code passes Gate 1.** No code merge, commit, or handoff before Validator + Simplifier + Scrutinizer (in that order).
+4. **Gate 2 runs once, at implementation acceptance.** It does not re-run after review-fixes.
+5. **NEVER auto-merge to main or master.** All merges target the integration branch. The user merges to main themselves.
+@end
+
+@export gate1_postcode
+@export gate2_acceptance
+@export evaluator_panel
+@export implement_bundle
+@export review_loop
+@export concurrency_doctrine
+@export engine_output_schema
+@export engine_invariants

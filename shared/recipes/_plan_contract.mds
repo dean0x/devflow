@@ -1,0 +1,51 @@
+@define acceptance_criteria_contract():
+### Acceptance criteria + test plan contract
+
+This is the shared shape produced by `/devflow:dynamic-plan`'s plan-challenge step (§5.1) and consumed by `/devflow:dynamic-build`'s Gate 2 (§7.2). Single source of truth — no drift between planning and build.
+
+#### What the plan-challenge step MUST produce (per ticket)
+
+A structured document (written as part of the per-ticket plan) containing:
+
+**Acceptance criteria (numbered, for the Evaluator)**
+
+Criteria must cover:
+- Functionality: what the feature does, including all stated use cases
+- API contracts: exact signatures, return types, error codes, preconditions, postconditions
+- Performance: explicit thresholds (e.g., "p99 latency < 200ms under 100 RPS") or a stated "no perf requirement"
+
+Each criterion is either:
+- POSITIVE: "The system MUST do X when Y" — the implementation must demonstrate this
+- NEGATIVE: "The system MUST NOT do Z" — the implementation must not exhibit this behavior
+
+At least one negative criterion is required per ticket (e.g., "must not break existing behavior X", "must not expose Y to unauthenticated callers", "must not regress test suite Z").
+
+**Test plan (structured, for the Tester)**
+
+For each acceptance criterion:
+- Test scenario: a concrete, runnable scenario description
+- Setup: preconditions and test data needed
+- Expected outcome: the specific observable result that confirms the criterion
+- Verification method: unit test / integration test / manual step / load test
+
+The test plan must be executable by the Tester agent without further clarification — it is a complete specification, not notes.
+
+#### Consumption by Gate 2
+
+The Evaluator panel receives: the per-ticket plan + the numbered acceptance criteria (positive and negative).
+
+The Tester receives: the test plan (all scenarios and expected outcomes).
+
+If either document is absent (no plan from `/devflow:dynamic-plan`, or criteria not written), the corresponding Gate 2 agent is skipped silently — build proceeds Gate-1-only. Never fabricate criteria.
+
+#### Quality bar
+
+A criterion is NOT acceptable if it is:
+- Vague: "the feature should work correctly" — no observable outcome
+- Implementation-coupled: "the function must call X" — tests behavior, not implementation
+- Untestable: no concrete way to verify pass/fail
+
+Challenge every criterion against these three disqualifiers before accepting the plan.
+@end
+
+@export acceptance_criteria_contract
