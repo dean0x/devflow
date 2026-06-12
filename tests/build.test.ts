@@ -4,6 +4,8 @@ import * as path from 'path';
 import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } from '../src/cli/plugins.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
+const MARKETPLACE_PATH = path.join(ROOT, '.claude-plugin', 'marketplace.json');
+const RECIPES_DIR = path.join(ROOT, 'shared', 'recipes');
 
 describe('plugin manifest validation', () => {
   it('every plugin in DEVFLOW_PLUGINS has a matching plugins/ directory', async () => {
@@ -115,6 +117,119 @@ describe('no orphaned declarations', () => {
     for (const file of agentFiles) {
       const name = path.basename(file, '.md');
       expect(referencedAgents.has(name), `shared/agents/${file} is not referenced by any plugin`).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// marketplace.json ↔ DEVFLOW_PLUGINS name parity (applies ADR-014)
+//
+// Guards the whole project: every plugin in src/cli/plugins.ts must have a
+// corresponding entry in .claude-plugin/marketplace.json (and vice-versa).
+// This is the test that would have caught the missing devflow-dynamic entry
+// before it shipped silently (regression from PR #242 review).
+// ---------------------------------------------------------------------------
+
+describe('marketplace.json ↔ DEVFLOW_PLUGINS parity', () => {
+  it('every plugin in DEVFLOW_PLUGINS has a marketplace.json entry', async () => {
+    const raw = await fs.readFile(MARKETPLACE_PATH, 'utf-8');
+    const marketplace = JSON.parse(raw) as { plugins: Array<{ name: string }> };
+    const marketplaceNames = new Set(marketplace.plugins.map(p => p.name));
+
+    for (const plugin of DEVFLOW_PLUGINS) {
+      expect(
+        marketplaceNames.has(plugin.name),
+        `Plugin '${plugin.name}' is in DEVFLOW_PLUGINS but missing from marketplace.json — add an entry to .claude-plugin/marketplace.json`,
+      ).toBe(true);
+    }
+  });
+
+  it('every marketplace.json entry has a corresponding DEVFLOW_PLUGINS registration', async () => {
+    const raw = await fs.readFile(MARKETPLACE_PATH, 'utf-8');
+    const marketplace = JSON.parse(raw) as { plugins: Array<{ name: string }> };
+    const registryNames = new Set(DEVFLOW_PLUGINS.map(p => p.name));
+
+    for (const entry of marketplace.plugins) {
+      expect(
+        registryNames.has(entry.name),
+        `marketplace.json entry '${entry.name}' has no corresponding plugin in DEVFLOW_PLUGINS (src/cli/plugins.ts)`,
+      ).toBe(true);
+    }
+  });
+
+  it('marketplace.json plugin count matches DEVFLOW_PLUGINS count', async () => {
+    const raw = await fs.readFile(MARKETPLACE_PATH, 'utf-8');
+    const marketplace = JSON.parse(raw) as { plugins: Array<{ name: string }> };
+    expect(marketplace.plugins.length).toBe(DEVFLOW_PLUGINS.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// devflow-dynamic declared commands ↔ shared/recipes/ source parity
+//
+// Ties the 5 command names declared in DEVFLOW_PLUGINS to the 5 non-partial
+// .mds recipe source files in shared/recipes/. Deriving from source (not from
+// gitignored compiled output) means this test passes even on a clean checkout
+// before build:recipes has run — which is the only reliable contract (applies ADR-019).
+//
+// A recipe rename (e.g. dynamic-wave.mds → dynamic-orchestrate.mds) without
+// updating plugins.ts would fail this test, surfacing the drift before it ships.
+// ---------------------------------------------------------------------------
+
+describe('devflow-dynamic declared commands ↔ recipe sources parity', () => {
+  it('declared command names match non-partial .mds files in shared/recipes/ (1:1)', async () => {
+    const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
+    expect(dynPlugin, 'devflow-dynamic must be registered in DEVFLOW_PLUGINS').toBeDefined();
+
+    // Derive expected command names from shared/recipes/ source files.
+    // Non-partial = file does NOT start with `_`. Strip .mds suffix and prepend /.
+    const entries = await fs.readdir(RECIPES_DIR, { withFileTypes: true });
+    const commandSourceNames = entries
+      .filter(e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'))
+      .map(e => '/' + path.basename(e.name, '.mds'))
+      .sort();
+
+    const declaredCommands = [...dynPlugin!.commands].sort();
+
+    expect(
+      declaredCommands,
+      `devflow-dynamic declared commands must match non-partial recipe sources 1:1.\n` +
+      `  declared:  ${declaredCommands.join(', ')}\n` +
+      `  from src:  ${commandSourceNames.join(', ')}`,
+    ).toEqual(commandSourceNames);
+  });
+
+  it('every declared devflow-dynamic command has a corresponding .mds source file', async () => {
+    const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
+    expect(dynPlugin).toBeDefined();
+
+    for (const cmd of dynPlugin!.commands) {
+      // Strip leading / to get the basename, append .mds
+      const sourceName = cmd.replace(/^\//, '') + '.mds';
+      const sourcePath = path.join(RECIPES_DIR, sourceName);
+      await expect(
+        fs.access(sourcePath),
+        `Command '${cmd}' declared in DEVFLOW_PLUGINS has no recipe source at shared/recipes/${sourceName}`,
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('every non-partial .mds in shared/recipes/ is declared as a devflow-dynamic command', async () => {
+    const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
+    expect(dynPlugin).toBeDefined();
+
+    const declaredSet = new Set(dynPlugin!.commands);
+    const entries = await fs.readdir(RECIPES_DIR, { withFileTypes: true });
+    const commandSources = entries.filter(
+      e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'),
+    );
+
+    for (const src of commandSources) {
+      const expectedCmd = '/' + path.basename(src.name, '.mds');
+      expect(
+        declaredSet.has(expectedCmd),
+        `Recipe source '${src.name}' is not declared as a command in DEVFLOW_PLUGINS. Add '${expectedCmd}' to devflow-dynamic.commands in src/cli/plugins.ts`,
+      ).toBe(true);
     }
   });
 });

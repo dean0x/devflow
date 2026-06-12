@@ -44,7 +44,7 @@ Done. npm package, git tag, and GitHub release are all created automatically.
 validate version format
   → check tag doesn't exist
   → check [Unreleased] section exists
-  → bump version in 24 files (package.json, plugin.json x21, marketplace.json, CHANGELOG.md)
+  → bump version in 25 files (package.json, plugin.json x22, marketplace.json, CHANGELOG.md)
   → sync package-lock.json
   → build
   → test
@@ -108,7 +108,7 @@ Items marked with **[auto]** are handled by CI:
 - [ ] CHANGELOG.md `[Unreleased]` section has content
 - [x] **[auto]** Version bumped in package.json
 - [x] **[auto]** package-lock.json synced
-- [x] **[auto]** All 21 plugin.json files updated
+- [x] **[auto]** All 22 plugin.json files updated
 - [x] **[auto]** marketplace.json updated
 - [x] **[auto]** CHANGELOG.md dated and linked
 - [x] **[auto]** Build succeeds

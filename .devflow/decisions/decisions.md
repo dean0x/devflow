@@ -1,4 +1,4 @@
-<!-- TL;DR: 17 decisions. Key: ADR-014, ADR-015, ADR-016, ADR-017, ADR-018 -->
+<!-- TL;DR: 19 decisions. Key: ADR-016, ADR-017, ADR-018, ADR-019, ADR-020 -->
 # Architectural Decisions
 
 Append-only. Status changes allowed; deletions prohibited.
@@ -156,3 +156,21 @@ Append-only. Status changes allowed; deletions prohibited.
 - **Decision**: drop Guard B entirely from scripts/hooks/preamble so first-word keyword prompts dispatch regardless of a trailing question mark
 - **Consequences**: users routinely phrase command-style prompts as questions
 - **Source**: self-learning:obs_preamble3
+
+## ADR-019: Dynamic workflow plugin ships as pure-instruction command recipes — markdown that teaches the model to author and run a dynamic workflow at runtime, with ZERO authored orchestration code (no parser, scheduler, topo-sort, or formula), now or ever
+
+- **Date**: 2026-06-12
+- **Status**: Accepted
+- **Context**: the devflow-dynamic plugin (tickets->plan->build delivery pipeline) needed a build/runtime architecture
+- **Decision**: ship the dynamic commands as pure-instruction command recipes — markdown that instructs the main model how to author and run a Claude Code dynamic workflow at runtime — carrying ZERO deterministic code that devflow authors (no parser, scheduler, topo-sort, FP-ratio/cycle formulas)
+- **Consequences**: a pure-instruction recipe survives the moving dynamic-workflow API, adapts to arbitrary input, and distributes through the command channel devflow already ships, while any authored parser/formula becomes a brittle deterministic dependency the user categorically rejected (not now, not ever)
+- **Source**: self-learning:obs_pfyb8b
+
+## ADR-020: In the dynamic-build pipeline, every Coder code mutation runs a post-code quality pipeline in fixed order Validate->Simplify->Scrutinize, the Evaluator runs ONLY when there is an implementation plan (not after fixes), and the Resolver is split — a Coder writes fixes while adversarial verification strips false positives before any fix is attempted
+
+- **Date**: 2026-06-12
+- **Status**: Accepted
+- **Context**: defining the agent topology for the /devflow:dynamic-build recipe (a fusion of /implement + /code-review + /resolve)
+- **Decision**: (1) the Simplifier->Scrutinizer->Evaluator order is a load-bearing, non-negotiable invariant
+- **Consequences**: the Evaluators job is to confirm the PLAN was implemented properly, so it is meaningless without a plan and wasteful on every fix
+- **Source**: self-learning:obs_10svdf

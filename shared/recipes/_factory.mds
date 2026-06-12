@@ -1,0 +1,216 @@
+@define factory_shape():
+### Ticket-factory pipeline shape (generalized)
+
+This is the standard shape for converting an initiative or spec into a reviewed, amended, self-consistent set of tickets plus a tracking issue. It generalises the `l3-ticket-factory` reference (`draft → [2-lens review in parallel] → revise → whole-set critic → per-ticket amend → tracking-issue`).
+
+The candidate ticket slate is **proposed by the model** (you, reading the initiative/spec), then **user-editable** before the pipeline runs. Never hardcode ticket identities — let the user confirm the slate first.
+
+---
+
+#### Stage 1 — Draft (one agent per ticket, parallelisable)
+
+Spawn one Designer or Synthesizer agent per candidate ticket:
+
+```js
+// Parallel per-ticket drafters — each is fully independent at draft time
+const drafts = await parallel(candidates.map(c => () =>
+  agent(`Draft ticket for: ${c.title}\nInitiative: ${initiative}\n${constraints}`, {
+    agentType: "Designer",
+    schema: DRAFT_SCHEMA
+  })
+));
+```
+
+DRAFT_SCHEMA (in fenced block — braces are raw):
+
+```json
+{
+  "type": "object",
+  "required": ["title", "summary", "wave", "dependsOn", "scope", "acceptanceCriteria", "openQuestions"],
+  "properties": {
+    "title":             { "type": "string" },
+    "summary":           { "type": "string" },
+    "wave":              { "type": "number" },
+    "dependsOn":         { "type": "array", "items": { "type": "string" } },
+    "scope":             { "type": "object",
+                           "properties": { "in": { "type": "array", "items": { "type": "string" } },
+                                           "out": { "type": "array", "items": { "type": "string" } } } },
+    "acceptanceCriteria":{ "type": "array", "items": { "type": "string" } },
+    "openQuestions":     { "type": "array", "items": { "type": "string" } }
+  }
+}
+```
+
+---
+
+#### Stage 2 — Two-lens review (parallel per ticket)
+
+For each draft, run TWO independent Reviewer agents **in parallel** — one per lens:
+
+**Lens A — Planner-readiness (cold read):** Could a planner build from this ticket alone, with no other context? Hunt: missing information; untestable or missing negative acceptance criteria; ambiguous constraints; scope holes (things the feature obviously needs that neither In nor Out mentions); undefined terms a cold reader cannot resolve. Severity: critical = planner would be blocked or misled; major = planner would guess; minor = polish.
+
+**Lens B — Accuracy / scope-discipline audit:** Every claim is sourced from the initiative or spec. No smuggled anti-features (scope items the initiative explicitly excludes). Constraints are honored. Dependency placeholders are consistent with the candidate slate. Severity: critical = invented fact / anti-feature / leak; major = unsourced claim or stance contradiction; minor = citation polish.
+
+```js
+// Two reviewers per ticket, parallel across both lens and all tickets
+const reviews = await parallel(drafts.map((draft, i) => () =>
+  parallel([
+    () => agent(`Planner-readiness cold read of ticket: ${JSON.stringify(draft)}`, {
+      agentType: "Reviewer",
+      schema: REVIEW_SCHEMA
+    }),
+    () => agent(`Accuracy/scope-discipline audit of ticket: ${JSON.stringify(draft)}`, {
+      agentType: "Reviewer",
+      schema: REVIEW_SCHEMA
+    }),
+  ])
+));
+```
+
+REVIEW_SCHEMA (in fenced block — braces are raw):
+
+```json
+{
+  "type": "object",
+  "required": ["verdict", "findings"],
+  "properties": {
+    "verdict":  { "type": "string", "enum": ["ready", "needs-work"] },
+    "findings": { "type": "array", "items": {
+      "type": "object",
+      "required": ["severity", "issue", "suggestion"],
+      "properties": {
+        "severity":   { "type": "string", "enum": ["critical", "major", "minor"] },
+        "issue":      { "type": "string" },
+        "suggestion": { "type": "string" }
+      }
+    }}
+  }
+}
+```
+
+---
+
+#### Stage 3 — Revise (one agent per ticket, per review findings)
+
+For each ticket, spawn one Synthesizer or Designer agent to apply review findings:
+
+```js
+// Sequential per ticket (shared file state); parallelisable across tickets only if separate files
+const revised = await parallel(drafts.map((draft, i) => () =>
+  agent(`Revise ticket per review findings. Fix all critical + major findings; apply minor only where they clarify.
+Ticket: ${JSON.stringify(draft)}
+Reviews: ${JSON.stringify(reviews[i])}
+Rules: if a finding asks for information that does not exist in the source initiative, add it to Open Questions — never invent. If a finding contradicts the stated initiative scope, the initiative wins; note the decline.`, {
+    agentType: "Synthesizer",
+    schema: REVISE_SCHEMA
+  })
+));
+```
+
+REVISE_SCHEMA (in fenced block — braces are raw):
+
+```json
+{
+  "type": "object",
+  "required": ["title", "changesMade", "remainingConcerns"],
+  "properties": {
+    "title":            { "type": "string" },
+    "changesMade":      { "type": "array", "items": { "type": "string" } },
+    "remainingConcerns":{ "type": "array", "items": { "type": "string" } }
+  }
+}
+```
+
+---
+
+#### Stage 4 — Whole-set cross-critic (single agent, sees all revised tickets)
+
+One Designer agent reviews the FULL revised set for set-level issues — not individual prose quality:
+
+1. **Coverage:** does the union of tickets cover every item the initiative mandates? Anything the initiative mandates that no ticket owns?
+2. **Overlaps / contradictions:** same responsibility claimed by two tickets; contradictory constraints between tickets; inconsistent terminology for the same concept.
+3. **Dependency graph:** placeholders used consistently; wave assignment matches stated dependencies; anything that should be a dependency but isn't declared.
+4. **Acceptance-criteria coherence:** no criterion in one ticket contradicts a criterion in another.
+
+```js
+const critic = await agent(`Whole-set completeness & coherence audit.
+Revised tickets: ${JSON.stringify(revised)}
+Initiative: ${initiative}
+Audit: coverage · overlaps/contradictions · dependency graph · acceptance-criteria coherence.
+Return: setVerdict + perTicketAmendments + trackingGuidance.`, {
+  agentType: "Designer",
+  schema: CRITIC_SCHEMA
+});
+```
+
+CRITIC_SCHEMA (in fenced block — braces are raw):
+
+```json
+{
+  "type": "object",
+  "required": ["setVerdict", "perTicketAmendments", "trackingGuidance"],
+  "properties": {
+    "setVerdict": { "type": "string" },
+    "perTicketAmendments": { "type": "array", "items": {
+      "type": "object",
+      "required": ["title", "amendments"],
+      "properties": {
+        "title":      { "type": "string" },
+        "amendments": { "type": "array", "items": { "type": "string" } }
+      }
+    }},
+    "trackingGuidance": { "type": "string" }
+  }
+}
+```
+
+---
+
+#### Stage 5 — Per-ticket amend (parallel, only tickets with amendments)
+
+Apply cross-set amendments to the tickets that need them:
+
+```js
+const toAmend = (critic.perTicketAmendments || []).filter(a => a.amendments.length > 0);
+if (toAmend.length) {
+  await parallel(toAmend.map(a => () =>
+    agent(`Apply cross-set amendments to ticket "${a.title}":
+Amendments: ${JSON.stringify(a.amendments)}
+Rules: same as revise — never invent; unresolvable items go to Open Questions; initiative scope wins over any amendment that contradicts it.`, {
+      agentType: "Synthesizer"
+    })
+  ));
+}
+```
+
+---
+
+#### Stage 6 — Assemble tracking issue
+
+One Synthesizer agent writes the tracking-issue document from the final ticket set + critic guidance:
+
+```js
+const tracker = await agent(`Write a tracking-issue document for the initiative.
+Guidance from cross-set critic: ${JSON.stringify(critic.trackingGuidance)}
+Final tickets: ${JSON.stringify(revised)}
+Structure: initiative context (1–2 paragraphs) + wave-structured execution checklist + ticket index (one line per ticket, user-facing) + explicitly-excluded items (decisions, not oversights) + invariants that bind every ticket.
+Output: write to the artifact path and return { path, title }.`, {
+  agentType: "Synthesizer",
+  schema: { type: "object", required: ["path", "title"],
+    properties: { path: { type: "string" }, title: { type: "string" } } }
+});
+```
+
+---
+
+#### Usage notes for commands that import this partial
+
+- The `candidates` array is **what the model proposed + user confirmed** — never hardcoded.
+- The `initiative` variable is the raw user input (a description, a spec doc path, or inline text) — read it and distill before passing to agents.
+- The `constraints` variable is optional: any cross-cutting rules (naming discipline, scope filters, authority order) the user supplied.
+- Emit artifact files using the `ticket_body_template()` shape (from `_ticket_template.mds`) for each ticket — write inside agents, since the script body has no filesystem access.
+- Tracking-issue doc goes to `.devflow/docs/tickets/\{slug\}/\{ts\}/tracking-issue.md` (agents do the writing).
+- For large initiatives (more than ~8 tickets), chunk the `parallel(map())` fan-outs into batches (e.g. `for` loop over slices, `await`-ing each batch) so agent concurrency stays bounded and provider rate limits are respected.
+@end
+
+@export factory_shape

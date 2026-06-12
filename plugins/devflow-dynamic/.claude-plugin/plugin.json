@@ -1,0 +1,38 @@
+{
+  "name": "devflow-dynamic",
+  "description": "Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline",
+  "author": {
+    "name": "Dean0x"
+  },
+  "version": "2.0.0",
+  "homepage": "https://github.com/dean0x/devflow",
+  "repository": "https://github.com/dean0x/devflow",
+  "license": "MIT",
+  "keywords": [
+    "dynamic",
+    "workflow",
+    "pipeline",
+    "tickets",
+    "wave"
+  ],
+  "agents": [
+    "coder",
+    "validator",
+    "simplifier",
+    "scrutinizer",
+    "evaluator",
+    "tester",
+    "reviewer",
+    "git",
+    "synthesizer",
+    "knowledge",
+    "designer"
+  ],
+  "skills": [
+    "apply-decisions",
+    "apply-feature-knowledge",
+    "worktree-support",
+    "docs-framework"
+  ],
+  "rules": []
+}

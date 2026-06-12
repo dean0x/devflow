@@ -1,0 +1,100 @@
+@define wave_loop():
+### Wave execution loop (§8)
+
+There is NO scheduler, NO parser, NO graph code. A wave is the single-ticket engine run once per ready ticket, in an order that agents work out by reading the GitHub issues.
+
+**Step 1 — Read the wave**
+
+Spawn an agent (agentType: "Git" or a Synthesizer-class reader) to:
+- `gh issue view` each wave issue and read its full body
+- Note each issue's stated `Depends on:` and `Wave:` fields
+- Reason about which tickets have no unmet dependencies (are "ready")
+- Return the ready set with a brief rationale
+
+This is LLM judgment — the agent reads like a person would, not a graph algorithm.
+
+**"Ready" does not mean "parallelizable."** The agent applies the concurrency doctrine (see `concurrency_doctrine()`): ready tickets run SEQUENTIALLY toward a shared goal by default; parallel ONLY when they satisfy all three bars (different code areas + different feature logic + different goals). Most of the time: one-by-one.
+
+**Step 2 — Run ready tickets**
+
+For each ready ticket (sequentially by default; parallel only past the §7.1 bar):
+- Branch setup: `ticket/<slug>` off integration HEAD at ready-time (so it already contains merged deps)
+- Run the single-ticket engine (implement-bundle → Gate 2 → review loop)
+- On engine PASS: merge to integration branch, run Validator (build + test)
+  - Merge FAIL (build red after merge): quarantine ticket, mark as escalated, continue
+- On engine FAIL or ESCALATED: quarantine ticket, do not block independent siblings
+
+**Step 3 — What's ready now?**
+
+After the round's merges, spawn the reader agent again with updated issue states: "given what's now merged, what's ready next?" Repeat from Step 2.
+
+**Termination conditions (checked each round):**
+- All tickets processed: done, write final report
+- Nothing ready but tickets remain (circular or all-blocked): end with escalation report
+- MAX_ROUNDS exceeded: end with partial-progress report (safeguard — never infinite)
+
+MAX_ROUNDS = LLM judgment based on ticket count (heuristic: ticket_count * 2 + 5, minimum 10). Always finite.
+@end
+
+@define branch_merge_model():
+### Branch and merge model (§9)
+
+**Integration branch:** `wave/<initiative>` (or the user's current branch if they direct it). NEVER main or master.
+
+**Per-ticket branches:** `ticket/<slug>`, branched off integration HEAD at the moment the ticket becomes ready. Branching at ready-time means the ticket branch already contains all merged dependencies.
+
+**Parallel independent tickets:** each gets its own `git worktree add` + durable branch managed by the Git agent. Use explicit `git worktree add` — NOT the Workflow tool's ephemeral `isolation:'worktree'`. The branch must persist across implement → review → resolve → merge stages; ephemeral worktrees are gone when the agent call ends.
+
+**Post-merge validation:** after EVERY merge into the integration branch, run Validator (build + test). A red build immediately after merge is the cheapest possible conflict detector. Red → quarantine the merged result + escalate.
+
+**Commit discipline:** Git agent creates atomic commits per logical change, conventional-commit format, on the ticket branch before merge.
+@end
+
+@define merge_doctrine():
+### Conflict-resolution doctrine (§10 — HIGHEST DANGER ZONE)
+
+Two parallel sibling tickets can produce real git conflicts. The resolution is **intent-aware and conservative-or-escalate**.
+
+**Resolution procedure:**
+
+1. Git agent detects the conflict and reports the conflicting files + sections
+2. Spawn a Coder with FULL intent context:
+   - Both ticket descriptions and plans
+   - The conflicting diff sections (both sides)
+   - Relevant ADRs from DECISIONS_CONTEXT (loaded by main model before authoring)
+3. Coder resolves to PRESERVE BOTH INTENTS — the resolution must honor what both tickets were trying to achieve
+4. If the correct resolution is NOT UNAMBIGUOUS from the intent context: **do NOT guess** → quarantine + escalate
+5. After any resolution: Validator (build + test) immediately
+
+**Conservative-or-escalate is absolute.** An LLM silently guessing a wrong merge is the highest-danger failure mode in the whole design. When in doubt: quarantine + surface in report. The user re-runs (resume) with the escalated context.
+
+**New decisions surfaced during resolution** (a conflict that reveals an undocumented architectural choice) are noted in the run report for the user to write back as ADRs.
+@end
+
+@define escalation_model():
+### Escalation model (§11)
+
+A workflow cannot pause mid-run (F4). "Escalate" means: quarantine-and-continue + list in the final report.
+
+**Escalation triggers:**
+- Git conflict that cannot be unambiguously resolved from intent context
+- Ticket engine FAIL after max retries (Gate 1 exhausted)
+- Gate 2 FAIL after max retries (Evaluator/Tester not satisfied)
+- Circular dependency detected (all remaining tickets blocked on each other)
+- Build red after merge (Validator fails post-merge)
+- Any situation requiring a human decision mid-run
+
+**Escalation procedure:**
+1. Quarantine the affected ticket (do not merge its branch)
+2. Continue with all independent remaining tickets (escalation does not block siblings)
+3. Add to the escalations list in the final report with: ticket ID, escalation type, context needed for resolution
+
+**The user's action on the report:** review escalations, resolve the conflicts / answer the questions, then re-run (resume via runId/journal if available — partial progress is preserved).
+
+**No silent skips.** Every quarantined ticket appears in the report. The run is only "done" when the report says it is — not when the wave loop ends.
+@end
+
+@export wave_loop
+@export branch_merge_model
+@export merge_doctrine
+@export escalation_model

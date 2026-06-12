@@ -1,0 +1,59 @@
+@define ticket_body_template():
+### Ticket body template
+
+Each ticket in a wave MUST use this structure. The wave scheduler agents read these fields to reason about dependencies and order. The build engine agents read acceptance criteria to drive Gate 2.
+
+---
+
+**Wave:** N
+**Depends on:** #issue-number, #issue-number (or "none")
+
+---
+
+## Summary
+
+One paragraph: what this ticket implements and why it exists in this wave.
+
+## Scope
+
+**In scope:**
+- Explicit list of what this ticket covers
+- Named deliverables (files, functions, APIs, schemas)
+
+**Out of scope (anti-features — do NOT implement):**
+- Explicit list of what this ticket deliberately excludes
+- Related things that belong to other tickets
+- Future work that must NOT be anticipated
+
+Anti-features are load-bearing: they prevent scope creep and tell the Coder what NOT to build. At least one is required per ticket.
+
+## Invariants
+
+System properties that MUST remain true after this ticket is merged:
+- Backward compatibility guarantees (if any)
+- Data integrity constraints
+- Performance contracts inherited from prior work
+
+## Acceptance criteria
+
+Numbered, for the Evaluator and Tester agents. See `acceptance_criteria_contract()` for the quality bar.
+
+1. POSITIVE: The system MUST...
+2. POSITIVE: The API MUST return...
+3. NEGATIVE: The system MUST NOT...
+4. NEGATIVE: Existing behavior X MUST NOT regress...
+
+(Minimum: at least one negative criterion)
+
+## Open questions
+
+Questions that must be answered before implementation begins. If none, write "None".
+
+When used with `/devflow:dynamic-plan`, open questions are collected into `DECISIONS-NEEDED.md` for user review at the plan→build boundary (the human gate, §11). Preference-profile-settled questions are auto-resolved and do not appear here.
+
+---
+
+**Note for wave scheduler:** The `Depends on:` field lists GitHub issue numbers this ticket must wait for. The `Wave: N` label is a human-readable hint; actual ordering is determined by reading the `Depends on` relationships. An agent reads all wave issues and reasons about the ready set — no topological sort algorithm is used.
+@end
+
+@export ticket_body_template

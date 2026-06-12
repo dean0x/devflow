@@ -3,7 +3,7 @@
   "features": {
     "cli-rules": {
       "name": "Rules System CLI",
-      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry, FLAG_REGISTRY, agent-teams, teammate-mode-cleanup, stripDevflowTeammateModeFromJson.",
+      "description": "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry, autoCommit, DreamConfig, decisions-ledger-unify-v1, sync-devflow-gitignore-v3, devflow-dynamic, build-recipes, shared/recipes.",
       "directories": [
         "src/cli/commands/",
         "src/cli/utils/",
@@ -20,18 +20,21 @@
         "src/cli/utils/manifest.ts",
         "src/cli/utils/flags.ts",
         "src/cli/utils/teammate-mode-cleanup.ts",
+        "src/cli/utils/dream-config.ts",
+        "src/cli/utils/migrations.ts",
         "scripts/build-plugins.ts",
+        "scripts/build-recipes.ts",
         "shared/rules/security.md",
         "shared/rules/engineering.md",
         "shared/rules/quality.md",
         "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-06-09T12:59:08.483Z",
+      "lastUpdated": "2026-06-12T08:53:49.520Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
       "name": "Dream & Hooks System",
-      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, assign-anchor, retire-anchor, rotate-observations, render-decisions, decisions-ledger, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation.",
+      "description": "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, assign-anchor, retire-anchor, rotate-observations, render-decisions, decisions-ledger, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation, dream-commit, autoCommit.",
       "directories": [
         "scripts/hooks/",
         "shared/agents/",
@@ -52,18 +55,20 @@
         "scripts/hooks/eval-curation",
         "scripts/hooks/session-start-memory",
         "scripts/hooks/session-start-context",
+        "scripts/hooks/dream-commit",
         "shared/agents/dream.md",
         "shared/skills/dream-decisions/SKILL.md",
         "shared/skills/dream-knowledge/SKILL.md",
         "shared/skills/dream-curation/SKILL.md",
-        "src/cli/commands/decisions.ts"
+        "src/cli/commands/decisions.ts",
+        "src/cli/utils/dream-config.ts"
       ],
-      "lastUpdated": "2026-06-08T20:16:14.327Z",
+      "lastUpdated": "2026-06-11T20:00:13.078Z",
       "createdBy": "implement"
     },
     "decisions": {
       "name": "Decisions & Pitfalls Ledger",
-      "description": "Use when working on the decisions/pitfalls pipeline, adding ops to json-helper.cjs, modifying render output, writing migrations, or modifying Dream SKILL behavior for decisions/curation. Keywords: decisions, pitfalls, ADR, ledger, assign-anchor, retire-anchor, render, dream-decisions, dream-curation, observations, decisions-log, decisions-ledger.",
+      "description": "Use when working on the decisions/pitfalls pipeline, adding ops to json-helper.cjs, modifying render output, writing migrations, or modifying Dream SKILL behavior for decisions/curation. Keywords: decisions, pitfalls, ADR, ledger, assign-anchor, retire-anchor, render, dream-decisions, dream-curation, observations, decisions-log, decisions-ledger, autoCommit, dream-commit, count-active.",
       "directories": [
         "scripts/hooks",
         "scripts/hooks/lib",
@@ -79,10 +84,11 @@
         "scripts/hooks/dream-commit",
         "src/cli/utils/decisions-ledger-migration.ts",
         "src/cli/utils/observations.ts",
+        "src/cli/utils/dream-config.ts",
         "shared/skills/dream-decisions/SKILL.md",
         "shared/skills/dream-curation/SKILL.md"
       ],
-      "lastUpdated": "2026-06-10T19:55:57.221Z",
+      "lastUpdated": "2026-06-11T20:00:20.339Z",
       "createdBy": "implement"
     }
   }

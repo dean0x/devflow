@@ -157,6 +157,19 @@
       ]
     },
     {
+      "name": "devflow-dynamic",
+      "source": "./plugins/devflow-dynamic",
+      "description": "Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline",
+      "version": "1.8.3",
+      "keywords": [
+        "dynamic",
+        "workflow",
+        "pipeline",
+        "tickets",
+        "wave"
+      ]
+    },
+    {
       "name": "devflow-typescript",
       "source": "./plugins/devflow-typescript",
       "description": "TypeScript language patterns - type safety, generics, utility types, type guards",

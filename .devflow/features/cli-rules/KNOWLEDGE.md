@@ -1,7 +1,7 @@
 ---
 feature: cli-rules
 name: Rules System CLI
-description: "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry."
+description: "Use when adding new rules, modifying the rules install flow, implementing rule shadowing, or wiring rules into init/uninstall. Keywords: rules, shared/rules, rulesMap, buildRulesMap, isValidRuleName, LEGACY_RULE_NAMES, rulesEnabled, devflow rules, ~/.claude/rules/devflow, installRuleFile, removeLegacyCommandsRule, ambient.ts, partitionSelectablePlugins, WORKFLOW_ORDER, combineSelection, shouldRetry, autoCommit, DreamConfig, decisions-ledger-unify-v1, sync-devflow-gitignore-v3, devflow-dynamic, build-recipes, shared/recipes."
 category: architecture
 directories: [src/cli/commands/, src/cli/utils/, shared/rules/, scripts/]
 referencedFiles:
@@ -12,13 +12,18 @@ referencedFiles:
   - src/cli/plugins.ts
   - src/cli/utils/installer.ts
   - src/cli/utils/manifest.ts
+  - src/cli/utils/flags.ts
+  - src/cli/utils/teammate-mode-cleanup.ts
+  - src/cli/utils/dream-config.ts
+  - src/cli/utils/migrations.ts
   - scripts/build-plugins.ts
+  - scripts/build-recipes.ts
   - shared/rules/security.md
   - shared/rules/engineering.md
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-06-09
+updated: 2026-06-12
 ---
 
 # Rules System CLI
@@ -72,7 +77,7 @@ This two-tier design is what makes language rules low-cost: a Go rule never load
 
 ### Plugin Declaration
 
-Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `rules` field (`string[]`). Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust. Non-language optional plugins (devflow-audit-claude) and all workflow plugins have `rules: []`. Only `devflow-core-skills` and the 8 language/UI plugins carry rules through the plugin system:
+Rules are added to `PluginDefinition` in `src/cli/plugins.ts` via the required `rules` field (`string[]`). Core rules belong on `devflow-core-skills`; language-specific rules belong on their respective optional plugin. All 8 optional language/ecosystem plugins carry rules — typescript, react, accessibility, ui-design, go, java, python, rust. Non-language optional plugins (devflow-audit-claude, **devflow-dynamic**) and all non-language workflow plugins have `rules: []`. Only `devflow-core-skills` and the 8 language/UI plugins carry rules through the plugin system:
 
 ```typescript
 // In DEVFLOW_PLUGINS:
@@ -100,6 +105,8 @@ Four helper functions in `plugins.ts` serve distinct scopes:
 
 The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the three active per-task Dream skills (`dream-decisions`, `dream-knowledge`, `dream-curation`). `dream-memory` was removed from the active skills list in PR #239 — memory is now handled entirely by the `background-memory-update` detached worker, not a Dream subagent. Both `dream-memory` (bare) and `devflow:dream-memory` (namespaced) are in `LEGACY_SKILLS_V2X` so older installs that had them are swept during `devflow init`. The learning pipeline skills (`eval-learning`, `eval-reinforce`, and the `devflow learn` CLI) were removed in PR #238.
 
+**PR #241 (decisions ledger + deterministic render)**: Added `decisions-ledger-unify-v1` (per-project migration) and `sync-devflow-gitignore-v3` (per-project) migrations in `src/cli/utils/migrations.ts`. The `DreamConfig` interface in `src/cli/utils/dream-config.ts` now has a fourth field: `autoCommit: boolean` (default `true`). When `autoCommit` is true (the default), the Dream agent's `dream-commit` helper automatically creates `chore(dream):` commits after each Dream maintenance write. `devflow decisions --status` now outputs an `Auto-commit: ON/OFF` line. `coerceConfig` in `dream-config.ts` silently drops the legacy `learning` key AND reads `autoCommit` — the interface is `{memory, decisions, knowledge, autoCommit}`. Do NOT reference `features.teams` (removed PR #240) or `features.learn` (removed PR #238) as fields of `DreamConfig`.
+
 **Agent Teams removal (PR #240)**: The bespoke Agent Teams machinery was removed. The eight `*-teams.md` command variants, the `agent-teams` skill, all `teamsEnabled`/`applyTeamsConfig`/`stripTeamsConfig` touch-points, and the `--teams`/`--no-teams` init flags were deleted. Agent Teams is re-exposed as a single optional flag `agent-teams` in `FLAG_REGISTRY` (defaultEnabled: false), toggled via `devflow flags --enable agent-teams`. Key cleanup mechanics:
 - `devflow:agent-teams` (namespaced) is in `LEGACY_SKILLS_V2X` for install cleanup
 - `init.ts` sweeps orphaned `*-teams.md` files from the commands directory unconditionally on every install type (full install clears the dir; partial install runs the explicit blanket sweep)
@@ -111,6 +118,8 @@ The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the 
 ### Build Pipeline
 
 `scripts/build-plugins.ts` extends the skill/agent build to handle rules. The key difference from skills: rules are **flat files** (not directories), so no recursive copy is needed. The build script reads `plugin.json`'s `rules` array, clears and recreates the plugin's `rules/` directory, then copies each `shared/rules/{name}.md` into `plugins/{plugin}/rules/{name}.md`. The build fails with exit 1 if a declared rule is missing from `shared/rules/`.
+
+**Recipe compilation** (`build:recipes`): `scripts/build-recipes.ts` compiles `.mds` recipe files from `shared/recipes/` into Markdown command files in `plugins/devflow-dynamic/commands/`. Partials (files whose basename starts with `_`) are skipped. The build hard-fails on any compile error, ensuring a broken or stale command never ships. Recipe commands cannot be installed from `shared/recipes/` directly — always run `npm run build:recipes` (or `npm run build`) before testing the dynamic plugin commands. The full build order is: `build:cli && build:plugins && build:recipes && build:hud`.
 
 ### Install Flow
 
@@ -150,7 +159,7 @@ Key install properties:
 
 ### Manifest Tracking
 
-`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs). The `features.learn` field was removed from `ManifestData` in PR #238 (learning pipeline removal); `DreamConfig` (in `src/cli/utils/dream-config.ts`) now tracks only `{memory, decisions, knowledge}`. The `--learn`/`--no-learn` CLI option and `learnEnabled` variable in `init.ts` no longer exist. The `features.teams`/`teamsEnabled` manifest field was removed in PR #240 (agent-teams removal) — `manifest.features` no longer tracks agent-teams state at all; it is handled entirely by `features.flags: string[]`.
+`ManifestData.features.rules: boolean` tracks whether rules are enabled. The manifest reader in `src/cli/utils/manifest.ts` self-heals — when reading a manifest that lacks the `rules` field, it defaults to `true` (rules-on is the safe default for upgrades from pre-rules installs). The `features.learn` field was removed from `ManifestData` in PR #238 (learning pipeline removal); `DreamConfig` (in `src/cli/utils/dream-config.ts`) now tracks only `{memory, decisions, knowledge, autoCommit}`. The `--learn`/`--no-learn` CLI option and `learnEnabled` variable in `init.ts` no longer exist. The `features.teams`/`teamsEnabled` manifest field was removed in PR #240 (agent-teams removal) — `manifest.features` no longer tracks agent-teams state at all; it is handled entirely by `features.flags: string[]`.
 
 ### `devflow rules` Command
 
@@ -172,10 +181,12 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 **Scope**: The interactive scope prompt was removed in feat(init). User scope is now the default for all TTY interactive runs. Only `--scope` flag or non-TTY path can set `local` scope. Non-TTY detects and logs "Non-interactive mode detected, using scope: user".
 
 **Two-step plugin selection**: `devflow init` (TTY, no `--plugin`) now presents two sequential `p.multiselect` prompts instead of one:
-- **Step 1 — Workflow plugins**: All command-bearing plugins (excluding `devflow-core-skills`, `devflow-ambient`, `devflow-audit-claude`). Pre-selected: non-optional workflow plugins.
+- **Step 1 — Workflow plugins**: All command-bearing plugins (excluding `devflow-core-skills`, `devflow-ambient`, `devflow-audit-claude`). Pre-selected: non-optional workflow plugins. **Includes `devflow-dynamic`** (optional, command-bearing).
 - **Step 2 — Language plugins**: All command-less selectable plugins (language/ecosystem). Nothing pre-selected.
 
 The split is computed by `partitionSelectablePlugins(DEVFLOW_PLUGINS)` in `plugins.ts`, which returns `{ workflow, language }` buckets. This is a pure function — no I/O, no mutation of the input array, deterministic, no side effects.
+
+**`devflow-dynamic` in workflow bucket**: `partitionSelectablePlugins` places `devflow-dynamic` in the **workflow** bucket because `commands.length > 0`. It carries `optional: true` so it is not pre-selected at init. The test in `tests/plugins.test.ts` allowlists `devflow-dynamic` in the `allowedOptional` set alongside `devflow-audit-claude` and the 8 language plugins.
 
 **Bounded retry loop**: A `while (attempts < MAX_ATTEMPTS)` loop (MAX_ATTEMPTS = 3) guards both steps:
 ```typescript
@@ -200,9 +211,10 @@ export const WORKFLOW_ORDER: string[] = [
   '/research', '/explore', '/plan', '/implement',
   '/code-review', '/resolve', '/self-review', '/bug-analysis',
   '/debug', '/release', '/audit-claude',
+  '/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-wave', '/dynamic-profile',
 ];
 ```
-`init.ts` imports it from `plugins.ts` rather than keeping a local duplicate. A regression guard test in `tests/plugins.test.ts` verifies every entry has a real backing command in `DEVFLOW_PLUGINS` (bidirectional: WORKFLOW_ORDER ⊆ commands AND commands ⊆ WORKFLOW_ORDER for the non-excluded set). `/bug-analysis` was added to WORKFLOW_ORDER in this same commit — the regression guard catches future omissions.
+`init.ts` imports it from `plugins.ts` rather than keeping a local duplicate. A regression guard test in `tests/plugins.test.ts` verifies every entry has a real backing command in `DEVFLOW_PLUGINS` (bidirectional: WORKFLOW_ORDER ⊆ commands AND commands ⊆ WORKFLOW_ORDER for the non-excluded set). The 5 dynamic commands were added to WORKFLOW_ORDER in the same commit that landed the dynamic plugin — the regression guard catches future omissions.
 
 **Agent Teams init flags removed (PR #240)**: The `--teams`/`--no-teams` init flags and `teamsEnabled` variable no longer exist. Users who want Agent Teams mode use `devflow flags --enable agent-teams` instead.
 
@@ -220,7 +232,7 @@ export const WORKFLOW_ORDER: string[] = [
 
 **list → rules**: `devflow list` shows `rules` in the Features line when `manifest.features.rules` is true.
 
-**build → install**: Rules are not installed from `shared/rules/` directly at runtime — the installer reads from `plugins/{plugin}/rules/`, which is the build output. Always run `npm run build` after modifying `shared/rules/` before testing install.
+**build → install**: Rules are not installed from `shared/rules/` directly at runtime — the installer reads from `plugins/{plugin}/rules/`, which is the build output. Always run `npm run build` after modifying `shared/rules/` before testing install. Similarly, dynamic recipe commands are not installable from `shared/recipes/` — always run `npm run build:recipes` (or `npm run build`) first; the installer reads from `plugins/devflow-dynamic/commands/`.
 
 **plugins.ts → init.ts**: `partitionSelectablePlugins`, `WORKFLOW_ORDER`, `combineSelection`, `shouldRetry` are all exported from their respective modules and imported by `init.ts`. `combineSelection` and `shouldRetry` are in `init.ts` (not `plugins.ts`).
 
@@ -231,7 +243,7 @@ export const WORKFLOW_ORDER: string[] = [
 - `LEGACY_RULE_NAMES` in `plugins.ts` is currently empty. Add entries here when renaming or removing a rule.
 - The `paths` frontmatter key must always be present. Core rules use `paths: []` (global); language rules use a glob array (file-type-scoped). Omitting the key may break rule loading.
 - `buildRulesMap` throws if any rule name fails `isValidRuleName` — misconfigured `plugin.json` entries are caught at map-build time, not at path-construction time.
-- `partitionSelectablePlugins` uses the presence of `commands.length > 0` as the sole criterion for the workflow bucket — command-less selectable plugins always land in the language bucket. If a non-language command-less plugin is added, update the bucket name or add an explicit category field.
+- `partitionSelectablePlugins` uses the presence of `commands.length > 0` as the sole criterion for the workflow bucket — command-less selectable plugins always land in the language bucket. `devflow-dynamic` has 5 commands and lands in the workflow bucket.
 
 ## Anti-Patterns
 
@@ -239,6 +251,7 @@ export const WORKFLOW_ORDER: string[] = [
 - **Using `paths: []` on a language-specific rule**: Language rules must scope to their file types. Using `paths: []` makes them load on every prompt, eliminating per-language token savings.
 - **Using a file-type path on a core rule**: Core rules (security, engineering, quality, reliability) must use `paths: []` — they apply cross-language.
 - **Installing rules from `shared/rules/` directly at runtime**: The installer reads from `plugins/{plugin}/rules/` (build output). Skipping `npm run build` silently installs the old version.
+- **Installing dynamic recipe commands from `shared/recipes/`**: Recipe `.mds` files are source-only; compiled `.md` command files live in `plugins/devflow-dynamic/commands/`. Always build before testing.
 - **Unbounded plugin selection loop**: The bounded `while (attempts < MAX_ATTEMPTS)` + `shouldRetry` guard is the pattern — never replace with `while (true)`.
 - **Long rule files**: Rules should be ~10-15 lines. If a rule grows beyond ~20 lines, extract the detail into a skill's `references/` directory.
 - **Omitting `rules: []` on a plugin**: The `rules` field is required on `PluginDefinition`. Omitting it causes TypeScript errors at build time.
@@ -253,8 +266,8 @@ export const WORKFLOW_ORDER: string[] = [
 - **`buildRulesMap` throws on invalid names**: Uppercase letters, dots, or slashes in a `plugin.json` rules entry cause an immediate throw — intentional early-catch.
 - **`commands.md` has been removed**: The ambient-managed commands rule no longer exists. Any stale `~/.claude/rules/devflow/commands.md` from prior installs is purged automatically by `removeLegacyCommandsRule()` which runs unconditionally in both `addAmbientHook` and `removeAmbientHook`. `devflow rules --enable/--disable` never touched it and still does not.
 - **Scope prompt removed**: Interactive TTY runs no longer ask for scope — user scope is the automatic default. The `--scope` flag still works (for `local` installs or scripted `user` overrides), and non-TTY still logs and defaults to `user`.
-- **Two-step selection requires `partitionSelectablePlugins` for bucket assignment**: Do NOT sort or filter `DEVFLOW_PLUGINS` manually in init code. Always delegate to `partitionSelectablePlugins`. The workflow-bucket predicate is `commands.length > 0` — the language-bucket is every command-less selectable plugin (implicit convention; not enforced by types).
-- **`WORKFLOW_ORDER` regression guard is bidirectional**: `tests/plugins.test.ts` verifies WORKFLOW_ORDER entries correspond to real commands AND that commands not in the excluded set are covered. Adding a new workflow command requires updating WORKFLOW_ORDER or the test will fail.
+- **Two-step selection requires `partitionSelectablePlugins` for bucket assignment**: Do NOT sort or filter `DEVFLOW_PLUGINS` manually in init code. Always delegate to `partitionSelectablePlugins`. The workflow-bucket predicate is `commands.length > 0` — `devflow-dynamic` is in the workflow bucket. The language-bucket is every command-less selectable plugin.
+- **`WORKFLOW_ORDER` regression guard is bidirectional**: `tests/plugins.test.ts` verifies WORKFLOW_ORDER entries correspond to real commands AND that commands not in the excluded set are covered. Adding a new workflow command requires updating WORKFLOW_ORDER or the test will fail. The 5 dynamic commands are already registered.
 - **Rules have no runtime sentinel**: Unlike knowledge (`.devflow/features/.disabled`), decisions, and memory, rules have no `.disabled` file. Disabling rules is destructive: `devflow rules --disable` removes the directory entirely. There is no temporary suppression path.
 - **`background-memory-update` is NOT in `LEGACY_HOOK_FILES`**: The worker is an active installed script — it must NOT be listed in the `LEGACY_HOOK_FILES` cleanup array in `init.ts`. It was accidentally listed there (fixed in `8c157db`), which caused `installViaFileCopy` to install it and the cleanup loop to immediately delete it, making memory refresh dead-on-arrival for installed users. If a future hook rename is needed, use `LEGACY_HOOK_FILES` only for truly retired scripts, never for scripts that are still installed and active.
 - **Core vs language rules have different token behavior**: Core rules load on every prompt. Language rules only activate when Claude is working with a matching file type.
@@ -263,13 +276,19 @@ export const WORKFLOW_ORDER: string[] = [
 - **`features.teams` no longer exists in ManifestData**: The agent-teams bespoke manifest field was removed in PR #240. Agent Teams is now a standard flag entry in `FLAG_REGISTRY` (`id: 'agent-teams'`, `defaultEnabled: false`). The env var `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is applied/stripped by the normal `applyFlags`/`stripFlags` machinery. Migration `purge-devflow-teammate-mode-global-v1` (global) and `purge-devflow-teammate-mode-v1` (per-project) clean up stale `teammateMode: "auto"` written by prior installs.
 - **`*-teams.md` command files are orphaned, not re-installed**: The blanket sweep in `init.ts` (`f.endsWith('-teams.md')`) runs on every install type including partial installs. This is safe because no `*-teams.md` command file is ever installed by current Devflow. Old installs that had these files will have them cleaned up on the next `devflow init`.
 - **`dream-memory` skill is no longer active**: `dream-memory` was removed from `devflow-core-skills` skills array in PR #239 (the `dream-memory` SKILL.md file was removed in PR #238; the skills array entry was removed in PR #239). Memory refresh is handled by `background-memory-update` (detached worker), not a Dream subagent. Both `dream-memory` and `devflow:dream-memory` are in `LEGACY_SKILLS_V2X` and are swept by `devflow init`. Migration `purge-stale-memory-markers-v1` (added in PR #239) sweeps `dream/memory.*` marker files from old installations.
-- **`DreamConfig` tracks only 3 features**: `{memory, decisions, knowledge}` — the `learning` key was removed from `DreamConfig` in PR #238. Do not add it back or reference it.
+- **`DreamConfig` tracks 4 features**: `{memory, decisions, knowledge, autoCommit}` — the `learning` key was removed in PR #238; `autoCommit` was added in PR #241 (default `true`; governs whether Dream tasks auto-commit maintenance writes). Do not add `learning` back or reference `features.learn`.
 - **New migration `sync-devflow-gitignore-v2`**: Per-project migration added in PR #238 to re-sync `.devflow/.gitignore` to the ignore-by-default allowlist policy. Overwrites existing `.gitignore` if content differs from canonical template. ENOENT-safe (no-op if `.devflow/` does not exist).
+- **New migration `sync-devflow-gitignore-v3`**: Per-project migration added in PR #241 to push the gitignore update that explicitly allows `decisions-ledger.jsonl` (the committed ledger). Without this, projects that had `.gitignore` from `sync-devflow-gitignore-v2` would not track the ledger file.
+- **New migration `decisions-ledger-unify-v1`**: Per-project migration added in PR #241. Backfills `decisions-ledger.jsonl` from the existing `decisions.md`/`pitfalls.md` and `decisions-log.jsonl`. Preserves every existing body verbatim via `raw_body`, synthesizes rows whose source obs is missing, marks hand-deleted anchors `Retired` (numbers reserved). Idempotent + crash-safe (always reconciles `.md` from ledger after write). Located in `src/cli/utils/decisions-ledger-migration.ts`.
+- **`devflow-dynamic` plugin is optional**: It installs only when the user selects it at `devflow init` (Step 1 — Workflow plugins) or passes `--plugin=dynamic`. It is not pre-selected. Its 5 recipe commands (`/dynamic-tickets`, `/dynamic-plan`, `/dynamic-build`, `/dynamic-wave`, `/dynamic-profile`) are compiled from `shared/recipes/*.mds` — not hand-authored `.md` files.
+- **`COMMAND_REFS` in `tests/skill-references.test.ts` includes dynamic commands**: The test allowlist `COMMAND_REFS` contains `dynamic-tickets`, `dynamic-plan`, `dynamic-build`, `dynamic-profile`, `dynamic-wave`. When adding new recipe commands, add them to this set or the skill-references test will fail.
 
 ## Key Files
 
 - `shared/rules/` — source of truth for all rule content; flat `.md` files (12 total)
-- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER`, `partitionSelectablePlugins()`; active Dream skills: `dream-decisions`, `dream-knowledge`, `dream-curation` (NOT `dream-memory`); `LEGACY_SKILLS_V2X` includes `dream-memory`, `devflow:dream-memory`, and `devflow:agent-teams` for cleanup
+- `shared/recipes/` — source of truth for dynamic plugin recipe commands; `.mds` files compiled at build time; partials prefixed with `_` are not compiled to commands
+- `scripts/build-recipes.ts` — compiles `shared/recipes/*.mds` → `plugins/devflow-dynamic/commands/*.md`; hard-fails on any compile error; skips partials
+- `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER` (now includes 5 dynamic commands), `partitionSelectablePlugins()`; active Dream skills: `dream-decisions`, `dream-knowledge`, `dream-curation` (NOT `dream-memory`); `LEGACY_SKILLS_V2X` includes `dream-memory`, `devflow:dream-memory`, and `devflow:agent-teams` for cleanup; `devflow-dynamic` is optional, command-bearing, workflow bucket
 - `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; blanket `*-teams.md` command sweep; no `--learn`/`--no-learn` or `learnEnabled` (removed PR #238); no `--teams`/`--no-teams` or `teamsEnabled` (removed PR #240)
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
 - `src/cli/commands/ambient.ts` — purges legacy `commands.md` via `COMMANDS_RULE_PATH` / `removeLegacyCommandsRule()`; called unconditionally from `addAmbientHook` and `removeAmbientHook` so stale files are cleaned up on every enable/disable/init
@@ -278,10 +297,11 @@ export const WORKFLOW_ORDER: string[] = [
 - `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed in PR #238; no `features.teams` (removed PR #240)
 - `src/cli/utils/flags.ts` — `FLAG_REGISTRY` with 18 entries including `agent-teams` (defaultEnabled: false); `applyFlags`/`stripFlags`/`getDefaultFlags`; `applyViewMode`/`stripViewMode`
 - `src/cli/utils/teammate-mode-cleanup.ts` — `stripDevflowTeammateModeFromJson` (pure, tolerant) and `stripDevflowTeammateMode` (file I/O wrapper); used by both migrations and uninstall
-- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore`; `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; `purge-devflow-teammate-mode-global-v1` (global) + `purge-devflow-teammate-mode-v1` (per-project) remove `teammateMode: "auto"` from settings.json files; applies ADR-002
+- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore` (PR #238); `sync-devflow-gitignore-v3` pushes gitignore change for decisions-ledger allowlist (PR #241); `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; `purge-devflow-teammate-mode-global-v1` (global) + `purge-devflow-teammate-mode-v1` (per-project) remove `teammateMode: "auto"` from settings.json files; `decisions-ledger-unify-v1` (per-project) backfills `decisions-ledger.jsonl` from existing `.md` + log, preserving every body verbatim (`raw_body`), marking hand-deleted anchors `Retired`; applies ADR-002
 - `scripts/build-plugins.ts` — build-time distribution from `shared/rules/` → `plugins/*/rules/`
-- `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional) + `LEGACY_SKILL_NAMES consistency` guard
+- `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional) + `LEGACY_SKILL_NAMES consistency` guard; `allowedOptional` set includes `devflow-dynamic`
 - `tests/init.test.ts` — `combineSelection` and `shouldRetry` unit tests
+- `tests/skill-references.test.ts` — `COMMAND_REFS` set includes dynamic commands (`dynamic-tickets`, `dynamic-plan`, `dynamic-build`, `dynamic-profile`, `dynamic-wave`)
 - `tests/teammate-mode-cleanup.test.ts` — `stripDevflowTeammateModeFromJson` and `stripDevflowTeammateMode` tests
 
 ## Related
@@ -295,3 +315,5 @@ export const WORKFLOW_ORDER: string[] = [
 - PR #238 (learning removal): removed `dream-memory` SKILL.md file, removed `features.learn`, removed `--learn`/`--no-learn`, added `purge-learning-pipeline-v1` + `sync-devflow-gitignore-v2` migrations; note — `dream-memory` was removed from the `devflow-core-skills` skills ARRAY in PR #239 (not #238)
 - PR #239 (eager memory refresh): removed `dream-memory` from `devflow-core-skills` skills array, added `background-memory-update` worker, added `purge-stale-memory-markers-v1` migration; `background-memory-update` is NOT in `LEGACY_HOOK_FILES` (fixed in `8c157db`)
 - PR #240 (agent-teams removal): removed bespoke Agent Teams machinery; re-exposed as `agent-teams` flag in `FLAG_REGISTRY`; added `purge-devflow-teammate-mode-global-v1` + `purge-devflow-teammate-mode-v1` migrations; blanket `*-teams.md` sweep in `init.ts`; `devflow:agent-teams` skill in `LEGACY_SKILLS_V2X`
+- PR #241 (decisions ledger + deterministic render): added `decisions-ledger.jsonl` as committed render source of truth; new `assign-anchor`/`retire-anchor`/`rotate-observations` ops in `json-helper.cjs`; `dream-commit` shell helper for attributable maintenance commits; `autoCommit: boolean` added to `DreamConfig`; `devflow decisions --status` now surfaces auto-commit state; `decisions-ledger-unify-v1` + `sync-devflow-gitignore-v3` per-project migrations added
+- PR #242 (devflow-dynamic plugin): added `devflow-dynamic` optional plugin with 5 recipe commands compiled from `shared/recipes/*.mds` via `scripts/build-recipes.ts`; `WORKFLOW_ORDER` extended with 5 dynamic commands; `devflow-dynamic` added to `allowedOptional` in `tests/plugins.test.ts`; `COMMAND_REFS` in `tests/skill-references.test.ts` updated with dynamic command names

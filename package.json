@@ -22,9 +22,10 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "npm run build:cli && npm run build:plugins && npm run build:hud",
+    "build": "npm run build:cli && npm run build:plugins && npm run build:recipes && npm run build:hud",
     "build:cli": "tsc",
     "build:plugins": "npx tsx scripts/build-plugins.ts",
+    "build:recipes": "npx tsx scripts/build-recipes.ts",
     "build:hud": "node scripts/build-hud.js",
     "dev": "tsc --watch",
     "cli": "node dist/cli.js",
@@ -55,7 +56,7 @@
   },
   "homepage": "https://dean0x.github.io/x/devflow/",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@clack/prompts": "^0.9.1",
@@ -63,7 +64,8 @@
     "picocolors": "^1.1.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@mdscript/mds": "0.2.0",
+    "@types/node": "^22.0.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^4.0.18"

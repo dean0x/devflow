@@ -25,7 +25,7 @@ referencedFiles:
   - shared/skills/dream-curation/SKILL.md
   - src/cli/commands/decisions.ts
 created: 2026-06-01
-updated: 2026-06-07
+updated: 2026-06-11
 ---
 
 # Dream & Hooks System
@@ -242,7 +242,7 @@ Note: `.curation-last` lives in `.devflow/dream/` (not `.devflow/decisions/`), c
 
 ## Dream Config
 
-The sole source of truth for feature enabled-state is `.devflow/dream/config.json` (ADR-001 clean break — there is no runtime fallback). `DreamConfig` is `{memory, decisions, knowledge}` (`src/cli/utils/dream-config.ts`); the legacy `learning` field has been removed, and `coerceConfig` silently drops it when reading old configs. Legacy `.devflow/sidecar/config.json` files are migrated to `dream/config.json` once at `devflow init` time by the `rename-sidecar-to-dream-v1` migration — the hooks do **not** read the sidecar path at runtime. (The old transitional `# dream-fallback: REMOVE after one release` read of `sidecar/config.json` has been removed from all hooks; do not reintroduce it.)
+The sole source of truth for feature enabled-state is `.devflow/dream/config.json` (ADR-001 clean break — there is no runtime fallback). `DreamConfig` is `{memory, decisions, knowledge, autoCommit}` (`src/cli/utils/dream-config.ts`); the legacy `learning` field has been removed, and `coerceConfig` silently drops it when reading old configs. The `autoCommit` field (added PR #241, default `true`) controls whether Dream tasks auto-commit maintenance writes; `dream-commit` reads it at runtime via jq or `json-helper.cjs get-field-file`. Legacy `.devflow/sidecar/config.json` files are migrated to `dream/config.json` once at `devflow init` time by the `rename-sidecar-to-dream-v1` migration — the hooks do **not** read the sidecar path at runtime. (The old transitional `# dream-fallback: REMOVE after one release` read of `sidecar/config.json` has been removed from all hooks; do not reintroduce it.)
 
 ## Anti-Patterns
 
@@ -287,6 +287,7 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 - `scripts/hooks/lib/feature-knowledge.cjs` — KB index, staleness checks (`checkAllStaleness` batches all KBs in one git log call), `updateIndex`, `stale-slugs` CLI op, slug validation
 - `scripts/hooks/lib/decisions-index.cjs` — compact decisions index with D-A filter for orchestrators
 - `shared/agents/dream.md` — Dream agent plumbing spec: Step 0 task discovery, Step 1 claim/heartbeat/multi-marker-merge, Step 2 per-task skill dispatch, error discipline
+- `scripts/hooks/dream-commit` — deterministic plumbing helper that stages ONLY allowed `.devflow` paths and commits `chore(dream): <action>` with `Dream-Task:` / `Dream-Session:` / `Co-Authored-By:` trailers; reads `autoCommit` from dream config via jq or `get-field-file`; self-exits cleanly mid-rebase/merge/cherry-pick/detached-HEAD/nothing-staged; must be called AFTER any lock is released
 - `shared/skills/dream-decisions/SKILL.md` — decisions task procedure: dialog-pair analysis, bounded retry+backoff on `.observations.lock`, `assign-anchor` promotion (opus)
 - `shared/skills/dream-knowledge/SKILL.md` — knowledge task procedure: stale KB refresh + index update (sonnet)
 - `shared/skills/dream-curation/SKILL.md` — curation task procedure: deprecate/merge ADR/PF, bounded retry+backoff on `.decisions.lock`, Edit-tool deprecation (opus)
