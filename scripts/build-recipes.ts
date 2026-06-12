@@ -125,4 +125,10 @@ async function main(): Promise<void> {
   console.log("\nRecipes build complete!");
 }
 
-main();
+main().catch((err) => {
+  // Hard-fail on any error escaping main() (e.g. init() or readdir failure) —
+  // a broken or stale command must never ship. Non-compile errors land here;
+  // per-file compile errors are already caught and reported inside main().
+  console.error(`\nFATAL: recipe build aborted — ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+});

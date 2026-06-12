@@ -212,9 +212,7 @@ Return: { planPaths (array), decisionsNeededPath (string), decisionsNeededCount 
 
 ---
 
-### Acceptance criteria + test plan contract
-
-The plan-challenge step (Phase 3 above) MUST produce the acceptance criteria and test plan shape that `/devflow:dynamic-build`'s Gate 2 consumes. Single source of truth — no drift between planning and building:
+The plan-challenge step (Phase 3 above) MUST produce the acceptance criteria and test plan shape that `/devflow:dynamic-build`'s Gate 2 consumes:
 
 {acceptance_criteria_contract()}
 
@@ -249,4 +247,4 @@ After the workflow returns: read `DECISIONS-NEEDED.md` and surface any open deci
 
 ### Maintenance note
 
-This recipe encodes the planning pipeline as of the authoring date (2026-06-12). The plan-challenge verbatim intent (§5.1) is load-bearing — do not paraphrase it when authoring the challenger agent prompt. The acceptance criteria contract (`{acceptance_criteria_contract()}`) is the shared shape with `/devflow:dynamic-build` Gate 2; any change must be kept in sync. No tooling detects drift — by design (ADR-008 Iron Rule).
+This recipe encodes the planning pipeline as of the authoring date (2026-06-12). The plan-challenge verbatim intent (§5.1) is load-bearing — do not paraphrase it when authoring the challenger agent prompt. The "Acceptance criteria + test plan contract" section above is the shared shape with `/devflow:dynamic-build` Gate 2; any change must be kept in sync. No tooling detects drift — by design (ADR-008 Iron Rule).
