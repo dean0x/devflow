@@ -75,7 +75,7 @@ If the user passed `--dry-run`: print the workflow script in a fenced code block
 A workflow cannot pause mid-run. Open design decisions collected in `DECISIONS-NEEDED.md` are surfaced to the user via **AskUserQuestion AFTER the workflow returns** — at the command boundary. The workflow only WRITES the file; the command (you, the main model) reads it and asks.
 
 After the workflow completes:
-1. Read `.devflow/docs/design/DECISIONS-NEEDED.md` (or the OUTDIR-scoped path).
+1. Read the `decisionsNeededPath` returned by the workflow (e.g. `.devflow/docs/design/<slug>/<ts>/DECISIONS-NEEDED.md`). Always use the OUTDIR-scoped path the workflow wrote — never the flat `.devflow/docs/design/DECISIONS-NEEDED.md`.
 2. If it contains any open decisions, surface them to the user via `AskUserQuestion`.
 3. The user's answers feed into their own plan edits or a follow-up `/devflow:dynamic-plan` run.
 

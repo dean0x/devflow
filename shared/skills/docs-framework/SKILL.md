@@ -43,6 +43,13 @@ All generated documentation lives under `.devflow/docs/` in the project root:
 │       └── resolution-summary.md      # Written by /resolve (if run)
 ├── design/                             # Design artifacts from /plan
 │   └── {issue}-{topic-slug}.{timestamp}.md  # Design document
+├── tickets/{slug}/                     # Ticket sets from /dynamic-tickets
+│   └── {YYYY-MM-DD_HHMM}/             # Timestamped ticket directory
+│       ├── {ticket-slug}.md            # Individual ticket files
+│       └── tracking-issue.md           # Tracking issue body (GitHub sync)
+├── waves/{slug}/                       # Wave run reports from /dynamic-wave
+│   └── {YYYY-MM-DD_HHMM}/             # Timestamped wave directory
+│       └── wave-report.md              # Wave run summary and status
 ├── research/{topic-slug}/              # Research artifacts per topic
 │   └── {YYYY-MM-DD_HHMM}/             # Timestamped research directory
 │       ├── {type}.md                  # Researcher outputs (codebase.md, external.md, etc.)

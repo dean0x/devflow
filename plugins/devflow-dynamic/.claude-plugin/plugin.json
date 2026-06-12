@@ -1,6 +1,6 @@
 {
   "name": "devflow-dynamic",
-  "description": "Dynamic workflow recipes — dependency-aware tickets→plan→build delivery pipeline",
+  "description": "Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline",
   "author": {
     "name": "Dean0x"
   },

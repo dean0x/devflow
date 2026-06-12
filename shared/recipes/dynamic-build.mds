@@ -225,21 +225,29 @@ const reviewResult = await phase("review-loop", async () => {
     const allFindings = reviewers.flatMap(r => r.findings || []);
     if (allFindings.length === 0) break;  // early exit
 
-    // Adversarial verification — majority-survives
-    const verified = await parallel(allFindings.map(finding => () =>
-      agent(`Adversarially verify this finding on branch ${BRANCH}:
-Finding: ${finding.description}
-File: ${finding.file || "unknown"}
+    // Adversarial verification — bounded 2-3 agent panel, majority-survives
+    // Panel asks perspective-diverse questions over the WHOLE finding set (not one agent per finding).
+    // A finding survives if >50% of panel agents CONFIRM it.
+    const VERIFY_PANEL = 3;
+    const panels = await parallel(
+      Array.from({ length: VERIFY_PANEL }, (_, lens) => () =>
+        agent(`Adversarially verify all ${allFindings.length} findings on branch ${BRANCH}.
+Lens ${lens + 1} of ${VERIFY_PANEL}:
+${["Does each finding actually reproduce in the current code? Hunt for findings that describe patterns not present in the diff.",
+   "Is each finding a real issue or a false positive in context? Consider intent, surrounding code, and project conventions.",
+   "Does the cited rule or principle actually apply here? Check whether the finding's rationale holds under the specific circumstances."][lens]}
 
-Answer three questions:
-1. Does this finding actually reproduce in the current code?
-2. Is this a real issue or a false positive in context?
-3. Does the cited rule/principle actually apply here?
+For each finding below, return CONFIRMED or FALSE_POSITIVE with a one-line rationale.
+Return: { verdicts: [ { index: number, verdict: "CONFIRMED"|"FALSE_POSITIVE", rationale: string } ] }
 
-Verdict: CONFIRMED or FALSE_POSITIVE with rationale.`, { agentType: "Reviewer" })
-    ));
+Findings:
+${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.description, file: f.file || "unknown" })))}`, { agentType: "Reviewer" })
+      )
+    );
 
-    survivingFindings = allFindings.filter((_, i) => verified[i].verdict === "CONFIRMED");
+    survivingFindings = allFindings.filter((_, i) =>
+      panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
+    );
 
     if (survivingFindings.length === 0) break;  // early exit — clean review
 

@@ -63,8 +63,26 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Clean stale compiled *.md files before (re)generating — mirrors build-plugins.ts
+  // rmSync pattern. Scoped to *.md to preserve any non-generated siblings.
+  if (fs.existsSync(OUTPUT_DIR)) {
+    for (const f of fs.readdirSync(OUTPUT_DIR)) {
+      if (f.endsWith(".md")) fs.rmSync(path.join(OUTPUT_DIR, f));
+    }
+  }
+
   // Ensure output directory exists
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+  // Assert the output directory is writable before starting the compile loop so
+  // that a permission / ENOSPC failure is reported as an I/O problem rather than
+  // being swallowed by the per-file mds error handler.
+  try {
+    fs.accessSync(OUTPUT_DIR, fs.constants.W_OK);
+  } catch {
+    console.error(`ERROR: output directory is not writable: ${OUTPUT_DIR}`);
+    process.exit(1);
+  }
 
   // Initialize the MDS compiler (required before any compile/check call)
   await init();

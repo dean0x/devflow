@@ -57,7 +57,7 @@ you: add rate limiting to the /api/upload endpoint
 
 **Full lifecycle.** `/plan` takes a feature idea through codebase exploration, gap analysis, design review, and outputs a plan document ready for `/implement`. `/implement` accepts that plan document (or an issue or task description directly) and drives it through coding, validation, and refinement to a PR. `/debug` investigates bugs with competing hypotheses in parallel. `/self-review` runs Simplifier + Scrutinizer quality passes.
 
-**Everything is composable.** 21 plugins (12 core + 9 language/ecosystem). Install only what you need.
+**Everything is composable.** 22 plugins (12 core + 9 language/ecosystem + 1 optional workflow). Install only what you need.
 
 **HUD.** A persistent status line updates on every prompt — project, branch, diff stats, context usage, model, cost with weekly/monthly totals, quota reset timers, and configuration counts at a glance.
 

@@ -135,6 +135,13 @@ All generated docs live under `.devflow/docs/` in the project root:
 │       ├── bug-analysis-summary.md    # Synthesizer output
 │       └── resolution-summary.md      # Written by /resolve (when resolving bug-analysis issues)
 ├── design/                            # Design artifacts from /plan
+├── tickets/{slug}/                    # Ticket sets from /dynamic-tickets
+│   └── {YYYY-MM-DD_HHMM}/            # Timestamped ticket directory
+│       ├── {ticket-slug}.md           # Individual ticket files
+│       └── tracking-issue.md          # Tracking issue body (GitHub sync)
+├── waves/{slug}/                      # Wave run reports from /dynamic-wave
+│   └── {YYYY-MM-DD_HHMM}/            # Timestamped wave directory
+│       └── wave-report.md             # Wave run summary and status
 └── research/{topic-slug}/             # Research artifacts per topic
     └── {YYYY-MM-DD_HHMM}/            # Timestamped research directory
         ├── {type}.md                  # Researcher outputs (codebase.md, external.md, etc.)
