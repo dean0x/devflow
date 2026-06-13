@@ -23,7 +23,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-06-12
+updated: 2026-06-13
 ---
 
 # Rules System CLI
