@@ -1,9 +1,9 @@
 ---
 feature: hooks
 name: Dream & Hooks System
-description: "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, assign-anchor, retire-anchor, rotate-observations, render-decisions, decisions-ledger, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation."
+description: "Use when modifying dream hooks, background maintenance, marker lifecycle, memory/decisions/knowledge/curation processing, or per-task dream skills. Keywords: dream, hooks, background processor, merge-observation, assign-anchor, retire-anchor, rotate-observations, render-decisions, decisions-ledger, marker, .processing, SessionStart, dream-capture, background-memory-update, dream-evaluate, dream-decisions, dream-knowledge, dream-curation, dream-commit, autoCommit."
 category: architecture
-directories: ["scripts/hooks/", "shared/agents/"]
+directories: ["scripts/hooks/", "shared/agents/", "shared/skills/"]
 referencedFiles:
   - scripts/hooks/lib/feature-knowledge.cjs
   - scripts/hooks/lib/decisions-index.cjs
@@ -19,13 +19,15 @@ referencedFiles:
   - scripts/hooks/eval-curation
   - scripts/hooks/session-start-memory
   - scripts/hooks/session-start-context
+  - scripts/hooks/dream-commit
   - shared/agents/dream.md
   - shared/skills/dream-decisions/SKILL.md
   - shared/skills/dream-knowledge/SKILL.md
   - shared/skills/dream-curation/SKILL.md
   - src/cli/commands/decisions.ts
+  - src/cli/utils/dream-config.ts
 created: 2026-06-01
-updated: 2026-06-11
+updated: 2026-06-15
 ---
 
 # Dream & Hooks System
@@ -44,7 +46,7 @@ Three active task types can be pending at any session start: `decisions`, `knowl
 
 | Hook / Worker | Trigger | Role |
 |---------------|---------|------|
-| `dream-capture` | Stop (per turn) | Append assistant turn to queue; spawn `background-memory-update` worker after 120s throttle |
+| `dream-capture` | Stop (per turn) | Append assistant turn to queue; spawn `background-memory-update` worker after 120s throttle; run decisions usage scanner |
 | `background-memory-update` | Spawned by dream-capture | Drain queue → `claude -p haiku` → rewrite WORKING-MEMORY.md with git stamp |
 | `dream-evaluate` | SessionEnd | Source eval-* modules; write per-session markers for decisions/knowledge/curation |
 | `session-start-context` | SessionStart | Recover stale `.processing`, collect pending markers, emit per-task DREAM MAINTENANCE directives |
@@ -136,7 +138,27 @@ No raw UNPROCESSED TURNS dump in session-start-memory (removed). The background 
 
 Queue overflow: capped at 200 lines, truncated to 100 under a mkdir-based lock to prevent multi-session truncation races.
 
-Decisions usage scanner (`decisions-usage-scan.cjs`) also runs in `dream-capture` — it increments cite counts in `.decisions-usage.json` when the assistant response contains `ADR-NNN` or `PF-NNN` references. This is independent of memory state.
+Decisions usage scanner (`decisions-usage-scan.cjs`) also runs in `dream-capture` — it increments cite counts in `.decisions-usage.json` when the assistant response contains `ADR-NNN` or `PF-NNN` references. This happens before the memory-enabled gate, so cite scanning is independent of memory state. A supplementary guard (D29) skips the Node subprocess entirely when no `ADR-[0-9]+|PF-[0-9]+` pattern is found in the response (~50-100ms savings).
+
+## dream-capture: SOH-Delimited Field Parsing
+
+`dream-capture` parses `cwd` and `last_assistant_message` from the Stop hook JSON input in a single subprocess, using ASCII SOH (U+0001, `$'\001'`) as the binary delimiter between fields:
+
+```bash
+_FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.last_assistant_message // "")')
+CWD="${_FIELDS%%$'\001'*}"
+ASSISTANT_MSG="${_FIELDS#*$'\001'}"
+```
+
+**Why SOH and not `cut`**: `cut` is line-oriented — a multi-line `last_assistant_message` would split across newlines, causing the second and subsequent lines to be misinterpreted as `CWD`. This caused a silent drop of every multi-line assistant turn (the `[ ! -d "$CWD" ]` guard would fail on the garbled value). The fix (commit 495b2d0) replaced `cut` with parameter expansion, which is newline-safe and bash 3.2 compatible.
+
+`dream-dispatch` (UserPromptSubmit) uses the same pattern via `json_extract_cwd_prompt()` in `json-parse`, which outputs `cwd + SOH + prompt`. Both hooks now use the identical split idiom:
+```bash
+CWD="${FIELDS%%$'\001'*}"
+PROMPT_OR_MSG="${FIELDS#*$'\001'}"
+```
+
+**Diagnostic signal**: if `dream-capture` silently drops all multi-line assistant turns (memory queue stays empty despite active sessions), suspect a regression to line-oriented parsing. Look for `cut -d$'\001'` or `@tsv` patterns near the field-split.
 
 ## Transcript Channels (transcript-filter.cjs)
 
@@ -182,13 +204,13 @@ Two key plumbing operations in `json-helper.cjs` handle all observation writes:
 - Caller holds `.devflow/dream/.observations.lock` (mkdir-based) EXTERNALLY — lock acquired by the per-task skill around the Bash call, then released. Never held across tool calls.
 - Writes atomically via temp+mv with O_EXCL flag
 
-**`assign-anchor <obs>`** — anchor an observation into the committed ledger (replaces the removed `decisions-append`):
+**`assign-anchor <type> <obs_id>`** — anchor an observation into the committed ledger (replaces the removed `decisions-append`):
 - Assigns the next `ADR-NNN` or `PF-NNN` anchor (max+1 over all anchored rows incl. Retired; ADR/PF numbered independently; 3-digit pad). Retired numbers are reserved, never resurrected.
-- Appends a projected row (`toLedgerRow`: id, type, pattern, details, anchor_id, decisions_status, date?, raw_body?, amendments?) to `decisions-ledger.jsonl`, then deterministically renders `decisions.md`/`pitfalls.md` from the ledger via `render-decisions.cjs` (active entries only — Deprecated/Superseded/Retired are dropped from the `.md`).
+- Appends a projected row to `decisions-ledger.jsonl`, then deterministically renders `decisions.md`/`pitfalls.md` from the ledger via `render-decisions.cjs` (active entries only — Deprecated/Superseded/Retired are dropped from the `.md`).
 - Acquires `.devflow/decisions/.decisions.lock` INTERNALLY — self-locking; asserts the anchor isn't already present and the obs isn't already anchored.
 - Never call from a context that already holds `.decisions.lock` (deadlock).
 
-**`retire-anchor <anchor_id>`** — recoverable removal:
+**`retire-anchor <anchor_id> <status>`** — recoverable removal:
 - Flips the row's `decisions_status` (e.g. → `Retired`/`Deprecated`/`Superseded`) and re-renders. The ledger row is never deleted, so the entry is recoverable; the rendered `.md` simply drops it. Errors if the anchor_id isn't found. Self-locks `.decisions.lock`.
 
 **`rotate-observations`** — log bound:
@@ -242,7 +264,7 @@ Note: `.curation-last` lives in `.devflow/dream/` (not `.devflow/decisions/`), c
 
 ## Dream Config
 
-The sole source of truth for feature enabled-state is `.devflow/dream/config.json` (ADR-001 clean break — there is no runtime fallback). `DreamConfig` is `{memory, decisions, knowledge, autoCommit}` (`src/cli/utils/dream-config.ts`); the legacy `learning` field has been removed, and `coerceConfig` silently drops it when reading old configs. The `autoCommit` field (added PR #241, default `true`) controls whether Dream tasks auto-commit maintenance writes; `dream-commit` reads it at runtime via jq or `json-helper.cjs get-field-file`. Legacy `.devflow/sidecar/config.json` files are migrated to `dream/config.json` once at `devflow init` time by the `rename-sidecar-to-dream-v1` migration — the hooks do **not** read the sidecar path at runtime. (The old transitional `# dream-fallback: REMOVE after one release` read of `sidecar/config.json` has been removed from all hooks; do not reintroduce it.)
+The sole source of truth for feature enabled-state is `.devflow/dream/config.json` (ADR-001 clean break — there is no runtime fallback). `DreamConfig` is `{memory, decisions, knowledge, autoCommit}` (`src/cli/utils/dream-config.ts`); the legacy `learning` field has been removed, and `coerceConfig` silently drops it when reading old configs. The `autoCommit` field (added PR #241, default `true`) controls whether Dream tasks auto-commit maintenance writes; `dream-commit` reads it at runtime via jq or `json-helper.cjs get-field-file`. Legacy `.devflow/sidecar/config.json` files are migrated to `dream/config.json` once at `devflow init` time by the `rename-sidecar-to-dream-v1` migration — the hooks do **not** read the sidecar path at runtime.
 
 ## Anti-Patterns
 
@@ -255,11 +277,13 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 - **Using `decisions-usage-scan.cjs` to read cite counts** — it is a write-path tool that increments counts from session text. Read `.decisions-usage.json` directly for reporting or curation decisions.
 - **Writing artifact content in deterministic scripts** — observations, ADR/PF bodies, and knowledge bases must be authored by the LLM Dream agent via per-task skills; WORKING-MEMORY.md is authored by the LLM inside the `background-memory-update` worker; plumbing scripts handle only structural writes (ADR-008).
 - **Expecting USER_SIGNALS to feed any active pipeline** — the learning pipeline is gone. `transcript-filter.cjs` still emits a `user-signals` op but nothing consumes it. Only `dialog-pairs` (decisions) is active.
+- **Using line-oriented `cut` to split multi-field jq output** — `cut` splits on newlines, so a multi-line field value (e.g. `last_assistant_message`) will bleed body lines into the preceding field. Use SOH delimiter with bash parameter expansion instead (fixed in 495b2d0).
 
 ## Gotchas
 
 - **PF-006**: Claude Code renamed `response_text` → `last_assistant_message` in the Stop hook JSON silently (mid-May 2026). All 3+ projects had frozen memory for weeks. After any Claude Code version update, verify hook input field names against current docs. `dream-capture` now reads `last_assistant_message`; if Claude Code changes the API again, this will break silently — always test hook field presence after upgrades.
 - **PF-007**: Source is `scripts/hooks/`; installed is `~/.devflow/scripts/hooks/`. Editing installed copies creates repo divergence and the changes are overwritten on next `devflow init`. Always source-first.
+- **Multi-line assistant message parsing (fixed 495b2d0)**: `dream-capture` previously used `cut -d$'\001'` to split `cwd + SOH + last_assistant_message`. `cut` is line-oriented: multi-line messages produced multiple lines of output, making the second line of `last_assistant_message` the apparent CWD. The `-d "$CWD"` guard would fail silently, dropping every multi-line turn from the memory queue. Fixed by switching to `${_FIELDS%%$'\001'*}` / `${_FIELDS#*$'\001'}` parameter expansion (bash 3.2 compatible, newline-safe).
 - **set -e / no-abort discipline** — `dream-capture` and `dream-evaluate` use `set -e`. However, `session-start-context` intentionally omits `set -e` because its two sections (1.5 decisions TL;DR and 2 dream pending-work) are independent — a failure in one must not prevent the other from running. Never add `set -e` to `session-start-context`.
 - **Background session guards** — all three hooks check `DEVFLOW_BG_UPDATER`, `DEVFLOW_BG_LEARNER`, `DEVFLOW_BG_KNOWLEDGE_REFRESH` env vars at the top and exit immediately to prevent feedback loops when the hook fires inside a background agent's subprocess.
 - **Atomic writes everywhere** — all marker and state file writes use `tmp.$$` (PID-unique) + atomic `mv`. The `json-helper.cjs` uses `writeExclusive` (O_EXCL flag) for temp files to prevent TOCTOU symlink attacks.
@@ -268,12 +292,13 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 - **Per-task skill model override** — `shared/agents/dream.md` has `model: sonnet` in its frontmatter, but `session-start-context` overrides this per spawn via `dream_build_spawn_directive`. The agent frontmatter model is never actually used in production; the spawn-time model is authoritative.
 - **`dream_build_spawn_directive` communicates via global** — uses `_DREAM_DIRECTIVE` global variable (not stdout) so exact directive bytes including trailing newlines survive intact; command substitution would strip them.
 - **eval-decisions daily cap blocks late-session writes** — at 3 runs/day (default), decisions markers stop being written mid-session. No marker = no Dream agent spawn for decisions that session. Configurable via `.devflow/decisions/decisions.json` → `max_daily_runs`.
+- **Decisions usage scanner runs before memory gate** — `decisions-usage-scan.cjs` runs unconditionally in `dream-capture` (before `MEMORY_ENABLED` check), so ADR/PF citation counts are updated even when memory is disabled.
 
 ## Key Files
 
-- `scripts/hooks/dream-capture` — Stop hook; queue append + spawns `background-memory-update` worker (120s throttle); decisions usage scanner (independent of memory)
+- `scripts/hooks/dream-capture` — Stop hook; queue append + spawns `background-memory-update` worker (120s throttle); decisions usage scanner (independent of memory); SOH-delimited `cwd`+`last_assistant_message` parsing via parameter expansion
 - `scripts/hooks/background-memory-update` — detached `claude -p haiku` worker: claims `.pending-turns.jsonl` → `.pending-turns.processing` atomically, calls `claude -p` with Write permission, verifies stamp on line 1, touches `.last-refresh-ok` on success; uses 300s-stale mkdir lock at `.working-memory.lock/`
-- `scripts/hooks/dream-dispatch` — UserPromptSubmit hook; capture-only (user turn append to pending-turns queue); no directive emission
+- `scripts/hooks/dream-dispatch` — UserPromptSubmit hook; capture-only (user turn append to pending-turns queue); no directive emission; uses `json_extract_cwd_prompt()` from `json-parse` for SOH-delimited field split
 - `scripts/hooks/dream-evaluate` — SessionEnd hook; orchestrator sourcing eval-helpers + eval-decisions + eval-knowledge + eval-curation (eval-learning and eval-reinforce removed); exports shared vars to eval modules via orchestrator contract
 - `scripts/hooks/eval-decisions` — sourced by dream-evaluate; daily-cap check (default 3/day via `.decisions-runs-today`); extracts dialog pairs via transcript-filter.cjs; writes `decisions.{session}.json` marker
 - `scripts/hooks/eval-knowledge` — sourced by dream-evaluate; 2-hour throttle (`.knowledge-last-refresh`); queries `feature-knowledge.cjs stale-slugs`; writes `knowledge.{session}.json` marker; optimistically updates throttle
@@ -282,6 +307,7 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 - `scripts/hooks/dream-collect-tasks` — 3-arg sourced helper; two-pass design: Pass 1 unconditional sweep (deletes `learning.*` + `memory.*` + disabled-feature markers), Pass 2 type accumulation; `dream_build_spawn_directive` function; COLLECT_LIMIT=50 FIFO
 - `scripts/hooks/session-start-context` — SessionStart hook (no set -e); two independent sections: 1.5 decisions TL;DR, 2 per-task dream spawn directives (calls `dream_build_spawn_directive`)
 - `scripts/hooks/json-helper.cjs` — plumbing ops: `merge-observation`, `assign-anchor`, `retire-anchor`, `rotate-observations`, `read-dream`, atomic writes; does NOT contain judgment logic
+- `scripts/hooks/json-parse` — sourced by all hooks; provides `json_field`, `json_field_file`, `json_extract_cwd_prompt` and friends; `json_extract_cwd_prompt` uses SOH delimiter + node/jq fallback for safe multi-field extraction
 - `scripts/hooks/lib/transcript-filter.cjs` — two-channel filter: USER_SIGNALS (orphaned, unused) + DIALOG_PAIRS (active, decisions only)
 - `scripts/hooks/lib/staleness.cjs` — annotates log entries with `mayBeStale` based on file existence; signal-only (no CLI display surface)
 - `scripts/hooks/lib/feature-knowledge.cjs` — KB index, staleness checks (`checkAllStaleness` batches all KBs in one git log call), `updateIndex`, `stale-slugs` CLI op, slug validation

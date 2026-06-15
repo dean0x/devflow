@@ -63,7 +63,7 @@
         "src/cli/commands/decisions.ts",
         "src/cli/utils/dream-config.ts"
       ],
-      "lastUpdated": "2026-06-11T20:00:13.078Z",
+      "lastUpdated": "2026-06-15T19:26:14.898Z",
       "createdBy": "implement"
     },
     "decisions": {
