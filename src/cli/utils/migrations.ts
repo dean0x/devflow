@@ -1021,6 +1021,36 @@ const MIGRATION_DECISIONS_LEDGER_UNIFY: Migration<'per-project'> = {
   },
 };
 
+/**
+ * Per-project: unlink the stale `.devflow/memory/.working-memory-disabled`
+ * sentinel that was previously used as a defense-in-depth gate for memory
+ * hooks but is now dead code (dream config is the sole source of truth,
+ * per ADR-001 clean-break philosophy).
+ *
+ * Best-effort cleanup of a runtime-inert file — ENOENT is success (ADR-001).
+ * Non-fatal on any other error (PF-004 idempotency: failed cleanup is invisible
+ * at runtime because no hook reads this path anymore).
+ *
+ * Applies ADR-001 (clean-break; minimal migration footprint).
+ * Mirrors purge-stale-memory-markers-v1 in shape.
+ */
+const MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL: Migration<'per-project'> = {
+  id: 'purge-dead-working-memory-sentinel-v1',
+  description: 'Remove stale .devflow/memory/.working-memory-disabled sentinel (config-only gate now)',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const sentinelPath = path.join(ctx.projectRoot, '.devflow', 'memory', '.working-memory-disabled');
+    try {
+      await fs.unlink(sentinelPath);
+      return { infos: ['Removed stale .working-memory-disabled sentinel'], warnings: [] };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return { infos: [], warnings: [] }; // already gone — no-op
+      throw err; // unexpected — surface to runner
+    }
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -1039,6 +1069,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,
   MIGRATION_SYNC_DEVFLOW_GITIGNORE_V3,
   MIGRATION_DECISIONS_LEDGER_UNIFY,
+  MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

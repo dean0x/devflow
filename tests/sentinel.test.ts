@@ -504,7 +504,7 @@ describe('manageSentinel utility', () => {
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('creates sentinel file when disabled=false', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
     await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
@@ -523,21 +523,21 @@ describe('manageSentinel utility', () => {
   });
 
   it('is idempotent when enabling with no sentinel present', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
     // No sentinel exists — enabling again should not throw
     await expect(manageSentinel(sentinelPath, true)).resolves.toBeUndefined();
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 
   it('is idempotent when disabling with sentinel already present', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
     writeDisabledSentinel(sentinelPath);
     await expect(manageSentinel(sentinelPath, false)).resolves.toBeUndefined();
     expect(fs.existsSync(sentinelPath)).toBe(true);
   });
 
   it('disable then enable removes the sentinel', async () => {
-    const sentinelPath = path.join(tmpDir, '.devflow', 'memory', '.working-memory-disabled');
+    const sentinelPath = path.join(tmpDir, '.devflow', 'decisions', '.disabled');
     await manageSentinel(sentinelPath, false);
     expect(fs.existsSync(sentinelPath)).toBe(true);
     await manageSentinel(sentinelPath, true);
