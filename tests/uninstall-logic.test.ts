@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeAssetsToRemove, formatDryRunPlan } from '../src/cli/commands/uninstall.js';
+import { computeAssetsToRemove, formatDryRunPlan, resolveSecurityRemovalDecision } from '../src/cli/commands/uninstall.js';
 import { DEVFLOW_PLUGINS, type PluginDefinition } from '../src/cli/plugins.js';
 
 describe('computeAssetsToRemove', () => {
@@ -190,5 +190,84 @@ describe('formatDryRunPlan', () => {
       rules: ['security', 'security', 'engineering'],
     });
     expect(plan).toContain('Rules (2)');
+  });
+});
+
+describe('resolveSecurityRemovalDecision', () => {
+  // === Non-interactive preserve invariant (SAFETY PROPERTY) ===
+  // When isTTY is false the deny list must NEVER be removed — avoids PF-004
+  // half-applied-state hazard during scripted/CI uninstalls.
+
+  it('returns preserve when security is present and isTTY is false (non-interactive invariant)', () => {
+    expect(resolveSecurityRemovalDecision({
+      anySecurityPresent: true,
+      keepDocs: false,
+      isTTY: false,
+    })).toBe('preserve');
+  });
+
+  it('returns preserve regardless of keepDocs when isTTY is false and security is present', () => {
+    // keepDocs wins over isTTY only when keepDocs is true — tested separately below
+    // This asserts the priority order: skip (keepDocs) > preserve (non-TTY) > prompt
+    expect(resolveSecurityRemovalDecision({
+      anySecurityPresent: true,
+      keepDocs: false,
+      isTTY: false,
+    })).toBe('preserve');
+  });
+
+  // === keepDocs gate ===
+
+  it('returns skip when keepDocs is true even if isTTY is true', () => {
+    expect(resolveSecurityRemovalDecision({
+      anySecurityPresent: true,
+      keepDocs: true,
+      isTTY: true,
+    })).toBe('skip');
+  });
+
+  it('returns skip when keepDocs is true and isTTY is false', () => {
+    expect(resolveSecurityRemovalDecision({
+      anySecurityPresent: true,
+      keepDocs: true,
+      isTTY: false,
+    })).toBe('skip');
+  });
+
+  // === nothing-present gate ===
+
+  it('returns skip when no security is present regardless of TTY or keepDocs', () => {
+    expect(resolveSecurityRemovalDecision({
+      anySecurityPresent: false,
+      keepDocs: false,
+      isTTY: true,
+    })).toBe('skip');
+
+    expect(resolveSecurityRemovalDecision({
+      anySecurityPresent: false,
+      keepDocs: false,
+      isTTY: false,
+    })).toBe('skip');
+  });
+
+  // === interactive prompt path ===
+
+  it('returns prompt when security is present, keepDocs is false, and isTTY is true', () => {
+    expect(resolveSecurityRemovalDecision({
+      anySecurityPresent: true,
+      keepDocs: false,
+      isTTY: true,
+    })).toBe('prompt');
+  });
+
+  // === exhaustiveness — all three outcomes are reachable ===
+
+  it('covers all three return values', () => {
+    const skip = resolveSecurityRemovalDecision({ anySecurityPresent: false, keepDocs: false, isTTY: true });
+    const preserve = resolveSecurityRemovalDecision({ anySecurityPresent: true, keepDocs: false, isTTY: false });
+    const prompt = resolveSecurityRemovalDecision({ anySecurityPresent: true, keepDocs: false, isTTY: true });
+    expect(skip).toBe('skip');
+    expect(preserve).toBe('preserve');
+    expect(prompt).toBe('prompt');
   });
 });

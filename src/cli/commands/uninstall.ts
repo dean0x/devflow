@@ -93,6 +93,33 @@ export function formatDryRunPlan(
 }
 
 /**
+ * Determine whether the security deny list should prompt for removal in an
+ * interactive session, and what the non-interactive default is.
+ *
+ * PURE — no I/O, fully testable.
+ *
+ * Safety invariant: non-interactive mode NEVER removes the deny list
+ * (protective-by-default).  `keepDocs` suppresses the entire section.
+ *
+ * Returns:
+ *   - "skip"    — nothing present, or keepDocs is set; no action needed
+ *   - "preserve"  — non-interactive (isTTY=false); deny list preserved
+ *   - "prompt"  — interactive (isTTY=true); caller should ask the user
+ *
+ * @D1 Non-interactive-preserve invariant: when isTTY is false the result is
+ * always "preserve", never "prompt" — avoids PF-004 half-applied-state hazard.
+ */
+export function resolveSecurityRemovalDecision(opts: {
+  anySecurityPresent: boolean;
+  keepDocs: boolean;
+  isTTY: boolean;
+}): 'skip' | 'preserve' | 'prompt' {
+  if (!opts.anySecurityPresent || opts.keepDocs) return 'skip';
+  if (!opts.isTTY) return 'preserve';
+  return 'prompt';
+}
+
+/**
  * Uninstall plugin using Claude CLI
  */
 function uninstallPluginViaCli(scope: 'user' | 'local'): boolean {
@@ -438,29 +465,37 @@ export const uninstallCommand = new Command('uninstall')
         const locationLabel = bothLocations ? 'user settings + managed settings'
           : detectedSecurity.user ? 'user settings' : 'managed settings';
 
+        const securityDecision = resolveSecurityRemovalDecision({
+          anySecurityPresent,
+          keepDocs: !!options.keepDocs,
+          isTTY: process.stdin.isTTY,
+        });
+
         let shouldRemoveSecurity = false;
 
-        if (!options.keepDocs) {
-          if (process.stdin.isTTY) {
-            const removeDenyConfirm = await p.confirm({
-              message: `Remove Devflow security deny list from ${locationLabel}?`,
-              initialValue: false, // Deny list is protective — default to keeping it
-            });
+        if (securityDecision === 'prompt') {
+          const removeDenyConfirm = await p.confirm({
+            message: `Remove Devflow security deny list from ${locationLabel}?`,
+            initialValue: false, // Deny list is protective — default to keeping it
+          });
 
-            if (!p.isCancel(removeDenyConfirm) && removeDenyConfirm) {
-              shouldRemoveSecurity = true;
-            } else {
-              p.log.info(`Security deny list preserved (${locationLabel})`);
-            }
+          if (!p.isCancel(removeDenyConfirm) && removeDenyConfirm) {
+            shouldRemoveSecurity = true;
           } else {
-            p.log.info(`Security deny list preserved (${locationLabel}, non-interactive mode)`);
+            p.log.info(`Security deny list preserved (${locationLabel})`);
           }
+        } else if (securityDecision === 'preserve') {
+          p.log.info(`Security deny list preserved (${locationLabel}, non-interactive mode)`);
         }
+        // securityDecision === 'skip' when keepDocs is set — no message, no action
 
         if (shouldRemoveSecurity) {
-          // Strip from user settings (ENOENT-tolerant; hard fail if unparseable — preserve safety).
-          // Atomic write (temp+rename) — settings.json is read by Claude Code every turn;
-          // mirrors the `devflow security --disable` strip path.
+          // Strip from user settings (ENOENT-tolerant; atomic write via temp+rename).
+          // NOTE: unparseable user settings are detected as user=false by detectDenyState
+          // (JSON.parse failure sets unknown=true but not user=true), so this branch is
+          // only reached when the JSON is valid — stripUserDenyList will not throw.
+          // Unlike `devflow security --disable`, uninstall does NOT hard-fail on corrupt
+          // JSON; it silently skips the strip instead (user=false → guard below is false).
           if (detectedSecurity.user && userSettingsJsonForSecurity !== null) {
             const { json: stripped, removed } = stripUserDenyList(
               userSettingsJsonForSecurity,
