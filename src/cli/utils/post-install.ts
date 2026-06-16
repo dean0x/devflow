@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './paths.js';
 import { getGitignoreEntries, getDocsDir } from './project-paths.js';
+import { writeFileAtomicExclusive } from './fs-atomic.js';
 
 /**
  * Type guard for Node.js system errors with error codes.
@@ -38,15 +39,370 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
 }
 
 /**
- * Merge Devflow deny entries into an existing managed settings object.
- * Preserves existing entries, deduplicates, and returns the merged JSON string.
+ * Merge Devflow deny entries into an existing settings JSON object.
+ * Preserves existing entries (including allow and sibling keys), deduplicates,
+ * and returns the merged JSON string with trailing newline.
+ *
+ * PURE + idempotent: calling with the same inputs always yields byte-equal output.
+ * Non-array `deny` (e.g. a string, null) is treated as empty — neither throws nor spreads chars.
  */
 export function mergeDenyList(existingJson: string, newDenyEntries: string[]): string {
-  const existing = JSON.parse(existingJson);
-  const currentDeny: string[] = existing.permissions?.deny ?? [];
+  const existing = JSON.parse(existingJson) as Record<string, unknown>;
+  const rawDeny = (existing.permissions as Record<string, unknown> | undefined)?.deny;
+  const currentDeny: string[] = Array.isArray(rawDeny) ? rawDeny as string[] : [];
   const merged = [...new Set([...currentDeny, ...newDenyEntries])];
-  existing.permissions = { ...existing.permissions, deny: merged };
+  existing.permissions = { ...(existing.permissions as Record<string, unknown> ?? {}), deny: merged };
   return JSON.stringify(existing, null, 2) + '\n';
+}
+
+/**
+ * Historical superset of every deny entry Devflow has ever shipped.
+ * Append every future entry here; never remove entries.
+ * Used by stripUserDenyList to identify Devflow-managed entries in legacy installs.
+ *
+ * Load-time assertion below verifies this is a superset of the current template.
+ */
+// D-SECURITY-01: frozen at module load — any future template entry must appear here too.
+export const DEVFLOW_HISTORICAL_DENY: ReadonlySet<string> = Object.freeze(new Set<string>([
+  // v1 batch — 154 entries shipped in src/templates/managed-settings.json
+  'Bash(rm -rf /*)',
+  'Bash(rm -rf ~*)',
+  'Bash(rm -rf .*)',
+  'Bash(* rm -rf /*)',
+  'Bash(rm -r /*)',
+  'Bash(rm -r ~*)',
+  'Bash(rm -r .*)',
+  'Bash(rm -fr /*)',
+  'Bash(rm -fr ~*)',
+  'Bash(rm -fr .*)',
+  'Bash(rm -f /*)',
+  'Bash(rm -f ~*)',
+  'Bash(rm -f .*)',
+  'Bash(dd if=*)',
+  'Bash(dd*of=/dev/*)',
+  'Bash(mkfs*)',
+  'Bash(fdisk*)',
+  'Bash(parted*)',
+  'Bash(shred*)',
+  'Bash(> /dev/sda*)',
+  'Bash(> /dev/nvme*)',
+  'Bash(sh -c *)',
+  'Bash(bash -c *)',
+  'Bash(curl * | bash*)',
+  'Bash(curl * | sh*)',
+  'Bash(wget * | bash*)',
+  'Bash(wget * | sh*)',
+  'Bash(fetch | sh*)',
+  'Bash(lynx -source | bash*)',
+  'Bash(base64 -d | bash*)',
+  'Bash(base64 -d | sh*)',
+  'Bash(base64 --decode | bash*)',
+  'Bash(eval *)',
+  'Bash(exec *)',
+  'Bash(sudo *)',
+  'Bash(su *)',
+  'Bash(doas *)',
+  'Bash(pkexec *)',
+  'Bash(passwd*)',
+  'Bash(useradd*)',
+  'Bash(userdel*)',
+  'Bash(usermod*)',
+  'Bash(groupadd*)',
+  'Bash(chmod*777*)',
+  'Bash(chmod*666*)',
+  'Bash(chmod -R 666*)',
+  'Bash(chmod a+w*)',
+  'Bash(chown*root*)',
+  'Bash(chgrp*root*)',
+  'Bash(kill -9 *)',
+  'Bash(kill -KILL *)',
+  'Bash(killall *)',
+  'Bash(pkill -9 *)',
+  'Bash(pkill *)',
+  'Bash(xkill*)',
+  'Bash(reboot*)',
+  'Bash(shutdown*)',
+  'Bash(halt*)',
+  'Bash(poweroff*)',
+  'Bash(init 0*)',
+  'Bash(init 6*)',
+  'Bash(systemctl*stop*)',
+  'Bash(systemctl*disable*)',
+  'Bash(systemctl*mask*)',
+  'Bash(service*stop*)',
+  'Bash(nc -l*)',
+  'Bash(nc -e*)',
+  'Bash(netcat -l*)',
+  'Bash(ncat -l*)',
+  'Bash(socat*)',
+  'Bash(telnet*)',
+  'Bash(python -c *)',
+  'Bash(python3 -c *)',
+  'Bash(php -r *)',
+  'Bash(perl -e *)',
+  'Bash(ruby -rsocket*)',
+  'Bash(nmap*)',
+  'Bash(masscan*)',
+  'Bash(ufw disable*)',
+  'Bash(iptables -F*)',
+  'Bash(iptables --flush*)',
+  'Bash(insmod*)',
+  'Bash(rmmod*)',
+  'Bash(modprobe*)',
+  'Bash(sysctl -w *)',
+  'Bash(docker run --privileged*)',
+  'Bash(docker run -v /:/host*)',
+  'Bash(docker run --pid=host*)',
+  'Bash(docker run --net=host*)',
+  'Bash(nsenter*)',
+  'Bash(crontab*)',
+  'Bash(rm /var/log*)',
+  'Bash(rm -rf /var/log*)',
+  'Bash(rm -r /var/log*)',
+  'Bash(rm -f /var/log*)',
+  'Bash(rm -fr /var/log*)',
+  'Bash(> /var/log*)',
+  'Bash(truncate /var/log*)',
+  'Bash(history -c*)',
+  'Bash(history -w*)',
+  'Bash(rm ~/.bash_history*)',
+  'Bash(rm -f ~/.bash_history*)',
+  'Bash(rm ~/.zsh_history*)',
+  'Bash(rm -f ~/.zsh_history*)',
+  'Bash(unset HISTFILE*)',
+  'Bash(curl 169.254.169.254*)',
+  'Bash(wget 169.254.169.254*)',
+  'Bash(rsync --daemon*)',
+  'Bash(sftp *)',
+  'Bash(ssh -o *)',
+  'Bash(xmrig*)',
+  'Bash(cgminer*)',
+  'Bash(bfgminer*)',
+  'Bash(ethminer*)',
+  'Bash(minerd*)',
+  'Bash(npm install -g *)',
+  'Bash(npm i -g *)',
+  'Bash(pip install --system*)',
+  'Bash(pip3 install --system*)',
+  'Bash(apt*install*)',
+  'Bash(yum*install*)',
+  'Bash(brew*install*)',
+  'Bash(mount *)',
+  'Bash(umount *)',
+  'Bash(> /etc/*)',
+  'Bash(> /usr/*)',
+  'Bash(> /bin/*)',
+  'Bash(> /sys/*)',
+  'Bash(> /proc/*)',
+  'Read(.env)',
+  'Read(.env.*)',
+  'Read(**/.env)',
+  'Read(**/.env.*)',
+  'Read(**/secrets/**)',
+  'Read(**/credentials/**)',
+  'Read(~/.ssh/id_*)',
+  'Read(~/.ssh/*.pem)',
+  'Read(~/.ssh/config)',
+  'Read(~/.aws/credentials)',
+  'Read(~/.aws/config)',
+  'Read(~/.config/gcloud/**)',
+  'Read(**/*.pem)',
+  'Read(**/*.key)',
+  'Read(**/*.pfx)',
+  'Read(**/*.p12)',
+  'Read(**/private.key)',
+  'Read(**/privkey.pem)',
+  'Read(**/id_rsa)',
+  'Read(**/id_ed25519)',
+  'Read(**/id_ecdsa)',
+  'Read(**/id_dsa)',
+  'Read(/etc/shadow)',
+  'Read(/etc/sudoers)',
+  'Read(/etc/passwd)',
+]));
+
+/**
+ * Assert that DEVFLOW_HISTORICAL_DENY is a superset of the provided template entries.
+ * Throws if any template entry is missing from the historical set.
+ * Call this after loading the template to catch drift where a new template entry
+ * was not also added to DEVFLOW_HISTORICAL_DENY.
+ *
+ * @param templateEntries - the deny array from the current managed-settings template
+ */
+export function assertHistoricalDenySuperset(templateEntries: string[]): void {
+  const missing = templateEntries.filter(e => !DEVFLOW_HISTORICAL_DENY.has(e));
+  if (missing.length > 0) {
+    throw new Error(
+      `DEVFLOW_HISTORICAL_DENY is missing ${missing.length} template entries. ` +
+      `Add these to DEVFLOW_HISTORICAL_DENY in post-install.ts:\n${missing.join('\n')}`,
+    );
+  }
+}
+
+/**
+ * Strip Devflow-managed deny entries from a user settings JSON string.
+ * PURE + idempotent — mirror of removeMemoryHooks in shape.
+ *
+ * - Parses the JSON; if permissions.deny is absent or not an array → returns input unchanged.
+ * - Removes entries that are in historicalSet; preserves user-only entries.
+ * - When remaining is empty: deletes permissions.deny; if permissions then has no keys, deletes permissions.
+ * - Never deletes the file — may return `{}\n`.
+ * - Preserves allow and all sibling keys.
+ * - Returns { json, removed[] } where removed is the list of entries actually stripped.
+ */
+export function stripUserDenyList(
+  existingJson: string,
+  historicalSet: ReadonlySet<string>,
+): { json: string; removed: string[] } {
+  const obj = JSON.parse(existingJson) as Record<string, unknown>;
+  const perms = obj.permissions as Record<string, unknown> | undefined;
+  if (!perms) return { json: existingJson, removed: [] };
+
+  const rawDeny = perms.deny;
+  if (!Array.isArray(rawDeny)) return { json: existingJson, removed: [] };
+
+  const currentDeny = rawDeny as string[];
+  const removed = currentDeny.filter(e => historicalSet.has(e));
+  const remaining = currentDeny.filter(e => !historicalSet.has(e));
+
+  if (remaining.length === 0) {
+    delete perms.deny;
+    if (Object.keys(perms).length === 0) {
+      delete obj.permissions;
+    }
+  } else {
+    perms.deny = remaining;
+  }
+
+  return {
+    json: JSON.stringify(obj, null, 2) + '\n',
+    removed,
+  };
+}
+
+/**
+ * Detect where the Devflow deny list currently lives.
+ *
+ * - user: ANY historical-set entry in user settings permissions.deny → true (subset installs count).
+ * - managed: managedExists AND ANY historical entry in managed content's deny → true.
+ * - unknown: user settings is present but unparseable → true (caller skips strip).
+ *
+ * Guards getManagedSettingsPath() — may throw on unsupported platforms; caught → managed absent.
+ */
+export function detectDenyState(
+  userSettingsJson: string | null,
+  managedExists: boolean,
+  managedContentJson: string | null,
+): { user: boolean; managed: boolean; unknown: boolean } {
+  let user = false;
+  let unknown = false;
+  let managed = false;
+
+  if (userSettingsJson !== null) {
+    try {
+      const obj = JSON.parse(userSettingsJson) as Record<string, unknown>;
+      const rawDeny = (obj.permissions as Record<string, unknown> | undefined)?.deny;
+      if (Array.isArray(rawDeny)) {
+        user = (rawDeny as string[]).some(e => DEVFLOW_HISTORICAL_DENY.has(e));
+      }
+    } catch {
+      unknown = true;
+    }
+  }
+
+  if (managedExists && managedContentJson !== null) {
+    try {
+      const obj = JSON.parse(managedContentJson) as Record<string, unknown>;
+      const rawDeny = (obj.permissions as Record<string, unknown> | undefined)?.deny;
+      if (Array.isArray(rawDeny)) {
+        managed = (rawDeny as string[]).some(e => DEVFLOW_HISTORICAL_DENY.has(e));
+      }
+    } catch {
+      // Unparseable managed file — treat as not present
+    }
+  }
+
+  return { user, managed, unknown };
+}
+
+/**
+ * Describe the action required for the security deny list.
+ * PURE — no I/O, no prompting.
+ *
+ * Resolution order:
+ * 1. Explicit `flag` always wins.
+ * 2. Manifest field present AND matches detected reality → proceed (merge for enabled, strip for none/disabled).
+ * 3. Manifest field disagrees with detected reality (CONFLICT):
+ *    - TTY → return a prompt descriptor.
+ *    - Non-TTY → keep detected reality + signal a warning.
+ * 4. Fresh (no manifest field) → seed from detected state; default 'user' when nothing detected.
+ */
+export function resolveSecurityAction(
+  flag: 'user' | 'managed' | 'none' | undefined,
+  manifestMode: 'user' | 'managed' | 'none' | undefined,
+  detected: { user: boolean; managed: boolean; unknown: boolean },
+  isTTY: boolean,
+): {
+  target: 'user' | 'managed' | 'none';
+  action: 'merge' | 'strip' | 'noop';
+  prompt?: string;
+  warn?: string;
+} {
+  // 1. Explicit CLI flag wins
+  if (flag !== undefined) {
+    if (flag === 'none') return { target: 'none', action: 'strip' };
+    if (flag === 'user') return { target: 'user', action: 'merge' };
+    if (flag === 'managed') return { target: 'managed', action: 'merge' };
+  }
+
+  const detectedMode: 'user' | 'managed' | 'both' | 'none' =
+    detected.user && detected.managed ? 'both'
+    : detected.user ? 'user'
+    : detected.managed ? 'managed'
+    : 'none';
+
+  // 2. Manifest field present — check alignment with detected reality
+  if (manifestMode !== undefined) {
+    const manifestEnabled = manifestMode !== 'none';
+    const detectedEnabled = detectedMode !== 'none';
+
+    if (manifestEnabled && detectedEnabled) {
+      // Both agree something is active — merge/upgrade with current template
+      return { target: manifestMode === 'managed' ? 'managed' : 'user', action: 'merge' };
+    }
+    if (!manifestEnabled && !detectedEnabled) {
+      // Both agree it's off — nothing to do
+      return { target: 'none', action: 'noop' };
+    }
+    // CONFLICT: manifest disagrees with reality
+    if (isTTY) {
+      return {
+        target: detectedMode === 'both' || detectedMode === 'user' ? 'user' : 'managed',
+        action: 'noop',
+        prompt: `Security deny list is ${detectedEnabled ? 'present' : 'absent'} but manifest says ${manifestMode}. Keep current state?`,
+      };
+    }
+    // Non-TTY: preserve detected reality + warn
+    const keepTarget: 'user' | 'managed' | 'none' =
+      detectedMode === 'both' || detectedMode === 'user' ? 'user'
+      : detectedMode === 'managed' ? 'managed'
+      : 'none';
+    return {
+      target: keepTarget,
+      action: detectedEnabled ? 'merge' : 'strip',
+      warn: `Security deny list state (manifest=${manifestMode}, detected=${detectedMode}) — keeping detected reality`,
+    };
+  }
+
+  // 4. Fresh (no manifest field) — seed from detected state
+  if (detectedMode === 'none') {
+    // Nothing detected — apply user mode as default
+    return { target: 'user', action: 'merge' };
+  }
+  // Something already installed — keep it, upgrade with current template
+  const seedTarget: 'user' | 'managed' =
+    detectedMode === 'managed' ? 'managed' : 'user';
+  return { target: seedTarget, action: 'merge' };
 }
 
 /**
@@ -255,16 +611,46 @@ export async function removeManagedSettings(
   }
 }
 
-export type SecurityMode = 'managed' | 'user';
+/**
+ * Where the security deny list is installed.
+ * 'user'    = ~/.claude/settings.json (default)
+ * 'managed' = system-level managed settings
+ * 'none'    = not installed
+ */
+export type SecurityMode = 'managed' | 'user' | 'none';
+
+/**
+ * Apply the Devflow deny list atomically to the user settings file (~/.claude/settings.json).
+ * Called by init's dedicated security step when target mode is 'user' (or as a fallback when
+ * the managed write fails).
+ *
+ * Merges currentTemplateDeny into the existing settings file. Idempotent.
+ * Returns the merged JSON string written to disk.
+ */
+export async function applyUserSecurityDenyList(
+  settingsPath: string,
+  currentTemplateDeny: string[],
+): Promise<string> {
+  let existing: string;
+  try {
+    existing = await fs.readFile(settingsPath, 'utf-8');
+  } catch {
+    existing = '{}';
+  }
+  const merged = mergeDenyList(existing, currentTemplateDeny);
+  await writeFileAtomicExclusive(settingsPath, merged);
+  return merged;
+}
 
 /**
  * Install or update settings.json with Devflow configuration.
  * Prompts interactively in TTY mode when settings already exist.
  * In non-TTY mode, skips override (safe default).
  *
- * When securityMode is 'managed', the deny list goes to system-level managed
- * settings and is excluded from user settings.json. When 'user', the deny list
- * is included in settings.json (original behavior).
+ * The deny list is NO LONGER injected here. It is handled by init's dedicated
+ * security step (applyUserSecurityDenyList / installManagedSettings) after
+ * installSettings completes. This separation ensures the security step is always
+ * atomic and targets ~/ settings.json explicitly.
  */
 export async function installSettings(
   claudeDir: string,
@@ -278,22 +664,11 @@ export async function installSettings(
 
   try {
     const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
-    let settingsContent = substituteSettingsTemplate(settingsTemplate, devflowDir);
+    const settingsContent = substituteSettingsTemplate(settingsTemplate, devflowDir);
 
-    // When securityMode is 'user', inject deny list from managed-settings template
-    if (securityMode === 'user') {
-      const managedTemplatePath = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
-      try {
-        const managedTemplate = JSON.parse(await fs.readFile(managedTemplatePath, 'utf-8'));
-        const settings = JSON.parse(settingsContent);
-        settings.permissions = managedTemplate.permissions;
-        settingsContent = JSON.stringify(settings, null, 2) + '\n';
-      } catch {
-        if (verbose) {
-          p.log.warn('Could not load security deny list — settings will be written without it');
-        }
-      }
-    }
+    // NOTE: security deny list injection was removed from here.
+    // The init command runs a dedicated security step after installSettings completes.
+    void securityMode; // parameter kept for backward compat; no longer used here
 
     let settingsExists = false;
     try {

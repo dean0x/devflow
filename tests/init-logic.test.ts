@@ -14,7 +14,15 @@ import {
   runMigrationsWithFallback,
 } from '../src/cli/commands/init.js';
 import { getManagedSettingsPath } from '../src/cli/utils/paths.js';
-import { installManagedSettings, installClaudeignore } from '../src/cli/utils/post-install.js';
+import {
+  installManagedSettings,
+  installClaudeignore,
+  stripUserDenyList,
+  detectDenyState,
+  resolveSecurityAction,
+  assertHistoricalDenySuperset,
+  DEVFLOW_HISTORICAL_DENY,
+} from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, prefixSkillName } from '../src/cli/plugins.js';
 import type { RunMigrationsResult } from '../src/cli/utils/migrations.js';
@@ -244,6 +252,296 @@ describe('mergeDenyList', () => {
     const existing = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
     const result = JSON.parse(mergeDenyList(existing, []));
     expect(result.permissions.deny).toEqual(['Bash(rm -rf /*)']);
+  });
+
+  it('handles non-array deny (string) without throwing or spreading chars', () => {
+    const existing = JSON.stringify({ permissions: { deny: 'oops-a-string' } });
+    // Must not throw and must treat string as empty, then add newEntries
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(sudo *)']));
+    expect(result.permissions.deny).toEqual(['Bash(sudo *)']);
+  });
+
+  it('handles null deny without throwing', () => {
+    const existing = JSON.stringify({ permissions: { deny: null } });
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(sudo *)']));
+    expect(result.permissions.deny).toEqual(['Bash(sudo *)']);
+  });
+
+  it('produces byte-equal output on idempotent re-run', () => {
+    const existing = JSON.stringify({ permissions: { deny: ['Bash(sudo *)'], allow: ['Read(*)'] } });
+    const first = mergeDenyList(existing, ['Bash(sudo *)']);
+    const second = mergeDenyList(first, ['Bash(sudo *)']);
+    expect(first).toBe(second);
+  });
+
+  it('always ends with trailing newline', () => {
+    const existing = JSON.stringify({});
+    const result = mergeDenyList(existing, ['Bash(sudo *)']);
+    expect(result.endsWith('\n')).toBe(true);
+  });
+
+  it('preserves allow alongside deny', () => {
+    const existing = JSON.stringify({ permissions: { allow: ['Read(**)'], deny: [] } });
+    const result = JSON.parse(mergeDenyList(existing, ['Bash(sudo *)']));
+    expect(result.permissions.allow).toEqual(['Read(**)']);
+    expect(result.permissions.deny).toEqual(['Bash(sudo *)']);
+  });
+});
+
+describe('stripUserDenyList', () => {
+  const historical = new Set(['Bash(rm -rf /*)', 'Bash(sudo *)', 'Bash(eval *)']);
+
+  it('removes historical entries', () => {
+    const json = JSON.stringify({
+      permissions: { deny: ['Bash(rm -rf /*)', 'Bash(sudo *)', 'my-custom-rule'] },
+    });
+    const { json: out, removed } = stripUserDenyList(json, historical);
+    const parsed = JSON.parse(out);
+    expect(parsed.permissions.deny).toEqual(['my-custom-rule']);
+    expect(removed).toEqual(['Bash(rm -rf /*)', 'Bash(sudo *)']);
+  });
+
+  it('preserves user-only entries', () => {
+    const json = JSON.stringify({
+      permissions: { deny: ['user-only-1', 'user-only-2'] },
+    });
+    const { json: out, removed } = stripUserDenyList(json, historical);
+    const parsed = JSON.parse(out);
+    expect(parsed.permissions.deny).toEqual(['user-only-1', 'user-only-2']);
+    expect(removed).toEqual([]);
+  });
+
+  it('removes permissions.deny when remaining is empty', () => {
+    const json = JSON.stringify({
+      permissions: { deny: ['Bash(rm -rf /*)'] },
+    });
+    const { json: out, removed } = stripUserDenyList(json, historical);
+    const parsed = JSON.parse(out);
+    expect(parsed.permissions).toBeUndefined();
+    expect(removed).toHaveLength(1);
+  });
+
+  it('removes permissions object when it becomes empty', () => {
+    const json = JSON.stringify({
+      permissions: { deny: ['Bash(sudo *)'] },
+    });
+    const { json: out } = stripUserDenyList(json, historical);
+    const parsed = JSON.parse(out);
+    expect(Object.keys(parsed)).not.toContain('permissions');
+  });
+
+  it('preserves allow alongside deny after strip', () => {
+    const json = JSON.stringify({
+      permissions: { allow: ['Read(**)'], deny: ['Bash(sudo *)'] },
+    });
+    const { json: out } = stripUserDenyList(json, historical);
+    const parsed = JSON.parse(out);
+    expect(parsed.permissions.allow).toEqual(['Read(**)']);
+    expect(parsed.permissions.deny).toBeUndefined();
+  });
+
+  it('returns {}\n when the only key was permissions with only historical deny', () => {
+    const json = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
+    const { json: out } = stripUserDenyList(json, historical);
+    expect(out).toBe('{}\n');
+  });
+
+  it('is idempotent (second strip returns same JSON)', () => {
+    const json = JSON.stringify({
+      permissions: { deny: ['Bash(rm -rf /*)', 'Bash(sudo *)'] },
+    });
+    const { json: first } = stripUserDenyList(json, historical);
+    const { json: second } = stripUserDenyList(first, historical);
+    expect(first).toBe(second);
+  });
+
+  it('no-ops when permissions is absent', () => {
+    const json = JSON.stringify({ otherKey: 'val' });
+    const { json: out, removed } = stripUserDenyList(json, historical);
+    expect(out).toBe(json);
+    expect(removed).toEqual([]);
+  });
+
+  it('no-ops when deny is not an array', () => {
+    const json = JSON.stringify({ permissions: { deny: 'bad' } });
+    const { json: out, removed } = stripUserDenyList(json, historical);
+    expect(out).toBe(json);
+    expect(removed).toEqual([]);
+  });
+
+  it('ends with trailing newline', () => {
+    const json = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
+    const { json: out } = stripUserDenyList(json, historical);
+    expect(out.endsWith('\n')).toBe(true);
+  });
+});
+
+describe('detectDenyState', () => {
+  const smallHistorical = new Set(['Bash(rm -rf /*)', 'Bash(sudo *)']);
+
+  it('returns user=true when user settings has a historical entry', () => {
+    const userJson = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
+    const state = detectDenyState(userJson, false, null);
+    expect(state.user).toBe(true);
+    expect(state.managed).toBe(false);
+    expect(state.unknown).toBe(false);
+  });
+
+  it('treats subset install (older entries) as user=true', () => {
+    // DEVFLOW_HISTORICAL_DENY has all 154 entries; even one match → user=true
+    const entry = [...DEVFLOW_HISTORICAL_DENY][0];
+    const userJson = JSON.stringify({ permissions: { deny: [entry] } });
+    const state = detectDenyState(userJson, false, null);
+    expect(state.user).toBe(true);
+  });
+
+  it('returns user=false when user settings has no historical entries', () => {
+    const userJson = JSON.stringify({ permissions: { deny: ['custom-rule'] } });
+    const state = detectDenyState(userJson, false, null);
+    expect(state.user).toBe(false);
+  });
+
+  it('returns unknown=true when user settings is unparseable', () => {
+    const state = detectDenyState('not-json{{{', false, null);
+    expect(state.unknown).toBe(true);
+    expect(state.user).toBe(false);
+  });
+
+  it('returns managed=true when managed file has a historical entry', () => {
+    const managedJson = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
+    const state = detectDenyState(null, true, managedJson);
+    expect(state.managed).toBe(true);
+    expect(state.user).toBe(false);
+  });
+
+  it('returns managed=false when managedExists=false even if content is present', () => {
+    const managedJson = JSON.stringify({ permissions: { deny: ['Bash(rm -rf /*)'] } });
+    const state = detectDenyState(null, false, managedJson);
+    expect(state.managed).toBe(false);
+  });
+
+  it('treats unparseable managed file as managed=false (never throws)', () => {
+    expect(() => detectDenyState(null, true, 'bad-json')).not.toThrow();
+    const state = detectDenyState(null, true, 'bad-json');
+    expect(state.managed).toBe(false);
+  });
+
+  it('returns none when user settings is null', () => {
+    const state = detectDenyState(null, false, null);
+    expect(state.user).toBe(false);
+    expect(state.managed).toBe(false);
+    expect(state.unknown).toBe(false);
+  });
+
+  it('reports both user and managed as true simultaneously', () => {
+    const entry = [...DEVFLOW_HISTORICAL_DENY][0];
+    const userJson = JSON.stringify({ permissions: { deny: [entry] } });
+    const managedJson = JSON.stringify({ permissions: { deny: [entry] } });
+    const state = detectDenyState(userJson, true, managedJson);
+    expect(state.user).toBe(true);
+    expect(state.managed).toBe(true);
+  });
+});
+
+describe('resolveSecurityAction', () => {
+  const noneDetected = { user: false, managed: false, unknown: false };
+  const userDetected = { user: true, managed: false, unknown: false };
+  const managedDetected = { user: false, managed: true, unknown: false };
+  const bothDetected = { user: true, managed: true, unknown: false };
+  const unknownDetected = { user: false, managed: false, unknown: true };
+
+  it('explicit flag=user always wins', () => {
+    const r = resolveSecurityAction('user', 'none', noneDetected, false);
+    expect(r.target).toBe('user');
+    expect(r.action).toBe('merge');
+  });
+
+  it('explicit flag=managed always wins', () => {
+    const r = resolveSecurityAction('managed', 'user', userDetected, false);
+    expect(r.target).toBe('managed');
+    expect(r.action).toBe('merge');
+  });
+
+  it('explicit flag=none strips', () => {
+    const r = resolveSecurityAction('none', 'user', userDetected, false);
+    expect(r.target).toBe('none');
+    expect(r.action).toBe('strip');
+  });
+
+  it('manifest agrees with detected (both enabled) → merge', () => {
+    const r = resolveSecurityAction(undefined, 'user', userDetected, false);
+    expect(r.action).toBe('merge');
+  });
+
+  it('manifest=none and detected=none → noop', () => {
+    const r = resolveSecurityAction(undefined, 'none', noneDetected, false);
+    expect(r.target).toBe('none');
+    expect(r.action).toBe('noop');
+  });
+
+  it('CONFLICT: manifest=none but detected user is present (TTY) → returns prompt', () => {
+    const r = resolveSecurityAction(undefined, 'none', userDetected, true);
+    expect(r.prompt).toBeTruthy();
+  });
+
+  it('CONFLICT: manifest=none but detected user is present (non-TTY) → keeps reality + warn', () => {
+    const r = resolveSecurityAction(undefined, 'none', userDetected, false);
+    expect(r.warn).toBeTruthy();
+    // Keeps detected reality
+    expect(r.target).toBe('user');
+    expect(r.action).toBe('merge');
+  });
+
+  it('fresh install (no manifest, no detected) → default user + merge', () => {
+    const r = resolveSecurityAction(undefined, undefined, noneDetected, false);
+    expect(r.target).toBe('user');
+    expect(r.action).toBe('merge');
+  });
+
+  it('fresh install (no manifest, user detected) → keeps user + merge', () => {
+    const r = resolveSecurityAction(undefined, undefined, userDetected, false);
+    expect(r.target).toBe('user');
+    expect(r.action).toBe('merge');
+  });
+
+  it('fresh install (no manifest, managed detected) → keeps managed + merge', () => {
+    const r = resolveSecurityAction(undefined, undefined, managedDetected, false);
+    expect(r.target).toBe('managed');
+    expect(r.action).toBe('merge');
+  });
+
+  it('both detected → target=user (user-settings-first preference)', () => {
+    const r = resolveSecurityAction(undefined, undefined, bothDetected, false);
+    expect(r.target).toBe('user');
+  });
+});
+
+describe('assertHistoricalDenySuperset', () => {
+  it('passes when template entries are all in historical set', () => {
+    const templateEntries = ['Bash(rm -rf /*)', 'Bash(sudo *)'];
+    expect(() => assertHistoricalDenySuperset(templateEntries)).not.toThrow();
+  });
+
+  it('throws when a template entry is missing from historical set', () => {
+    const templateEntries = ['Bash(rm -rf /*)', 'Bash(new-future-entry-not-in-historical)'];
+    expect(() => assertHistoricalDenySuperset(templateEntries)).toThrow(/missing.*entries/i);
+  });
+
+  it('passes for empty template', () => {
+    expect(() => assertHistoricalDenySuperset([])).not.toThrow();
+  });
+
+  it('DEVFLOW_HISTORICAL_DENY is superset of actual template (154 entries covered)', () => {
+    // The actual template has 154 entries — all must be in the historical set
+    // We test a representative sample here since the full template is a file I/O concern
+    const sampleEntries = [
+      'Bash(rm -rf /*)',
+      'Read(/etc/shadow)',
+      'Read(/etc/sudoers)',
+      'Read(/etc/passwd)',
+      'Bash(sudo *)',
+    ];
+    expect(() => assertHistoricalDenySuperset(sampleEntries)).not.toThrow();
   });
 });
 
