@@ -37,7 +37,7 @@ import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, 
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { manageSentinel } from '../utils/sentinel.js';
 import { writeConfig as writeDreamConfig } from '../utils/dream-config.js';
-import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel, getDecisionsDisabledSentinel } from '../utils/project-paths.js';
+import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel, getDecisionsDisabledSentinel, getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -1222,6 +1222,15 @@ export const initCommand = new Command('init')
         knowledge: knowledgeEnabled,
         autoCommit: existingDreamConfig.autoCommit,
       });
+
+      // Drain orphaned queue files when memory is disabled so stale turns
+      // don't process on a future re-enable. Mirrors memory.ts --disable drain.
+      if (!memoryEnabled) {
+        await Promise.all([
+          fs.unlink(getPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+          fs.unlink(getPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
+        ]);
+      }
     }
 
     // Configure HUD
