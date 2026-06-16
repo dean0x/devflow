@@ -25,6 +25,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
 | `--hud` / `--no-hud` | Enable/disable HUD status line (default: on) |
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
+| `--security <user\|managed\|none>` | Security deny list location (default: user) |
 | `--verbose` | Show detailed output |
 
 ### Scopes
@@ -118,6 +119,23 @@ npx devflow-kit hud --enable         # Enable HUD
 npx devflow-kit hud --disable        # Disable HUD
 npx devflow-kit hud --detail         # Show tool/agent descriptions
 npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
+```
+
+## Security (Deny List)
+
+```bash
+npx devflow-kit security --status            # Show deny list state + entry counts + location
+npx devflow-kit security --enable            # Install deny list (user settings, default)
+npx devflow-kit security --enable --managed  # Install into system managed settings
+npx devflow-kit security --disable           # Remove the deny list from all locations
+```
+
+## Safe-Delete
+
+```bash
+npx devflow-kit safe-delete --status   # Show install state (installed/outdated/absent/unknown)
+npx devflow-kit safe-delete --enable   # Install the rm -> trash shell function
+npx devflow-kit safe-delete --disable  # Remove the safe-delete shell function
 ```
 
 ## Skill Shadowing
