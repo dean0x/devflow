@@ -36,7 +36,6 @@ import {
   getDecisionsNotificationsPath,
   getDecisionsRunsTodayPath,
   getDecisionsBatchIdsPath,
-  getWorkingMemoryDisabledSentinel,
   getWorkingMemoryPath,
   getBackupPath,
   getPendingTurnsPath,
@@ -144,10 +143,6 @@ describe('project-paths TypeScript module', () => {
   });
 
   describe('memory / working-memory files', () => {
-    it('getWorkingMemoryDisabledSentinel returns .devflow/memory/.working-memory-disabled', () => {
-      expect(getWorkingMemoryDisabledSentinel(ROOT)).toBe('/some/project/.devflow/memory/.working-memory-disabled');
-    });
-
     it('getWorkingMemoryPath returns .devflow/memory/WORKING-MEMORY.md', () => {
       expect(getWorkingMemoryPath(ROOT)).toBe('/some/project/.devflow/memory/WORKING-MEMORY.md');
     });
@@ -296,7 +291,6 @@ describe('CJS project-paths parity', () => {
     { name: 'getDecisionsNotificationsPath', ts: getDecisionsNotificationsPath, cjs: cjsPaths.getDecisionsNotificationsPath },
     { name: 'getDecisionsRunsTodayPath', ts: getDecisionsRunsTodayPath, cjs: cjsPaths.getDecisionsRunsTodayPath },
     { name: 'getDecisionsBatchIdsPath', ts: getDecisionsBatchIdsPath, cjs: cjsPaths.getDecisionsBatchIdsPath },
-    { name: 'getWorkingMemoryDisabledSentinel', ts: getWorkingMemoryDisabledSentinel, cjs: cjsPaths.getWorkingMemoryDisabledSentinel },
     { name: 'getWorkingMemoryPath', ts: getWorkingMemoryPath, cjs: cjsPaths.getWorkingMemoryPath },
     { name: 'getBackupPath', ts: getBackupPath, cjs: cjsPaths.getBackupPath },
     { name: 'getPendingTurnsPath', ts: getPendingTurnsPath, cjs: cjsPaths.getPendingTurnsPath },

@@ -17,6 +17,8 @@ import {
   getDecisionsDisabledSentinel,
 } from '../utils/project-paths.js';
 import { updateFeature, isFeatureEnabled, readConfig } from '../utils/dream-config.js';
+import { syncManifestFeature } from '../utils/manifest.js';
+import { getDevFlowDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import {
   type DecisionsEntryStatus,
@@ -352,6 +354,7 @@ export const decisionsCommand = new Command('decisions')
         try {
           await fs.unlink(getDecisionsDisabledSentinel(gitRoot));
         } catch { /* may not exist */ }
+        await syncManifestFeature(getDevFlowDirectory(), 'decisions', true);
         p.log.success('Decisions learning enabled — configuration updated');
         p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
       } else {
@@ -368,6 +371,7 @@ export const decisionsCommand = new Command('decisions')
         const decisionsDir = getDecisionsDir(gitRoot);
         await fs.mkdir(decisionsDir, { recursive: true });
         await fs.writeFile(getDecisionsDisabledSentinel(gitRoot), '', 'utf-8');
+        await syncManifestFeature(getDevFlowDirectory(), 'decisions', false);
         p.log.success('Decisions learning disabled — configuration updated');
       } else {
         p.log.warn('Could not resolve git root — configuration not updated');

@@ -16,6 +16,8 @@ import { knowledgeCommand } from './commands/knowledge/index.js';
 import { decisionsCommand } from './commands/decisions.js';
 import { rulesCommand } from './commands/rules.js';
 import { debugCommand } from './commands/debug.js';
+import { securityCommand } from './commands/security.js';
+import { safeDeleteCommand } from './commands/safe-delete.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -32,7 +34,7 @@ program
   .description('Agentic Development Toolkit for Claude Code\n\nEnhance your AI-assisted development with intelligent commands and workflows.')
   .version(packageJson.version, '-v, --version', 'Display version number')
   .helpOption('-h, --help', 'Display help information')
-  .addHelpText('after', '\nExamples:\n  $ devflow init                       Install all Devflow plugins\n  $ devflow init --plugin=implement    Install specific plugin\n  $ devflow init --plugin=implement,review  Install multiple plugins\n  $ devflow list                       List available plugins\n  $ devflow ambient --enable           Enable always-on ambient mode\n  $ devflow memory --status            Check working memory state\n  $ devflow hud --configure            Configure HUD preset\n  $ devflow uninstall                  Remove Devflow from Claude Code\n  $ devflow --version                  Show version\n  $ devflow --help                     Show help\n\nDocumentation:\n  https://github.com/dean0x/devflow#readme');
+  .addHelpText('after', '\nExamples:\n  $ devflow init                       Install all Devflow plugins\n  $ devflow init --plugin=implement    Install specific plugin\n  $ devflow init --plugin=implement,review  Install multiple plugins\n  $ devflow list                       List available plugins\n  $ devflow ambient --enable           Enable always-on ambient mode\n  $ devflow memory --status            Check working memory state\n  $ devflow hud --configure            Configure HUD preset\n  $ devflow security --status          Check security deny list state\n  $ devflow security --disable         Remove the security deny list\n  $ devflow safe-delete --status       Check safe-delete shell function state\n  $ devflow safe-delete --enable       Install safe-delete shell function\n  $ devflow uninstall                  Remove Devflow from Claude Code\n  $ devflow --version                  Show version\n  $ devflow --help                     Show help\n\nDocumentation:\n  https://github.com/dean0x/devflow#readme');
 
 // Register commands
 program.addCommand(initCommand);
@@ -47,6 +49,8 @@ program.addCommand(knowledgeCommand);
 program.addCommand(decisionsCommand);
 program.addCommand(rulesCommand);
 program.addCommand(debugCommand);
+program.addCommand(securityCommand);
+program.addCommand(safeDeleteCommand);
 
 // Handle no command
 program.action(() => {

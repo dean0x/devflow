@@ -1,11 +1,14 @@
 #!/bin/bash
 # dream-evaluate: Curation evaluation module.
 # Writes a throttled curation marker at most once per 7 days.
-# Curation has no feature-enabled flag — it always runs when the throttle allows.
+# Curation is gated by DECISIONS_ENABLED — when decisions is disabled (via
+# dream config or .disabled sentinel), curation is also skipped so that
+# disabling decisions does not stamp .curation-last and cause a 7-day
+# suppression window after re-enable.
 # Source from dream-evaluate orchestrator after eval-helpers.
 #
 # Requires (from orchestrator namespace):
-#   DREAM_DIR, NOW, MARKER_SUFFIX,
+#   DECISIONS_ENABLED, DREAM_DIR, NOW, MARKER_SUFFIX,
 #   _HAS_JQ, log(), dbg()
 #
 # D58: 7-day curation throttle.
@@ -20,12 +23,23 @@
 #   next window will pick it up. This is intentional: a failed curation is less
 #   costly than repeatedly spawning curation work in a retry storm.
 
+: "${DECISIONS_ENABLED:?eval-curation: DECISIONS_ENABLED must be set by orchestrator}"
 : "${DREAM_DIR:?eval-curation: DREAM_DIR must be set by orchestrator}"
 : "${NOW:?eval-curation: NOW must be set by orchestrator}"
 : "${MARKER_SUFFIX:?eval-curation: MARKER_SUFFIX must be set by orchestrator}"
 : "${_HAS_JQ:?eval-curation: _HAS_JQ must be set by orchestrator}"
 
-# Curation is always-on (no feature-enabled flag).
+# Gate: curation inherits decisions enabled-state. When decisions is disabled,
+# skip immediately — BEFORE reading or writing .curation-last — so disabling
+# decisions does not burn a 7-day suppression window.
+# Use return (not exit): this file is sourced under set -e in dream-evaluate;
+# exit would kill the whole orchestrator process.
+if [ "$DECISIONS_ENABLED" != "true" ]; then
+  log "Curation skipped: decisions disabled"
+  dbg "eval-curation: DECISIONS_ENABLED=$DECISIONS_ENABLED — returning"
+  return 0
+fi
+
 # Throttle: at most once per 7 days (604800 seconds).
 _CUR_THROTTLE=604800
 _CUR_LAST_FILE="$DREAM_DIR/.curation-last"

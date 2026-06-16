@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import { syncManifestFeature } from '../utils/manifest.js';
+import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import {
   HUD_COMPONENTS,
   loadConfig,
@@ -169,6 +171,7 @@ export const hudCommand = new Command('hud')
 
     if (options.enable) {
       const claudeDir = getClaudeDirectory();
+      const devflowDir = getDevFlowDirectory();
       const settingsPath = path.join(claudeDir, 'settings.json');
       let settingsContent: string;
       try {
@@ -203,9 +206,8 @@ export const hudCommand = new Command('hud')
           }
         }
 
-        const devflowDir = getDevFlowDirectory();
         const updated = addHudStatusLine(settingsContent, devflowDir);
-        await fs.writeFile(settingsPath, updated, 'utf-8');
+        await writeFileAtomicExclusive(settingsPath, updated);
       }
 
       // Update config
@@ -216,18 +218,44 @@ export const hudCommand = new Command('hud')
       }
       saveConfig({ ...config, enabled: true });
 
+      await syncManifestFeature(devflowDir, 'hud', true);
       p.log.success('HUD enabled');
       p.log.info(color.dim('Restart Claude Code to see the HUD'));
     }
 
     if (options.disable) {
       const config = loadConfig();
-      if (!config.enabled) {
+      const wasEnabled = config.enabled;
+
+      // Always update config to disabled (idempotent).
+      if (wasEnabled) {
+        saveConfig({ ...config, enabled: false });
+      }
+
+      // D1: Always attempt to hard-remove the statusLine from settings.json,
+      // regardless of config.enabled. This self-heals drift where hud.json says
+      // disabled but a Devflow statusLine still lingers in settings.json from a
+      // partial prior state (e.g. crash between config-write and settings-write).
+      const claudeDir = getClaudeDirectory();
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      let statusLineRemoved = false;
+      try {
+        const settingsContent = await fs.readFile(settingsPath, 'utf-8');
+        const updated = removeHudStatusLine(settingsContent);
+        if (updated !== settingsContent) {
+          await writeFileAtomicExclusive(settingsPath, updated);
+          statusLineRemoved = true;
+        }
+      } catch {
+        // settings.json may not exist — non-fatal
+      }
+
+      if (!wasEnabled && !statusLineRemoved) {
         p.log.info('HUD already disabled');
         return;
       }
-      saveConfig({ ...config, enabled: false });
+
+      await syncManifestFeature(getDevFlowDirectory(), 'hud', false);
       p.log.success('HUD disabled');
-      p.log.info(color.dim('Version upgrade notifications will still appear'));
     }
   });

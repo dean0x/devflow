@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, type ManifestData } from '../src/cli/utils/manifest.js';
+import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, type ManifestData } from '../src/cli/utils/manifest.js';
 
 describe('readManifest', () => {
   let tmpDir: string;
@@ -252,6 +252,97 @@ describe('readManifest', () => {
     const result = await readManifest(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.features.viewMode).toBeUndefined();
+  });
+
+  it('parses manifest with security=user', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'user' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('user');
+  });
+
+  it('parses manifest with security=managed', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'managed' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('managed');
+  });
+
+  it('parses manifest with security=none', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'none' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('none');
+  });
+
+  it('normalizes absent security field to undefined (back-compat with pre-Phase-F manifests)', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [] },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    // Pre-Phase-F manifests have no security field → reads as undefined
+    expect(result!.features.security).toBeUndefined();
+  });
+
+  it('normalizes invalid security value to undefined', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'invalid-value' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBeUndefined();
+  });
+
+  it('security field round-trips through write/read', async () => {
+    const data: ManifestData = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'user' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('user');
   });
 });
 
@@ -523,5 +614,81 @@ describe('resolvePluginList', () => {
       true,
     );
     expect(result).toEqual(['devflow-core-skills', 'devflow-ui-design', 'devflow-code-review']);
+  });
+});
+
+describe('syncManifestFeature', () => {
+  let tmpDir: string;
+
+  const baseManifest: ManifestData = {
+    version: '1.4.0',
+    plugins: ['devflow-core-skills'],
+    scope: 'user',
+    features: {
+      ambient: true,
+      memory: true,
+      hud: false,
+      knowledge: false,
+      decisions: false,
+      rules: true,
+      flags: [],
+    },
+    installedAt: '2026-03-01T00:00:00.000Z',
+    updatedAt: '2026-03-01T00:00:00.000Z',
+  };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-sync-feature-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('is a no-op when manifest.json is absent — file must NOT be created', async () => {
+    // No manifest.json in tmpDir
+    await syncManifestFeature(tmpDir, 'ambient', false);
+
+    // The invariant: toggles never fabricate a manifest from nothing
+    let exists = false;
+    try {
+      await fs.access(path.join(tmpDir, 'manifest.json'));
+      exists = true;
+    } catch {
+      exists = false;
+    }
+    expect(exists).toBe(false);
+  });
+
+  it('updates the target feature field and bumps updatedAt when manifest is present', async () => {
+    await writeManifest(tmpDir, baseManifest);
+
+    await syncManifestFeature(tmpDir, 'ambient', false);
+
+    const updated = await readManifest(tmpDir);
+    expect(updated).not.toBeNull();
+    expect(updated!.features.ambient).toBe(false);
+    // updatedAt is refreshed (strictly after the initial value)
+    expect(updated!.updatedAt > baseManifest.updatedAt).toBe(true);
+    // Other fields are untouched
+    expect(updated!.features.memory).toBe(true);
+    expect(updated!.features.hud).toBe(false);
+    expect(updated!.features.rules).toBe(true);
+    expect(updated!.version).toBe('1.4.0');
+    expect(updated!.plugins).toEqual(['devflow-core-skills']);
+  });
+
+  it('can update the security field in a manifest that has it', async () => {
+    const withSecurity: ManifestData = {
+      ...baseManifest,
+      features: { ...baseManifest.features, security: 'none' },
+    };
+    await writeManifest(tmpDir, withSecurity);
+
+    await syncManifestFeature(tmpDir, 'security', 'user');
+
+    const updated = await readManifest(tmpDir);
+    expect(updated).not.toBeNull();
+    expect(updated!.features.security).toBe('user');
   });
 });

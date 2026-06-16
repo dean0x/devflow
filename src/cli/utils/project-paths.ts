@@ -139,11 +139,6 @@ export function getDecisionsBatchIdsPath(projectRoot: string): string {
 // Memory / working-memory files
 // ---------------------------------------------------------------------------
 
-/** .devflow/memory/.working-memory-disabled — sentinel that gates all 4 memory hooks */
-export function getWorkingMemoryDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'memory', '.working-memory-disabled');
-}
-
 /** .devflow/memory/WORKING-MEMORY.md */
 export function getWorkingMemoryPath(projectRoot: string): string {
   return path.join(projectRoot, '.devflow', 'memory', 'WORKING-MEMORY.md');

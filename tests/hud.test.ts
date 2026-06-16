@@ -141,6 +141,69 @@ describe('hasHudStatusLine', () => {
   });
 });
 
+/**
+ * Drift self-healing contract tests.
+ *
+ * The --disable command is now idempotent end-to-end: it always attempts to
+ * strip a lingering Devflow statusLine from settings.json even when hud.json
+ * already says disabled. The pure-function layer that --disable delegates to
+ * (removeHudStatusLine) must satisfy these properties for the self-healing
+ * to be correct.
+ */
+describe('--disable drift self-healing (via removeHudStatusLine)', () => {
+  it('removes a lingering Devflow hud.sh statusLine when config was already disabled', () => {
+    // Simulates: hud.json says enabled=false but settings.json still has the statusLine
+    // (drift from a partial prior state such as a crash between config-write and settings-write).
+    const driftedSettings = JSON.stringify({
+      statusLine: { type: 'command', command: '/home/user/.devflow/scripts/hud.sh' },
+      env: { FOO: 'bar' },
+    });
+
+    const result = removeHudStatusLine(driftedSettings);
+    const settings = JSON.parse(result);
+
+    expect(settings.statusLine).toBeUndefined();
+    // Other settings must survive
+    expect(settings.env.FOO).toBe('bar');
+  });
+
+  it('removes a lingering legacy statusline.sh when config was already disabled', () => {
+    const driftedSettings = JSON.stringify({
+      statusLine: { type: 'command', command: '/old/path/.devflow/scripts/statusline.sh' },
+    });
+
+    const result = removeHudStatusLine(driftedSettings);
+    const settings = JSON.parse(result);
+
+    expect(settings.statusLine).toBeUndefined();
+  });
+
+  it('does NOT remove a non-Devflow statusLine — third-party statusLine must survive --disable', () => {
+    // A user may have their own statusLine from another tool.
+    // --disable must never remove it (removeHudStatusLine returns unchanged JSON).
+    const input = JSON.stringify({
+      statusLine: { type: 'command', command: '/usr/local/bin/my-custom-statusbar.sh' },
+    });
+
+    const result = removeHudStatusLine(input);
+
+    expect(result).toBe(input);
+    expect(JSON.parse(result).statusLine.command).toBe('/usr/local/bin/my-custom-statusbar.sh');
+  });
+
+  it('is a no-op (returns identical JSON) when no statusLine is present', () => {
+    // When config is already disabled AND settings has no statusLine,
+    // removeHudStatusLine must return the same string (content unchanged).
+    // The --disable command uses changed-content detection (updated !== settingsContent)
+    // to decide whether to write; unchanged means no write.
+    const input = JSON.stringify({ env: { FOO: 'bar' } });
+
+    const result = removeHudStatusLine(input);
+
+    expect(result).toBe(input);
+  });
+});
+
 describe('hasNonDevFlowStatusLine', () => {
   it('returns true for external statusLine', () => {
     const input = JSON.stringify({

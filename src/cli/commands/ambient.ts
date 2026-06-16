@@ -5,6 +5,8 @@ import * as os from 'os';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import { syncManifestFeature } from '../utils/manifest.js';
+import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 
 const PREAMBLE_HOOK_MARKER = 'preamble';
@@ -218,7 +220,8 @@ export const ambientCommand = new Command('ambient')
         p.log.info('Ambient mode already enabled');
         return;
       }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
+      await writeFileAtomicExclusive(settingsPath, updated);
+      await syncManifestFeature(getDevFlowDirectory(), 'ambient', true);
       p.log.success('Ambient mode enabled — detection hook registered');
       p.log.info(color.dim('Keyword prompts and structured plans auto-run their workflow'));
     }
@@ -229,7 +232,8 @@ export const ambientCommand = new Command('ambient')
         p.log.info('Ambient mode already disabled');
         return;
       }
-      await fs.writeFile(settingsPath, updated, 'utf-8');
+      await writeFileAtomicExclusive(settingsPath, updated);
+      await syncManifestFeature(getDevFlowDirectory(), 'ambient', false);
       p.log.success('Ambient mode disabled — hook removed');
     }
   });

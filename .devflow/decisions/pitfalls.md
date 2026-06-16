@@ -1,4 +1,4 @@
-<!-- TL;DR: 9 pitfalls. Key: PF-008, PF-009, PF-010, PF-011, PF-012 -->
+<!-- TL;DR: 10 pitfalls. Key: PF-009, PF-010, PF-011, PF-012, PF-013 -->
 # Known Pitfalls
 
 Area-specific gotchas, fragile areas, and past bugs.
@@ -83,3 +83,12 @@ Area-specific gotchas, fragile areas, and past bugs.
 - **Resolution**: drop Guard B, and diagnose hook flakiness by reproducing through the real run-hook preamble path with a truth table that varies only the trailing ? to isolate the actual cause
 - **Status**: Active
 - **Source**: self-learning:obs_preambleq1
+
+## PF-013: Shell cut is line-oriented — using cut to extract a delimited field from a multi-line value silently corrupts the extraction, dropping all lines after the first
+
+- **Area**: scripts/hooks/dream-capture, shell string parsing with cut
+- **Issue**: cut -d<delim> -f<N> operates per-line — when the delimiter appears only on the first line of a multi-line string (e.g., SOH joining CWD and a multi-line assistant message), cut extracts the field correctly from line 1 but emits every subsequent line verbatim, corrupting the extracted value
+- **Impact**: systemic — working memory broken machine-wide for ~8 days across all projects
+- **Resolution**: replace cut with bash parameter expansion (${PAYLOAD%%$SOH*}) which operates on the whole string regardless of newlines
+- **Status**: Active
+- **Source**: self-learning:obs_cutline1

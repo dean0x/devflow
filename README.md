@@ -67,7 +67,7 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
-**Security.** Deny lists block dangerous tool patterns out of the box — configurable during init.
+**Security.** Deny lists block dangerous tool patterns out of the box — configurable during init and toggleable any time with `devflow security` (`--enable`/`--disable`/`--status`).
 
 ## Quick Start
 
@@ -117,6 +117,8 @@ npx devflow-kit list                    # List available plugins
 npx devflow-kit ambient --enable        # Toggle ambient mode
 npx devflow-kit decisions --enable      # Toggle decision/pitfall tracking
 npx devflow-kit rules --status          # Show installed rules
+npx devflow-kit security --status       # Show / manage the security deny list
+npx devflow-kit safe-delete --enable    # Install rm -> trash safe-delete
 npx devflow-kit uninstall               # Remove Devflow
 ```
 

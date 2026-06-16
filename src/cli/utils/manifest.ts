@@ -4,6 +4,16 @@ import { LEGACY_PLUGIN_NAMES } from '../plugins.js';
 import { VIEW_MODES, ViewMode } from './flags.js';
 
 /**
+ * Where the Devflow security deny list is installed.
+ * 'user'    = ~/.claude/settings.json (default)
+ * 'managed' = system-level managed settings
+ * 'none'    = not installed
+ *
+ * Canonical definition — imported by post-install.ts and init.ts.
+ */
+export type SecurityMode = 'managed' | 'user' | 'none';
+
+/**
  * Manifest data tracked for each Devflow installation.
  */
 export interface ManifestData {
@@ -19,6 +29,12 @@ export interface ManifestData {
     rules: boolean;
     flags: string[];
     viewMode?: ViewMode;
+    /**
+     * Security deny list location. 'user' = ~/.claude/settings.json,
+     * 'managed' = system-level managed settings, 'none' = not installed.
+     * Absent in pre-Phase-F manifests — readManifest defaults to undefined (unknown).
+     */
+    security?: SecurityMode;
   };
   installedAt: string;
   updatedAt: string;
@@ -52,6 +68,8 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       : false;
     const needsHeal = features.kb !== undefined;
 
+    const SECURITY_MODES = ['none', 'user', 'managed'] as const;
+
     const manifest: ManifestData = {
       version: data.version as string,
       plugins: data.plugins as string[],
@@ -66,6 +84,9 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
         viewMode: typeof features.viewMode === 'string' && (VIEW_MODES as readonly string[]).includes(features.viewMode)
           ? features.viewMode as ViewMode
+          : undefined,
+        security: typeof features.security === 'string' && (SECURITY_MODES as readonly string[]).includes(features.security)
+          ? features.security as SecurityMode
           : undefined,
       },
       installedAt: data.installedAt as string,
@@ -89,6 +110,25 @@ export async function writeManifest(devflowDir: string, data: ManifestData): Pro
   await fs.mkdir(devflowDir, { recursive: true });
   const manifestPath = path.join(devflowDir, 'manifest.json');
   await fs.writeFile(manifestPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+}
+
+/**
+ * Update a single feature field in the manifest. No-op when no manifest exists.
+ * Reads, mutates, and writes atomically. The `updatedAt` timestamp is always refreshed.
+ *
+ * Use this in toggle commands (ambient, hud, memory, decisions, security) instead of
+ * the repeated read → if-exists → mutate → write pattern.
+ */
+export async function syncManifestFeature<K extends keyof ManifestData['features']>(
+  devflowDir: string,
+  key: K,
+  value: ManifestData['features'][K],
+): Promise<void> {
+  const manifest = await readManifest(devflowDir);
+  if (!manifest) return;
+  manifest.features[key] = value;
+  manifest.updatedAt = new Date().toISOString();
+  await writeManifest(devflowDir, manifest);
 }
 
 /**

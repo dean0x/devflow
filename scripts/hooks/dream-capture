@@ -85,10 +85,18 @@ if [ ${#ASSISTANT_MSG} -gt 2000 ]; then
 fi
 
 # --- Decisions usage scanner (independent of memory state) ---
-# D29: Supplementary — skip Node spawn when no ADR/PF citations present (~50-100ms savings).
+# D29: Grep-first reorder — cheap in-process citation check gates the expensive config parse.
+# Dual-signal: skip when decisions is disabled via config OR sentinel (mirror of dream-evaluate).
+# On the common case (no ADR/PF citations) the grep exits false and the config subprocess is
+# never forked, preserving the D29 optimization (~5-20ms jq / ~50-100ms node per turn saved).
 SCANNER="$SCRIPT_DIR/decisions-usage-scan.cjs"
-if [ -f "$SCANNER" ] && [ ! -f "$DEVFLOW_DIR/decisions/.disabled" ]; then
-  if printf '%s' "$ASSISTANT_MSG" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
+if [ -f "$SCANNER" ] && printf '%s' "$ASSISTANT_MSG" | grep -qE 'ADR-[0-9]+|PF-[0-9]+'; then
+  _DEC_ENABLED_CAPTURE="true"
+  if [ -f "$DREAM_CONFIG" ]; then
+    _DEC_ENABLED_CAPTURE=$(json_field_file "$DREAM_CONFIG" "decisions" "true")
+  fi
+  [ -f "$DEVFLOW_DIR/decisions/.disabled" ] && _DEC_ENABLED_CAPTURE="false"
+  if [ "$_DEC_ENABLED_CAPTURE" = "true" ]; then
     dbg "Running decisions usage scanner"
     printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
   fi

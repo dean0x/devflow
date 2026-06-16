@@ -29,7 +29,7 @@
         "shared/rules/quality.md",
         "shared/rules/reliability.md"
       ],
-      "lastUpdated": "2026-06-13T09:31:19.557Z",
+      "lastUpdated": "2026-06-16T12:28:06.273Z",
       "createdBy": "devflow-knowledge"
     },
     "hooks": {
@@ -63,7 +63,7 @@
         "src/cli/commands/decisions.ts",
         "src/cli/utils/dream-config.ts"
       ],
-      "lastUpdated": "2026-06-11T20:00:13.078Z",
+      "lastUpdated": "2026-06-16T12:27:57.174Z",
       "createdBy": "implement"
     },
     "decisions": {
@@ -88,7 +88,7 @@
         "shared/skills/dream-decisions/SKILL.md",
         "shared/skills/dream-curation/SKILL.md"
       ],
-      "lastUpdated": "2026-06-11T20:00:20.339Z",
+      "lastUpdated": "2026-06-16T12:28:13.817Z",
       "createdBy": "implement"
     }
   }

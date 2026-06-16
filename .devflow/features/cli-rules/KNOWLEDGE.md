@@ -23,7 +23,7 @@ referencedFiles:
   - shared/rules/quality.md
   - shared/rules/reliability.md
 created: 2026-05-10
-updated: 2026-06-13
+updated: 2026-06-16
 ---
 
 # Rules System CLI
@@ -115,6 +115,32 @@ The `devflow-core-skills` plugin's `skills` array in `plugins.ts` registers the 
 
 **Dual-role bare entries in `LEGACY_SKILLS_V2X`**: the bare entries `dream-decisions`, `dream-knowledge`, and `dream-curation` are still-active skills installed at `devflow:<bare-name>`. These bare entries in `LEGACY_SKILLS_V2X` exist only to clean up pre-namespace V2.x install directories (e.g., `~/.claude/skills/dream-decisions`). On current installs, the `fs.rm` targeting the bare path is a harmless no-op because active skills always install under the `devflow:` prefix. A block comment in `plugins.ts` documents this explicitly — do NOT remove these entries or V2.x upgraders will be left with stale bare-name dirs.
 
+### Manifest: ManifestData and syncManifestFeature
+
+`ManifestData.features` now includes a `security` field (PR #244):
+
+```typescript
+features: {
+  ambient: boolean;
+  memory: boolean;
+  hud: boolean;
+  knowledge: boolean;
+  decisions: boolean;
+  rules: boolean;
+  flags: string[];
+  viewMode?: ViewMode;
+  security?: 'none' | 'user' | 'managed';  // Added PR #244
+}
+```
+
+The `security` field is optional (absent in pre-Phase-F manifests — treated as `undefined`/unknown by `resolveSecurityTriState`). `readManifest` validates it against the `SECURITY_MODES` union and defaults to `undefined` if invalid or absent.
+
+**`syncManifestFeature`** is the canonical pattern for toggle commands updating the manifest. It reads the existing manifest, updates one feature key, refreshes `updatedAt`, and writes atomically. The pattern:
+```typescript
+await syncManifestFeature(devflowDir, 'security', targetMode);
+```
+Used by: `ambient --enable/--disable`, `decisions --enable/--disable`, `hud --enable/--disable`, `memory --enable/--disable`, `security --enable/--disable`. Never creates a manifest if one doesn't exist — it is a no-op when `readManifest` returns null.
+
 ### Build Pipeline
 
 `scripts/build-plugins.ts` extends the skill/agent build to handle rules. The key difference from skills: rules are **flat files** (not directories), so no recursive copy is needed. The build script reads `plugin.json`'s `rules` array, clears and recreates the plugin's `rules/` directory, then copies each `shared/rules/{name}.md` into `plugins/{plugin}/rules/{name}.md`. The build fails with exit 1 if a declared rule is missing from `shared/rules/`.
@@ -176,7 +202,7 @@ Two private helpers are top-level named functions in `rules.ts` (not inline):
 - `isShadowed(devflowDir, ruleName)` — `fs.access` on `~/.devflow/rules/{name}.md`; returns `Promise<boolean>`
 - `formatRuleRow(name, devflowDir, ownerMap, suffix)` — builds a colorized display row; both `--status` and `--list` build their own `buildRulesMap(DEVFLOW_PLUGINS)` call locally and pass it in — there is no module-level constant.
 
-## Init Flow Integration (Updated: Two-Step Plugin Selection)
+## Init Flow Integration
 
 **Scope**: The interactive scope prompt was removed in feat(init). User scope is now the default for all TTY interactive runs. Only `--scope` flag or non-TTY path can set `local` scope. Non-TTY detects and logs "Non-interactive mode detected, using scope: user".
 
@@ -203,8 +229,6 @@ Two exported pure functions power the loop:
 - `combineSelection(workflowSelected, languageSelected)` → `{ plugins: string[], accepted: boolean }` — merges the two arrays; `accepted` is true iff the union is non-empty.
 - `shouldRetry(attempt, maxAttempts, accepted)` → `boolean` — returns true iff the selection was empty AND the attempt ceiling has not been reached; returns false when accepted or exhausted (caller exits on false + !accepted).
 
-Both functions are exported from `init.ts` for unit testing (same pattern as `parsePluginSelection`). Tests in `tests/init.test.ts` cover: accept-on-non-empty, empty-both-buckets, retry-exhaustion, and mid-loop iteration.
-
 **WORKFLOW_ORDER is now exported from `plugins.ts`**:
 ```typescript
 export const WORKFLOW_ORDER: string[] = [
@@ -216,9 +240,11 @@ export const WORKFLOW_ORDER: string[] = [
 ```
 `init.ts` imports it from `plugins.ts` rather than keeping a local duplicate. A regression guard test in `tests/plugins.test.ts` verifies every entry has a real backing command in `DEVFLOW_PLUGINS` (bidirectional: WORKFLOW_ORDER ⊆ commands AND commands ⊆ WORKFLOW_ORDER for the non-excluded set). The 5 dynamic commands were added to WORKFLOW_ORDER in the same commit that landed the dynamic plugin — the regression guard catches future omissions.
 
-**Agent Teams init flags removed (PR #240)**: The `--teams`/`--no-teams` init flags and `teamsEnabled` variable no longer exist. Users who want Agent Teams mode use `devflow flags --enable agent-teams` instead.
+**Security mode in init (PR #244)**: `initCommand` now has a `--security <mode>` flag (`user`/`managed`/`none`). The init flow detects the current deny list state (`detectDenyState`), reads the manifest mode, and resolves the final action via `resolveSecurityAction()` (a pure resolver). A dedicated security step after the managed-install step handles the actual deny list write to `~/.claude/settings.json`. The `securityMode` is written to `manifest.features.security` so subsequent `devflow list` and `devflow security --status` can surface it. The security step always uses atomic writes (`writeFileAtomicExclusive`) — both the strip and merge paths, not just the merge path.
 
-**Learning pipeline removed (PR #238)**: The `--learn`/`--no-learn` init flags, `learnEnabled` variable, and `features.learn` manifest field no longer exist. The self-learning step in the Advanced mode prompt was removed. Legacy hook scripts `eval-learning` and `eval-reinforce` are now in the init's legacy hook cleanup list alongside their removal from `dream-evaluate` sourcing.
+**Atomic writes for toggle commands (PR #244)**: `ambient --enable`, `memory --enable/--disable`, `hud --enable/--disable`, `uninstall --security` all now use `writeFileAtomicExclusive` for settings.json writes instead of plain `fs.writeFile`. This ensures Claude Code never reads a partially-written settings.json.
+
+**`--no-memory` queue drain (PR #244)**: when `--no-memory` is specified (or memory is disabled via Recommended/Advanced prompts), `init.ts` now drains orphaned queue files (`getPendingTurnsPath` + `getPendingTurnsProcessingPath`) via `Promise.all([fs.unlink, fs.unlink])`, mirroring the `memory.ts --disable` drain. ENOENT is treated as a no-op; other errors propagate.
 
 **Excluded from plugin selection buckets**: `devflow-core-skills` (always installed), `devflow-ambient` (always installed), `devflow-audit-claude` (installable via `--plugin` only).
 
@@ -228,13 +254,63 @@ export const WORKFLOW_ORDER: string[] = [
 
 **init → rules**: `rulesEnabled` flows through to `buildRulesMap(pluginsToInstall)` → `installViaFileCopy`. When disabled, post-install removes `~/.claude/rules/devflow/` entirely.
 
-**uninstall → rules**: Full uninstall (`removeAllDevFlow`) includes `~/.claude/rules/devflow/` in its target list. Selective plugin uninstall (`computeAssetsToRemove`) computes which rules to remove using the same "retained by remaining plugins" logic as skills. `uninstall.ts` also calls `stripDevflowTeammateModeFromJson` to clean `teammateMode: "auto"` written by prior Devflow installs.
+**uninstall → rules**: Full uninstall (`removeAllDevFlow`) includes `~/.claude/rules/devflow/` in its target list. Selective plugin uninstall (`computeAssetsToRemove`) computes which rules to remove using the same "retained by remaining plugins" logic as skills. `uninstall.ts` also calls `stripDevflowTeammateModeFromJson` to clean `teammateMode: "auto"` written by prior Devflow installs. The uninstall security step now also uses `writeFileAtomicExclusive` (PR #244).
 
-**list → rules**: `devflow list` shows `rules` in the Features line when `manifest.features.rules` is true.
+**list → rules**: `devflow list` shows `rules` in the Features line when `manifest.features.rules` is true. `devflow list` also surfaces `security` and `safe-delete` as tri-state values via `formatFeatures(manifest.features, { security, safeDelete })`.
 
 **build → install**: Rules are not installed from `shared/rules/` directly at runtime — the installer reads from `plugins/{plugin}/rules/`, which is the build output. Always run `npm run build` after modifying `shared/rules/` before testing install. Similarly, dynamic recipe commands are not installable from `shared/recipes/` — always run `npm run build:recipes` (or `npm run build`) first; the installer reads from `plugins/devflow-dynamic/commands/`.
 
 **plugins.ts → init.ts**: `partitionSelectablePlugins`, `WORKFLOW_ORDER`, `combineSelection`, `shouldRetry` are all exported from their respective modules and imported by `init.ts`. `combineSelection` and `shouldRetry` are in `init.ts` (not `plugins.ts`).
+
+## New Commands (PR #244)
+
+### `devflow security`
+
+New standalone command in `src/cli/commands/security.ts` for lifecycle management of the security deny list. Subcommands:
+- `--status` (default): reports installed locations and entry counts; flags dual-install anomaly; shows manifest mode if available
+- `--enable [--managed|--user]`: add-to-target-first, verify, then strip-other (self-healing mode switch); updates manifest to `'user'` or `'managed'`; uses atomic writes
+- `--disable`: strips from user settings (must be parseable JSON, hard fails otherwise) and removes managed settings unconditionally; updates manifest to `'none'`; uses atomic writes
+
+Pure helpers:
+- `loadTemplateDenyEntries(rootDir)` — reads from `src/templates/managed-settings.json` bundled with the package
+- `countDenyEntries(settingsJson: string)` — count of `permissions.deny` entries; returns 0 on parse error
+
+Key invariants: `--enable` always writes to only ONE location then strips the other (prevents dual-location installs). `--disable --user` fails hard when settings.json is unparseable (avoids corruption).
+
+### `devflow safe-delete`
+
+New command in `src/cli/commands/safe-delete.ts` for shell-profile safe-delete function management. Subcommands:
+- `--status` (default): reports tri-state (`installed`/`outdated`/`absent`/`unknown`) + profile path
+- `--enable`: idempotent install/upgrade of versioned shell block to profile; checks trash CLI availability first (platform-specific)
+- `--disable`: removes block from profile; no-op if not installed
+
+**`getSafeDeleteStatus()`** is an exported async function that determines install status and profile path:
+```typescript
+export type SafeDeleteStatus = 'installed' | 'outdated' | 'absent' | 'unknown';
+export async function getSafeDeleteStatus(): Promise<{ status: SafeDeleteStatus; profilePath: string | null }>
+```
+Used directly by `devflow list` (no subprocess) for the safe-delete tri-state.
+
+### `devflow list` — tri-state security + safe-delete
+
+`list.ts` now exposes `security` and `safe-delete` as tri-state values after regular boolean features:
+
+```typescript
+export type TriState = 'on' | 'off' | 'unknown';
+
+export function resolveSecurityTriState(
+  security: ManifestData['features']['security'],
+): TriState // 'user'|'managed' → 'on', 'none' → 'off', absent → 'unknown'
+
+export function formatFeatures(
+  features: ManifestData['features'],
+  extra?: { security?: TriState; safeDelete?: TriState },
+): string
+```
+
+Order is: `rules → security → safe-delete` (last two are tri-state, appended after standard boolean features). When `extra.security === 'unknown'`, `formatFeatures` emits `security: unknown`; when `'off'`, emits `security: off`; when `'on'`, emits `security`. Same tri-label logic for safe-delete.
+
+Security fallback probe: if manifest field is absent (`resolveSecurityTriState` returns `'unknown'`), `list.ts` probes `getManagedSettingsPath()` via `fs.access` (wrapped in `try/catch` to survive unsupported platforms); if the path exists, security is considered `'on'`.
 
 ## Constraints
 
@@ -255,7 +331,9 @@ export const WORKFLOW_ORDER: string[] = [
 - **Unbounded plugin selection loop**: The bounded `while (attempts < MAX_ATTEMPTS)` + `shouldRetry` guard is the pattern — never replace with `while (true)`.
 - **Long rule files**: Rules should be ~10-15 lines. If a rule grows beyond ~20 lines, extract the detail into a skill's `references/` directory.
 - **Omitting `rules: []` on a plugin**: The `rules` field is required on `PluginDefinition`. Omitting it causes TypeScript errors at build time.
-- **Adding a bespoke feature toggle to `manifest.features`**: Agent Teams was removed partly because it was a bespoke `teamsEnabled` field on the manifest. New optional toggleable Claude Code behaviours belong in `FLAG_REGISTRY` with `defaultEnabled: false`, not as custom manifest fields.
+- **Adding a bespoke feature toggle to `manifest.features`**: Agent Teams was removed partly because it was a bespoke `teamsEnabled` field on the manifest. New optional toggleable Claude Code behaviours belong in `FLAG_REGISTRY` with `defaultEnabled: false`, not as custom manifest fields. The `security` field is a justified exception because it stores the selected mode (user/managed/none), not just on/off.
+- **Inline read→mutate→write manifest patterns in toggle commands**: All toggle commands must use `syncManifestFeature` instead of the inline pattern. This consolidation (PR #244) eliminates a class of atomic-write omissions.
+- **Using plain `fs.writeFile` for settings.json**: Always use `writeFileAtomicExclusive` (temp+rename). Claude Code reads settings.json every turn — a partial write during a crash causes Claude Code to boot with a corrupt settings.
 
 ## Gotchas
 
@@ -274,14 +352,13 @@ export const WORKFLOW_ORDER: string[] = [
 - **manifest.ts contains a `kb → knowledge` migration self-heal**: `readManifest` detects `features.kb` and migrates it to `features.knowledge` in-place. This is the only backward-compat code in `manifest.ts`; do not add more. For rules, `LEGACY_RULE_NAMES` is the correct pattern when renaming rule files.
 - **`features.learn` no longer exists in ManifestData**: The learning pipeline was removed in PR #238. `manifest.features.learn`, `--learn`/`--no-learn` init flags, and `learnEnabled` in `init.ts` are all gone. Two migrations (`purge-learning-pipeline-v1` per-project, `purge-learning-global-v1` global) in `src/cli/utils/migrations.ts` sweep legacy learning artifacts on `devflow init`. `eval-learning` and `eval-reinforce` hook scripts are removed and in the legacy hook cleanup list.
 - **`features.teams` no longer exists in ManifestData**: The agent-teams bespoke manifest field was removed in PR #240. Agent Teams is now a standard flag entry in `FLAG_REGISTRY` (`id: 'agent-teams'`, `defaultEnabled: false`). The env var `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is applied/stripped by the normal `applyFlags`/`stripFlags` machinery. Migration `purge-devflow-teammate-mode-global-v1` (global) and `purge-devflow-teammate-mode-v1` (per-project) clean up stale `teammateMode: "auto"` written by prior installs.
-- **`*-teams.md` command files are orphaned, not re-installed**: The blanket sweep in `init.ts` (`f.endsWith('-teams.md')`) runs on every install type including partial installs. This is safe because no `*-teams.md` command file is ever installed by current Devflow. Old installs that had these files will have them cleaned up on the next `devflow init`.
-- **`dream-memory` skill is no longer active**: `dream-memory` was removed from `devflow-core-skills` skills array in PR #239 (the `dream-memory` SKILL.md file was removed in PR #238; the skills array entry was removed in PR #239). Memory refresh is handled by `background-memory-update` (detached worker), not a Dream subagent. Both `dream-memory` and `devflow:dream-memory` are in `LEGACY_SKILLS_V2X` and are swept by `devflow init`. Migration `purge-stale-memory-markers-v1` (added in PR #239) sweeps `dream/memory.*` marker files from old installations.
+- **`manifest.features.security` is absent in pre-Phase-F manifests**: `readManifest` returns `undefined` for missing or invalid values. `resolveSecurityTriState(undefined)` returns `'unknown'`. All consumers of `security` must handle `undefined`.
+- **`getSafeDeleteStatus()` never throws**: Wrapped in try/catch. Returns `{ status: 'unknown', profilePath: null }` on any error. Safe to call from `devflow list` without additional error handling.
+- **`getWorkingMemoryDisabledSentinel` removed from `project-paths.cjs`**: The function was deleted (PR #244 cleanup). Any reference to `getWorkingMemoryDisabledSentinel` in hooks or plumbing is stale.
+- **Security `--disable` hard-fails on unparseable JSON**: Unlike `--enable`, which can create a new settings.json, `--disable` must parse the existing settings.json to safely strip entries. If the file is present but unparseable, the command exits with an error — avoids corrupting the file by writing a stripped version that drops all settings.
+- **`HUD --disable` self-heals lingering statusLine**: `hud --disable` always attempts to read and strip the statusLine from settings.json, regardless of `hud.json` config state. This self-heals drift where hud.json says disabled but a Devflow statusLine still lingers from a partial prior state.
 - **`DreamConfig` tracks 4 features**: `{memory, decisions, knowledge, autoCommit}` — the `learning` key was removed in PR #238; `autoCommit` was added in PR #241 (default `true`; governs whether Dream tasks auto-commit maintenance writes). Do not add `learning` back or reference `features.learn`.
-- **New migration `sync-devflow-gitignore-v2`**: Per-project migration added in PR #238 to re-sync `.devflow/.gitignore` to the ignore-by-default allowlist policy. Overwrites existing `.gitignore` if content differs from canonical template. ENOENT-safe (no-op if `.devflow/` does not exist).
-- **New migration `sync-devflow-gitignore-v3`**: Per-project migration added in PR #241 to push the gitignore update that explicitly allows `decisions-ledger.jsonl` (the committed ledger). Without this, projects that had `.gitignore` from `sync-devflow-gitignore-v2` would not track the ledger file.
-- **New migration `decisions-ledger-unify-v1`**: Per-project migration added in PR #241. Backfills `decisions-ledger.jsonl` from the existing `decisions.md`/`pitfalls.md` and `decisions-log.jsonl`. Preserves every existing body verbatim via `raw_body`, synthesizes rows whose source obs is missing, marks hand-deleted anchors `Retired` (numbers reserved). Idempotent + crash-safe (always reconciles `.md` from ledger after write). Located in `src/cli/utils/decisions-ledger-migration.ts`.
 - **`devflow-dynamic` plugin is optional**: It installs only when the user selects it at `devflow init` (Step 1 — Workflow plugins) or passes `--plugin=dynamic`. It is not pre-selected. Its 5 recipe commands (`/dynamic-tickets`, `/dynamic-plan`, `/dynamic-build`, `/dynamic-wave`, `/dynamic-profile`) are compiled from `shared/recipes/*.mds` — not hand-authored `.md` files.
-- **`COMMAND_REFS` in `tests/skill-references.test.ts` includes dynamic commands**: The test allowlist `COMMAND_REFS` contains `dynamic-tickets`, `dynamic-plan`, `dynamic-build`, `dynamic-profile`, `dynamic-wave`. When adding new recipe commands, add them to this set or the skill-references test will fail.
 
 ## Key Files
 
@@ -289,20 +366,27 @@ export const WORKFLOW_ORDER: string[] = [
 - `shared/recipes/` — source of truth for dynamic plugin recipe commands; `.mds` files compiled at build time; partials prefixed with `_` are not compiled to commands
 - `scripts/build-recipes.ts` — compiles `shared/recipes/*.mds` → `plugins/devflow-dynamic/commands/*.md`; hard-fails on any compile error; skips partials
 - `src/cli/plugins.ts` — `DEVFLOW_PLUGINS` `rules` field, `buildRulesMap()`, `getAllRuleNames()`, `isValidRuleName()`, `LEGACY_RULE_NAMES`, `WORKFLOW_ORDER` (now includes 5 dynamic commands), `partitionSelectablePlugins()`; active Dream skills: `dream-decisions`, `dream-knowledge`, `dream-curation` (NOT `dream-memory`); `LEGACY_SKILLS_V2X` includes `dream-memory`, `devflow:dream-memory`, and `devflow:agent-teams` for cleanup; `devflow-dynamic` is optional, command-bearing, workflow bucket
-- `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; blanket `*-teams.md` command sweep; no `--learn`/`--no-learn` or `learnEnabled` (removed PR #238); no `--teams`/`--no-teams` or `teamsEnabled` (removed PR #240)
+- `src/cli/commands/init.ts` — `rulesEnabled` flag; two-step plugin selection with `partitionSelectablePlugins`; `combineSelection`, `shouldRetry` pure helpers (exported for tests); `WORKFLOW_ORDER` import; Recommended-mode silent apply vs Advanced-mode note+confirm; `buildRulesMap(pluginsToInstall)`; `LEGACY_RULE_NAMES` stale-file cleanup loop; blanket `*-teams.md` command sweep; `--security <mode>` flag + dedicated security step after managed install; `--no-memory` pending queue drain
 - `src/cli/commands/rules.ts` — `devflow rules` command (enable/disable/status/list)
-- `src/cli/commands/ambient.ts` — purges legacy `commands.md` via `COMMANDS_RULE_PATH` / `removeLegacyCommandsRule()`; called unconditionally from `addAmbientHook` and `removeAmbientHook` so stale files are cleaned up on every enable/disable/init
+- `src/cli/commands/ambient.ts` — purges legacy `commands.md` via `COMMANDS_RULE_PATH` / `removeLegacyCommandsRule()`; `ambient --enable` now uses `writeFileAtomicExclusive` + `syncManifestFeature`
+- `src/cli/commands/security.ts` — NEW: `devflow security` command (status/enable/disable); `loadTemplateDenyEntries`, `countDenyEntries` pure helpers; atomic writes throughout
+- `src/cli/commands/safe-delete.ts` — NEW: `devflow safe-delete` command (status/enable/disable); `getSafeDeleteStatus()` exported for `devflow list`
+- `src/cli/commands/list.ts` — `TriState`, `resolveSecurityTriState()`, `formatFeatures(features, extra?)` with tri-state support for security + safe-delete; security fallback probe via `getManagedSettingsPath`
+- `src/cli/commands/hud.ts` — `hud --disable` self-heals lingering statusLine unconditionally; uses `writeFileAtomicExclusive` + `syncManifestFeature`
+- `src/cli/commands/memory.ts` — `memory --enable/--disable` use `writeFileAtomicExclusive` + `syncManifestFeature`; `memory --disable` drains pending queue files
+- `src/cli/commands/decisions.ts` — `decisions --enable/--disable` use `syncManifestFeature`
 - `src/cli/utils/installer.ts` — `installRuleFile` (exported); `installViaFileCopy` rules section
-- `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files; calls `stripDevflowTeammateModeFromJson` to clean `teammateMode`
-- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `features.learn` removed in PR #238; no `features.teams` (removed PR #240)
+- `src/cli/commands/uninstall.ts` — `computeAssetsToRemove` includes rules; `removeAllDevFlow` removes rules dir; `removeSelectedPlugins` removes per-rule files; calls `stripDevflowTeammateModeFromJson` to clean `teammateMode`; unified security strip uses `writeFileAtomicExclusive`
+- `src/cli/utils/manifest.ts` — `ManifestData.features.rules` with `true` self-heal default; `ManifestData.features.security?: 'none'|'user'|'managed'`; `syncManifestFeature<K>` helper for atomic single-field updates; `features.learn` removed in PR #238; no `features.teams` (removed PR #240)
 - `src/cli/utils/flags.ts` — `FLAG_REGISTRY` with 18 entries including `agent-teams` (defaultEnabled: false); `applyFlags`/`stripFlags`/`getDefaultFlags`; `applyViewMode`/`stripViewMode`
 - `src/cli/utils/teammate-mode-cleanup.ts` — `stripDevflowTeammateModeFromJson` (pure, tolerant) and `stripDevflowTeammateMode` (file I/O wrapper); used by both migrations and uninstall
-- `src/cli/utils/migrations.ts` — `purge-learning-pipeline-v1` (per-project) + `purge-learning-global-v1` (global) sweep legacy learning artifacts; `sync-devflow-gitignore-v2` re-syncs `.devflow/.gitignore` (PR #238); `sync-devflow-gitignore-v3` pushes gitignore change for decisions-ledger allowlist (PR #241); `purge-stale-memory-markers-v1` removes stale `dream/memory.*` markers; `purge-devflow-teammate-mode-global-v1` (global) + `purge-devflow-teammate-mode-v1` (per-project) remove `teammateMode: "auto"` from settings.json files; `decisions-ledger-unify-v1` (per-project) backfills `decisions-ledger.jsonl` from existing `.md` + log, preserving every body verbatim (`raw_body`), marking hand-deleted anchors `Retired`; applies ADR-002
+- `src/cli/utils/migrations.ts` — PR #238: `purge-learning-pipeline-v1` + `purge-learning-global-v1` + `sync-devflow-gitignore-v2`; PR #239: `purge-stale-memory-markers-v1`; PR #240: `purge-devflow-teammate-mode-global-v1` + `purge-devflow-teammate-mode-v1`; PR #241: `decisions-ledger-unify-v1` + `sync-devflow-gitignore-v3`
 - `scripts/build-plugins.ts` — build-time distribution from `shared/rules/` → `plugins/*/rules/`
 - `tests/plugins.test.ts` — `partitionSelectablePlugins` (8 cases) + `WORKFLOW_ORDER` regression guard (4 cases, bidirectional) + `LEGACY_SKILL_NAMES consistency` guard; `allowedOptional` set includes `devflow-dynamic`
 - `tests/init.test.ts` — `combineSelection` and `shouldRetry` unit tests
-- `tests/skill-references.test.ts` — `COMMAND_REFS` set includes dynamic commands (`dynamic-tickets`, `dynamic-plan`, `dynamic-build`, `dynamic-profile`, `dynamic-wave`)
-- `tests/teammate-mode-cleanup.test.ts` — `stripDevflowTeammateModeFromJson` and `stripDevflowTeammateMode` tests
+- `tests/list-logic.test.ts` — `resolveSecurityTriState` suite (on/off/unknown cases); `formatFeatures` with extras (8 cases covering all tri-states); order-asserting test for rules→security→safe-delete ordering
+- `tests/safe-delete-command.test.ts` — `getSafeDeleteStatus` and safe-delete command tests
+- `tests/manifest.test.ts` — `readManifest` security field round-trip and self-heal tests
 
 ## Related
 
@@ -310,10 +394,9 @@ export const WORKFLOW_ORDER: string[] = [
 - ADR-012: `.devflow` knowledge committed to git — governs feature knowledge storage; rules themselves install outside the repo to `~/.claude/rules/devflow/`
 - Skills system (parallel architecture): `src/cli/utils/installer.ts` `installViaFileCopy` skills section is the model rules followed
 - Feature flags: `src/cli/utils/flags.ts` — another toggleable feature using the same manifest.features pattern; now the home for `agent-teams` after bespoke pipeline removal
-- Ambient simplification (c51114d): introduced `commands.md` rule + ambient-managed separation
-- Init flow simplification (5143d73–154899b): two-step selection, `partitionSelectablePlugins`, `WORKFLOW_ORDER` export, `combineSelection`/`shouldRetry`
 - PR #238 (learning removal): removed `dream-memory` SKILL.md file, removed `features.learn`, removed `--learn`/`--no-learn`, added `purge-learning-pipeline-v1` + `sync-devflow-gitignore-v2` migrations; note — `dream-memory` was removed from the `devflow-core-skills` skills ARRAY in PR #239 (not #238)
 - PR #239 (eager memory refresh): removed `dream-memory` from `devflow-core-skills` skills array, added `background-memory-update` worker, added `purge-stale-memory-markers-v1` migration; `background-memory-update` is NOT in `LEGACY_HOOK_FILES` (fixed in `8c157db`)
 - PR #240 (agent-teams removal): removed bespoke Agent Teams machinery; re-exposed as `agent-teams` flag in `FLAG_REGISTRY`; added `purge-devflow-teammate-mode-global-v1` + `purge-devflow-teammate-mode-v1` migrations; blanket `*-teams.md` sweep in `init.ts`; `devflow:agent-teams` skill in `LEGACY_SKILLS_V2X`
 - PR #241 (decisions ledger + deterministic render): added `decisions-ledger.jsonl` as committed render source of truth; new `assign-anchor`/`retire-anchor`/`rotate-observations` ops in `json-helper.cjs`; `dream-commit` shell helper for attributable maintenance commits; `autoCommit: boolean` added to `DreamConfig`; `devflow decisions --status` now surfaces auto-commit state; `decisions-ledger-unify-v1` + `sync-devflow-gitignore-v3` per-project migrations added
 - PR #242 (devflow-dynamic plugin): added `devflow-dynamic` optional plugin with 5 recipe commands compiled from `shared/recipes/*.mds` via `scripts/build-recipes.ts`; `WORKFLOW_ORDER` extended with 5 dynamic commands; `devflow-dynamic` added to `allowedOptional` in `tests/plugins.test.ts`; `COMMAND_REFS` in `tests/skill-references.test.ts` updated with dynamic command names
+- PR #244 (close feature-toggle gaps): added `devflow security` + `devflow safe-delete` commands; `manifest.features.security`; `syncManifestFeature` helper; `TriState` + `resolveSecurityTriState` in `list.ts`; `formatFeatures` extended with extra params; `hud --disable` self-healing; `ambient`/`memory`/`hud`/`decisions` toggle commands converted to `writeFileAtomicExclusive` + `syncManifestFeature`; `--no-memory` init queue drain; `--security` init flag + dedicated security step; `getWorkingMemoryDisabledSentinel` removed from `project-paths.cjs`

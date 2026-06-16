@@ -2321,21 +2321,23 @@ describe('dream-collect-tasks: single-pass scan', () => {
     expect(fs.existsSync(path.join(dreamDir, 'learning.sess2.json'))).toBe(false);
   });
 
-  // AC-3: memory always swept (unconditional); disabled decisions/knowledge deleted; type never in _DREAM_TASKS
-  it('AC-3: memory always swept; disabled decisions/knowledge markers deleted; not in _DREAM_TASKS', () => {
+  // AC-3: memory always swept (unconditional); disabled decisions/knowledge/curation deleted; type never in _DREAM_TASKS
+  // Curation is now also swept when decisions is disabled (curation depends on decisions data).
+  it('AC-3: memory always swept; disabled decisions/knowledge/curation markers deleted when decisions disabled', () => {
     fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');       // swept unconditionally
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
 
-    // Memory markers are always swept unconditionally (memory is no longer a Dream task)
+    // Memory markers are always swept unconditionally (memory is no longer a Dream task).
+    // Curation markers are also swept when decisions is disabled — curation inherits decisions state.
     const { tasks } = runCollectTasks(dreamDir, { decEnabled: false, knowEnabled: false });
-    expect(tasks).toBe('curation');
+    expect(tasks).toBe('');
     expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'decisions.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'knowledge.sess1.json'))).toBe(false);
-    // curation survives
-    expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(true);
+    // curation swept because decisions is disabled
+    expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(false);
   });
 
   // AC-3b: memory markers always swept unconditionally (not flag-gated — ADR-016)
