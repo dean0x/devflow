@@ -21,7 +21,9 @@
 #   - Skips config.json (reserved).
 #   - Pass 1: unconditional sweep — deletes learning.* and memory.* markers always
 #     (both pipelines removed from Dream subagent); deletes disabled decisions/knowledge
-#     markers. curation and unknown types pass through unchanged (no flag gates them).
+#     markers. When decisions is disabled, curation markers are also swept (curation
+#     depends on decisions data and should not run when decisions is disabled).
+#     Unknown types pass through unchanged.
 #   - Pass 1 runs over ALL markers regardless of cap, so no orphan survives by
 #     being pushed past position 50.
 #   - COLLECT_LIMIT=50: when >50 kept markers remain after pass 1, orders by
@@ -122,7 +124,16 @@ dream_collect_tasks() {
           continue
         fi
         ;;
-      # curation and unknown types: pass through unchanged
+      curation)
+        # Curation depends on decisions data — sweep when decisions is disabled
+        # so stray curation markers don't trigger Dream agent spawns when disabled.
+        if [ "$dec_enabled" != "true" ]; then
+          rm -f "$_f" 2>/dev/null || true
+          dbg "dream_collect_tasks: deleted disabled-feature curation marker: $_base"
+          continue
+        fi
+        ;;
+      # unknown types: pass through unchanged
     esac
 
     # Marker kept — accumulate

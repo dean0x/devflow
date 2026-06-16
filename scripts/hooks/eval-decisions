@@ -19,8 +19,6 @@
 if [ "$DECISIONS_ENABLED" = "true" ] && [ "$SESSION_DEEP" = "true" ]; then
   log "Evaluating decisions..."
 
-  # Note: .devflow/decisions/.disabled is for session-start-context only — this hook uses DECISIONS_ENABLED.
-
   # Daily cap check
   _DEC_RUNS_FILE="$DREAM_DIR/.decisions-runs-today"
   _DEC_RUNS_TODAY=$(read_daily_cap "$_DEC_RUNS_FILE" 0)

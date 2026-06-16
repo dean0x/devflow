@@ -51,6 +51,11 @@ if [ -f "$DREAM_CONFIG" ]; then
   KNOWLEDGE_ENABLED=$(json_field_file "$DREAM_CONFIG" "knowledge" "true")
 fi
 
+# Dual-signal gate: config OR sentinel disables decisions (and transitively curation).
+# This ensures session-start-context and dream-evaluate honour the same signal so
+# stray markers are never written when decisions is disabled via the sentinel alone.
+[ -f "$DECISIONS_DIR_DATA/.disabled" ] && DECISIONS_ENABLED="false"
+
 # Log + dream-lock
 source "$SCRIPT_DIR/hook-log-init" "dream-evaluate"
 source "$SCRIPT_DIR/dream-lock" || { log "failed to source dream-lock"; exit 1; }
