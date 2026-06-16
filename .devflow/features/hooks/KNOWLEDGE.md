@@ -27,7 +27,7 @@ referencedFiles:
   - src/cli/commands/decisions.ts
   - src/cli/utils/dream-config.ts
 created: 2026-06-01
-updated: 2026-06-15
+updated: 2026-06-16
 ---
 
 # Dream & Hooks System
@@ -138,14 +138,24 @@ No raw UNPROCESSED TURNS dump in session-start-memory (removed). The background 
 
 Queue overflow: capped at 200 lines, truncated to 100 under a mkdir-based lock to prevent multi-session truncation races.
 
-Decisions usage scanner (`decisions-usage-scan.cjs`) also runs in `dream-capture` — it increments cite counts in `.decisions-usage.json` when the assistant response contains `ADR-NNN` or `PF-NNN` references. This happens before the memory-enabled gate, so cite scanning is independent of memory state. A supplementary guard (D29) skips the Node subprocess entirely when no `ADR-[0-9]+|PF-[0-9]+` pattern is found in the response (~50-100ms savings).
+Decisions usage scanner (`decisions-usage-scan.cjs`) also runs in `dream-capture` — it increments cite counts in `.decisions-usage.json` when the assistant response contains `ADR-NNN` or `PF-NNN` references. **Dual-signal gate (PR #244)**: the scanner is now skipped when decisions is disabled via EITHER dream config (`decisions: false`) OR the `.disabled` sentinel — mirrors the same dual-signal check used in `dream-evaluate`. A supplementary guard (D29) skips the Node subprocess entirely when no `ADR-[0-9]+|PF-[0-9]+` pattern is found in the response (~50-100ms savings).
+
+## Curation Gate: Decisions-Dependency (PR #244)
+
+Curation depends on the decisions pipeline — it curates ADR/PF entries that decisions writes. Two new gates enforce this dependency:
+
+**`eval-curation` gate**: before writing the `.curation-last` throttle file, `eval-curation` checks `DECISIONS_ENABLED`. If decisions is disabled, it returns immediately (using `return 0`, never `exit` — it is sourced under `set -e` inside the orchestrator). This prevents disabling decisions from accidentally burning the 7-day curation suppression window.
+
+**`dream-collect-tasks` curation sweep**: Pass 1 now includes a `curation)` branch — when decisions is disabled (`dec_enabled != "true"`), curation markers are deleted unconditionally, same as `learning.*` and `memory.*`. This prevents stale curation markers from triggering an opus spawn when decisions is disabled.
+
+**`dream-evaluate` dual-signal gate**: after reading `DECISIONS_ENABLED` from dream config, a `[ -f "$DECISIONS_DIR_DATA/.disabled" ]` check can override it to `"false"`. This ensures both config-based disabling and sentinel-based disabling suppress marker writes — the same gate is mirrored in `dream-capture` for the usage scanner.
 
 ## dream-capture: SOH-Delimited Field Parsing
 
 `dream-capture` parses `cwd` and `last_assistant_message` from the Stop hook JSON input in a single subprocess, using ASCII SOH (U+0001, `$'\001'`) as the binary delimiter between fields:
 
 ```bash
-_FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.last_assistant_message // "")')
+_FIELDS=$(printf '%s' "$INPUT" | jq -r '(.cwd // "") + "" + (.last_assistant_message // "")')
 CWD="${_FIELDS%%$'\001'*}"
 ASSISTANT_MSG="${_FIELDS#*$'\001'}"
 ```
@@ -239,7 +249,7 @@ The boundary is strict:
 
 ## Curation (eval-curation + dream-curation skill)
 
-`eval-curation` (sourced by `dream-evaluate`) writes a `curation.{session}.json` marker, throttled to once every 7 days via `.devflow/dream/.curation-last` epoch file. The `devflow:dream-curation` skill (loaded by the Dream agent) then:
+`eval-curation` (sourced by `dream-evaluate`) writes a `curation.{session}.json` marker, throttled to once every 7 days via `.devflow/dream/.curation-last` epoch file. Curation is now **gated by `DECISIONS_ENABLED`** (PR #244): if decisions is disabled, `eval-curation` returns immediately (using `return 0` not `exit`) without touching `.curation-last`, so the suppression window is not burned. The `devflow:dream-curation` skill (loaded by the Dream agent) then:
 
 - Reads `.decisions-usage.json` directly for cite counts (never calls `decisions-usage-scan.cjs`)
 - Retires/deprecates/supersedes by calling `retire-anchor <anchor_id> <status>` — flips `decisions_status` on the ledger row and re-renders both `.md` files atomically. The `.md` files are rendered views of the ledger and are NEVER hand-edited; retired entries vanish from the `.md` but survive (recoverable) in the committed ledger.
@@ -278,6 +288,8 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 - **Writing artifact content in deterministic scripts** — observations, ADR/PF bodies, and knowledge bases must be authored by the LLM Dream agent via per-task skills; WORKING-MEMORY.md is authored by the LLM inside the `background-memory-update` worker; plumbing scripts handle only structural writes (ADR-008).
 - **Expecting USER_SIGNALS to feed any active pipeline** — the learning pipeline is gone. `transcript-filter.cjs` still emits a `user-signals` op but nothing consumes it. Only `dialog-pairs` (decisions) is active.
 - **Using line-oriented `cut` to split multi-field jq output** — `cut` splits on newlines, so a multi-line field value (e.g. `last_assistant_message`) will bleed body lines into the preceding field. Use SOH delimiter with bash parameter expansion instead (fixed in 495b2d0).
+- **Calling `eval-curation` return 0 as exit** — `eval-curation` is sourced under `set -e` inside `dream-evaluate`. Using `exit` would kill the whole orchestrator process. Always use `return 0` when short-circuiting from a sourced file.
+- **Expecting curation to run when decisions is disabled** — curation is not an independent feature. Both `eval-curation` (write-time gate) and `dream-collect-tasks` (collect-time sweep) enforce this dependency. Disabling decisions suppresses curation too.
 
 ## Gotchas
 
@@ -292,19 +304,21 @@ The sole source of truth for feature enabled-state is `.devflow/dream/config.jso
 - **Per-task skill model override** — `shared/agents/dream.md` has `model: sonnet` in its frontmatter, but `session-start-context` overrides this per spawn via `dream_build_spawn_directive`. The agent frontmatter model is never actually used in production; the spawn-time model is authoritative.
 - **`dream_build_spawn_directive` communicates via global** — uses `_DREAM_DIRECTIVE` global variable (not stdout) so exact directive bytes including trailing newlines survive intact; command substitution would strip them.
 - **eval-decisions daily cap blocks late-session writes** — at 3 runs/day (default), decisions markers stop being written mid-session. No marker = no Dream agent spawn for decisions that session. Configurable via `.devflow/decisions/decisions.json` → `max_daily_runs`.
-- **Decisions usage scanner runs before memory gate** — `decisions-usage-scan.cjs` runs unconditionally in `dream-capture` (before `MEMORY_ENABLED` check), so ADR/PF citation counts are updated even when memory is disabled.
+- **Decisions usage scanner dual-signal (PR #244)** — the scanner in `dream-capture` checks both config (`decisions: false`) AND the `.disabled` sentinel. Previously it only checked the sentinel. Any code reading the usage scanner gate must check both signals.
+- **Curation gate is `return 0`, not `exit 0`** — `eval-curation` is sourced (not executed) under `set -e` inside `dream-evaluate`. Using `exit` would kill the entire `dream-evaluate` orchestrator, not just the curation eval. All short-circuits in sourced eval modules must use `return`.
+- **`dream-collect-tasks` curation pass-through gone** — curation no longer blindly passes through when decisions is disabled. The prior comment "curation and unknown types: pass through unchanged" is outdated. A curation marker found when `dec_enabled != "true"` is now deleted in Pass 1.
 
 ## Key Files
 
-- `scripts/hooks/dream-capture` — Stop hook; queue append + spawns `background-memory-update` worker (120s throttle); decisions usage scanner (independent of memory); SOH-delimited `cwd`+`last_assistant_message` parsing via parameter expansion
+- `scripts/hooks/dream-capture` — Stop hook; queue append + spawns `background-memory-update` worker (120s throttle); decisions usage scanner with dual-signal gate (config OR sentinel); SOH-delimited `cwd`+`last_assistant_message` parsing via parameter expansion
 - `scripts/hooks/background-memory-update` — detached `claude -p haiku` worker: claims `.pending-turns.jsonl` → `.pending-turns.processing` atomically, calls `claude -p` with Write permission, verifies stamp on line 1, touches `.last-refresh-ok` on success; uses 300s-stale mkdir lock at `.working-memory.lock/`
 - `scripts/hooks/dream-dispatch` — UserPromptSubmit hook; capture-only (user turn append to pending-turns queue); no directive emission; uses `json_extract_cwd_prompt()` from `json-parse` for SOH-delimited field split
-- `scripts/hooks/dream-evaluate` — SessionEnd hook; orchestrator sourcing eval-helpers + eval-decisions + eval-knowledge + eval-curation (eval-learning and eval-reinforce removed); exports shared vars to eval modules via orchestrator contract
+- `scripts/hooks/dream-evaluate` — SessionEnd hook; orchestrator sourcing eval-helpers + eval-decisions + eval-knowledge + eval-curation; dual-signal gate for `DECISIONS_ENABLED` (config + sentinel override)
 - `scripts/hooks/eval-decisions` — sourced by dream-evaluate; daily-cap check (default 3/day via `.decisions-runs-today`); extracts dialog pairs via transcript-filter.cjs; writes `decisions.{session}.json` marker
 - `scripts/hooks/eval-knowledge` — sourced by dream-evaluate; 2-hour throttle (`.knowledge-last-refresh`); queries `feature-knowledge.cjs stale-slugs`; writes `knowledge.{session}.json` marker; optimistically updates throttle
-- `scripts/hooks/eval-curation` — sourced by dream-evaluate; writes `curation.{session}.json` marker on 7-day throttle; `.curation-last` in `.devflow/dream/`
+- `scripts/hooks/eval-curation` — sourced by dream-evaluate; gated by `DECISIONS_ENABLED` (returns immediately without burning `.curation-last` when decisions disabled); writes `curation.{session}.json` marker on 7-day throttle
 - `scripts/hooks/dream-recover` — sourced helper; stale `.processing` recovery per-type thresholds; JUST_RECOVERED guard; orphaned pending-turns recovery
-- `scripts/hooks/dream-collect-tasks` — 3-arg sourced helper; two-pass design: Pass 1 unconditional sweep (deletes `learning.*` + `memory.*` + disabled-feature markers), Pass 2 type accumulation; `dream_build_spawn_directive` function; COLLECT_LIMIT=50 FIFO
+- `scripts/hooks/dream-collect-tasks` — 3-arg sourced helper; two-pass design: Pass 1 unconditional sweep (deletes `learning.*` + `memory.*` + disabled-feature markers + curation markers when decisions disabled), Pass 2 type accumulation; `dream_build_spawn_directive` function; COLLECT_LIMIT=50 FIFO
 - `scripts/hooks/session-start-context` — SessionStart hook (no set -e); two independent sections: 1.5 decisions TL;DR, 2 per-task dream spawn directives (calls `dream_build_spawn_directive`)
 - `scripts/hooks/json-helper.cjs` — plumbing ops: `merge-observation`, `assign-anchor`, `retire-anchor`, `rotate-observations`, `read-dream`, atomic writes; does NOT contain judgment logic
 - `scripts/hooks/json-parse` — sourced by all hooks; provides `json_field`, `json_field_file`, `json_extract_cwd_prompt` and friends; `json_extract_cwd_prompt` uses SOH delimiter + node/jq fallback for safe multi-field extraction

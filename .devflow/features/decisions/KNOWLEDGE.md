@@ -17,7 +17,7 @@ referencedFiles:
   - shared/skills/dream-decisions/SKILL.md
   - shared/skills/dream-curation/SKILL.md
 created: 2026-06-10
-updated: 2026-06-11
+updated: 2026-06-16
 ---
 
 # Decisions & Pitfalls Ledger
@@ -121,7 +121,7 @@ Three ledger-mutating operations (all run from `process.cwd()` as project root):
 - Caller-locked: the Dream agent acquires `.observations.lock` externally before calling this
 - Passthrough for ledger fields: `anchor_id`, `date`, `decisions_status`, `amendments`, `raw_body`
 
-**`count-active <worktree> <type>`** — Reads ledger; returns count of active anchored rows. Note: unlike `assign-anchor`, `retire-anchor`, and `rotate-observations` (which derive project root from `process.cwd()`), `count-active` requires the worktree path as `args[0]` and the type as `args[1]` — always call as `count-active "$(pwd)" "decision"` or `count-active "$(pwd)" "pitfall"`. The `devflow:dream-curation` SKILL.md example shows `count-active "decision"` (single arg), which would resolve `"decision"` as a filesystem path — use `"$(pwd)"` as the first arg in practice.
+**`count-active <worktree> <type>`** — Reads ledger; returns count of active anchored rows. Unlike `assign-anchor`, `retire-anchor`, and `rotate-observations` (which derive project root from `process.cwd()`), `count-active` requires the worktree path as `args[0]` and the type as `args[1]` — always call as `node "$HOME/.devflow/scripts/hooks/json-helper.cjs" count-active "$(pwd)" "decision"` or `"$(pwd)" "pitfall"`. The `devflow:dream-curation` SKILL.md example shows `count-active "decision"` (single arg), which would resolve `"decision"` as a filesystem path — use `"$(pwd)"` as the first arg in practice.
 
 ### Locking Discipline (ADR-017)
 
@@ -158,6 +158,8 @@ The Dream SKILL for curation (`shared/skills/dream-curation/SKILL.md`) defines p
 - LLM selects up to 5 entries to retire per curation run (7-day protection window)
 - Calls `retire-anchor` once per entry (each self-locks `.decisions.lock` — do NOT hold lock across multiple calls, that would deadlock)
 - Calls `dream-commit curation "<action>" <session_id>` after all retirements
+
+**Curation depends on decisions** (PR #244): `eval-curation` is now gated by `DECISIONS_ENABLED` — it returns immediately (using `return 0`, not `exit`) without touching `.curation-last` when decisions is disabled. `dream-collect-tasks` Pass 1 also sweeps curation markers when decisions is disabled. This prevents: (a) stray curation markers triggering an opus spawn when decisions is off, and (b) disabling decisions burning the 7-day curation suppression window on re-enable.
 
 ### dream-commit
 
