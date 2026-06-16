@@ -227,7 +227,21 @@ export const hudCommand = new Command('hud')
         return;
       }
       saveConfig({ ...config, enabled: false });
+
+      // Hard-remove the statusLine from settings.json so no Devflow status line
+      // appears even if hud.json is re-enabled separately (Phase C).
+      const claudeDir = getClaudeDirectory();
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      try {
+        const settingsContent = await fs.readFile(settingsPath, 'utf-8');
+        const updated = removeHudStatusLine(settingsContent);
+        if (updated !== settingsContent) {
+          await fs.writeFile(settingsPath, updated, 'utf-8');
+        }
+      } catch {
+        // settings.json may not exist — non-fatal
+      }
+
       p.log.success('HUD disabled');
-      p.log.info(color.dim('Version upgrade notifications will still appear'));
     }
   });
