@@ -22,6 +22,8 @@ import {
   resolveSecurityAction,
   assertHistoricalDenySuperset,
   DEVFLOW_HISTORICAL_DENY,
+  applyUserSecurityDenyList,
+  loadTemplateDenyEntries,
 } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, prefixSkillName } from '../src/cli/plugins.js';
@@ -513,6 +515,25 @@ describe('resolveSecurityAction', () => {
   it('both detected → target=user (user-settings-first preference)', () => {
     const r = resolveSecurityAction(undefined, undefined, bothDetected, false);
     expect(r.target).toBe('user');
+  });
+
+  it('unknown does not perturb explicit flag resolution', () => {
+    // unknownDetected should not block an explicit flag from winning
+    const r = resolveSecurityAction('user', undefined, unknownDetected, false);
+    expect(r.target).toBe('user');
+    expect(r.action).toBe('merge');
+  });
+
+  it('CONFLICT: manifest=user but nothing detected (non-TTY) → strip + warn', () => {
+    const r = resolveSecurityAction(undefined, 'user', noneDetected, false);
+    expect(r.warn).toBeTruthy();
+    expect(r.action).toBe('strip');
+  });
+
+  it('CONFLICT: manifest=none but managed is present (non-TTY) → keeps managed + warn', () => {
+    const r = resolveSecurityAction(undefined, 'none', managedDetected, false);
+    expect(r.warn).toBeTruthy();
+    expect(r.target).toBe('managed');
   });
 });
 
@@ -1183,5 +1204,126 @@ describe('buildRulesMap', () => {
     const map = buildRulesMap([fakePlug1, fakePlug2]);
     expect(map.size).toBe(1);
     expect(map.get('shared-rule')).toBe('devflow-a'); // first plugin wins
+  });
+});
+
+describe('applyUserSecurityDenyList', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-apply-deny-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const templateDeny = ['Bash(rm -rf /*)', 'Bash(sudo *)', 'Read(/etc/shadow)'];
+
+  it('merges template deny into an existing settings file, preserving sibling keys', async () => {
+    const settingsPath = path.join(tmpDir, 'settings.json');
+    const initial = { theme: 'dark', model: 'claude-opus-4-5', permissions: { allow: ['Read(~/notes)'] } };
+    await fs.writeFile(settingsPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
+
+    const result = await applyUserSecurityDenyList(settingsPath, templateDeny);
+
+    const written = JSON.parse(result);
+    // Deny entries are present
+    for (const entry of templateDeny) {
+      expect(written.permissions.deny).toContain(entry);
+    }
+    // Sibling keys are preserved
+    expect(written.theme).toBe('dark');
+    expect(written.model).toBe('claude-opus-4-5');
+    // Allow list is preserved
+    expect(written.permissions.allow).toEqual(['Read(~/notes)']);
+
+    // File on disk matches
+    const fromDisk = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(fromDisk.permissions.deny).toEqual(written.permissions.deny);
+  });
+
+  it('creates settings from {} when the file is absent (ENOENT branch)', async () => {
+    const settingsPath = path.join(tmpDir, 'nonexistent', 'settings.json');
+    // Parent directory does not exist — applyUserSecurityDenyList will hit ENOENT on
+    // the read (falling back to '{}') and then writeFileAtomicExclusive must create it.
+    // writeFileAtomicExclusive writes to a .tmp sibling and renames — the parent must exist.
+    // So we create the parent dir but leave the file absent.
+    await fs.mkdir(path.join(tmpDir, 'nonexistent'), { recursive: true });
+
+    const result = await applyUserSecurityDenyList(settingsPath, templateDeny);
+
+    const written = JSON.parse(result);
+    for (const entry of templateDeny) {
+      expect(written.permissions.deny).toContain(entry);
+    }
+    // File was actually written to disk
+    const fromDisk = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+    expect(fromDisk.permissions.deny).toEqual(written.permissions.deny);
+  });
+
+  it('is idempotent — two applies produce byte-equal output, no duplication', async () => {
+    const settingsPath = path.join(tmpDir, 'settings.json');
+    await fs.writeFile(settingsPath, JSON.stringify({ theme: 'light' }, null, 2) + '\n', 'utf-8');
+
+    const first = await applyUserSecurityDenyList(settingsPath, templateDeny);
+    const second = await applyUserSecurityDenyList(settingsPath, templateDeny);
+
+    // Returned strings are identical
+    expect(second).toBe(first);
+
+    // No duplication in the deny array
+    const written = JSON.parse(second);
+    const uniqueEntries = new Set(written.permissions.deny);
+    expect(written.permissions.deny.length).toBe(uniqueEntries.size);
+    // All template entries still present exactly once
+    for (const entry of templateDeny) {
+      expect(written.permissions.deny.filter((e: string) => e === entry).length).toBe(1);
+    }
+  });
+});
+
+describe('loadTemplateDenyEntries', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-load-deny-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns the template deny entries for a valid template', async () => {
+    const denyEntries = ['Bash(rm -rf /*)', 'Bash(sudo *)', 'Read(/etc/shadow)'];
+    const templateContent = JSON.stringify({ permissions: { deny: denyEntries } }, null, 2);
+    await fs.mkdir(path.join(tmpDir, 'src', 'templates'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'templates', 'managed-settings.json'),
+      templateContent,
+      'utf-8',
+    );
+
+    const result = await loadTemplateDenyEntries(tmpDir);
+    expect(result).toEqual(denyEntries);
+  });
+
+  it('returns [] when permissions.deny is a non-array (e.g. a string)', async () => {
+    const templateContent = JSON.stringify({ permissions: { deny: 'not-an-array' } });
+    await fs.mkdir(path.join(tmpDir, 'src', 'templates'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'templates', 'managed-settings.json'),
+      templateContent,
+      'utf-8',
+    );
+
+    const result = await loadTemplateDenyEntries(tmpDir);
+    expect(result).toEqual([]);
+  });
+
+  it('returns [] on read/parse error (missing template file)', async () => {
+    // No template file created — the directory is empty
+    const result = await loadTemplateDenyEntries(tmpDir);
+    expect(result).toEqual([]);
   });
 });
