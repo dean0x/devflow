@@ -2003,3 +2003,101 @@ describe('purge-devflow-teammate-mode-v1 migration', () => {
     expect(result?.warnings ?? []).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// purge-dead-working-memory-sentinel-v1 (per-project)
+// applies ADR-001 (clean-break; dream config is sole source of truth)
+// avoids PF-004 (idempotency means a buggy run is never re-swept — the
+//   rethrow contract must be correct on the first attempt)
+// ---------------------------------------------------------------------------
+
+describe('purge-dead-working-memory-sentinel-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-dead-sentinel-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    await fs.mkdir(devflowDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-dead-working-memory-sentinel-v1');
+    if (!m) throw new Error('purge-dead-working-memory-sentinel-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('is registered in MIGRATIONS with per-project scope', () => {
+    // applies ADR-001: per-project scope ensures cleanup targets the correct project tree
+    const m = MIGRATIONS.find(m => m.id === 'purge-dead-working-memory-sentinel-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+  });
+
+  it('removes .working-memory-disabled sentinel when present and returns info', async () => {
+    // applies ADR-001: file is dead code — dream config is now the sole gate
+    const memoryDir = path.join(devflowDir, 'memory');
+    await fs.mkdir(memoryDir, { recursive: true });
+    const sentinelPath = path.join(memoryDir, '.working-memory-disabled');
+    await fs.writeFile(sentinelPath, '', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(sentinelPath)).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  it('is a no-op when sentinel is absent (ENOENT) without throwing', async () => {
+    // avoids PF-004: idempotency — sentinel already gone is a valid success state
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  it('rethrows non-ENOENT errors (avoids PF-004 silent-swallow)', async () => {
+    // avoids PF-004: migration idempotency means a buggy run is never re-swept;
+    // the rethrow contract must be correct on the first attempt so callers know it failed.
+    // Point unlink at a path that yields ENOTDIR by putting a file where the dir should be.
+    const memoryParent = path.join(devflowDir, 'memory');
+    // Write a plain file where the memory directory should be so that
+    // path.join(memoryParent, '.working-memory-disabled') produces ENOTDIR.
+    await fs.writeFile(memoryParent, 'not-a-dir', 'utf-8');
+
+    await expect(getMigration().run(makeCtx())).rejects.toThrow();
+  });
+
+  it('appears after purge-stale-memory-markers-v1 in MIGRATIONS array', () => {
+    const staleIdx = MIGRATIONS.findIndex(m => m.id === 'purge-stale-memory-markers-v1');
+    const deadIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dead-working-memory-sentinel-v1');
+    expect(staleIdx).toBeGreaterThanOrEqual(0);
+    expect(deadIdx).toBeGreaterThan(staleIdx);
+  });
+});
