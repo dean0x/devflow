@@ -17,6 +17,8 @@ import {
   getDecisionsDisabledSentinel,
 } from '../utils/project-paths.js';
 import { updateFeature, isFeatureEnabled, readConfig } from '../utils/dream-config.js';
+import { readManifest, writeManifest } from '../utils/manifest.js';
+import { getDevFlowDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
 import {
   type DecisionsEntryStatus,
@@ -352,6 +354,14 @@ export const decisionsCommand = new Command('decisions')
         try {
           await fs.unlink(getDecisionsDisabledSentinel(gitRoot));
         } catch { /* may not exist */ }
+        // Sync manifest — only update when a manifest already exists
+        const devflowDir = getDevFlowDirectory();
+        const manifest = await readManifest(devflowDir);
+        if (manifest) {
+          manifest.features.decisions = true;
+          manifest.updatedAt = new Date().toISOString();
+          await writeManifest(devflowDir, manifest);
+        }
         p.log.success('Decisions learning enabled — configuration updated');
         p.log.info(color.dim('Architectural decisions and pitfalls will be detected from your sessions'));
       } else {
@@ -368,6 +378,14 @@ export const decisionsCommand = new Command('decisions')
         const decisionsDir = getDecisionsDir(gitRoot);
         await fs.mkdir(decisionsDir, { recursive: true });
         await fs.writeFile(getDecisionsDisabledSentinel(gitRoot), '', 'utf-8');
+        // Sync manifest — only update when a manifest already exists
+        const devflowDir = getDevFlowDirectory();
+        const manifest = await readManifest(devflowDir);
+        if (manifest) {
+          manifest.features.decisions = false;
+          manifest.updatedAt = new Date().toISOString();
+          await writeManifest(devflowDir, manifest);
+        }
         p.log.success('Decisions learning disabled — configuration updated');
       } else {
         p.log.warn('Could not resolve git root — configuration not updated');
