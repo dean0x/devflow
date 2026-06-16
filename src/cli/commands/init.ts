@@ -16,6 +16,12 @@ import {
   discoverProjectGitRoots,
   updateGitignore,
   createDocsStructure,
+  applyUserSecurityDenyList,
+  stripUserDenyList,
+  detectDenyState,
+  resolveSecurityAction,
+  assertHistoricalDenySuperset,
+  DEVFLOW_HISTORICAL_DENY,
   type SecurityMode,
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, type PluginDefinition } from '../plugins.js';
@@ -159,6 +165,7 @@ interface InitOptions {
   knowledge?: boolean;
   decisions?: boolean;
   rules?: boolean;
+  security?: 'user' | 'managed' | 'none';
   hudOnly?: boolean;
   recommended?: boolean;
   advanced?: boolean;
@@ -181,6 +188,7 @@ export const initCommand = new Command('init')
   .option('--no-decisions', 'Disable decision/pitfall tracking')
   .option('--rules', 'Enable rules (always-on engineering principles)')
   .option('--no-rules', 'Disable rules')
+  .option('--security <mode>', 'Security deny list location: user, managed, or none', /^(user|managed|none)$/i)
   .option('--hud-only', 'Install only the HUD (no plugins, hooks, or extras)')
   .option('--recommended', 'Apply recommended defaults after plugin selection (skip advanced prompts)')
   .option('--advanced', 'Show all configuration prompts')
@@ -437,10 +445,9 @@ export const initCommand = new Command('init')
     let discoveredProjects: string[] = [];
     let safeDeleteAction: 'install' | 'upgrade' | 'skip' = 'skip';
     let safeDeleteBlock: string | null = null;
-    // Default to 'user' mode: recommended path skips managed-settings to avoid a
-    // sudo prompt in non-interactive / quick-setup contexts. Advanced mode offers
-    // the managed option explicitly with a confirmation step.
-    let securityMode: SecurityMode = 'user';
+    // Security mode is resolved from flag + manifest + detected reality via resolveSecurityAction.
+    // The final value is written to the manifest and consumed by the dedicated security step.
+    let securityMode: SecurityMode = 'user'; // placeholder; overwritten below by resolve
     let managedSettingsConfirmed = false;
 
     // Safe-delete detection (both paths need this)
@@ -875,6 +882,50 @@ export const initCommand = new Command('init')
       }
     }
 
+    // Detect current deny list state in user settings (read-only; write happens in security step)
+    {
+      const userSettingsPath = path.join(claudeDir, 'settings.json');
+      let userSettingsJson: string | null = null;
+      try { userSettingsJson = await fs.readFile(userSettingsPath, 'utf-8'); } catch { /* absent */ }
+
+      let managedExists = false;
+      let managedContentJson: string | null = null;
+      try {
+        const { getManagedSettingsPath: getMgdPath } = await import('../utils/paths.js');
+        const mgdPath = getMgdPath();
+        managedContentJson = await fs.readFile(mgdPath, 'utf-8');
+        managedExists = true;
+      } catch { /* absent or unsupported platform */ }
+
+      const detected = detectDenyState(userSettingsJson, managedExists, managedContentJson);
+
+      const flagValue = options.security as 'user' | 'managed' | 'none' | undefined;
+      const manifestMode = existingManifest?.features.security as 'user' | 'managed' | 'none' | undefined;
+      const resolution = resolveSecurityAction(flagValue, manifestMode, detected, process.stdin.isTTY);
+
+      if (resolution.warn) {
+        p.log.warn(resolution.warn);
+      }
+
+      // In TTY + CONFLICT, prompt the user (the pure fn returned prompt descriptor)
+      if (resolution.prompt && process.stdin.isTTY) {
+        // Default: keep detected reality (the safe choice — don't remove protection silently)
+        const keep = await p.confirm({ message: resolution.prompt, initialValue: true });
+        if (p.isCancel(keep)) {
+          p.cancel('Installation cancelled.');
+          process.exit(0);
+        }
+        // If user declines to keep, switch to the manifest mode
+        if (!keep && manifestMode !== undefined) {
+          securityMode = manifestMode === 'none' ? 'none' : manifestMode as SecurityMode;
+        } else {
+          securityMode = resolution.target === 'none' ? 'none' : resolution.target;
+        }
+      } else {
+        securityMode = resolution.target === 'none' ? 'none' : resolution.target;
+      }
+    }
+
     // Validate target directory
     s.message('Validating target directory');
 
@@ -1208,14 +1259,73 @@ export const initCommand = new Command('init')
       await installToProfile(profilePath, safeDeleteBlock);
     }
 
-    // Managed settings (last install step — sudo may prompt for password)
-    if (securityMode === 'managed' && managedSettingsConfirmed) {
-      s.stop('Configuring managed settings (may prompt for sudo password)...');
-      const managed = await installManagedSettings(rootDir, verbose);
-      if (!managed) {
-        p.log.warn('Managed settings write failed — falling back to user settings');
+    // ── Dedicated security step (always targets ~/.claude/settings.json for user mode) ──
+    // Runs AFTER managed-install so effective mode is known.
+    // Reads the current template deny list, asserts historical superset at install time.
+    {
+      const userSettingsPath = path.join(claudeDir, 'settings.json');
+      const managedTemplatePath = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
+
+      let templateDeny: string[] = [];
+      try {
+        const tmpl = JSON.parse(await fs.readFile(managedTemplatePath, 'utf-8')) as Record<string, unknown>;
+        const rawDeny = (tmpl.permissions as Record<string, unknown> | undefined)?.deny;
+        templateDeny = Array.isArray(rawDeny) ? rawDeny as string[] : [];
+        // Catch any drift where a new template entry was not added to DEVFLOW_HISTORICAL_DENY
+        try { assertHistoricalDenySuperset(templateDeny); } catch (e) {
+          p.log.warn(`Security template drift: ${e instanceof Error ? e.message : e}`);
+        }
+      } catch {
+        if (verbose) p.log.warn('Could not read managed-settings template; deny list unchanged');
       }
-      s.start('Finalizing installation...');
+
+      if (securityMode === 'managed' && managedSettingsConfirmed) {
+        // Managed path: attempt sudo write, fall back to user on failure
+        s.stop('Configuring managed settings (may prompt for sudo password)...');
+        const managed = await installManagedSettings(rootDir, verbose);
+        if (!managed) {
+          // Real fallback: actually write to user settings (not just a warning)
+          p.log.warn('Managed settings write failed — deny list written to user settings instead');
+          try {
+            await applyUserSecurityDenyList(userSettingsPath, templateDeny);
+            securityMode = 'user'; // update so manifest reflects reality
+            if (verbose) p.log.success('Security deny list written to ~/.claude/settings.json (fallback)');
+          } catch (e) {
+            p.log.warn(`Could not write deny list to user settings either: ${e instanceof Error ? e.message : e}`);
+          }
+        } else {
+          // Managed write succeeded — strip from user settings to avoid duplication
+          try {
+            const existing = await fs.readFile(userSettingsPath, 'utf-8');
+            const { json: stripped } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
+            if (stripped !== existing) {
+              await fs.writeFile(userSettingsPath, stripped, 'utf-8');
+              if (verbose) p.log.info('Removed deny list from user settings (now in managed settings)');
+            }
+          } catch { /* user settings may not exist */ }
+        }
+        s.start('Finalizing installation...');
+      } else if (securityMode === 'user') {
+        // User mode (default): merge deny list into ~/.claude/settings.json
+        if (templateDeny.length > 0) {
+          try {
+            await applyUserSecurityDenyList(userSettingsPath, templateDeny);
+            if (verbose) p.log.success('Security deny list applied to ~/.claude/settings.json');
+          } catch (e) {
+            if (verbose) p.log.warn(`Could not apply security deny list: ${e instanceof Error ? e.message : e}`);
+          }
+        }
+      } else if (securityMode === 'none') {
+        // None: strip Devflow deny entries from user settings
+        try {
+          const existing = await fs.readFile(userSettingsPath, 'utf-8');
+          const { json: stripped, removed } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
+          if (stripped !== existing) {
+            await fs.writeFile(userSettingsPath, stripped, 'utf-8');
+            if (verbose) p.log.info(`Security deny list removed (${removed.length} entries stripped)`);
+          }
+        } catch { /* user settings may not exist */ }
+      }
     }
 
     s.stop('Installation complete');
@@ -1295,7 +1405,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode },
+      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode as 'user' | 'managed' | 'none' },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };

@@ -253,6 +253,97 @@ describe('readManifest', () => {
     expect(result).not.toBeNull();
     expect(result!.features.viewMode).toBeUndefined();
   });
+
+  it('parses manifest with security=user', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'user' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('user');
+  });
+
+  it('parses manifest with security=managed', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'managed' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('managed');
+  });
+
+  it('parses manifest with security=none', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'none' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('none');
+  });
+
+  it('normalizes absent security field to undefined (back-compat with pre-Phase-F manifests)', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [] },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    // Pre-Phase-F manifests have no security field → reads as undefined
+    expect(result!.features.security).toBeUndefined();
+  });
+
+  it('normalizes invalid security value to undefined', async () => {
+    const data = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'invalid-value' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(data), 'utf-8');
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBeUndefined();
+  });
+
+  it('security field round-trips through write/read', async () => {
+    const data: ManifestData = {
+      version: '1.4.0',
+      plugins: ['devflow-core-skills'],
+      scope: 'user',
+      features: { ambient: true, memory: true, hud: false, knowledge: false, decisions: false, rules: true, flags: [], security: 'user' },
+      installedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+    };
+    await writeManifest(tmpDir, data);
+    const result = await readManifest(tmpDir);
+    expect(result).not.toBeNull();
+    expect(result!.features.security).toBe('user');
+  });
 });
 
 describe('writeManifest', () => {

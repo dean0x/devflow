@@ -19,6 +19,12 @@ export interface ManifestData {
     rules: boolean;
     flags: string[];
     viewMode?: ViewMode;
+    /**
+     * Security deny list location. 'user' = ~/.claude/settings.json,
+     * 'managed' = system-level managed settings, 'none' = not installed.
+     * Absent in pre-Phase-F manifests — readManifest defaults to undefined (unknown).
+     */
+    security?: 'none' | 'user' | 'managed';
   };
   installedAt: string;
   updatedAt: string;
@@ -52,6 +58,9 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
       : false;
     const needsHeal = features.kb !== undefined;
 
+    const SECURITY_MODES = ['none', 'user', 'managed'] as const;
+    type SecurityMode = 'none' | 'user' | 'managed';
+
     const manifest: ManifestData = {
       version: data.version as string,
       plugins: data.plugins as string[],
@@ -66,6 +75,9 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
         flags: Array.isArray(features.flags) ? features.flags as string[] : [],
         viewMode: typeof features.viewMode === 'string' && (VIEW_MODES as readonly string[]).includes(features.viewMode)
           ? features.viewMode as ViewMode
+          : undefined,
+        security: typeof features.security === 'string' && (SECURITY_MODES as readonly string[]).includes(features.security)
+          ? features.security as SecurityMode
           : undefined,
       },
       installedAt: data.installedAt as string,
