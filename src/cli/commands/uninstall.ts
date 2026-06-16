@@ -16,7 +16,7 @@ import { removeContextHook } from './context.js';
 import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
-import { removeManagedSettings } from '../utils/post-install.js';
+import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../utils/post-install.js';
 import { stripFlags, stripViewMode } from '../utils/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../utils/teammate-mode-cleanup.js';
 
@@ -409,32 +409,69 @@ export const uninstallCommand = new Command('uninstall')
         }
       }
 
-      // 6. Managed settings (security deny list)
-      let managedSettingsExist = false;
+      // 6. Security deny list (user settings + managed settings)
+      const uninstallRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+      // Detect what's installed
+      let userSettingsJsonForSecurity: string | null = null;
+      const userSettingsPathForSecurity = path.join(getClaudeDirectory(), 'settings.json');
+      try { userSettingsJsonForSecurity = await fs.readFile(userSettingsPathForSecurity, 'utf-8'); } catch { /* absent */ }
+
+      let managedExistsForSecurity = false;
+      let managedContentForSecurity: string | null = null;
       try {
         const managedPath = getManagedSettingsPath();
-        await fs.access(managedPath);
-        managedSettingsExist = true;
-      } catch {
-        // Managed settings don't exist or platform unsupported
-      }
+        managedContentForSecurity = await fs.readFile(managedPath, 'utf-8');
+        managedExistsForSecurity = true;
+      } catch { /* absent or unsupported platform */ }
 
-      if (managedSettingsExist) {
-        if (process.stdin.isTTY) {
-          const removeManagedConfirm = await p.confirm({
-            message: 'Remove Devflow security deny list from managed settings?',
-            initialValue: false,
-          });
+      const detectedSecurity = detectDenyState(
+        userSettingsJsonForSecurity,
+        managedExistsForSecurity,
+        managedContentForSecurity,
+      );
 
-          if (!p.isCancel(removeManagedConfirm) && removeManagedConfirm) {
-            // Resolve rootDir for the template path — use the dist directory
-            const uninstallRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-            await removeManagedSettings(uninstallRootDir, verbose);
+      const anySecurityPresent = detectedSecurity.user || detectedSecurity.managed;
+      if (anySecurityPresent) {
+        const bothLocations = detectedSecurity.user && detectedSecurity.managed;
+        const locationLabel = bothLocations ? 'user settings + managed settings'
+          : detectedSecurity.user ? 'user settings' : 'managed settings';
+
+        let shouldRemoveSecurity = false;
+
+        if (!options.keepDocs) {
+          if (process.stdin.isTTY) {
+            const removeDenyConfirm = await p.confirm({
+              message: `Remove Devflow security deny list from ${locationLabel}?`,
+              initialValue: false, // Deny list is protective — default to keeping it
+            });
+
+            if (!p.isCancel(removeDenyConfirm) && removeDenyConfirm) {
+              shouldRemoveSecurity = true;
+            } else {
+              p.log.info(`Security deny list preserved (${locationLabel})`);
+            }
           } else {
-            p.log.info('Managed settings preserved');
+            p.log.info(`Security deny list preserved (${locationLabel}, non-interactive mode)`);
           }
-        } else {
-          p.log.info('Managed settings preserved (non-interactive mode)');
+        }
+
+        if (shouldRemoveSecurity) {
+          // Strip from user settings (ENOENT-tolerant; hard fail if unparseable — preserve safety)
+          if (detectedSecurity.user && userSettingsJsonForSecurity !== null) {
+            const { json: stripped, removed } = stripUserDenyList(
+              userSettingsJsonForSecurity,
+              DEVFLOW_HISTORICAL_DENY,
+            );
+            if (removed.length > 0) {
+              await fs.writeFile(userSettingsPathForSecurity, stripped, 'utf-8');
+              p.log.success(`Security deny list removed from user settings (${removed.length} entries)`);
+            }
+          }
+          // Strip from managed settings (ENOENT-tolerant via removeManagedSettings)
+          if (managedExistsForSecurity) {
+            await removeManagedSettings(uninstallRootDir, verbose);
+          }
         }
       }
 
