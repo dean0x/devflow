@@ -36,9 +36,15 @@ export function formatFeatures(
   extra?: { security?: TriState; safeDelete?: TriState },
 ): string {
   const triLabel = (label: string, state: TriState): string => {
-    if (state === 'on') return label;
-    if (state === 'off') return `${label}: off`;
-    return `${label}: unknown`;
+    switch (state) {
+      case 'on': return label;
+      case 'off': return `${label}: off`;
+      case 'unknown': return `${label}: unknown`;
+      default: {
+        const _exhaustive: never = state;
+        return `${label}: ${_exhaustive}`;
+      }
+    }
   };
 
   const parts = [

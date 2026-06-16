@@ -67,17 +67,40 @@ export const safeDeleteCommand = new Command('safe-delete')
   .option('--status', 'Show current safe-delete state')
   .action(async (options: SafeDeleteOptions) => {
     const hasFlag = options.enable || options.disable || options.status;
-    if (!hasFlag || options.status) {
-      // --status (or no flag) → tri-state report
+    if (!hasFlag) {
+      // No flag → show usage (matches ambient/memory/hud/decisions pattern)
+      p.note(
+        `${color.cyan('devflow safe-delete --enable')}   Install safe-delete shell function\n` +
+        `${color.cyan('devflow safe-delete --disable')}  Remove safe-delete shell function\n` +
+        `${color.cyan('devflow safe-delete --status')}   Show current safe-delete state`,
+        'Usage',
+      );
+      return;
+    }
+
+    if (options.status) {
+      // --status → tri-state report
       const { status, profilePath } = await getSafeDeleteStatus();
 
-      const statusLabel = status === 'installed'
-        ? color.green('installed')
-        : status === 'outdated'
-          ? color.yellow('outdated (upgrade available)')
-          : status === 'absent'
-            ? color.dim('absent')
-            : color.dim('unknown');
+      let statusLabel: string;
+      switch (status) {
+        case 'installed':
+          statusLabel = color.green('installed');
+          break;
+        case 'outdated':
+          statusLabel = color.yellow('outdated (upgrade available)');
+          break;
+        case 'absent':
+          statusLabel = color.dim('absent');
+          break;
+        case 'unknown':
+          statusLabel = color.dim('unknown');
+          break;
+        default: {
+          const _exhaustive: never = status;
+          statusLabel = color.dim(_exhaustive);
+        }
+      }
 
       p.log.info(`Safe-delete: ${statusLabel}`);
       if (profilePath) {
@@ -88,11 +111,6 @@ export const safeDeleteCommand = new Command('safe-delete')
 
       if (status === 'outdated') {
         p.log.info(color.dim('Run devflow safe-delete --enable to upgrade to the current version'));
-      }
-
-      if (!hasFlag) {
-        // Default (no flag) — show usage hint
-        p.log.info(color.dim('Usage: devflow safe-delete --enable | --disable | --status'));
       }
       return;
     }
