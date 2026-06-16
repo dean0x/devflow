@@ -23,6 +23,7 @@ import {
   assertHistoricalDenySuperset,
   DEVFLOW_HISTORICAL_DENY,
   loadTemplateDenyEntries,
+  stripUserSecurityDenyList,
   type SecurityMode,
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, type PluginDefinition } from '../plugins.js';
@@ -901,8 +902,8 @@ export const initCommand = new Command('init')
 
       const detected = detectDenyState(userSettingsJson, managedExists, managedContentJson);
 
-      const flagValue = options.security as 'user' | 'managed' | 'none' | undefined;
-      const manifestMode = existingManifest?.features.security as 'user' | 'managed' | 'none' | undefined;
+      const flagValue = options.security as SecurityMode | undefined;
+      const manifestMode = existingManifest?.features.security as SecurityMode | undefined;
       const resolution = resolveSecurityAction(flagValue, manifestMode, detected, process.stdin.isTTY);
 
       if (resolution.warn) {
@@ -1282,34 +1283,43 @@ export const initCommand = new Command('init')
         p.log.warn('Could not read managed-settings template; deny list unchanged');
       }
 
-      if (securityMode === 'managed' && managedSettingsConfirmed) {
-        // Managed path: attempt sudo write, fall back to user on failure
-        s.stop('Configuring managed settings (may prompt for sudo password)...');
-        const managed = await installManagedSettings(rootDir, verbose);
-        if (!managed) {
-          // Real fallback: actually write to user settings (not just a warning)
-          p.log.warn('Managed settings write failed — deny list written to user settings instead');
-          try {
-            await applyUserSecurityDenyList(userSettingsPath, templateDeny);
-            securityMode = 'user'; // update so manifest reflects reality
-            if (verbose) p.log.success('Security deny list written to ~/.claude/settings.json (fallback)');
-          } catch (e) {
-            p.log.warn(`Could not write deny list to user settings either: ${e instanceof Error ? e.message : e}`);
-          }
-        } else {
-          // Managed write succeeded — strip from user settings to avoid duplication.
-          // Atomic write (temp+rename): settings.json is read by Claude Code every turn;
-          // a crash mid-write must never truncate it (invariant: never-truncate-on-crash).
-          try {
-            const existing = await fs.readFile(userSettingsPath, 'utf-8');
-            const { json: stripped } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
-            if (stripped !== existing) {
-              await writeFileAtomicExclusive(userSettingsPath, stripped);
-              if (verbose) p.log.info('Removed deny list from user settings (now in managed settings)');
+      if (securityMode === 'managed') {
+        if (managedSettingsConfirmed) {
+          // Managed path: attempt sudo write, fall back to user on failure
+          s.stop('Configuring managed settings (may prompt for sudo password)...');
+          const managed = await installManagedSettings(rootDir, verbose);
+          if (!managed) {
+            // Real fallback: actually write to user settings (not just a warning)
+            p.log.warn('Managed settings write failed — deny list written to user settings instead');
+            try {
+              await applyUserSecurityDenyList(userSettingsPath, templateDeny);
+              securityMode = 'user'; // update so manifest reflects reality
+              if (verbose) p.log.success('Security deny list written to ~/.claude/settings.json (fallback)');
+            } catch (e) {
+              p.log.warn(`Could not write deny list to user settings either: ${e instanceof Error ? e.message : e}`);
             }
-          } catch { /* user settings may not exist */ }
+          } else {
+            // Managed write succeeded — strip from user settings to avoid duplication.
+            // Uses the canonical helper (atomic temp+rename; ENOENT-safe; only-write-if-changed).
+            const stripResult = await stripUserSecurityDenyList(userSettingsPath);
+            if (stripResult && verbose) p.log.info('Removed deny list from user settings (now in managed settings)');
+          }
+          s.start('Finalizing installation...');
+        } else {
+          // applies ADR-010: user declined sudo and chose the settings.json fallback.
+          // securityMode is 'managed' (from resolveSecurityAction or interactive choice) but
+          // managedSettingsConfirmed is false — honor the "fall back to settings.json" label
+          // by writing to user settings. Manifest will record 'user' to match reality.
+          if (templateDeny.length > 0) {
+            try {
+              await applyUserSecurityDenyList(userSettingsPath, templateDeny);
+              securityMode = 'user'; // manifest must reflect where the deny list actually landed
+              if (verbose) p.log.success('Security deny list written to ~/.claude/settings.json (declined managed)');
+            } catch (e) {
+              p.log.warn(`Could not write deny list to user settings: ${e instanceof Error ? e.message : e}`);
+            }
+          }
         }
-        s.start('Finalizing installation...');
       } else if (securityMode === 'user') {
         // User mode (default): merge deny list into ~/.claude/settings.json
         if (templateDeny.length > 0) {
@@ -1322,16 +1332,14 @@ export const initCommand = new Command('init')
         }
       } else if (securityMode === 'none') {
         // None: strip Devflow deny entries from user settings.
-        // Atomic write (temp+rename) — same never-truncate-on-crash guarantee as the
-        // merge path (applyUserSecurityDenyList) and the managed-success strip above.
-        try {
-          const existing = await fs.readFile(userSettingsPath, 'utf-8');
-          const { json: stripped, removed } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
-          if (stripped !== existing) {
-            await writeFileAtomicExclusive(userSettingsPath, stripped);
-            if (verbose) p.log.info(`Security deny list removed (${removed.length} entries stripped)`);
-          }
-        } catch { /* user settings may not exist */ }
+        // Uses the canonical helper (atomic temp+rename; ENOENT-safe; only-write-if-changed).
+        const stripResult = await stripUserSecurityDenyList(userSettingsPath);
+        if (stripResult && verbose) p.log.info(`Security deny list removed (${stripResult.removed.length} entries stripped)`);
+      } else {
+        // Exhaustive guard — if TypeScript reaches here, a new SecurityMode variant was added
+        // without a matching branch. avoids PF-009 (stale references after rename/refactor).
+        const _exhaustive: never = securityMode;
+        void _exhaustive;
       }
     }
 
@@ -1412,7 +1420,7 @@ export const initCommand = new Command('init')
       version,
       plugins: resolvePluginList(installedPluginNames, existingManifest, !!options.plugin),
       scope,
-      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode as 'user' | 'managed' | 'none' },
+      features: { ambient: ambientEnabled, memory: memoryEnabled, hud: hudEnabled, knowledge: knowledgeEnabled, decisions: decisionsEnabled, rules: rulesEnabled, flags: enabledFlags, viewMode, security: securityMode },
       installedAt: existingManifest?.installedAt ?? now,
       updatedAt: now,
     };
