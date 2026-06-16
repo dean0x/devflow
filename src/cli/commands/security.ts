@@ -1,5 +1,4 @@
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -12,8 +11,11 @@ import {
   DEVFLOW_HISTORICAL_DENY,
   removeManagedSettings,
   installManagedSettings,
+  loadTemplateDenyEntries,
+  stripUserSecurityDenyList,
 } from '../utils/post-install.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
+import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,22 +30,6 @@ interface SecurityOptions {
 }
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-/**
- * Load current template deny entries from the bundled managed-settings.json.
- * Returns empty array on error (caller reports).
- */
-export async function loadTemplateDenyEntries(rootDir: string): Promise<string[]> {
-  try {
-    const tmpl = JSON.parse(
-      await fs.readFile(path.join(rootDir, 'src', 'templates', 'managed-settings.json'), 'utf-8'),
-    ) as Record<string, unknown>;
-    const rawDeny = (tmpl.permissions as Record<string, unknown> | undefined)?.deny;
-    return Array.isArray(rawDeny) ? rawDeny as string[] : [];
-  } catch {
-    return [];
-  }
-}
 
 /**
  * Count deny entries in a parsed settings JSON string.
@@ -90,9 +76,16 @@ export const securityCommand = new Command('security')
 
     const detected = detectDenyState(userSettingsJson, managedExists, managedContentJson);
 
-    // Default (no flag) → show status
+    // Default (no flag) → show Usage note (mirrors memory.ts:242-253 incumbent pattern)
     if (!options.enable && !options.disable && !options.status) {
-      options.status = true;
+      p.note(
+        `${color.cyan('devflow security --status')}           Show current deny list state\n` +
+        `${color.cyan('devflow security --enable')}           Install deny list (user settings)\n` +
+        `${color.cyan('devflow security --enable --managed')} Install deny list (managed settings)\n` +
+        `${color.cyan('devflow security --disable')}          Remove the deny list from all locations`,
+        'Usage',
+      );
+      return;
     }
 
     // ── --status ────────────────────────────────────────────────────────────
@@ -138,7 +131,7 @@ export const securityCommand = new Command('security')
       const templateDeny = await loadTemplateDenyEntries(rootDir);
       if (templateDeny.length === 0) {
         p.log.error('Could not load deny list template — no entries to install');
-        process.exit(1);
+        return;
       }
 
       if (targetMode === 'managed') {
@@ -146,19 +139,15 @@ export const securityCommand = new Command('security')
         const managed = await installManagedSettings(rootDir, true);
         if (!managed) {
           p.log.error('Managed settings write failed — re-run without --managed to use user settings');
-          process.exit(1);
+          return;
         }
         p.log.success('Security deny list written to managed settings');
 
-        // Strip from user settings (self-heal)
-        try {
-          const existing = await fs.readFile(userSettingsPath, 'utf-8');
-          const { json: stripped, removed } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
-          if (stripped !== existing) {
-            await writeFileAtomicExclusive(userSettingsPath, stripped);
-            p.log.info(`Removed ${removed.length} entries from user settings (now in managed)`);
-          }
-        } catch { /* user settings may not exist */ }
+        // Strip from user settings (self-heal) — adopts canonical stripUserSecurityDenyList (SF9)
+        const stripResult = await stripUserSecurityDenyList(userSettingsPath);
+        if (stripResult && stripResult.removed.length > 0) {
+          p.log.info(`Removed ${stripResult.removed.length} entries from user settings (now in managed)`);
+        }
 
       } else {
         // User mode: merge into ~/.claude/settings.json
@@ -206,9 +195,16 @@ export const securityCommand = new Command('security')
         }
       }
 
-      // Managed settings: remove if present (ENOENT-tolerant)
-      if (managedExists) {
+      // Managed settings: gate on detected.managed (parse-safe signal from detectDenyState),
+      // not raw managedExists — avoids raw JSON.parse crash inside removeManagedSettings
+      // when the managed file exists but is corrupt JSON. (SF5 — applies engineering.md
+      // "never throw in business logic"; avoids PF partial-failure: user settings already
+      // stripped but manifest sync would be skipped on uncaught throw.)
+      if (detected.managed) {
         await removeManagedSettings(rootDir, true);
+      } else if (managedExists && !detected.managed) {
+        // File exists but is unparseable or contains no Devflow entries — warn and skip.
+        p.log.warn('Managed settings file exists but contains no Devflow deny entries — skipping');
       } else {
         p.log.info('No managed settings to remove');
       }
