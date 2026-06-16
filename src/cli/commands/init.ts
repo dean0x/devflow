@@ -22,6 +22,7 @@ import {
   resolveSecurityAction,
   assertHistoricalDenySuperset,
   DEVFLOW_HISTORICAL_DENY,
+  loadTemplateDenyEntries,
   type SecurityMode,
 } from '../utils/post-install.js';
 import { DEVFLOW_PLUGINS, LEGACY_PLUGIN_NAMES, LEGACY_SKILL_NAMES, LEGACY_COMMAND_NAMES, LEGACY_RULE_NAMES, buildAssetMaps, buildFullSkillsMap, buildRulesMap, partitionSelectablePlugins, WORKFLOW_ORDER, type PluginDefinition } from '../plugins.js';
@@ -166,7 +167,7 @@ interface InitOptions {
   knowledge?: boolean;
   decisions?: boolean;
   rules?: boolean;
-  security?: 'user' | 'managed' | 'none';
+  security?: SecurityMode;
   hudOnly?: boolean;
   recommended?: boolean;
   advanced?: boolean;
@@ -1269,19 +1270,16 @@ export const initCommand = new Command('init')
     // Reads the current template deny list, asserts historical superset at install time.
     {
       const userSettingsPath = path.join(claudeDir, 'settings.json');
-      const managedTemplatePath = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
 
-      let templateDeny: string[] = [];
-      try {
-        const tmpl = JSON.parse(await fs.readFile(managedTemplatePath, 'utf-8')) as Record<string, unknown>;
-        const rawDeny = (tmpl.permissions as Record<string, unknown> | undefined)?.deny;
-        templateDeny = Array.isArray(rawDeny) ? rawDeny as string[] : [];
+      // Use canonical loadTemplateDenyEntries (avoids duplicating parse logic here).
+      const templateDeny = await loadTemplateDenyEntries(rootDir);
+      if (templateDeny.length > 0) {
         // Catch any drift where a new template entry was not added to DEVFLOW_HISTORICAL_DENY
         try { assertHistoricalDenySuperset(templateDeny); } catch (e) {
           p.log.warn(`Security template drift: ${e instanceof Error ? e.message : e}`);
         }
-      } catch {
-        if (verbose) p.log.warn('Could not read managed-settings template; deny list unchanged');
+      } else if (verbose) {
+        p.log.warn('Could not read managed-settings template; deny list unchanged');
       }
 
       if (securityMode === 'managed' && managedSettingsConfirmed) {

@@ -4,6 +4,16 @@ import { LEGACY_PLUGIN_NAMES } from '../plugins.js';
 import { VIEW_MODES, ViewMode } from './flags.js';
 
 /**
+ * Where the Devflow security deny list is installed.
+ * 'user'    = ~/.claude/settings.json (default)
+ * 'managed' = system-level managed settings
+ * 'none'    = not installed
+ *
+ * Canonical definition — imported by post-install.ts and init.ts.
+ */
+export type SecurityMode = 'managed' | 'user' | 'none';
+
+/**
  * Manifest data tracked for each Devflow installation.
  */
 export interface ManifestData {
@@ -24,7 +34,7 @@ export interface ManifestData {
      * 'managed' = system-level managed settings, 'none' = not installed.
      * Absent in pre-Phase-F manifests — readManifest defaults to undefined (unknown).
      */
-    security?: 'none' | 'user' | 'managed';
+    security?: SecurityMode;
   };
   installedAt: string;
   updatedAt: string;
@@ -59,7 +69,6 @@ export async function readManifest(devflowDir: string): Promise<ManifestData | n
     const needsHeal = features.kb !== undefined;
 
     const SECURITY_MODES = ['none', 'user', 'managed'] as const;
-    type SecurityMode = 'none' | 'user' | 'managed';
 
     const manifest: ManifestData = {
       version: data.version as string,

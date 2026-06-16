@@ -6,6 +6,7 @@ import * as p from '@clack/prompts';
 import { getManagedSettingsPath } from './paths.js';
 import { getGitignoreEntries, getDocsDir } from './project-paths.js';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
+import type { SecurityMode } from './manifest.js';
 
 /**
  * Type guard for Node.js system errors with error codes.
@@ -45,6 +46,9 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
  *
  * PURE + idempotent: calling with the same inputs always yields byte-equal output.
  * Non-array `deny` (e.g. a string, null) is treated as empty — neither throws nor spreads chars.
+ *
+ * @throws {SyntaxError} on malformed JSON — callers must pre-validate (e.g. via detectDenyState)
+ *   or wrap in try/catch.
  */
 export function mergeDenyList(existingJson: string, newDenyEntries: string[]): string {
   const existing = JSON.parse(existingJson) as Record<string, unknown>;
@@ -249,6 +253,9 @@ export function assertHistoricalDenySuperset(templateEntries: string[]): void {
  * - Never deletes the file — may return `{}\n`.
  * - Preserves allow and all sibling keys.
  * - Returns { json, removed[] } where removed is the list of entries actually stripped.
+ *
+ * @throws {SyntaxError} on malformed JSON — callers must pre-validate (e.g. via detectDenyState)
+ *   or wrap in try/catch.
  */
 export function stripUserDenyList(
   existingJson: string,
@@ -325,6 +332,29 @@ export function detectDenyState(
   return { user, managed, unknown };
 }
 
+/** Internal 4-way classification of what detectDenyState found on disk. */
+type DetectedMode = 'user' | 'managed' | 'both' | 'none';
+
+/**
+ * Collapse a DetectedMode to the canonical SecurityMode target to keep.
+ * 'both' and 'user' prefer user-settings (user-settings-first convention).
+ * Called from the three distinct collapse sites in resolveSecurityAction.
+ */
+function keepTargetFor(m: DetectedMode): SecurityMode {
+  return m === 'managed' ? 'managed' : m === 'none' ? 'none' : 'user';
+}
+
+/**
+ * Derive DetectedMode from the raw boolean flags returned by detectDenyState.
+ * Extracted so the 4-way ternary is named and reusable (pairs with keepTargetFor).
+ */
+function classifyDetected(detected: { user: boolean; managed: boolean; unknown: boolean }): DetectedMode {
+  return detected.user && detected.managed ? 'both'
+    : detected.user ? 'user'
+    : detected.managed ? 'managed'
+    : 'none';
+}
+
 /**
  * Describe the action required for the security deny list.
  * PURE — no I/O, no prompting.
@@ -338,12 +368,12 @@ export function detectDenyState(
  * 4. Fresh (no manifest field) → seed from detected state; default 'user' when nothing detected.
  */
 export function resolveSecurityAction(
-  flag: 'user' | 'managed' | 'none' | undefined,
-  manifestMode: 'user' | 'managed' | 'none' | undefined,
+  flag: SecurityMode | undefined,
+  manifestMode: SecurityMode | undefined,
   detected: { user: boolean; managed: boolean; unknown: boolean },
   isTTY: boolean,
 ): {
-  target: 'user' | 'managed' | 'none';
+  target: SecurityMode;
   action: 'merge' | 'strip' | 'noop';
   prompt?: string;
   warn?: string;
@@ -353,13 +383,12 @@ export function resolveSecurityAction(
     if (flag === 'none') return { target: 'none', action: 'strip' };
     if (flag === 'user') return { target: 'user', action: 'merge' };
     if (flag === 'managed') return { target: 'managed', action: 'merge' };
+    // Exhaustiveness guard — TypeScript ensures SecurityMode is exhausted above.
+    const _exhaustive: never = flag;
+    void _exhaustive;
   }
 
-  const detectedMode: 'user' | 'managed' | 'both' | 'none' =
-    detected.user && detected.managed ? 'both'
-    : detected.user ? 'user'
-    : detected.managed ? 'managed'
-    : 'none';
+  const detectedMode = classifyDetected(detected);
 
   // 2. Manifest field present — check alignment with detected reality
   if (manifestMode !== undefined) {
@@ -377,22 +406,14 @@ export function resolveSecurityAction(
     // CONFLICT: manifest disagrees with reality
     if (isTTY) {
       return {
-        target: detectedMode === 'both' || detectedMode === 'user' ? 'user' : 'managed',
+        target: keepTargetFor(detectedMode),
         action: 'noop',
         prompt: `Security deny list is ${detectedEnabled ? 'present' : 'absent'} but manifest says ${manifestMode}. Keep current state?`,
       };
     }
     // Non-TTY: preserve detected reality + warn
-    let keepTarget: 'user' | 'managed' | 'none';
-    if (detectedMode === 'both' || detectedMode === 'user') {
-      keepTarget = 'user';
-    } else if (detectedMode === 'managed') {
-      keepTarget = 'managed';
-    } else {
-      keepTarget = 'none';
-    }
     return {
-      target: keepTarget,
+      target: keepTargetFor(detectedMode),
       action: detectedEnabled ? 'merge' : 'strip',
       warn: `Security deny list state (manifest=${manifestMode}, detected=${detectedMode}) — keeping detected reality`,
     };
@@ -404,9 +425,27 @@ export function resolveSecurityAction(
     return { target: 'user', action: 'merge' };
   }
   // Something already installed — keep it, upgrade with current template
-  const seedTarget: 'user' | 'managed' =
-    detectedMode === 'managed' ? 'managed' : 'user';
-  return { target: seedTarget, action: 'merge' };
+  // detectedMode !== 'none' here (handled above), so keepTargetFor yields 'user' | 'managed'.
+  return { target: keepTargetFor(detectedMode), action: 'merge' };
+}
+
+/**
+ * Load the deny entry array from the managed-settings.json template.
+ * Canonical single-source helper used by installManagedSettings, removeManagedSettings,
+ * and init.ts's security step. Downstream: security.ts will adopt this too.
+ *
+ * Defensive read: treats file as `Record<string, unknown>`, guards with Array.isArray,
+ * coerces each element to string. Returns [] on any read or parse failure (never throws).
+ */
+export function loadTemplateDenyEntries(rootDir: string): Promise<string[]> {
+  const sourceManaged = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
+  return fs.readFile(sourceManaged, 'utf-8')
+    .then((raw) => {
+      const tmpl = JSON.parse(raw) as Record<string, unknown>;
+      const rawDeny = (tmpl.permissions as Record<string, unknown> | undefined)?.deny;
+      return Array.isArray(rawDeny) ? rawDeny.map(String) : [];
+    })
+    .catch(() => []);
 }
 
 /**
@@ -430,13 +469,9 @@ export async function installManagedSettings(
   }
 
   const managedDir = path.dirname(managedPath);
-  const sourceManaged = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
 
-  let newDenyEntries: string[];
-  try {
-    const template = JSON.parse(await fs.readFile(sourceManaged, 'utf-8'));
-    newDenyEntries = template.permissions?.deny ?? [];
-  } catch {
+  const newDenyEntries = await loadTemplateDenyEntries(rootDir);
+  if (newDenyEntries.length === 0) {
     if (verbose) {
       p.log.warn('Could not read managed settings template');
     }
@@ -522,12 +557,8 @@ export async function removeManagedSettings(
   }
 
   // Load our deny entries to identify which to remove
-  const sourceManaged = path.join(rootDir, 'src', 'templates', 'managed-settings.json');
-  let devflowDenyEntries: string[];
-  try {
-    const template = JSON.parse(await fs.readFile(sourceManaged, 'utf-8'));
-    devflowDenyEntries = template.permissions?.deny ?? [];
-  } catch {
+  const devflowDenyEntries = await loadTemplateDenyEntries(rootDir);
+  if (devflowDenyEntries.length === 0) {
     return false;
   }
 
@@ -615,13 +646,9 @@ export async function removeManagedSettings(
   }
 }
 
-/**
- * Where the security deny list is installed.
- * 'user'    = ~/.claude/settings.json (default)
- * 'managed' = system-level managed settings
- * 'none'    = not installed
- */
-export type SecurityMode = 'managed' | 'user' | 'none';
+// Re-export canonical SecurityMode for callers that import from post-install.ts
+// (canonical definition lives in manifest.ts — avoids re-declaration in 7 places).
+export type { SecurityMode } from './manifest.js';
 
 /**
  * Apply the Devflow deny list atomically to the user settings file (~/.claude/settings.json).
@@ -644,6 +671,41 @@ export async function applyUserSecurityDenyList(
   const merged = mergeDenyList(existing, currentTemplateDeny);
   await writeFileAtomicExclusive(settingsPath, merged);
   return merged;
+}
+
+/**
+ * Strip Devflow deny entries from the user settings file (~/.claude/settings.json).
+ * Colocated with applyUserSecurityDenyList — the remove-side counterpart.
+ *
+ * Sequence: read → stripUserDenyList → guard (stripped !== existing) →
+ *   writeFileAtomicExclusive → return { removed }.
+ * Atomic write (temp+rename) upholds the never-truncate-on-crash invariant.
+ * ENOENT is swallowed (file absent = nothing to strip). Other errors propagate.
+ *
+ * @returns { removed: string[] } listing the stripped entries,
+ *   or null when the file is absent (ENOENT) or nothing changed.
+ *
+ * Downstream adopters: init.ts (1305-1312, 1329-1336) and security.ts (154-161)
+ * will call this instead of open-coding the sequence.
+ */
+export async function stripUserSecurityDenyList(
+  settingsPath: string,
+): Promise<{ removed: string[] } | null> {
+  let existing: string;
+  try {
+    existing = await fs.readFile(settingsPath, 'utf-8');
+  } catch (error: unknown) {
+    if (isNodeSystemError(error) && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+  const { json: stripped, removed } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
+  if (stripped === existing) {
+    return null;
+  }
+  await writeFileAtomicExclusive(settingsPath, stripped);
+  return { removed };
 }
 
 /**
