@@ -225,24 +225,34 @@ export const hudCommand = new Command('hud')
 
     if (options.disable) {
       const config = loadConfig();
-      if (!config.enabled) {
-        p.log.info('HUD already disabled');
-        return;
-      }
-      saveConfig({ ...config, enabled: false });
+      const wasEnabled = config.enabled;
 
-      // Hard-remove the statusLine from settings.json so no Devflow status line
-      // appears even if hud.json is re-enabled separately (Phase C).
+      // Always update config to disabled (idempotent).
+      if (wasEnabled) {
+        saveConfig({ ...config, enabled: false });
+      }
+
+      // D1: Always attempt to hard-remove the statusLine from settings.json,
+      // regardless of config.enabled. This self-heals drift where hud.json says
+      // disabled but a Devflow statusLine still lingers in settings.json from a
+      // partial prior state (e.g. crash between config-write and settings-write).
       const claudeDir = getClaudeDirectory();
       const settingsPath = path.join(claudeDir, 'settings.json');
+      let statusLineRemoved = false;
       try {
         const settingsContent = await fs.readFile(settingsPath, 'utf-8');
         const updated = removeHudStatusLine(settingsContent);
         if (updated !== settingsContent) {
           await writeFileAtomicExclusive(settingsPath, updated);
+          statusLineRemoved = true;
         }
       } catch {
         // settings.json may not exist — non-fatal
+      }
+
+      if (!wasEnabled && !statusLineRemoved) {
+        p.log.info('HUD already disabled');
+        return;
       }
 
       await syncManifestFeature(getDevFlowDirectory(), 'hud', false);
