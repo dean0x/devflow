@@ -104,6 +104,25 @@ export async function writeManifest(devflowDir: string, data: ManifestData): Pro
 }
 
 /**
+ * Update a single feature field in the manifest. No-op when no manifest exists.
+ * Reads, mutates, and writes atomically. The `updatedAt` timestamp is always refreshed.
+ *
+ * Use this in toggle commands (ambient, hud, memory, decisions, security) instead of
+ * the repeated read → if-exists → mutate → write pattern.
+ */
+export async function syncManifestFeature<K extends keyof ManifestData['features']>(
+  devflowDir: string,
+  key: K,
+  value: ManifestData['features'][K],
+): Promise<void> {
+  const manifest = await readManifest(devflowDir);
+  if (!manifest) return;
+  manifest.features[key] = value;
+  manifest.updatedAt = new Date().toISOString();
+  await writeManifest(devflowDir, manifest);
+}
+
+/**
  * Merge new plugins into existing plugin list (union, no duplicates).
  * Preserves order: existing plugins first, then new ones appended.
  */

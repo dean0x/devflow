@@ -17,6 +17,7 @@ import { listShadowed } from './skills.js';
 import { detectShell, getProfilePath } from '../utils/safe-delete.js';
 import { isAlreadyInstalled, removeFromProfile } from '../utils/safe-delete-install.js';
 import { removeManagedSettings, stripUserDenyList, detectDenyState, DEVFLOW_HISTORICAL_DENY } from '../utils/post-install.js';
+import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { stripFlags, stripViewMode } from '../utils/flags.js';
 import { stripDevflowTeammateModeFromJson } from '../utils/teammate-mode-cleanup.js';
 
@@ -457,14 +458,16 @@ export const uninstallCommand = new Command('uninstall')
         }
 
         if (shouldRemoveSecurity) {
-          // Strip from user settings (ENOENT-tolerant; hard fail if unparseable — preserve safety)
+          // Strip from user settings (ENOENT-tolerant; hard fail if unparseable — preserve safety).
+          // Atomic write (temp+rename) — settings.json is read by Claude Code every turn;
+          // mirrors the `devflow security --disable` strip path.
           if (detectedSecurity.user && userSettingsJsonForSecurity !== null) {
             const { json: stripped, removed } = stripUserDenyList(
               userSettingsJsonForSecurity,
               DEVFLOW_HISTORICAL_DENY,
             );
             if (removed.length > 0) {
-              await fs.writeFile(userSettingsPathForSecurity, stripped, 'utf-8');
+              await writeFileAtomicExclusive(userSettingsPathForSecurity, stripped);
               p.log.success(`Security deny list removed from user settings (${removed.length} entries)`);
             }
           }

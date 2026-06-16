@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { readManifest, writeManifest } from '../utils/manifest.js';
+import { syncManifestFeature } from '../utils/manifest.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import type { HookMatcher, Settings } from '../utils/hooks.js';
 
@@ -221,14 +221,7 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await writeFileAtomicExclusive(settingsPath, updated);
-      // Sync manifest — only update when a manifest already exists
-      const canonicalDevflowDir = getDevFlowDirectory();
-      const manifest = await readManifest(canonicalDevflowDir);
-      if (manifest) {
-        manifest.features.ambient = true;
-        manifest.updatedAt = new Date().toISOString();
-        await writeManifest(canonicalDevflowDir, manifest);
-      }
+      await syncManifestFeature(getDevFlowDirectory(), 'ambient', true);
       p.log.success('Ambient mode enabled — detection hook registered');
       p.log.info(color.dim('Keyword prompts and structured plans auto-run their workflow'));
     }
@@ -240,14 +233,7 @@ export const ambientCommand = new Command('ambient')
         return;
       }
       await writeFileAtomicExclusive(settingsPath, updated);
-      // Sync manifest — only update when a manifest already exists
-      const canonicalDevflowDir = getDevFlowDirectory();
-      const manifest = await readManifest(canonicalDevflowDir);
-      if (manifest) {
-        manifest.features.ambient = false;
-        manifest.updatedAt = new Date().toISOString();
-        await writeManifest(canonicalDevflowDir, manifest);
-      }
+      await syncManifestFeature(getDevFlowDirectory(), 'ambient', false);
       p.log.success('Ambient mode disabled — hook removed');
     }
   });

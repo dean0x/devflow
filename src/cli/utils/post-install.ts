@@ -383,10 +383,14 @@ export function resolveSecurityAction(
       };
     }
     // Non-TTY: preserve detected reality + warn
-    const keepTarget: 'user' | 'managed' | 'none' =
-      detectedMode === 'both' || detectedMode === 'user' ? 'user'
-      : detectedMode === 'managed' ? 'managed'
-      : 'none';
+    let keepTarget: 'user' | 'managed' | 'none';
+    if (detectedMode === 'both' || detectedMode === 'user') {
+      keepTarget = 'user';
+    } else if (detectedMode === 'managed') {
+      keepTarget = 'managed';
+    } else {
+      keepTarget = 'none';
+    }
     return {
       target: keepTarget,
       action: detectedEnabled ? 'merge' : 'strip',
@@ -647,17 +651,14 @@ export async function applyUserSecurityDenyList(
  * Prompts interactively in TTY mode when settings already exist.
  * In non-TTY mode, skips override (safe default).
  *
- * The deny list is NO LONGER injected here. It is handled by init's dedicated
- * security step (applyUserSecurityDenyList / installManagedSettings) after
- * installSettings completes. This separation ensures the security step is always
- * atomic and targets ~/ settings.json explicitly.
+ * The deny list is handled by init's dedicated security step
+ * (applyUserSecurityDenyList / installManagedSettings) after installSettings completes.
  */
 export async function installSettings(
   claudeDir: string,
   rootDir: string,
   devflowDir: string,
   verbose: boolean,
-  securityMode: SecurityMode = 'user',
 ): Promise<void> {
   const settingsPath = path.join(claudeDir, 'settings.json');
   const sourceSettingsPath = path.join(rootDir, 'src', 'templates', 'settings.json');
@@ -665,10 +666,6 @@ export async function installSettings(
   try {
     const settingsTemplate = await fs.readFile(sourceSettingsPath, 'utf-8');
     const settingsContent = substituteSettingsTemplate(settingsTemplate, devflowDir);
-
-    // NOTE: security deny list injection was removed from here.
-    // The init command runs a dedicated security step after installSettings completes.
-    void securityMode; // parameter kept for backward compat; no longer used here
 
     let settingsExists = false;
     try {

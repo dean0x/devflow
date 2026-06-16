@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
-import { readManifest, writeManifest } from '../utils/manifest.js';
+import { syncManifestFeature } from '../utils/manifest.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { discoverProjectGitRoots } from '../utils/post-install.js';
 import { getGitRoot } from '../utils/git.js';
@@ -372,16 +372,7 @@ export const memoryCommand = new Command('memory')
       if (gitRoot) {
         await updateFeature(gitRoot, 'memory', true);
       }
-      // Sync manifest — only update when a manifest already exists
-      {
-        const canonicalDevflowDir = getDevFlowDirectory();
-        const manifest = await readManifest(canonicalDevflowDir);
-        if (manifest) {
-          manifest.features.memory = true;
-          manifest.updatedAt = new Date().toISOString();
-          await writeManifest(canonicalDevflowDir, manifest);
-        }
-      }
+      await syncManifestFeature(getDevFlowDirectory(), 'memory', true);
       return;
     }
 
@@ -395,14 +386,7 @@ export const memoryCommand = new Command('memory')
           fs.unlink(getPendingTurnsPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
           fs.unlink(getPendingTurnsProcessingPath(gitRoot)).catch((e: NodeJS.ErrnoException) => { if (e.code !== 'ENOENT') throw e; }),
         ]);
-        // Sync manifest — only update when a manifest already exists
-        const canonicalDevflowDir = getDevFlowDirectory();
-        const manifest = await readManifest(canonicalDevflowDir);
-        if (manifest) {
-          manifest.features.memory = false;
-          manifest.updatedAt = new Date().toISOString();
-          await writeManifest(canonicalDevflowDir, manifest);
-        }
+        await syncManifestFeature(getDevFlowDirectory(), 'memory', false);
         p.log.success('Working memory disabled — configuration updated');
       } else {
         p.log.warn('Could not resolve git root — configuration not updated');

@@ -36,6 +36,7 @@ import { readManifest, writeManifest, resolvePluginList, detectUpgrade } from '.
 import { getDefaultFlags, applyFlags, stripFlags, applyViewMode, stripViewMode, FLAG_REGISTRY, ViewMode, VIEW_MODES } from '../utils/flags.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { manageSentinel } from '../utils/sentinel.js';
+import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { writeConfig as writeDreamConfig } from '../utils/dream-config.js';
 import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel, getDecisionsDisabledSentinel, getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
 import * as os from 'os';
@@ -1121,12 +1122,7 @@ export const initCommand = new Command('init')
     // === Settings & hooks (all automatic based on collected choices) ===
     s.message('Configuring settings');
 
-    // Determine effective security mode (managed settings executed later, after safe-delete)
-    let effectiveSecurityMode = securityMode;
-    if (securityMode === 'managed' && !managedSettingsConfirmed) {
-      effectiveSecurityMode = 'user';
-    }
-    await installSettings(claudeDir, rootDir, devflowDir, verbose, effectiveSecurityMode);
+    await installSettings(claudeDir, rootDir, devflowDir, verbose);
 
     const settingsPath = path.join(claudeDir, 'settings.json');
 
@@ -1303,12 +1299,14 @@ export const initCommand = new Command('init')
             p.log.warn(`Could not write deny list to user settings either: ${e instanceof Error ? e.message : e}`);
           }
         } else {
-          // Managed write succeeded — strip from user settings to avoid duplication
+          // Managed write succeeded — strip from user settings to avoid duplication.
+          // Atomic write (temp+rename): settings.json is read by Claude Code every turn;
+          // a crash mid-write must never truncate it (invariant: never-truncate-on-crash).
           try {
             const existing = await fs.readFile(userSettingsPath, 'utf-8');
             const { json: stripped } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
             if (stripped !== existing) {
-              await fs.writeFile(userSettingsPath, stripped, 'utf-8');
+              await writeFileAtomicExclusive(userSettingsPath, stripped);
               if (verbose) p.log.info('Removed deny list from user settings (now in managed settings)');
             }
           } catch { /* user settings may not exist */ }
@@ -1325,12 +1323,14 @@ export const initCommand = new Command('init')
           }
         }
       } else if (securityMode === 'none') {
-        // None: strip Devflow deny entries from user settings
+        // None: strip Devflow deny entries from user settings.
+        // Atomic write (temp+rename) — same never-truncate-on-crash guarantee as the
+        // merge path (applyUserSecurityDenyList) and the managed-success strip above.
         try {
           const existing = await fs.readFile(userSettingsPath, 'utf-8');
           const { json: stripped, removed } = stripUserDenyList(existing, DEVFLOW_HISTORICAL_DENY);
           if (stripped !== existing) {
-            await fs.writeFile(userSettingsPath, stripped, 'utf-8');
+            await writeFileAtomicExclusive(userSettingsPath, stripped);
             if (verbose) p.log.info(`Security deny list removed (${removed.length} entries stripped)`);
           }
         } catch { /* user settings may not exist */ }

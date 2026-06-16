@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory, getManagedSettingsPath } from '../utils/paths.js';
-import { readManifest, writeManifest } from '../utils/manifest.js';
+import { readManifest, syncManifestFeature } from '../utils/manifest.js';
 import {
   mergeDenyList,
   stripUserDenyList,
@@ -14,11 +14,10 @@ import {
   installManagedSettings,
 } from '../utils/post-install.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
-import * as pathUtils from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = pathUtils.dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 interface SecurityOptions {
   status?: boolean;
@@ -176,13 +175,7 @@ export const securityCommand = new Command('security')
         p.log.info(`  Location: ${color.dim(userSettingsPath)}`);
       }
 
-      // Update manifest
-      const manifest = await readManifest(devflowDir);
-      if (manifest) {
-        manifest.features.security = targetMode;
-        manifest.updatedAt = new Date().toISOString();
-        try { await writeManifest(devflowDir, manifest); } catch { /* non-fatal */ }
-      }
+      await syncManifestFeature(devflowDir, 'security', targetMode);
 
       return;
     }
@@ -220,13 +213,7 @@ export const securityCommand = new Command('security')
         p.log.info('No managed settings to remove');
       }
 
-      // Update manifest
-      const manifest = await readManifest(devflowDir);
-      if (manifest) {
-        manifest.features.security = 'none';
-        manifest.updatedAt = new Date().toISOString();
-        try { await writeManifest(devflowDir, manifest); } catch { /* non-fatal */ }
-      }
+      await syncManifestFeature(devflowDir, 'security', 'none');
 
       return;
     }
