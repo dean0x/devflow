@@ -123,11 +123,13 @@ export const listCommand = new Command('list')
     }
 
     // safe-delete tri-state from profile detection (no subprocess)
-    const safeDeleteTriState: TriState = safeDeleteResult.status === 'installed'
-      ? 'on'
-      : safeDeleteResult.status === 'absent' || safeDeleteResult.status === 'outdated'
-        ? 'off'
-        : 'unknown';
+    let safeDeleteTriState: TriState;
+    switch (safeDeleteResult.status) {
+      case 'installed': safeDeleteTriState = 'on'; break;
+      case 'absent':
+      case 'outdated':  safeDeleteTriState = 'off'; break;
+      default:          safeDeleteTriState = 'unknown'; break;
+    }
 
     // Show install status if manifest exists
     if (manifest) {

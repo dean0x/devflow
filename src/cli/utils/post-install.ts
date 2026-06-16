@@ -432,7 +432,7 @@ export function resolveSecurityAction(
 /**
  * Load the deny entry array from the managed-settings.json template.
  * Canonical single-source helper used by installManagedSettings, removeManagedSettings,
- * and init.ts's security step. Downstream: security.ts will adopt this too.
+ * init.ts's security step, and security.ts's --enable/--disable paths.
  *
  * Defensive read: treats file as `Record<string, unknown>`, guards with Array.isArray,
  * coerces each element to string. Returns [] on any read or parse failure (never throws).
@@ -685,8 +685,8 @@ export async function applyUserSecurityDenyList(
  * @returns { removed: string[] } listing the stripped entries,
  *   or null when the file is absent (ENOENT) or nothing changed.
  *
- * Downstream adopters: init.ts (1305-1312, 1329-1336) and security.ts (154-161)
- * will call this instead of open-coding the sequence.
+ * Callers: init.ts (managed-write success and 'none' branches) and security.ts
+ * (--enable --managed self-heal) use this instead of open-coding the sequence.
  */
 export async function stripUserSecurityDenyList(
   settingsPath: string,
