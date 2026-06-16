@@ -4,6 +4,8 @@ import {
   resolveScope,
   getPluginInstallStatus,
   formatPluginCommands,
+  resolveSecurityTriState,
+  type TriState,
 } from '../src/cli/commands/list.js';
 import type { ManifestData } from '../src/cli/utils/manifest.js';
 
@@ -50,6 +52,14 @@ describe('formatFeatures', () => {
       ...allOff, memory: true, knowledge: true, decisions: true, hud: true, rules: true,
     };
     expect(formatFeatures(features)).toBe('memory, knowledge, decisions, hud, rules');
+  });
+
+  it('preserves feature order: ..., rules, security, safe-delete', () => {
+    const features: ManifestData['features'] = {
+      ...allOff, memory: true, knowledge: true, decisions: true, hud: true, rules: true,
+    };
+    expect(formatFeatures(features, { security: 'on', safeDelete: 'on' }))
+      .toBe('memory, knowledge, decisions, hud, rules, security, safe-delete');
   });
 
   it('includes flags count when flags are present', () => {
@@ -111,6 +121,66 @@ describe('getPluginInstallStatus', () => {
 
   it('returns "unknown" when no manifest, even with empty set', () => {
     expect(getPluginInstallStatus('devflow-implement', new Set(), false)).toBe('unknown');
+  });
+});
+
+describe('resolveSecurityTriState', () => {
+  it('returns "on" for user mode', () => {
+    expect(resolveSecurityTriState('user')).toBe('on');
+  });
+
+  it('returns "on" for managed mode', () => {
+    expect(resolveSecurityTriState('managed')).toBe('on');
+  });
+
+  it('returns "off" for none mode', () => {
+    expect(resolveSecurityTriState('none')).toBe('off');
+  });
+
+  it('returns "unknown" for undefined (old manifest)', () => {
+    expect(resolveSecurityTriState(undefined)).toBe('unknown');
+  });
+});
+
+describe('formatFeatures with tri-state extras', () => {
+  it('shows security: off when security is off', () => {
+    const features: ManifestData['features'] = { ...allOff, ambient: true };
+    expect(formatFeatures(features, { security: 'off' })).toBe('ambient, security: off');
+  });
+
+  it('shows security: unknown when security is unknown', () => {
+    const features: ManifestData['features'] = { ...allOff, ambient: true };
+    expect(formatFeatures(features, { security: 'unknown' })).toBe('ambient, security: unknown');
+  });
+
+  it('shows security without suffix when security is on', () => {
+    const features: ManifestData['features'] = { ...allOff, ambient: true };
+    expect(formatFeatures(features, { security: 'on' })).toBe('ambient, security');
+  });
+
+  it('shows safe-delete: off when safe-delete is off', () => {
+    const features: ManifestData['features'] = { ...allOff };
+    expect(formatFeatures(features, { safeDelete: 'off' })).toBe('safe-delete: off');
+  });
+
+  it('shows safe-delete: unknown when safe-delete is unknown', () => {
+    const features: ManifestData['features'] = { ...allOff };
+    expect(formatFeatures(features, { safeDelete: 'unknown' })).toBe('safe-delete: unknown');
+  });
+
+  it('omits extra fields when not provided', () => {
+    const features: ManifestData['features'] = { ...allOff, ambient: true };
+    expect(formatFeatures(features)).toBe('ambient');
+  });
+
+  it('omits extra fields when extra object is empty', () => {
+    const features: ManifestData['features'] = { ...allOff, ambient: true };
+    expect(formatFeatures(features, {})).toBe('ambient');
+  });
+
+  it('returns "none" when all off and extras are off/unknown', () => {
+    expect(formatFeatures(allOff, { security: 'off', safeDelete: 'unknown' }))
+      .toBe('security: off, safe-delete: unknown');
   });
 });
 

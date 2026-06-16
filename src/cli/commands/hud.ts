@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import { getClaudeDirectory, getDevFlowDirectory } from '../utils/paths.js';
+import { readManifest, writeManifest } from '../utils/manifest.js';
+import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import {
   HUD_COMPONENTS,
   loadConfig,
@@ -205,7 +207,7 @@ export const hudCommand = new Command('hud')
 
         const devflowDir = getDevFlowDirectory();
         const updated = addHudStatusLine(settingsContent, devflowDir);
-        await fs.writeFile(settingsPath, updated, 'utf-8');
+        await writeFileAtomicExclusive(settingsPath, updated);
       }
 
       // Update config
@@ -215,6 +217,17 @@ export const hudCommand = new Command('hud')
         return;
       }
       saveConfig({ ...config, enabled: true });
+
+      // Sync manifest — only update when a manifest already exists
+      {
+        const devflowDir = getDevFlowDirectory();
+        const manifest = await readManifest(devflowDir);
+        if (manifest) {
+          manifest.features.hud = true;
+          manifest.updatedAt = new Date().toISOString();
+          await writeManifest(devflowDir, manifest);
+        }
+      }
 
       p.log.success('HUD enabled');
       p.log.info(color.dim('Restart Claude Code to see the HUD'));
@@ -236,10 +249,21 @@ export const hudCommand = new Command('hud')
         const settingsContent = await fs.readFile(settingsPath, 'utf-8');
         const updated = removeHudStatusLine(settingsContent);
         if (updated !== settingsContent) {
-          await fs.writeFile(settingsPath, updated, 'utf-8');
+          await writeFileAtomicExclusive(settingsPath, updated);
         }
       } catch {
         // settings.json may not exist — non-fatal
+      }
+
+      // Sync manifest — only update when a manifest already exists
+      {
+        const devflowDir = getDevFlowDirectory();
+        const manifest = await readManifest(devflowDir);
+        if (manifest) {
+          manifest.features.hud = false;
+          manifest.updatedAt = new Date().toISOString();
+          await writeManifest(devflowDir, manifest);
+        }
       }
 
       p.log.success('HUD disabled');
