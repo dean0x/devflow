@@ -12,7 +12,6 @@ import {
   type MigrationLogger,
   type RunMigrationsResult,
 } from '../src/cli/utils/migrations.js';
-import { getDevflowGitignoreContent } from '../src/cli/utils/project-paths.js';
 
 describe('readAppliedMigrations', () => {
   let tmpDir: string;
@@ -163,32 +162,6 @@ describe('MIGRATIONS', () => {
     const consolidateIdx = MIGRATIONS.findIndex(m => m.id === 'consolidate-to-devflow-dir');
     expect(renameIdx).toBeGreaterThanOrEqual(0);
     expect(consolidateIdx).toBeGreaterThan(renameIdx);
-  });
-
-  it('contains sync-devflow-gitignore-v1 with per-project scope', () => {
-    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v1');
-    expect(m).toBeDefined();
-    expect(m?.scope).toBe('per-project');
-  });
-
-  it('sync-devflow-gitignore-v1 follows cleanup-stale-working-memory in array', () => {
-    const cleanupIdx = MIGRATIONS.findIndex(m => m.id === 'cleanup-stale-working-memory');
-    const syncIdx = MIGRATIONS.findIndex(m => m.id === 'sync-devflow-gitignore-v1');
-    expect(cleanupIdx).toBeGreaterThanOrEqual(0);
-    expect(syncIdx).toBeGreaterThan(cleanupIdx);
-  });
-
-  it('contains sync-devflow-gitignore-v2 with per-project scope', () => {
-    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v2');
-    expect(m).toBeDefined();
-    expect(m?.scope).toBe('per-project');
-  });
-
-  it('sync-devflow-gitignore-v2 follows sync-devflow-gitignore-v1 in array', () => {
-    const v1Idx = MIGRATIONS.findIndex(m => m.id === 'sync-devflow-gitignore-v1');
-    const v2Idx = MIGRATIONS.findIndex(m => m.id === 'sync-devflow-gitignore-v2');
-    expect(v1Idx).toBeGreaterThanOrEqual(0);
-    expect(v2Idx).toBeGreaterThan(v1Idx);
   });
 });
 
@@ -728,31 +701,6 @@ describe('consolidate-to-devflow-dir migration', () => {
     expect(review).toBe('# Review\n');
   });
 
-  it('creates .devflow/.gitignore with correct content when not present', async () => {
-    await getMigration().run(makeCtx());
-
-    const gitignorePath = path.join(devflowDir, '.gitignore');
-    const content = await fs.readFile(gitignorePath, 'utf-8');
-    // Spot-check key entries from the ignore-by-default allowlist policy
-    expect(content).toContain('\n*\n');
-    expect(content).toContain('!.gitignore');
-    expect(content).toContain('!decisions/decisions.md');
-    expect(content).toContain('!decisions/pitfalls.md');
-    expect(content).toContain('!features/index.json');
-    expect(content).toContain('!features/*/KNOWLEDGE.md');
-  });
-
-  it('does not overwrite an existing .devflow/.gitignore', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    const existing = '# custom\nfeatures/\n';
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), existing, 'utf-8');
-
-    await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(existing);
-  });
-
   it('removes stale .gitignore entries from the root .gitignore', async () => {
     const gitignorePath = path.join(projectRoot, '.gitignore');
     await fs.writeFile(gitignorePath, [
@@ -776,8 +724,9 @@ describe('consolidate-to-devflow-dir migration', () => {
     expect(updated).not.toContain('.features/.disabled');
     expect(updated).not.toContain('.features/.knowledge-last-refresh');
     expect(updated).not.toContain('.features/.knowledge-refresh.lock');
-    expect(updated).not.toContain('.devflow/');
-    // Non-stale entries are preserved
+    // Non-stale entries are preserved — including .devflow/, which is now the
+    // canonical wholesale-ignore entry (no longer stripped by consolidation).
+    expect(updated).toContain('.devflow/');
     expect(updated).toContain('node_modules/');
     expect(updated).toContain('dist/');
   });
@@ -1025,212 +974,6 @@ describe('reportMigrationResult', () => {
     reportMigrationResult(result, logger, false);
     const infoCalls = calls.filter(c => c.method === 'info');
     expect(infoCalls.length).toBe(0);
-  });
-});
-
-describe('sync-devflow-gitignore-v1 migration', () => {
-  let tmpDir: string;
-  let projectRoot: string;
-  let devflowDir: string;
-  let fakeHome: string;
-  let originalHome: string | undefined;
-
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-sync-gitignore-test-'));
-    projectRoot = path.join(tmpDir, 'project');
-    devflowDir = path.join(projectRoot, '.devflow');
-    originalHome = process.env.HOME;
-    process.env.HOME = path.join(tmpDir, 'home');
-    fakeHome = path.join(tmpDir, 'home', '.devflow');
-    await fs.mkdir(fakeHome, { recursive: true });
-  });
-
-  afterEach(async () => {
-    if (originalHome !== undefined) {
-      process.env.HOME = originalHome;
-    } else {
-      delete process.env.HOME;
-    }
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
-
-  function getMigration(): Migration<'per-project'> {
-    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v1');
-    if (!m) throw new Error('sync-devflow-gitignore-v1 migration not found');
-    return m as Migration<'per-project'>;
-  }
-
-  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
-    return {
-      scope: 'per-project',
-      devflowDir: fakeHome,
-      memoryDir: path.join(devflowDir, 'memory'),
-      projectRoot,
-    };
-  }
-
-  it('overwrites stale .devflow/.gitignore with canonical content', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# old stale content\nmemory/\n', 'utf-8');
-
-    const result = await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
-    expect(result?.infos).toContain('Synced .devflow/.gitignore to latest template');
-  });
-
-  it('is a no-op when content already matches', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), getDevflowGitignoreContent(), 'utf-8');
-
-    const result = await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
-    expect(result?.infos ?? []).toHaveLength(0);
-  });
-
-  it('skips when .devflow/ directory does not exist', async () => {
-    // projectRoot exists but .devflow/ does not
-    await fs.mkdir(projectRoot, { recursive: true });
-
-    const result = await getMigration().run(makeCtx());
-
-    await expect(fs.access(devflowDir)).rejects.toThrow();
-    expect(result?.infos ?? []).toHaveLength(0);
-  });
-
-  it('creates .devflow/.gitignore when file is missing but directory exists', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-
-    await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
-  });
-
-  it('is idempotent — running twice produces same result', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# stale\n', 'utf-8');
-
-    await getMigration().run(makeCtx());
-    await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
-  });
-
-  it('returns structured MigrationRunResult', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# stale\n', 'utf-8');
-
-    const result = await getMigration().run(makeCtx());
-
-    expect(result).toBeDefined();
-    expect(Array.isArray(result?.infos)).toBe(true);
-    expect(Array.isArray(result?.warnings)).toBe(true);
-    expect(result?.warnings).toHaveLength(0);
-  });
-});
-
-describe('sync-devflow-gitignore-v2 migration', () => {
-  let tmpDir: string;
-  let projectRoot: string;
-  let devflowDir: string;
-  let fakeHome: string;
-  let originalHome: string | undefined;
-
-  beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-sync-gitignore-v2-test-'));
-    projectRoot = path.join(tmpDir, 'project');
-    devflowDir = path.join(projectRoot, '.devflow');
-    originalHome = process.env.HOME;
-    process.env.HOME = path.join(tmpDir, 'home');
-    fakeHome = path.join(tmpDir, 'home', '.devflow');
-    await fs.mkdir(fakeHome, { recursive: true });
-  });
-
-  afterEach(async () => {
-    if (originalHome !== undefined) {
-      process.env.HOME = originalHome;
-    } else {
-      delete process.env.HOME;
-    }
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  });
-
-  function getMigration(): Migration<'per-project'> {
-    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v2');
-    if (!m) throw new Error('sync-devflow-gitignore-v2 migration not found');
-    return m as Migration<'per-project'>;
-  }
-
-  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
-    return {
-      scope: 'per-project',
-      devflowDir: fakeHome,
-      memoryDir: path.join(devflowDir, 'memory'),
-      projectRoot,
-    };
-  }
-
-  it('is registered with per-project scope', () => {
-    const m = MIGRATIONS.find(m => m.id === 'sync-devflow-gitignore-v2');
-    expect(m).toBeDefined();
-    expect(m?.scope).toBe('per-project');
-  });
-
-  it('overwrites a stale old-format .devflow/.gitignore with the new canonical content', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    // Old-format content (blocklist style from v1)
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# old\nmemory/\ndream/\nlearning/learning-log.jsonl\nfeatures/.knowledge.lock/\nmanifest.json\n', 'utf-8');
-
-    const result = await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
-    expect(result?.infos).toContain('Synced .devflow/.gitignore to ignore-by-default allowlist policy');
-  });
-
-  it('is a no-op when content already matches the new canonical template', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), getDevflowGitignoreContent(), 'utf-8');
-
-    const result = await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
-    expect(result?.infos ?? []).toHaveLength(0);
-  });
-
-  it('creates .devflow/.gitignore when file is missing but directory exists', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-
-    await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
-  });
-
-  it('skips when .devflow/ directory does not exist', async () => {
-    await fs.mkdir(projectRoot, { recursive: true });
-
-    const result = await getMigration().run(makeCtx());
-
-    await expect(fs.access(devflowDir)).rejects.toThrow();
-    expect(result?.infos ?? []).toHaveLength(0);
-  });
-
-  it('is idempotent — running twice produces the same result', async () => {
-    await fs.mkdir(devflowDir, { recursive: true });
-    await fs.writeFile(path.join(devflowDir, '.gitignore'), '# stale blocklist\nmemory/\n', 'utf-8');
-
-    await getMigration().run(makeCtx());
-    await getMigration().run(makeCtx());
-
-    const content = await fs.readFile(path.join(devflowDir, '.gitignore'), 'utf-8');
-    expect(content).toBe(getDevflowGitignoreContent());
   });
 });
 

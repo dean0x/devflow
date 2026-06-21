@@ -51,7 +51,6 @@ import {
   getResearchDir,
   getHandoffPath,
   getGitignoreEntries,
-  getDevflowGitignoreContent,
 } from '../src/cli/utils/project-paths.js';
 import * as tsPathsNs from '../src/cli/utils/project-paths.js';
 
@@ -218,31 +217,12 @@ describe('project-paths TypeScript module', () => {
       expect(getGitignoreEntries()).toContain('.claude/');
     });
 
+    it('includes .devflow/ (ignored wholesale by default)', () => {
+      expect(getGitignoreEntries()).toContain('.devflow/');
+    });
+
     it('does not include old .memory/ entry', () => {
       expect(getGitignoreEntries()).not.toContain('.memory/');
-    });
-  });
-
-  describe('getDevflowGitignoreContent', () => {
-    it('uses ignore-by-default allowlist policy', () => {
-      const content = getDevflowGitignoreContent();
-      // Allowlist header (ignore everything, re-include curated files)
-      expect(content).toContain('\n*\n');
-      expect(content).toContain('!.gitignore');
-      // Decisions knowledge tracked
-      expect(content).toContain('!decisions/');
-      expect(content).toContain('!decisions/decisions.md');
-      expect(content).toContain('!decisions/pitfalls.md');
-      // Feature knowledge tracked
-      expect(content).toContain('!features/');
-      expect(content).toContain('!features/index.json');
-      expect(content).toContain('!features/*/');
-      expect(content).toContain('!features/*/KNOWLEDGE.md');
-      // Transient/per-developer paths are NOT enumerated (no longer needed)
-      expect(content).not.toContain('dream/');
-      expect(content).not.toContain('sidecar/');
-      expect(content).not.toContain('memory/');
-      expect(content).not.toContain('manifest.json');
     });
   });
 
@@ -321,10 +301,6 @@ describe('CJS project-paths parity', () => {
 
   it('getGitignoreEntries — TypeScript and CJS agree', () => {
     expect(cjsPaths.getGitignoreEntries()).toEqual(getGitignoreEntries());
-  });
-
-  it('getDevflowGitignoreContent — TypeScript and CJS agree', () => {
-    expect(cjsPaths.getDevflowGitignoreContent()).toBe(getDevflowGitignoreContent());
   });
 
   // TS/CJS parity: getDreamDir and getDreamConfigPath return .devflow/dream/

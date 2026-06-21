@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { writeFileAtomicExclusive } from './fs-atomic.js';
-import { getMemoryDir, getFeaturesDir, getDevflowGitignoreContent } from './project-paths.js';
+import { getMemoryDir, getFeaturesDir } from './project-paths.js';
 
 // ---------------------------------------------------------------------------
 // consolidate-to-devflow-dir helpers
@@ -313,28 +313,10 @@ const CONSOLIDATE_STALE_GITIGNORE_ENTRIES = [
   '.features/.disabled',
   '.features/.knowledge-last-refresh',
   '.features/.knowledge-refresh.lock',
-  '.devflow/',
 ] as const;
 
 /**
- * Step 5 helper: create .devflow/.gitignore only when absent.
- *
- * Uses O_EXCL (flag: 'wx') so the kernel rejects the open atomically if the
- * file already exists — no TOCTOU window between the existence check and the
- * write. EEXIST is silently ignored (idempotent).
- */
-async function createDevflowGitignoreIfAbsent(devflowDir: string): Promise<void> {
-  const gitignore = path.join(devflowDir, '.gitignore');
-  try {
-    await fs.writeFile(gitignore, getDevflowGitignoreContent(), { encoding: 'utf-8', flag: 'wx' });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    // File already present — idempotent skip
-  }
-}
-
-/**
- * Step 6 helper: remove stale old-layout entries from the project .gitignore.
+ * Step 5 helper: remove stale old-layout entries from the project .gitignore.
  *
  * Uses writeFileAtomicExclusive (temp+rename) so a crash between read and
  * write never leaves the .gitignore truncated.
@@ -465,15 +447,12 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
     // 4. Move .docs/ contents → .devflow/docs/ (skip WORKING-MEMORY.md — belongs in memory/)
     const docsWarnings = await moveDirContents(docsSrc, path.join(devflowDir, 'docs'), new Set(['WORKING-MEMORY.md']));
 
-    // 5. Create .devflow/.gitignore if not present (atomic exclusive create — no TOCTOU)
-    await createDevflowGitignoreIfAbsent(devflowDir);
-
-    // 6. Clean up project .gitignore — remove stale entries (atomic temp+rename write)
+    // 5. Clean up project .gitignore — remove stale entries (atomic temp+rename write)
     const gitignoreInfos = await cleanStaleGitignoreEntries(projectRoot);
 
-    // 7. Clean up legacy/leftover files and remove old directories (best-effort)
+    // 6. Clean up legacy/leftover files and remove old directories (best-effort)
 
-    // 7a. Delete legacy skip files from old .memory/ — these were intentionally
+    // 6a. Delete legacy skip files from old .memory/ — these were intentionally
     // not migrated (obsolete V1 artifacts)
     await Promise.all(
       MEMORY_LEGACY_SKIP_FILES.map(name =>
@@ -481,7 +460,7 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       ),
     );
 
-    // 7b. Delete leftover entries in .features/ and .docs/ — after moveDirContents,
+    // 6b. Delete leftover entries in .features/ and .docs/ — after moveDirContents,
     // any remaining entries are duplicates whose dest already existed
     for (const oldDir of [featSrc, docsSrc]) {
       try {
@@ -494,7 +473,7 @@ const MIGRATION_CONSOLIDATE_TO_DEVFLOW: Migration<'per-project'> = {
       } catch { /* dir may not exist */ }
     }
 
-    // 7c. Attempt rmdir on all three old directories — if .memory/ has user files
+    // 6c. Attempt rmdir on all three old directories — if .memory/ has user files
     // not in the legacy skip list, the dir survives
     for (const oldDir of [memSrc, featSrc, docsSrc]) {
       try { await fs.rmdir(oldDir); } catch { /* non-empty or already removed */ }
@@ -521,59 +500,6 @@ const MIGRATION_CLEANUP_STALE_WORKING_MEMORY: Migration<'per-project'> = {
       await fs.rm(stale, { force: true });
     } catch { /* already removed or doesn't exist */ }
     return { infos: [], warnings: [] };
-  },
-};
-
-const MIGRATION_SYNC_DEVFLOW_GITIGNORE: Migration<'per-project'> = {
-  id: 'sync-devflow-gitignore-v1',
-  description: 'Sync .devflow/.gitignore to latest canonical template',
-  scope: 'per-project',
-  async run(ctx) {
-    const devflowDir = path.join(ctx.projectRoot, '.devflow');
-    try { await fs.access(devflowDir); } catch { return { infos: [], warnings: [] }; }
-
-    const canonical = getDevflowGitignoreContent();
-    const gitignorePath = path.join(devflowDir, '.gitignore');
-
-    try {
-      const existing = await fs.readFile(gitignorePath, 'utf-8');
-      if (existing === canonical) return { infos: [], warnings: [] };
-    } catch { /* file missing — will be created below */ }
-
-    await writeFileAtomicExclusive(gitignorePath, canonical);
-    return { infos: ['Synced .devflow/.gitignore to latest template'], warnings: [] };
-  },
-};
-
-/**
- * Re-sync .devflow/.gitignore to the new ignore-by-default allowlist policy.
- *
- * v1 already executed on existing machines (writing the old per-entry blocklist).
- * v2 is required to overwrite those with the new template — a new ID forces
- * machines that already ran v1 to re-fire.
- *
- * Applies PF-004 / PF-001: idempotent — no-op if content already matches
- * (covers this very repo which was manually updated to the new policy). Also
- * no-ops cleanly when .devflow/ does not exist.
- */
-const MIGRATION_SYNC_DEVFLOW_GITIGNORE_V2: Migration<'per-project'> = {
-  id: 'sync-devflow-gitignore-v2',
-  description: 'Re-sync .devflow/.gitignore to new ignore-by-default allowlist policy',
-  scope: 'per-project',
-  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
-    const devflowDir = path.join(ctx.projectRoot, '.devflow');
-    try { await fs.access(devflowDir); } catch { return { infos: [], warnings: [] }; }
-
-    const canonical = getDevflowGitignoreContent();
-    const gitignorePath = path.join(devflowDir, '.gitignore');
-
-    try {
-      const existing = await fs.readFile(gitignorePath, 'utf-8');
-      if (existing === canonical) return { infos: [], warnings: [] };
-    } catch { /* file missing — will be created below */ }
-
-    await writeFileAtomicExclusive(gitignorePath, canonical);
-    return { infos: ['Synced .devflow/.gitignore to ignore-by-default allowlist policy'], warnings: [] };
   },
 };
 
@@ -793,7 +719,7 @@ async function _dropLearningKeyFromConfig(configPath: string): Promise<void> {
   delete config['learning'];
 
   // D34: use writeFileAtomicExclusive (O_EXCL temp+rename) — TOCTOU-safe.
-  // The sibling sync-devflow-gitignore migration uses the same helper.
+  // Other per-project migrations use the same helper for crash-safe writes.
   await writeFileAtomicExclusive(configPath, JSON.stringify(config, null, 2) + '\n');
 }
 
@@ -934,57 +860,6 @@ const MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT: Migration<'per-project'> = {
 };
 
 /**
- * Per-project: add `!decisions/decisions-ledger.jsonl` re-include to the
- * .devflow/.gitignore of any project that already ran `sync-devflow-gitignore-v2`
- * and therefore has an older template that lacks the new ledger re-include.
- *
- * Idempotent: only adds the line if absent. Preserves existing content.
- * Applies ADR-012 (decisions artifacts committed to git) and PF-004 (idempotent).
- */
-const MIGRATION_SYNC_DEVFLOW_GITIGNORE_V3: Migration<'per-project'> = {
-  id: 'sync-devflow-gitignore-v3',
-  description: 'Add !decisions/decisions-ledger.jsonl re-include to .devflow/.gitignore',
-  scope: 'per-project',
-  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
-    const devflowDir = path.join(ctx.projectRoot, '.devflow');
-    try { await fs.access(devflowDir); } catch { return { infos: [], warnings: [] }; }
-
-    const gitignorePath = path.join(devflowDir, '.gitignore');
-    const ledgerLine = '!decisions/decisions-ledger.jsonl';
-
-    let existing: string;
-    try {
-      existing = await fs.readFile(gitignorePath, 'utf-8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      // .gitignore absent — no-op (full template sync is v1/v2's job)
-      return { infos: [], warnings: [] };
-    }
-
-    // Idempotent: only add if absent
-    if (existing.includes(ledgerLine)) {
-      return { infos: [], warnings: [] };
-    }
-
-    // Insert the new line immediately after `!decisions/pitfalls.md`
-    const insertAfter = '!decisions/pitfalls.md';
-    let updated: string;
-    if (existing.includes(insertAfter)) {
-      updated = existing.replace(insertAfter, `${insertAfter}\n${ledgerLine}`);
-    } else {
-      // Fallback: append before the features section or at end
-      updated = existing.trimEnd() + '\n' + ledgerLine + '\n';
-    }
-
-    await writeFileAtomicExclusive(gitignorePath, updated);
-    return {
-      infos: ['Added !decisions/decisions-ledger.jsonl to .devflow/.gitignore'],
-      warnings: [],
-    };
-  },
-};
-
-/**
  * Per-project: migrate existing decisions.md + pitfalls.md + decisions-log.jsonl
  * to the two-file split layout (committed anchored ledger + gitignored raw log).
  *
@@ -1058,8 +933,6 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_RENAME_KB_TO_KNOWLEDGE,
   MIGRATION_CONSOLIDATE_TO_DEVFLOW,
   MIGRATION_CLEANUP_STALE_WORKING_MEMORY,
-  MIGRATION_SYNC_DEVFLOW_GITIGNORE,
-  MIGRATION_SYNC_DEVFLOW_GITIGNORE_V2,
   MIGRATION_PURGE_ORPHANED_SIDECAR_JUDGMENT_STATE,
   MIGRATION_RENAME_SIDECAR_TO_DREAM,
   MIGRATION_PURGE_LEARNING_PIPELINE,
@@ -1067,7 +940,6 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_STALE_MEMORY_MARKERS,
   MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL,
   MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,
-  MIGRATION_SYNC_DEVFLOW_GITIGNORE_V3,
   MIGRATION_DECISIONS_LEDGER_UNIFY,
   MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL,
 ];

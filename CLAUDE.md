@@ -47,7 +47,7 @@ Plugin marketplace with 22 plugins (12 core + 9 optional language/ecosystem + 1 
 
 **Ambient Mode**: Single-component system for zero-overhead session enhancement. UserPromptSubmit hook (`preamble`) uses two coexisting detection paths, both controlled by the same single toggle (`devflow ambient --enable/--disable/--status` or `devflow init`). **First-word keyword detection** — when a prompt's first word (case-insensitive) is one of `implement`, `explore`, `research`, `debug`, or `plan`, followed by at least one additional word, the hook outputs a directive instructing the model to briefly announce the workflow then invoke the matching `devflow:<keyword>` skill via the Skill tool. **3-marker plan detection** — when a prompt contains `## Goal`, `## Steps`, and `## Files` markers (and the keyword path did not fire), it outputs a directive to invoke `devflow:implement`. Zero overhead for normal prompts — hook outputs nothing. Any legacy `commands.md` rule left by prior installs is auto-removed on every `devflow ambient --enable/--disable` or `devflow init`.
 
-**Decisions pipeline** (`eval-decisions` SessionEnd module → `decisions.{session_id}.json` marker → Dream agent): The `eval-decisions` module runs every session, extracts DIALOG_PAIRS from the transcript, and writes a decisions marker. At SessionStart the Dream agent claims the marker, detects **decision** and **pitfall** observation types via LLM analysis of the dialog pairs, and materializes entries via `assign-anchor` (internally self-locks `.decisions.lock`; assigns the next ADR-NNN/PF-NNN anchor number into the committed `decisions-ledger.jsonl`, then deterministically renders `decisions.md`/`pitfalls.md` from the ledger — active entries only). Removal is recoverable via `retire-anchor` (flips `decisions_status`, never deletes). Raw observations accumulate in the gitignored `.devflow/decisions/decisions-log.jsonl` (rotated to `decisions-log.archive.jsonl` by `rotate-observations`). No deterministic thresholds or confidence formulas — the LLM determines whether an observation warrants a new entry or should be merged with an existing one. Global config: `~/.devflow/decisions.json`. Project config: `.devflow/decisions/decisions.json`. Runtime sentinel: `.devflow/decisions/.disabled` — the decisions sections in `session-start-context` skip if present; `devflow decisions --enable` removes it, `devflow decisions --disable` creates it. Toggleable via `devflow decisions --enable/--disable/--status` or `devflow init --decisions/--no-decisions`. Management subcommands: `devflow decisions list`, `devflow decisions --configure`, `devflow decisions --clear/--reset`.
+**Decisions pipeline** (`eval-decisions` SessionEnd module → `decisions.{session_id}.json` marker → Dream agent): The `eval-decisions` module runs every session, extracts DIALOG_PAIRS from the transcript, and writes a decisions marker. At SessionStart the Dream agent claims the marker, detects **decision** and **pitfall** observation types via LLM analysis of the dialog pairs, and materializes entries via `assign-anchor` (internally self-locks `.decisions.lock`; assigns the next ADR-NNN/PF-NNN anchor number into `decisions-ledger.jsonl`, then deterministically renders `decisions.md`/`pitfalls.md` from the ledger — active entries only). Removal is recoverable via `retire-anchor` (flips `decisions_status`, never deletes). Raw observations accumulate in the gitignored `.devflow/decisions/decisions-log.jsonl` (rotated to `decisions-log.archive.jsonl` by `rotate-observations`). No deterministic thresholds or confidence formulas — the LLM determines whether an observation warrants a new entry or should be merged with an existing one. Global config: `~/.devflow/decisions.json`. Project config: `.devflow/decisions/decisions.json`. Runtime sentinel: `.devflow/decisions/.disabled` — the decisions sections in `session-start-context` skip if present; `devflow decisions --enable` removes it, `devflow decisions --disable` creates it. Toggleable via `devflow decisions --enable/--disable/--status` or `devflow init --decisions/--no-decisions`. Management subcommands: `devflow decisions list`, `devflow decisions --configure`, `devflow decisions --clear/--reset`.
 
 Debug logs stored at `~/.devflow/logs/{project-slug}/`.
 
@@ -81,12 +81,12 @@ devflow/
 │   └── hooks/              # Dream + ambient + memory hooks (dream-capture, dream-dispatch [capture-only], background-memory-update [Stop-hook worker], dream-recover, dream-collect-tasks, dream-evaluate, dream-lock, session-start-memory, session-start-context, pre-compact-memory, preamble, get-mtime, hook-bootstrap, hook-log-init, eval-helpers, eval-decisions, eval-knowledge, eval-curation)
 ├── src/cli/                # TypeScript CLI (init, list, uninstall, ambient, decisions, flags, knowledge, rules, debug)
 ├── .claude-plugin/         # Marketplace registry
-├── .devflow/               # All per-project runtime data (docs, memory, decisions, features)
+├── .devflow/               # All per-project runtime data — gitignored wholesale by default (ensure-devflow-init adds .devflow/ to the root .gitignore; sharing is opt-in)
 │   ├── docs/               # Project docs (reviews, design)
 │   ├── memory/             # Working memory files
 │   ├── dream/              # Dream marker files
 │   ├── decisions/          # Decisions agent observations and ADR/PF files
-│   └── features/           # Per-feature knowledge bases (committed to git)
+│   └── features/           # Per-feature knowledge bases (gitignored by default; opt-in to share)
 ├── .release/               # Release configuration (lazy-init)
 │   ├── RELEASE-FLOW.md     # Learned release process config
 │   ├── .gitignore          # Excludes .progress.json, .lock/
@@ -162,7 +162,7 @@ Per-project runtime files live under `.devflow/`:
 │   └── .working-memory.lock/         # Worker lock dir — 300s stale-break (transient, never tracked)
 ├── dream/                        # Dream state: config.json (feature toggles), per-session markers (decisions.{session}.json, knowledge.{session}.json, curation.{session}.json), .processor-spawned-at (120s spawn throttle), .curation-last (7-day curation throttle)
 ├── decisions/
-│   ├── decisions-ledger.jsonl    # Anchored ledger (committed) — render source of truth; one row per ADR/PF incl. retired
+│   ├── decisions-ledger.jsonl    # Anchored ledger (gitignored by default) — render source of truth; one row per ADR/PF incl. retired
 │   ├── decisions-log.jsonl       # Raw decision/pitfall observations (JSONL, gitignored)
 │   ├── decisions-log.archive.jsonl # Archived observing rows >30d, moved by rotate-observations (gitignored)
 │   ├── decisions.json            # Project-level decisions agent config (max runs, throttle, model, debug)
@@ -172,7 +172,7 @@ Per-project runtime files live under `.devflow/`:
 │   ├── decisions.md              # Architectural decisions (ADR-NNN) — rendered from decisions-ledger.jsonl (active only) by Dream agent via assign-anchor + render-decisions
 │   ├── pitfalls.md               # Known pitfalls (PF-NNN, area-specific gotchas) — rendered from decisions-ledger.jsonl (active only) by Dream agent via assign-anchor + render-decisions
 │   └── .disabled                 # Runtime sentinel — decisions sections in session-start-context skip if present
-└── features/                     # Per-feature knowledge bases (committed to git)
+└── features/                     # Per-feature knowledge bases (gitignored by default; opt-in to share)
     ├── {slug}/KNOWLEDGE.md
     ├── index.json
     ├── .disabled                 # Sentinel — gates Phase 12 generation and refresh hook

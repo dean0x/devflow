@@ -812,30 +812,24 @@ describe('S8: AC-C2/C4 — security constraints', () => {
 });
 
 // =============================================================================
-// S9 — AC-C4: Transient files covered by .devflow/.gitignore wildcard
+// S9 — AC-C4: .devflow/ is git-ignored wholesale at the project root
 // =============================================================================
-describe('S9: AC-C4 — transient files git-ignored by .devflow/.gitignore', () => {
-  it('actual .devflow/.gitignore uses * (ignore all) + re-includes curated files', () => {
+describe('S9: AC-C4 — .devflow/ ignored wholesale by the root .gitignore', () => {
+  it('this repo root .gitignore ignores .devflow/', () => {
     const gitignoreContent = fs.readFileSync(
-      path.join(__dirname, '..', '.devflow', '.gitignore'),
+      path.join(__dirname, '..', '.gitignore'),
       'utf-8'
     );
-    expect(gitignoreContent).toContain('\n*\n');  // wildcard on its own line
-    expect(gitignoreContent).toContain('!decisions/decisions.md');
-    expect(gitignoreContent).toContain('!decisions/pitfalls.md');
+    expect(gitignoreContent.split('\n').map(l => l.trim())).toContain('.devflow/');
   });
 
-  it('transient files are untracked (git-ignored) in scratch repo with .gitignore', () => {
+  it('transient files are untracked (git-ignored) in a scratch repo with root .gitignore', () => {
     const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s9-'));
     try {
       initGitRepo(projectDir);
       fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
 
-      fs.writeFileSync(
-        path.join(projectDir, '.devflow', '.gitignore'),
-        ['*', '!.gitignore', '!decisions/', '!decisions/decisions.md', '!decisions/pitfalls.md',
-          '!features/', '!features/index.json', '!features/*/', '!features/*/KNOWLEDGE.md', ''].join('\n')
-      );
+      fs.writeFileSync(path.join(projectDir, '.gitignore'), '.devflow/\n');
 
       for (const f of ['.working-memory-last-trigger', '.last-refresh-ok', '.pending-turns.processing']) {
         fs.writeFileSync(path.join(projectDir, '.devflow', 'memory', f), 'test');
@@ -846,6 +840,8 @@ describe('S9: AC-C4 — transient files git-ignored by .devflow/.gitignore', () 
       for (const f of ['.working-memory-last-trigger', '.last-refresh-ok', '.pending-turns.processing', '.working-memory.lock']) {
         expect(statusOut).not.toContain(f);
       }
+      // The entire .devflow/ tree is excluded from git status under wholesale ignore
+      expect(statusOut).not.toContain('.devflow/');
     } finally {
       fs.rmSync(projectDir, { recursive: true, force: true });
     }
