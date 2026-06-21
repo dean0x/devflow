@@ -891,7 +891,8 @@ const MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT: Migration<'per-project'> = {
 
 /**
  * Per-project: migrate existing decisions.md + pitfalls.md + decisions-log.jsonl
- * to the two-file split layout (committed anchored ledger + gitignored raw log).
+ * to the two-file split layout (anchored ledger as the render source of truth +
+ * raw observation log — both gitignored under .devflow/ by default per ADR-021).
  *
  * Preserve-verbatim: every existing .md entry body is captured as raw_body and
  * re-rendered byte-identically (except the TL;DR Key list which is repopulated).
@@ -908,7 +909,7 @@ const MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT: Migration<'per-project'> = {
  */
 const MIGRATION_DECISIONS_LEDGER_UNIFY: Migration<'per-project'> = {
   id: 'decisions-ledger-unify-v1',
-  description: 'Migrate decisions.md + pitfalls.md to two-file split: committed anchored ledger + gitignored raw log',
+  description: 'Migrate decisions.md + pitfalls.md to two-file split: anchored ledger + raw observation log',
   scope: 'per-project',
   async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
     const { migrateDecisionsLedger } = await import('./decisions-ledger-migration.js');
