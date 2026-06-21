@@ -746,6 +746,36 @@ const MIGRATION_PURGE_LEARNING_GLOBAL: Migration<'global'> = {
 };
 
 /**
+ * Global: remove the orphaned dream-commit hook left in prior installs.
+ *
+ * dream-commit auto-committed curated .devflow/ artifacts via `git add` (no -f).
+ * It became a permanent no-op once .devflow/ was gitignored wholesale (ADR-021) and
+ * was deleted from the repo along with its three skill call-sites. The installer
+ * copies scripts/ additively (copyDirectory never deletes target files absent from
+ * source), so an unreferenced ~/.devflow/scripts/hooks/dream-commit would otherwise
+ * linger on every existing machine. This sweeps it once per machine. Order-independent:
+ * the source no longer contains dream-commit, so the script copy can never re-create it.
+ *
+ * ENOENT-idempotent (fresh installs never had it); rethrows other errors.
+ */
+const MIGRATION_PURGE_ORPHANED_DREAM_COMMIT_HOOK: Migration<'global'> = {
+  id: 'purge-orphaned-dream-commit-hook-v1',
+  description: 'Remove orphaned ~/.devflow/scripts/hooks/dream-commit (dream-commit helper removed)',
+  scope: 'global',
+  async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
+    const hookPath = path.join(ctx.devflowDir, 'scripts', 'hooks', 'dream-commit');
+    try {
+      await fs.unlink(hookPath);
+      return { infos: ['Removed orphaned ~/.devflow/scripts/hooks/dream-commit'], warnings: [] };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return { infos: [], warnings: [] }; // already absent / fresh install
+      throw err;
+    }
+  },
+};
+
+/**
  * Per-project: remove stale memory dream markers left by the old Dream-subagent
  * memory pipeline. Memory refresh is now handled by background-memory-update
  * (a detached `claude -p` worker spawned from dream-capture). Dream markers for
@@ -871,7 +901,8 @@ const MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT: Migration<'per-project'> = {
  *
  * Applies ADR-001 EXCEPTION (data-preserving migration explicitly approved).
  * Applies ADR-008 (renderer is deterministic plumbing; content was LLM-authored).
- * Applies ADR-012 (decisions-ledger.jsonl committed to git).
+ * Applies ADR-021 (.devflow/ is gitignored by default — the ledger stays local and
+ *   sharing is opt-in; this supersedes ADR-012's commit-the-ledger-by-default premise).
  * Applies ADR-017 (.decisions.lock held for the full operation).
  * Avoids PF-007 (renderer resolved from bundled package, not installed ~/.devflow).
  */
@@ -937,6 +968,7 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_RENAME_SIDECAR_TO_DREAM,
   MIGRATION_PURGE_LEARNING_PIPELINE,
   MIGRATION_PURGE_LEARNING_GLOBAL,
+  MIGRATION_PURGE_ORPHANED_DREAM_COMMIT_HOOK,
   MIGRATION_PURGE_STALE_MEMORY_MARKERS,
   MIGRATION_PURGE_TEAMMATE_MODE_GLOBAL,
   MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,

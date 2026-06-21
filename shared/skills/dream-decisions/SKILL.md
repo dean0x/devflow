@@ -110,15 +110,7 @@ both `decisions.md` and `pitfalls.md` — all atomically under `.decisions.lock`
 
 NEVER call `decisions-append`. NEVER hand-edit `decisions.md` or `pitfalls.md`.
 
-**Auto-commit** (after assign-anchor succeeds, lock released):
-
-Run the installed commit helper — pass the session id from the marker you claimed:
-```bash
-"$HOME/.devflow/scripts/hooks/dream-commit" decisions "add <anchor_id>" "<session_id>"
-```
-This is best-effort: the helper exits 0 silently on no-op or if auto-commit is disabled.
-Run it AFTER the lock is released (assign-anchor releases `.decisions.lock` before returning).
-
+`.devflow/` is gitignored by default (ADR-021) — materialized entries stay local.
 Delete all claimed `.processing` markers on success.
 
 **On any failure**: leave `.processing` files in place (dream-recover will retry them).

@@ -32,21 +32,10 @@ if [ ! -f "$_DEVFLOW_DIR/features/index.json" ]; then
     mv "$_DEVFLOW_DIR/features/index.json.tmp" "$_DEVFLOW_DIR/features/index.json"
 fi
 
-# One-time root .gitignore setup (marker prevents repeated checks).
-# .devflow/ holds per-developer runtime state (memory, dream, docs, decisions,
-# feature knowledge, locks) — ignore it wholesale by default. Sharing is opt-in:
-# a user removes the entry, or re-includes specific files in their own .gitignore.
-if [ ! -f "$_DEVFLOW_DIR/.root-gitignore-configured" ]; then
-  _ROOT_GITIGNORE="$1/.gitignore"
-  _GITIGNORE_OK=0
-  if [ ! -f "$_ROOT_GITIGNORE" ]; then
-    printf '# Devflow runtime data (local by default; remove to share via git)\n.devflow/\n' \
-      > "$_ROOT_GITIGNORE" && _GITIGNORE_OK=1
-  elif ! grep -qE '^/?\.devflow/?[[:space:]]*$' "$_ROOT_GITIGNORE"; then
-    printf '\n# Devflow runtime data (local by default; remove to share via git)\n.devflow/\n' \
-      >> "$_ROOT_GITIGNORE" && _GITIGNORE_OK=1
-  else
-    _GITIGNORE_OK=1
-  fi
-  [ "$_GITIGNORE_OK" = 1 ] && touch "$_DEVFLOW_DIR/.root-gitignore-configured"
-fi
+# One-time root .gitignore setup — delegated to the sibling ensure-root-gitignore
+# helper (single source of truth) so the always-on, memory-independent
+# session-start-context hook applies the identical rule. Resolve our own directory
+# via BASH_SOURCE so this works whether sourced by a hook (which sets SCRIPT_DIR) or
+# sourced directly (tests source this file with no SCRIPT_DIR in scope).
+_EDI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_EDI_DIR/ensure-root-gitignore" "$1"

@@ -32,6 +32,13 @@ fi
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
+# Ensure the project root .gitignore ignores .devflow/ wholesale. This runs on every
+# session regardless of feature toggles, so memory-off projects (decisions/knowledge
+# only) still get .devflow/ ignored — this is the memory-independent path that fixes
+# the gitignore/memory coupling (PF-014). Single source of truth: ensure-root-gitignore.
+# Soft-fail: a gitignore write must never block context injection. Marker keeps it O(1).
+[ -d "$CWD" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ] && source "$SCRIPT_DIR/ensure-root-gitignore" "$CWD" || true
+
 CONTEXT=""
 
 DEVFLOW_DIR="$CWD/.devflow"

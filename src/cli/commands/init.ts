@@ -15,6 +15,7 @@ import {
   installClaudeignore,
   discoverProjectGitRoots,
   updateGitignore,
+  ensureDevflowGitignore,
   createDocsStructure,
   applyUserSecurityDenyList,
   stripUserDenyList,
@@ -1183,7 +1184,7 @@ export const initCommand = new Command('init')
 
 
     // Create .devflow/features/ directory with empty index (feature knowledge bases)
-    // .devflow/features/ is committed to the project repo (not scope-dependent)
+    // .devflow/features/ is gitignored by default (under .devflow/); opt-in to share.
     if (gitRoot && knowledgeEnabled) {
       const featuresDir = getFeaturesDir(gitRoot);
       await fs.mkdir(featuresDir, { recursive: true });
@@ -1205,20 +1206,15 @@ export const initCommand = new Command('init')
     }
 
     // Write dream config.json to manage per-feature enable/disable at runtime.
-    // Uses writeConfig (full atomic write) rather than four updateFeature calls because
-    // init always sets all four features at once and is never concurrent with toggle
+    // Uses writeConfig (full atomic write) rather than three updateFeature calls because
+    // init always sets all three features at once and is never concurrent with toggle
     // commands — it is a one-time setup action. See D1 in dream-config.ts for the
     // concurrency assumption shared by both write strategies.
     if (gitRoot) {
-      // autoCommit: preserve existing value (if set by user), default ON for new installs.
-      // We read the current config to avoid clobbering a user-set autoCommit=false.
-      const { readConfig: readDreamConfig } = await import('../utils/dream-config.js');
-      const existingDreamConfig = await readDreamConfig(gitRoot);
       await writeDreamConfig(gitRoot, {
         memory: memoryEnabled,
         decisions: decisionsEnabled,
         knowledge: knowledgeEnabled,
-        autoCommit: existingDreamConfig.autoCommit,
       });
 
       // Drain orphaned queue files when memory is disabled so stale turns
@@ -1250,6 +1246,13 @@ export const initCommand = new Command('init')
       } else if (gitRoot) {
         await installClaudeignore(gitRoot, rootDir, verbose);
       }
+    }
+    // Deterministically ensure .devflow/ is gitignored at the repo root — independent
+    // of install scope and every feature toggle. The always-on ensure-root-gitignore
+    // hook covers projects that never re-run init; this covers the init-time path so a
+    // fresh install never tracks .devflow/. Decoupled from memory (avoids PF-014).
+    if (gitRoot) {
+      await ensureDevflowGitignore(gitRoot, verbose);
     }
     if (scope === 'local' && gitRoot) {
       await updateGitignore(gitRoot, verbose);
