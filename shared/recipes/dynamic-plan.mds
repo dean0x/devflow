@@ -76,7 +76,7 @@ A workflow cannot pause mid-run. Open design decisions collected in `DECISIONS-N
 
 After the workflow completes:
 1. Read the `decisionsNeededPath` returned by the workflow (e.g. `.devflow/docs/design/<slug>/<ts>/DECISIONS-NEEDED.md`). Always use the OUTDIR-scoped path the workflow wrote — never the flat `.devflow/docs/design/DECISIONS-NEEDED.md`.
-2. If it contains any open decisions, surface them to the user via `AskUserQuestion`.
+2. First surface the **Auto-Resolved Decisions** section (decision → resolution → source) for audit, then surface ALL open **Decisions Needed** to the user in ONE batched `AskUserQuestion` (never one-at-a-time).
 3. The user's answers feed into their own plan edits or a follow-up `/devflow:dynamic-plan` run.
 
 State this explicitly in the workflow script as a comment: `// AskUserQuestion happens at the command boundary after this workflow returns — NOT here.`
@@ -198,9 +198,10 @@ For each ticket, write ${OUTDIR}/\{ticket-slug\}-plan.md containing:
 - The plan body (incorporate cross-plan amendments)
 - ## Acceptance Criteria (numbered, positive + negative)
 - ## Test Plan (per-criterion scenarios)
-- ## Auto-Resolved Decisions (if any, with rationale)
+- ## Auto-Resolved Decisions (if any — list each as: decision → resolution → source)
 
 Then write ${OUTDIR}/DECISIONS-NEEDED.md:
+- ## Auto-Resolved Decisions — list each silently-resolved decision as: decision → resolution → source (preference profile / ADR-NNN), so auto-resolution is auditable and reversible. If none, write "None."
 - ## Decisions Needed
 - One section per open decision: what the decision is, why it matters, what options exist.
 - Include cross-plan conflicts that were not auto-resolved.
@@ -241,7 +242,7 @@ The workflow returns:
 }
 ```
 
-After the workflow returns: read `DECISIONS-NEEDED.md` and surface any open decisions to the user via `AskUserQuestion`. Do not ask questions mid-workflow — this is F4.
+After the workflow returns: read `DECISIONS-NEEDED.md`. First briefly surface the **Auto-Resolved Decisions** section (decision → resolution → source) so silently-settled calls are visible and reversible, then surface ALL open **Decisions Needed** in ONE batched `AskUserQuestion` (never one-at-a-time). Do not ask questions mid-workflow — this is F4. If no preference profile was found, note in your summary: "no preference profile found — N decisions were surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
 
 ---
 

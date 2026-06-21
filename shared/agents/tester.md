@@ -71,6 +71,19 @@ For each scenario:
 
 If a previous run failed (PREVIOUS_FAILURES provided), prioritize re-testing those scenarios first.
 
+## Long-running commands (test/build commands that may run >120s)
+
+A plain `Bash` call defaults to a 120s timeout, and inside a dynamic Workflow a sub-agent that emits no output for 180s is KILLED ("agent stalled"). For any scenario whose command may run silent longer than ~120s (a full `cargo test` / `go test ./...`, a build step, a slow integration suite), do NOT run it as one silent foreground command. Instead:
+
+1. Run it in the BACKGROUND with the Bash tool (`run_in_background: true`), capturing output + exit code under a unique `<slug>` reused in step 2:
+   `<command> > /tmp/df-test-<slug>.log 2>&1; echo "EXIT=$?" > /tmp/df-test-<slug>.done`
+2. Poll with the `Monitor` tool (load it via ToolSearch `select:Monitor` if it is not available): set `persistent: false`, `timeout_ms` above the expected run time (e.g. 600000), and
+   `command: until [ -f /tmp/df-test-<slug>.done ]; do echo running; sleep 25; done; echo DONE; cat /tmp/df-test-<slug>.done`
+   The 25s heartbeat (≪ 180s) is delivered as a notification that keeps you alive past the watchdog.
+3. When the monitor reports `DONE`: the scenario's command PASSED iff the `.done` file contains `EXIT=0`. Read the `.log` for evidence.
+
+For a foreground command that exceeds the 120s default but stays under 180s, pass an explicit higher `timeout` to the Bash tool (up to 600000ms). Prefer scoping to the changed package/path where possible.
+
 ## Output
 
 Return structured QA report:

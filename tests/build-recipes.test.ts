@@ -21,7 +21,7 @@
  * guarantee without corrupting source files.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
@@ -195,6 +195,51 @@ describe('build-recipes.ts script subprocess contract', () => {
       compiled = [];
     }
     expect(compiled.length, 'commands dir should contain at least one compiled .md file after build').toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Compiled dynamic-build.md encodes the Gate-1-twice cadence + build doctrine
+//    (Fixes 1 & 2 — assert via compiled-output grep, since recipe behavior is prose)
+// ---------------------------------------------------------------------------
+
+describe('compiled dynamic-build.md: Gate-1-twice cadence + build execution doctrine', () => {
+  let compiled: string;
+
+  beforeAll(async () => {
+    // Compile fresh so this assertion is independent of test order / a prior build.
+    const result = spawnSync('npx', ['tsx', path.join(ROOT, 'scripts', 'build-recipes.ts')], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+    if (result.error) throw result.error;
+    compiled = await fs.readFile(path.join(COMMANDS_DIR, 'dynamic-build.md'), 'utf-8');
+  });
+
+  it('renders the build_execution_doctrine (background Bash + Monitor poll)', () => {
+    expect(compiled).toContain('Build execution doctrine');
+    expect(compiled).toContain('run_in_background');
+    expect(compiled).toContain('Monitor');
+  });
+
+  it('runs ONE final Gate 1 (#2) after the review loop', () => {
+    expect(compiled).toContain('gate1-final');
+    expect(compiled).toContain('Gate 1 #2');
+  });
+
+  it('does NOT run Gate 1 (Validator/Simplifier/Scrutinizer) between review cycles', () => {
+    // The old per-cycle Gate-1 strings must be gone.
+    expect(compiled).not.toContain('Gate 1 only — no Gate 2 for review-fixes');
+    expect(compiled).not.toContain('Simplify recent fixes');
+    expect(compiled).not.toContain('9-pillar review of recent fixes');
+  });
+
+  it('spawns Simplifier and Scrutinizer exactly twice each (Gate 1 #1 + Gate 1 #2)', () => {
+    const simplifier = (compiled.match(/agentType: "Simplifier"/g) || []).length;
+    const scrutinizer = (compiled.match(/agentType: "Scrutinizer"/g) || []).length;
+    expect(simplifier, 'Simplifier should run only in the two Gate-1 passes').toBe(2);
+    expect(scrutinizer, 'Scrutinizer should run only in the two Gate-1 passes').toBe(2);
   });
 });
 

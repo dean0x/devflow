@@ -45,7 +45,12 @@ source "$SCRIPT_DIR/get-mtime" || { echo "background-memory-update: failed to so
 log "Starting (CWD=$CWD)"
 
 # --- Resolve paths ---
-DEVFLOW_DIR="$CWD/.devflow"
+# Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when the
+# worker is spawned with a CWD inside .devflow/...). Empty → fall back to CWD.
+source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
+PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
+[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
+DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 DREAM_DIR="$DEVFLOW_DIR/dream"
 QUEUE_FILE="$MEMORY_DIR/.pending-turns.jsonl"

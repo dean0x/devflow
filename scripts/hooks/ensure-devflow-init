@@ -7,7 +7,15 @@
 
 [ -z "$1" ] && return 1
 
-_DEVFLOW_DIR="$1/.devflow"
+# Anchor to the project root so a CWD nested inside .devflow/ never scaffolds a
+# stray nested .devflow/. Resolve our own dir via BASH_SOURCE (works whether sourced
+# by a hook or directly by tests). Empty → fall back to "$1" (old behavior).
+_EDI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_EDI_DIR/resolve-project-root" 2>/dev/null || true
+_EDI_ROOT="$(df_resolve_root "$1" 2>/dev/null || true)"
+[ -n "$_EDI_ROOT" ] || _EDI_ROOT="$1"
+
+_DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 
 # Fast-path: if all subdirectories already exist, skip mkdir and gitignore setup
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
@@ -34,8 +42,6 @@ fi
 
 # One-time root .gitignore setup — delegated to the sibling ensure-root-gitignore
 # helper (single source of truth) so the always-on, memory-independent
-# session-start-context hook applies the identical rule. Resolve our own directory
-# via BASH_SOURCE so this works whether sourced by a hook (which sets SCRIPT_DIR) or
-# sourced directly (tests source this file with no SCRIPT_DIR in scope).
-_EDI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$_EDI_DIR/ensure-root-gitignore" "$1"
+# session-start-context hook applies the identical rule. _EDI_DIR and _EDI_ROOT
+# were resolved at the top of this script.
+source "$_EDI_DIR/ensure-root-gitignore" "$_EDI_ROOT"

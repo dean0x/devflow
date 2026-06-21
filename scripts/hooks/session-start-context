@@ -32,16 +32,22 @@ fi
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
+# Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
+# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD (old behavior).
+source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
+PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
+[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
+
 # Ensure the project root .gitignore ignores .devflow/ wholesale. This runs on every
 # session regardless of feature toggles, so memory-off projects (decisions/knowledge
 # only) still get .devflow/ ignored — this is the memory-independent path that fixes
 # the gitignore/memory coupling (PF-014). Single source of truth: ensure-root-gitignore.
 # Soft-fail: a gitignore write must never block context injection. Marker keeps it O(1).
-[ -d "$CWD" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ] && source "$SCRIPT_DIR/ensure-root-gitignore" "$CWD" || true
+[ -d "$PROJECT_ROOT" ] && [ -f "$SCRIPT_DIR/ensure-root-gitignore" ] && source "$SCRIPT_DIR/ensure-root-gitignore" "$PROJECT_ROOT" || true
 
 CONTEXT=""
 
-DEVFLOW_DIR="$CWD/.devflow"
+DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 DREAM_DIR="$DEVFLOW_DIR/dream"
 DECISIONS_CONTENT_DIR="$DEVFLOW_DIR/decisions"

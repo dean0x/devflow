@@ -1,9 +1,10 @@
 @define gate1_postcode():
-### GATE 1 — Post-code pipeline (fires after EVERY code mutation)
+### GATE 1 — Post-code pipeline (runs exactly TWICE per ticket)
 
 ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
 1. **Validator** — build / typecheck / lint / test
+   - Build/test commands that may run silent for >~120s MUST follow `build_execution_doctrine()` (background Bash + Monitor poll), or they trip the 180s workflow watchdog.
    - FAIL → Coder fix (max 2 retries) → re-Validator
    - If still FAIL after 2 retries → escalate (do not loop endlessly)
 2. **Simplifier** — reduce complexity, remove duplication
@@ -12,9 +13,13 @@ ORDER IS LOAD-BEARING. Run exactly in this sequence:
 
 **Gate 1 contains NO Evaluator and NO Tester.** Those are Gate 2 only.
 
-Depth scales to change size + budget: a trivial one-line fix warrants a lighter pass; a multi-file refactor warrants the full depth. But Gate 1 is **never skipped**, regardless of change size.
+Depth scales to change size + budget: a trivial one-line fix warrants a lighter pass; a multi-file refactor warrants the full depth.
 
-Gate 1 runs after: initial Coder implementation, every review-fix, every alignment-fix (Gate 2 demanded change), every QA-fix. It is the invariant that all written code must pass.
+**Cadence — Gate 1 runs at exactly TWO points per ticket:**
+1. **Gate 1 #1** — immediately after the initial Coder implementation (inside `implement_bundle()`).
+2. **Gate 1 #2** — the FINAL gate, after ALL Gate-2 fixes AND the entire review loop have completed.
+
+It does NOT run between review cycles, nor after each individual Gate-2 / review / QA fix. At those points the fixing Coder self-verifies its OWN build compiles (see `review_loop()` and the Coder agent's "Long-running commands" discipline). The final Gate 1 #2 is the invariant that all written code passes before merge.
 @end
 
 @define gate2_acceptance():
@@ -106,7 +111,7 @@ Majority-survives: a finding needs >50% of verification lenses to confirm it. St
 
 If no surviving findings: break (early exit — do not run unnecessary cycles).
 
-If survivors remain: Coder fixes them (batched per concurrency doctrine — see `concurrency_doctrine()`). Then → Gate 1 ONLY. Review-fixes do NOT get Gate 2 (no Evaluator, no Tester).
+If survivors remain: Coder fixes them (batched per concurrency doctrine — see `concurrency_doctrine()`). The fixing Coder **self-verifies its own fix builds** (build/typecheck per the Coder's "Long-running commands" discipline). Do **NOT** run Gate 1 between cycles, and do NOT run Gate 2 (no Validator, no Simplifier, no Scrutinizer, no Evaluator, no Tester between cycles). The engine runs ONE final Gate 1 after the loop exits — see the `gate1_postcode()` cadence (Gate 1 #2).
 @end
 
 @define concurrency_doctrine():
@@ -123,6 +128,34 @@ If survivors remain: Coder fixes them (batched per concurrency doctrine — see 
 - **When in doubt, sequential.** Parallel must be affirmatively justified against all three bars. The cost of a wrong parallel call (incoherent merge, contended edits) dwarfs the wall-clock saved.
 
 This applies to both: multi-Coder work on a single ticket AND multi-ticket scheduling in a wave.
+@end
+
+@define build_execution_doctrine():
+### Build execution doctrine — long-running commands (LOAD-BEARING)
+
+The Workflow runtime KILLS any sub-agent that emits no output for 180 seconds. A cold `cargo build`, `cargo test`, a large `tsc`, `gradle build`, `go build ./...`, etc. routinely runs silent far longer and trips this watchdog (the failure reads `agent stalled on all N attempts`). Plain foreground `Bash` also defaults to a 120s timeout.
+
+**RULE: any agent (Validator, Coder, Tester) running a build / test / compile / install that may run silent for more than ~120s MUST run it in the BACKGROUND and POLL — never as a single silent foreground command.**
+
+Mechanical procedure (spike-verified — a workflow sub-agent survived a 253s job this way):
+
+1. Choose ONE unique base path for this run and reuse it verbatim in steps 1–3, e.g. `BASE=/tmp/df-build-<ticket-slug>`. Launch the command with the Bash tool using `run_in_background: true`:
+   ```
+   <build/test command> > <BASE>.log 2>&1; echo "EXIT=$?" > <BASE>.done
+   ```
+   This returns immediately with a background task id — do NOT block on it.
+2. Poll with the `Monitor` tool (load it first via ToolSearch `select:Monitor` if it is not already available). Arm ONE monitor that emits a heartbeat well under 180s AND exits when the job finishes:
+   - description: short, e.g. `await <build cmd>`
+   - persistent: false
+   - timeout_ms: comfortably ABOVE the expected job time (e.g. 600000)
+   - command: `until [ -f <BASE>.done ]; do echo building; sleep 25; done; echo BUILD_DONE; cat <BASE>.done`
+
+   The `building` heartbeat every 25s (≪ 180s) is delivered as a notification that re-invokes you, so the watchdog never sees a >180s gap. `BUILD_DONE` + the `EXIT=` line signal completion.
+3. When the monitor reports `BUILD_DONE`: the job PASSES iff `<BASE>.done` contains `EXIT=0`. Read `<BASE>.log` for output/failure detail.
+
+**Scope commands to stay short.** During the engine, PREFER crate/package-scoped builds and tests — `cargo build -p <crate>`, `cargo test -p <crate>`, `npm test -- <path>`, `go test ./pkg/...` — over the whole workspace. The full-workspace regression is the human's job after the wave (the wave already hands the integrated branch back to the user). Scoping keeps most commands under the watchdog window and under budget.
+
+**Invariants:** heartbeat interval MUST stay well under 180s (25–30s is the tested value); Monitor `timeout_ms` MUST exceed the expected job duration (a too-short timeout kills the poll, not the build). Never substitute a single silent long command for this procedure.
 @end
 
 @define engine_output_schema():
@@ -175,5 +208,6 @@ Each ticket engine run returns a structured result. The Synthesizer or the wave 
 @export implement_bundle
 @export review_loop
 @export concurrency_doctrine
+@export build_execution_doctrine
 @export engine_output_schema
 @export engine_invariants

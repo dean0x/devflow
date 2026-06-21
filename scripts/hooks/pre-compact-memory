@@ -31,7 +31,13 @@ fi
 devflow_debug_set_cwd "$CWD"
 dbg "CWD=$CWD"
 
-DEVFLOW_DIR="$CWD/.devflow"
+# Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
+# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD (old behavior).
+source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
+PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
+[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
+
+DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 DREAM_DIR="$DEVFLOW_DIR/dream"
 
