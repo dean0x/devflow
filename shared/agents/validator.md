@@ -38,6 +38,19 @@ Execute in this order, stopping on first failure:
 | 3 | Lint | `npm run lint`, `cargo clippy`, `make lint` |
 | 4 | Test | `npm test`, `cargo test`, `make test` |
 
+## Long-running commands (builds/tests that may run >120s)
+
+A plain `Bash` call defaults to a 120s timeout, and inside a dynamic Workflow a sub-agent that emits no output for 180s is KILLED ("agent stalled"). For any build/test that may run silent longer than ~120s (cold `cargo build`/`cargo test`, large `tsc`, `gradle`, `go build ./...`), do NOT run it as one silent foreground command. Instead:
+
+1. Run it in the BACKGROUND, capturing output + exit code. With the Bash tool set `run_in_background: true` and pick a unique `<slug>` (reuse the same paths in step 2):
+   `<command> > /tmp/df-val-<slug>.log 2>&1; echo "EXIT=$?" > /tmp/df-val-<slug>.done`
+2. Poll with the `Monitor` tool (load it via ToolSearch `select:Monitor` if it is not available): set `persistent: false`, `timeout_ms` above the expected run time (e.g. 600000), and
+   `command: until [ -f /tmp/df-val-<slug>.done ]; do echo running; sleep 25; done; echo DONE; cat /tmp/df-val-<slug>.done`
+   The 25s heartbeat (≪ 180s) is delivered as a notification that keeps you alive past the watchdog.
+3. When the monitor reports `DONE`: the command PASSED iff the `.done` file contains `EXIT=0`. Read the `.log` for failure details to parse.
+
+For a foreground command that merely exceeds the 120s default but stays well under 180s, simply pass an explicit higher `timeout` to the Bash tool (up to 600000ms). Prefer package-scoped commands (`cargo build -p <crate>`, `cargo test -p <crate>`) when the project supports them.
+
 ## Principles
 
 1. **Report only** - Never fix code, never commit, never modify files

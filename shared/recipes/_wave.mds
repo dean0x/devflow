@@ -30,7 +30,7 @@ After the round's merges, spawn the reader agent again with updated issue states
 
 **Termination conditions (checked each round):**
 - All tickets processed: done, write final report
-- Nothing ready but tickets remain (circular or all-blocked): end with escalation report
+- Nothing ready but tickets remain (circular or all-blocked): end with an escalation report that, for EACH remaining ticket, names the specific unmet dependency or unresolved decision blocking it
 - MAX_ROUNDS exceeded: end with partial-progress report (safeguard — never infinite)
 
 MAX_ROUNDS = LLM judgment based on ticket count (heuristic: ticket_count * 2 + 5, minimum 10). Always finite.
@@ -87,9 +87,9 @@ A workflow cannot pause mid-run (F4). "Escalate" means: quarantine-and-continue 
 **Escalation procedure:**
 1. Quarantine the affected ticket (do not merge its branch)
 2. Continue with all independent remaining tickets (escalation does not block siblings)
-3. Add to the escalations list in the final report with: ticket ID, escalation type, context needed for resolution
+3. Add to the escalations list in the final report. For EACH quarantined/blocked ticket, state explicitly: ticket ID; escalation type; the precise REASON it is blocked — name the specific failed dependency ticket, the failing gate, or the exact unresolved decision (never a bare "blocked"); the context needed to resolve it; and the resume handle (the workflow `runId` / journal path) so the user can re-run from where it stopped.
 
-**The user's action on the report:** review escalations, resolve the conflicts / answer the questions, then re-run (resume via runId/journal if available — partial progress is preserved).
+**The user's action on the report:** review escalations, resolve the conflicts / answer the questions, then re-run (resume via the cited runId/journal if available — partial progress is preserved).
 
 **No silent skips.** Every quarantined ticket appears in the report. The run is only "done" when the report says it is — not when the wave loop ends.
 @end

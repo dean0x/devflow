@@ -25,6 +25,7 @@ const HOOK_SCRIPTS = [
   'get-mtime',
   'ensure-devflow-init',
   'ensure-root-gitignore',
+  'resolve-project-root',
   'dream-capture',
   'dream-evaluate',
   'dream-dispatch',
@@ -965,6 +966,111 @@ describe('working memory queue behavior', () => {
 
     const queueFile = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl');
     expect(fs.existsSync(queueFile)).toBe(false);
+  });
+});
+
+// =============================================================================
+// resolve-project-root — anchor .devflow/ to the project root (Fix 6)
+// =============================================================================
+
+describe('resolve-project-root: df_resolve_root', () => {
+  const RESOLVE = path.join(HOOKS_DIR, 'resolve-project-root');
+
+  function resolveRoot(cwd: string): string {
+    return execSync(`bash -c 'source "${RESOLVE}"; df_resolve_root "${cwd}"'`, { stdio: 'pipe' })
+      .toString()
+      .trim();
+  }
+
+  it('(a) returns the git toplevel for a normal subdir inside a repo', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-rpr-git-'));
+    try {
+      execSync(`git init -q "${repo}"`, { stdio: 'pipe' });
+      const real = fs.realpathSync(repo);
+      const sub = path.join(real, 'src', 'deep', 'nested');
+      fs.mkdirSync(sub, { recursive: true });
+      expect(fs.realpathSync(resolveRoot(sub))).toBe(real);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('(b) returns the repo root for a path inside .devflow/ — git walks up (the stray-nesting fix)', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-rpr-dev-'));
+    try {
+      execSync(`git init -q "${repo}"`, { stdio: 'pipe' });
+      const real = fs.realpathSync(repo);
+      const nested = path.join(real, '.devflow', 'docs', 'waves', 'x', 'tickets');
+      fs.mkdirSync(nested, { recursive: true });
+      expect(fs.realpathSync(resolveRoot(nested))).toBe(real);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('(c) non-git: strips from the first /.devflow/ onward', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-rpr-nogit-'));
+    try {
+      const real = fs.realpathSync(base);
+      const nested = path.join(real, '.devflow', 'docs', 'tickets');
+      fs.mkdirSync(nested, { recursive: true });
+      // No git repo above os.tmpdir() → fallback strip yields the path before /.devflow/.
+      expect(resolveRoot(nested)).toBe(real);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('(c2) non-git, no .devflow in path: returns cwd unchanged', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-rpr-plain-'));
+    try {
+      const real = fs.realpathSync(base);
+      const sub = path.join(real, 'a', 'b');
+      fs.mkdirSync(sub, { recursive: true });
+      expect(resolveRoot(sub)).toBe(sub);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('hooks anchor .devflow/ to the project root (no stray nested .devflow/)', () => {
+  const STOP_HOOK = path.join(HOOKS_DIR, 'dream-capture');
+
+  it('dream-capture run with a CWD inside .devflow/ writes the queue at the repo root, not a nested .devflow/', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-anchor-'));
+    try {
+      execSync(`git init -q "${repo}"`, { stdio: 'pipe' });
+      const real = fs.realpathSync(repo);
+
+      // Pre-scaffold the real .devflow/memory and a fresh trigger so the hook stays
+      // throttled and never spawns a background worker during the test.
+      const memDir = path.join(real, '.devflow', 'memory');
+      fs.mkdirSync(memDir, { recursive: true });
+      fs.writeFileSync(path.join(memDir, '.working-memory-last-trigger'), '');
+
+      // The hook runs with a CWD deep inside .devflow/ — the stray-nesting scenario.
+      const nestedCwd = path.join(real, '.devflow', 'docs', 'waves', 'w', 'tickets');
+      fs.mkdirSync(nestedCwd, { recursive: true });
+
+      const input = JSON.stringify({
+        cwd: nestedCwd,
+        session_id: 'anchor-test',
+        last_assistant_message: 'hello from a nested cwd',
+      });
+      execSync(`bash "${STOP_HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+
+      // Queue written at the REAL repo root .devflow/memory/ ...
+      const rootQueue = path.join(real, '.devflow', 'memory', '.pending-turns.jsonl');
+      expect(fs.existsSync(rootQueue)).toBe(true);
+      const entry = JSON.parse(fs.readFileSync(rootQueue, 'utf-8').trim().split('\n').filter(Boolean)[0]);
+      expect(entry.role).toBe('assistant');
+
+      // ... and NO stray nested .devflow/ was scaffolded under the nested cwd.
+      expect(fs.existsSync(path.join(nestedCwd, '.devflow'))).toBe(false);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 

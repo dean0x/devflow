@@ -57,7 +57,13 @@ dbg "CWD=$CWD"
 # Only log metadata (length, keys, presence checks).
 dbg "ASSISTANT_MSG length=${#ASSISTANT_MSG}"
 
-DEVFLOW_DIR="$CWD/.devflow"
+# Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
+# hook runs with a CWD inside .devflow/...). Empty → fall back to CWD (old behavior).
+source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
+PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
+[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
+
+DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 MEMORY_DIR="$DEVFLOW_DIR/memory"
 DREAM_DIR="$DEVFLOW_DIR/dream"
 
@@ -98,7 +104,7 @@ if [ -f "$SCANNER" ] && printf '%s' "$ASSISTANT_MSG" | grep -qE 'ADR-[0-9]+|PF-[
   [ -f "$DEVFLOW_DIR/decisions/.disabled" ] && _DEC_ENABLED_CAPTURE="false"
   if [ "$_DEC_ENABLED_CAPTURE" = "true" ]; then
     dbg "Running decisions usage scanner"
-    printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$CWD" 2>/dev/null || true
+    printf '%s' "$ASSISTANT_MSG" | node "$SCANNER" --cwd "$PROJECT_ROOT" 2>/dev/null || true
   fi
 fi
 

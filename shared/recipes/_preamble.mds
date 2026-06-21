@@ -44,9 +44,21 @@ Valid `agentType` values: Coder, Validator, Simplifier, Scrutinizer, Evaluator, 
 
 Do not write logic that depends on an agent enumerating its own skills. Skills are loaded (confirmed by spike F5) but agents do not reliably self-report them.
 
+### Pre-flight self-check — MANDATORY before the first live `Workflow` call
+
+Two distinct LLM-authored-script bugs have crashed whole runs in the field: `TypeError: pipeline() expects an array as the first argument` and `undefined is not an object (evaluating 'SEAL.num')`. Before you invoke the `Workflow` tool, audit the script you just authored against this checklist — it targets exactly those crash classes:
+
+- **`meta` is a pure literal** — `name` and `description` present; NO variables, function calls, spreads, or template interpolation anywhere inside `meta`.
+- **Every `pipeline(x, …)` / `parallel(x)` first argument is a real array** — never a function, object, or possibly-undefined value. If it derives from a prior agent result, coerce it: `parallel((maybeList || []).map(...))`.
+- **No reference to a possibly-undefined field** — guard every cross-result field access with optional chaining (e.g. `result?.findings`, `seal?.num`). This is the `SEAL.num` crash class: an agent returned a shape without `num`, so `SEAL.num` threw.
+- **`.filter(Boolean)` before mapping over `agent()` / `parallel()` results** — an agent can return `null` (skipped, or died after retries); strip nulls before `.map` or field access.
+- **`phase()` titles match the phases declared in `meta`** — every `phase("…")` call has a matching declared phase, and vice-versa.
+
+Then run a cheap syntax gate: write the authored script to a scratch temp file (e.g. `/tmp/df-wf-check.js`) purely to validate it, run `node --check /tmp/df-wf-check.js`, and only then pass the script text to the `Workflow` tool as usual. `node --check` catches SYNTAX errors only — it does NOT catch the runtime type errors above, so the checklist is the real safeguard.
+
 ### --dry-run affordance
 
-If the user's input includes `--dry-run`, PRINT the authored workflow script (inside a fenced code block) for inspection, then STOP — do not invoke the Workflow tool. This lets the user review the script before execution.
+If the user's input includes `--dry-run`, PRINT the authored workflow script (inside a fenced code block) for inspection, then STOP — do not invoke the Workflow tool. This lets the user review the script before execution. For a large or novel script, prefer this dry-run path by default — eyeball the script once before the first live run.
 
 ### Budget scaling
 

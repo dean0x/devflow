@@ -89,6 +89,19 @@ When you apply a decision from `.devflow/decisions/decisions.md` or avoid a pitf
 
 8. **Generate handoff** (if HANDOFF_REQUIRED=true): Include implementation summary for next Coder (see Output section).
 
+## Long-running commands (self-verifying builds/tests that may run >120s)
+
+You run builds and tests to verify your own work — including **self-verifying that each fix compiles** when no separate Validator runs between review cycles. A plain `Bash` call defaults to a 120s timeout, and inside a dynamic Workflow a sub-agent that emits no output for 180s is KILLED ("agent stalled"). For any build/test that may run silent longer than ~120s (cold `cargo build`/`cargo test`, large `tsc`, `gradle`, `go build ./...`), do NOT run it as one silent foreground command. Instead:
+
+1. Run it in the BACKGROUND with the Bash tool (`run_in_background: true`), capturing output + exit code under a unique `<slug>` reused in step 2:
+   `<command> > /tmp/df-build-<slug>.log 2>&1; echo "EXIT=$?" > /tmp/df-build-<slug>.done`
+2. Poll with the `Monitor` tool (load it via ToolSearch `select:Monitor` if it is not available): set `persistent: false`, `timeout_ms` above the expected run time (e.g. 600000), and
+   `command: until [ -f /tmp/df-build-<slug>.done ]; do echo building; sleep 25; done; echo DONE; cat /tmp/df-build-<slug>.done`
+   The 25s heartbeat (≪ 180s) is delivered as a notification that keeps you alive past the watchdog.
+3. When the monitor reports `DONE`: the command PASSED iff the `.done` file contains `EXIT=0`. Read the `.log`, fix any failures, and only then proceed.
+
+For a foreground command that exceeds the 120s default but stays under 180s, pass an explicit higher `timeout` to the Bash tool (up to 600000ms). Prefer package-scoped commands (`cargo build -p <crate>`) during the engine; the full-workspace regression is the human's job after the wave.
+
 ## Principles
 
 1. **Work on feature branch** - All operations happen on the current feature branch
