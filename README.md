@@ -77,6 +77,27 @@ npx devflow-kit init
 
 That's it. The interactive wizard handles plugin selection, feature configuration, and security settings. Ambient mode, working memory, and decisions tracking are on by default.
 
+## Privacy & Sharing
+
+Everything Devflow generates lives under `.devflow/` — working memory, decisions and pitfalls, feature knowledge bases, dream state, and transient locks. That directory is **gitignored wholesale by default**, so this per-developer runtime state stays on your machine and never lands in a commit. Devflow adds the `.devflow/` line to your project's root `.gitignore` automatically on first use.
+
+Sharing is opt-in. To share **everything** with your team, remove the `.devflow/` line from `.gitignore`. To share only curated knowledge (and keep memory, queues, and locks local), replace the `.devflow/` line with a pattern that ignores everything except the files you want tracked:
+
+```gitignore
+# Ignore all Devflow runtime data…
+.devflow/**
+# …except the team knowledge you want to share
+!.devflow/decisions/
+!.devflow/decisions/decisions.md
+!.devflow/decisions/pitfalls.md
+!.devflow/features/
+!.devflow/features/index.json
+!.devflow/features/**/
+!.devflow/features/**/KNOWLEDGE.md
+```
+
+(The directory re-includes — `!.devflow/decisions/` — are required: git won't descend into an excluded directory to reach a re-included file.)
+
 ## Commands
 
 | Command | What it does |

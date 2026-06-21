@@ -892,6 +892,54 @@ export async function updateGitignore(
 }
 
 /**
+ * Deterministically ensure the project root .gitignore ignores `.devflow/`.
+ *
+ * Appends ONLY `.devflow/` — never `.claude/` — because user-scope installs must
+ * not gitignore `.claude/`. This is the init-time counterpart to the always-on
+ * scripts/hooks/ensure-root-gitignore shell helper; both write the identical
+ * comment block and entry, so the two paths are byte-compatible and mutually
+ * idempotent. Called unconditionally (independent of install scope and every
+ * feature toggle) whenever a git root is known, so a fresh install never tracks
+ * `.devflow/` even before any hook fires.
+ *
+ * Idempotent: reuses computeGitignoreAppend, so a second run is a no-op once
+ * `.devflow/` is present. Errors are swallowed (verbose-logged) — a gitignore
+ * write must never abort init.
+ */
+export async function ensureDevflowGitignore(
+  gitRoot: string,
+  verbose: boolean,
+): Promise<void> {
+  try {
+    const gitignorePath = path.join(gitRoot, '.gitignore');
+
+    let gitignoreContent = '';
+    try {
+      gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+    } catch { /* doesn't exist yet */ }
+
+    const linesToAdd = computeGitignoreAppend(gitignoreContent, ['.devflow/']);
+    if (linesToAdd.length === 0) {
+      return;
+    }
+
+    const comment = '# Devflow runtime data (local by default; remove to share via git)';
+    const newContent = gitignoreContent
+      ? `${gitignoreContent.trimEnd()}\n\n${comment}\n.devflow/\n`
+      : `${comment}\n.devflow/\n`;
+
+    await fs.writeFile(gitignorePath, newContent, 'utf-8');
+    if (verbose) {
+      p.log.success('.gitignore configured (.devflow/ ignored)');
+    }
+  } catch (error) {
+    if (verbose) {
+      p.log.warn(`Could not update .gitignore: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+}
+
+/**
  * Create .devflow/docs/ directory structure for Devflow artifacts.
  */
 export async function createDocsStructure(verbose: boolean): Promise<void> {

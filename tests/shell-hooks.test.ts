@@ -24,6 +24,7 @@ const HOOK_SCRIPTS = [
   'json-parse',
   'get-mtime',
   'ensure-devflow-init',
+  'ensure-root-gitignore',
   'dream-capture',
   'dream-evaluate',
   'dream-dispatch',
@@ -1302,41 +1303,43 @@ describe('ensure-devflow-init behavioral', () => {
     expect(content).toBe('{"existing":"data"}');
   });
 
-  it('creates .devflow/.gitignore with ignore-by-default allowlist content', () => {
+  it('adds .devflow/ to the project root .gitignore (creates it when absent)', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    const gitignore = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
-    expect(gitignore).toContain('\n*\n');
-    expect(gitignore).toContain('!.gitignore');
-    expect(gitignore).toContain('!decisions/decisions.md');
-    expect(gitignore).toContain('!features/*/KNOWLEDGE.md');
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore-configured'))).toBe(true);
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    expect(gitignore.split('\n').map(l => l.trim())).toContain('.devflow/');
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(true);
+    // Under the wholesale-ignore model no nested .devflow/.gitignore is written
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
   });
 
-  it('is idempotent — marker prevents repeated gitignore writes', () => {
-    // Run twice
-    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
+  it('appends .devflow/ to an existing root .gitignore without clobbering it', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\ndist/\n');
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    const gitignore = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
-    // The allowlist negation for decisions.md should appear exactly once
-    const decisionsEntries = gitignore.split('\n').filter(l => l === '!decisions/decisions.md');
-    expect(decisionsEntries).toHaveLength(1);
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    expect(gitignore).toContain('node_modules/');
+    expect(gitignore).toContain('dist/');
+    expect(gitignore.split('\n').map(l => l.trim())).toContain('.devflow/');
   });
 
-  it('heredoc matches getDevflowGitignoreContent() from project-paths.cjs', () => {
-    // Source ensure-devflow-init in a fresh temp dir, then compare the resulting
-    // .devflow/.gitignore to the canonical CJS function output.
-    const PROJECT_PATHS_CJS = path.join(HOOKS_DIR, 'lib', 'project-paths.cjs');
+  it('is idempotent — .devflow/ appears exactly once after repeated runs', () => {
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    const hookContent = fs.readFileSync(path.join(tmpDir, '.devflow', '.gitignore'), 'utf-8');
-    const canonical = execSync(
-      `node -e "process.stdout.write(require('${PROJECT_PATHS_CJS}').getDevflowGitignoreContent())"`,
-      { stdio: 'pipe' },
-    ).toString();
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    const entries = gitignore.split('\n').map(l => l.trim()).filter(l => l === '.devflow/');
+    expect(entries).toHaveLength(1);
+  });
 
-    expect(hookContent).toBe(canonical);
+  it('does not append .devflow/ when the root .gitignore already ignores it', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), '/.devflow/\n');
+    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    // Pre-existing /.devflow/ already matches the guard — no duplicate added
+    expect(gitignore.split('\n').map(l => l.trim()).filter(l => l === '.devflow/')).toHaveLength(0);
+    expect(gitignore).toContain('/.devflow/');
   });
 
   it('returns non-zero and creates no .devflow/ when called with empty argument (SEC-3 guard)', () => {
@@ -1350,6 +1353,85 @@ describe('ensure-devflow-init behavioral', () => {
     // return 1 from a sourced script propagates as the last exit status
     expect(result).toBe('1');
     // No .devflow/ directory should have been created in the test working directory
+    expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
+  });
+});
+
+describe('ensure-root-gitignore behavioral', () => {
+  const ENSURE_ROOT = path.join(HOOKS_DIR, 'ensure-root-gitignore');
+
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-rootignore-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const ignoreLines = (file: string): string[] =>
+    fs.readFileSync(file, 'utf-8').split('\n').map(l => l.trim());
+
+  it('creates the root .gitignore (and .devflow/) when absent, writes the marker', () => {
+    // Standalone case (as session-start-context calls it): no .devflow/ exists yet.
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = path.join(tmpDir, '.gitignore');
+    expect(fs.existsSync(gitignore)).toBe(true);
+    expect(ignoreLines(gitignore)).toContain('.devflow/');
+    // The helper must create .devflow/ to host the marker even when called standalone
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(true);
+    // Wholesale-ignore model — no nested .devflow/.gitignore written
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
+  });
+
+  it('appends .devflow/ to an existing root .gitignore without clobbering it', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\ndist/\n');
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = path.join(tmpDir, '.gitignore');
+    const content = fs.readFileSync(gitignore, 'utf-8');
+    expect(content).toContain('node_modules/');
+    expect(content).toContain('dist/');
+    expect(ignoreLines(gitignore)).toContain('.devflow/');
+  });
+
+  it('is idempotent — .devflow/ appears exactly once after repeated runs', () => {
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const entries = ignoreLines(path.join(tmpDir, '.gitignore')).filter(l => l === '.devflow/');
+    expect(entries).toHaveLength(1);
+  });
+
+  it('does not append .devflow/ when the root .gitignore already ignores it (/.devflow/ guard)', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), '/.devflow/\n');
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = path.join(tmpDir, '.gitignore');
+    // Pre-existing /.devflow/ already matches the guard — no bare .devflow/ duplicate added
+    expect(ignoreLines(gitignore).filter(l => l === '.devflow/')).toHaveLength(0);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toContain('/.devflow/');
+  });
+
+  it('marker short-circuits subsequent runs (O(1) fast-path) — does not touch .gitignore', () => {
+    // Pre-seed the marker; the helper must return early and leave .gitignore untouched.
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'), '');
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    // No .gitignore should have been created because the marker fast-path fired first
+    expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
+  });
+
+  it('returns non-zero and creates nothing when called with an empty argument', () => {
+    const result = execSync(
+      `bash -c 'source "${ENSURE_ROOT}" ""; echo $?'`,
+      { stdio: 'pipe' },
+    ).toString().trim();
+
+    expect(result).toBe('1');
     expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
   });
 });
@@ -2073,6 +2155,52 @@ describe('session-start-context pending-work directive', () => {
     expect(fs.existsSync(procFile)).toBe(false);
     // learning.stale.json recovered, then deleted by dream-collect-tasks
     expect(fs.existsSync(path.join(dreamDir, 'learning.stale.json'))).toBe(false);
+  });
+});
+
+// =============================================================================
+// session-start-context: memory-independent root .gitignore write (PF-014 fix)
+// =============================================================================
+//
+// The root .gitignore write must NOT depend on the memory feature toggle. Before
+// this fix the only writer (ensure-devflow-init) was reached only behind the memory
+// gate, so a project with memory OFF but decisions/knowledge ON never got .devflow/
+// ignored. session-start-context (always-on) now sources ensure-root-gitignore early,
+// covering exactly that case.
+
+describe('session-start-context root .gitignore (memory-independent)', () => {
+  const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-ignore-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-ignore-home-'));
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('adds .devflow/ to the root .gitignore even when memory is disabled', () => {
+    // Memory OFF, decisions implicitly ON — the exact gap PF-014 describes.
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'dream', 'config.json'),
+      JSON.stringify({ memory: false }),
+    );
+    // No root .gitignore present to begin with.
+    expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
+
+    runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+
+    const gitignore = path.join(tmpDir, '.gitignore');
+    expect(fs.existsSync(gitignore)).toBe(true);
+    expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('.devflow/');
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(true);
   });
 });
 

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Ensures .devflow/ and all subdirectories exist, .devflow/.gitignore is configured,
-# and .devflow/features/index.json is bootstrapped.
+# Ensures .devflow/ and all subdirectories exist, the project root .gitignore
+# ignores .devflow/, and .devflow/features/index.json is bootstrapped.
 # Merges functionality of the former ensure-memory-gitignore and ensure-features-init.
 # Called from dream-capture, dream-dispatch, and pre-compact-memory. Idempotent.
 # Usage: source ensure-devflow-init "$CWD"
@@ -13,7 +13,7 @@ _DEVFLOW_DIR="$1/.devflow"
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
    [ -d "$_DEVFLOW_DIR/dream" ] && \
    [ -d "$_DEVFLOW_DIR/decisions" ] && [ -d "$_DEVFLOW_DIR/features" ] && \
-   [ -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
+   [ -f "$_DEVFLOW_DIR/.root-gitignore-configured" ]; then
   return 0
 fi
 
@@ -32,41 +32,10 @@ if [ ! -f "$_DEVFLOW_DIR/features/index.json" ]; then
     mv "$_DEVFLOW_DIR/features/index.json.tmp" "$_DEVFLOW_DIR/features/index.json"
 fi
 
-# One-time .devflow/.gitignore setup (marker prevents repeated checks)
-# CANONICAL SOURCE: scripts/hooks/lib/project-paths.cjs — getDevflowGitignoreContent()
-# Keep this heredoc in sync with that function when adding or removing entries.
-if [ ! -f "$_DEVFLOW_DIR/.gitignore-configured" ]; then
-  cat > "$_DEVFLOW_DIR/.gitignore.tmp" << 'EOF'
-# .devflow/ git-tracking policy
-# ---------------------------------------------------------------------------
-# Only curated, shared team knowledge is committed to git:
-#   - decisions/decisions-ledger.jsonl                    (anchored render source)
-#   - decisions/decisions.md, decisions/pitfalls.md      (ADR / pitfall records)
-#   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
-#
-# Everything else under .devflow/ is per-developer or transient (memory, dream,
-# docs, locks, runtime state, manifest, scratch results) and is
-# intentionally ignored. Model: ignore-by-default, then re-include the curated
-# files. Any NEW file under .devflow/ is ignored unless explicitly listed below.
-
-# 1. Ignore everything under .devflow/ by default
-*
-
-# 2. Keep this policy file
-!.gitignore
-
-# 3. Track the decisions knowledge (not its log / config / locks / usage state)
-!decisions/
-!decisions/decisions.md
-!decisions/pitfalls.md
-!decisions/decisions-ledger.jsonl
-
-# 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
-!features/
-!features/index.json
-!features/*/
-!features/*/KNOWLEDGE.md
-EOF
-  mv "$_DEVFLOW_DIR/.gitignore.tmp" "$_DEVFLOW_DIR/.gitignore" && \
-    touch "$_DEVFLOW_DIR/.gitignore-configured"
-fi
+# One-time root .gitignore setup — delegated to the sibling ensure-root-gitignore
+# helper (single source of truth) so the always-on, memory-independent
+# session-start-context hook applies the identical rule. Resolve our own directory
+# via BASH_SOURCE so this works whether sourced by a hook (which sets SCRIPT_DIR) or
+# sourced directly (tests source this file with no SCRIPT_DIR in scope).
+_EDI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_EDI_DIR/ensure-root-gitignore" "$1"

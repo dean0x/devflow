@@ -221,55 +221,17 @@ function getHandoffPath(projectRoot, branchSlug) {
 // ---------------------------------------------------------------------------
 
 /**
- * The canonical list of gitignore entries for a Devflow local-scope install.
- * After PR 5b, .devflow/ is NOT gitignored — it holds committed content.
- * Internal .devflow/ transients are handled by .devflow/.gitignore.
+ * The canonical list of gitignore entries Devflow adds to a project's root
+ * .gitignore. `.devflow/` holds per-developer runtime state (memory, dream,
+ * docs, decisions, feature knowledge, locks) and is ignored wholesale by
+ * default — sharing is opt-in. `.claude/` covers local-scope installs.
+ *
+ * The ensure-devflow-init hook is the live, every-project mechanism that
+ * appends `.devflow/` to the root .gitignore lazily; this list mirrors that
+ * intent for the TS install path.
  */
 function getGitignoreEntries() {
-  return ['.claude/'];
-}
-
-/**
- * The canonical content of .devflow/.gitignore — lists all transient per-developer
- * files that must NOT be committed.
- *
- * Single source of truth: migrations.ts imports this function instead of
- * maintaining an inline copy. The shell hook (ensure-devflow-init) keeps its
- * heredoc in sync manually — a comment in that file points here as canonical.
- *
- * CANONICAL SOURCE — TS counterpart at src/cli/utils/project-paths.ts must mirror this exactly.
- */
-function getDevflowGitignoreContent() {
-  return `# .devflow/ git-tracking policy
-# ---------------------------------------------------------------------------
-# Only curated, shared team knowledge is committed to git:
-#   - decisions/decisions-ledger.jsonl                    (anchored render source)
-#   - decisions/decisions.md, decisions/pitfalls.md      (ADR / pitfall records)
-#   - features/index.json, features/<slug>/KNOWLEDGE.md  (feature knowledge bases)
-#
-# Everything else under .devflow/ is per-developer or transient (memory, dream,
-# docs, locks, runtime state, manifest, scratch results) and is
-# intentionally ignored. Model: ignore-by-default, then re-include the curated
-# files. Any NEW file under .devflow/ is ignored unless explicitly listed below.
-
-# 1. Ignore everything under .devflow/ by default
-*
-
-# 2. Keep this policy file
-!.gitignore
-
-# 3. Track the decisions knowledge (not its log / config / locks / usage state)
-!decisions/
-!decisions/decisions.md
-!decisions/pitfalls.md
-!decisions/decisions-ledger.jsonl
-
-# 4. Track the feature knowledge bases (not locks / sentinels / scratch results)
-!features/
-!features/index.json
-!features/*/
-!features/*/KNOWLEDGE.md
-`;
+  return ['.claude/', '.devflow/'];
 }
 
 module.exports = {
@@ -316,5 +278,4 @@ module.exports = {
   getHandoffPath,
   // Gitignore entries
   getGitignoreEntries,
-  getDevflowGitignoreContent,
 };

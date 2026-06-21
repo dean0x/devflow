@@ -73,6 +73,11 @@ install.log
 # Devflow local scope installation (use --scope local)
 .claude/
 
+# Devflow runtime data — per-developer state (memory, dream, docs, decisions,
+# feature knowledge, locks). Ignored wholesale by default; sharing is opt-in
+# (remove this entry, or re-include specific files in your own .gitignore).
+.devflow/
+
 src/claude/CLAUDE.legacy.md
 
 # Launch marketing materials

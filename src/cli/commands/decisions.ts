@@ -16,7 +16,7 @@ import {
   getDecisionsBatchIdsPath,
   getDecisionsDisabledSentinel,
 } from '../utils/project-paths.js';
-import { updateFeature, isFeatureEnabled, readConfig } from '../utils/dream-config.js';
+import { updateFeature, isFeatureEnabled } from '../utils/dream-config.js';
 import { syncManifestFeature } from '../utils/manifest.js';
 import { getDevFlowDirectory } from '../utils/paths.js';
 import { getGitRoot } from '../utils/git.js';
@@ -92,7 +92,6 @@ export const decisionsCommand = new Command('decisions')
         return;
       }
       const enabled = await isFeatureEnabled(gitRoot, 'decisions');
-      const dreamConfig = await readConfig(gitRoot);
       const { observations, invalidCount } = await readObservations(logPath);
 
       const decisionObs = observations.filter(o => o.type === 'decision' || o.type === 'pitfall');
@@ -104,7 +103,6 @@ export const decisionsCommand = new Command('decisions')
       const deprecated = decisionObs.filter(o => o.status === 'deprecated');
 
       const lines: string[] = [`Decisions learning: ${enabled ? 'enabled' : 'disabled'}`];
-      lines.push(`Auto-commit: ${dreamConfig.autoCommit ? 'ON' : 'OFF'} (chore(dream): commits after each Dream write)`);
       if (decisionObs.length === 0) {
         lines.push('Observations: none');
       } else {

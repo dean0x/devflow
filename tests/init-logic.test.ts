@@ -24,6 +24,7 @@ import {
   DEVFLOW_HISTORICAL_DENY,
   applyUserSecurityDenyList,
   loadTemplateDenyEntries,
+  ensureDevflowGitignore,
 } from '../src/cli/utils/post-install.js';
 import { installViaFileCopy, type Spinner } from '../src/cli/utils/installer.js';
 import { DEVFLOW_PLUGINS, buildAssetMaps, buildRulesMap, prefixSkillName } from '../src/cli/plugins.js';
@@ -189,6 +190,58 @@ describe('computeGitignoreAppend', () => {
   it('handles empty entries list', () => {
     const result = computeGitignoreAppend('something\n', []);
     expect(result).toEqual([]);
+  });
+});
+
+describe('ensureDevflowGitignore', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-ensure-ignore-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  const read = (): Promise<string> => fs.readFile(path.join(tmpDir, '.gitignore'), 'utf-8');
+  const lines = (content: string): string[] => content.split('\n').map(l => l.trim());
+
+  it('creates .gitignore with only .devflow/ when absent (never .claude/)', async () => {
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    expect(lines(content)).toContain('.devflow/');
+    // User-scope installs must NOT gitignore .claude/ — this is the key difference
+    // from updateGitignore (which also adds .claude/).
+    expect(content).not.toContain('.claude/');
+    expect(content).toContain('# Devflow runtime data');
+  });
+
+  it('appends .devflow/ to existing content without clobbering it', async () => {
+    await fs.writeFile(path.join(tmpDir, '.gitignore'), 'node_modules/\ndist/\n');
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    expect(content).toContain('node_modules/');
+    expect(content).toContain('dist/');
+    expect(lines(content)).toContain('.devflow/');
+  });
+
+  it('is idempotent — .devflow/ appears exactly once after repeated runs', async () => {
+    await ensureDevflowGitignore(tmpDir, false);
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    expect(lines(content).filter(l => l === '.devflow/')).toHaveLength(1);
+  });
+
+  it('is a no-op when .devflow/ is already present (content unchanged)', async () => {
+    await fs.writeFile(path.join(tmpDir, '.gitignore'), 'node_modules/\n.devflow/\n');
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    expect(content).toBe('node_modules/\n.devflow/\n');
   });
 });
 
