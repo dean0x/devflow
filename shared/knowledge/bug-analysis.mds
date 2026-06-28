@@ -34,7 +34,7 @@ Return: branch, base_branch, branch-slug, PR#"
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
-PR_DESCRIPTION=$(gh pr view \{pr_number\} --json body --jq '.body' 2>/dev/null || echo "(none)")
+PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
 If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
@@ -64,7 +64,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Requires:** DIFF_RANGE
 
 ```bash
-CHANGED_FILES=$(git diff --name-only \{DIFF_RANGE\})
+CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})
 ```
 
 Store result as `CHANGED_FILES` — used throughout Steps 2d and Phase 4 to avoid repeated git invocations and ensure consistency.
@@ -193,19 +193,19 @@ Spawn ALL active BugAnalyzer agents **in a single message** (parallel, NOT backg
 For each active focus, spawn:
 ```
 Agent(subagent_type="BugAnalyzer", run_in_background=false):
-"Analyze focusing on \{focus\}.
-FOCUS: \{focus\}
-DIFF_COMMAND: git diff \{DIFF_RANGE\}
-ACCEPTANCE_RULES: \{ACCEPTANCE_RULES filtered to this focus type, or (none)\}
-PLAN_CONTEXT: \{PLAN_CONTEXT\}
-STATIC_FINDINGS: \{STATIC_FINDINGS if focus == security, else (none)\}
-DECISIONS_CONTEXT: \{DECISIONS_CONTEXT\}
-FEATURE_KNOWLEDGE: \{FEATURE_KNOWLEDGE\}
-PR_DESCRIPTION: <pr-description>\{PR_DESCRIPTION\}</pr-description>
-OUTPUT_PATH: \{ANALYSIS_DIR\}/\{focus\}.md
+"Analyze focusing on {focus}.
+FOCUS: {focus}
+DIFF_COMMAND: git diff {DIFF_RANGE}
+ACCEPTANCE_RULES: {ACCEPTANCE_RULES filtered to this focus type, or (none)}
+PLAN_CONTEXT: {PLAN_CONTEXT}
+STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}
+DECISIONS_CONTEXT: {DECISIONS_CONTEXT}
+FEATURE_KNOWLEDGE: {FEATURE_KNOWLEDGE}
+PR_DESCRIPTION: <pr-description>{PR_DESCRIPTION}</pr-description>
+OUTPUT_PATH: {ANALYSIS_DIR}/{focus}.md
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE.
-IMPORTANT: Write report to \{ANALYSIS_DIR\}/\{focus\}.md using Write tool"
+IMPORTANT: Write report to {ANALYSIS_DIR}/{focus}.md using Write tool"
 ```
 
 Notes:
@@ -223,10 +223,10 @@ Spawn Synthesizer:
 ```
 Agent(subagent_type="Synthesizer", run_in_background=false):
 "Mode: bug-analysis
-ANALYSIS_BASE_DIR: \{ANALYSIS_DIR\}
-BRANCH: \{branch\} -> \{base_branch\}
-TIMESTAMP: \{timestamp\}
-Output: \{ANALYSIS_DIR\}/bug-analysis-summary.md"
+ANALYSIS_BASE_DIR: {ANALYSIS_DIR}
+BRANCH: {branch} -> {base_branch}
+TIMESTAMP: {timestamp}
+Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
 ```
 
 ### Phase 7: Finalize
@@ -239,30 +239,30 @@ Output: \{ANALYSIS_DIR\}/bug-analysis-summary.md"
 ```
 ## Bug Analysis Complete
 
-**Branch**: \{branch\} -> \{base_branch\}
-**Analysis**: \{ANALYSIS_DIR\}
+**Branch**: {branch} -> {base_branch}
+**Analysis**: {ANALYSIS_DIR}
 
-### Risk Assessment: \{risk_level\}
+### Risk Assessment: {risk_level}
 
-\{brief_reasoning\}
+{brief_reasoning}
 
 ### Bug Counts
 | Category | CRITICAL | HIGH | MEDIUM | LOW | Total |
 |----------|----------|------|--------|-----|-------|
-| Security | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
-| Functional | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
-| Integration | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
-| Usability | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
+| Security | {n} | {n} | {n} | {n} | {n} |
+| Functional | {n} | {n} | {n} | {n} | {n} |
+| Integration | {n} | {n} | {n} | {n} | {n} |
+| Usability | {n} | {n} | {n} | {n} | {n} |
 
 ### Top Findings
-\{List top 3-5 bugs by severity and confidence\}
+{List top 3-5 bugs by severity and confidence}
 
 ### Artifacts
-- Bug report: \{ANALYSIS_DIR\}/bug-analysis-summary.md
-- Per-focus reports: \{ANALYSIS_DIR\}/\{security|functional|integration|usability\}.md
-- Static findings: \{ANALYSIS_DIR\}/static-findings.md (if static analysis ran)
+- Bug report: {ANALYSIS_DIR}/bug-analysis-summary.md
+- Per-focus reports: {ANALYSIS_DIR}/{security|functional|integration|usability}.md
+- Static findings: {ANALYSIS_DIR}/static-findings.md (if static analysis ran)
 
-\{if any CRITICAL or HIGH bugs found:\}
+{if any CRITICAL or HIGH bugs found:}
 Run `/resolve` to process and fix these findings.
 ```
 

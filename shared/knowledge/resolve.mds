@@ -43,7 +43,7 @@ For each resolvable worktree, spawn Git agent:
 ```
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: validate-branch
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
 Check feature branch, clean working directory, reviews exist.
 Return: branch, branch-slug, PR#, review count"
 ```
@@ -56,7 +56,7 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
-PR_DESCRIPTION=$(gh pr view \{pr_number\} --json body --jq '.body' 2>/dev/null || echo "(none)")
+PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
 If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
@@ -158,13 +158,13 @@ Spawn Resolver agents based on dependency analysis. For independent batches, spa
 
 ```
 Agent(subagent_type="Resolver"):
-"ISSUES: [\{issue1\}, \{issue2\}, ...]
-BRANCH: \{branch-slug\}
-BATCH_ID: batch-\{n\}
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-DECISIONS_CONTEXT: \{decisions_context\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
-PR_DESCRIPTION: <pr-description>\{pr_description\}</pr-description>
+"ISSUES: [{issue1}, {issue2}, ...]
+BRANCH: {branch-slug}
+BATCH_ID: batch-{n}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+DECISIONS_CONTEXT: {decisions_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
 Validate, decide FIX vs TECH_DEBT, implement fixes. Follow devflow:apply-decisions to Read full ADR/PF bodies on demand. Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE."
 ```
 
@@ -200,8 +200,8 @@ If any fixes were made, spawn Simplifier agent to refine the changed code:
 ```
 Agent(subagent_type="Simplifier", run_in_background=false):
 "TASK_DESCRIPTION: Issue resolution fixes
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-FILES_CHANGED: \{list of files modified by Resolvers\}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+FILES_CHANGED: {list of files modified by Resolvers}
 Simplify and refine the fixes for clarity and consistency"
 ```
 
@@ -235,9 +235,9 @@ If any issues were deferred, spawn Git agent:
 ```
 Agent(subagent_type="Git"):
 "OPERATION: manage-debt
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-REVIEW_DIR: \{TARGET_DIR\}
-TIMESTAMP: \{timestamp\}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+REVIEW_DIR: {TARGET_DIR}
+TIMESTAMP: {timestamp}
 Note: Deferred issues from resolution are already in resolution-summary.md"
 ```
 
@@ -250,26 +250,26 @@ The resolution summary was already written to `\{TARGET_DIR\}/resolution-summary
 ```
 ## Resolution Summary
 
-**Branch**: \{branch\}
-**Reviews Processed**: \{n\} reports from \{TARGET_DIR\}
-**Total Issues**: \{n\}
+**Branch**: {branch}
+**Reviews Processed**: {n} reports from {TARGET_DIR}
+**Total Issues**: {n}
 
 ### Results
 | Outcome | Count |
 |---------|-------|
-| Fixed | \{n\} |
-| False Positive | \{n\} |
-| Tech Debt | \{n\} |
-| Blocked | \{n\} |
+| Fixed | {n} |
+| False Positive | {n} |
+| Tech Debt | {n} |
+| Blocked | {n} |
 
 ### Commits Created
-- \{sha\} \{message\}
+- {sha} {message}
 
 ### Tech Debt Added
-- \{n\} items added to backlog
+- {n} items added to backlog
 
 ### Artifacts
-- Resolution report: \{TARGET_DIR\}/resolution-summary.md
+- Resolution report: {TARGET_DIR}/resolution-summary.md
 ```
 
 In multi-worktree mode, report results per worktree with aggregate summary.
@@ -349,44 +349,44 @@ Written in Phase 5 (Collect Results) to `\{TARGET_DIR\}/resolution-summary.md`:
 ```markdown
 # Resolution Summary
 
-**Branch**: \{branch\} -> \{base\}
-**Date**: \{timestamp\}
-**Review**: \{TARGET_DIR\}
+**Branch**: {branch} -> {base}
+**Date**: {timestamp}
+**Review**: {TARGET_DIR}
 **Command**: /resolve
 
 ## Decisions Citations
 
-- applies ADR-\{NNN\} — \{batch-id\}, \{issue-id\}
-- avoids PF-\{NNN\} — \{batch-id\}, \{issue-id\}
+- applies ADR-{NNN} — {batch-id}, {issue-id}
+- avoids PF-{NNN} — {batch-id}, {issue-id}
 
 (Omit section if no citations were made)
 
 ## Statistics
 | Metric | Value |
 |--------|-------|
-| Total Issues | \{n\} |
-| Fixed | \{n\} |
-| False Positive | \{n\} |
-| Deferred | \{n\} |
-| Blocked | \{n\} |
+| Total Issues | {n} |
+| Fixed | {n} |
+| False Positive | {n} |
+| Deferred | {n} |
+| Blocked | {n} |
 
 ## Fixed Issues
 | Issue | File:Line | Commit |
 |-------|-----------|--------|
-| \{description\} | \{file\}:\{line\} | \{sha\} |
+| {description} | {file}:{line} | {sha} |
 
 ## False Positives
 | Issue | File:Line | Reasoning |
 |-------|-----------|-----------|
-| \{description\} | \{file\}:\{line\} | \{why\} |
+| {description} | {file}:{line} | {why} |
 
 ## Deferred to Tech Debt
 | Issue | File:Line | Risk Factor |
 |-------|-----------|-------------|
-| \{description\} | \{file\}:\{line\} | \{criteria\} |
+| {description} | {file}:{line} | {criteria} |
 
 ## Blocked
 | Issue | File:Line | Blocker |
 |-------|-----------|---------|
-| \{description\} | \{file\}:\{line\} | \{why\} |
+| {description} | {file}:{line} | {why} |
 ```

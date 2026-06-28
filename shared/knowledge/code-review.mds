@@ -48,8 +48,8 @@ For each reviewable worktree, spawn Git agent:
 ```
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: ensure-pr-ready
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 Validate branch, commit if needed, push, create PR if needed.
 Return: branch, base_branch, branch-slug, PR#"
 ```
@@ -62,7 +62,7 @@ In multi-worktree mode, spawn all pre-flight agents **in a single message** (par
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
-PR_DESCRIPTION=$(gh pr view \{pr_number\} --json body --jq '.body' 2>/dev/null || echo "(none)")
+PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
 If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
@@ -196,19 +196,19 @@ Spawn Reviewer agents **in a single message**. Always run 8 core reviews; condit
 Each Reviewer invocation (all in one message, **NOT background**):
 ```
 Agent(subagent_type="Reviewer", run_in_background=false):
-"Review focusing on \{focus\}. Load the pattern skill for your focus from the Focus Areas table.
+"Review focusing on {focus}. Load the pattern skill for your focus from the Focus Areas table.
 Follow 6-step process from devflow:review-methodology.
-PR: #\{pr_number\}, Base: \{base_branch\}
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-DIFF_COMMAND: git -C \{WORKTREE_PATH\} diff \{DIFF_RANGE\}  (omit -C flag if no WORKTREE_PATH)
-DECISIONS_CONTEXT: \{decisions_context\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
-PR_DESCRIPTION: <pr-description>\{pr_description\}</pr-description>
-PRIOR_RESOLUTIONS: <prior-resolution-summary>\{prior_resolutions\}</prior-resolution-summary>
+PR: #{pr_number}, Base: {base_branch}
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+DIFF_COMMAND: git -C {WORKTREE_PATH} diff {DIFF_RANGE}  (omit -C flag if no WORKTREE_PATH)
+DECISIONS_CONTEXT: {decisions_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+PR_DESCRIPTION: <pr-description>{pr_description}</pr-description>
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 If PRIOR_RESOLUTIONS is not (none), follow Cross-Cycle Awareness in reviewer.md.
 Follow devflow:apply-decisions to scan the index and Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE — feature-specific patterns and anti-patterns inform findings.
-IMPORTANT: Write report to \{worktree_path\}/.devflow/docs/reviews/\{branch-slug\}/\{timestamp\}/\{focus\}.md using Write tool"
+IMPORTANT: Write report to {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/{focus}.md using Write tool"
 ```
 
 In multi-worktree mode, process worktrees **sequentially** (one worktree at a time). Complete Phases 1-4 for each worktree before starting the next. This prevents agent overload — spawning 8-19 reviewers per worktree across multiple worktrees simultaneously overwhelms the system.
@@ -224,8 +224,8 @@ In multi-worktree mode, process worktrees **sequentially** (one worktree at a ti
 ```
 Agent(subagent_type="Git", run_in_background=false):
 "OPERATION: comment-pr
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-Read reviews from \{worktree_path\}/.devflow/docs/reviews/\{branch-slug\}/\{timestamp\}/
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+Read reviews from {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/
 Create inline PR comments for findings with ≥80% confidence only.
 Lower-confidence suggestions (60-79%) go in the summary comment, not as inline comments.
 Deduplicate findings across reviewers, consolidate skipped into summary.
@@ -236,14 +236,14 @@ Check for existing inline comments at same file:line before creating new ones to
 ```
 Agent(subagent_type="Synthesizer", run_in_background=false):
 "Mode: review
-WORKTREE_PATH: \{worktree_path\}  (omit if cwd)
-REVIEW_BASE_DIR: \{worktree_path\}/.devflow/docs/reviews/\{branch-slug\}/\{timestamp\}
-TIMESTAMP: \{timestamp\}
-CYCLE_NUMBER: \{cycle_number\}
-PRIOR_RESOLUTIONS: <prior-resolution-summary>\{prior_resolutions\}</prior-resolution-summary>
+WORKTREE_PATH: {worktree_path}  (omit if cwd)
+REVIEW_BASE_DIR: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}
+TIMESTAMP: {timestamp}
+CYCLE_NUMBER: {cycle_number}
+PRIOR_RESOLUTIONS: <prior-resolution-summary>{prior_resolutions}</prior-resolution-summary>
 Include Convergence Status section in review-summary.md.
 Aggregate findings, determine merge recommendation
-Output: \{worktree_path\}/.devflow/docs/reviews/\{branch-slug\}/\{timestamp\}/review-summary.md"
+Output: {worktree_path}/.devflow/docs/reviews/{branch-slug}/{timestamp}/review-summary.md"
 ```
 
 ### Phase 4: Write Review Head Marker & Report

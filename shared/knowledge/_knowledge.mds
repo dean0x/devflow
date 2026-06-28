@@ -8,7 +8,7 @@ Resolve the worktree root using the `devflow:worktree-support` algorithm (use WO
 Attempt to read `\{worktree\}/.devflow/features/index.md`. Each line follows the format:
 
 ```
-- **\{slug\}** — \{areas\} — \{Use-when description\}
+- **{slug}** — {areas} — {Use-when description}
 ```
 
 If `index.md` exists and contains at least one entry line, use it for relevance matching.
@@ -30,8 +30,8 @@ For each selected entry, read `\{worktree\}/.devflow/features/\{slug\}/KNOWLEDGE
 Concatenate the selected KNOWLEDGE.md files under slug headers:
 
 ```
---- Feature knowledge: \{slug\} ---
-\{full KNOWLEDGE.md content\}
+--- Feature knowledge: {slug} ---
+{full KNOWLEDGE.md content}
 ```
 
 If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set `FEATURE_KNOWLEDGE` to `(none)`.
@@ -65,22 +65,22 @@ Only proceed if **at least one** of these is true:
 Spawn `Agent(subagent_type="Knowledge")` with the following context:
 
 ```
-"WORKTREE_PATH: \{worktree root\}
-FEATURE_SLUG: \{slug derived from primary changed directory, kebab-case\}
-FEATURE_NAME: \{human-readable name\}
-DIRECTORIES: \{list of primary directories touched by this workflow\}
-FILES_CHANGED: \{list of files changed\}
-DECISIONS_CONTEXT: \{DECISIONS_CONTEXT if available, else (none)\}
+"WORKTREE_PATH: {worktree root}
+FEATURE_SLUG: {slug derived from primary changed directory, kebab-case}
+FEATURE_NAME: {human-readable name}
+DIRECTORIES: {list of primary directories touched by this workflow}
+FILES_CHANGED: {list of files changed}
+DECISIONS_CONTEXT: {DECISIONS_CONTEXT if available, else (none)}
 
 Load the devflow:feature-knowledge skill and follow its authoring process.
 
 Write the knowledge base to:
-  \{worktree\}/.devflow/features/\{slug\}/KNOWLEDGE.md
+  {worktree}/.devflow/features/{slug}/KNOWLEDGE.md
 
 Then update the index cache by performing a read-modify-write on:
-  \{worktree\}/.devflow/features/index.md
+  {worktree}/.devflow/features/index.md
 
-Index line format: `- **\{slug\}** — \{areas\} — \{Use-when description\}`
+Index line format: `- **{slug}** — {areas} — {Use-when description}`
 
 If the line for this slug already exists in index.md, replace it. If it does not exist, append it. If index.md does not exist, create it with just this line.
 

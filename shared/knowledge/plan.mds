@@ -80,7 +80,7 @@ Spawn Skimmer agent for codebase context:
 
 ```
 Agent(subagent_type="Skimmer"):
-"Orient in codebase for design planning: \{feature/issues\}
+"Orient in codebase for design planning: {feature/issues}
 Run rskim on source directories (NOT repo root) to identify:
 - Existing patterns and conventions in the affected area
 - File structure and module boundaries
@@ -124,9 +124,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context, `DECI
 
 ```
 Agent(subagent_type="Synthesizer"):
-"Synthesize EXPLORATION outputs for: \{feature/issues\}
+"Synthesize EXPLORATION outputs for: {feature/issues}
 Mode: exploration
-Explorer outputs: \{all 4 outputs\}
+Explorer outputs: {all 4 outputs}
 Combine into: user needs, similar features, constraints, failure modes"
 ```
 
@@ -166,13 +166,13 @@ Each designer receives:
 ```
 Agent(subagent_type="Designer"):
 "Mode: gap-analysis
-Focus: \{completeness|architecture|security|performance|consistency|dependencies\}
-DECISIONS_CONTEXT: \{decisions_context\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
+Focus: {completeness|architecture|security|performance|consistency|dependencies}
+DECISIONS_CONTEXT: {decisions_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Artifacts:
-  Feature/Issues: \{feature description or issue bodies\}
-  Exploration synthesis: \{Phase 4 output\}
-  Codebase context: \{Phase 2 output\}
+  Feature/Issues: {feature description or issue bodies}
+  Exploration synthesis: {Phase 4 output}
+  Codebase context: {Phase 2 output}
 Analyze only your assigned focus area. Follow devflow:apply-decisions for DECISIONS_CONTEXT.
 Cite evidence from provided artifacts."
 ```
@@ -186,9 +186,9 @@ Cite evidence from provided artifacts."
 
 ```
 Agent(subagent_type="Synthesizer"):
-"Synthesize GAP ANALYSIS outputs for: \{feature/issues\}
+"Synthesize GAP ANALYSIS outputs for: {feature/issues}
 Mode: design
-Designer outputs: \{all designer outputs\}
+Designer outputs: {all designer outputs}
 Deduplicate, boost confidence for multi-agent flags, categorize by severity."
 ```
 
@@ -248,9 +248,9 @@ Spawn 4 Explore agents **in a single message**, each with Skimmer context + acce
 
 ```
 Agent(subagent_type="Synthesizer"):
-"Synthesize IMPLEMENTATION EXPLORATION outputs for: \{feature/issues\}
+"Synthesize IMPLEMENTATION EXPLORATION outputs for: {feature/issues}
 Mode: exploration
-Explorer outputs: \{all 4 outputs\}
+Explorer outputs: {all 4 outputs}
 Combine into: patterns to follow, integration points, reusable code, edge cases"
 ```
 
@@ -278,9 +278,9 @@ Implementation steps planner: include explicit gap mitigations (from Phase 6) in
 
 ```
 Agent(subagent_type="Synthesizer"):
-"Synthesize PLANNING outputs for: \{feature/issues\}
+"Synthesize PLANNING outputs for: {feature/issues}
 Mode: planning
-Planner outputs: \{all 3 outputs\}
+Planner outputs: {all 3 outputs}
 Combine into: execution plan with strategy decision, gap mitigations integrated"
 ```
 
@@ -299,9 +299,9 @@ Spawn 1 Designer agent with mode `design-review`:
 Agent(subagent_type="Designer"):
 "Mode: design-review
 Artifacts:
-  Implementation plan: \{Phase 11 planning synthesis\}
-  Implementation exploration: \{Phase 9 exploration synthesis\}
-  Codebase context: \{Phase 2 output\}
+  Implementation plan: {Phase 11 planning synthesis}
+  Implementation exploration: {Phase 9 exploration synthesis}
+  Codebase context: {Phase 2 output}
 Review the full plan for all 6 anti-patterns. Report all findings with evidence."
 ```
 
@@ -387,16 +387,16 @@ Required sections:
 ## PR Description Guidance
 
 ### Problem Being Solved
-\{1-2 sentences: the "why" behind this change\}
+{1-2 sentences: the "why" behind this change}
 
 ### Key Changes to Highlight
-\{bulleted list: user-facing framing of what changed\}
+{bulleted list: user-facing framing of what changed}
 
 ### Breaking Changes
-\{from gap analysis, or "None expected"\}
+{from gap analysis, or "None expected"}
 
 ### Reviewer Focus Areas
-\{areas needing careful review, with reasons\}
+{areas needing careful review, with reasons}
 ```
 
 **Create GitHub issue (optional):**

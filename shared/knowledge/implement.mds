@@ -53,9 +53,9 @@ Spawn Git agent to set up task environment. The Git agent derives the branch nam
 ```
 Agent(subagent_type="Git"):
 "OPERATION: setup-task
-BASE_BRANCH: \{current branch name\}
-ISSUE_INPUT: \{issue number if $ARGUMENTS starts with #, otherwise omit\}
-TASK_DESCRIPTION: \{task description from $ARGUMENTS if not an issue number or .md path, otherwise omit\}
+BASE_BRANCH: {current branch name}
+ISSUE_INPUT: {issue number if $ARGUMENTS starts with #, otherwise omit}
+TASK_DESCRIPTION: {task description from $ARGUMENTS if not an issue number or .md path, otherwise omit}
 Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
@@ -109,16 +109,16 @@ Based on Setup context (plan document, issue body, or conversation context), use
 
 ```
 Agent(subagent_type="Coder"):
-"TASK_ID: \{task-id\}
-TASK_DESCRIPTION: \{description\}
-BASE_BRANCH: \{base branch\}
-EXECUTION_PLAN: \{full plan from setup context\}
-PATTERNS: \{patterns from plan document or empty\}
+"TASK_ID: {task-id}
+TASK_DESCRIPTION: {description}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {full plan from setup context}
+PATTERNS: {patterns from plan document or empty}
 CREATE_PR: true
-DOMAIN: \{detected domain or 'fullstack'\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
-DECISIONS_CONTEXT: \{decisions_context\}
-PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}"
+DOMAIN: {detected domain or 'fullstack'}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
 ---
@@ -130,37 +130,37 @@ Spawn Coders one at a time, passing handoff summaries between phases:
 **Phase 1 Coder:**
 ```
 Agent(subagent_type="Coder"):
-"TASK_ID: \{task-id\}
-TASK_DESCRIPTION: \{phase 1 description\}
-BASE_BRANCH: \{base branch\}
-EXECUTION_PLAN: \{phase 1 steps\}
-PATTERNS: \{patterns from plan document or empty\}
+"TASK_ID: {task-id}
+TASK_DESCRIPTION: {phase 1 description}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {phase 1 steps}
+PATTERNS: {patterns from plan document or empty}
 CREATE_PR: false
-DOMAIN: \{phase 1 domain, e.g., 'backend'\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
-DECISIONS_CONTEXT: \{decisions_context\}
-PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}
+DOMAIN: {phase 1 domain, e.g., 'backend'}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
 HANDOFF_REQUIRED: true
-HANDOFF_FILE: .devflow/docs/handoff-\{branch_slug\}.md"
+HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
 
 **Phase 2+ Coders** (after prior phase completes):
 ```
 Agent(subagent_type="Coder"):
-"TASK_ID: \{task-id\}
-TASK_DESCRIPTION: \{phase N description\}
-BASE_BRANCH: \{base branch\}
-EXECUTION_PLAN: \{phase N steps\}
-PATTERNS: \{patterns from plan document or empty\}
-CREATE_PR: \{true if last phase, false otherwise\}
-DOMAIN: \{phase N domain, e.g., 'frontend'\}
-PRIOR_PHASE_SUMMARY: \{summary from previous Coder\}
-FILES_FROM_PRIOR_PHASE: \{list of files created\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
-DECISIONS_CONTEXT: \{decisions_context\}
-PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}
-HANDOFF_REQUIRED: \{true if not last phase\}
-HANDOFF_FILE: .devflow/docs/handoff-\{branch_slug\}.md"
+"TASK_ID: {task-id}
+TASK_DESCRIPTION: {phase N description}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {phase N steps}
+PATTERNS: {patterns from plan document or empty}
+CREATE_PR: {true if last phase, false otherwise}
+DOMAIN: {phase N domain, e.g., 'frontend'}
+PRIOR_PHASE_SUMMARY: {summary from previous Coder}
+FILES_FROM_PRIOR_PHASE: {list of files created}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+HANDOFF_REQUIRED: {true if not last phase}
+HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
 ```
 
 **Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Coder with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-\{branch_slug\}.md` using the Write tool (survives context compaction). Delete `.devflow/docs/handoff-\{branch_slug\}.md` after the final Coder completes (cleanup).
@@ -173,28 +173,28 @@ Spawn multiple Coders **in a single message**, each with independent subtask:
 
 ```
 Agent(subagent_type="Coder"):  # Coder 1
-"TASK_ID: \{task-id\}-part1
-TASK_DESCRIPTION: \{independent subtask 1\}
-BASE_BRANCH: \{base branch\}
-EXECUTION_PLAN: \{subtask 1 steps\}
-PATTERNS: \{patterns\}
+"TASK_ID: {task-id}-part1
+TASK_DESCRIPTION: {independent subtask 1}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {subtask 1 steps}
+PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: \{subtask 1 domain\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
-DECISIONS_CONTEXT: \{decisions_context\}
-PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}"
+DOMAIN: {subtask 1 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
-"TASK_ID: \{task-id\}-part2
-TASK_DESCRIPTION: \{independent subtask 2\}
-BASE_BRANCH: \{base branch\}
-EXECUTION_PLAN: \{subtask 2 steps\}
-PATTERNS: \{patterns\}
+"TASK_ID: {task-id}-part2
+TASK_DESCRIPTION: {independent subtask 2}
+BASE_BRANCH: {base branch}
+EXECUTION_PLAN: {subtask 2 steps}
+PATTERNS: {patterns}
 CREATE_PR: false
-DOMAIN: \{subtask 2 domain\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
-DECISIONS_CONTEXT: \{decisions_context\}
-PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}"
+DOMAIN: {subtask 2 domain}
+FEATURE_KNOWLEDGE: {feature_knowledge}
+DECISIONS_CONTEXT: {decisions_context}
+PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODERS):
@@ -212,7 +212,7 @@ After Coder completes, spawn Validator to verify correctness:
 
 ```
 Agent(subagent_type="Validator", model="haiku"):
-"FILES_CHANGED: \{list of files from Coder output\}
+"FILES_CHANGED: {list of files from Coder output}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
@@ -246,8 +246,8 @@ After validation passes, spawn Simplifier to polish the code:
 ```
 Agent(subagent_type="Simplifier"):
 "Simplify recently implemented code
-Task: \{task description\}
-FILES_CHANGED: \{list of files from Coder output\}
+Task: {task description}
+FILES_CHANGED: {list of files from Coder output}
 Focus on code modified by Coder, apply project standards, enhance clarity"
 ```
 
@@ -260,10 +260,10 @@ After Simplifier completes, spawn Scrutinizer as final quality gate:
 
 ```
 Agent(subagent_type="Scrutinizer"):
-"TASK_DESCRIPTION: \{task description\}
-FILES_CHANGED: \{list of files from Coder output\}
-DECISIONS_CONTEXT: \{decisions_context\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
+"TASK_DESCRIPTION: {task description}
+FILES_CHANGED: {list of files from Coder output}
+DECISIONS_CONTEXT: {decisions_context}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
@@ -278,7 +278,7 @@ If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
 
 ```
 Agent(subagent_type="Validator", model="haiku"):
-"FILES_CHANGED: \{files modified by Scrutinizer\}
+"FILES_CHANGED: {files modified by Scrutinizer}
 VALIDATION_SCOPE: changed-only
 Verify Scrutinizer's fixes didn't break anything."
 ```
@@ -296,11 +296,11 @@ After Scrutinizer passes (and re-validation if needed), spawn Evaluator to valid
 
 ```
 Agent(subagent_type="Evaluator"):
-"ORIGINAL_REQUEST: \{task description or issue content\}
-EXECUTION_PLAN: \{execution plan from Phase 1\}
-FILES_CHANGED: \{list of files from Coder output\}
-ACCEPTANCE_CRITERIA: \{extracted criteria if available\}
-FEATURE_KNOWLEDGE: \{feature_knowledge\}
+"ORIGINAL_REQUEST: {task description or issue content}
+EXECUTION_PLAN: {execution plan from Phase 1}
+FILES_CHANGED: {list of files from Coder output}
+ACCEPTANCE_CRITERIA: {extracted criteria if available}
+FEATURE_KNOWLEDGE: {feature_knowledge}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
@@ -339,10 +339,10 @@ After Evaluator passes, spawn Tester for scenario-based acceptance testing:
 
 ```
 Agent(subagent_type="Tester"):
-"ORIGINAL_REQUEST: \{task description or issue content\}
-EXECUTION_PLAN: \{execution plan from Phase 1\}
-FILES_CHANGED: \{list of files from Coder output\}
-ACCEPTANCE_CRITERIA: \{extracted criteria if available\}
+"ORIGINAL_REQUEST: {task description or issue content}
+EXECUTION_PLAN: {execution plan from Phase 1}
+FILES_CHANGED: {list of files from Coder output}
+ACCEPTANCE_CRITERIA: {extracted criteria if available}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
 ```
 

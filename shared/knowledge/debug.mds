@@ -50,7 +50,7 @@ If `$ARGUMENTS` starts with `#`, fetch the GitHub issue:
 ```
 Agent(subagent_type="Git"):
 "OPERATION: fetch-issue
-ISSUE: \{issue number\}
+ISSUE: {issue number}
 Return issue title, body, labels, and any linked error logs."
 ```
 
@@ -68,10 +68,10 @@ Spawn one Explore agent per hypothesis in a **single message** (parallel executi
 
 ```
 Agent(subagent_type="Explore"):
-"Investigate this bug: \{bug_description\}
+"Investigate this bug: {bug_description}
 
-Hypothesis: \{hypothesis A description\}
-Focus area: \{specific code area, mechanism, or condition\}
+Hypothesis: {hypothesis A description}
+Focus area: {specific code area, mechanism, or condition}
 
 Steps:
 1. Read relevant code files in your focus area
@@ -80,25 +80,25 @@ Steps:
 4. Collect evidence AGAINST this hypothesis (with file:line references)
 
 Return a structured report:
-- Hypothesis: \{restate\}
+- Hypothesis: {restate}
 - Status: CONFIRMED / DISPROVED / PARTIAL
 - Evidence FOR: [list with file:line refs]
 - Evidence AGAINST: [list with file:line refs]
-- Key finding: \{one-sentence summary\}"
+- Key finding: {one-sentence summary}"
 
 Agent(subagent_type="Explore"):
-"Investigate this bug: \{bug_description\}
+"Investigate this bug: {bug_description}
 
-Hypothesis: \{hypothesis B description\}
-Focus area: \{specific code area, mechanism, or condition\}
+Hypothesis: {hypothesis B description}
+Focus area: {specific code area, mechanism, or condition}
 
 [same steps and return format]"
 
 Agent(subagent_type="Explore"):
-"Investigate this bug: \{bug_description\}
+"Investigate this bug: {bug_description}
 
-Hypothesis: \{hypothesis C description\}
-Focus area: \{specific code area, mechanism, or condition\}
+Hypothesis: {hypothesis C description}
+Focus area: {specific code area, mechanism, or condition}
 
 [same steps and return format]"
 
@@ -127,7 +127,7 @@ Once all investigators return, spawn a Synthesizer agent to aggregate findings:
 Agent(subagent_type="Synthesizer"):
 "You are a root cause analyst. Synthesize these investigation reports:
 
-\{paste all investigator reports\}
+{paste all investigator reports}
 
 Instructions:
 1. Compare evidence across all hypotheses
@@ -144,28 +144,28 @@ Instructions:
 Produce the final report:
 
 ```markdown
-## Root Cause Analysis: \{bug description\}
+## Root Cause Analysis: {bug description}
 
 ### Root Cause
-\{Description of the root cause supported by evidence\}
-\{Key evidence with file:line references\}
+{Description of the root cause supported by evidence}
+{Key evidence with file:line references}
 
 ### Investigation Summary
 
 | Hypothesis | Status | Key Evidence |
 |-----------|--------|-------------|
-| A: \{description\} | CONFIRMED/DISPROVED/PARTIAL | \{file:line + summary\} |
-| B: \{description\} | CONFIRMED/DISPROVED/PARTIAL | \{file:line + summary\} |
-| C: \{description\} | CONFIRMED/DISPROVED/PARTIAL | \{file:line + summary\} |
+| A: {description} | CONFIRMED/DISPROVED/PARTIAL | {file:line + summary} |
+| B: {description} | CONFIRMED/DISPROVED/PARTIAL | {file:line + summary} |
+| C: {description} | CONFIRMED/DISPROVED/PARTIAL | {file:line + summary} |
 
 ### Key Findings
-\{2-3 most important discoveries across all investigators\}
+{2-3 most important discoveries across all investigators}
 
 ### Recommended Fix
-\{Concrete action items with file references\}
+{Concrete action items with file references}
 
 ### Confidence Level
-\{HIGH/MEDIUM/LOW based on evidence strength and investigator agreement\}
+{HIGH/MEDIUM/LOW based on evidence strength and investigator agreement}
 ```
 
 ### Phase 7: Offer Fix
