@@ -8,6 +8,17 @@ dist/
 # Generated plugin commands (compiled from shared/recipes/*.mds at build time)
 plugins/devflow-dynamic/commands/
 
+# Generated plugin commands (compiled from shared/knowledge/*.mds at build time)
+plugins/devflow-implement/commands/implement.md
+plugins/devflow-plan/commands/plan.md
+plugins/devflow-resolve/commands/resolve.md
+plugins/devflow-code-review/commands/code-review.md
+plugins/devflow-self-review/commands/self-review.md
+plugins/devflow-research/commands/research.md
+plugins/devflow-bug-analysis/commands/bug-analysis.md
+plugins/devflow-explore/commands/explore.md
+plugins/devflow-debug/commands/debug.md
+
 # Generated plugin skills (copied from shared/skills/ at build time)
 plugins/*/skills/
 

@@ -1,6 +1,7 @@
 ---
 description: Execute a single task through implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
 ---
+@import { knowledge_load, knowledge_writeback } from "./_knowledge.mds"
 
 # Implement Command
 
@@ -33,7 +34,7 @@ When the user explicitly asks to re-validate, re-check, or re-run quality gates 
 
 1. **Branch safety check**: If on a protected branch (main, master, develop, etc.), run Phase 1 to create/switch to a work branch. If already on a work branch, skip Phase 1.
 2. **Skip Phase 2** — no Coder needed, user already made changes.
-3. **Detect FILES_CHANGED**: `git diff --name-only {base_branch}...HEAD`
+3. **Detect FILES_CHANGED**: `git diff --name-only \{base_branch\}...HEAD`
 4. **Run Phases 3-8** — full quality gate pipeline on detected changes.
 5. **Proceed to Phase 10** (Create PR) / **Phase 11** (Report).
 
@@ -41,7 +42,7 @@ If the user prompt does NOT match re-validation, proceed with the full pipeline 
 
 ### Phase 1: Setup
 
-**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, STALE_FEATURE_KNOWLEDGE_SLUGS, PR_DESCRIPTION_GUIDANCE
+**Produces:** TASK_ID, BASE_BRANCH, EXECUTION_PLAN, DECISIONS_CONTEXT, FEATURE_KNOWLEDGE, PR_DESCRIPTION_GUIDANCE
 
 **Load Companion Skills** — Load via Skill tool: `devflow:test-driven-development`, `devflow:patterns`, `devflow:dependency-research`. If a skill fails to load, continue without it.
 
@@ -52,9 +53,9 @@ Spawn Git agent to set up task environment. The Git agent derives the branch nam
 ```
 Agent(subagent_type="Git"):
 "OPERATION: setup-task
-BASE_BRANCH: {current branch name}
-ISSUE_INPUT: {issue number if $ARGUMENTS starts with #, otherwise omit}
-TASK_DESCRIPTION: {task description from $ARGUMENTS if not an issue number or .md path, otherwise omit}
+BASE_BRANCH: \{current branch name\}
+ISSUE_INPUT: \{issue number if $ARGUMENTS starts with #, otherwise omit\}
+TASK_DESCRIPTION: \{task description from $ARGUMENTS if not an issue number or .md path, otherwise omit\}
 Derive branch name from issue or description, create feature branch, and fetch issue if specified.
 Return the branch setup summary."
 ```
@@ -83,12 +84,7 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 ```
 Pass to Coder (Phase 2) and Scrutinizer (Phase 5).
 
-**Load Feature Knowledge:**
-1. Read `.devflow/features/index.json` if it exists
-2. Based on task description and file targets, identify relevant feature knowledge
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
-4. Set `FEATURE_KNOWLEDGE` (or `(none)` if no feature knowledge exists or none is relevant)
-5. Collect slugs where staleness check returned stale → `STALE_FEATURE_KNOWLEDGE_SLUGS`.
+{knowledge_load()}
 
 ### Phase 2: Implement
 
@@ -113,16 +109,16 @@ Based on Setup context (plan document, issue body, or conversation context), use
 
 ```
 Agent(subagent_type="Coder"):
-"TASK_ID: {task-id}
-TASK_DESCRIPTION: {description}
-BASE_BRANCH: {base branch}
-EXECUTION_PLAN: {full plan from setup context}
-PATTERNS: {patterns from plan document or empty}
+"TASK_ID: \{task-id\}
+TASK_DESCRIPTION: \{description\}
+BASE_BRANCH: \{base branch\}
+EXECUTION_PLAN: \{full plan from setup context\}
+PATTERNS: \{patterns from plan document or empty\}
 CREATE_PR: true
-DOMAIN: {detected domain or 'fullstack'}
-FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
+DOMAIN: \{detected domain or 'fullstack'\}
+FEATURE_KNOWLEDGE: \{feature_knowledge\}
+DECISIONS_CONTEXT: \{decisions_context\}
+PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}"
 ```
 
 ---
@@ -134,40 +130,40 @@ Spawn Coders one at a time, passing handoff summaries between phases:
 **Phase 1 Coder:**
 ```
 Agent(subagent_type="Coder"):
-"TASK_ID: {task-id}
-TASK_DESCRIPTION: {phase 1 description}
-BASE_BRANCH: {base branch}
-EXECUTION_PLAN: {phase 1 steps}
-PATTERNS: {patterns from plan document or empty}
+"TASK_ID: \{task-id\}
+TASK_DESCRIPTION: \{phase 1 description\}
+BASE_BRANCH: \{base branch\}
+EXECUTION_PLAN: \{phase 1 steps\}
+PATTERNS: \{patterns from plan document or empty\}
 CREATE_PR: false
-DOMAIN: {phase 1 domain, e.g., 'backend'}
-FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
+DOMAIN: \{phase 1 domain, e.g., 'backend'\}
+FEATURE_KNOWLEDGE: \{feature_knowledge\}
+DECISIONS_CONTEXT: \{decisions_context\}
+PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}
 HANDOFF_REQUIRED: true
-HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
+HANDOFF_FILE: .devflow/docs/handoff-\{branch_slug\}.md"
 ```
 
 **Phase 2+ Coders** (after prior phase completes):
 ```
 Agent(subagent_type="Coder"):
-"TASK_ID: {task-id}
-TASK_DESCRIPTION: {phase N description}
-BASE_BRANCH: {base branch}
-EXECUTION_PLAN: {phase N steps}
-PATTERNS: {patterns from plan document or empty}
-CREATE_PR: {true if last phase, false otherwise}
-DOMAIN: {phase N domain, e.g., 'frontend'}
-PRIOR_PHASE_SUMMARY: {summary from previous Coder}
-FILES_FROM_PRIOR_PHASE: {list of files created}
-FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}
-HANDOFF_REQUIRED: {true if not last phase}
-HANDOFF_FILE: .devflow/docs/handoff-{branch_slug}.md"
+"TASK_ID: \{task-id\}
+TASK_DESCRIPTION: \{phase N description\}
+BASE_BRANCH: \{base branch\}
+EXECUTION_PLAN: \{phase N steps\}
+PATTERNS: \{patterns from plan document or empty\}
+CREATE_PR: \{true if last phase, false otherwise\}
+DOMAIN: \{phase N domain, e.g., 'frontend'\}
+PRIOR_PHASE_SUMMARY: \{summary from previous Coder\}
+FILES_FROM_PRIOR_PHASE: \{list of files created\}
+FEATURE_KNOWLEDGE: \{feature_knowledge\}
+DECISIONS_CONTEXT: \{decisions_context\}
+PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}
+HANDOFF_REQUIRED: \{true if not last phase\}
+HANDOFF_FILE: .devflow/docs/handoff-\{branch_slug\}.md"
 ```
 
-**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Coder with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-{branch_slug}.md` using the Write tool (survives context compaction). Delete `.devflow/docs/handoff-{branch_slug}.md` after the final Coder completes (cleanup).
+**Handoff Protocol**: Each sequential Coder receives the prior Coder's implementation summary via PRIOR_PHASE_SUMMARY and FILES_FROM_PRIOR_PHASE. The Coder's built-in branch orientation step handles git log scanning, file reading, and pattern discovery automatically. After each Coder with HANDOFF_REQUIRED=true completes, write its phase summary to `.devflow/docs/handoff-\{branch_slug\}.md` using the Write tool (survives context compaction). Delete `.devflow/docs/handoff-\{branch_slug\}.md` after the final Coder completes (cleanup).
 
 ---
 
@@ -177,28 +173,28 @@ Spawn multiple Coders **in a single message**, each with independent subtask:
 
 ```
 Agent(subagent_type="Coder"):  # Coder 1
-"TASK_ID: {task-id}-part1
-TASK_DESCRIPTION: {independent subtask 1}
-BASE_BRANCH: {base branch}
-EXECUTION_PLAN: {subtask 1 steps}
-PATTERNS: {patterns}
+"TASK_ID: \{task-id\}-part1
+TASK_DESCRIPTION: \{independent subtask 1\}
+BASE_BRANCH: \{base branch\}
+EXECUTION_PLAN: \{subtask 1 steps\}
+PATTERNS: \{patterns\}
 CREATE_PR: false
-DOMAIN: {subtask 1 domain}
-FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
+DOMAIN: \{subtask 1 domain\}
+FEATURE_KNOWLEDGE: \{feature_knowledge\}
+DECISIONS_CONTEXT: \{decisions_context\}
+PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}"
 
 Agent(subagent_type="Coder"):  # Coder 2 (same message)
-"TASK_ID: {task-id}-part2
-TASK_DESCRIPTION: {independent subtask 2}
-BASE_BRANCH: {base branch}
-EXECUTION_PLAN: {subtask 2 steps}
-PATTERNS: {patterns}
+"TASK_ID: \{task-id\}-part2
+TASK_DESCRIPTION: \{independent subtask 2\}
+BASE_BRANCH: \{base branch\}
+EXECUTION_PLAN: \{subtask 2 steps\}
+PATTERNS: \{patterns\}
 CREATE_PR: false
-DOMAIN: {subtask 2 domain}
-FEATURE_KNOWLEDGE: {feature_knowledge}
-DECISIONS_CONTEXT: {decisions_context}
-PR_DESCRIPTION_GUIDANCE: {pr_description_guidance}"
+DOMAIN: \{subtask 2 domain\}
+FEATURE_KNOWLEDGE: \{feature_knowledge\}
+DECISIONS_CONTEXT: \{decisions_context\}
+PR_DESCRIPTION_GUIDANCE: \{pr_description_guidance\}"
 ```
 
 **Independence criteria** (all must be true for PARALLEL_CODERS):
@@ -216,7 +212,7 @@ After Coder completes, spawn Validator to verify correctness:
 
 ```
 Agent(subagent_type="Validator", model="haiku"):
-"FILES_CHANGED: {list of files from Coder output}
+"FILES_CHANGED: \{list of files from Coder output\}
 VALIDATION_SCOPE: full
 Run build, typecheck, lint, test. Report pass/fail with failure details."
 ```
@@ -228,10 +224,10 @@ Run build, typecheck, lint, test. Report pass/fail with failure details."
    - Spawn Coder with fix context:
    ```
    Agent(subagent_type="Coder"):
-   "TASK_ID: {task-id}
+   "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix validation failures
    OPERATION: validation-fix
-   VALIDATION_FAILURES: {parsed failures from Validator}
+   VALIDATION_FAILURES: \{parsed failures from Validator\}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false"
    ```
@@ -250,8 +246,8 @@ After validation passes, spawn Simplifier to polish the code:
 ```
 Agent(subagent_type="Simplifier"):
 "Simplify recently implemented code
-Task: {task description}
-FILES_CHANGED: {list of files from Coder output}
+Task: \{task description\}
+FILES_CHANGED: \{list of files from Coder output\}
 Focus on code modified by Coder, apply project standards, enhance clarity"
 ```
 
@@ -264,10 +260,10 @@ After Simplifier completes, spawn Scrutinizer as final quality gate:
 
 ```
 Agent(subagent_type="Scrutinizer"):
-"TASK_DESCRIPTION: {task description}
-FILES_CHANGED: {list of files from Coder output}
-DECISIONS_CONTEXT: {decisions_context}
-FEATURE_KNOWLEDGE: {feature_knowledge}
+"TASK_DESCRIPTION: \{task description\}
+FILES_CHANGED: \{list of files from Coder output\}
+DECISIONS_CONTEXT: \{decisions_context\}
+FEATURE_KNOWLEDGE: \{feature_knowledge\}
 Evaluate 9 pillars, fix P0/P1 issues, report status"
 ```
 
@@ -282,7 +278,7 @@ If Scrutinizer made code changes (status: FIXED), spawn Validator to verify:
 
 ```
 Agent(subagent_type="Validator", model="haiku"):
-"FILES_CHANGED: {files modified by Scrutinizer}
+"FILES_CHANGED: \{files modified by Scrutinizer\}
 VALIDATION_SCOPE: changed-only
 Verify Scrutinizer's fixes didn't break anything."
 ```
@@ -300,11 +296,11 @@ After Scrutinizer passes (and re-validation if needed), spawn Evaluator to valid
 
 ```
 Agent(subagent_type="Evaluator"):
-"ORIGINAL_REQUEST: {task description or issue content}
-EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Coder output}
-ACCEPTANCE_CRITERIA: {extracted criteria if available}
-FEATURE_KNOWLEDGE: {feature_knowledge}
+"ORIGINAL_REQUEST: \{task description or issue content\}
+EXECUTION_PLAN: \{execution plan from Phase 1\}
+FILES_CHANGED: \{list of files from Coder output\}
+ACCEPTANCE_CRITERIA: \{extracted criteria if available\}
+FEATURE_KNOWLEDGE: \{feature_knowledge\}
 Validate alignment with request and plan. Report ALIGNED or MISALIGNED with details."
 ```
 
@@ -317,17 +313,17 @@ Validate alignment with request and plan. Report ALIGNED or MISALIGNED with deta
    - Spawn Coder to fix misalignments:
    ```
    Agent(subagent_type="Coder"):
-   "TASK_ID: {task-id}
+   "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix alignment issues
    OPERATION: alignment-fix
-   MISALIGNMENTS: {structured misalignments from Evaluator}
+   MISALIGNMENTS: \{structured misalignments from Evaluator\}
    SCOPE: Fix only the listed misalignments, no other changes
    CREATE_PR: false"
    ```
    - Spawn Validator to verify fix didn't break tests:
    ```
    Agent(subagent_type="Validator", model="haiku"):
-   "FILES_CHANGED: {files modified by fix Coder}
+   "FILES_CHANGED: \{files modified by fix Coder\}
    VALIDATION_SCOPE: changed-only"
    ```
    - If Validator FAIL: Report to user
@@ -343,10 +339,10 @@ After Evaluator passes, spawn Tester for scenario-based acceptance testing:
 
 ```
 Agent(subagent_type="Tester"):
-"ORIGINAL_REQUEST: {task description or issue content}
-EXECUTION_PLAN: {execution plan from Phase 1}
-FILES_CHANGED: {list of files from Coder output}
-ACCEPTANCE_CRITERIA: {extracted criteria if available}
+"ORIGINAL_REQUEST: \{task description or issue content\}
+EXECUTION_PLAN: \{execution plan from Phase 1\}
+FILES_CHANGED: \{list of files from Coder output\}
+ACCEPTANCE_CRITERIA: \{extracted criteria if available\}
 Design and execute scenario-based acceptance tests. Report PASS or FAIL with evidence."
 ```
 
@@ -359,17 +355,17 @@ Design and execute scenario-based acceptance tests. Report PASS or FAIL with evi
    - Spawn Coder to fix QA failures:
    ```
    Agent(subagent_type="Coder"):
-   "TASK_ID: {task-id}
+   "TASK_ID: \{task-id\}
    TASK_DESCRIPTION: Fix QA test failures
    OPERATION: qa-fix
-   QA_FAILURES: {structured failures from Tester}
+   QA_FAILURES: \{structured failures from Tester\}
    SCOPE: Fix only the listed failures, no other changes
    CREATE_PR: false"
    ```
    - Spawn Validator to verify fix didn't break tests:
    ```
    Agent(subagent_type="Validator", model="haiku"):
-   "FILES_CHANGED: {files modified by fix Coder}
+   "FILES_CHANGED: \{files modified by fix Coder\}
    VALIDATION_SCOPE: changed-only"
    ```
    - If Validator FAIL: Report to user
@@ -407,75 +403,9 @@ If `PR_DESCRIPTION_GUIDANCE` is not `(none)`, use it to compose the PR body (see
 
 **Requires:** VALIDATION_RESULT, ALIGNMENT_RESULT, QA_RESULT, PR_URL
 
-Compute overlapping feature knowledge:
-```bash
-OVERLAPPING_SLUGS=$(node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs find-overlapping "{worktree}" {files_changed...} 2>/dev/null)
-```
-Parse the JSON array output. Pass `OVERLAPPING_SLUGS` to Phase 12.
-
 Display completion summary with phase status, PR info, and next steps.
 
-### Phase 12: Feature Knowledge Generation (Conditional)
-
-**Requires:** FILES_CHANGED, STALE_FEATURE_KNOWLEDGE_SLUGS, OVERLAPPING_SLUGS, DECISIONS_CONTEXT
-**Produces:** Updated `.devflow/features/index.json` (or skipped)
-
-If `.devflow/features/.disabled` exists, skip entirely.
-
-**New feature knowledge creation**: If FILES_CHANGED touch a feature area that does NOT have matching feature knowledge in `.devflow/features/index.json`:
-
-**Slug derivation**: Derive the slug from the primary directory name using kebab-case. Examples: `src/cli/commands/` → `cli-commands`, `src/payments/stripe/` → `payments-stripe`, `scripts/hooks/` → `hooks`. Strip common prefixes like `src/` and `lib/`. The slug must match `^[a-z0-9][a-z0-9-]*$`.
-
-1. Identify the feature area slug and human-readable name from the implemented directories
-2. Spawn Agent(subagent_type="Knowledge"):
-   ```
-   "FEATURE_SLUG: {slug}
-   FEATURE_NAME: {name}
-   FILES_CHANGED: {files_changed list}
-   DIRECTORIES: {directory prefixes from FILES_CHANGED}
-   DECISIONS_CONTEXT: {from Phase 1}
-
-   Load the devflow:feature-knowledge skill and follow its 4-phase process exactly.
-   Read the FILES_CHANGED to understand the implemented code.
-   Read .devflow/features/index.json to see existing feature knowledge for cross-referencing."
-   ```
-3. Read result file (`.devflow/features/{slug}/.create-result.json`), then run:
-   ```bash
-   node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
-     --slug="{slug}" --name="{name}" \
-     --directories='["{dir1}", "{dir2}"]' \
-     --referencedFiles='{referencedFiles_json_from_result}' \
-     --description="{description_from_result}" \
-     --createdBy="implement" 2>/dev/null
-   ```
-   Clean up: `rm -f .devflow/features/{slug}/.create-result.json`
-   If the result file does not exist (agent failed to write it), use empty defaults:
-   `referencedFiles='[]'`, `description=""`.
-4. Report: "Created feature knowledge: {slug}"
-
-Skip if all touched areas already have matching feature knowledge.
-
-**Refresh stale feature knowledge**: Combine STALE_FEATURE_KNOWLEDGE_SLUGS (from Phase 1) and OVERLAPPING_SLUGS (from Phase 11), deduplicate. For each slug, refresh:
-
-1. Read `.devflow/features/{slug}/KNOWLEDGE.md` and index entry
-2. Spawn Agent(subagent_type="Knowledge"):
-   ```
-   "FEATURE_SLUG: {slug}
-   FEATURE_NAME: {name from index}
-   DIRECTORIES: {directories from index}
-   EXISTING_FEATURE_KNOWLEDGE: {content of .devflow/features/{slug}/KNOWLEDGE.md}
-   CHANGED_FILES: {FILES_CHANGED that overlap this feature knowledge}
-   DECISIONS_CONTEXT: {from Phase 1}
-
-   Load the devflow:feature-knowledge skill. This is a REFRESH, not a new creation.
-   Read the CHANGED_FILES to understand what changed, then update the EXISTING_FEATURE_KNOWLEDGE.
-   Maintain quality standards from the skill. Do NOT regenerate from scratch.
-   Write updated feature knowledge to .devflow/features/{slug}/KNOWLEDGE.md
-   Write .devflow/features/{slug}/.refresh-result.json with referencedFiles and description."
-   ```
-3. Read result file, update index (same CLI call as step 3 above), clean up the result file.
-
-**Failure handling**: Non-blocking. If Knowledge agent crashes, log failure and report results normally.
+{knowledge_writeback()}
 
 ## Architecture
 
@@ -525,8 +455,8 @@ Skip if all touched areas already have matching feature knowledge.
 │
 ├─ Phase 11: Report
 │
-└─ Phase 12: Feature Knowledge Generation (Conditional)
-   └─ Knowledge agent (if new/stale feature area)
+└─ Feature Knowledge Write-Back (Conditional)
+   └─ Knowledge agent (if documented area changed AND knowledge enabled)
 ```
 
 ## Principles

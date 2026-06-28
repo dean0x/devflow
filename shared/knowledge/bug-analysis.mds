@@ -1,6 +1,7 @@
 ---
 description: Proactive bug finding with static and semantic analysis — hunts real bugs in changed code before merge
 ---
+@import { knowledge_load } from "./_knowledge.mds"
 
 # Bug Analysis Command
 
@@ -33,7 +34,7 @@ Return: branch, base_branch, branch-slug, PR#"
 
 **Fetch PR body** (after extracting `pr_number`):
 ```bash
-PR_DESCRIPTION=$(gh pr view {pr_number} --json body --jq '.body' 2>/dev/null || echo "(none)")
+PR_DESCRIPTION=$(gh pr view \{pr_number\} --json body --jq '.body' 2>/dev/null || echo "(none)")
 ```
 If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 
@@ -46,16 +47,16 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Produces:** DIFF_RANGE, ANALYSIS_DIR
 **Requires:** BRANCH_INFO
 
-1. Check `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`:
+1. Check `.devflow/docs/bug-analysis/\{branch-slug\}/.last-analysis-head`:
    - **If exists AND `--full` NOT set:**
      - Read the SHA from the file
-     - Verify reachable: `git cat-file -t {sha}` — if exit code non-zero (rebase invalidated SHA), fall through to full
+     - Verify reachable: `git cat-file -t \{sha\}` — if exit code non-zero (rebase invalidated SHA), fall through to full
      - If SHA == current HEAD → "No new commits since last analysis. Use --full for a full re-analysis." Stop.
-     - Set `DIFF_RANGE` to `{sha}...HEAD`
+     - Set `DIFF_RANGE` to `\{sha\}...HEAD`
    - **If not exists, unreachable SHA, or `--full`:**
-     - Set `DIFF_RANGE` to `{base_branch}...HEAD`
+     - Set `DIFF_RANGE` to `\{base_branch\}...HEAD`
 2. Generate timestamp: `YYYY-MM-DD_HHMM`. If directory already exists (same-minute collision), append seconds (`YYYY-MM-DD_HHMMSS`).
-3. Create timestamped analysis directory: `mkdir -p .devflow/docs/bug-analysis/{branch-slug}/{timestamp}/`
+3. Create timestamped analysis directory: `mkdir -p .devflow/docs/bug-analysis/\{branch-slug\}/\{timestamp\}/`
 4. Set `ANALYSIS_DIR` to that path.
 
 #### Step 2b: Check Changed Files
@@ -63,7 +64,7 @@ If `pr_number` is absent or the command fails, set `PR_DESCRIPTION` to `(none)`.
 **Requires:** DIFF_RANGE
 
 ```bash
-CHANGED_FILES=$(git diff --name-only {DIFF_RANGE})
+CHANGED_FILES=$(git diff --name-only \{DIFF_RANGE\})
 ```
 
 Store result as `CHANGED_FILES` — used throughout Steps 2d and Phase 4 to avoid repeated git invocations and ensure consistency.
@@ -140,9 +141,9 @@ Parse `CODEQL_SARIF` → extract findings. If database creation fails, `CODEQL_E
 
 | Tool | File:Line | CWE | Severity | Title | Description |
 |------|-----------|-----|----------|-------|-------------|
-| {tool} | {file}:{line} | {CWE or —} | {CRITICAL/HIGH/MEDIUM/LOW} | {title} | {description truncated to 200 chars} |
+| \{tool\} | \{file\}:\{line\} | \{CWE or —\} | \{CRITICAL/HIGH/MEDIUM/LOW\} | \{title\} | \{description truncated to 200 chars\} |
 
-Write ALL raw findings to `{ANALYSIS_DIR}/static-findings.md`. Set `STATIC_FINDINGS` to the top-50 table.
+Write ALL raw findings to `\{ANALYSIS_DIR\}/static-findings.md`. Set `STATIC_FINDINGS` to the top-50 table.
 
 If no tool produced findings: set `STATIC_FINDINGS` to `(none)`.
 
@@ -158,10 +159,7 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 
 #### Feature Knowledge
 
-1. Read `.devflow/features/index.json` if it exists
-2. Match changed files from Phase 2 against feature knowledge entries (`directories` and `referencedFiles`)
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "." {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`
-4. Concatenate as `FEATURE_KNOWLEDGE` (or `(none)`)
+{knowledge_load()}
 
 #### Plan Artifact
 
@@ -195,19 +193,19 @@ Spawn ALL active BugAnalyzer agents **in a single message** (parallel, NOT backg
 For each active focus, spawn:
 ```
 Agent(subagent_type="BugAnalyzer", run_in_background=false):
-"Analyze focusing on {focus}.
-FOCUS: {focus}
-DIFF_COMMAND: git diff {DIFF_RANGE}
-ACCEPTANCE_RULES: {ACCEPTANCE_RULES filtered to this focus type, or (none)}
-PLAN_CONTEXT: {PLAN_CONTEXT}
-STATIC_FINDINGS: {STATIC_FINDINGS if focus == security, else (none)}
-DECISIONS_CONTEXT: {DECISIONS_CONTEXT}
-FEATURE_KNOWLEDGE: {FEATURE_KNOWLEDGE}
-PR_DESCRIPTION: <pr-description>{PR_DESCRIPTION}</pr-description>
-OUTPUT_PATH: {ANALYSIS_DIR}/{focus}.md
+"Analyze focusing on \{focus\}.
+FOCUS: \{focus\}
+DIFF_COMMAND: git diff \{DIFF_RANGE\}
+ACCEPTANCE_RULES: \{ACCEPTANCE_RULES filtered to this focus type, or (none)\}
+PLAN_CONTEXT: \{PLAN_CONTEXT\}
+STATIC_FINDINGS: \{STATIC_FINDINGS if focus == security, else (none)\}
+DECISIONS_CONTEXT: \{DECISIONS_CONTEXT\}
+FEATURE_KNOWLEDGE: \{FEATURE_KNOWLEDGE\}
+PR_DESCRIPTION: <pr-description>\{PR_DESCRIPTION\}</pr-description>
+OUTPUT_PATH: \{ANALYSIS_DIR\}/\{focus\}.md
 Follow devflow:apply-decisions to Read full ADR/PF bodies on demand.
 Follow devflow:apply-feature-knowledge for FEATURE_KNOWLEDGE.
-IMPORTANT: Write report to {ANALYSIS_DIR}/{focus}.md using Write tool"
+IMPORTANT: Write report to \{ANALYSIS_DIR\}/\{focus\}.md using Write tool"
 ```
 
 Notes:
@@ -225,46 +223,46 @@ Spawn Synthesizer:
 ```
 Agent(subagent_type="Synthesizer", run_in_background=false):
 "Mode: bug-analysis
-ANALYSIS_BASE_DIR: {ANALYSIS_DIR}
-BRANCH: {branch} -> {base_branch}
-TIMESTAMP: {timestamp}
-Output: {ANALYSIS_DIR}/bug-analysis-summary.md"
+ANALYSIS_BASE_DIR: \{ANALYSIS_DIR\}
+BRANCH: \{branch\} -> \{base_branch\}
+TIMESTAMP: \{timestamp\}
+Output: \{ANALYSIS_DIR\}/bug-analysis-summary.md"
 ```
 
 ### Phase 7: Finalize
 
 **Requires:** BRANCH_INFO, ANALYSIS_DIR
 
-1. Write current HEAD SHA to `.devflow/docs/bug-analysis/{branch-slug}/.last-analysis-head`
+1. Write current HEAD SHA to `.devflow/docs/bug-analysis/\{branch-slug\}/.last-analysis-head`
 2. Report to user:
 
 ```
 ## Bug Analysis Complete
 
-**Branch**: {branch} -> {base_branch}
-**Analysis**: {ANALYSIS_DIR}
+**Branch**: \{branch\} -> \{base_branch\}
+**Analysis**: \{ANALYSIS_DIR\}
 
-### Risk Assessment: {risk_level}
+### Risk Assessment: \{risk_level\}
 
-{brief_reasoning}
+\{brief_reasoning\}
 
 ### Bug Counts
 | Category | CRITICAL | HIGH | MEDIUM | LOW | Total |
 |----------|----------|------|--------|-----|-------|
-| Security | {n} | {n} | {n} | {n} | {n} |
-| Functional | {n} | {n} | {n} | {n} | {n} |
-| Integration | {n} | {n} | {n} | {n} | {n} |
-| Usability | {n} | {n} | {n} | {n} | {n} |
+| Security | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
+| Functional | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
+| Integration | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
+| Usability | \{n\} | \{n\} | \{n\} | \{n\} | \{n\} |
 
 ### Top Findings
-{List top 3-5 bugs by severity and confidence}
+\{List top 3-5 bugs by severity and confidence\}
 
 ### Artifacts
-- Bug report: {ANALYSIS_DIR}/bug-analysis-summary.md
-- Per-focus reports: {ANALYSIS_DIR}/{security|functional|integration|usability}.md
-- Static findings: {ANALYSIS_DIR}/static-findings.md (if static analysis ran)
+- Bug report: \{ANALYSIS_DIR\}/bug-analysis-summary.md
+- Per-focus reports: \{ANALYSIS_DIR\}/\{security|functional|integration|usability\}.md
+- Static findings: \{ANALYSIS_DIR\}/static-findings.md (if static analysis ran)
 
-{if any CRITICAL or HIGH bugs found:}
+\{if any CRITICAL or HIGH bugs found:\}
 Run `/resolve` to process and fix these findings.
 ```
 
@@ -285,7 +283,7 @@ Run `/resolve` to process and fix these findings.
 │
 ├─ Phase 3: Context Loading
 │  ├─ decisions-index.cjs → DECISIONS_CONTEXT
-│  ├─ feature-knowledge.cjs → FEATURE_KNOWLEDGE
+│  ├─ Feature knowledge load → FEATURE_KNOWLEDGE
 │  └─ .devflow/docs/design/*.md → PLAN_CONTEXT + ACCEPTANCE_RULES
 │
 ├─ Phase 4: File Analysis
@@ -344,7 +342,7 @@ Before reporting results, verify every phase was executed:
 - [ ] Phase 3: Context Loading → DECISIONS_CONTEXT captured, FEATURE_KNOWLEDGE loaded (or `(none)`), PLAN_CONTEXT and ACCEPTANCE_RULES captured (or `(none)`)
 - [ ] Phase 4: File Analysis → ACTIVE_FOCUSES determined (security + functional always present)
 - [ ] Phase 5: Parallel Bug Analysis → ANALYZER_OUTPUTS captured per active focus; all reports written to ANALYSIS_DIR
-- [ ] Phase 6: Synthesis → BUG_ANALYSIS_SUMMARY written to `{ANALYSIS_DIR}/bug-analysis-summary.md`
+- [ ] Phase 6: Synthesis → BUG_ANALYSIS_SUMMARY written to `\{ANALYSIS_DIR\}/bug-analysis-summary.md`
 - [ ] Phase 7: Finalize → `.last-analysis-head` updated; results displayed to user
 
 If any phase is unchecked, execute it before proceeding.

@@ -1,6 +1,7 @@
 ---
 description: Explore codebase with structured analysis and optional feature knowledge creation
 ---
+@import { knowledge_writeback } from "./_knowledge.mds"
 
 # Explore Command
 
@@ -25,7 +26,7 @@ Explore a codebase area by spawning parallel agents for flow tracing, dependency
 
 ### Phase 1: Load Decisions (Orchestrator-Local)
 
-**Produces:** DECISIONS_CONTEXT, FEATURE_KNOWLEDGE
+**Produces:** DECISIONS_CONTEXT
 
 Before exploring, load the decisions index:
 
@@ -35,14 +36,7 @@ DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index 
 
 The orchestrator uses `DECISIONS_CONTEXT` locally when framing exploration — prior decisions and pitfalls suggest specific areas to investigate. Follow `devflow:apply-decisions` to Read full entry bodies on demand. **Do NOT pass `DECISIONS_CONTEXT` to Explore sub-agents** — decisions context stays in the orchestrator, not in the investigation workers.
 
-Also load feature knowledge:
-1. Read `.devflow/features/index.json` if it exists. If not, set `FEATURE_KNOWLEDGE = (none)`.
-2. Identify relevant feature knowledge entries (match task intent against each entry's descriptions and directories).
-3. For each match: check staleness via `node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs stale "{worktree}" {slug} 2>/dev/null`, read `.devflow/features/{slug}/KNOWLEDGE.md`.
-4. Use `FEATURE_KNOWLEDGE` **locally** for exploration framing — feature-specific patterns and integration points guide where to focus.
-5. **Do NOT pass to Explore sub-agents** (same asymmetric pattern as DECISIONS_CONTEXT).
-
-**Explore agent framing**: "The feature knowledge is a baseline — your job is to VALIDATE, EXTEND, and CORRECT it, not repeat it. Focus on areas the feature knowledge doesn't cover and things that may have changed."
+**No up-front feature knowledge load** — explore investigation workers read code directly to avoid confirmation bias. Feature knowledge is only created as a write-back at the end, after exploration is complete.
 
 ### Phase 2: Orient
 
@@ -95,39 +89,14 @@ Present findings to user. Use AskUserQuestion to offer focused follow-up explora
 **Requires:** MERGED_FINDINGS, DECISIONS_CONTEXT
 **Produces:** FEATURE_KNOWLEDGE_STATUS (created | skipped)
 
-1. If `.devflow/features/.disabled` exists → skip, set FEATURE_KNOWLEDGE_STATUS = skipped
-2. Read `.devflow/features/index.json` (if it exists)
-3. Based on the explored area (user's question + MERGED_FINDINGS scope), check if matching feature knowledge
-   already exists (match against each entry's `directories` and `description`). If covered → skip
-4. Use AskUserQuestion: "No feature knowledge exists for {explored area}. Create one to capture these patterns?"
-5. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
-6. If user accepts:
-   a. Derive FEATURE_SLUG from explored area (kebab-case from primary directory, strip src/lib
-      prefixes, must match `^[a-z0-9][a-z0-9-]*$`)
-   b. Derive FEATURE_NAME (human-readable)
-   c. Identify DIRECTORIES from explored scope
-   d. Spawn Agent(subagent_type="Knowledge"):
-      ```
-      "FEATURE_SLUG: {slug}
-      FEATURE_NAME: {name}
-      DIRECTORIES: {directories}
-      EXPLORATION_OUTPUTS: {MERGED_FINDINGS from Phase 4}
-      DECISIONS_CONTEXT: {from Phase 1}
-      WORKTREE_PATH: {worktree path, if in a worktree}
-      Load the devflow:feature-knowledge skill. EXPLORATION_OUTPUTS are pre-computed — synthesize instead of
-      exploring from scratch. Read .devflow/features/index.json for cross-referencing."
-      ```
-   e. Read result file (`.devflow/features/{slug}/.create-result.json`), then run:
-      ```bash
-      node ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs update-index "{worktree}" \
-        --slug="{slug}" --name="{name}" --directories='[...]' \
-        --referencedFiles='{from_result}' --description="{from_result}" \
-        --createdBy="explore" 2>/dev/null
-      ```
-      Clean up: `rm -f .devflow/features/{slug}/.create-result.json`
-      If result file missing (agent failed), use empty defaults: `referencedFiles='[]'`, `description=""`.
-   f. Report: "Created feature knowledge: {slug}"
-   g. Set FEATURE_KNOWLEDGE_STATUS = created
+1. Check if matching feature knowledge already exists by reading `\{worktree\}/.devflow/features/index.md` (or globbing frontmatter if absent). If covered → skip
+2. Use AskUserQuestion: "No feature knowledge exists for \{explored area\}. Create one to capture these patterns?"
+3. If user declines → set FEATURE_KNOWLEDGE_STATUS = skipped
+4. If user accepts: proceed with write-back below.
+
+{knowledge_writeback()}
+
+Set FEATURE_KNOWLEDGE_STATUS = created (if agent spawned) or skipped.
 
 **Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.
 
@@ -165,14 +134,14 @@ Structured exploration findings with concrete code references:
 ├─ Phase 5: Present findings with drill-down offer
 │
 └─ Phase 6: Suggest feature knowledge creation (conditional)
-   └─ Knowledge agent (if user accepts and no existing feature knowledge)
+   └─ Knowledge agent write-back (if user accepts and no existing feature knowledge)
 ```
 
 ## Principles
 
 1. **Structure over browsing** - Every claim must cite file:line references
 2. **Parallel execution** - All explorers run simultaneously for speed
-3. **Knowledge-informed** - Prior decisions and feature knowledge guide where to look
+3. **Knowledge-informed** - Prior decisions guide where to look; NO pre-loaded feature knowledge in sub-agents (avoids confirmation bias)
 4. **User-driven depth** - Present findings, then offer drill-down into specific areas
 
 ## Error Handling

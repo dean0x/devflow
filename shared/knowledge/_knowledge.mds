@@ -1,0 +1,93 @@
+@define knowledge_load():
+### Load Feature Knowledge
+
+Resolve the worktree root using the `devflow:worktree-support` algorithm (use WORKTREE_PATH if provided, otherwise cwd). All paths below are relative to `\{worktree\}`.
+
+**Step 1 — Read the index cache:**
+
+Attempt to read `\{worktree\}/.devflow/features/index.md`. Each line follows the format:
+
+```
+- **\{slug\}** — \{areas\} — \{Use-when description\}
+```
+
+If `index.md` exists and contains at least one entry line, use it for relevance matching.
+
+**Step 2 — Fallback: glob frontmatter (if `index.md` is absent or empty):**
+
+Glob `\{worktree\}/.devflow/features/*/KNOWLEDGE.md`. For each file found, read only its YAML frontmatter block (between the opening and closing `---` delimiters). The frontmatter fields `name`, `description`, and `directories` are the authoritative relevance surface — `index.md` is only a cache.
+
+**Step 3 — Pick relevant KBs:**
+
+Match the current task area and description against each index line (or frontmatter `description` + `directories` on fallback). Select entries whose documented area overlaps the current task. This is a relevance judgment — prefer specificity over breadth.
+
+**Step 4 — Read selected KBs:**
+
+For each selected entry, read `\{worktree\}/.devflow/features/\{slug\}/KNOWLEDGE.md` in full. When the KB content contradicts the current code you observe, **trust the code** — the code is the freshness mechanism; the KB may lag behind.
+
+**Step 5 — Set FEATURE_KNOWLEDGE:**
+
+Concatenate the selected KNOWLEDGE.md files under slug headers:
+
+```
+--- Feature knowledge: \{slug\} ---
+\{full KNOWLEDGE.md content\}
+```
+
+If no KBs exist, no KBs are relevant, or `.devflow/features/` is absent, set `FEATURE_KNOWLEDGE` to `(none)`.
+
+**No subprocess, no git calls, no `.cjs` script.** This entire step is direct file reads — 1 index read (or N frontmatter reads on fallback), bounded by KB count.
+@end
+
+@export knowledge_load
+
+@define knowledge_writeback():
+### Feature Knowledge Write-Back (Conditional)
+
+Resolve the worktree root using the `devflow:worktree-support` algorithm (use WORKTREE_PATH if provided, otherwise cwd). All paths below are relative to `\{worktree\}`.
+
+**Step 1 — Check the opt-out gate:**
+
+Read `\{worktree\}/.devflow/dream/config.json`. If the `knowledge` field is `false`, skip write-back entirely — the user has disabled it.
+
+If `.devflow/dream/config.json` does not exist, proceed (default is enabled).
+
+**Step 2 — Evaluate whether write-back is warranted:**
+
+Only proceed if **at least one** of these is true:
+- This workflow changed files in a directory that is documented by an existing feature knowledge base (a documented area changed).
+- This workflow surfaced durable, cross-cutting knowledge about a codebase area that would help future agents working in the same area — patterns, anti-patterns, integration points, gotchas not visible from a single file read.
+
+**Never spawn unconditionally.** If neither condition is met, skip write-back silently.
+
+**Step 3 — Spawn the Knowledge agent:**
+
+Spawn `Agent(subagent_type="Knowledge")` with the following context:
+
+```
+"WORKTREE_PATH: \{worktree root\}
+FEATURE_SLUG: \{slug derived from primary changed directory, kebab-case\}
+FEATURE_NAME: \{human-readable name\}
+DIRECTORIES: \{list of primary directories touched by this workflow\}
+FILES_CHANGED: \{list of files changed\}
+DECISIONS_CONTEXT: \{DECISIONS_CONTEXT if available, else (none)\}
+
+Load the devflow:feature-knowledge skill and follow its authoring process.
+
+Write the knowledge base to:
+  \{worktree\}/.devflow/features/\{slug\}/KNOWLEDGE.md
+
+Then update the index cache by performing a read-modify-write on:
+  \{worktree\}/.devflow/features/index.md
+
+Index line format: `- **\{slug\}** — \{areas\} — \{Use-when description\}`
+
+If the line for this slug already exists in index.md, replace it. If it does not exist, append it. If index.md does not exist, create it with just this line.
+
+The frontmatter in KNOWLEDGE.md is the source of truth — index.md is only a cache. Write the two files directly — no intermediate result JSON files, no external scripts."
+```
+
+**Failure handling**: Non-blocking. If the Knowledge agent fails, log the failure and continue — the workflow outcome is not affected by write-back success.
+@end
+
+@export knowledge_writeback
