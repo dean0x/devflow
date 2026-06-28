@@ -594,8 +594,8 @@ export const initCommand = new Command('init')
       } else {
         p.note(
           'Per-feature knowledge bases capture cross-cutting patterns,\n' +
-          'conventions, and gotchas. Auto-refreshed when files change.\n' +
-          'Consumes a background agent session on staleness detection.',
+          'conventions, and gotchas. Created and updated automatically\n' +
+          'when workflows touch a documented area (write-through model).',
           'Feature Knowledge Bases',
         );
         const knowledgeChoice = await p.confirm({

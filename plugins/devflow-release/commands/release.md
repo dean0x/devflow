@@ -53,7 +53,7 @@ Load the decisions index:
 DECISIONS_CONTEXT=$(node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "." 2>/dev/null || echo "(none)")
 ```
 
-Load feature knowledge: Read `.devflow/features/index.json`, match release-relevant files, read relevant KNOWLEDGE.md entries. Set `FEATURE_KNOWLEDGE` (or `(none)`).
+Load feature knowledge: Attempt to read `.devflow/features/index.md` (the regenerable cache). If absent or empty, glob `.devflow/features/*/KNOWLEDGE.md` and read each file's YAML frontmatter (`name`, `description`, `directories`) as the relevance surface. Pick release-relevant KBs by matching their documented area against the release context. For each selected KB, read the full `KNOWLEDGE.md` — trust current code over KB content on any mismatch. Concatenate under slug headers and set `FEATURE_KNOWLEDGE` (or `(none)` if no KBs exist or none are relevant). No `index.json`, no subprocess, no `.cjs` script.
 
 Pass both to all subsequent agents via their input contracts.
 
