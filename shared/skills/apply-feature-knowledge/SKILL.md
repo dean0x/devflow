@@ -9,10 +9,11 @@ allowed-tools: Read
 
 ## Iron Law
 
-> **Pre-computed context, not a cage. Verify against current code when assumptions seem outdated.**
+> **Pre-computed context, not a cage. Verify against current code — always.**
 >
-> A feature knowledge captures patterns AS THEY WERE when last updated. Code evolves.
-> Use the feature knowledge as a starting point, not gospel truth.
+> A feature knowledge captures patterns AS THEY WERE when last written. Code evolves.
+> Use the feature knowledge as a starting point, not gospel truth. When something feels
+> off, Read the actual files. Code is authoritative; feature knowledge is supplementary.
 
 ---
 
@@ -34,12 +35,13 @@ When `FEATURE_KNOWLEDGE` is provided and is not `(none)`:
 4. **Integration points**: Ensure your changes respect documented boundaries
 5. **Key files**: Use as starting points for exploration
 
-### Step 3: Supplement as Needed
+### Step 3: Verify Against Current Code
 
-The feature knowledge may not cover everything:
+The feature knowledge may not reflect recent changes:
 - If the feature knowledge doesn't address your specific area, explore further
-- If the feature knowledge seems outdated (marked `[STALE]`), verify against current code
-- If you discover new patterns, note them — they may become feature knowledge updates
+- **When an assertion seems outdated**: Read the relevant source files to confirm — code wins
+- When you find a contradiction between the KB and actual code, trust the code
+- Note discrepancies in your output when they matter for the task
 
 ---
 
@@ -48,13 +50,12 @@ The feature knowledge may not cover everything:
 When `FEATURE_KNOWLEDGE` is `(none)`, empty, or not provided — skip this skill entirely.
 Do not mention feature knowledge or its absence in your output.
 
-## Staleness Handling
+## Freshness Model
 
-Feature knowledge entries marked with `[STALE — referenced files changed since last update. Verify against current code.]`:
-- Treat as **lower-confidence** context
-- Verify key assertions against current code before relying on them
-- Don't assume anti-patterns or gotchas are still valid
-- Still use as a starting point — stale context is better than no context
+Feature knowledge uses **write-through + verify-on-read** for freshness:
+- KBs are written at the point a documented area changes (not on a background schedule)
+- Readers verify key assertions against current code rather than relying on staleness markers
+- When in doubt, Read the file — that resolves any uncertainty immediately
 
 ## Concatenation Format
 

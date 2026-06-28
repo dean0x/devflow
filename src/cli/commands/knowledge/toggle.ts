@@ -1,15 +1,43 @@
-import { promises as fs } from 'fs';
-import * as p from '@clack/prompts';
-import color from 'picocolors';
-import { getDevFlowDirectory } from '../../utils/paths.js';
-import { readManifest, writeManifest } from '../../utils/manifest.js';
-import { getFeatureKnowledge, getWorktreePath } from './shared.js';
-import { updateFeature, isFeatureEnabled } from '../../utils/dream-config.js';
-import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel } from '../../utils/project-paths.js';
-
 /**
  * Handle the enable/disable/status toggle actions for `devflow knowledge`.
+ *
+ * The sole opt-out mechanism is the dream config `knowledge` field (config-only gate per ADR-001).
+ * The features/.disabled sentinel and index.json bootstrap are no longer managed here —
+ * write-through creates features/ lazily, and the sentinel machinery is deleted.
  */
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as p from '@clack/prompts';
+import color from 'picocolors';
+import { getGitRoot } from '../../utils/git.js';
+import { getDevFlowDirectory } from '../../utils/paths.js';
+import { readManifest, writeManifest } from '../../utils/manifest.js';
+import { updateFeature, isFeatureEnabled } from '../../utils/dream-config.js';
+import { getFeaturesDir } from '../../utils/project-paths.js';
+
+async function getWorktreePath(): Promise<string> {
+  return (await getGitRoot()) ?? process.cwd();
+}
+
+/** Count KNOWLEDGE.md files present in features/ */
+async function countKnowledgeBases(worktreePath: string): Promise<number> {
+  const featuresDir = getFeaturesDir(worktreePath);
+  try {
+    const entries = await fs.readdir(featuresDir, { withFileTypes: true });
+    let count = 0;
+    for (const dirent of entries) {
+      if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue;
+      try {
+        await fs.access(path.join(featuresDir, dirent.name, 'KNOWLEDGE.md'));
+        count++;
+      } catch { /* KNOWLEDGE.md absent */ }
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
 export async function handleToggle(options: { enable?: boolean; disable?: boolean; status?: boolean }): Promise<void> {
   if (!options.enable && !options.disable && !options.status) return;
 
@@ -19,20 +47,7 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
   if (options.enable) {
     p.intro(color.cyan('Enable Feature Knowledge Bases'));
 
-    // Create .devflow/features/index.json if missing
-    const featuresDir = getFeaturesDir(worktreePath);
-    await fs.mkdir(featuresDir, { recursive: true });
-    const indexPath = getFeaturesIndexPath(worktreePath);
-    try {
-      await fs.access(indexPath);
-    } catch {
-      await fs.writeFile(indexPath, JSON.stringify({ version: 1, features: {} }, null, 2) + '\n');
-    }
-
-    // Remove .disabled sentinel
-    try { await fs.unlink(getFeaturesDisabledSentinel(worktreePath)); } catch { /* doesn't exist */ }
-
-    // Update dream config
+    // Update dream config (the sole gate — config-only per ADR-001)
     await updateFeature(worktreePath, 'knowledge', true);
 
     // Update manifest
@@ -44,17 +59,13 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     }
 
     p.log.success('Feature knowledge bases enabled');
-    p.outro(`Run ${color.cyan('devflow knowledge create <slug>')} to create a knowledge base.`);
+    p.log.info('Knowledge bases are created automatically when workflows detect documented area changes.');
+    p.outro('');
 
   } else if (options.disable) {
     p.intro(color.cyan('Disable Feature Knowledge Bases'));
 
-    // Create .disabled sentinel
-    const featuresDir = getFeaturesDir(worktreePath);
-    await fs.mkdir(featuresDir, { recursive: true });
-    await fs.writeFile(getFeaturesDisabledSentinel(worktreePath), '', 'utf-8');
-
-    // Update dream config
+    // Update dream config (the sole gate — config-only per ADR-001)
     await updateFeature(worktreePath, 'knowledge', false);
 
     // Update manifest
@@ -66,32 +77,18 @@ export async function handleToggle(options: { enable?: boolean; disable?: boolea
     }
 
     p.log.success('Feature knowledge bases disabled');
-    p.log.info('Existing knowledge bases preserved. Manual commands (create/refresh) still work.');
+    p.log.info('Existing knowledge bases preserved. Write-back skipped while disabled.');
     p.outro('');
 
   } else {
     // options.status
     p.intro(color.cyan('Feature Knowledge Status'));
 
-    // Check dream config enabled state
     const enabled = await isFeatureEnabled(worktreePath, 'knowledge');
+    const kbCount = await countKnowledgeBases(worktreePath);
 
-    // Check sentinel
-    let disabled = false;
-    try {
-      await fs.access(getFeaturesDisabledSentinel(worktreePath));
-      disabled = true;
-    } catch { /* not disabled */ }
-
-    // Count knowledge bases
-    const kbs = getFeatureKnowledge().listEntries(worktreePath);
-
-    p.log.info(`Status: ${(enabled && !disabled) ? color.green('enabled') : color.yellow('disabled')}`);
-    p.log.info(`Config: ${enabled ? color.green('enabled') : color.dim('disabled')}`);
-    p.log.info(`Knowledge bases: ${kbs.length}`);
-    if (disabled) {
-      p.log.info(`Sentinel: ${color.yellow('.devflow/features/.disabled present')}`);
-    }
+    p.log.info(`Status: ${enabled ? color.green('enabled') : color.yellow('disabled')}`);
+    p.log.info(`Knowledge bases: ${kbCount}`);
     p.outro('');
   }
 }

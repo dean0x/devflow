@@ -167,29 +167,9 @@ function getPendingTurnsLockDir(projectRoot) {
 // Features / knowledge files
 // ---------------------------------------------------------------------------
 
-/** .devflow/features/index.json */
-function getFeaturesIndexPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'features', 'index.json');
-}
-
 /** .devflow/features/{slug}/KNOWLEDGE.md */
 function getKnowledgePath(projectRoot, slug) {
   return path.join(projectRoot, '.devflow', 'features', slug, 'KNOWLEDGE.md');
-}
-
-/** .devflow/features/.disabled — sentinel that gates knowledge phase/refresh */
-function getFeaturesDisabledSentinel(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'features', '.disabled');
-}
-
-/** .devflow/features/.knowledge.lock — transient lock directory for concurrent index writes */
-function getFeaturesLockDir(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'features', '.knowledge.lock');
-}
-
-/** .devflow/features/.knowledge-last-refresh — timestamp of last auto-refresh */
-function getFeaturesLastRefreshPath(projectRoot) {
-  return path.join(projectRoot, '.devflow', 'features', '.knowledge-last-refresh');
 }
 
 // ---------------------------------------------------------------------------
@@ -266,11 +246,7 @@ module.exports = {
   getPendingTurnsProcessingPath,
   getPendingTurnsLockDir,
   // Features files
-  getFeaturesIndexPath,
   getKnowledgePath,
-  getFeaturesDisabledSentinel,
-  getFeaturesLockDir,
-  getFeaturesLastRefreshPath,
   // Docs files
   getReviewsDir,
   getDesignDir,

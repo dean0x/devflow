@@ -24,6 +24,7 @@
     "patterns",
     "security",
     "worktree-support",
+    "feature-knowledge",
     "apply-feature-knowledge"
   ]
 }

@@ -31,7 +31,6 @@ const HOOK_SCRIPTS = [
   'dream-dispatch',
   'eval-helpers',
   'eval-decisions',
-  'eval-knowledge',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1391,22 +1390,13 @@ describe('ensure-devflow-init behavioral', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates .devflow/features/ and index.json when absent', () => {
+  it('creates .devflow/features/ directory when absent (no index.json — write-through model)', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features', 'index.json'))).toBe(true);
-    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), 'utf-8');
-    expect(content).toBe('{"version":1,"features":{}}');
-  });
-
-  it('does not overwrite existing index.json', () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'features'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), '{"existing":"data"}');
-
-    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
-
-    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), 'utf-8');
-    expect(content).toBe('{"existing":"data"}');
+    // Knowledge index is now write-through (written when a KB is created/refreshed in-command)
+    // ensure-devflow-init only creates the directory, not the index file
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features', 'index.json'))).toBe(false);
   });
 
   it('adds .devflow/ to the project root .gitignore (creates it when absent)', () => {
@@ -1735,9 +1725,10 @@ describe('dream-evaluate business logic', () => {
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Evaluating decisions');
-    expect(log).toContain('Evaluating knowledge');
     // learning pipeline removed — no 'Evaluating learning' should appear
     expect(log).not.toContain('Evaluating learning');
+    // knowledge is now write-through (in-command) — no 'Evaluating knowledge' from dream-evaluate
+    expect(log).not.toContain('Evaluating knowledge');
   });
 
   it('shallow session (2 turns) skips decisions', () => {
@@ -1786,51 +1777,6 @@ describe('dream-evaluate business logic', () => {
     expect(pairs.length).toBeGreaterThan(0);
   });
 
-  it('knowledge throttle: recent refresh skips evaluation', () => {
-    // Write a recent timestamp to the throttle marker
-    const featuresDir = path.join(tmpDir, '.devflow', 'features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
-    const now = Math.floor(Date.now() / 1000);
-    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), String(now));
-
-    createTranscript(homeDir, tmpDir, 5);
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test-session',
-    }, homeDir);
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    expect(fs.existsSync(path.join(dreamDir, 'knowledge.json'))).toBe(false);
-
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    expect(fs.existsSync(logFile)).toBe(true);
-    const log = fs.readFileSync(logFile, 'utf-8');
-    expect(log).toContain('Knowledge throttled');
-  });
-
-  it('knowledge disabled sentinel skips evaluation', () => {
-    const featuresDir = path.join(tmpDir, '.devflow', 'features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
-
-    createTranscript(homeDir, tmpDir, 5);
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test-session',
-    }, homeDir);
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    expect(fs.existsSync(path.join(dreamDir, 'knowledge.json'))).toBe(false);
-
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    expect(fs.existsSync(logFile)).toBe(true);
-    const log = fs.readFileSync(logFile, 'utf-8');
-    expect(log).toContain('Knowledge disabled by sentinel');
-  });
-
   it('session ID path traversal rejected, fallback used', () => {
     // Create a valid transcript with a normal name
     createTranscript(homeDir, tmpDir, 5, 5, 'valid-session');
@@ -1846,76 +1792,6 @@ describe('dream-evaluate business logic', () => {
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Session depth');
-  });
-});
-
-// =============================================================================
-// dream-evaluate knowledge evaluation
-// =============================================================================
-
-describe('dream-evaluate knowledge evaluation', () => {
-  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
-
-  let tmpDir: string;
-  let homeDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-test-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
-    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  });
-
-  it('LAST_REFRESH sanitization: non-numeric content in knowledge marker defaults to 0', () => {
-    // Write non-numeric content to .knowledge-last-refresh — should sanitize to 0
-    // resulting in a stale age calculation (now - 0 > 7200) and triggering evaluation
-    const featuresDir = path.join(tmpDir, '.devflow', 'features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    // No stale slugs — so no marker will be written — but hook should not crash
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
-    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), 'not-a-number\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-    expect(exitCode).toBe(0);
-
-    // Hook should have attempted knowledge evaluation (no crash from bad timestamp)
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      // Either throttled (with sanitized timestamp near 0 → stale) or "no stale slugs"
-      // Both are valid outcomes — the key is it didn't crash
-      expect(log).toContain('Evaluating knowledge');
-    }
-  });
-
-  it('LAST_UPDATE get_mtime fallback: missing WORKING-MEMORY defaults to 0', () => {
-    // Without WORKING-MEMORY.md, get_mtime returns empty string; LAST_UPDATE should default to 0
-    // so age computation doesn't error
-    createTranscript(homeDir, tmpDir, 5);
-
-    // Deliberately do NOT create WORKING-MEMORY.md
-    // We call dream-capture (not dream-evaluate) for this one since it does the get_mtime check
-    const CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-capture');
-    const exitCode = (() => {
-      try {
-        execSync(`bash "${CAPTURE_HOOK}"`, {
-          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', last_assistant_message: 'response text here' }),
-          stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env, HOME: homeDir },
-        });
-        return 0;
-      } catch (e: unknown) {
-        return (e as { status: number }).status ?? 1;
-      }
-    })();
-    expect(exitCode).toBe(0);
   });
 });
 
@@ -2464,7 +2340,7 @@ exit 0
  */
 function runCollectTasks(
   dreamDir: string,
-  opts: { decEnabled?: boolean; knowEnabled?: boolean },
+  opts: { decEnabled?: boolean },
 ): { tasks: string; mtimeCount: number } {
   const hooksDir = path.resolve(__dirname, '..', 'scripts', 'hooks');
   const counterFile = path.join(os.tmpdir(), `devflow-mtime-counter-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2478,7 +2354,6 @@ function runCollectTasks(
   //  4. Prints _DREAM_TASKS to stdout.
   // Note: memEnabled removed — memory is not a Dream task (applies ADR-016; avoids PF-009).
   const decEn = opts.decEnabled ?? true ? 'true' : 'false';
-  const knowEn = opts.knowEnabled ?? true ? 'true' : 'false';
 
   const script = `#!/bin/bash
 dbg() { :; }
@@ -2494,7 +2369,7 @@ get_mtime() {
   printf '%s' "$c"
 }
 source "${hooksDir}/dream-collect-tasks"
-dream_collect_tasks "${dreamDir}" "${decEn}" "${knowEn}"
+dream_collect_tasks "${dreamDir}" "${decEn}"
 printf '%s' "\$_DREAM_TASKS"
 `;
 
@@ -2555,17 +2430,18 @@ describe('dream-collect-tasks: single-pass scan', () => {
     expect(fs.existsSync(path.join(dreamDir, 'learning.sess2.json'))).toBe(false);
   });
 
-  // AC-3: memory always swept (unconditional); disabled decisions/knowledge/curation deleted; type never in _DREAM_TASKS
-  // Curation is now also swept when decisions is disabled (curation depends on decisions data).
+  // AC-3: memory + knowledge always swept unconditionally; decisions/curation deleted when decisions disabled
+  // Curation is swept when decisions is disabled (curation depends on decisions data).
+  // Knowledge is no longer a Dream task — write-through handles it in-command; stale markers deleted on sight.
   it('AC-3: memory always swept; disabled decisions/knowledge/curation markers deleted when decisions disabled', () => {
     fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');       // swept unconditionally
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
-    fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');
+    fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');    // swept unconditionally (no longer Dream task)
     fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
 
-    // Memory markers are always swept unconditionally (memory is no longer a Dream task).
+    // Memory + knowledge markers are always swept unconditionally (neither is a Dream task anymore).
     // Curation markers are also swept when decisions is disabled — curation inherits decisions state.
-    const { tasks } = runCollectTasks(dreamDir, { decEnabled: false, knowEnabled: false });
+    const { tasks } = runCollectTasks(dreamDir, { decEnabled: false });
     expect(tasks).toBe('');
     expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'decisions.sess1.json'))).toBe(false);

@@ -168,29 +168,9 @@ export function getPendingTurnsLockDir(projectRoot: string): string {
 // Features / knowledge files
 // ---------------------------------------------------------------------------
 
-/** .devflow/features/index.json */
-export function getFeaturesIndexPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', 'index.json');
-}
-
 /** .devflow/features/{slug}/KNOWLEDGE.md */
 export function getKnowledgePath(projectRoot: string, slug: string): string {
   return path.join(projectRoot, '.devflow', 'features', slug, 'KNOWLEDGE.md');
-}
-
-/** .devflow/features/.disabled — sentinel that gates knowledge phase/refresh */
-export function getFeaturesDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', '.disabled');
-}
-
-/** .devflow/features/.knowledge.lock — transient lock directory for concurrent index writes */
-export function getFeaturesLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', '.knowledge.lock');
-}
-
-/** .devflow/features/.knowledge-last-refresh — timestamp of last auto-refresh */
-export function getFeaturesLastRefreshPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', '.knowledge-last-refresh');
 }
 
 // ---------------------------------------------------------------------------

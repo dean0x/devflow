@@ -56,7 +56,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // plugin, unlike skills which install universally). Predecessor was the universally
     // installed `devflow:sidecar` skill; core-skills preserves that guarantee.
     agents: ['dream'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-decisions', 'dream-knowledge', 'dream-curation'],
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-decisions', 'dream-curation'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
   {
@@ -72,7 +72,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
     agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
-    skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -88,7 +88,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Process and fix code review issues with risk assessment',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['patterns', 'security', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -96,7 +96,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
-    skills: ['git', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -128,7 +128,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
-    skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -551,6 +551,9 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:dream-memory',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
+  // v3.x dream-knowledge removal: namespaced name for cleanup of installed devflow:dream-knowledge skill
+  // (dream-knowledge was removed when knowledge write-through replaced the Dream background pipeline)
+  'devflow:dream-knowledge',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
   'devflow:router',
   'devflow:implement:triage',
