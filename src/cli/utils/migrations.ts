@@ -958,6 +958,155 @@ const MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL: Migration<'per-project'> = {
   },
 };
 
+/**
+ * Global: remove the orphaned eval-knowledge hook and feature-knowledge.cjs
+ * library left in prior installs at ~/.devflow/scripts/hooks/.
+ *
+ * Phase 2 deleted these files from source, but the installer copies scripts/
+ * additively (copyDirectory never deletes), so stale copies linger on every
+ * existing machine. Same rationale as purge-orphaned-dream-commit-hook-v1.
+ *
+ * Removes (ENOENT-idempotent; rethrows non-ENOENT errors):
+ *   - ~/.devflow/scripts/hooks/eval-knowledge
+ *   - ~/.devflow/scripts/hooks/lib/feature-knowledge.cjs
+ */
+const MIGRATION_PURGE_KNOWLEDGE_HOOKS_GLOBAL: Migration<'global'> = {
+  id: 'purge-knowledge-hooks-global-v1',
+  description: 'Remove orphaned eval-knowledge hook + feature-knowledge.cjs library from ~/.devflow/scripts/hooks/',
+  scope: 'global',
+  async run(ctx: GlobalMigrationContext): Promise<MigrationRunResult> {
+    const hooksDir = path.join(ctx.devflowDir, 'scripts', 'hooks');
+    const toRemove = [
+      path.join(hooksDir, 'eval-knowledge'),
+      path.join(hooksDir, 'lib', 'feature-knowledge.cjs'),
+    ];
+
+    let removed = 0;
+    for (const filePath of toRemove) {
+      try {
+        await fs.unlink(filePath);
+        removed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') continue; // already absent — idempotent skip
+        throw err; // unexpected — surface to runner
+      }
+    }
+
+    const infos = removed > 0
+      ? [`Removed ${removed} orphaned knowledge hook file(s) from ~/.devflow/scripts/hooks/`]
+      : [];
+    return { infos, warnings: [] };
+  },
+};
+
+/**
+ * Per-project: remove the feature-knowledge pipeline runtime artifacts left
+ * by the old SessionEnd hook / Dream refresh task model.
+ *
+ * Write-through (Phase 1–2) replaced the entire pipeline. Knowledge is now
+ * authored in-command; the Dream refresh path is gone. Per ADR-001, the
+ * config gate (knowledge key in dream/config.json) is intentionally preserved
+ * — it still gates write-back in the new model.
+ *
+ * Removes (ENOENT-idempotent; rethrows non-ENOENT errors):
+ *   - .devflow/dream/knowledge.*.json markers (glob)
+ *   - .devflow/dream/knowledge.*.processing markers (glob)
+ *   - .devflow/features/.knowledge.lock/ directory (recursive)
+ *   - .devflow/features/.knowledge-last-refresh (file)
+ *   - .devflow/features/.knowledge-refresh.lock (file or dir)
+ *   - .devflow/features/.disabled (sentinel — config-only gate now)
+ *   - renames .devflow/features/index.json → index.json.deprecated (if present)
+ *
+ * Does NOT touch the `knowledge` key in dream/config.json (write-back gate stays).
+ * Does NOT remove KNOWLEDGE.md files — existing KBs remain loadable via frontmatter.
+ */
+const MIGRATION_PURGE_FEATURE_KNOWLEDGE_PIPELINE: Migration<'per-project'> = {
+  id: 'purge-feature-knowledge-pipeline-v1',
+  description: 'Remove feature-knowledge pipeline artifacts (dream markers, lock/sentinel/refresh files, deprecate index.json)',
+  scope: 'per-project',
+  async run(ctx: PerProjectMigrationContext): Promise<MigrationRunResult> {
+    const devflowDir = path.join(ctx.projectRoot, '.devflow');
+    const dreamDir = path.join(devflowDir, 'dream');
+    const featuresDir = path.join(devflowDir, 'features');
+    let removed = 0;
+
+    // 1. Remove .devflow/dream/knowledge.*.json and *.processing markers
+    try {
+      const dreamEntries = await fs.readdir(dreamDir);
+      for (const entry of dreamEntries) {
+        if (entry.startsWith('knowledge.') &&
+            (entry.endsWith('.json') || entry.endsWith('.processing'))) {
+          try {
+            await fs.unlink(path.join(dreamDir, entry));
+            removed++;
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code !== 'ENOENT') throw err;
+          }
+        }
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw err; // unexpected — surface to runner
+    }
+
+    // 2. Remove transient artifacts from .devflow/features/
+    const featureFilesToRemove = [
+      path.join(featuresDir, '.knowledge-last-refresh'),
+      path.join(featuresDir, '.disabled'),
+    ];
+    for (const filePath of featureFilesToRemove) {
+      try {
+        await fs.unlink(filePath);
+        removed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err;
+      }
+    }
+
+    // 3. Remove .knowledge.lock dir (recursive) and .knowledge-refresh.lock (file or dir)
+    const featureDirsToRemove = [
+      path.join(featuresDir, '.knowledge.lock'),
+      path.join(featuresDir, '.knowledge-refresh.lock'),
+    ];
+    for (const dirPath of featureDirsToRemove) {
+      try {
+        await fs.rm(dirPath, { recursive: true, force: true });
+        removed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') throw err;
+      }
+    }
+
+    // 4. Rename index.json → index.json.deprecated (if present; never recreate index.json)
+    const indexJsonPath = path.join(featuresDir, 'index.json');
+    const indexDeprecatedPath = path.join(featuresDir, 'index.json.deprecated');
+    try {
+      // Skip if deprecated already exists (idempotent)
+      try {
+        await fs.lstat(indexDeprecatedPath);
+        // dest already present — idempotent skip
+      } catch {
+        // dest absent — proceed with rename
+        await fs.rename(indexJsonPath, indexDeprecatedPath);
+        removed++;
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw err; // unexpected — surface to runner
+      // ENOENT on indexJsonPath means nothing to rename — idempotent no-op
+    }
+
+    const infos = removed > 0
+      ? [`Removed ${removed} feature-knowledge pipeline artifact(s)`]
+      : [];
+    return { infos, warnings: [] };
+  },
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_SHADOW_OVERRIDES,
   MIGRATION_PURGE_LEGACY_KNOWLEDGE,
@@ -975,6 +1124,8 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_PURGE_TEAMMATE_MODE_PER_PROJECT,
   MIGRATION_DECISIONS_LEDGER_UNIFY,
   MIGRATION_PURGE_DEAD_WORKING_MEMORY_SENTINEL,
+  MIGRATION_PURGE_KNOWLEDGE_HOOKS_GLOBAL,
+  MIGRATION_PURGE_FEATURE_KNOWLEDGE_PIPELINE,
 ];
 
 const MIGRATIONS_FILE = 'migrations.json';

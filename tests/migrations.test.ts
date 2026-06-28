@@ -163,6 +163,36 @@ describe('MIGRATIONS', () => {
     expect(renameIdx).toBeGreaterThanOrEqual(0);
     expect(consolidateIdx).toBeGreaterThan(renameIdx);
   });
+
+  it('contains purge-knowledge-hooks-global-v1 with global scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-knowledge-hooks-global-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('global');
+    expect(m?.description).toBeTruthy();
+    expect(typeof m?.run).toBe('function');
+  });
+
+  it('contains purge-feature-knowledge-pipeline-v1 with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-feature-knowledge-pipeline-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+    expect(m?.description).toBeTruthy();
+    expect(typeof m?.run).toBe('function');
+  });
+
+  it('purge-knowledge-hooks-global-v1 appears after purge-dead-working-memory-sentinel-v1', () => {
+    const sentinelIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dead-working-memory-sentinel-v1');
+    const hooksIdx = MIGRATIONS.findIndex(m => m.id === 'purge-knowledge-hooks-global-v1');
+    expect(sentinelIdx).toBeGreaterThanOrEqual(0);
+    expect(hooksIdx).toBeGreaterThan(sentinelIdx);
+  });
+
+  it('purge-feature-knowledge-pipeline-v1 appears after purge-knowledge-hooks-global-v1', () => {
+    const hooksIdx = MIGRATIONS.findIndex(m => m.id === 'purge-knowledge-hooks-global-v1');
+    const pipelineIdx = MIGRATIONS.findIndex(m => m.id === 'purge-feature-knowledge-pipeline-v1');
+    expect(hooksIdx).toBeGreaterThanOrEqual(0);
+    expect(pipelineIdx).toBeGreaterThan(hooksIdx);
+  });
 });
 
 describe('runMigrations', () => {
@@ -1896,5 +1926,327 @@ describe('purge-dead-working-memory-sentinel-v1 migration', () => {
     const deadIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dead-working-memory-sentinel-v1');
     expect(staleIdx).toBeGreaterThanOrEqual(0);
     expect(deadIdx).toBeGreaterThan(staleIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purge-knowledge-hooks-global-v1 migration
+// ---------------------------------------------------------------------------
+
+describe('purge-knowledge-hooks-global-v1 migration', () => {
+  let tmpDir: string;
+  let fakeDevflow: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-knowledge-hooks-global-test-'));
+    fakeDevflow = path.join(tmpDir, 'devflow');
+    await fs.mkdir(path.join(fakeDevflow, 'scripts', 'hooks', 'lib'), { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    await fs.mkdir(path.join(tmpDir, 'home', '.devflow'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'global'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-knowledge-hooks-global-v1');
+    if (!m) throw new Error('purge-knowledge-hooks-global-v1 migration not found');
+    return m as Migration<'global'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').GlobalMigrationContext {
+    return { scope: 'global', devflowDir: fakeDevflow };
+  }
+
+  it('is registered in MIGRATIONS with global scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-knowledge-hooks-global-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('global');
+    expect(m?.description).toBeTruthy();
+    expect(typeof m?.run).toBe('function');
+  });
+
+  it('appears after purge-dead-working-memory-sentinel-v1 in MIGRATIONS array', () => {
+    const prevIdx = MIGRATIONS.findIndex(m => m.id === 'purge-dead-working-memory-sentinel-v1');
+    const thisIdx = MIGRATIONS.findIndex(m => m.id === 'purge-knowledge-hooks-global-v1');
+    expect(prevIdx).toBeGreaterThanOrEqual(0);
+    expect(thisIdx).toBeGreaterThan(prevIdx);
+  });
+
+  it('removes eval-knowledge hook when present', async () => {
+    const hookPath = path.join(fakeDevflow, 'scripts', 'hooks', 'eval-knowledge');
+    await fs.writeFile(hookPath, '#!/bin/bash\necho eval-knowledge\n', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(hookPath)).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  it('removes feature-knowledge.cjs when present', async () => {
+    const libPath = path.join(fakeDevflow, 'scripts', 'hooks', 'lib', 'feature-knowledge.cjs');
+    await fs.writeFile(libPath, '// feature-knowledge lib\n', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(libPath)).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+  });
+
+  it('removes both files when both are present', async () => {
+    const hookPath = path.join(fakeDevflow, 'scripts', 'hooks', 'eval-knowledge');
+    const libPath = path.join(fakeDevflow, 'scripts', 'hooks', 'lib', 'feature-knowledge.cjs');
+    await fs.writeFile(hookPath, '#!/bin/bash\n', 'utf-8');
+    await fs.writeFile(libPath, '// lib\n', 'utf-8');
+
+    const result = await getMigration().run(makeCtx());
+
+    await expect(fs.access(hookPath)).rejects.toThrow();
+    await expect(fs.access(libPath)).rejects.toThrow();
+    expect(result?.infos?.length).toBeGreaterThan(0);
+  });
+
+  it('is a no-op when neither file exists (ENOENT-idempotent)', async () => {
+    // No files seeded — migration should succeed without error
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  it('is idempotent — running twice produces no error and same result', async () => {
+    const hookPath = path.join(fakeDevflow, 'scripts', 'hooks', 'eval-knowledge');
+    await fs.writeFile(hookPath, '#!/bin/bash\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+    // Second run: file already gone — must not throw
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+    const result = await getMigration().run(makeCtx());
+    expect(result?.infos ?? []).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purge-feature-knowledge-pipeline-v1 migration
+// ---------------------------------------------------------------------------
+
+describe('purge-feature-knowledge-pipeline-v1 migration', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let devflowDir: string;
+  let dreamDir: string;
+  let featuresDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-purge-knowledge-pipeline-test-'));
+    projectRoot = path.join(tmpDir, 'project');
+    devflowDir = path.join(projectRoot, '.devflow');
+    dreamDir = path.join(devflowDir, 'dream');
+    featuresDir = path.join(devflowDir, 'features');
+    await fs.mkdir(dreamDir, { recursive: true });
+    await fs.mkdir(featuresDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = path.join(tmpDir, 'home');
+    fakeHome = path.join(tmpDir, 'home', '.devflow');
+    await fs.mkdir(fakeHome, { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function getMigration(): Migration<'per-project'> {
+    const m = MIGRATIONS.find(m => m.id === 'purge-feature-knowledge-pipeline-v1');
+    if (!m) throw new Error('purge-feature-knowledge-pipeline-v1 migration not found');
+    return m as Migration<'per-project'>;
+  }
+
+  function makeCtx(): import('../src/cli/utils/migrations.js').PerProjectMigrationContext {
+    return {
+      scope: 'per-project',
+      devflowDir: fakeHome,
+      memoryDir: path.join(devflowDir, 'memory'),
+      projectRoot,
+    };
+  }
+
+  it('is registered in MIGRATIONS with per-project scope', () => {
+    const m = MIGRATIONS.find(m => m.id === 'purge-feature-knowledge-pipeline-v1');
+    expect(m).toBeDefined();
+    expect(m?.scope).toBe('per-project');
+    expect(m?.description).toBeTruthy();
+    expect(typeof m?.run).toBe('function');
+  });
+
+  it('appears after purge-knowledge-hooks-global-v1 in MIGRATIONS array', () => {
+    const globalIdx = MIGRATIONS.findIndex(m => m.id === 'purge-knowledge-hooks-global-v1');
+    const thisIdx = MIGRATIONS.findIndex(m => m.id === 'purge-feature-knowledge-pipeline-v1');
+    expect(globalIdx).toBeGreaterThanOrEqual(0);
+    expect(thisIdx).toBeGreaterThan(globalIdx);
+  });
+
+  it('removes knowledge.*.json dream markers', async () => {
+    const marker1 = path.join(dreamDir, 'knowledge.abc123.json');
+    const marker2 = path.join(dreamDir, 'knowledge.def456.json');
+    await fs.writeFile(marker1, '{}', 'utf-8');
+    await fs.writeFile(marker2, '{}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(marker1)).rejects.toThrow();
+    await expect(fs.access(marker2)).rejects.toThrow();
+  });
+
+  it('removes knowledge.*.processing dream markers', async () => {
+    const marker = path.join(dreamDir, 'knowledge.abc123.processing');
+    await fs.writeFile(marker, '', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(marker)).rejects.toThrow();
+  });
+
+  it('preserves non-knowledge dream files', async () => {
+    const decisionsMarker = path.join(dreamDir, 'decisions.abc123.json');
+    const configFile = path.join(dreamDir, 'config.json');
+    await fs.writeFile(decisionsMarker, '{}', 'utf-8');
+    await fs.writeFile(configFile, '{"knowledge":true}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // decisions and config must survive
+    await expect(fs.access(decisionsMarker)).resolves.toBeUndefined();
+    await expect(fs.access(configFile)).resolves.toBeUndefined();
+  });
+
+  it('removes .knowledge-last-refresh file', async () => {
+    const lastRefresh = path.join(featuresDir, '.knowledge-last-refresh');
+    await fs.writeFile(lastRefresh, '1718000000', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(lastRefresh)).rejects.toThrow();
+  });
+
+  it('removes .disabled sentinel file', async () => {
+    const disabled = path.join(featuresDir, '.disabled');
+    await fs.writeFile(disabled, '', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(disabled)).rejects.toThrow();
+  });
+
+  it('removes .knowledge.lock directory recursively', async () => {
+    const lockDir = path.join(featuresDir, '.knowledge.lock');
+    await fs.mkdir(lockDir, { recursive: true });
+    await fs.writeFile(path.join(lockDir, 'pid'), '12345', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(lockDir)).rejects.toThrow();
+  });
+
+  it('removes .knowledge-refresh.lock directory recursively', async () => {
+    const lockDir = path.join(featuresDir, '.knowledge-refresh.lock');
+    await fs.mkdir(lockDir, { recursive: true });
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(lockDir)).rejects.toThrow();
+  });
+
+  it('renames index.json to index.json.deprecated when present', async () => {
+    const indexJson = path.join(featuresDir, 'index.json');
+    const indexDeprecated = path.join(featuresDir, 'index.json.deprecated');
+    const content = '{"feature-knowledge-system":{"name":"Feature Knowledge System"}}';
+    await fs.writeFile(indexJson, content, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(indexJson)).rejects.toThrow();
+    await expect(fs.access(indexDeprecated)).resolves.toBeUndefined();
+    const renamed = await fs.readFile(indexDeprecated, 'utf-8');
+    expect(renamed).toBe(content);
+  });
+
+  it('does NOT touch the knowledge key in dream config.json', async () => {
+    const configPath = path.join(dreamDir, 'config.json');
+    const config = JSON.stringify({ knowledge: true, decisions: true }, null, 2);
+    await fs.writeFile(configPath, config, 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    const after = JSON.parse(await fs.readFile(configPath, 'utf-8'));
+    expect(after.knowledge).toBe(true);
+    expect(after.decisions).toBe(true);
+  });
+
+  it('does NOT remove KNOWLEDGE.md files from feature slugs', async () => {
+    const slugDir = path.join(featuresDir, 'my-feature');
+    await fs.mkdir(slugDir, { recursive: true });
+    const kbPath = path.join(slugDir, 'KNOWLEDGE.md');
+    await fs.writeFile(kbPath, '# My Feature KB\n', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    await expect(fs.access(kbPath)).resolves.toBeUndefined();
+    const content = await fs.readFile(kbPath, 'utf-8');
+    expect(content).toBe('# My Feature KB\n');
+  });
+
+  it('is a no-op when no artifacts exist (ENOENT-idempotent)', async () => {
+    // No artifacts seeded — migration should succeed without error
+    const result = await getMigration().run(makeCtx());
+    expect(result?.warnings ?? []).toEqual([]);
+  });
+
+  it('is idempotent — running twice produces no error and no further change', async () => {
+    // Seed all artifacts
+    await fs.writeFile(path.join(dreamDir, 'knowledge.abc123.json'), '{}', 'utf-8');
+    await fs.writeFile(path.join(featuresDir, '.knowledge-last-refresh'), '1718000000', 'utf-8');
+    await fs.writeFile(path.join(featuresDir, '.disabled'), '', 'utf-8');
+    await fs.mkdir(path.join(featuresDir, '.knowledge.lock'), { recursive: true });
+    await fs.writeFile(path.join(featuresDir, 'index.json'), '{}', 'utf-8');
+
+    // First run — performs cleanup
+    await getMigration().run(makeCtx());
+
+    // Second run — everything already gone, must not throw
+    await expect(getMigration().run(makeCtx())).resolves.not.toThrow();
+    const result = await getMigration().run(makeCtx());
+    expect(result?.warnings ?? []).toEqual([]);
+
+    // index.json.deprecated must still be present (not removed on second run)
+    await expect(
+      fs.access(path.join(featuresDir, 'index.json.deprecated')),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not rename index.json.deprecated a second time if already renamed', async () => {
+    // Pre-seed only the deprecated file (first run already ran)
+    const deprecatedPath = path.join(featuresDir, 'index.json.deprecated');
+    await fs.writeFile(deprecatedPath, '{"existing":true}', 'utf-8');
+
+    await getMigration().run(makeCtx());
+
+    // Deprecated file must still contain original content
+    const content = await fs.readFile(deprecatedPath, 'utf-8');
+    expect(content).toBe('{"existing":true}');
   });
 });
