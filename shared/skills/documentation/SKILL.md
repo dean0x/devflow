@@ -29,6 +29,7 @@ Domain expertise for documentation quality and alignment. Use alongside `devflow
 | Outdated comments | Comments that contradict code | Update or remove |
 | "What" comments | `// Loop through users` | Explain "why" instead |
 | Magic algorithms | Complex logic without explanation | Document algorithm and rationale |
+| Transition residue | "We no longer do X" notes, in-file changelogs, or refs to removed code/sections | Remove — git holds the history |
 
 **Brief Example - Missing vs. Complete:**
 ```typescript

@@ -40,12 +40,14 @@ Analyze recently modified code and apply refinements that:
    |----------|---------|
    | Language-behavior tests | Tests verifying built-in language features work as documented |
    | Redundant type checks | Runtime checks for types TypeScript already enforces |
-   | Over-defensive handling | try/catch around code that cannot throw |
+   | Over-defensive handling | try/catch around code that cannot throw; guards for states that can no longer occur |
    | Debug remnants | console.log, debugger, alert() left behind |
    | Commented-out code | Dead code preserved in comments |
    | Unused imports | Imports not referenced anywhere in file |
    | Verbose names | Unnecessarily long names (`currentUserDataObject` → `user`) |
    | Unnecessary intermediates | Variables used once, immediately after assignment |
+   | Tombstone comments | "No longer does X" notes or refs to removed code, files, or config |
+   | History-encoding names | `fooV2`, `userNew`, `*_old`/`legacy*` with no current sibling |
 
 4. **Enhance Clarity**: Simplify code structure by:
 
@@ -99,7 +101,7 @@ Return structured completion status:
 - Files outside the recently modified scope (unless instructed)
 
 **Handle autonomously:**
-- Slop removal (all 8 categories)
+- Slop removal (all 10 categories)
 - Naming improvements, nesting reduction
 - Import sorting and organization
 - Redundant abstraction elimination
