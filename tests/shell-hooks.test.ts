@@ -2430,22 +2430,21 @@ describe('dream-collect-tasks: single-pass scan', () => {
     expect(fs.existsSync(path.join(dreamDir, 'learning.sess2.json'))).toBe(false);
   });
 
-  // AC-3: memory + knowledge always swept unconditionally; decisions/curation deleted when decisions disabled
+  // AC-3: memory always swept unconditionally; decisions/curation deleted when decisions disabled
   // Curation is swept when decisions is disabled (curation depends on decisions data).
-  // Knowledge is no longer a Dream task — write-through handles it in-command; stale markers deleted on sight.
-  it('AC-3: memory always swept; disabled decisions/knowledge/curation markers deleted when decisions disabled', () => {
+  // Knowledge is no longer a Dream concept at all — write-through handles KBs in-command and
+  // nothing writes knowledge.* markers, so the script carries no knowledge case (clean break).
+  it('AC-3: memory always swept; disabled decisions/curation markers deleted when decisions disabled', () => {
     fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');       // swept unconditionally
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
-    fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');    // swept unconditionally (no longer Dream task)
     fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
 
-    // Memory + knowledge markers are always swept unconditionally (neither is a Dream task anymore).
+    // Memory markers are always swept unconditionally (no longer a Dream task).
     // Curation markers are also swept when decisions is disabled — curation inherits decisions state.
     const { tasks } = runCollectTasks(dreamDir, { decEnabled: false });
     expect(tasks).toBe('');
     expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'decisions.sess1.json'))).toBe(false);
-    expect(fs.existsSync(path.join(dreamDir, 'knowledge.sess1.json'))).toBe(false);
     // curation swept because decisions is disabled
     expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(false);
   });

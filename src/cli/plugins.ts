@@ -538,8 +538,6 @@ const LEGACY_SKILLS_V2X: string[] = [
   // v3.x dream per-task skills: bare names for pre-namespace installs.
   // NOTE: dream-decisions and dream-curation are STILL-ACTIVE skills (declared in
   // DEVFLOW_PLUGINS, installed at the namespaced path devflow:dream-*).
-  // dream-knowledge was REMOVED in this release — knowledge is now handled in-command
-  // via write-through (knowledge_writeback MDS partial).
   // These bare entries exist solely to clean up pre-namespace V2.x installs where
   // skills were written without the devflow: prefix. On current installs the post-install
   // fs.rm targets a bare path (e.g. ~/.claude/skills/dream-decisions) that does not exist
@@ -547,15 +545,11 @@ const LEGACY_SKILLS_V2X: string[] = [
   // stale bare-name dirs swept. (applies ADR-016; avoids PF-009)
   'dream-memory',
   'dream-decisions',
-  'dream-knowledge',
   'dream-curation',
   // v3.x dream-memory removal: namespaced name for cleanup of installed devflow:dream-memory skill
   'devflow:dream-memory',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
-  // v3.x dream-knowledge removal: namespaced name for cleanup of installed devflow:dream-knowledge skill
-  // (dream-knowledge was removed when knowledge write-through replaced the Dream background pipeline)
-  'devflow:dream-knowledge',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
   'devflow:router',
   'devflow:implement:triage',
