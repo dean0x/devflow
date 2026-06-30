@@ -197,8 +197,10 @@ describe('project-paths TypeScript module', () => {
       expect(getGitignoreEntries()).toContain('.claude/');
     });
 
-    it('includes .devflow/ (ignored wholesale by default)', () => {
-      expect(getGitignoreEntries()).toContain('.devflow/');
+    it('does NOT include .devflow/ — that is managed by ensureDevflowGitignore (carve-out)', () => {
+      // A bare `.devflow/` here would be appended after the carve-out and re-bury it.
+      expect(getGitignoreEntries()).not.toContain('.devflow/');
+      expect(getGitignoreEntries()).not.toContain('.devflow/*');
     });
 
     it('does not include old .memory/ entry', () => {

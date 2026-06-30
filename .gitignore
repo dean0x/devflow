@@ -84,10 +84,18 @@ install.log
 # Devflow local scope installation (use --scope local)
 .claude/
 
-# Devflow runtime data — per-developer state (memory, dream, docs, decisions,
-# feature knowledge, locks). Ignored wholesale by default; sharing is opt-in
-# (remove this entry, or re-include specific files in your own .gitignore).
-.devflow/
+# Devflow runtime data — local by default (memory, dream, docs, decisions, locks).
+# Exception: feature knowledge bases under .devflow/features/ are shared via git —
+# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else
+# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`
+# to your own .gitignore.
+.devflow/*
+!.devflow/features/
+.devflow/features/*
+!.devflow/features/index.md
+!.devflow/features/*/
+.devflow/features/*/*
+!.devflow/features/*/KNOWLEDGE.md
 
 src/claude/CLAUDE.legacy.md
 

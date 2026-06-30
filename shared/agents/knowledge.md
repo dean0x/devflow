@@ -12,6 +12,7 @@ tools:
   - Grep
   - Glob
   - Write
+  - Bash
 ---
 
 # Knowledge Agent
@@ -39,7 +40,8 @@ tools:
    - If slug already present: replace that line in-place
    - If absent or file missing: append (or create file)
    - Line format: `- **{slug}** — {areas} — {Use-when description}`
-8. **Report**: Output KB_PATH and KB_SLUG (see Output section)
+8. **Commit the knowledge files**: Run git yourself via Bash to commit `index.md` + the `KNOWLEDGE.md` to the current worktree branch (see Commit Protocol). Commit only those two paths; never push.
+9. **Report**: Output KB_PATH, KB_SLUG, and KB_COMMIT (see Output section)
 
 ## Direct Write Protocol
 
@@ -53,6 +55,20 @@ Write BOTH files atomically — no intermediate result files, no external script
 
 The frontmatter in KNOWLEDGE.md is always the authority. The index.md line is a discoverable cache.
 
+## Commit Protocol
+
+After both files are written, **commit them to the current worktree branch yourself** by running git directly with your Bash tool. Do NOT write or invoke a script to do this — run the commands. Feature knowledge bases are tracked in git (the root `.gitignore` carve-out keeps `index.md` and every `{slug}/KNOWLEDGE.md` shareable), so persisting them is part of your job.
+
+Run every command with `git -C "{worktree}"` (never `cd`). Commit **only** the two knowledge files — never stage or commit anything else, so a user's unrelated in-progress work is never swept in.
+
+1. **Guard.** If `git -C "{worktree}" rev-parse --is-inside-work-tree` is not `true`, or `git -C "{worktree}" symbolic-ref -q HEAD` prints nothing (detached HEAD), skip committing and report `KB_COMMIT: skipped (no branch)`. Never commit on a detached HEAD.
+2. **Detect changes.** If `git -C "{worktree}" status --porcelain -- .devflow/features/index.md .devflow/features/{slug}/KNOWLEDGE.md` is empty, the write produced no change — report `KB_COMMIT: skipped (no changes)` and stop.
+3. **Stage only the two paths:** `git -C "{worktree}" add -- .devflow/features/index.md .devflow/features/{slug}/KNOWLEDGE.md`
+4. **Commit only those paths** (the pathspec keeps any other staged work out of the commit): `git -C "{worktree}" commit --only -- .devflow/features/index.md .devflow/features/{slug}/KNOWLEDGE.md -m "docs(knowledge): {add when created | update when refreshed} {slug} feature knowledge base"`
+5. **Stop there.** Do NOT push. Do NOT force. Do NOT amend or rewrite other commits. The commit stays local to the branch; the user's normal workflow pushes it.
+
+**Non-blocking.** Writing the files is the primary outcome. If any git step errors (commit hook rejects, index locked, no remote), report `KB_COMMIT: failed (<one-line reason>)` and finish normally — never abort the task, and never retry in a loop.
+
 ## Output
 
 ```
@@ -62,6 +78,7 @@ KB_SLUG: {slug}
 KB_NAME: {name}
 SECTIONS: [list of sections written]
 CROSS_REFERENCES: [ADR/PF entries referenced, if any]
+KB_COMMIT: committed <sha> | skipped (no changes) | skipped (no branch) | failed (<reason>)
 ```
 
 ## Boundaries
@@ -69,4 +86,4 @@ CROSS_REFERENCES: [ADR/PF entries referenced, if any]
 - **Only writes to `.devflow/features/` directory** — never modify source code
 - **Never delete existing feature knowledge** — only create new or refresh existing
 - **500-line cap** — if the knowledge base exceeds 500 lines, split into focused sub-knowledge bases (each gets its own index entry)
-- **No push, no external API calls** — local filesystem operations only
+- **Commits only `.devflow/features/` paths** — stage and commit only `index.md` and the `KNOWLEDGE.md` you wrote (never `git add -A`, never touch other files); **never push, never force, never amend**. Run git via Bash yourself — no commit scripts. No external API calls.

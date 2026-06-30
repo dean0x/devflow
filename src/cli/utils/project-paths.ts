@@ -202,17 +202,16 @@ export function getHandoffPath(projectRoot: string, branchSlug: string): string 
 // ---------------------------------------------------------------------------
 
 /**
- * The canonical list of gitignore entries Devflow adds to a project's root
- * .gitignore. `.devflow/` holds per-developer runtime state (memory, dream,
- * docs, decisions, feature knowledge, locks) and is ignored wholesale by
- * default — sharing is opt-in. `.claude/` covers local-scope installs.
+ * The canonical list of generic gitignore entries Devflow adds to a project's
+ * root .gitignore for LOCAL-scope installs. Currently just `.claude/`.
  *
- * The ensure-devflow-init hook is the live, every-project mechanism that
- * appends `.devflow/` to the root .gitignore lazily; this list mirrors that
- * intent for the TS install path.
+ * `.devflow/` is intentionally NOT here: it is managed by ensureDevflowGitignore
+ * (TS) / ensure-root-gitignore (hook), which write the feature-knowledge carve-out
+ * for ALL scopes. Adding a bare `.devflow/` here would append a wholesale-ignore
+ * line after the carve-out and re-bury it (last match wins in .gitignore).
  *
  * CJS mirror: scripts/hooks/lib/project-paths.cjs getGitignoreEntries().
  */
 export function getGitignoreEntries(): string[] {
-  return ['.claude/', '.devflow/'];
+  return ['.claude/'];
 }

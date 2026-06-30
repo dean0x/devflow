@@ -84,7 +84,9 @@ Index line format: `- **{slug}** — {areas} — {Use-when description}`
 
 If the line for this slug already exists in index.md, replace it. If it does not exist, append it. If index.md does not exist, create it with just this line.
 
-The frontmatter in KNOWLEDGE.md is the source of truth — index.md is only a cache. Write the two files directly — no intermediate result JSON files, no external scripts."
+The frontmatter in KNOWLEDGE.md is the source of truth — index.md is only a cache. Write the two files directly — no intermediate result JSON files, no external scripts.
+
+After writing, commit the two files to the current worktree branch yourself by running git via your Bash tool (do not use a script). Stage ONLY .devflow/features/index.md and .devflow/features/{slug}/KNOWLEDGE.md, then commit just those paths with a docs(knowledge): message. Do NOT push, do NOT force, do NOT stage anything else. Follow your Commit Protocol — it is non-blocking, so if any git step fails, report KB_COMMIT and finish normally."
 ```
 
 **Failure handling**: Non-blocking. If the Knowledge agent fails, log the failure and continue — the workflow outcome is not affected by write-back success.

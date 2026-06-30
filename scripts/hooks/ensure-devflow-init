@@ -23,7 +23,7 @@ _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
    [ -d "$_DEVFLOW_DIR/dream" ] && \
    [ -d "$_DEVFLOW_DIR/decisions" ] && [ -d "$_DEVFLOW_DIR/features" ] && \
-   [ -f "$_DEVFLOW_DIR/.root-gitignore-configured" ]; then
+   [ -f "$_DEVFLOW_DIR/.root-gitignore-configured-v2" ]; then
   return 0
 fi
 
