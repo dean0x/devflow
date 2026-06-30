@@ -221,7 +221,6 @@ _DREAM_DIRECTIVE=""
 # substitution would strip them.
 #
 # Hardcoded task→model map: decisions=opus, curation=opus.
-# memory is no longer a Dream task — swept unconditionally by collect.
 # decisions+curation co-pending → exactly ONE opus spawn that
 # runs decisions THEN curation sequentially (prevents .decisions.lock contention).
 # Unknown task types are skipped (belt-and-suspenders — dream_collect_tasks
@@ -230,8 +229,6 @@ dream_build_spawn_directive() {
   local _dbsd_tasks="$1"
   _DREAM_DIRECTIVE=""
 
-  # memory: no longer a Dream subagent task (handled by background-memory-update worker).
-  # Map: decisions=opus, curation=opus. memory entries swept by collect.
   local _dbsd_dec="false" _dbsd_cur="false"
   case ",$_dbsd_tasks," in *,decisions,*) _dbsd_dec="true" ;; esac
   case ",$_dbsd_tasks," in *,curation,*)  _dbsd_cur="true" ;; esac

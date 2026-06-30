@@ -255,8 +255,6 @@ Where:
 
 If `index.md` does not exist, create it with just this line. If the file already has an entry for this slug, replace that line in-place. This is the discoverable cache read by `knowledge_load()` — the KNOWLEDGE.md frontmatter is always authoritative.
 
-Do NOT write `.create-result.json` or `.refresh-result.json`. Do NOT call any external script to update an index. Write directly.
-
 ---
 
 ## Worked Example

@@ -70,4 +70,3 @@ CROSS_REFERENCES: [ADR/PF entries referenced, if any]
 - **Never delete existing feature knowledge** — only create new or refresh existing
 - **500-line cap** — if the knowledge base exceeds 500 lines, split into focused sub-knowledge bases (each gets its own index entry)
 - **No push, no external API calls** — local filesystem operations only
-- **No `.create-result.json` or `.refresh-result.json`** — write directly; the host workflow reads KB_PATH/KB_SLUG from this agent's output text

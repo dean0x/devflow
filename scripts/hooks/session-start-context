@@ -130,9 +130,7 @@ fi
 if [ "$_SC2_HELPERS_OK" = "true" ]; then
   # Determine feature enabled-state.
   # Primary: dream/config.json fields; secondary: runtime sentinel for decisions.
-  # Note: memory is NOT a Dream task (handled by background-memory-update worker) —
-  # mem_enabled was removed from dream_collect_tasks (applies ADR-016; avoids PF-009).
-  # Note: knowledge is no longer a Dream task — write-through handles it in-command.
+  # Only decisions is gated here (per ADR-016; avoids PF-009).
   _SC2_DEC_EN="true"
 
   _SC2_DREAM_CONFIG="$DREAM_DIR/config.json"

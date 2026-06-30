@@ -111,7 +111,7 @@ If external research was skipped due to tool unavailability: inform user.
 1. If `codebase` type was not in RESEARCH_PLAN → skip
 2. Check if matching feature knowledge already exists by reading `\{worktree\}/.devflow/features/index.md` (or globbing frontmatter if absent). If covered → skip
 3. Use AskUserQuestion: "No feature knowledge exists for \{researched area\}. Create one?"
-4. If user accepts: spawn `Agent(subagent_type="Knowledge")` with researched area context + worktree root, instructing it to load `devflow:feature-knowledge`, write `KNOWLEDGE.md`, and update `index.md` directly (no `.create-result.json`)
+4. If user accepts: spawn `Agent(subagent_type="Knowledge")` with researched area context + worktree root, instructing it to load `devflow:feature-knowledge`, write `KNOWLEDGE.md`, and update `index.md` directly
 5. Set FEATURE_KNOWLEDGE_STATUS = created or skipped
 
 **Failure handling**: Non-blocking. If Knowledge agent fails, log and continue.

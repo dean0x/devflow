@@ -23,8 +23,6 @@
 #   - Per-type stale thresholds:
 #       memory    = 300s  (5 minutes)
 #       decisions = 1800s (30 minutes)
-#       knowledge = 1800s (legacy; knowledge is no longer a Dream task — stale markers are
- #                         recovered here then deleted by dream-collect-tasks on sight)
 #       unknown   = 1800s (default)
 #   - Also recovers orphaned .pending-turns.processing:
 #       If MEMORY_DIR/.pending-turns.processing exists and is older than 300s,
@@ -39,8 +37,6 @@
 #   running after 5 minutes the session almost certainly crashed. All other
 #   types (decisions, curation) run the LLM and may take up to 30 minutes on
 #   large logs or slow models; 1800s avoids yanking an actively-running Dream agent.
-#   Learning and knowledge are no longer Dream tasks; stale markers are recovered
-#   here and then deleted by dream-collect-tasks on sight.
 #
 # D56b: JUST_RECOVERED guard.
 #   When dream_recover_stale renames a .processing back to .json, it records

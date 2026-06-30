@@ -1,6 +1,6 @@
 ---
 name: Dream
-description: Background maintenance agent — processes ONE pending task type named in its prompt (decisions, curation). Spawned per-task by session-start-context; loads the matching per-task skill via the Skill tool. Memory is NOT a Dream task — it is handled by the background-memory-update worker spawned from dream-capture. Knowledge is NOT a Dream task — it is handled in-command via write-through.
+description: Background maintenance agent — processes ONE pending task type named in its prompt (decisions, curation). Spawned per-task by session-start-context; loads the matching per-task skill via the Skill tool.
 model: sonnet
 tools:
   - Read
@@ -40,10 +40,6 @@ Project root is your current working directory (`.`). All `.devflow/` paths are 
 
 Your prompt names the task type(s) to process: `decisions`, `curation`,
 or `decisions then curation` (the combined Opus spawn). Process ONLY the task(s) named.
-**Memory is NOT a Dream task** — the background-memory-update worker (spawned by dream-capture)
-handles WORKING-MEMORY.md writes. If your prompt mentions `memory`, skip it.
-**Knowledge is NOT a Dream task** — write-through (knowledge_writeback MDS partial, invoked
-in-command) handles knowledge base updates. If your prompt mentions `knowledge`, skip it.
 
 ## Step 1 — Claim markers atomically
 
