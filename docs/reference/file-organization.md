@@ -188,7 +188,7 @@ Three shell-script hooks (`dream-capture`, `dream-dispatch`, `dream-evaluate`) r
 
 | Hook / Worker | Event | Purpose |
 |---------------|-------|---------|
-| `dream-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue; after the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p`). No `memory.json` marker is written — memory refresh no longer goes through the Dream subagent. |
+| `dream-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue; after the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p`). Memory refresh is handled directly by that worker; no `memory.json` Dream marker is written. |
 | `background-memory-update` | Detached worker (spawned by Stop) | Drains `.pending-turns.jsonl` → calls `claude -p --model haiku` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
 | `dream-dispatch` | UserPromptSubmit | Capture-only: appends the user turn to `.pending-turns.jsonl` (emits no directive) |
 | `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 2 feature modules (`eval-decisions`, `eval-curation`); writes per-session decisions/curation markers |

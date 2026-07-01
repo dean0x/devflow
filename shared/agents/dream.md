@@ -11,7 +11,6 @@ tools:
   - Grep
 skills:
   - devflow:apply-decisions
-  - devflow:apply-feature-knowledge
   - devflow:dream-decisions
   - devflow:dream-curation
 ---
@@ -59,7 +58,7 @@ If ALL markers for a task type fail to claim, skip that task entirely.
 
 **Heartbeat rule**: At the start of every phase, `touch` each in-flight `.processing` file to
 refresh its mtime. This prevents dream-recover from reclaiming a file that is actively
-being processed (recovery threshold is 1800s; a long knowledge refresh can take time).
+being processed (recovery threshold is 1800s; a long decisions or curation pass can take time).
 
 **Concurrency rule**: Never hold a lock across tool calls. All log/decisions writes go through
 the plumbing ops in the per-task skills — they hold locks internally for one atomic read-modify-write.

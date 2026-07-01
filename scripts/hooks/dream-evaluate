@@ -5,7 +5,6 @@
 # Writes marker files to .devflow/dream/ for dream-dispatch to pick up.
 #
 # Orchestrator: sources eval-helpers + 2 feature modules after shared setup.
-# Knowledge is no longer evaluated here — write-through handles it in-command.
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
@@ -133,9 +132,6 @@ MARKER_SUFFIX="${SESSION_ID:-$$}"
 #   DECISIONS_DIR_DATA — absolute path to .devflow/decisions/
 #   DECISIONS_ENABLED — "true"/"false"
 #   _HAS_JQ        — "true" if jq is available on PATH
-#
-# Note: FEATURES_DIR and KNOWLEDGE_ENABLED are no longer set here.
-# Knowledge write-through is handled in-command via the knowledge_writeback() MDS partial.
 #
 source "$SCRIPT_DIR/eval-helpers"
 source "$SCRIPT_DIR/eval-decisions"

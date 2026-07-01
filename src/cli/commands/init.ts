@@ -1185,9 +1185,6 @@ export const initCommand = new Command('init')
 
 
     // Manage runtime-disable sentinel for decisions gating.
-    // Note: features/.disabled sentinel for knowledge is no longer managed here;
-    // write-through (knowledge_writeback MDS partial) creates features/ lazily,
-    // and the config gate (dream config `knowledge` field) is the sole opt-out.
     if (gitRoot) {
       await manageSentinel(getDecisionsDisabledSentinel(gitRoot), decisionsEnabled);
     }

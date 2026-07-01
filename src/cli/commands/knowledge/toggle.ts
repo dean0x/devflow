@@ -2,8 +2,6 @@
  * Handle the enable/disable/status toggle actions for `devflow knowledge`.
  *
  * The sole opt-out mechanism is the dream config `knowledge` field (config-only gate per ADR-001).
- * The features/.disabled sentinel and index.json bootstrap are no longer managed here —
- * write-through creates features/ lazily, and the sentinel machinery is deleted.
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';

@@ -2,9 +2,8 @@
  * devflow knowledge list — list feature knowledge bases.
  *
  * Reads .devflow/features/index.md directly (write-through cache), or falls back
- * to globbing KNOWLEDGE.md frontmatter when index.md is absent/empty. No .cjs
- * engine, no index.json, no staleness detection (verify-against-code is the freshness
- * mechanism per the new write-through model).
+ * to globbing KNOWLEDGE.md frontmatter when index.md is absent or empty. Freshness
+ * comes from verify-against-code at read time in the consuming workflow.
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
