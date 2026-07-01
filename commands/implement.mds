@@ -1,7 +1,8 @@
 ---
 description: Execute a single task through implementation, quality gates, and PR creation - accepts plan documents, issues, or task descriptions
+output-dir: plugins/devflow-implement/commands
 ---
-@import { knowledge_load, knowledge_writeback } from "./_knowledge.mds"
+@import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 
 # Implement Command
 

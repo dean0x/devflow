@@ -1,7 +1,8 @@
 ---
 description: Debug issues using competing hypothesis investigation with parallel agents
+output-dir: plugins/devflow-debug/commands
 ---
-@import { knowledge_writeback } from "./_knowledge.mds"
+@import { knowledge_writeback } from "./_partials/_knowledge.mds"
 
 # Debug Command
 

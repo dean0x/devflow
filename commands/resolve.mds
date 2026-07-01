@@ -1,7 +1,8 @@
 ---
 description: Process review issues - validate, assess risk, fix low-risk issues, defer high-risk to tech debt
+output-dir: plugins/devflow-resolve/commands
 ---
-@import { knowledge_load, knowledge_writeback } from "./_knowledge.mds"
+@import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 
 # Resolve Command
 

@@ -1,10 +1,11 @@
 ---
 description: Parallel wave planning — plan-challenge every ticket, produce acceptance criteria + test plans, auto-resolve decisions against the preference profile, output DECISIONS-NEEDED.md
 argument-hint: "[tickets-dir | issue-list | --dry-run]"
+output-dir: plugins/devflow-dynamic/commands
 ---
-@import { authoring_preamble } from "./_preamble.mds"
-@import { agent_roster, agent_caveats } from "./_roster.mds"
-@import { acceptance_criteria_contract } from "./_plan_contract.mds"
+@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
+@import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 
 {authoring_preamble()}
 

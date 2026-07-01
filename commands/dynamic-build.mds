@@ -1,12 +1,13 @@
 ---
 description: Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents
 argument-hint: "[ticket | issue-url | plan-doc | --dry-run]"
+output-dir: plugins/devflow-dynamic/commands
 ---
-@import { authoring_preamble } from "./_preamble.mds"
-@import { agent_roster, agent_caveats } from "./_roster.mds"
-@import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_loop, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_engine.mds"
-@import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_wave.mds"
-@import { acceptance_criteria_contract } from "./_plan_contract.mds"
+@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
+@import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_loop, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
+@import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
+@import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
 
 {authoring_preamble()}
 

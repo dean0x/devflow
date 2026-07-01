@@ -1,7 +1,8 @@
 ---
 description: Self-review workflow - Simplifier (code clarity) then Scrutinizer (9-pillar quality gate)
+output-dir: plugins/devflow-self-review/commands
 ---
-@import { knowledge_load, knowledge_writeback } from "./_knowledge.mds"
+@import { knowledge_load, knowledge_writeback } from "./_partials/_knowledge.mds"
 
 # Self-Review Command
 

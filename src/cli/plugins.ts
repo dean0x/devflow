@@ -188,7 +188,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   {
     name: 'devflow-dynamic',
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
-    // Recipe commands compiled from shared/recipes/*.mds at build time (build:recipes).
+    // Commands compiled from commands/*.mds at build time (build:mds).
     commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile', '/dynamic-wave'],
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'reviewer', 'git', 'synthesizer', 'knowledge', 'designer'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],

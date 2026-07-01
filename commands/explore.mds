@@ -1,7 +1,8 @@
 ---
 description: Explore codebase with structured analysis and optional feature knowledge creation
+output-dir: plugins/devflow-explore/commands
 ---
-@import { knowledge_writeback } from "./_knowledge.mds"
+@import { knowledge_writeback } from "./_partials/_knowledge.mds"
 
 # Explore Command
 

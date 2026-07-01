@@ -1,8 +1,9 @@
 ---
 description: Decision-preference profile distiller — mine past session transcripts across all projects to write ~/.devflow/preference-profile.md
 argument-hint: "[--dry-run]"
+output-dir: plugins/devflow-dynamic/commands
 ---
-@import { authoring_preamble } from "./_preamble.mds"
+@import { authoring_preamble } from "./_partials/_preamble.mds"
 
 {authoring_preamble()}
 

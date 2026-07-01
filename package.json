@@ -22,11 +22,10 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "npm run build:cli && npm run build:plugins && npm run build:recipes && npm run build:knowledge && npm run build:hud",
+    "build": "npm run build:cli && npm run build:plugins && npm run build:mds && npm run build:hud",
     "build:cli": "tsc",
     "build:plugins": "npx tsx scripts/build-plugins.ts",
-    "build:recipes": "npx tsx scripts/build-recipes.ts",
-    "build:knowledge": "npx tsx scripts/build-knowledge.ts",
+    "build:mds": "npx tsx scripts/build-mds.ts",
     "build:hud": "node scripts/build-hud.js",
     "dev": "tsc --watch",
     "cli": "node dist/cli.js",
