@@ -1,17 +1,17 @@
 ---
 feature: feature-knowledge-system
 name: Feature Knowledge Base System
-description: "Use when adding a new knowledge base entry, modifying how knowledge is loaded into agents, changing the write-through save model, extending the CLI knowledge commands, or understanding the MDS knowledge module. Keywords: feature knowledge, KNOWLEDGE.md, write-through, knowledge_load, knowledge_writeback, build-knowledge, _knowledge.mds, index.md, apply-feature-knowledge, feature-knowledge."
+description: "Use when adding a new knowledge base entry, modifying how knowledge is loaded into agents, changing the write-through save model, extending the CLI knowledge commands, or understanding the MDS knowledge module. Keywords: feature knowledge, KNOWLEDGE.md, write-through, knowledge_load, knowledge_writeback, build-mds, _knowledge.mds, index.md, apply-feature-knowledge, feature-knowledge."
 category: architecture
 directories:
   - src/cli/commands/knowledge
   - shared/skills/feature-knowledge
   - shared/skills/apply-feature-knowledge
   - shared/agents/knowledge.md
-  - shared/knowledge
-  - scripts/build-knowledge.ts
+  - commands/_partials
+  - scripts/build-mds.ts
 created: 2026-06-21
-updated: 2026-06-28
+updated: 2026-07-01
 ---
 
 # Feature Knowledge Base System
@@ -55,9 +55,10 @@ Gates write-back ONLY — load is ungated (harmless). No sentinel file.
 
 | Component | Path | Role |
 |-----------|------|------|
-| MDS partial module | `shared/knowledge/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
-| Host command sources (9) | `shared/knowledge/{name}.mds` | Command bodies that `@import "_knowledge.mds"` and call the partials |
-| Build script | `scripts/build-knowledge.ts` | Compiles 9 `.mds` → 9 plugin `commands/*.md`; explicit SOURCE_TO_PLUGIN_MAP; hard-fails on any error |
+| MDS partial module | `commands/_partials/_knowledge.mds` | Defines + exports `knowledge_load` and `knowledge_writeback` |
+| Host command sources (9) | `commands/{name}.mds` | Command bodies that `@import "_partials/_knowledge.mds"` and call the partials |
+| Host command sources (5 dynamic) | `commands/dynamic-*.mds` | Dynamic workflow commands — `@import` various `_partials/*.mds`; not knowledge-specific |
+| Build script | `scripts/build-mds.ts` | Frontmatter-driven: discovers ALL `.mds` files declaring `output-dir:` and compiles them to `{output-dir}/{basename}.md`; hard-fails on any error |
 | Author agent | `shared/agents/knowledge.md` | Writes KNOWLEDGE.md + updates index.md line directly; model=sonnet |
 | Author skill | `shared/skills/feature-knowledge/SKILL.md` | 4-phase authoring + KNOWLEDGE.md template + index.md registration |
 | Consumption skill | `shared/skills/apply-feature-knowledge/SKILL.md` | 3-step algorithm for agents loading FEATURE_KNOWLEDGE |
@@ -96,16 +97,17 @@ Invoked at the end of applicable workflows via `knowledge_writeback()` MDS call 
 
 ### Flow 3: MDS build-time compilation
 
-`npm run build:knowledge` (part of `npm run build` chain after `build:recipes`):
+`npm run build:mds` (part of `npm run build` chain after `build:plugins`):
 
-1. Reads `SOURCE_TO_PLUGIN_MAP` (9 entries, explicit — not a glob)
-2. Validates each source `.mds` exists and each plugin `commands/` dir exists
-3. Compiles each `.mds` file via `@mdscript/mds` `compileFile()`
-4. Writes `{basename}.md` to the plugin's `commands/` dir (per-file clean: removes old output before recompile)
-5. Hard-fails on any compile error — no stale command ever ships
+1. Walks the repo from root, skipping `node_modules`, `dist`, `.git`, `.devflow`, `.claude`, `.release`, `tmp`
+2. For each `.mds` file: reads frontmatter; if it declares a non-empty `output-dir:` key, treats it as a host
+3. Validates the parent plugin directory of each `output-dir` exists (hard-fail with "typo?" message if not)
+4. Compiles each host via `@mdscript/mds` `compileFile()`, strips `output-dir:` from the output
+5. Writes `{basename}.md` to the declared `output-dir` (per-file clean; no dir wipe)
+6. Hard-fails on any compile error — no stale command ever ships
 
-The 9 host `.mds` files in `shared/knowledge/` are gitignored (generated build artifacts
-in plugin `commands/` dirs are rebuilt on every `npm run build`).
+14 hosts total: 9 knowledge hosts (`commands/{name}.mds`) + 5 dynamic hosts (`commands/dynamic-*.mds`).
+Partials in `commands/_partials/` have no `output-dir:` and are skipped automatically.
 
 ## Integration Patterns
 
@@ -130,7 +132,7 @@ of `knowledge_writeback` for the research workflow.
 
 - **500-line cap**: KNOWLEDGE.md exceeding 500 lines must be split into focused sub-knowledge bases.
 - **index.md line format**: `- **{slug}** — {areas} — {Use-when description}` — frontmatter is authoritative if the line format changes.
-- **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is removed. Config-only gate per ADR-001.
+- **No sentinel gating**: The old `.devflow/features/.disabled` sentinel is gone (clean break). Config-only gate per ADR-001 — the `knowledge` key in `dream/config.json` is the sole toggle.
 - **No concurrent lock**: `index.md` write-through may clobber concurrent writes, but the frontmatter fallback self-heals. `index.md` is git-tracked (shared), so it can also merge-conflict when two branches add different slugs — resolve by keeping both lines.
 
 ## Anti-Patterns
@@ -164,20 +166,25 @@ agent spawn entirely. This is by design (P2: no unconditional spawns).
 path. If it is stale or absent, frontmatter glob is the authoritative fallback. Never
 treat a missing `index.md` as a problem — write-through creates it lazily.
 
-**The knowledge config key stays after pipeline removal**: ADR-001 requires config-only
-gates. The `knowledge` key in `dream/config.json` still exists and gates write-back. The
-old sentinel (`.devflow/features/.disabled`) is removed by the
-`purge-feature-knowledge-pipeline-v1` migration.
+**The knowledge config key is the sole gate**: ADR-001 requires config-only gates. The
+`knowledge` key in `dream/config.json` gates write-back. The old sentinel
+(`.devflow/features/.disabled`) is gone via the clean break — no migration removes it
+because it was never deployed on this branch.
 
 **MDS brace-escaping**: In the `.mds` host files, every literal `{…}` in prose must be
 escaped as `\{…\}`. Fenced code blocks (` ```bash `) use raw braces. Indented fences are
 treated as prose — un-indent to avoid MDS interpolation errors.
 
+**output-dir: must be the last frontmatter key in host .mds files**: The build script's
+`stripOutputDirKey` regex operates on the first `---…---` block and assumes `output-dir:`
+is the last key. Adding any key after `output-dir:` in a host's frontmatter will break
+byte-identity of compiled outputs.
+
 ## Key Files
 
-- `shared/knowledge/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
-- `shared/knowledge/{name}.mds` (9 files) — host command sources that `@import "_knowledge.mds"` and call the partials; compiled to plugin commands at build time
-- `scripts/build-knowledge.ts` — build script with explicit SOURCE_TO_PLUGIN_MAP; validates all 9 sources and dest dirs exist before compiling; hard-fails on any error
+- `commands/_partials/_knowledge.mds` — defines and exports `knowledge_load` and `knowledge_writeback` partials; the single authoritative source for both algorithms
+- `commands/{name}.mds` (9 files) — knowledge host command sources that `@import "_partials/_knowledge.mds"` and call the partials; compiled to plugin commands at build time
+- `scripts/build-mds.ts` — unified frontmatter-driven build script; discovers all 14 host `.mds` files by `output-dir:` key; validates plugin dirs; hard-fails on any compile error
 - `shared/agents/knowledge.md` — Knowledge agent contract: dual-write (KNOWLEDGE.md + index.md line), no result file, model=sonnet
 - `shared/skills/feature-knowledge/SKILL.md` — Iron Law, 4-phase authoring, KNOWLEDGE.md template, index.md registration instructions
 - `shared/skills/apply-feature-knowledge/SKILL.md` — 3-step consumption algorithm, skip guard, verify-against-code freshness
@@ -189,5 +196,3 @@ treated as prose — un-indent to avoid MDS interpolation errors.
 - Working Memory (`.devflow/memory/WORKING-MEMORY.md`, `background-memory-update` worker) — sibling persistence layer; independent toggle.
 - Decisions pipeline (`.devflow/decisions/`, `decisions-ledger.jsonl`) — sibling persistence layer; shares Dream marker protocol, independent toggle.
 - ADR-021 (`.devflow/` local by default) — amended for `features/`: feature knowledge bases are git-tracked and committed by the Knowledge agent. See the carve-out in `scripts/hooks/ensure-root-gitignore` + `ensureDevflowGitignore`.
-- `purge-knowledge-hooks-global-v1` migration — removes orphaned `eval-knowledge` + `feature-knowledge.cjs` from installed copies.
-- `purge-feature-knowledge-pipeline-v1` migration — removes dream markers, lock/sentinel files, deprecates `index.json`.
