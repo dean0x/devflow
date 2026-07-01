@@ -175,10 +175,11 @@ because it was never deployed on this branch.
 escaped as `\{…\}`. Fenced code blocks (` ```bash `) use raw braces. Indented fences are
 treated as prose — un-indent to avoid MDS interpolation errors.
 
-**output-dir: must be the last frontmatter key in host .mds files**: The build script's
-`stripOutputDirKey` regex operates on the first `---…---` block and assumes `output-dir:`
-is the last key. Adding any key after `output-dir:` in a host's frontmatter will break
-byte-identity of compiled outputs.
+**output-dir: is kept as the last frontmatter key in host .mds files (test convention, not a strip requirement)**:
+A `build-mds.test.ts` case asserts `output-dir:` is the last key in every host's frontmatter, so keep it
+last to satisfy the test. This is a style convention only — `stripOutputDirKey`'s block-scoped regex removes
+the `output-dir:` line regardless of its position, so key ordering does not affect byte-identity of the
+compiled output.
 
 ## Key Files
 

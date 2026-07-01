@@ -41,7 +41,6 @@ import {
   getPendingTurnsPath,
   getPendingTurnsProcessingPath,
   getPendingTurnsLockDir,
-  getKnowledgePath,
   getReviewsDir,
   getDesignDir,
   getResearchDir,
@@ -159,12 +158,6 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('features / knowledge files', () => {
-    it('getKnowledgePath returns .devflow/features/{slug}/KNOWLEDGE.md', () => {
-      expect(getKnowledgePath(ROOT, 'my-feature')).toBe('/some/project/.devflow/features/my-feature/KNOWLEDGE.md');
-    });
-  });
-
   describe('docs files', () => {
     it('getReviewsDir returns .devflow/docs/reviews/', () => {
       expect(getReviewsDir(ROOT)).toBe('/some/project/.devflow/docs/reviews');
@@ -268,10 +261,6 @@ describe('CJS project-paths parity', () => {
       expect(cjs(ROOT)).toBe(ts(ROOT));
     });
   }
-
-  it('getKnowledgePath — TypeScript and CJS agree', () => {
-    expect(cjsPaths.getKnowledgePath(ROOT, 'my-feature')).toBe(getKnowledgePath(ROOT, 'my-feature'));
-  });
 
   it('getHandoffPath — TypeScript and CJS agree', () => {
     expect(cjsPaths.getHandoffPath(ROOT, 'feat-branch')).toBe(getHandoffPath(ROOT, 'feat-branch'));

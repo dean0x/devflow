@@ -57,7 +57,6 @@ devflow/
 │       ├── dream-lock               # Shared helper: mkdir-based locking
 │       ├── eval-helpers             # SessionEnd module: shared setup sourced by dream-evaluate
 │       ├── eval-decisions           # SessionEnd module: decisions marker (DIALOG_PAIRS)
-│       ├── eval-knowledge           # SessionEnd module: knowledge staleness refresh
 │       ├── eval-curation            # SessionEnd module: curation marker
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state
 │       ├── session-start-context    # SessionStart hook: emits DREAM MAINTENANCE directive + decisions TL;DR + learned behaviors
@@ -75,7 +74,6 @@ devflow/
 │       ├── json-parse               # Shell wrapper: jq with node fallback
 │       └── lib/                     # Node.js helper modules
 │           ├── dream-ops.cjs          # Dream marker + queue operations
-│           ├── feature-knowledge.cjs  # Feature knowledge base index operations (CRUD, staleness)
 │           ├── decisions-index.cjs    # Decisions index builder
 │           ├── project-paths.cjs      # Project slug + path resolution
 │           ├── safe-path.cjs          # Path safety validation
@@ -193,9 +191,9 @@ Three shell-script hooks (`dream-capture`, `dream-dispatch`, `dream-evaluate`) r
 | `dream-capture` | Stop | Captures user/assistant turns to `.devflow/memory/.pending-turns.jsonl` queue; after the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p`). No `memory.json` marker is written — memory refresh no longer goes through the Dream subagent. |
 | `background-memory-update` | Detached worker (spawned by Stop) | Drains `.pending-turns.jsonl` → calls `claude -p --model haiku` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
 | `dream-dispatch` | UserPromptSubmit | Capture-only: appends the user turn to `.pending-turns.jsonl` (emits no directive) |
-| `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 3 feature modules (`eval-decisions`, `eval-knowledge`, `eval-curation`); writes per-session decisions/knowledge/curation markers |
+| `dream-evaluate` | SessionEnd | Orchestrator sourcing `eval-helpers` + 2 feature modules (`eval-decisions`, `eval-curation`); writes per-session decisions/curation markers |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner). Memory refresh is NOT triggered here — `session-start-memory` only reads and injects. |
-| `session-start-context` | SessionStart | Recovers stale `.processing` markers, collects pending Dream markers (decisions/knowledge/curation only — memory markers are swept unconditionally), emits the DREAM MAINTENANCE directive (throttled to 120s); also injects decisions TL;DR + learned behaviors |
+| `session-start-context` | SessionStart | Recovers stale `.processing` markers, collects pending Dream markers (decisions/curation only — memory markers are swept unconditionally), emits the DREAM MAINTENANCE directive (throttled to 120s); also injects decisions TL;DR + learned behaviors |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
 | `preamble` | UserPromptSubmit | Ambient keyword + plan auto-detection (zero overhead for normal prompts) |
 

@@ -165,15 +165,6 @@ export function getPendingTurnsLockDir(projectRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Features / knowledge files
-// ---------------------------------------------------------------------------
-
-/** .devflow/features/{slug}/KNOWLEDGE.md */
-export function getKnowledgePath(projectRoot: string, slug: string): string {
-  return path.join(projectRoot, '.devflow', 'features', slug, 'KNOWLEDGE.md');
-}
-
-// ---------------------------------------------------------------------------
 // Docs files
 // ---------------------------------------------------------------------------
 

@@ -92,11 +92,7 @@ npx devflow-kit decisions --reset      # Remove all artifacts + log
 ## Feature Knowledge
 
 ```bash
-npx devflow-kit knowledge list              # List knowledge bases with staleness
-npx devflow-kit knowledge create <slug>     # Create a new knowledge base
-npx devflow-kit knowledge check             # Check all for staleness
-npx devflow-kit knowledge refresh [slug]    # Refresh stale knowledge base(s)
-npx devflow-kit knowledge remove <slug>     # Remove a knowledge base
+npx devflow-kit knowledge list              # List knowledge bases
 npx devflow-kit knowledge --enable          # Enable feature knowledge
 npx devflow-kit knowledge --disable         # Disable feature knowledge
 npx devflow-kit knowledge --status          # Show current status

@@ -544,10 +544,13 @@ const LEGACY_SKILLS_V2X: string[] = [
   // — a harmless no-op. Do NOT remove these entries: upgrading users from V2.x need the
   // stale bare-name dirs swept. (applies ADR-016; avoids PF-009)
   'dream-memory',
+  'dream-knowledge',
   'dream-decisions',
   'dream-curation',
-  // v3.x dream-memory removal: namespaced name for cleanup of installed devflow:dream-memory skill
+  // v3.x dream-memory + dream-knowledge removal: namespaced names for cleanup of the
+  // installed devflow:dream-memory / devflow:dream-knowledge skills (both fully removed).
   'devflow:dream-memory',
+  'devflow:dream-knowledge',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup
