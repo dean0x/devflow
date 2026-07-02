@@ -13,6 +13,15 @@ dbg() { :; }
 # set -e intentionally omitted: sections 1.5 and 2 are independent —
 # a failure in one must not prevent the others from running.
 
+# Re-entrancy guards — before hook-bootstrap to minimize background session
+# overhead. The dream worker's own claude -p session fires SessionStart hooks;
+# without this guard every dream run would recursively re-trigger this hook's
+# own directive-emitting logic (Section 2) from inside its own nested session.
+# A latent pre-existing gap for DEVFLOW_BG_UPDATER too (this hook previously
+# had no re-entrancy guard at all).
+if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then dbg "EXIT: bg_dream"; exit 0; fi
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+
 # JSON parsing (jq with node fallback) — silently no-op if neither available
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -85,6 +94,28 @@ ${DECISIONS_SECTION}"
         CONTEXT="$DECISIONS_SECTION"
       fi
     fi
+  fi
+
+  # --- AC-F15: dream worker last-run-summary (agent-written, injected once) ---
+  # The dream worker (background-dream-update) writes this file only when it
+  # changed the ledger. Inject its content next to the decisions TL;DR, then
+  # delete it — no file means no injection and no error.
+  _SC_LAST_RUN_SUMMARY="$DREAM_DIR/last-run-summary"
+  if [ -f "$_SC_LAST_RUN_SUMMARY" ]; then
+    _SC_SUMMARY_CONTENT=$(cat "$_SC_LAST_RUN_SUMMARY" 2>/dev/null || true)
+    if [ -n "$_SC_SUMMARY_CONTENT" ]; then
+      _SC_SUMMARY_SECTION="--- DREAM LAST RUN ---
+$_SC_SUMMARY_CONTENT"
+      if [ -n "$CONTEXT" ]; then
+        CONTEXT="${CONTEXT}
+
+${_SC_SUMMARY_SECTION}"
+      else
+        CONTEXT="$_SC_SUMMARY_SECTION"
+      fi
+      dbg "last-run-summary injected"
+    fi
+    rm -f "$_SC_LAST_RUN_SUMMARY" 2>/dev/null || true
   fi
 fi
 

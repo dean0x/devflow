@@ -12,6 +12,13 @@ dbg() { :; }
 
 set -e
 
+# Re-entrancy guards — before hook-bootstrap to minimize background session
+# overhead. A latent pre-existing gap: this hook had no guard against firing
+# from within the memory or dream worker's own nested claude -p session
+# (PreCompact can fire mid-session on a long-running detached worker too).
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then dbg "EXIT: bg_updater"; exit 0; fi
+if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then dbg "EXIT: bg_dream"; exit 0; fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 source "$SCRIPT_DIR/hook-bootstrap" "pre-compact-memory"
