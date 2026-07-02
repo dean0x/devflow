@@ -31,6 +31,13 @@ const HOOK_SCRIPTS = [
   'dream-dispatch',
   'eval-helpers',
   'eval-decisions',
+  'queue-append',
+  'capture-prompt',
+  'capture-turn',
+  'capture-question',
+  'memory-worker',
+  'spawn-dream-worker',
+  'background-dream-update',
 ];
 
 describe('shell hook syntax checks', () => {

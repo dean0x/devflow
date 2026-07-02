@@ -1464,3 +1464,199 @@ describe('S12: install survival — background-memory-update not deleted by init
     expect(mode & 0o100).toBeGreaterThan(0);
   });
 });
+
+// =============================================================================
+// S18 — AC-F10: qa rows flow into memory synthesis (orphan gate + TURNS_TEXT agree)
+//
+// A qa row (captured AskUserQuestion Q&A pair) must count as content-bearing for
+// the orphan-only auto-clean guard — the same way an assistant row does — and
+// must appear in the prompt fed to claude as its own "Q&A:" stanza.
+// =============================================================================
+describe('S18: AC-F10 — qa rows in background-memory-update (orphan gate + TURNS_TEXT)', () => {
+  let projectDir: string;
+  let homeDir: string;
+  let shimDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s18-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s18-home-'));
+    shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s18-shim-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+    initGitRepo(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  it('user + qa (no assistant) is NOT truncated as user-only — a real run is attempted', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    createFakeClaudeShim(shimDir, memFile);
+
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
+      [
+        JSON.stringify({ role: 'user', content: 'what should I pick?', ts }),
+        JSON.stringify({ role: 'qa', content: 'Q: pick one\nA: option B', ts: ts + 1 }),
+      ].join('\n') + '\n'
+    );
+
+    runWorker(projectDir, homeDir, shimDir);
+
+    // WORKING-MEMORY.md written proves the orphan gate did NOT truncate the queue
+    // (the "no assistant turn" auto-clean path never invokes claude at all).
+    expect(fs.existsSync(memFile)).toBe(true);
+    const processingFile = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    expect(fs.existsSync(processingFile)).toBe(false);
+  });
+
+  it('qa content appears in the prompt fed to claude as a "Q&A:" stanza', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const stdinCapture = path.join(shimDir, 'stdin-captured.txt');
+    const claudeBin = path.join(shimDir, 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      `#!/bin/bash
+cat > "${stdinCapture}"
+echo "<!-- memory-head: testsha branch: main -->" > "${memFile}"
+echo "## Now" >> "${memFile}"
+exit 0
+`
+    );
+    fs.chmodSync(claudeBin, 0o755);
+
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
+      [
+        JSON.stringify({ role: 'user', content: 'need a decision', ts }),
+        JSON.stringify({ role: 'qa', content: 'Q: ship now or wait?\nA: ship now', ts: ts + 1 }),
+      ].join('\n') + '\n'
+    );
+
+    const { exitCode } = runWorker(projectDir, homeDir, shimDir);
+    expect(exitCode).toBe(0);
+
+    expect(fs.existsSync(stdinCapture)).toBe(true);
+    const capturedStdin = fs.readFileSync(stdinCapture, 'utf-8');
+    expect(capturedStdin).toContain('Q&A:');
+    expect(capturedStdin).toContain('ship now or wait?');
+    expect(capturedStdin).toContain('ship now');
+  });
+
+  it('regression: pure user-only queue (no qa, no assistant) is STILL truncated without an LLM run', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    createFakeClaudeShim(shimDir, memFile);
+
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
+      JSON.stringify({ role: 'user', content: 'just a question', ts }) + '\n'
+    );
+
+    runWorker(projectDir, homeDir, shimDir);
+
+    // Orphan gate must still fire for a genuinely user-only queue — claude never invoked.
+    expect(fs.existsSync(memFile)).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
+  });
+
+  it('qa-only queue (no user, no assistant) is NOT truncated as user-only', () => {
+    const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    createFakeClaudeShim(shimDir, memFile);
+
+    const ts = Math.floor(Date.now() / 1000);
+    fs.writeFileSync(
+      path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'),
+      JSON.stringify({ role: 'qa', content: 'Q: only question\nA: only answer', ts }) + '\n'
+    );
+
+    runWorker(projectDir, homeDir, shimDir);
+
+    expect(fs.existsSync(memFile)).toBe(true);
+  });
+});
+
+// =============================================================================
+// S19 — session-start-memory cold-path recovery for orphaned .pending-turns.processing
+//
+// Mirrors dream-recover's dream_recover_stale logic (duplicated, not sourced —
+// session-start-memory has no dependency on dream-recover). Age >300s + no
+// existing .jsonl -> recovered; .jsonl present -> left alone (non-clobber).
+// =============================================================================
+describe('S19: session-start-memory cold-path .pending-turns.processing recovery', () => {
+  let projectDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s19-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s19-home-'));
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, '.devflow', 'dream'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it('stale (>300s) orphaned .processing with no .jsonl present is recovered', () => {
+    const proc = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'orphaned', ts: 1 }) + '\n');
+    backdateMtime(proc, 600);
+
+    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+
+    expect(fs.existsSync(proc)).toBe(false);
+    const jsonl = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    expect(fs.existsSync(jsonl)).toBe(true);
+    expect(fs.readFileSync(jsonl, 'utf-8')).toContain('orphaned');
+  });
+
+  it('fresh (<300s) .processing is left alone (not yet stale)', () => {
+    const proc = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'fresh', ts: 1 }) + '\n');
+    // No backdate — mtime is "now"
+
+    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+
+    expect(fs.existsSync(proc)).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
+  });
+
+  it('non-clobber: stale .processing is left in place when .pending-turns.jsonl already exists', () => {
+    const proc = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'orphaned', ts: 1 }) + '\n');
+    backdateMtime(proc, 600);
+    const jsonl = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
+    fs.writeFileSync(jsonl, JSON.stringify({ role: 'user', content: 'fresh-queue', ts: 2 }) + '\n');
+
+    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+
+    expect(fs.existsSync(proc)).toBe(true);
+    expect(fs.readFileSync(jsonl, 'utf-8')).toContain('fresh-queue');
+    expect(fs.readFileSync(jsonl, 'utf-8')).not.toContain('orphaned');
+  });
+
+  it('no .processing at all — hook proceeds normally (no error, no spurious .jsonl)', () => {
+    const { exitCode } = runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+    expect(exitCode).toBe(0);
+    expect(fs.existsSync(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
+  });
+
+  it('recovery is skipped entirely when memory is disabled via dream config', () => {
+    writeDreamConfig(projectDir, { memory: false });
+    const proc = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+    fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'orphaned', ts: 1 }) + '\n');
+    backdateMtime(proc, 600);
+
+    runHook(SESSION_START_MEMORY_HOOK, { cwd: projectDir }, homeDir);
+
+    // memory:false gates the whole hook (including the new recovery block) — .processing untouched
+    expect(fs.existsSync(proc)).toBe(true);
+  });
+});

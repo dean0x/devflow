@@ -6,10 +6,11 @@
 // D12: evidence capped at 10 (FIFO).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { runHelper } from './helpers.js';
+import { runHelper, JSON_HELPER } from './helpers.js';
 
 function readLog(logPath: string): Record<string, unknown>[] {
   if (!fs.existsSync(logPath)) return [];
@@ -281,5 +282,99 @@ describe('merge-observation — LLM-provided fields stored verbatim', () => {
     const entries = readLog(logFile);
     expect(entries[0].confidence).toBe(0.95);
     expect(entries[0].status).toBe('ready');
+  });
+});
+
+// AC-C4: merge-observation self-locks internally on .devflow/dream/.observations.lock
+// (D53). N parallel invocations against the SAME log file must never corrupt it —
+// every row must survive as valid JSON with no torn/interleaved writes — and the CLI
+// signature (`merge-observation <log> <newObsJson>`) must remain unchanged.
+describe('merge-observation — self-locking concurrency (AC-C4)', () => {
+  let tmpDir: string;
+  let logFile: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-obs-concurrency-'));
+    logFile = path.join(tmpDir, 'decisions-log.jsonl');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('N=15 parallel invocations (distinct ids) all persist with no corruption', () => {
+    const N = 15;
+    const cwd = tmpDir; // process.cwd() for each child -> shared .devflow/dream/.observations.lock under tmpDir
+
+    const results = Promise.all(
+      Array.from({ length: N }, (_, i) => {
+        const obs = JSON.stringify({
+          id: `obs_concurrent_${i}`,
+          type: 'pitfall',
+          pattern: `pattern ${i}`,
+          evidence: [`evidence ${i}`],
+          details: `area: x; issue: y-${i}; impact: z; resolution: w`,
+          confidence: 0.5,
+          status: 'observing',
+          quality_ok: true,
+        });
+        return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+          const proc = spawn('node', [JSON_HELPER, 'merge-observation', logFile, obs], {
+            cwd,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          let stdout = '';
+          let stderr = '';
+          proc.stdout?.on('data', (d) => { stdout += d.toString(); });
+          proc.stderr?.on('data', (d) => { stderr += d.toString(); });
+          proc.on('close', (code) => resolve({ code, stdout, stderr }));
+        });
+      }),
+    );
+
+    return results.then((outcomes) => {
+      // Every invocation must exit 0 — self-locking must never make a caller fail
+      // outright (only rotate-observations/assign-anchor's OWN callers get a hard
+      // timeout error; a fresh, uncontended log file should never hit the 30s cap
+      // with only 15 short-lived writers).
+      for (const o of outcomes) {
+        expect(o.code, `stderr: ${o.stderr}`).toBe(0);
+      }
+
+      // No corruption: every line must parse as valid JSON, and all N distinct
+      // ids must be present exactly once (no torn writes, no lost updates).
+      const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean);
+      expect(lines).toHaveLength(N);
+      const parsed = lines.map((l) => JSON.parse(l));
+      const ids = new Set(parsed.map((e) => e.id));
+      expect(ids.size).toBe(N);
+      for (let i = 0; i < N; i++) {
+        expect(ids.has(`obs_concurrent_${i}`)).toBe(true);
+      }
+
+      // No stray lock directory left behind.
+      const lockDir = path.join(tmpDir, '.devflow', 'dream', '.observations.lock');
+      expect(fs.existsSync(lockDir)).toBe(false);
+    });
+  }, 20000);
+
+  it('CLI signature unchanged: merge-observation <log> <newObsJson> still returns {merged, id}', () => {
+    const newObs = JSON.stringify({
+      id: 'obs_sig_check',
+      type: 'decision',
+      pattern: 'signature check',
+      evidence: ['e'],
+      details: 'context: x; decision: y; rationale: z',
+      confidence: 0.6,
+      status: 'observing',
+      quality_ok: true,
+    });
+    const result = JSON.parse(
+      execSync(`node "${JSON_HELPER}" merge-observation "${logFile}" '${newObs}'`, {
+        cwd: tmpDir,
+        encoding: 'utf8',
+      }).trim(),
+    );
+    expect(result).toEqual({ merged: false, id: 'obs_sig_check' });
   });
 });

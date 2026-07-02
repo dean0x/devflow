@@ -545,3 +545,108 @@ describe('manageSentinel utility', () => {
   });
 });
 
+// ─── Part F: DEVFLOW_BG_* re-entrancy guards (AC-F14) ──────────────────────
+//
+// session-start-context, session-start-memory, and pre-compact-memory had no
+// re-entrancy guard at all (a latent pre-existing gap): the memory or dream
+// worker's own nested claude -p session fires these SessionStart/PreCompact
+// hooks too. Guards were added additively — these are NEW test cases; the
+// existing guard describes above (dream-dispatch, dream-capture,
+// dream-evaluate) are untouched.
+
+describe('sentinel guard: session-start-context DEVFLOW_BG_* re-entrancy', () => {
+  const HOOK = path.join(HOOKS_DIR, 'session-start-context');
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = mkTmpDir(); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('outputs nothing when DEVFLOW_BG_UPDATER=1, even with a decisions TL;DR present', () => {
+    mkMemoryDir(tmpDir);
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
+    const input = sessionInput(tmpDir);
+    const output = execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    expect(output).toBe('');
+  });
+
+  it('outputs nothing when DEVFLOW_BG_DREAM=1, even with a decisions TL;DR present', () => {
+    mkMemoryDir(tmpDir);
+    const decisionsDir = path.join(tmpDir, '.devflow', 'decisions');
+    fs.writeFileSync(path.join(decisionsDir, 'decisions.md'), '<!-- TL;DR: 1 decisions. Key: ADR-001 -->\n# Decisions\n');
+    const input = sessionInput(tmpDir);
+    const output = execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    expect(output).toBe('');
+  });
+
+  it('DEVFLOW_BG_DREAM=1 makes zero filesystem writes (no .gitignore/.devflow scaffolding)', () => {
+    // A fresh tmpDir with no .devflow/ at all — the guard must fire before
+    // ensure-root-gitignore or any other write-side-effect runs.
+    const input = sessionInput(tmpDir);
+    execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    expect(fs.existsSync(path.join(tmpDir, '.devflow'))).toBe(false);
+  });
+});
+
+describe('sentinel guard: session-start-memory DEVFLOW_BG_* re-entrancy', () => {
+  const HOOK = path.join(HOOKS_DIR, 'session-start-memory');
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = mkTmpDir(); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('outputs nothing when DEVFLOW_BG_UPDATER=1, even with WORKING-MEMORY.md present', () => {
+    mkMemoryDir(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
+    const input = sessionInput(tmpDir);
+    const output = execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    expect(output).toBe('');
+  });
+
+  it('outputs nothing when DEVFLOW_BG_DREAM=1, even with WORKING-MEMORY.md present', () => {
+    mkMemoryDir(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, '.devflow', 'memory', 'WORKING-MEMORY.md'), '## Now\n- testing');
+    const input = sessionInput(tmpDir);
+    const output = execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    expect(output).toBe('');
+  });
+
+  it('DEVFLOW_BG_DREAM=1 does not recover a stale .pending-turns.processing (guard fires before the cold-path check)', () => {
+    mkMemoryDir(tmpDir);
+    const proc = path.join(tmpDir, '.devflow', 'memory', '.pending-turns.processing');
+    fs.writeFileSync(proc, JSON.stringify({ role: 'user', content: 'x', ts: 1 }) + '\n');
+    const old = new Date(Date.now() - 600 * 1000);
+    fs.utimesSync(proc, old, old);
+    const input = sessionInput(tmpDir);
+    execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    expect(fs.existsSync(proc)).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toBe(false);
+  });
+});
+
+describe('sentinel guard: pre-compact-memory DEVFLOW_BG_* re-entrancy', () => {
+  const HOOK = path.join(HOOKS_DIR, 'pre-compact-memory');
+  let tmpDir: string;
+
+  beforeEach(() => { tmpDir = mkTmpDir(); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('does not write backup.json when DEVFLOW_BG_UPDATER=1', () => {
+    mkMemoryDir(tmpDir);
+    const input = sessionInput(tmpDir);
+    expect(() => {
+      execSync(`DEVFLOW_BG_UPDATER=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
+  });
+
+  it('does not write backup.json when DEVFLOW_BG_DREAM=1', () => {
+    mkMemoryDir(tmpDir);
+    const input = sessionInput(tmpDir);
+    expect(() => {
+      execSync(`DEVFLOW_BG_DREAM=1 bash "${HOOK}"`, { input, stdio: ['pipe', 'pipe', 'pipe'] });
+    }).not.toThrow();
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'memory', 'backup.json'))).toBe(false);
+  });
+});
+
