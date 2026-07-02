@@ -91,9 +91,9 @@ Sharing is opt-in. To share **everything** with your team, remove the `.devflow/
 !.devflow/decisions/decisions.md
 !.devflow/decisions/pitfalls.md
 !.devflow/features/
-!.devflow/features/index.json
-!.devflow/features/**/
-!.devflow/features/**/KNOWLEDGE.md
+!.devflow/features/index.md
+!.devflow/features/*/
+!.devflow/features/*/KNOWLEDGE.md
 ```
 
 (The directory re-includes — `!.devflow/decisions/` — are required: git won't descend into an excluded directory to reach a re-included file.)

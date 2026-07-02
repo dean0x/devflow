@@ -56,7 +56,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     // plugin, unlike skills which install universally). Predecessor was the universally
     // installed `devflow:sidecar` skill; core-skills preserves that guarantee.
     agents: ['dream'],
-    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-decisions', 'dream-knowledge', 'dream-curation'],
+    skills: ['apply-decisions', 'apply-feature-knowledge', 'software-design', 'docs-framework', 'git', 'boundary-validation', 'test-driven-development', 'testing', 'dependency-research', 'dream-decisions', 'dream-curation'],
     rules: ['security', 'engineering', 'quality', 'reliability'],
   },
   {
@@ -72,7 +72,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Complete task implementation workflow - accepts plan documents, issues, or task descriptions',
     commands: ['/implement'],
     agents: ['git', 'coder', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'validator'],
-    skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['patterns', 'qa', 'quality-gates', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -88,7 +88,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Process and fix code review issues with risk assessment',
     commands: ['/resolve'],
     agents: ['git', 'resolver', 'simplifier'],
-    skills: ['patterns', 'security', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['patterns', 'security', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -96,7 +96,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Debugging workflows with competing hypothesis investigation via parallel subagents',
     commands: ['/debug'],
     agents: ['git', 'synthesizer'],
-    skills: ['git', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['git', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -128,7 +128,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
     description: 'Self-review workflow: Simplifier + Scrutinizer for code quality',
     commands: ['/self-review'],
     agents: ['simplifier', 'scrutinizer', 'validator'],
-    skills: ['quality-gates', 'software-design', 'worktree-support', 'apply-feature-knowledge'],
+    skills: ['quality-gates', 'software-design', 'worktree-support', 'feature-knowledge', 'apply-feature-knowledge'],
     rules: [],
   },
   {
@@ -188,7 +188,7 @@ export const DEVFLOW_PLUGINS: PluginDefinition[] = [
   {
     name: 'devflow-dynamic',
     description: 'Dynamic workflow recipes - dependency-aware tickets→plan→build delivery pipeline',
-    // Recipe commands compiled from shared/recipes/*.mds at build time (build:recipes).
+    // Commands compiled from commands/*.mds at build time (build:mds).
     commands: ['/dynamic-tickets', '/dynamic-plan', '/dynamic-build', '/dynamic-profile', '/dynamic-wave'],
     agents: ['coder', 'validator', 'simplifier', 'scrutinizer', 'evaluator', 'tester', 'reviewer', 'git', 'synthesizer', 'knowledge', 'designer'],
     skills: ['apply-decisions', 'apply-feature-knowledge', 'worktree-support', 'docs-framework'],
@@ -536,19 +536,21 @@ const LEGACY_SKILLS_V2X: string[] = [
   'devflow:research:orch',
   'devflow:release:orch',
   // v3.x dream per-task skills: bare names for pre-namespace installs.
-  // NOTE: dream-decisions, dream-knowledge, and dream-curation are STILL-ACTIVE skills
-  // (declared in DEVFLOW_PLUGINS, installed at the namespaced path devflow:dream-*).
+  // NOTE: dream-decisions and dream-curation are STILL-ACTIVE skills (declared in
+  // DEVFLOW_PLUGINS, installed at the namespaced path devflow:dream-*).
   // These bare entries exist solely to clean up pre-namespace V2.x installs where
   // skills were written without the devflow: prefix. On current installs the post-install
   // fs.rm targets a bare path (e.g. ~/.claude/skills/dream-decisions) that does not exist
   // — a harmless no-op. Do NOT remove these entries: upgrading users from V2.x need the
   // stale bare-name dirs swept. (applies ADR-016; avoids PF-009)
   'dream-memory',
-  'dream-decisions',
   'dream-knowledge',
+  'dream-decisions',
   'dream-curation',
-  // v3.x dream-memory removal: namespaced name for cleanup of installed devflow:dream-memory skill
+  // v3.x dream-memory + dream-knowledge removal: namespaced names for cleanup of the
+  // installed devflow:dream-memory / devflow:dream-knowledge skills (both fully removed).
   'devflow:dream-memory',
+  'devflow:dream-knowledge',
   // v3.x agent-teams removal: namespaced name for cleanup of installed devflow:agent-teams skill
   'devflow:agent-teams',
   // v2.x ambient refinements: devflow:-prefixed triage/guided/router names for cleanup

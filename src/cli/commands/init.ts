@@ -41,7 +41,7 @@ import { addContextHook, removeContextHook, hasContextHook } from './context.js'
 import { manageSentinel } from '../utils/sentinel.js';
 import { writeFileAtomicExclusive } from '../utils/fs-atomic.js';
 import { writeConfig as writeDreamConfig } from '../utils/dream-config.js';
-import { getFeaturesDir, getFeaturesIndexPath, getFeaturesDisabledSentinel, getDecisionsDisabledSentinel, getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
+import { getDecisionsDisabledSentinel, getPendingTurnsPath, getPendingTurnsProcessingPath } from '../utils/project-paths.js';
 import * as os from 'os';
 
 // Re-export pure functions for tests (canonical source is post-install.ts)
@@ -594,8 +594,8 @@ export const initCommand = new Command('init')
       } else {
         p.note(
           'Per-feature knowledge bases capture cross-cutting patterns,\n' +
-          'conventions, and gotchas. Auto-refreshed when files change.\n' +
-          'Consumes a background agent session on staleness detection.',
+          'conventions, and gotchas. Created and updated automatically\n' +
+          'when workflows touch a documented area (write-through model).',
           'Feature Knowledge Bases',
         );
         const knowledgeChoice = await p.confirm({
@@ -1100,7 +1100,7 @@ export const initCommand = new Command('init')
       // kb → knowledge rename: hook scripts replaced by session-end-knowledge-refresh / background-knowledge-refresh
       'session-end-kb-refresh',
       'background-kb-refresh',
-      // kb → knowledge rename: CJS module replaced by feature-knowledge.cjs
+      // kb → knowledge rename: CJS module (now removed — knowledge pipeline is write-through)
       'lib/feature-kb.cjs',
       // decisions agent decoupling: background-learning replaced by TypeScript CLI (devflow learn --run-background)
       'background-learning',
@@ -1140,7 +1140,8 @@ export const initCommand = new Command('init')
 
       // Memory hooks — always remove-then-add to upgrade hook format (e.g., .sh → run-hook)
       // Memory hooks include the unified dream hooks (dream-dispatch, dream-capture,
-      // dream-evaluate) which handle memory, decisions, and knowledge in the background.
+      // dream-evaluate) which handle memory and decisions in the background.
+      // Knowledge is handled in-command via write-through (knowledge_writeback MDS partial).
       const cleaned = removeMemoryHooks(content);
       content = memoryEnabled ? addMemoryHooks(cleaned, devflowDir) : cleaned;
 
@@ -1183,25 +1184,8 @@ export const initCommand = new Command('init')
     } catch { /* settings.json may not exist yet */ }
 
 
-    // Create .devflow/features/ directory with empty index (feature knowledge bases)
-    // .devflow/features/ is gitignored by default (under .devflow/); opt-in to share.
-    if (gitRoot && knowledgeEnabled) {
-      const featuresDir = getFeaturesDir(gitRoot);
-      await fs.mkdir(featuresDir, { recursive: true });
-      const featuresIndexPath = getFeaturesIndexPath(gitRoot);
-      try {
-        await fs.access(featuresIndexPath);
-      } catch {
-        await fs.writeFile(featuresIndexPath, JSON.stringify({ version: 1, features: {} }, null, 2) + '\n');
-        if (verbose) {
-          p.log.success('.devflow/features/index.json created');
-        }
-      }
-    }
-
-    // Manage runtime-disable sentinels for session-start-context gating
+    // Manage runtime-disable sentinel for decisions gating.
     if (gitRoot) {
-      await manageSentinel(getFeaturesDisabledSentinel(gitRoot), knowledgeEnabled);
       await manageSentinel(getDecisionsDisabledSentinel(gitRoot), decisionsEnabled);
     }
 

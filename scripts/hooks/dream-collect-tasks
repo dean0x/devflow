@@ -4,12 +4,11 @@
 #
 # Source this file to get the dream_collect_tasks and dream_build_spawn_directive functions.
 #
-# Function: dream_collect_tasks DREAM_DIR DECISIONS_ENABLED KNOWLEDGE_ENABLED
+# Function: dream_collect_tasks DREAM_DIR DECISIONS_ENABLED
 #
 # Inputs (positional args):
 #   $1  DREAM_DIR         — path to .devflow/dream/
 #   $2  DECISIONS_ENABLED — "true"/"false"
-#   $3  KNOWLEDGE_ENABLED — "true"/"false"
 #
 # Outputs (exported variable):
 #   _DREAM_TASKS — comma-separated, deduped, sorted list of pending task types.
@@ -20,7 +19,7 @@
 # Behaviour:
 #   - Skips config.json (reserved).
 #   - Pass 1: unconditional sweep — deletes learning.* and memory.* markers always
-#     (both pipelines removed from Dream subagent); deletes disabled decisions/knowledge
+#     (both pipelines removed from Dream subagent); deletes disabled decisions
 #     markers. When decisions is disabled, curation markers are also swept (curation
 #     depends on decisions data and should not run when decisions is disabled).
 #     Unknown types pass through unchanged.
@@ -52,7 +51,6 @@ _derive_marker_type() {
 dream_collect_tasks() {
   local dream_dir="${1:?dream_collect_tasks: dream_dir required}"
   local dec_enabled="${2:-true}"
-  local know_enabled="${3:-true}"
 
   _DREAM_TASKS=""
 
@@ -78,7 +76,6 @@ dream_collect_tasks() {
   #     learning  → rm -f always (orphan sweep, R1)
   #     memory    → rm -f always (no longer a Dream subagent task)
   #     decisions → rm -f if dec_enabled != true
-  #     knowledge → rm -f if know_enabled != true
   #     curation / unknown → KEEP (pass through; no flag gates them)
   # - Kept markers appended to newline-separated `candidates`; count tracked.
   # ---------------------------------------------------------------------------
@@ -112,13 +109,6 @@ dream_collect_tasks() {
         ;;
       decisions)
         if [ "$dec_enabled" != "true" ]; then
-          rm -f "$_f" 2>/dev/null || true
-          dbg "dream_collect_tasks: deleted disabled-feature marker: $_base"
-          continue
-        fi
-        ;;
-      knowledge)
-        if [ "$know_enabled" != "true" ]; then
           rm -f "$_f" 2>/dev/null || true
           dbg "dream_collect_tasks: deleted disabled-feature marker: $_base"
           continue
@@ -230,8 +220,8 @@ _DREAM_DIRECTIVE=""
 # exact directive bytes (including trailing newlines) survive intact; command
 # substitution would strip them.
 #
-# Hardcoded task→model map: memory=haiku, knowledge=sonnet, decisions=opus,
-# curation=opus. decisions+curation co-pending → exactly ONE opus spawn that
+# Hardcoded task→model map: decisions=opus, curation=opus.
+# decisions+curation co-pending → exactly ONE opus spawn that
 # runs decisions THEN curation sequentially (prevents .decisions.lock contention).
 # Unknown task types are skipped (belt-and-suspenders — dream_collect_tasks
 # should never emit them).
@@ -239,18 +229,11 @@ dream_build_spawn_directive() {
   local _dbsd_tasks="$1"
   _DREAM_DIRECTIVE=""
 
-  # memory is no longer a Dream subagent task (handled by background-memory-update worker).
-  # Map: knowledge=sonnet, decisions=opus, curation=opus. memory entries swept by collect.
-  local _dbsd_know="false" _dbsd_dec="false" _dbsd_cur="false"
-  case ",$_dbsd_tasks," in *,knowledge,*) _dbsd_know="true" ;; esac
-  case ",$_dbsd_tasks," in *,decisions,*) _dbsd_dec="true"  ;; esac
-  case ",$_dbsd_tasks," in *,curation,*)  _dbsd_cur="true"  ;; esac
+  local _dbsd_dec="false" _dbsd_cur="false"
+  case ",$_dbsd_tasks," in *,decisions,*) _dbsd_dec="true" ;; esac
+  case ",$_dbsd_tasks," in *,curation,*)  _dbsd_cur="true" ;; esac
 
   local _dbsd_lines=""
-  if [ "$_dbsd_know" = "true" ]; then
-    _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"sonnet\", run_in_background: true, prompt: \"Process pending 'knowledge' marker(s): claim per your plumbing, then load devflow:dream-knowledge and follow it.\")
-"
-  fi
   if [ "$_dbsd_dec" = "true" ] && [ "$_dbsd_cur" = "true" ]; then
     _dbsd_lines="${_dbsd_lines}Agent(subagent_type=\"Dream\", model=\"opus\", run_in_background: true, prompt: \"Process pending decisions and curation marker(s): claim each per your plumbing, then load devflow:dream-decisions and follow it, THEN load devflow:dream-curation and follow it (sequentially, never concurrently).\")
 "

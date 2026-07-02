@@ -812,36 +812,48 @@ describe('S8: AC-C2/C4 — security constraints', () => {
 });
 
 // =============================================================================
-// S9 — AC-C4: .devflow/ is git-ignored wholesale at the project root
+// S9 — AC-C4: .devflow/ is local by default with a feature-knowledge carve-out
 // =============================================================================
-describe('S9: AC-C4 — .devflow/ ignored wholesale by the root .gitignore', () => {
-  it('this repo root .gitignore ignores .devflow/', () => {
-    const gitignoreContent = fs.readFileSync(
+describe('S9: AC-C4 — .devflow/ local-by-default with the feature-knowledge carve-out', () => {
+  it('this repo root .gitignore applies the carve-out (not wholesale)', () => {
+    const lines = fs.readFileSync(
       path.join(__dirname, '..', '.gitignore'),
       'utf-8'
-    );
-    expect(gitignoreContent.split('\n').map(l => l.trim())).toContain('.devflow/');
+    ).split('\n').map(l => l.trim());
+    expect(lines).toContain('.devflow/*');
+    expect(lines).toContain('!.devflow/features/');
+    expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(lines).not.toContain('.devflow/'); // no bare wholesale entry
   });
 
-  it('transient files are untracked (git-ignored) in a scratch repo with root .gitignore', () => {
+  it('feature knowledge is tracked while transient memory files stay ignored (carve-out)', () => {
     const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-s9-'));
     try {
       initGitRepo(projectDir);
+      // Apply the real carve-out via the runtime single-source-of-truth helper.
+      execSync(`bash -c 'source "${path.join(HOOKS_DIR, 'ensure-root-gitignore')}" "${projectDir}"'`, { stdio: 'pipe' });
+
+      // Transient memory files — must stay ignored.
       fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
-
-      fs.writeFileSync(path.join(projectDir, '.gitignore'), '.devflow/\n');
-
       for (const f of ['.working-memory-last-trigger', '.last-refresh-ok', '.pending-turns.processing']) {
         fs.writeFileSync(path.join(projectDir, '.devflow', 'memory', f), 'test');
       }
       fs.mkdirSync(path.join(projectDir, '.devflow', 'memory', '.working-memory.lock'), { recursive: true });
 
-      const statusOut = execSync(`git -C "${projectDir}" status --short 2>&1`, { encoding: 'utf-8' });
+      // Feature knowledge — must be tracked (shareable).
+      fs.mkdirSync(path.join(projectDir, '.devflow', 'features', 'demo'), { recursive: true });
+      fs.writeFileSync(path.join(projectDir, '.devflow', 'features', 'index.md'), '- **demo** — x — y\n');
+      fs.writeFileSync(path.join(projectDir, '.devflow', 'features', 'demo', 'KNOWLEDGE.md'), '# Demo\n');
+
+      // -uall lists untracked files individually (git otherwise collapses an all-untracked dir).
+      const statusOut = execSync(`git -C "${projectDir}" status --short -uall 2>&1`, { encoding: 'utf-8' });
+      // Memory transients are excluded.
       for (const f of ['.working-memory-last-trigger', '.last-refresh-ok', '.pending-turns.processing', '.working-memory.lock']) {
         expect(statusOut).not.toContain(f);
       }
-      // The entire .devflow/ tree is excluded from git status under wholesale ignore
-      expect(statusOut).not.toContain('.devflow/');
+      // Feature knowledge is surfaced (untracked-but-not-ignored).
+      expect(statusOut).toContain('.devflow/features/index.md');
+      expect(statusOut).toContain('.devflow/features/demo/KNOWLEDGE.md');
     } finally {
       fs.rmSync(projectDir, { recursive: true, force: true });
     }

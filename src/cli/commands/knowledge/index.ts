@@ -1,19 +1,14 @@
 /**
  * devflow knowledge — per-feature knowledge base management.
- * Thin router that delegates each subcommand to its own module.
+ * Thin router that delegates to list (read-only) and toggle (enable/disable/status).
+ *
+ * The heavy CRUD subcommands (create/check/refresh/remove) are deleted — knowledge
+ * bases are created automatically via write-through (knowledge_writeback MDS partial).
  */
 import { Command } from 'commander';
 
 import { handleToggle } from './toggle.js';
 import { handleList } from './list.js';
-import { handleCheck } from './check.js';
-import { handleCreate } from './create.js';
-import { handleRefresh } from './refresh.js';
-import { handleRemove } from './remove.js';
-
-// Re-export agent result helpers for callers that import from knowledge/index.js
-export type { AgentResult } from '../../utils/agent-result.js';
-export { readAgentResult } from '../../utils/agent-result.js';
 
 export const knowledgeCommand = new Command('knowledge')
   .description('Manage per-feature knowledge bases')
@@ -26,35 +21,7 @@ export const knowledgeCommand = new Command('knowledge')
 
 knowledgeCommand
   .command('list')
-  .description('List all feature knowledge bases with staleness status')
+  .description('List all feature knowledge bases')
   .action(async () => {
     await handleList();
-  });
-
-knowledgeCommand
-  .command('check')
-  .description('Check all knowledge bases for staleness')
-  .action(async () => {
-    await handleCheck();
-  });
-
-knowledgeCommand
-  .command('create <slug>')
-  .description('Create a new knowledge base via claude -p exploration')
-  .action(async (slug: string) => {
-    await handleCreate(slug);
-  });
-
-knowledgeCommand
-  .command('refresh [slug]')
-  .description('Refresh stale knowledge base(s). Omit slug to refresh all stale knowledge bases.')
-  .action(async (slug?: string) => {
-    await handleRefresh(slug);
-  });
-
-knowledgeCommand
-  .command('remove <slug>')
-  .description('Remove a knowledge base and its index entry')
-  .action(async (slug: string) => {
-    await handleRemove(slug);
   });

@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Dream System: dream-evaluate (SessionEnd Hook)
-# Evaluates session-level features: decisions detection, knowledge refresh.
+# Evaluates session-level features: decisions detection and curation.
 # Writes marker files to .devflow/dream/ for dream-dispatch to pick up.
 #
-# Orchestrator: sources eval-helpers + 3 feature modules after shared setup.
+# Orchestrator: sources eval-helpers + 2 feature modules after shared setup.
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
@@ -43,18 +43,15 @@ DEVFLOW_DIR="$PROJECT_ROOT/.devflow"
 [ ! -d "$DEVFLOW_DIR" ] && exit 0
 
 MEMORY_DIR="$DEVFLOW_DIR/memory"
-FEATURES_DIR="$DEVFLOW_DIR/features"
 DREAM_DIR="$DEVFLOW_DIR/dream"
 DECISIONS_DIR_DATA="$DEVFLOW_DIR/decisions"
 
 # Read dream config
 DREAM_CONFIG="$DREAM_DIR/config.json"
 DECISIONS_ENABLED="true"
-KNOWLEDGE_ENABLED="true"
 
 if [ -f "$DREAM_CONFIG" ]; then
   DECISIONS_ENABLED=$(json_field_file "$DREAM_CONFIG" "decisions" "true")
-  KNOWLEDGE_ENABLED=$(json_field_file "$DREAM_CONFIG" "knowledge" "true")
 fi
 
 # Dual-signal gate: config OR sentinel disables decisions (and transitively curation).
@@ -67,7 +64,7 @@ source "$SCRIPT_DIR/hook-log-init" "dream-evaluate"
 source "$SCRIPT_DIR/dream-lock" || { log "failed to source dream-lock"; exit 1; }
 
 log "SessionEnd hook triggered"
-dbg "DECISIONS=$DECISIONS_ENABLED KNOWLEDGE=$KNOWLEDGE_ENABLED"
+dbg "DECISIONS=$DECISIONS_ENABLED"
 
 # --- Find transcript ---
 ENCODED_CWD=$(echo "$CWD" | sed 's|^/||' | tr '/' '-')
@@ -133,13 +130,11 @@ MARKER_SUFFIX="${SESSION_ID:-$$}"
 #   MARKER_SUFFIX  — suffix for per-session marker filenames (SESSION_ID or $$)
 #   DREAM_DIR      — absolute path to .devflow/dream/
 #   DECISIONS_DIR_DATA — absolute path to .devflow/decisions/
-#   FEATURES_DIR   — absolute path to .devflow/features/
-#   DECISIONS_ENABLED / KNOWLEDGE_ENABLED — "true"/"false"
+#   DECISIONS_ENABLED — "true"/"false"
 #   _HAS_JQ        — "true" if jq is available on PATH
 #
 source "$SCRIPT_DIR/eval-helpers"
 source "$SCRIPT_DIR/eval-decisions"
-source "$SCRIPT_DIR/eval-knowledge"
 source "$SCRIPT_DIR/eval-curation"
 
 dbg "=== HOOK COMPLETE ==="

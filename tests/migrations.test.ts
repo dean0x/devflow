@@ -163,6 +163,7 @@ describe('MIGRATIONS', () => {
     expect(renameIdx).toBeGreaterThanOrEqual(0);
     expect(consolidateIdx).toBeGreaterThan(renameIdx);
   });
+
 });
 
 describe('runMigrations', () => {
@@ -1898,3 +1899,4 @@ describe('purge-dead-working-memory-sentinel-v1 migration', () => {
     expect(deadIdx).toBeGreaterThan(staleIdx);
   });
 });
+

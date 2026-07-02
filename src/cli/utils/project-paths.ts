@@ -165,35 +165,6 @@ export function getPendingTurnsLockDir(projectRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Features / knowledge files
-// ---------------------------------------------------------------------------
-
-/** .devflow/features/index.json */
-export function getFeaturesIndexPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', 'index.json');
-}
-
-/** .devflow/features/{slug}/KNOWLEDGE.md */
-export function getKnowledgePath(projectRoot: string, slug: string): string {
-  return path.join(projectRoot, '.devflow', 'features', slug, 'KNOWLEDGE.md');
-}
-
-/** .devflow/features/.disabled — sentinel that gates knowledge phase/refresh */
-export function getFeaturesDisabledSentinel(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', '.disabled');
-}
-
-/** .devflow/features/.knowledge.lock — transient lock directory for concurrent index writes */
-export function getFeaturesLockDir(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', '.knowledge.lock');
-}
-
-/** .devflow/features/.knowledge-last-refresh — timestamp of last auto-refresh */
-export function getFeaturesLastRefreshPath(projectRoot: string): string {
-  return path.join(projectRoot, '.devflow', 'features', '.knowledge-last-refresh');
-}
-
-// ---------------------------------------------------------------------------
 // Docs files
 // ---------------------------------------------------------------------------
 
@@ -222,17 +193,16 @@ export function getHandoffPath(projectRoot: string, branchSlug: string): string 
 // ---------------------------------------------------------------------------
 
 /**
- * The canonical list of gitignore entries Devflow adds to a project's root
- * .gitignore. `.devflow/` holds per-developer runtime state (memory, dream,
- * docs, decisions, feature knowledge, locks) and is ignored wholesale by
- * default — sharing is opt-in. `.claude/` covers local-scope installs.
+ * The canonical list of generic gitignore entries Devflow adds to a project's
+ * root .gitignore for LOCAL-scope installs. Currently just `.claude/`.
  *
- * The ensure-devflow-init hook is the live, every-project mechanism that
- * appends `.devflow/` to the root .gitignore lazily; this list mirrors that
- * intent for the TS install path.
+ * `.devflow/` is intentionally NOT here: it is managed by ensureDevflowGitignore
+ * (TS) / ensure-root-gitignore (hook), which write the feature-knowledge carve-out
+ * for ALL scopes. Adding a bare `.devflow/` here would append a wholesale-ignore
+ * line after the carve-out and re-bury it (last match wins in .gitignore).
  *
  * CJS mirror: scripts/hooks/lib/project-paths.cjs getGitignoreEntries().
  */
 export function getGitignoreEntries(): string[] {
-  return ['.claude/', '.devflow/'];
+  return ['.claude/'];
 }

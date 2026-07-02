@@ -5,7 +5,7 @@ import { DEVFLOW_PLUGINS, getAllSkillNames, getAllAgentNames, getAllRuleNames } 
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MARKETPLACE_PATH = path.join(ROOT, '.claude-plugin', 'marketplace.json');
-const RECIPES_DIR = path.join(ROOT, 'shared', 'recipes');
+const COMMANDS_DIR = path.join(ROOT, 'commands');
 
 describe('plugin manifest validation', () => {
   it('every plugin in DEVFLOW_PLUGINS has a matching plugins/ directory', async () => {
@@ -165,70 +165,90 @@ describe('marketplace.json ↔ DEVFLOW_PLUGINS parity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// devflow-dynamic declared commands ↔ shared/recipes/ source parity
+// devflow-dynamic declared commands ↔ commands/*.mds source parity
 //
-// Ties the 5 command names declared in DEVFLOW_PLUGINS to the 5 non-partial
-// .mds recipe source files in shared/recipes/. Deriving from source (not from
-// gitignored compiled output) means this test passes even on a clean checkout
-// before build:recipes has run — which is the only reliable contract (applies ADR-019).
+// Ties the 5 command names declared in DEVFLOW_PLUGINS to the 5 dynamic-*.mds
+// host files in commands/ whose output-dir points at plugins/devflow-dynamic/.
+// Deriving from source (not from gitignored compiled output) means this test
+// passes even on a clean checkout before build:mds has run — the only reliable
+// contract (applies ADR-019).
 //
-// A recipe rename (e.g. dynamic-wave.mds → dynamic-orchestrate.mds) without
-// updating plugins.ts would fail this test, surfacing the drift before it ships.
+// A dynamic host rename (e.g. dynamic-wave.mds → dynamic-orchestrate.mds)
+// without updating plugins.ts would fail this test, surfacing the drift before
+// it ships.
 // ---------------------------------------------------------------------------
 
-describe('devflow-dynamic declared commands ↔ recipe sources parity', () => {
-  it('declared command names match non-partial .mds files in shared/recipes/ (1:1)', async () => {
+describe('devflow-dynamic declared commands ↔ commands/ source parity', () => {
+  /** Read the output-dir: from a .mds file's frontmatter, or null if absent. */
+  async function getOutputDir(filePath: string): Promise<string | null> {
+    const content = await fs.readFile(filePath, 'utf-8');
+    const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(content);
+    if (!fmMatch) return null;
+    const odMatch = /^output-dir:[ \t]*(.+?)[ \t]*$/m.exec(fmMatch[1]);
+    return odMatch ? odMatch[1].trim() : null;
+  }
+
+  it('declared command names match dynamic-host .mds files in commands/ (1:1)', async () => {
     const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
     expect(dynPlugin, 'devflow-dynamic must be registered in DEVFLOW_PLUGINS').toBeDefined();
 
-    // Derive expected command names from shared/recipes/ source files.
-    // Non-partial = file does NOT start with `_`. Strip .mds suffix and prepend /.
-    const entries = await fs.readdir(RECIPES_DIR, { withFileTypes: true });
-    const commandSourceNames = entries
-      .filter(e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'))
-      .map(e => '/' + path.basename(e.name, '.mds'))
-      .sort();
+    // Derive expected command names from commands/ source files whose output-dir
+    // targets plugins/devflow-dynamic/commands (the dynamic hosts).
+    const entries = await fs.readdir(COMMANDS_DIR, { withFileTypes: true });
+    const hostFiles = entries.filter(
+      e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'),
+    );
+
+    const dynamicSourceNames: string[] = [];
+    for (const e of hostFiles) {
+      const outputDir = await getOutputDir(path.join(COMMANDS_DIR, e.name));
+      if (outputDir && outputDir.includes('devflow-dynamic')) {
+        dynamicSourceNames.push('/' + path.basename(e.name, '.mds'));
+      }
+    }
+    dynamicSourceNames.sort();
 
     const declaredCommands = [...dynPlugin!.commands].sort();
 
     expect(
       declaredCommands,
-      `devflow-dynamic declared commands must match non-partial recipe sources 1:1.\n` +
+      `devflow-dynamic declared commands must match dynamic-host sources 1:1.\n` +
       `  declared:  ${declaredCommands.join(', ')}\n` +
-      `  from src:  ${commandSourceNames.join(', ')}`,
-    ).toEqual(commandSourceNames);
+      `  from src:  ${dynamicSourceNames.join(', ')}`,
+    ).toEqual(dynamicSourceNames);
   });
 
-  it('every declared devflow-dynamic command has a corresponding .mds source file', async () => {
+  it('every declared devflow-dynamic command has a corresponding .mds source file in commands/', async () => {
     const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
     expect(dynPlugin).toBeDefined();
 
     for (const cmd of dynPlugin!.commands) {
-      // Strip leading / to get the basename, append .mds
       const sourceName = cmd.replace(/^\//, '') + '.mds';
-      const sourcePath = path.join(RECIPES_DIR, sourceName);
+      const sourcePath = path.join(COMMANDS_DIR, sourceName);
       await expect(
         fs.access(sourcePath),
-        `Command '${cmd}' declared in DEVFLOW_PLUGINS has no recipe source at shared/recipes/${sourceName}`,
+        `Command '${cmd}' declared in DEVFLOW_PLUGINS has no source at commands/${sourceName}`,
       ).resolves.toBeUndefined();
     }
   });
 
-  it('every non-partial .mds in shared/recipes/ is declared as a devflow-dynamic command', async () => {
+  it('every dynamic-host .mds in commands/ is declared as a devflow-dynamic command', async () => {
     const dynPlugin = DEVFLOW_PLUGINS.find(p => p.name === 'devflow-dynamic');
     expect(dynPlugin).toBeDefined();
 
     const declaredSet = new Set(dynPlugin!.commands);
-    const entries = await fs.readdir(RECIPES_DIR, { withFileTypes: true });
-    const commandSources = entries.filter(
+    const entries = await fs.readdir(COMMANDS_DIR, { withFileTypes: true });
+    const hostFiles = entries.filter(
       e => e.isFile() && e.name.endsWith('.mds') && !e.name.startsWith('_'),
     );
 
-    for (const src of commandSources) {
-      const expectedCmd = '/' + path.basename(src.name, '.mds');
+    for (const e of hostFiles) {
+      const outputDir = await getOutputDir(path.join(COMMANDS_DIR, e.name));
+      if (!outputDir || !outputDir.includes('devflow-dynamic')) continue;
+      const expectedCmd = '/' + path.basename(e.name, '.mds');
       expect(
         declaredSet.has(expectedCmd),
-        `Recipe source '${src.name}' is not declared as a command in DEVFLOW_PLUGINS. Add '${expectedCmd}' to devflow-dynamic.commands in src/cli/plugins.ts`,
+        `commands/${e.name} targets devflow-dynamic but '${expectedCmd}' is not declared in DEVFLOW_PLUGINS. Add it to devflow-dynamic.commands in src/cli/plugins.ts`,
       ).toBe(true);
     }
   });

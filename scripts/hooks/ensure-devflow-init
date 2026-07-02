@@ -1,8 +1,7 @@
 #!/bin/bash
-# Ensures .devflow/ and all subdirectories exist, the project root .gitignore
-# ignores .devflow/, and .devflow/features/index.json is bootstrapped.
-# Merges functionality of the former ensure-memory-gitignore and ensure-features-init.
-# Called from dream-capture, dream-dispatch, and pre-compact-memory. Idempotent.
+# Ensures .devflow/ and all subdirectories exist and the project root .gitignore
+# ignores .devflow/. Called from dream-capture, dream-dispatch, and pre-compact-memory.
+# Idempotent.
 # Usage: source ensure-devflow-init "$CWD"
 
 [ -z "$1" ] && return 1
@@ -21,7 +20,7 @@ _DEVFLOW_DIR="$_EDI_ROOT/.devflow"
 if [ -d "$_DEVFLOW_DIR/memory" ] && [ -d "$_DEVFLOW_DIR/docs" ] && \
    [ -d "$_DEVFLOW_DIR/dream" ] && \
    [ -d "$_DEVFLOW_DIR/decisions" ] && [ -d "$_DEVFLOW_DIR/features" ] && \
-   [ -f "$_DEVFLOW_DIR/.root-gitignore-configured" ]; then
+   [ -f "$_DEVFLOW_DIR/.root-gitignore-configured-v2" ]; then
   return 0
 fi
 
@@ -33,12 +32,6 @@ mkdir -p \
   "$_DEVFLOW_DIR/features" \
   "$_DEVFLOW_DIR/docs" \
   2>/dev/null || return 1
-
-# Bootstrap features/index.json if missing
-if [ ! -f "$_DEVFLOW_DIR/features/index.json" ]; then
-  printf '{"version":1,"features":{}}' > "$_DEVFLOW_DIR/features/index.json.tmp" && \
-    mv "$_DEVFLOW_DIR/features/index.json.tmp" "$_DEVFLOW_DIR/features/index.json"
-fi
 
 # One-time root .gitignore setup — delegated to the sibling ensure-root-gitignore
 # helper (single source of truth) so the always-on, memory-independent

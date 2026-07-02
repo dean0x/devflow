@@ -207,41 +207,55 @@ describe('ensureDevflowGitignore', () => {
   const read = (): Promise<string> => fs.readFile(path.join(tmpDir, '.gitignore'), 'utf-8');
   const lines = (content: string): string[] => content.split('\n').map(l => l.trim());
 
-  it('creates .gitignore with only .devflow/ when absent (never .claude/)', async () => {
+  it('creates .gitignore with the .devflow/ carve-out when absent (never .claude/)', async () => {
     await ensureDevflowGitignore(tmpDir, false);
 
     const content = await read();
-    expect(lines(content)).toContain('.devflow/');
+    expect(lines(content)).toContain('.devflow/*');
+    expect(lines(content)).toContain('!.devflow/features/');
+    expect(lines(content)).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(lines(content)).not.toContain('.devflow/'); // carve-out, not bare wholesale
     // User-scope installs must NOT gitignore .claude/ — this is the key difference
     // from updateGitignore (which also adds .claude/).
     expect(content).not.toContain('.claude/');
     expect(content).toContain('# Devflow runtime data');
   });
 
-  it('appends .devflow/ to existing content without clobbering it', async () => {
+  it('appends the carve-out to existing content without clobbering it', async () => {
     await fs.writeFile(path.join(tmpDir, '.gitignore'), 'node_modules/\ndist/\n');
     await ensureDevflowGitignore(tmpDir, false);
 
     const content = await read();
     expect(content).toContain('node_modules/');
     expect(content).toContain('dist/');
-    expect(lines(content)).toContain('.devflow/');
+    expect(lines(content)).toContain('!.devflow/features/*/KNOWLEDGE.md');
   });
 
-  it('is idempotent — .devflow/ appears exactly once after repeated runs', async () => {
+  it('is idempotent — the carve-out appears exactly once after repeated runs', async () => {
     await ensureDevflowGitignore(tmpDir, false);
     await ensureDevflowGitignore(tmpDir, false);
 
     const content = await read();
-    expect(lines(content).filter(l => l === '.devflow/')).toHaveLength(1);
+    expect(lines(content).filter(l => l === '!.devflow/features/*/KNOWLEDGE.md')).toHaveLength(1);
   });
 
-  it('is a no-op when .devflow/ is already present (content unchanged)', async () => {
+  it('upgrades a legacy bare .devflow/ entry to the carve-out', async () => {
     await fs.writeFile(path.join(tmpDir, '.gitignore'), 'node_modules/\n.devflow/\n');
     await ensureDevflowGitignore(tmpDir, false);
 
     const content = await read();
-    expect(content).toBe('node_modules/\n.devflow/\n');
+    // Bare wholesale entry replaced by the carve-out; unrelated entry preserved.
+    expect(lines(content)).not.toContain('.devflow/');
+    expect(lines(content)).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(content).toContain('node_modules/');
+  });
+
+  it('respects a user-authored /.devflow/ entry (no carve-out forced)', async () => {
+    await fs.writeFile(path.join(tmpDir, '.gitignore'), '/.devflow/\n');
+    await ensureDevflowGitignore(tmpDir, false);
+
+    const content = await read();
+    expect(content).toBe('/.devflow/\n'); // untouched
   });
 });
 

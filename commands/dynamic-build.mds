@@ -1,0 +1,369 @@
+---
+description: Dependency-aware build engine — implement, review, and verify a single ticket or a full wave of tickets using devflow agents
+argument-hint: "[ticket | issue-url | plan-doc | --dry-run]"
+output-dir: plugins/devflow-dynamic/commands
+---
+@import { authoring_preamble } from "./_partials/_preamble.mds"
+@import { agent_roster, agent_caveats } from "./_partials/_roster.mds"
+@import { gate1_postcode, gate2_acceptance, evaluator_panel, implement_bundle, review_loop, concurrency_doctrine, build_execution_doctrine, engine_output_schema, engine_invariants } from "./_partials/_engine.mds"
+@import { wave_loop, branch_merge_model, merge_doctrine, escalation_model } from "./_partials/_wave.mds"
+@import { acceptance_criteria_contract } from "./_partials/_plan_contract.mds"
+
+{authoring_preamble()}
+
+---
+
+## dynamic-build — author and run a build workflow
+
+This command instructs you to construct and run a Claude Code dynamic Workflow that implements, reviews, and verifies one ticket or a full wave of tickets, reusing devflow's existing agents via `agentType`.
+
+{agent_roster()}
+
+{agent_caveats()}
+
+---
+
+**Requires:** ticket or task description; optional plan document and acceptance criteria from `/devflow:dynamic-plan`
+**Produces:** implemented and reviewed branch per ticket; wave run report at `.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`
+
+---
+
+### Preflight checks
+
+Before authoring, verify:
+
+1. **Workflow tool available:** if the `Workflow` tool is not in your available tools, STOP and tell the user: "The Workflow tool is not available in this session. dynamic-build requires Claude Code's dynamic workflow runtime."
+2. **`agentType` support:** confirmed available (spike F5, 2026-06-11). If spawned agents return no results, check that devflow is installed (`devflow init` has been run).
+3. **GitHub paths:** if the input is a GitHub issue URL, `gh` CLI must be authenticated. If not authenticated, note it and fall back to the issue text the user provided.
+4. **No-remote path:** if the repo has no remote, skip GitHub-dependent steps (issue reading, PR creation) and proceed with local branch operations only.
+
+---
+
+### Pre-authoring setup
+
+Before you write the workflow script:
+
+**1. Load DECISIONS_CONTEXT**
+
+Run:
+```bash
+node ~/.devflow/scripts/hooks/lib/decisions-index.cjs index "$(pwd)"
+```
+
+Apply the `devflow:apply-decisions` algorithm: scan the index, Read relevant entries, note the verbatim ADR/PF IDs you will inject into Coder and Evaluator prompts.
+
+**2. Read budget**
+
+Note the `budget` value from the Workflow tool context (or default to "medium" if not provided). This governs reviewer roster size, review cycle count, and verification vote count.
+
+**3. Detect mode: SINGLE or WAVE**
+
+- **SINGLE mode:** input is one ticket, one issue, one task description, or one plan document
+- **WAVE mode:** input is a set of GitHub issues (wave labels, milestone, issue list), or the user says "wave" / "all tickets in wave N"
+
+When ambiguous, ask the user before authoring: "Is this a single ticket or a wave of tickets?"
+
+**4. Resolve plan and acceptance criteria**
+
+Check for (in priority order):
+- A plan document passed as input (path or inline)
+- A GitHub issue body (fetch via `gh issue view <number>`)
+- The current working context (recent `/devflow:dynamic-plan` output)
+- An in-context task description
+
+Extract or note:
+- Implementation plan (for Coder prompt and Evaluator)
+- Acceptance criteria and test plan (for Gate 2)
+
+If none found: build proceeds Gate-1-only (Gate 2 skipped with a note). Never refuse to build; never fabricate criteria.
+
+---
+
+### SINGLE mode workflow structure
+
+Author a workflow script shaped like:
+
+```js
+export const meta = {
+  name: "devflow-dynamic-build",
+  description: "Single-ticket build: implement → Gate 1 → Gate 2 → review → verify → fix",
+  phases: ["setup", "implement", "gate1", "gate2", "review-loop", "gate1-final", "report"]
+};
+
+// SINGLE mode: one ticket, one branch, full engine
+
+const TICKET = args.ticket || args[0] || "see task description";
+const BRANCH = args.branch || `ticket/${TICKET.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
+const PLAN = args.plan || null;
+const CRITERIA = args.criteria || null;
+const DECISIONS_CONTEXT = args.decisionsContext || "";  // injected before authoring
+
+// Phase 1: Git setup
+const gitSetup = await phase("setup", () =>
+  agent(`Set up the git branch for this ticket:
+- Create branch: ${BRANCH} from current HEAD
+- Ensure working tree is clean before starting
+- Report the base commit SHA
+
+Ticket: ${TICKET}`, { agentType: "Git" })
+);
+
+// Phase 2: Implement
+const implResult = await phase("implement", () =>
+  agent(`Implement the following ticket on branch ${BRANCH}:
+
+${TICKET}
+
+${PLAN ? `Implementation plan:\n${PLAN}` : "No plan provided — use best judgment."}
+
+Relevant architectural decisions (apply devflow:apply-decisions algorithm):
+${DECISIONS_CONTEXT}
+
+When you build or run tests to verify your work, use your "Long-running commands" discipline (background-Bash + Monitor poll) for anything that may run silent >120s, and prefer package-scoped commands.
+
+After implementing, commit your changes with a conventional-commit message and report:
+- Files changed
+- Summary of changes
+- Any open questions or blockers`, { agentType: "Coder" })
+);
+
+// Phase 3: Gate 1 — post-code pipeline
+const gate1 = await phase("gate1", async () => {
+  // Gate 1 #1 — runs once, immediately after the initial implementation.
+  const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH}.
+For any build/test that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog; prefer package-scoped commands.
+Report: PASS or FAIL with details.`, { agentType: "Validator" });
+
+  if (validation.verdict === "FAIL") {
+    // Up to 2 fix attempts
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await agent(`Fix the validation failures on branch ${BRANCH}:
+${validation.details}
+Commit fixes with conventional-commit message.`, { agentType: "Coder" });
+      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH}. Report: PASS or FAIL.`, { agentType: "Validator" });
+      if (recheck.verdict === "PASS") break;
+      if (attempt === 2) return { verdict: "ESCALATED", reason: "Validation exhausted after 2 Coder fix attempts" };
+    }
+  }
+
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplifier" });
+
+  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinizer" });
+
+  if (scrutiny.codeChanged) {
+    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinizer made changes). Report: PASS or FAIL.`, { agentType: "Validator" });
+  }
+
+  return { verdict: "PASS" };
+});
+
+// Phase 4: Gate 2 — acceptance gate (once, before review loop)
+const gate2 = await phase("gate2", async () => {
+  if (!PLAN && !CRITERIA) {
+    return { evaluatorVerdict: "SKIPPED", testerVerdict: "SKIPPED", skipReasons: ["No plan and no criteria provided"] };
+  }
+
+  let evalVerdict = "SKIPPED";
+  if (PLAN) {
+    const panel = await parallel([
+      () => agent(`Acceptance-criteria evaluator: does the implementation on branch ${BRANCH} satisfy each numbered criterion, INCLUDING negative criteria?
+Plan: ${PLAN}
+Criteria: ${CRITERIA || "see plan"}
+Report: PASS or FAIL per criterion with rationale.`, { agentType: "Evaluator" }),
+      () => agent(`Scope/intent-drift evaluator: did the Coder on branch ${BRANCH} introduce any unplanned changes, smuggled anti-features, or drift from the plan's intent?
+Plan: ${PLAN}
+Report: PASS or FAIL with rationale.`, { agentType: "Evaluator" }),
+    ]);
+    evalVerdict = panel.every(p => p.verdict === "PASS") ? "PASS" : "FAIL";
+    if (evalVerdict === "FAIL") {
+      // Gate-2-demanded fix: a plain Coder fix that self-verifies its OWN build.
+      // No inline Gate 1 (Validator/Simplifier/Scrutinizer) here — the final Gate 1 (#2)
+      // after the review loop is the build gate before the branch is handed back.
+      await agent(`Fix the alignment issues identified by the Evaluator panel on branch ${BRANCH}:
+${panel.filter(p => p.verdict === "FAIL").map(p => p.rationale).join("\n")}
+Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit fixes.`, { agentType: "Coder" });
+    }
+  }
+
+  let testerVerdict = "SKIPPED";
+  if (CRITERIA) {
+    const testerResult = await agent(`Run scenario-based acceptance tests on branch ${BRANCH} against these criteria:
+${CRITERIA}
+For any test/build command that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog.
+Cover: functionality, API contracts, performance. Report: PASS or FAIL per scenario.`, { agentType: "Tester" });
+    testerVerdict = testerResult.verdict;
+    if (testerVerdict === "FAIL") {
+      // Gate-2-demanded QA fix: plain Coder fix that self-verifies. No inline Gate 1.
+      await agent(`Fix the failing acceptance test scenarios on branch ${BRANCH}:
+${testerResult.failures}
+Self-verify your fix compiles and the scenarios pass (background-Bash + Monitor for any build/test >120s). Commit fixes.`, { agentType: "Coder" });
+    }
+  }
+
+  return { evaluatorVerdict: evalVerdict, testerVerdict };
+});
+
+// Phase 5: Review → verify → fix loop
+const reviewResult = await phase("review-loop", async () => {
+  const changedFiles = implResult.filesChanged || [];
+  const maxCycles = changedFiles.length <= 20 ? 2 : 3;  // judgment heuristic, budget-scaled
+
+  let cyclesRun = 0;
+  let survivingFindings = [];
+
+  for (let cycle = 1; cycle <= maxCycles; cycle++) {
+    cyclesRun = cycle;
+
+    // Spawn core reviewers in parallel + conditional by file type
+    const reviewers = await parallel([
+      () => agent(`Security review of changes on branch ${BRANCH}. Focus: injection, auth, secrets, trust boundaries.`, { agentType: "Reviewer" }),
+      () => agent(`Architecture review of changes on branch ${BRANCH}. Focus: SOLID, coupling, layering, boundaries.`, { agentType: "Reviewer" }),
+      () => agent(`Performance review of changes on branch ${BRANCH}. Focus: N+1, memory leaks, I/O bottlenecks.`, { agentType: "Reviewer" }),
+      () => agent(`Complexity review of changes on branch ${BRANCH}. Focus: cyclomatic complexity, deep nesting, long functions.`, { agentType: "Reviewer" }),
+      () => agent(`Consistency review of changes on branch ${BRANCH}. Focus: naming conventions, pattern deviations, API style.`, { agentType: "Reviewer" }),
+      () => agent(`Regression review of changes on branch ${BRANCH}. Focus: removed exports, changed signatures, behavior changes.`, { agentType: "Reviewer" }),
+      () => agent(`Testing review of changes on branch ${BRANCH}. Focus: test coverage, behavior assertions, brittle patterns.`, { agentType: "Reviewer" }),
+      () => agent(`Reliability review of changes on branch ${BRANCH}. Focus: unbounded loops, missing assertions, error handling.`, { agentType: "Reviewer" }),
+    ]);
+
+    const allFindings = reviewers.flatMap(r => r.findings || []);
+    if (allFindings.length === 0) break;  // early exit
+
+    // Adversarial verification — bounded 2-3 agent panel, majority-survives
+    // Panel asks perspective-diverse questions over the WHOLE finding set (not one agent per finding).
+    // A finding survives if >50% of panel agents CONFIRM it.
+    const VERIFY_PANEL = 3;
+    const panels = await parallel(
+      Array.from({ length: VERIFY_PANEL }, (_, lens) => () =>
+        agent(`Adversarially verify all ${allFindings.length} findings on branch ${BRANCH}.
+Lens ${lens + 1} of ${VERIFY_PANEL}:
+${["Does each finding actually reproduce in the current code? Hunt for findings that describe patterns not present in the diff.",
+   "Is each finding a real issue or a false positive in context? Consider intent, surrounding code, and project conventions.",
+   "Does the cited rule or principle actually apply here? Check whether the finding's rationale holds under the specific circumstances."][lens]}
+
+For each finding below, return CONFIRMED or FALSE_POSITIVE with a one-line rationale.
+Return: { verdicts: [ { index: number, verdict: "CONFIRMED"|"FALSE_POSITIVE", rationale: string } ] }
+
+Findings:
+${JSON.stringify(allFindings.map((f, i) => ({ index: i, description: f.description, file: f.file || "unknown" })))}`, { agentType: "Reviewer" })
+      )
+    );
+
+    survivingFindings = allFindings.filter((_, i) =>
+      panels.filter(p => (p.verdicts || []).find(v => v.index === i)?.verdict === "CONFIRMED").length > VERIFY_PANEL / 2
+    );
+
+    if (survivingFindings.length === 0) break;  // early exit — clean review
+
+    // Coder fixes survivors (sequential per concurrency doctrine). The fixing Coder
+    // SELF-VERIFIES its own fix compiles — NO Gate 1 (Validator/Simplifier/Scrutinizer)
+    // between review cycles. The single final Gate 1 (#2) after this loop is the build gate.
+    await agent(`Fix the following confirmed review findings on branch ${BRANCH}:
+${survivingFindings.map(f => `- ${f.description} (${f.severity})`).join("\n")}
+
+Fix all findings in this batch. Self-verify your fix compiles (background-Bash + Monitor for any build >120s — see your "Long-running commands" discipline). Commit with conventional-commit message.`, { agentType: "Coder" });
+  }
+
+  return { cyclesRun, survivingFindings };
+});
+
+// Phase 5.5: Gate 1 #2 — FINAL post-fix gate (full Validator → Simplifier → Scrutinizer).
+// Runs ONCE, after the review loop. Between cycles the Coder self-verified its own fixes;
+// this is the build gate before the branch is handed back. See gate1_postcode() cadence.
+const gate1Final = await phase("gate1-final", async () => {
+  const validation = await agent(`Run build, typecheck, lint, and tests on branch ${BRANCH} (final gate after all fixing).
+For any build/test that may run silent >120s, use the background-Bash + Monitor poll procedure (your "Long-running commands" discipline) so you never trip the 180s watchdog; prefer package-scoped commands.
+Report: PASS or FAIL with details.`, { agentType: "Validator" });
+
+  if (validation.verdict === "FAIL") {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await agent(`Fix the final validation failures on branch ${BRANCH}:
+${validation.details}
+Self-verify your fix compiles. Commit fixes with conventional-commit message.`, { agentType: "Coder" });
+      const recheck = await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validator" });
+      if (recheck.verdict === "PASS") break;
+      if (attempt === 2) return { verdict: "ESCALATED", reason: "Final Gate 1 validation exhausted after 2 Coder fix attempts" };
+    }
+  }
+
+  await agent(`Simplify and reduce complexity of recent changes on branch ${BRANCH}. Commit any improvements.`, { agentType: "Simplifier" });
+
+  const scrutiny = await agent(`9-pillar self-review of recent changes on branch ${BRANCH}. Report any code you changed and your findings.`, { agentType: "Scrutinizer" });
+
+  if (scrutiny.codeChanged) {
+    await agent(`Re-run build, typecheck, lint, tests on branch ${BRANCH} (Scrutinizer made changes; background+Monitor for long commands). Report: PASS or FAIL.`, { agentType: "Validator" });
+  }
+
+  return { verdict: "PASS" };
+});
+
+// Phase 6: Report
+return phase("report", () =>
+  agent(`Synthesize the build run for ticket ${TICKET} on branch ${BRANCH}:
+- Implementation summary
+- Gate 1 (#1 post-implementation) result
+- Gate 2 result: ${JSON.stringify(gate2)}
+- Review cycles: ${reviewResult.cyclesRun}
+- Final Gate 1 (#2 post-fix): ${JSON.stringify(gate1Final)}
+- Surviving findings: ${JSON.stringify(reviewResult.survivingFindings)}
+- Overall verdict: ${reviewResult.survivingFindings.length === 0 && gate1Final.verdict !== "ESCALATED" ? "PASS" : "PARTIAL"}
+
+Write a concise report. The branch is ready for user review — do NOT merge to main.`, { agentType: "Synthesizer" })
+);
+```
+
+{concurrency_doctrine()}
+
+{build_execution_doctrine()}
+
+{implement_bundle()}
+
+{gate1_postcode()}
+
+{gate2_acceptance()}
+
+{evaluator_panel()}
+
+{acceptance_criteria_contract()}
+
+{review_loop()}
+
+{engine_invariants()}
+
+{engine_output_schema()}
+
+---
+
+### WAVE mode — additional structure
+
+When WAVE mode is detected, author a workflow that wraps the single-ticket engine with the wave loop:
+
+{wave_loop()}
+
+{branch_merge_model()}
+
+{merge_doctrine()}
+
+{escalation_model()}
+
+**Wave workflow structure (author after the SINGLE engine blocks above):**
+
+The wave workflow uses the same phases as SINGLE but wraps them in a wave loop. The integration branch is `wave/<initiative>` (or the user's current branch). Per-ticket branches are `ticket/<slug>`. The Git agent manages worktrees for parallel-eligible tickets. After every merge: Validator (build + test). Escalations accumulate in a list; the final report lists all of them.
+
+---
+
+### After the workflow returns — batch decisions at the command boundary (F4)
+
+A workflow cannot pause mid-run. After the build/wave workflow returns, you (the main model) surface anything that needs a human decision — all at once:
+
+1. Read the wave report (`.devflow/docs/waves/\{slug\}/\{ts\}/wave-report.md`) for its **escalations** (quarantined/blocked tickets and why), and read any `DECISIONS-NEEDED.md` left by a prior `/devflow:dynamic-plan` run for this initiative.
+2. Surface ALL of them — escalations AND open decisions — to the user in ONE batched `AskUserQuestion` (never one-at-a-time). `_wave.mds`'s escalation model already quarantines-and-continues; this batches the surfacing so the user answers everything in a single pass.
+3. If `~/.devflow/preference-profile.md` was absent, note in your summary: "no preference profile found — N decisions surfaced that a profile might have auto-resolved; consider `/devflow:dynamic-profile`."
+
+Do NOT ask questions mid-workflow — that is impossible (F4). The workflow only WRITES the report; you read it and ask.
+
+---
+
+### Maintenance note
+
+This recipe encodes the current `/implement` + `/code-review` + `/resolve` orchestration shape as of the authoring date (2026-06-12). When those base commands change their orchestration, update this recipe to match. No tooling detects drift — by design (ADR-008 Iron Rule). The reminder lives in the design doc §16.

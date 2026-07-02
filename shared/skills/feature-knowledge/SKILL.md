@@ -96,7 +96,6 @@ name: {human-readable name}
 description: "Use when [specific scenarios]. Keywords: [relevant terms]."
 category: [architecture | conventions | component-patterns | domain-knowledge | lessons-learned]
 directories: [{dir prefixes}]
-referencedFiles: [{5-10 key files for staleness tracking}]
 created: {ISO date}
 updated: {ISO date}
 ---
@@ -229,7 +228,6 @@ Run through this before writing. If any check fails, go back and fix it.
 - [ ] Category is correct and main sections follow the matching template
 - [ ] Description field starts with "Use when" and includes keywords
 - [ ] File stays under 500 lines (split if necessary)
-- [ ] 5-10 referenced files selected for staleness tracking
 
 **Connections:**
 - [ ] Cross-references to related feature knowledge entries and ADR/PF entries in Related section
@@ -238,21 +236,24 @@ Run through this before writing. If any check fails, go back and fix it.
 
 ---
 
-## Result Output
+## Index Registration
 
-After writing KNOWLEDGE.md, write a result JSON for the host process:
+After writing KNOWLEDGE.md, update the index cache directly:
 
-**Filename**: `.create-result.json` (new feature knowledge entries) or `.refresh-result.json` (refreshes)
-**Location**: Same directory as KNOWLEDGE.md (`.devflow/features/{slug}/`)
+**File**: `{worktree}/.devflow/features/index.md`
+**Operation**: Read-modify-write — replace the existing line for this slug if present, or append.
 
-```json
-{
-  "referencedFiles": ["src/path/to/key-file.ts", "src/path/to/other.ts"],
-  "description": "Use when working on {feature area}. Keywords: {terms}."
-}
+**Line format**:
+```
+- **{slug}** — {areas} — {Use-when description}
 ```
 
-The host process reads this result file and updates `.devflow/features/index.json` — do NOT update the index directly.
+Where:
+- `{slug}` matches the `feature:` frontmatter field
+- `{areas}` is a comma-separated summary of the `directories:` frontmatter field
+- `{Use-when description}` is the `description:` frontmatter field value (the full "Use when..." sentence)
+
+If `index.md` does not exist, create it with just this line. If the file already has an entry for this slug, replace that line in-place. This is the discoverable cache read by `knowledge_load()` — the KNOWLEDGE.md frontmatter is always authoritative.
 
 ---
 
@@ -267,7 +268,6 @@ name: Third-Party Integrations
 description: "Use when adding a new vendor integration, implementing API clients, or connecting to external services. Keywords: integration, vendor, API client, webhook, spawn, config."
 category: component-patterns
 directories: [src/lib/]
-referencedFiles: [src/lib/config.ts, src/lib/claude.ts, src/lib/skill-installer.ts, src/lib/deploy.ts]
 created: 2026-04-30
 updated: 2026-04-30
 ---

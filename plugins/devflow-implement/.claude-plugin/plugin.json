@@ -30,6 +30,7 @@
     "qa",
     "quality-gates",
     "worktree-support",
+    "feature-knowledge",
     "apply-feature-knowledge"
   ]
 }

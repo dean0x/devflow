@@ -41,11 +41,6 @@ import {
   getPendingTurnsPath,
   getPendingTurnsProcessingPath,
   getPendingTurnsLockDir,
-  getFeaturesIndexPath,
-  getKnowledgePath,
-  getFeaturesDisabledSentinel,
-  getFeaturesLockDir,
-  getFeaturesLastRefreshPath,
   getReviewsDir,
   getDesignDir,
   getResearchDir,
@@ -163,28 +158,6 @@ describe('project-paths TypeScript module', () => {
     });
   });
 
-  describe('features / knowledge files', () => {
-    it('getFeaturesIndexPath returns .devflow/features/index.json', () => {
-      expect(getFeaturesIndexPath(ROOT)).toBe('/some/project/.devflow/features/index.json');
-    });
-
-    it('getKnowledgePath returns .devflow/features/{slug}/KNOWLEDGE.md', () => {
-      expect(getKnowledgePath(ROOT, 'my-feature')).toBe('/some/project/.devflow/features/my-feature/KNOWLEDGE.md');
-    });
-
-    it('getFeaturesDisabledSentinel returns .devflow/features/.disabled', () => {
-      expect(getFeaturesDisabledSentinel(ROOT)).toBe('/some/project/.devflow/features/.disabled');
-    });
-
-    it('getFeaturesLockDir returns .devflow/features/.knowledge.lock', () => {
-      expect(getFeaturesLockDir(ROOT)).toBe('/some/project/.devflow/features/.knowledge.lock');
-    });
-
-    it('getFeaturesLastRefreshPath returns .devflow/features/.knowledge-last-refresh', () => {
-      expect(getFeaturesLastRefreshPath(ROOT)).toBe('/some/project/.devflow/features/.knowledge-last-refresh');
-    });
-  });
-
   describe('docs files', () => {
     it('getReviewsDir returns .devflow/docs/reviews/', () => {
       expect(getReviewsDir(ROOT)).toBe('/some/project/.devflow/docs/reviews');
@@ -217,8 +190,10 @@ describe('project-paths TypeScript module', () => {
       expect(getGitignoreEntries()).toContain('.claude/');
     });
 
-    it('includes .devflow/ (ignored wholesale by default)', () => {
-      expect(getGitignoreEntries()).toContain('.devflow/');
+    it('does NOT include .devflow/ — that is managed by ensureDevflowGitignore (carve-out)', () => {
+      // A bare `.devflow/` here would be appended after the carve-out and re-bury it.
+      expect(getGitignoreEntries()).not.toContain('.devflow/');
+      expect(getGitignoreEntries()).not.toContain('.devflow/*');
     });
 
     it('does not include old .memory/ entry', () => {
@@ -276,10 +251,6 @@ describe('CJS project-paths parity', () => {
     { name: 'getPendingTurnsPath', ts: getPendingTurnsPath, cjs: cjsPaths.getPendingTurnsPath },
     { name: 'getPendingTurnsProcessingPath', ts: getPendingTurnsProcessingPath, cjs: cjsPaths.getPendingTurnsProcessingPath },
     { name: 'getPendingTurnsLockDir', ts: getPendingTurnsLockDir, cjs: cjsPaths.getPendingTurnsLockDir },
-    { name: 'getFeaturesIndexPath', ts: getFeaturesIndexPath, cjs: cjsPaths.getFeaturesIndexPath },
-    { name: 'getFeaturesDisabledSentinel', ts: getFeaturesDisabledSentinel, cjs: cjsPaths.getFeaturesDisabledSentinel },
-    { name: 'getFeaturesLockDir', ts: getFeaturesLockDir, cjs: cjsPaths.getFeaturesLockDir },
-    { name: 'getFeaturesLastRefreshPath', ts: getFeaturesLastRefreshPath, cjs: cjsPaths.getFeaturesLastRefreshPath },
     { name: 'getReviewsDir', ts: getReviewsDir, cjs: cjsPaths.getReviewsDir },
     { name: 'getDesignDir', ts: getDesignDir, cjs: cjsPaths.getDesignDir },
     { name: 'getResearchDir', ts: getResearchDir, cjs: cjsPaths.getResearchDir },
@@ -290,10 +261,6 @@ describe('CJS project-paths parity', () => {
       expect(cjs(ROOT)).toBe(ts(ROOT));
     });
   }
-
-  it('getKnowledgePath — TypeScript and CJS agree', () => {
-    expect(cjsPaths.getKnowledgePath(ROOT, 'my-feature')).toBe(getKnowledgePath(ROOT, 'my-feature'));
-  });
 
   it('getHandoffPath — TypeScript and CJS agree', () => {
     expect(cjsPaths.getHandoffPath(ROOT, 'feat-branch')).toBe(getHandoffPath(ROOT, 'feat-branch'));

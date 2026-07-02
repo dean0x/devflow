@@ -31,7 +31,6 @@ const HOOK_SCRIPTS = [
   'dream-dispatch',
   'eval-helpers',
   'eval-decisions',
-  'eval-knowledge',
 ];
 
 describe('shell hook syntax checks', () => {
@@ -1391,61 +1390,57 @@ describe('ensure-devflow-init behavioral', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates .devflow/features/ and index.json when absent', () => {
+  it('creates .devflow/features/ directory when absent (no index.json — write-through model)', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features', 'index.json'))).toBe(true);
-    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), 'utf-8');
-    expect(content).toBe('{"version":1,"features":{}}');
+    // Knowledge index is now write-through (written when a KB is created/refreshed in-command)
+    // ensure-devflow-init only creates the directory, not the index file
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', 'features', 'index.json'))).toBe(false);
   });
 
-  it('does not overwrite existing index.json', () => {
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'features'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), '{"existing":"data"}');
-
+  it('writes the .devflow/ carve-out to the project root .gitignore (creates it when absent)', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    const content = fs.readFileSync(path.join(tmpDir, '.devflow', 'features', 'index.json'), 'utf-8');
-    expect(content).toBe('{"existing":"data"}');
-  });
-
-  it('adds .devflow/ to the project root .gitignore (creates it when absent)', () => {
-    execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
-
-    const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
-    expect(gitignore.split('\n').map(l => l.trim())).toContain('.devflow/');
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(true);
-    // Under the wholesale-ignore model no nested .devflow/.gitignore is written
+    const lines = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8').split('\n').map(l => l.trim());
+    // Wholesale .devflow/ replaced by the carve-out: everything local except feature knowledge
+    expect(lines).toContain('.devflow/*');
+    expect(lines).toContain('!.devflow/features/');
+    expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(lines).not.toContain('.devflow/'); // no bare wholesale line
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
+    // No nested .devflow/.gitignore is written
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
   });
 
-  it('appends .devflow/ to an existing root .gitignore without clobbering it', () => {
+  it('appends the .devflow/ carve-out to an existing root .gitignore without clobbering it', () => {
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\ndist/\n');
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
     expect(gitignore).toContain('node_modules/');
     expect(gitignore).toContain('dist/');
-    expect(gitignore.split('\n').map(l => l.trim())).toContain('.devflow/');
+    expect(gitignore.split('\n').map(l => l.trim())).toContain('!.devflow/features/*/KNOWLEDGE.md');
   });
 
-  it('is idempotent — .devflow/ appears exactly once after repeated runs', () => {
+  it('is idempotent — the carve-out appears exactly once after repeated runs', () => {
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
-    const entries = gitignore.split('\n').map(l => l.trim()).filter(l => l === '.devflow/');
+    const entries = gitignore.split('\n').map(l => l.trim()).filter(l => l === '!.devflow/features/*/KNOWLEDGE.md');
     expect(entries).toHaveLength(1);
   });
 
-  it('does not append .devflow/ when the root .gitignore already ignores it', () => {
+  it('respects a user-authored /.devflow/ entry — neither duplicates nor forces the carve-out', () => {
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), '/.devflow/\n');
     execSync(`bash -c 'source "${ENSURE_DEVFLOW}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
-    // Pre-existing /.devflow/ already matches the guard — no duplicate added
+    // A leading-slash entry is treated as the user's own choice: left intact, no carve-out forced
     expect(gitignore.split('\n').map(l => l.trim()).filter(l => l === '.devflow/')).toHaveLength(0);
     expect(gitignore).toContain('/.devflow/');
+    expect(gitignore).not.toContain('!.devflow/features/');
   });
 
   it('returns non-zero and creates no .devflow/ when called with empty argument (SEC-3 guard)', () => {
@@ -1479,20 +1474,22 @@ describe('ensure-root-gitignore behavioral', () => {
   const ignoreLines = (file: string): string[] =>
     fs.readFileSync(file, 'utf-8').split('\n').map(l => l.trim());
 
-  it('creates the root .gitignore (and .devflow/) when absent, writes the marker', () => {
+  it('creates the root .gitignore (and .devflow/) when absent, writes the v2 marker', () => {
     // Standalone case (as session-start-context calls it): no .devflow/ exists yet.
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = path.join(tmpDir, '.gitignore');
     expect(fs.existsSync(gitignore)).toBe(true);
-    expect(ignoreLines(gitignore)).toContain('.devflow/');
+    expect(ignoreLines(gitignore)).toContain('.devflow/*');
+    expect(ignoreLines(gitignore)).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(ignoreLines(gitignore)).not.toContain('.devflow/'); // carve-out, not wholesale
     // The helper must create .devflow/ to host the marker even when called standalone
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(true);
-    // Wholesale-ignore model — no nested .devflow/.gitignore written
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
+    // No nested .devflow/.gitignore written
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.gitignore'))).toBe(false);
   });
 
-  it('appends .devflow/ to an existing root .gitignore without clobbering it', () => {
+  it('appends the carve-out to an existing root .gitignore without clobbering it', () => {
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules/\ndist/\n');
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
@@ -1500,35 +1497,59 @@ describe('ensure-root-gitignore behavioral', () => {
     const content = fs.readFileSync(gitignore, 'utf-8');
     expect(content).toContain('node_modules/');
     expect(content).toContain('dist/');
-    expect(ignoreLines(gitignore)).toContain('.devflow/');
+    expect(ignoreLines(gitignore)).toContain('!.devflow/features/*/KNOWLEDGE.md');
   });
 
-  it('is idempotent — .devflow/ appears exactly once after repeated runs', () => {
+  it('is idempotent — the carve-out appears exactly once after repeated runs', () => {
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
-    const entries = ignoreLines(path.join(tmpDir, '.gitignore')).filter(l => l === '.devflow/');
+    const entries = ignoreLines(path.join(tmpDir, '.gitignore')).filter(l => l === '!.devflow/features/*/KNOWLEDGE.md');
     expect(entries).toHaveLength(1);
   });
 
-  it('does not append .devflow/ when the root .gitignore already ignores it (/.devflow/ guard)', () => {
+  it('respects a user-authored /.devflow/ entry — no bare duplicate, no carve-out forced', () => {
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), '/.devflow/\n');
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     const gitignore = path.join(tmpDir, '.gitignore');
-    // Pre-existing /.devflow/ already matches the guard — no bare .devflow/ duplicate added
+    // A leading-slash entry is the user's own choice: left intact, carve-out not forced
     expect(ignoreLines(gitignore).filter(l => l === '.devflow/')).toHaveLength(0);
     expect(fs.readFileSync(gitignore, 'utf-8')).toContain('/.devflow/');
+    expect(ignoreLines(gitignore)).not.toContain('!.devflow/features/');
   });
 
-  it('marker short-circuits subsequent runs (O(1) fast-path) — does not touch .gitignore', () => {
-    // Pre-seed the marker; the helper must return early and leave .gitignore untouched.
+  it('v2 marker short-circuits subsequent runs (O(1) fast-path) — does not touch .gitignore', () => {
+    // Pre-seed the current-format marker; the helper must return early, leaving .gitignore untouched.
     fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'), '');
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'), '');
     execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
 
     // No .gitignore should have been created because the marker fast-path fired first
     expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
+  });
+
+  it('upgrades a legacy install: replaces bare .devflow/ with the carve-out and bumps v1 → v2', () => {
+    // Simulate an existing v1 install: legacy comment + bare wholesale entry + v1 marker.
+    fs.writeFileSync(
+      path.join(tmpDir, '.gitignore'),
+      'node_modules/\n\n# Devflow runtime data (local by default; remove to share via git)\n.devflow/\n',
+    );
+    fs.mkdirSync(path.join(tmpDir, '.devflow'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'), ''); // v1 marker
+    execSync(`bash -c 'source "${ENSURE_ROOT}" "${tmpDir}"'`, { stdio: 'pipe' });
+
+    const gitignore = path.join(tmpDir, '.gitignore');
+    const lines = ignoreLines(gitignore);
+    const content = fs.readFileSync(gitignore, 'utf-8');
+    // Legacy bare entry and old comment are gone; carve-out is in; unrelated entry preserved.
+    expect(lines).not.toContain('.devflow/');
+    expect(content).not.toContain('remove to share via git');
+    expect(lines).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(content).toContain('node_modules/');
+    // Marker is bumped: v1 dropped, v2 written.
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
   });
 
   it('returns non-zero and creates nothing when called with an empty argument', () => {
@@ -1735,9 +1756,10 @@ describe('dream-evaluate business logic', () => {
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Evaluating decisions');
-    expect(log).toContain('Evaluating knowledge');
     // learning pipeline removed — no 'Evaluating learning' should appear
     expect(log).not.toContain('Evaluating learning');
+    // knowledge is now write-through (in-command) — no 'Evaluating knowledge' from dream-evaluate
+    expect(log).not.toContain('Evaluating knowledge');
   });
 
   it('shallow session (2 turns) skips decisions', () => {
@@ -1786,51 +1808,6 @@ describe('dream-evaluate business logic', () => {
     expect(pairs.length).toBeGreaterThan(0);
   });
 
-  it('knowledge throttle: recent refresh skips evaluation', () => {
-    // Write a recent timestamp to the throttle marker
-    const featuresDir = path.join(tmpDir, '.devflow', 'features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
-    const now = Math.floor(Date.now() / 1000);
-    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), String(now));
-
-    createTranscript(homeDir, tmpDir, 5);
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test-session',
-    }, homeDir);
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    expect(fs.existsSync(path.join(dreamDir, 'knowledge.json'))).toBe(false);
-
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    expect(fs.existsSync(logFile)).toBe(true);
-    const log = fs.readFileSync(logFile, 'utf-8');
-    expect(log).toContain('Knowledge throttled');
-  });
-
-  it('knowledge disabled sentinel skips evaluation', () => {
-    const featuresDir = path.join(tmpDir, '.devflow', 'features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    fs.writeFileSync(path.join(featuresDir, '.disabled'), '');
-
-    createTranscript(homeDir, tmpDir, 5);
-    runHook(EVALUATE_HOOK, {
-      cwd: tmpDir,
-      session_id: 'test-session',
-    }, homeDir);
-
-    const dreamDir = path.join(tmpDir, '.devflow', 'dream');
-    expect(fs.existsSync(path.join(dreamDir, 'knowledge.json'))).toBe(false);
-
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    expect(fs.existsSync(logFile)).toBe(true);
-    const log = fs.readFileSync(logFile, 'utf-8');
-    expect(log).toContain('Knowledge disabled by sentinel');
-  });
-
   it('session ID path traversal rejected, fallback used', () => {
     // Create a valid transcript with a normal name
     createTranscript(homeDir, tmpDir, 5, 5, 'valid-session');
@@ -1846,76 +1823,6 @@ describe('dream-evaluate business logic', () => {
     expect(fs.existsSync(logFile)).toBe(true);
     const log = fs.readFileSync(logFile, 'utf-8');
     expect(log).toContain('Session depth');
-  });
-});
-
-// =============================================================================
-// dream-evaluate knowledge evaluation
-// =============================================================================
-
-describe('dream-evaluate knowledge evaluation', () => {
-  const EVALUATE_HOOK = path.join(HOOKS_DIR, 'dream-evaluate');
-
-  let tmpDir: string;
-  let homeDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-test-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-cap-home-'));
-    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
-    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    fs.rmSync(homeDir, { recursive: true, force: true });
-  });
-
-  it('LAST_REFRESH sanitization: non-numeric content in knowledge marker defaults to 0', () => {
-    // Write non-numeric content to .knowledge-last-refresh — should sanitize to 0
-    // resulting in a stale age calculation (now - 0 > 7200) and triggering evaluation
-    const featuresDir = path.join(tmpDir, '.devflow', 'features');
-    fs.mkdirSync(featuresDir, { recursive: true });
-    // No stale slugs — so no marker will be written — but hook should not crash
-    fs.writeFileSync(path.join(featuresDir, 'index.json'), '{"version":1,"features":{}}');
-    fs.writeFileSync(path.join(featuresDir, '.knowledge-last-refresh'), 'not-a-number\n');
-
-    createTranscript(homeDir, tmpDir, 5);
-    const { exitCode } = runHook(EVALUATE_HOOK, { cwd: tmpDir, session_id: 'test-session' }, homeDir);
-    expect(exitCode).toBe(0);
-
-    // Hook should have attempted knowledge evaluation (no crash from bad timestamp)
-    const logDir = path.join(homeDir, '.devflow', 'logs', encodeCwd(tmpDir));
-    const logFile = path.join(logDir, '.dream-evaluate.log');
-    if (fs.existsSync(logFile)) {
-      const log = fs.readFileSync(logFile, 'utf-8');
-      // Either throttled (with sanitized timestamp near 0 → stale) or "no stale slugs"
-      // Both are valid outcomes — the key is it didn't crash
-      expect(log).toContain('Evaluating knowledge');
-    }
-  });
-
-  it('LAST_UPDATE get_mtime fallback: missing WORKING-MEMORY defaults to 0', () => {
-    // Without WORKING-MEMORY.md, get_mtime returns empty string; LAST_UPDATE should default to 0
-    // so age computation doesn't error
-    createTranscript(homeDir, tmpDir, 5);
-
-    // Deliberately do NOT create WORKING-MEMORY.md
-    // We call dream-capture (not dream-evaluate) for this one since it does the get_mtime check
-    const CAPTURE_HOOK = path.join(HOOKS_DIR, 'dream-capture');
-    const exitCode = (() => {
-      try {
-        execSync(`bash "${CAPTURE_HOOK}"`, {
-          input: JSON.stringify({ cwd: tmpDir, session_id: 'test', last_assistant_message: 'response text here' }),
-          stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env, HOME: homeDir },
-        });
-        return 0;
-      } catch (e: unknown) {
-        return (e as { status: number }).status ?? 1;
-      }
-    })();
-    expect(exitCode).toBe(0);
   });
 });
 
@@ -2305,8 +2212,8 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
 
     const gitignore = path.join(tmpDir, '.gitignore');
     expect(fs.existsSync(gitignore)).toBe(true);
-    expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('.devflow/');
-    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured'))).toBe(true);
+    expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/features/*/KNOWLEDGE.md');
+    expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
   });
 });
 
@@ -2464,7 +2371,7 @@ exit 0
  */
 function runCollectTasks(
   dreamDir: string,
-  opts: { decEnabled?: boolean; knowEnabled?: boolean },
+  opts: { decEnabled?: boolean },
 ): { tasks: string; mtimeCount: number } {
   const hooksDir = path.resolve(__dirname, '..', 'scripts', 'hooks');
   const counterFile = path.join(os.tmpdir(), `devflow-mtime-counter-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -2478,7 +2385,6 @@ function runCollectTasks(
   //  4. Prints _DREAM_TASKS to stdout.
   // Note: memEnabled removed — memory is not a Dream task (applies ADR-016; avoids PF-009).
   const decEn = opts.decEnabled ?? true ? 'true' : 'false';
-  const knowEn = opts.knowEnabled ?? true ? 'true' : 'false';
 
   const script = `#!/bin/bash
 dbg() { :; }
@@ -2494,7 +2400,7 @@ get_mtime() {
   printf '%s' "$c"
 }
 source "${hooksDir}/dream-collect-tasks"
-dream_collect_tasks "${dreamDir}" "${decEn}" "${knowEn}"
+dream_collect_tasks "${dreamDir}" "${decEn}"
 printf '%s' "\$_DREAM_TASKS"
 `;
 
@@ -2555,21 +2461,21 @@ describe('dream-collect-tasks: single-pass scan', () => {
     expect(fs.existsSync(path.join(dreamDir, 'learning.sess2.json'))).toBe(false);
   });
 
-  // AC-3: memory always swept (unconditional); disabled decisions/knowledge/curation deleted; type never in _DREAM_TASKS
-  // Curation is now also swept when decisions is disabled (curation depends on decisions data).
-  it('AC-3: memory always swept; disabled decisions/knowledge/curation markers deleted when decisions disabled', () => {
+  // AC-3: memory always swept unconditionally; decisions/curation deleted when decisions disabled
+  // Curation is swept when decisions is disabled (curation depends on decisions data).
+  // Knowledge is no longer a Dream concept at all — write-through handles KBs in-command and
+  // nothing writes knowledge.* markers, so the script carries no knowledge case (clean break).
+  it('AC-3: memory always swept; disabled decisions/curation markers deleted when decisions disabled', () => {
     fs.writeFileSync(path.join(dreamDir, 'memory.sess1.json'), '{}');       // swept unconditionally
     fs.writeFileSync(path.join(dreamDir, 'decisions.sess1.json'), '{}');
-    fs.writeFileSync(path.join(dreamDir, 'knowledge.sess1.json'), '{}');
     fs.writeFileSync(path.join(dreamDir, 'curation.sess1.json'), '{}');
 
-    // Memory markers are always swept unconditionally (memory is no longer a Dream task).
+    // Memory markers are always swept unconditionally (no longer a Dream task).
     // Curation markers are also swept when decisions is disabled — curation inherits decisions state.
-    const { tasks } = runCollectTasks(dreamDir, { decEnabled: false, knowEnabled: false });
+    const { tasks } = runCollectTasks(dreamDir, { decEnabled: false });
     expect(tasks).toBe('');
     expect(fs.existsSync(path.join(dreamDir, 'memory.sess1.json'))).toBe(false);
     expect(fs.existsSync(path.join(dreamDir, 'decisions.sess1.json'))).toBe(false);
-    expect(fs.existsSync(path.join(dreamDir, 'knowledge.sess1.json'))).toBe(false);
     // curation swept because decisions is disabled
     expect(fs.existsSync(path.join(dreamDir, 'curation.sess1.json'))).toBe(false);
   });

@@ -40,6 +40,71 @@ export function computeGitignoreAppend(existingContent: string, entries: string[
 }
 
 /**
+ * The shared .devflow/ gitignore block. Everything under .devflow/ is local
+ * (memory, dream, docs, decisions, locks) EXCEPT feature knowledge bases:
+ * index.md and every {slug}/KNOWLEDGE.md are tracked + committed (the Knowledge
+ * agent commits them at workflow end). Re-including files under an ignored tree
+ * needs a `dir/*` + `!dir/keep` pair at each level — a bare `.devflow/` excludes
+ * the directory so git never descends and later negations are dead.
+ *
+ * Kept BYTE-IDENTICAL to the block emitted by scripts/hooks/ensure-root-gitignore
+ * so the init-time path and the always-on hook path produce the same file.
+ */
+export const DEVFLOW_GITIGNORE_BLOCK = [
+  '# Devflow runtime data — local by default (memory, dream, docs, decisions, locks).',
+  '# Exception: feature knowledge bases under .devflow/features/ are shared via git —',
+  '# index.md and every {slug}/KNOWLEDGE.md are tracked and committed; everything else',
+  '# under .devflow/features/ stays local. To stop sharing, re-add `.devflow/features/`',
+  '# to your own .gitignore.',
+  '.devflow/*',
+  '!.devflow/features/',
+  '.devflow/features/*',
+  '!.devflow/features/index.md',
+  '!.devflow/features/*/',
+  '.devflow/features/*/*',
+  '!.devflow/features/*/KNOWLEDGE.md',
+].join('\n');
+
+/** Sentinel line whose presence means the carve-out block is already installed. */
+const DEVFLOW_GITIGNORE_SENTINEL = '!.devflow/features/*/KNOWLEDGE.md';
+
+/** The legacy wholesale comment our pre-carve-out writers emitted. */
+const LEGACY_DEVFLOW_COMMENT = '# Devflow runtime data (local by default; remove to share via git)';
+
+/**
+ * PURE: given existing .gitignore content, return the content that ignores
+ * `.devflow/` with the feature-knowledge carve-out — or `null` when no change
+ * is needed. Idempotent: feeding its own output back returns `null`.
+ *
+ * - Carve-out already present → `null`.
+ * - User-authored `/.devflow/` (leading slash) present → `null` (respect manual config).
+ * - Legacy bare `.devflow/` present → strip it (+ our old comment), append the block.
+ * - Otherwise → append the block (or the block alone when content is empty).
+ */
+export function computeDevflowGitignore(existingContent: string): string | null {
+  const lines = existingContent.split('\n');
+  const trimmed = lines.map(l => l.trim());
+
+  if (trimmed.includes(DEVFLOW_GITIGNORE_SENTINEL)) return null;
+  if (trimmed.some(l => l === '/.devflow/')) return null;
+
+  const append = (body: string): string =>
+    body.trimEnd()
+      ? `${body.trimEnd()}\n\n${DEVFLOW_GITIGNORE_BLOCK}\n`
+      : `${DEVFLOW_GITIGNORE_BLOCK}\n`;
+
+  if (trimmed.some(l => l === '.devflow/')) {
+    // Upgrade our legacy wholesale entry: drop the bare line + old comment, append block.
+    const kept = lines
+      .filter(l => l.trim() !== '.devflow/' && l.trim() !== LEGACY_DEVFLOW_COMMENT)
+      .join('\n');
+    return append(kept);
+  }
+
+  return append(existingContent);
+}
+
+/**
  * Merge Devflow deny entries into an existing settings JSON object.
  * Preserves existing entries (including allow and sibling keys), deduplicates,
  * and returns the merged JSON string with trailing newline.
@@ -892,19 +957,20 @@ export async function updateGitignore(
 }
 
 /**
- * Deterministically ensure the project root .gitignore ignores `.devflow/`.
+ * Deterministically ensure the project root .gitignore applies the `.devflow/`
+ * carve-out (local by default, feature knowledge shared via git).
  *
- * Appends ONLY `.devflow/` — never `.claude/` — because user-scope installs must
+ * Manages ONLY `.devflow/` — never `.claude/` — because user-scope installs must
  * not gitignore `.claude/`. This is the init-time counterpart to the always-on
  * scripts/hooks/ensure-root-gitignore shell helper; both write the identical
- * comment block and entry, so the two paths are byte-compatible and mutually
+ * DEVFLOW_GITIGNORE_BLOCK, so the two paths are byte-compatible and mutually
  * idempotent. Called unconditionally (independent of install scope and every
- * feature toggle) whenever a git root is known, so a fresh install never tracks
- * `.devflow/` even before any hook fires.
+ * feature toggle) whenever a git root is known, so a fresh install tracks feature
+ * knowledge and ignores the rest of `.devflow/` even before any hook fires.
  *
- * Idempotent: reuses computeGitignoreAppend, so a second run is a no-op once
- * `.devflow/` is present. Errors are swallowed (verbose-logged) — a gitignore
- * write must never abort init.
+ * Idempotent via computeDevflowGitignore, which returns null when the carve-out
+ * is already present (and upgrades a legacy bare `.devflow/` entry once). Errors
+ * are swallowed (verbose-logged) — a gitignore write must never abort init.
  */
 export async function ensureDevflowGitignore(
   gitRoot: string,
@@ -918,19 +984,14 @@ export async function ensureDevflowGitignore(
       gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
     } catch { /* doesn't exist yet */ }
 
-    const linesToAdd = computeGitignoreAppend(gitignoreContent, ['.devflow/']);
-    if (linesToAdd.length === 0) {
+    const newContent = computeDevflowGitignore(gitignoreContent);
+    if (newContent === null) {
       return;
     }
 
-    const comment = '# Devflow runtime data (local by default; remove to share via git)';
-    const newContent = gitignoreContent
-      ? `${gitignoreContent.trimEnd()}\n\n${comment}\n.devflow/\n`
-      : `${comment}\n.devflow/\n`;
-
     await fs.writeFile(gitignorePath, newContent, 'utf-8');
     if (verbose) {
-      p.log.success('.gitignore configured (.devflow/ ignored)');
+      p.log.success('.gitignore configured (.devflow/ local; feature knowledge shared)');
     }
   } catch (error) {
     if (verbose) {
