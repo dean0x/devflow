@@ -1,0 +1,126 @@
+#!/bin/bash
+# queue-append -- shared queue-append helper (sourced, not executed).
+#
+# Single implementation of: umask-077 file creation, JSONL emit (jq --arg / node
+# JSON.stringify -- never string concatenation), and 200->100 overflow truncation
+# under a lock. Used by capture-prompt, capture-turn, and capture-question so the
+# per-feature dual-queue-append logic exists in exactly one place.
+#
+# Source-order requirement: source json-parse (for _HAS_JQ) and dream-lock (for
+# dream_lock_acquire/dream_lock_release, which itself requires get-mtime) BEFORE
+# calling queue_append_row or queue_append_both. Sourcing this file itself only
+# defines functions -- no side effects until they are called.
+#
+# queue_append_row <queue_file> <role> <content> <ts>
+#   Appends one JSONL row {role, content, ts} to <queue_file>. Creates the file
+#   with mode 0600 (umask 077) if absent. After appending, truncates from 200 to
+#   the newest 100 lines under a lock (dream_lock_acquire on "<queue_file>.lock",
+#   2s timeout) -- mirrors dream-capture's own overflow guard. The append itself
+#   is intentionally lock-free (accepted-class race shared with the pre-existing
+#   memory design -- see the design doc's "Append-vs-claim race" note).
+#
+# queue_append_both <memory_queue> <dream_queue> <memory_enabled> <dream_enabled> <role> <content> <ts>
+#   Calls queue_append_row for each queue whose *_enabled flag is "true". Each
+#   queue is gated independently -- callers compute memory_enabled/dream_enabled
+#   from dream config themselves (see queue_read_gates below for the one-fork
+#   combined read that keeps this to a single config subprocess per hook).
+#
+# queue_read_gates <dream_config_path> <decisions_disabled_sentinel_path>
+#   Reads BOTH the "memory" and "decisions" fields from dream config.json in a
+#   SINGLE subprocess fork (AC-P1 -- exactly one config-read fork per capture
+#   hook, not two). Sets _QG_MEMORY and _QG_DECISIONS ("true"/"false") in the
+#   caller's scope. Missing config file -> both default "true". decisions is
+#   further forced "false" when the sentinel path exists (dual-signal gate,
+#   mirroring dream-capture/dream-evaluate's existing convention). The two
+#   values are newline-separated rather than using a control-character
+#   delimiter: they are always the literal strings "true"/"false", never
+#   arbitrary content, so a plain newline split is unambiguous and easy to
+#   review (no invisible bytes hiding in the source).
+
+queue_append_row() {
+  local _qar_file="$1" _qar_role="$2" _qar_content="$3" _qar_ts="$4"
+
+  if [ ! -f "$_qar_file" ]; then
+    (umask 077 && touch "$_qar_file") 2>/dev/null || true
+  fi
+
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -n -c --arg role "$_qar_role" --arg content "$_qar_content" --argjson ts "$_qar_ts" \
+      '{role: $role, content: $content, ts: $ts}' >> "$_qar_file"
+  else
+    node -e "process.stdout.write(JSON.stringify({role:process.argv[1],content:process.argv[2],ts:parseInt(process.argv[3])})+String.fromCharCode(10))" \
+      -- "$_qar_role" "$_qar_content" "$_qar_ts" >> "$_qar_file"
+  fi
+
+  # Overflow safety: >200 lines -> keep newest 100, locked to prevent a multi-session race.
+  if [ -f "$_qar_file" ]; then
+    local _qar_lines
+    _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
+    if [ "$_qar_lines" -gt 200 ]; then
+      local _qar_lock="${_qar_file}.lock"
+      if dream_lock_acquire "$_qar_lock" 2; then
+        _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
+        if [ "$_qar_lines" -gt 200 ]; then
+          local _qar_tmp="${_qar_file}.tmp.$$"
+          tail -100 "$_qar_file" > "$_qar_tmp" && mv "$_qar_tmp" "$_qar_file" || rm -f "$_qar_tmp"
+          log "Queue overflow: truncated from $_qar_lines to 100 lines ($(basename "$_qar_file"))"
+          dbg "Queue overflow: truncated from $_qar_lines to 100 lines ($_qar_file)"
+        fi
+        dream_lock_release "$_qar_lock"
+      fi
+    fi
+  fi
+}
+
+queue_append_both() {
+  local _qab_memory_queue="$1" _qab_dream_queue="$2"
+  local _qab_memory_enabled="$3" _qab_dream_enabled="$4"
+  local _qab_role="$5" _qab_content="$6" _qab_ts="$7"
+
+  if [ "$_qab_memory_enabled" = "true" ]; then
+    queue_append_row "$_qab_memory_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
+  fi
+  if [ "$_qab_dream_enabled" = "true" ]; then
+    queue_append_row "$_qab_dream_queue" "$_qab_role" "$_qab_content" "$_qab_ts"
+  fi
+}
+
+queue_read_gates() {
+  local _qg_config="$1" _qg_sentinel="$2"
+  _QG_MEMORY="true"
+  _QG_DECISIONS="true"
+
+  if [ -f "$_qg_config" ]; then
+    local _qg_fields
+    if [ "$_HAS_JQ" = "true" ]; then
+      # if/then/else (not //) preserves an explicit `false` -- mirrors json_field_file's
+      # own documented rationale (jq's // would replace a real `false` with the default).
+      # The comma produces two raw-output lines (newline-separated) in one jq process.
+      _qg_fields=$(jq -r '
+        (if (.memory | type) == "null" then "true" else (.memory | tostring) end),
+        (if (.decisions | type) == "null" then "true" else (.decisions | tostring) end)
+      ' "$_qg_config" 2>/dev/null) || _qg_fields=""
+    else
+      _qg_fields=$(node -e "
+        const j = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+        const m = j.memory === undefined ? 'true' : String(j.memory);
+        const d = j.decisions === undefined ? 'true' : String(j.decisions);
+        process.stdout.write(m + String.fromCharCode(10) + d);
+      " -- "$_qg_config" 2>/dev/null) || _qg_fields=""
+    fi
+    if [ -n "$_qg_fields" ]; then
+      _QG_MEMORY="${_qg_fields%%$'\n'*}"
+      _QG_DECISIONS="${_qg_fields#*$'\n'}"
+    fi
+  fi
+
+  if [ -f "$_qg_sentinel" ]; then
+    _QG_DECISIONS="false"
+  fi
+  # Explicit return: this function's meaning is "populate _QG_* outputs," not a
+  # success/failure signal, so its exit status must never leak the truthiness of
+  # the last internal test into the caller (a bare `[ -f x ] && y=z` as the final
+  # statement would return 1 whenever the sentinel is absent — the common case —
+  # aborting any `set -e` caller that invokes this function as a plain statement).
+  return 0
+}

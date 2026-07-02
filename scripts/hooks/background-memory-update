@@ -22,6 +22,16 @@
 
 set -e
 
+# Re-entrancy guard: the dream worker's own claude -p session (DEVFLOW_BG_DREAM=1
+# in its env) fires Stop hooks on its own turns. If those hooks ever chain into
+# spawning this worker, bail out immediately rather than cascading a memory
+# refresh out of a nested dream-agent session (belt-and-suspenders alongside the
+# equivalent guard in memory-worker, which is the intended sole spawn site).
+if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then
+  echo "background-memory-update: EXIT: bg_dream" >&2
+  exit 0
+fi
+
 CWD="$1"
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then
   echo "background-memory-update: CWD missing or not a directory: '$CWD'" >&2
@@ -127,26 +137,29 @@ if ! acquire_lock; then
   exit 0
 fi
 
-# --- Orphan-only auto-clean: if queue has no assistant turn, truncate and exit ---
+# --- Orphan-only auto-clean: if queue has no assistant/qa turn, truncate and exit ---
 # This prevents fabrication-prone LLM runs with only user turns in the queue.
+# A qa row (captured Q&A pair) counts as content-bearing here too — it carries
+# the same synthesis-worthy signal as an assistant turn (AC-F10). This check
+# and the TURNS_TEXT extraction loop below must agree on that.
 # When neither jq nor node is available (_JSON_AVAILABLE=false) we skip the check
 # and allow the run to proceed — conservative: better to attempt than to truncate blindly.
 if [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ] && [ "$_JSON_AVAILABLE" = "true" ]; then
   if [ "$_HAS_JQ" = "true" ]; then
-    _HAS_ASSISTANT=$(jq -r 'select(.role=="assistant") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
+    _HAS_CONTENT=$(jq -r 'select(.role=="assistant" or .role=="qa") | .role' "$QUEUE_FILE" 2>/dev/null | head -1 || echo "")
   else
     # SECURITY: pass path via argv, never interpolate into node -e source (avoids shell injection
     # for repo paths containing quotes or special characters — applies ADR-008 plumbing principle)
-    _HAS_ASSISTANT=$(node -e '
+    _HAS_CONTENT=$(node -e '
       const f = process.argv[1];
       const lines = require("fs").readFileSync(f, "utf8").split("\n");
       for (const l of lines) {
-        try { const o = JSON.parse(l); if (o.role === "assistant") { process.stdout.write("assistant"); break; } } catch {}
+        try { const o = JSON.parse(l); if (o.role === "assistant" || o.role === "qa") { process.stdout.write(o.role); break; } } catch {}
       }
     ' "$QUEUE_FILE" 2>/dev/null || echo "")
   fi
-  if [ -z "$_HAS_ASSISTANT" ]; then
-    log "User-only queue (no assistant turn) — truncating without LLM run"
+  if [ -z "$_HAS_CONTENT" ]; then
+    log "User-only queue (no assistant/qa turn) — truncating without LLM run"
     rm -f "$QUEUE_FILE" 2>/dev/null || true
     exit 0
   fi
@@ -250,6 +263,15 @@ Turn ${TURN_COUNT}:
 Assistant: ${CONTENT}
 "
     fi
+  elif [ "$ROLE" = "qa" ]; then
+    # Captured AskUserQuestion Q&A pair — a self-contained stanza, not paired
+    # with CURRENT_USER (a qa row can arrive mid-turn, between a user prompt
+    # and its eventual assistant reply; leave CURRENT_USER buffered untouched).
+    TURN_COUNT=$(( TURN_COUNT + 1 ))
+    TURNS_TEXT="${TURNS_TEXT}
+Turn ${TURN_COUNT}:
+Q&A: ${CONTENT}
+"
   fi
 done <<EOF
 $EXTRACTED
