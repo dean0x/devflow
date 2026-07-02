@@ -536,12 +536,12 @@ try {
     // If the id is new, insert a new entry with LLM-provided fields verbatim.
     // D11: ID collision with different-type entry → suffix _b to avoid trampling.
     // D12: evidence array capped at 10 (FIFO).
-    // D53: merge-observation is locked EXTERNALLY by the caller (dream agent acquires/
-    // releases .devflow/dream/.observations.lock around the Bash subshell call), while
-    // assign-anchor self-locks INTERNALLY via .decisions.lock. These are two distinct lock
-    // domains — merge-observation itself never acquires a lock; it relies on the caller to
-    // serialize concurrent writes. This is intentional: the subshell pattern in the Dream
-    // agent acquires the lock, invokes this op, and releases — all in a single Bash call.
+    // D53: merge-observation self-locks INTERNALLY on .devflow/dream/.observations.lock,
+    // mirroring assign-anchor's internal locking on .decisions.lock. These remain two
+    // distinct lock domains — a caller that also needs .decisions.lock (e.g. immediately
+    // promoting via assign-anchor) must acquire it only AFTER this call returns; never hold
+    // both simultaneously (ADR-017). Callers must NOT wrap this op in their own
+    // .observations.lock mkdir — doing so would nest against this self-lock and time out.
     // -------------------------------------------------------------------------
     case 'merge-observation': {
       const logFile = safePath(args[0]);
@@ -552,79 +552,92 @@ try {
         process.exit(1);
       }
 
-      // D54 (E1): self-create parent directory on first write (fresh project, file+dir absent).
-      // The prior batch-merge op created the dir; merge-observation matches that so callers
-      // do not need to pre-create the log directory.
-      const logDir = path.dirname(logFile);
-      if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
+      const moProjectRoot = process.cwd();
+      const moLockDir = getObservationsLockDir(moProjectRoot);
+      fs.mkdirSync(path.dirname(moLockDir), { recursive: true });
+
+      if (!acquireMkdirLock(moLockDir, 30000, 60000)) {
+        process.stderr.write(`merge-observation: timeout acquiring lock at ${moLockDir}\n`);
+        process.exit(1);
       }
 
-      let logEntries = [];
-      if (fs.existsSync(logFile)) {
-        logEntries = parseJsonl(logFile);
-      }
-      const logMap = new Map(logEntries.map(e => [e.id, e]));
-      const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-
-      // ID-keyed lookup: match by obs_xxx id only
-      const existing = logMap.get(newObs.id);
-      let merged = false;
-
-      if (existing) {
-        // Reinforce: increment count, merge evidence (FIFO cap 10), update last_seen.
-        // Store LLM-provided confidence/status/quality_ok verbatim (no recalculation).
-        const newCount = (existing.observations || 0) + 1;
-        existing.observations = newCount;
-        existing.evidence = mergeEvidence(existing.evidence || [], newObs.evidence || []);
-        if (typeof newObs.confidence === 'number') existing.confidence = newObs.confidence;
-        if (newObs.status) existing.status = newObs.status;
-        existing.last_seen = nowIso;
-        if (newObs.pattern) existing.pattern = newObs.pattern;
-        if (newObs.details) existing.details = newObs.details;
-        if (newObs.quality_ok === true) existing.quality_ok = true;
-        // Passthrough new ledger fields from incoming obs (if LLM sets them)
-        if (newObs.anchor_id !== undefined) existing.anchor_id = newObs.anchor_id;
-        if (newObs.date !== undefined) existing.date = newObs.date;
-        if (newObs.decisions_status !== undefined) existing.decisions_status = newObs.decisions_status;
-        if (newObs.amendments !== undefined) existing.amendments = newObs.amendments;
-        if (newObs.raw_body !== undefined) existing.raw_body = newObs.raw_body;
-
-        merged = true;
-        learningLog(`merge-observation: merged into ${existing.id} (count=${newCount})`);
-      } else {
-        // D11: ID collision recovery
-        let newId = newObs.id;
-        if (logMap.has(newId)) {
-          newId = newId + '_b';
-          learningLog(`merge-observation: ID collision resolved: ${newObs.id} -> ${newId}`);
+      try {
+        // D54 (E1): self-create parent directory on first write (fresh project, file+dir absent).
+        // The prior batch-merge op created the dir; merge-observation matches that so callers
+        // do not need to pre-create the log directory.
+        const logDir = path.dirname(logFile);
+        if (!fs.existsSync(logDir)) {
+          fs.mkdirSync(logDir, { recursive: true });
         }
-        const entry = {
-          id: newId,
-          type: newObs.type,
-          pattern: newObs.pattern,
-          confidence: typeof newObs.confidence === 'number' ? newObs.confidence : 0,
-          observations: 1,
-          first_seen: nowIso,
-          last_seen: nowIso,
-          status: newObs.status || 'observing',
-          evidence: (newObs.evidence || []).slice(0, 10),
-          details: newObs.details || '',
-          quality_ok: newObs.quality_ok === true,
-        };
-        // Passthrough new ledger fields if present on the new obs
-        if (newObs.anchor_id !== undefined) entry.anchor_id = newObs.anchor_id;
-        if (newObs.date !== undefined) entry.date = newObs.date;
-        if (newObs.decisions_status !== undefined) entry.decisions_status = newObs.decisions_status;
-        if (newObs.amendments !== undefined) entry.amendments = newObs.amendments;
-        if (newObs.raw_body !== undefined) entry.raw_body = newObs.raw_body;
 
-        logMap.set(newId, entry);
-        learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
+        let logEntries = [];
+        if (fs.existsSync(logFile)) {
+          logEntries = parseJsonl(logFile);
+        }
+        const logMap = new Map(logEntries.map(e => [e.id, e]));
+        const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+        // ID-keyed lookup: match by obs_xxx id only
+        const existing = logMap.get(newObs.id);
+        let merged = false;
+
+        if (existing) {
+          // Reinforce: increment count, merge evidence (FIFO cap 10), update last_seen.
+          // Store LLM-provided confidence/status/quality_ok verbatim (no recalculation).
+          const newCount = (existing.observations || 0) + 1;
+          existing.observations = newCount;
+          existing.evidence = mergeEvidence(existing.evidence || [], newObs.evidence || []);
+          if (typeof newObs.confidence === 'number') existing.confidence = newObs.confidence;
+          if (newObs.status) existing.status = newObs.status;
+          existing.last_seen = nowIso;
+          if (newObs.pattern) existing.pattern = newObs.pattern;
+          if (newObs.details) existing.details = newObs.details;
+          if (newObs.quality_ok === true) existing.quality_ok = true;
+          // Passthrough new ledger fields from incoming obs (if LLM sets them)
+          if (newObs.anchor_id !== undefined) existing.anchor_id = newObs.anchor_id;
+          if (newObs.date !== undefined) existing.date = newObs.date;
+          if (newObs.decisions_status !== undefined) existing.decisions_status = newObs.decisions_status;
+          if (newObs.amendments !== undefined) existing.amendments = newObs.amendments;
+          if (newObs.raw_body !== undefined) existing.raw_body = newObs.raw_body;
+
+          merged = true;
+          learningLog(`merge-observation: merged into ${existing.id} (count=${newCount})`);
+        } else {
+          // D11: ID collision recovery
+          let newId = newObs.id;
+          if (logMap.has(newId)) {
+            newId = newId + '_b';
+            learningLog(`merge-observation: ID collision resolved: ${newObs.id} -> ${newId}`);
+          }
+          const entry = {
+            id: newId,
+            type: newObs.type,
+            pattern: newObs.pattern,
+            confidence: typeof newObs.confidence === 'number' ? newObs.confidence : 0,
+            observations: 1,
+            first_seen: nowIso,
+            last_seen: nowIso,
+            status: newObs.status || 'observing',
+            evidence: (newObs.evidence || []).slice(0, 10),
+            details: newObs.details || '',
+            quality_ok: newObs.quality_ok === true,
+          };
+          // Passthrough new ledger fields if present on the new obs
+          if (newObs.anchor_id !== undefined) entry.anchor_id = newObs.anchor_id;
+          if (newObs.date !== undefined) entry.date = newObs.date;
+          if (newObs.decisions_status !== undefined) entry.decisions_status = newObs.decisions_status;
+          if (newObs.amendments !== undefined) entry.amendments = newObs.amendments;
+          if (newObs.raw_body !== undefined) entry.raw_body = newObs.raw_body;
+
+          logMap.set(newId, entry);
+          learningLog(`merge-observation: new entry ${newId} confidence=${entry.confidence}`);
+        }
+
+        writeJsonlAtomic(logFile, Array.from(logMap.values()));
+        console.log(JSON.stringify({ merged, id: existing ? existing.id : newObs.id }));
+      } finally {
+        releaseLock(moLockDir);
       }
-
-      writeJsonlAtomic(logFile, Array.from(logMap.values()));
-      console.log(JSON.stringify({ merged, id: existing ? existing.id : newObs.id }));
       break;
     }
 
