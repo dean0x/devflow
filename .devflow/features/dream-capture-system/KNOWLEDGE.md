@@ -1,10 +1,11 @@
 ---
 feature: dream-capture-system
 name: Dream & Capture System
-description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the memory or dream pending-turns queues, the background-memory-update or background-dream-update detached workers, dream-procedure.md, or the dream/decisions config toggles. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, spawn-dream-worker, background-memory-update, background-dream-update, dream-procedure, watchdog, DEVFLOW_BG_DREAM, DEVFLOW_BG_UPDATER, dream config, decisions dual-signal, dream-lock."
+description: "Use when modifying capture hooks (capture-prompt/capture-turn/capture-question), the memory or dream pending-turns queues, the background-memory-update detached worker, the Dream agent (shared/agents/dream.md), the session-start-context dream directive, or the dream/decisions config toggles. Keywords: capture-prompt, capture-turn, capture-question, queue-append, pending-turns, memory-worker, background-memory-update, Dream agent, dream directive, DREAM MAINTENANCE, DEVFLOW_BG_UPDATER, dream config, dream-lock."
 category: architecture
 directories:
   - scripts/hooks
+  - shared/agents/dream.md
   - src/cli/commands/capture.ts
   - src/cli/commands/dream.ts
   - src/cli/commands/memory.ts
@@ -12,44 +13,39 @@ directories:
   - src/cli/utils/decisions-config.ts
   - src/cli/utils/project-paths.ts
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-07-04
 ---
 
 # Dream & Capture System
 
 ## Overview
 
-This system replaced the old SessionEnd marker-pipeline (`dream-capture`, `dream-dispatch`,
-`dream-evaluate`, `eval-decisions`, `eval-curation`, `dream-recover`, `dream-collect-tasks`)
-with a capture-then-spawn model: three always-on hooks append conversation turns to two
-independently-gated JSONL queues, and two detached `claude -p` workers drain those queues on
-their own schedule. There are no marker files, no per-session JSON state, and no Claude Code
-subagent anywhere in this flow — everything downstream of capture is a plain shell script or a
-`claude -p` process reading a plain-text procedure file.
-
-The two workers — `background-memory-update` (working memory) and `background-dream-update`
-(decisions detection + curation) — share one proven skeleton (lock → leftover-merge →
-rename-to-claim → watchdog-bounded `claude -p` → stamp-advance success gate) but are tuned
-independently for their own trust model, latency budget, and recovery semantics. Treat them as
-siblings, not clones: several numbers and permission choices below deliberately differ between
-them, and copying one worker's constant onto the other is a real mistake (see Anti-Patterns).
+A capture-then-process model with two deliberately different processors: three always-on hooks
+append conversation turns to two independently-gated JSONL queues; the **memory** queue is
+drained by a detached `claude -p` worker (`background-memory-update`) on a 120s throttle, and
+the **dream** (decisions) queue is drained by the **Dream agent** — a Claude Code background
+subagent that `session-start-context` instructs the main model to spawn whenever the queue has
+pending turns. Scripts capture and trigger; the Dream agent does all processing by reading and
+editing the data files directly. There are no marker files, no per-session JSON state, no
+worker locks on the dream side, and no status/stamp files: the claimed queue batch itself is
+the only dream-side state, deleted as the agent's final act.
 
 ## System Context
 
 **Purpose**: (1) preserve session context across restarts/`/clear`/compaction (working memory)
 and (2) detect architectural decisions and pitfalls from conversation turns, rendering them
-into `decisions.md`/`pitfalls.md` (decisions pipeline) — both without a SessionEnd hook or a
-Claude Code subagent.
+into `decisions.md`/`pitfalls.md` (decisions pipeline).
 
 **Role in the larger system**: two of the three per-project background systems under
 `.devflow/`. The third — feature knowledge — is write-through and in-command (spawned directly
 by orchestrator commands at workflow end), not part of this system; see
 `.devflow/features/feature-knowledge-system/KNOWLEDGE.md`.
 
-**External dependencies**: the `claude` CLI on `PATH` (spawned via `claude -p`, never the
-interactive TUI); `jq` with a `node` fallback for all JSON parsing (`_HAS_JQ`/`_JSON_AVAILABLE`,
-set once by `json-parse`); `git` (only `session-start-memory`'s drift detection and
-`background-memory-update`'s stamp gathering shell out to it).
+**External dependencies**: the `claude` CLI on `PATH` (memory worker only — the Dream agent is
+an in-session subagent, not a `claude -p` child); `jq` with a `node` fallback for all JSON
+parsing (`_HAS_JQ`/`_JSON_AVAILABLE`, set once by `json-parse`); `git` (only
+`session-start-memory`'s drift detection and `background-memory-update`'s stamp gathering
+shell out to it).
 
 ## Component Architecture
 
@@ -62,18 +58,16 @@ hook-registration toggle):
 | `capture-turn` | Stop | **before** `memory-worker` | never |
 | `capture-question` | PostToolUse (matcher `AskUserQuestion`) | — | never |
 | `memory-worker` | Stop | **after** `capture-turn` | `background-memory-update` |
-| `spawn-dream-worker` | SessionStart | **last** in the SessionStart array | `background-dream-update` |
 | `session-start-memory` | SessionStart | before `session-start-context` | never |
-| `session-start-context` | SessionStart | before `spawn-dream-worker` | never |
+| `session-start-context` | SessionStart | last | never (emits the Dream spawn **directive**) |
 | `pre-compact-memory` | PreCompact | — | never |
 
-**Detached workers** (plain executables, not hooks — spawned via
-`nohup ... </dev/null >>/dev/null 2>&1 & disown`, never registered in settings.json):
+**Processors**:
 
-| Worker | Spawned by | Model | Permission mode |
-|---|---|---|---|
-| `background-memory-update` | `memory-worker` | `haiku` | `--dangerously-skip-permissions`, `--allowedTools 'Read,Write'` |
-| `background-dream-update` | `spawn-dream-worker` | resolved (default `opus`) | `--allowedTools 'Read,Grep,Glob,Write,Edit,Bash'` — **no** skip-permissions |
+| Processor | Kind | Triggered by | Model | Tool surface |
+|---|---|---|---|---|
+| `background-memory-update` | detached `claude -p` worker (`nohup … & disown`) | `memory-worker` (120s throttle) | `haiku` | `--dangerously-skip-permissions`, `--allowedTools 'Read,Write'` |
+| Dream agent (`shared/agents/dream.md`) | Claude Code background subagent | `session-start-context` Section 2 directive → main model spawns `Agent(subagent_type="Dream", run_in_background: true)` | resolved per directive (default `opus`) | frontmatter `tools`: Read, Bash, Write, Edit, Glob, Grep |
 
 **State** (all under `.devflow/`, none git-tracked — contrast ADR-002):
 
@@ -81,12 +75,12 @@ hook-registration toggle):
 |---|---|---|
 | `memory/.pending-turns.jsonl` | capture hooks | memory queue |
 | `dream/.pending-turns.jsonl` | capture hooks | decisions queue |
+| `dream/.pending-turns.processing` | Dream agent (atomic `mv` claim) | claimed batch — deleted as the agent's final act; mtime is the live/crashed discriminator (900s) |
 | `dream/config.json` | `dream-config.ts` (`updateFeature`) | shared toggle: `memory`, `decisions`, `knowledge` |
-| `decisions/decisions.json` / `~/.devflow/decisions.json` | `devflow decisions --configure` | worker tuning: `model`, `debug` only |
+| `decisions/decisions.json` / `~/.devflow/decisions.json` | `devflow decisions --configure` | Dream agent tuning: `model`, `debug` only |
 | `memory/WORKING-MEMORY.md` | `background-memory-update` | rendered working memory |
 | `decisions/decisions.md` / `pitfalls.md` | `render-decisions.cjs` (via `assign-anchor`/`retire-anchor`) | rendered ledger output |
-| `memory/.last-refresh-ok` / `dream/.last-dream-ok` | respective worker, on success | success stamps |
-| `dream/last-run-summary` | dream worker agent, only if changed | injected once by `session-start-context`, then deleted |
+| `memory/.last-refresh-ok` | memory worker, on success | memory success stamp (the dream side has no stamp — the deleted `.processing` IS success) |
 
 ## Component Interactions
 
@@ -95,11 +89,9 @@ hook-registration toggle):
 All three capture hooks share one shape: resolve `PROJECT_ROOT` (via `resolve-project-root`,
 falling back to `CWD`), truncate content, then call exactly two `queue-append` functions:
 
-- `queue_read_gates "$DREAM_DIR/config.json" "$DEVFLOW_DIR/decisions/.disabled"` — **one
-  config-read subprocess fork** returning both `_QG_MEMORY` and `_QG_DECISIONS` (AC-P1).
-  `decisions` is forced `"false"` when the sentinel file exists regardless of the config value —
-  this is the dual-signal gate, computed here and re-checked independently by
-  `spawn-dream-worker` and again by `background-dream-update` (three checkpoints total).
+- `queue_read_gates "$DREAM_DIR/config.json"` — **one config-read subprocess fork** returning
+  both `_QG_MEMORY` and `_QG_DECISIONS` (AC-P1). The gate is config-only (mirrors memory's
+  ADR-001): missing config file defaults both to `"true"`.
 - `queue_append_both <memory_queue> <dream_queue> <memory_enabled> <dream_enabled> <role>
   <content> <ts>` — appends the SAME row to whichever queue(s) are enabled, independently.
 
@@ -110,11 +102,12 @@ at 1000 chars **independently**, so a long question can't swallow the answer. Ev
 is created with mode `0600` (`umask 077`) on first write. After each append,
 `queue_append_row` checks line count and — only when it exceeds 200 — truncates to the newest
 100 lines under `dream_lock_acquire "<file>.lock" 2` (the *generic* `dream-lock` helper, 30s
-stale-break — not to be confused with either worker's own bespoke lock, see Gotchas).
+stale-break — not the memory worker's own bespoke lock, see Gotchas).
 
 `capture-turn` also runs the decisions-usage scanner (`decisions-usage-scan.cjs`) directly,
 gated only by a grep for `ADR-[0-9]+|PF-[0-9]+` in the assistant message (cheap pre-filter) AND
-`DECISIONS_ENABLED` — independent of whether anything gets queued.
+`DECISIONS_ENABLED` — independent of whether anything gets queued. The scanner itself has no
+gate of its own; the caller gates.
 
 **Stop-array ordering contract**: `capture-turn` MUST be registered before `memory-worker` in
 the Stop array. Nothing in either script enforces this — it is enforced entirely by `init.ts`'s
@@ -131,12 +124,12 @@ sees a fresh trigger and exits without double-spawning. If `claude` isn't on `PA
 worker binary is missing/non-executable, it logs and exits 0 — the queue is left intact for the
 next Stop event to retry. Note this hook does **not** check whether the queue is actually
 non-empty before spawning; it spawns unconditionally once the throttle clears, and lets the
-worker itself no-op cheaply (contrast `spawn-dream-worker` below, which gates on queue content).
+worker itself no-op cheaply (contrast the dream directive, which gates on queue content).
 
 `background-memory-update`'s lifecycle, in order:
-1. Both re-entrancy guards (`DEVFLOW_BG_DREAM`, `DEVFLOW_BG_UPDATER`) first, then re-check
-   `memory:false` at runtime (defense-in-depth — the feature may have been disabled after
-   `memory-worker` already decided to spawn).
+1. Re-entrancy guard (`DEVFLOW_BG_UPDATER`) first, then re-check `memory:false` at runtime
+   (defense-in-depth — the feature may have been disabled after `memory-worker` already
+   decided to spawn).
 2. Acquire `.working-memory.lock` — 300s stale-break, 90s acquire timeout. 90s is deliberately
    **less than** `WATCHDOG_SECS` (120): a waiter gives up before the current holder's own
    watchdog would fire, so the queue is simply left for the next spawn rather than blocking.
@@ -154,53 +147,15 @@ worker itself no-op cheaply (contrast `spawn-dream-worker` below, which gates on
    its first line matches `<!-- memory-head:*`. Only then remove `.processing` and touch
    `.last-refresh-ok`.
 
-### 3. spawn-dream-worker → background-dream-update
-
-`spawn-dream-worker` puts both re-entrancy guards before even `hook-bootstrap` is sourced (same
-as every hook in this system), then gates the spawn on ALL of: the decisions dual-signal
-(config `decisions` field AND no `.disabled` sentinel) **AND** (`.pending-turns.jsonl`
-non-empty **OR** a leftover `.pending-turns.processing` exists) **AND** `claude` resolvable on
-`PATH`. Unlike the old `session-start-context` Section 2 flow this replaced, it emits **no
-stdout directive** — it silently spawns the worker itself, the same pattern `memory-worker`
-already used.
-
-`background-dream-update` mirrors `background-memory-update`'s skeleton but every tuning knob
-differs:
-1. Re-checks the full dual-signal at runtime (defense-in-depth), plus its own `claude`-on-`PATH`
-   check.
-2. Acquires `.worker.lock` — **900s** stale-break, **2s fail-fast** acquire (not a 90s wait — a
-   waiter here has nothing to contribute once the holder has claimed the queue; the next
-   `spawn-dream-worker` invocation, i.e. the next SessionStart, simply retries).
-3. Claims the queue the same rename + leftover-merge + 200→100-cap way.
-4. Resolves `MODEL` from `decisions/decisions.json` (project) → `~/.devflow/decisions.json`
-   (global) → hardcoded `"opus"` — a literal duplicate of `DecisionsConfig`'s own default in
-   `decisions-config.ts`, kept in sync intentionally rather than shelling out to the TS loader
-   (this worker reads raw JSON directly).
-5. Builds a **short pointer prompt** — paths only (`Read {procedure file} and follow it`, plus
-   the claimed-queue/log/rendered-file paths) — never the raw queue content itself. Untrusted
-   conversation content therefore never appears in this worker's prompt or argv; the agent reads
-   the claimed snapshot itself via its own Read tool.
-6. Captures `PRE_DREAM_MTIME` (the `.last-dream-ok` mtime, or 0) **before** spawning.
-7. Runs a **NASA/JPL Rule 5** runtime assertion — `STALE_THRESHOLD (900) > WATCHDOG_SECS+GRACE
-   (605)` — that hard-fails (`exit 1`) before ever spawning `claude` if a future edit breaks the
-   invariant that a live worker can never be evicted by the stale-lock break.
-8. `cd`s to `$PROJECT_ROOT` before spawning (see Gotchas — the cwd trap).
-9. Spawns `claude -p --model $MODEL --allowedTools 'Read,Grep,Glob,Write,Edit,Bash'
-   --output-format text` (no `--dangerously-skip-permissions` — contrast the memory worker)
-   under a `WATCHDOG_SECS=600` (default) + 5s kill-grace watchdog.
-10. Verifies success: `.last-dream-ok` mtime strictly greater than the pre-spawn baseline
-    (file-vs-file, not file-vs-wallclock — avoids a false negative when the agent touches the
-    stamp in the same wall-clock second the worker started). Only then removes `.processing`.
-
-**The watchdog kill mechanism** (identical shape in both workers) is worth reading verbatim
-once — it is the one piece of non-obvious bash in this whole system:
+**The watchdog kill mechanism** (memory worker) is worth reading verbatim once — it is the one
+piece of non-obvious bash in this system:
 
 ```bash
-set -m                                   # give claude its OWN process group (PGID == its PID),
-DEVFLOW_BG_DREAM=1 "$CLAUDE_BIN" -p ... & # even though this script is non-interactive
+set -m                                     # give claude its OWN process group (PGID == its PID),
+DEVFLOW_BG_UPDATER=1 "$CLAUDE_BIN" -p ... & # even though this script is non-interactive
 CLAUDE_PID=$!
-set +m                                   # restore immediately so the watchdog subshell below
-                                          # stays in THIS script's group, not claude's
+set +m                                     # restore immediately so the watchdog subshell below
+                                            # stays in THIS script's group, not claude's
 
 ( sleep "$WATCHDOG_SECS"; kill -TERM -"$CLAUDE_PID"; sleep "$GRACE"; kill -KILL -"$CLAUDE_PID"; ) &
 WD_PID=$!
@@ -212,49 +167,85 @@ Without `set -m`, the background `claude` child would inherit this script's own 
 and `kill -TERM -"$CLAUDE_PID"` (the **negative** PID form kills an entire process group) would
 kill the worker script itself along with `claude` — a self-kill bug. `set -m` is toggled back
 off immediately after capturing `CLAUDE_PID` so it doesn't affect anything spawned afterward.
-Both workers cancel the watchdog subshell as soon as `claude` exits, specifically to avoid a
-stray `kill` hitting an unrelated, recycled PID after this script has already moved on.
+The watchdog subshell is cancelled as soon as `claude` exits, specifically to avoid a stray
+`kill` hitting an unrelated, recycled PID after this script has already moved on.
 
-### 4. dream-procedure.md (the agent's own instructions)
+### 3. session-start-context Section 2 → Dream agent
 
-Not a Claude Code skill — skills don't load in `claude -p` sessions — just a plain markdown
-file the spawned agent reads via its own Read tool. Its **Iron Laws**: (a) `assign-anchor` owns
-numbering and `render-decisions.cjs` owns the `.md` files — never hand-edit
-`decisions.md`/`pitfalls.md`; (b) abstain-by-default — "most runs produce nothing, if unsure
-record nothing"; (c) ADR-XOR-PF — one incident yields exactly one of an ADR or a PF, never
-both; (d) curation is bounded to **≤5 changes per run** and a **7-day protection window** keyed
-on the ledger row's `date` field (not anything in the rendered `.md`).
+`session-start-context` gates both of its sections on the `decisions` field in dream config
+(config-only). Section 2 emits the `--- DREAM MAINTENANCE ---` directive when work is pending:
 
-Detection (Part 1): scan `decisions-log.jsonl` for a matching existing entry first — reuse its
-`obs_` id via `merge-observation` (self-locking on `.observations.lock`, call it plainly, never
-wrap your own lock around it) rather than creating a duplicate. Promote via `assign-anchor`
+- `.pending-turns.processing` exists and is **fresh** (younger than 900s) → a live Dream agent
+  owns the batch → **suppressed**, even if new turns queued since the claim.
+- `.pending-turns.processing` exists and is **stale** (900s or older) → crashed run → emit.
+- otherwise `.pending-turns.jsonl` non-empty (`-s`) → emit.
+
+When emitting, it resolves the model — project `decisions/decisions.json` → global
+`~/.devflow/decisions.json` → `"opus"` — and injects a directive instructing the main model to
+spawn `Agent(subagent_type="Dream", model="<resolved>", run_in_background: true, prompt:
+"Process the pending decisions queue per your agent instructions. Project root: <root>")`
+without narrating. Queue emptiness is the natural gate: no throttle, no lock, no
+claude-on-PATH check (the agent runs inside the session that received the directive).
+
+The **Dream agent** (`shared/agents/dream.md`) then:
+1. Claims the queue itself: atomic
+   `mv .pending-turns.jsonl .pending-turns.processing` — one winner across concurrent
+   sessions; a lost `mv` means exit silently. A fresh `.processing` means another live agent —
+   exit silently. A stale `.processing` is re-claimed (`touch` = heartbeat) and any new queue
+   is folded in (`cat queue >> processing && rm -f queue`).
+2. Reads everything directly with its Read tool: the claimed batch, `decisions-log.jsonl`
+   (dedup), `decisions.md`/`pitfalls.md` (active entries), `.decisions-usage.json` (cite
+   counts).
+3. Writes observations directly — appends exactly one JSONL row via a quoted heredoc, or
+   Edit-replaces a single existing row to reinforce it (bump `observations`, union `evidence`
+   cap 10, update `last_seen`). Never rewrites the whole file.
+4. Calls only the three ledger ops via Bash: `assign-anchor` (numbering + render),
+   `retire-anchor` (status flip + render), `rotate-observations` (30-day archival). Each
+   self-locks internally; the agent never wraps them in a lock of its own.
+5. Heartbeats (`touch`) the claim file once at the detection→curation boundary so a long run
+   is never mistaken for a crash.
+6. Deletes `.pending-turns.processing` as its **final act**, strictly after every other write
+   (consume-then-delete). A crash before that line leaves the batch for the next session's
+   stale-merge recovery — the correct outcome for a partial run.
+7. Ends with a 1–3 line summary. Native background-task visibility replaces any status file:
+   there is nothing to touch and nothing for SessionStart to inject or delete.
+
+### 4. Dream agent instructions (shared/agents/dream.md)
+
+A normal shared agent (distributed to `devflow-core-skills` + `devflow-ambient`, installed to
+`~/.claude/agents/devflow/dream.md`). Its **Iron Laws**: (a) `assign-anchor` owns numbering and
+`render-decisions.cjs` owns the `.md` files — never hand-edit `decisions.md`/`pitfalls.md`;
+(b) abstain-by-default — "most runs produce nothing, if unsure record nothing"; (c) ADR-XOR-PF —
+one incident yields exactly one of an ADR or a PF, never both; (d) curation is bounded to
+**≤5 changes per run** and a **7-day protection window** keyed on the ledger row's `date` field
+(not anything in the rendered `.md`).
+
+Detection (Part 1): scan `decisions-log.jsonl` for a matching existing entry first — reinforce
+that row (single-line Edit) rather than creating a duplicate. Promote via `assign-anchor`
 (self-locking on `.decisions.lock`) only when `quality_ok=true` and the pattern clears the
-creation bar.
+creation bar. Observation rows keep the full downstream schema (`id`, `type`, `pattern`,
+`confidence`, `observations`, `first_seen`, `last_seen`, `status`, `evidence`, `details`,
+`quality_ok`) — `assign-anchor`, `rotate-observations`, and `devflow decisions
+--list/--status` all read it.
 
 Curation (Part 2): run `rotate-observations` first (archives `observing` rows >30 days old to
-`decisions-log.archive.jsonl`, never touches anchored/`created`/`ready` rows), then read the
-`staleness.cjs` signal (a *preference* for retirement, not an automatic trigger) before
-selecting ≤5 candidates to retire via `retire-anchor <id> <status>`.
+`decisions-log.archive.jsonl`, never touches anchored/`created`/`ready` rows), ground counts
+and cite data by reading the rendered files and `.decisions-usage.json` directly, check
+referenced file paths still exist with Glob (a missing reference is a *preference* for
+retirement, not an automatic trigger), then retire ≤5 candidates via
+`retire-anchor <id> <status>`.
 
-**Run visibility**: write `dream/last-run-summary` (1-3 lines) ONLY if the ledger actually
-changed this run — if nothing changed, do not create the file at all. `session-start-context`
-injects its content once, then unconditionally deletes it (inject-once-then-delete), regardless
-of whether the content was empty.
-
-**Finishing**: touch `.last-dream-ok` **last**, strictly after every other write. This is the
-worker script's sole success signal; a run that errors or is watchdog-killed correctly never
-reaches this line, leaving `.processing` for the next spawn to retry.
+Contract tests pin these strings: `tests/dream-agent.test.ts` (frontmatter, claim protocol,
+negatives — the agent must NOT reference `count-active`, `staleness.cjs`, `merge-observation`,
+`.last-dream-ok`, or `last-run-summary`) and `tests/decisions/dream-curation.test.ts` +
+`decisions-format.test.ts` (Iron Law, creation bar, curation bounds).
 
 ### 5. SessionStart injection (session-start-context, session-start-memory)
 
 `session-start-context` injects the decisions TL;DR (the first line of
-`decisions.md`/`pitfalls.md`, matched via `sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p'`) plus, when
-present, the dream worker's `last-run-summary`. Its TL;DR section is gated **only** on the
-`.disabled` sentinel — not on the `dream/config.json` `decisions` field the other three
-checkpoints (capture hooks, `spawn-dream-worker`, `background-dream-update`) all check. In the
-normal CLI flow this never diverges (`devflow decisions --disable` always writes both signals
-together), but it means this one call site is a single-signal check where every other decisions
-call site in the system is dual-signal.
+`decisions.md`/`pitfalls.md`, matched via `sed -n '1s/<!-- TL;DR: \(.*\) -->/\1/p'`) as
+Section 1 and the Dream maintenance directive as Section 2 — both gated on the same
+`decisions` config field the capture hooks read.
 
 `session-start-memory` renders a 3-state header from the
 `<!-- memory-head: <sha> branch: <name> -->` stamp on line 1 of `WORKING-MEMORY.md`: **A**
@@ -264,85 +255,86 @@ refresh-failing banner (queue depth > 0 AND `.last-refresh-ok` missing or >600s 
 addition to* A or B. Before ever passing the parsed `STAMP_SHA` to git, it is hex-validated
 (7-40 lowercase-hex chars, rejecting anything with a `-`-prefix or non-hex character) —
 `WORKING-MEMORY.md` is treated as untrusted input. It also runs a self-contained **D56c
-cold-path recovery**: an orphaned `.pending-turns.processing` older than 300s is renamed back to
-`.pending-turns.jsonl`, but only if the live queue file doesn't already exist (non-clobber — a
-concurrent session's fresh queue is never overwritten). `background-memory-update` is the
-PRIMARY recovery owner (merges leftovers on its own next spawn); this is only the fallback for
-when the worker never respawns at all.
+cold-path recovery**: an orphaned memory `.pending-turns.processing` older than 300s is renamed
+back to `.pending-turns.jsonl`, but only if the live queue file doesn't already exist
+(non-clobber — a concurrent session's fresh queue is never overwritten).
+`background-memory-update` is the PRIMARY recovery owner (merges leftovers on its own next
+spawn); this is only the fallback for when the worker never respawns at all. The dream side
+needs no equivalent cold path: the Dream agent's own stale-merge in Step 0 is the recovery.
 
 ## Integration Patterns
 
-**Re-entrancy guard convention**: every hook in this system AND both workers check
-`DEVFLOW_BG_UPDATER` and `DEVFLOW_BG_DREAM` first — before `hook-bootstrap` is even sourced, to
-minimize overhead inside a background session. Each worker sets its OWN variable when spawning
-its `claude -p` child (`DEVFLOW_BG_UPDATER=1` for memory, `DEVFLOW_BG_DREAM=1` for dream) so
-that hooks firing from *within* that nested session bail out in one line instead of cascading a
-second spawn.
+**Re-entrancy guard convention**: every hook in this system AND the memory worker check
+`DEVFLOW_BG_UPDATER` first — before `hook-bootstrap` is even sourced, to minimize overhead
+inside a background session. The memory worker sets `DEVFLOW_BG_UPDATER=1` on its `claude -p`
+child so hooks firing from *within* that nested session bail out in one line instead of
+cascading a second spawn (or handing the nested session a Dream directive). The Dream agent
+needs no guard variable: it is a subagent of the main session, and subagents do not fire
+SessionStart/Stop hooks of their own.
 
 **Two independent config layers**: `dream/config.json` (boolean feature toggles: `memory`,
 `decisions`, `knowledge` — read fresh by every hook on every invocation) vs. `decisions.json`
-(worker tuning: `model`, `debug` — read only by the dream worker and
+(Dream agent tuning: `model`, `debug` — read by `session-start-context`'s model resolution and
 `devflow decisions --configure`). Conflating the two is a common mistake — toggling a feature
 never touches `model`/`debug`, and configuring the model never touches the boolean gates.
 
-**CLI enable/disable asymmetry**: both `memory.ts` and `decisions.ts` follow the same rule —
-`--enable` installs hooks (if not already present) AND writes config; `--disable` ONLY writes
-config (`memory: false` / `decisions: false` + `.disabled` sentinel). Hooks are never removed by
-a single-feature disable because they are shared plumbing across features.
+**CLI enable/disable**: both `memory.ts` and `decisions.ts` write config only. Hooks are never
+removed by a single-feature disable because they are shared plumbing across features.
+`decisions --disable` additionally drains the dream queue + `.processing` unconditionally — a
+mid-run Dream agent whose claimed batch vanishes aborts without changes, which is the desired
+outcome of disabling.
 
-**Array-order contracts are enforced entirely by `init.ts`**: neither
-`capture-turn`/`memory-worker` nor the SessionStart trio encode their own ordering —
-`addCaptureHooks` must run before `addMemoryHooks`, and `addContextHook` before `addDreamHook`,
-in `init.ts`'s single read-modify-write pass over `settings.json`. Reordering those calls
-silently breaks the append-before-spawn and TL;DR-before-dream-spawn contracts with no runtime
-error.
+**Array-order contracts are enforced entirely by `init.ts`**: `capture-turn`/`memory-worker`
+ordering (append-before-spawn) exists only because `addCaptureHooks` runs before
+`addMemoryHooks` in `init.ts`'s single read-modify-write pass over `settings.json`. Reordering
+those calls silently breaks the contract with no runtime error.
 
 ## Constraints
 
 - **No argv content, ever**: user/assistant/turn content flows only via `claude -p`'s stdin in
-  both workers — `ps(1)` can see argv system-wide, so any content there would leak. The dream
-  worker's prompt is a path-only pointer for exactly this reason.
+  the memory worker, and the Dream directive's prompt is a path-only pointer — `ps(1)` can see
+  argv system-wide, so content there would leak. The Dream agent reads the claimed batch itself
+  via its Read tool.
 - **Silent debug logging**: `dbg()` calls in `capture-turn`/`capture-question` explicitly never
   log message content (only lengths) — "SECURITY: Never log ASSISTANT_MSG or INPUT content —
   may contain secrets."
-- **No daily/throttle cap on the dream worker**: dropped in this simplification
-  (`DecisionsConfig` no longer has `max_daily_runs`/`throttle_minutes` — a legacy config on disk
-  with those keys is silently ignored). The worker is bounded instead by queue non-emptiness at
-  spawn time.
-- **Lock durations are watchdog-derived, not arbitrary**: both workers assert at runtime that
-  their lock's stale-threshold exceeds their own watchdog's total in-flight time
-  (`WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS`) with margin — memory: 300 > 125; dream: 900 >
-  605. Raising either the `DEVFLOW_BG_WATCHDOG_SECS` override or the base constant without
-  re-verifying this invariant risks a live worker's lock being stale-broken out from under it.
+- **No daily/throttle cap on the dream side**: `DecisionsConfig` has no
+  `max_daily_runs`/`throttle_minutes` (a legacy config on disk with those keys is silently
+  ignored). Processing is bounded by queue non-emptiness at directive time.
+- **Memory lock duration is watchdog-derived, not arbitrary**: the memory worker asserts that
+  its lock's stale-threshold (300s) exceeds its own watchdog's total in-flight time
+  (`WATCHDOG_SECS + WATCHDOG_KILL_GRACE_SECS` = 125s) with margin. Raising the
+  `DEVFLOW_BG_WATCHDOG_SECS` override without re-verifying this invariant risks a live worker's
+  lock being stale-broken out from under it. The dream side's equivalent constant is the shared
+  900s `.processing` staleness threshold used by both the hook (suppress) and the agent
+  (exit-vs-merge) — change it in both places or the discriminator desyncs.
 
 ## Anti-Patterns
 
-- **Copying the memory worker's 90s lock-wait onto the dream worker (or vice versa)**: the two
-  lock philosophies are intentionally different (memory waits because losing an eager refresh
-  is wasteful; dream fails fast at 2s because a waiter has nothing to contribute once another
-  worker already claimed the queue).
-- **Copying `--dangerously-skip-permissions` onto the dream worker**: the memory worker only
-  ever calls `Read`/`Write` on one file; the dream worker calls `Bash` against ledger-mutating
-  scripts and must go through the explicit `--allowedTools` allowlist without the
-  skip-permissions bypass.
-- **Wrapping `merge-observation`/`assign-anchor`/`retire-anchor` in your own lock acquisition**:
-  all three self-lock internally; an external lock around them nests against the internal one
-  and times out.
-- **Passing raw queue content into a worker's prompt or argv**: both workers pass only paths;
-  the agent (dream) or the worker script itself (memory, via `EXTRACTED`/`TURNS_TEXT` built from
-  the claimed file) handles content — never argv.
+- **Wrapping `assign-anchor`/`retire-anchor`/`rotate-observations` in your own lock
+  acquisition**: all three self-lock internally; an external lock around them nests against the
+  internal one and times out.
+- **Whole-file rewrites of `decisions-log.jsonl`**: the Dream agent appends or Edit-replaces
+  one JSONL row at a time. A whole-file rewrite races the capture-side `decisions-usage-scan`
+  and any concurrent op's atomic log update.
 - **Hand-editing `decisions.md`/`pitfalls.md`**: they are deterministically rendered from
   `decisions-ledger.jsonl` by `render-decisions.cjs`; any manual edit is silently overwritten on
   the next `assign-anchor`/`retire-anchor` call.
+- **Adding a throttle, lock, or status file to the dream side**: the design intentionally has
+  none — queue emptiness gates the directive, the atomic `mv` settles races, `.processing`
+  mtime discriminates live from crashed, and the agent's final message is the visibility
+  surface. New state files here are machinery regression.
+- **Passing raw queue content into the directive or worker argv**: paths only; the processor
+  reads content itself.
 
 ## Gotchas
 
-- **Three distinct lock mechanisms, not one**: the generic `dream-lock` helper
+- **Two distinct lock mechanisms, not one**: the generic `dream-lock` helper
   (`dream_lock_acquire`/`dream_lock_release`, 30s stale-break) is used only by `queue-append`'s
-  overflow-truncation path. Each worker instead defines its OWN inline
-  `break_stale_lock`/`acquire_lock` pair with its own stale-threshold (memory 300s, dream 900s)
-  tailored to its own watchdog — neither worker calls into `dream-lock` at all. Don't assume the
-  30s generic threshold applies to `.working-memory.lock` or `.worker.lock`.
+  overflow-truncation path. The memory worker defines its OWN inline
+  `break_stale_lock`/`acquire_lock` pair (300s stale-break) tailored to its watchdog. Don't
+  assume the 30s generic threshold applies to `.working-memory.lock`. The dream side has no
+  lock at all — the `.processing` claim file plays that role.
 - **`dream/config.json` is shared, multi-feature state**: `memory`, `decisions`, and `knowledge`
   all live in the same file. Any code that writes it (`updateFeature` in `dream-config.ts`) must
   read-modify-write, preserving keys it doesn't own — a naive overwrite silently disables
@@ -354,20 +346,25 @@ error.
   loaded its hook list from `settings.json`. Toggling an ALREADY-REGISTERED hook's underlying
   feature (e.g. `--disable` then `--enable`) takes effect on the very next hook invocation within
   the same session, because every hook script re-reads `dream/config.json` fresh on every run.
-  This is exactly why the CLI asymmetry in Integration Patterns exists.
-- **The cwd trap**: `background-dream-update` explicitly `cd`s to `$PROJECT_ROOT` before
-  spawning `claude` because `dream-procedure.md` drives the agent with `$(pwd)`-relative Bash
-  invocations (e.g. `count-active "$(pwd)"`, `render-decisions.cjs render "$(pwd)"`). The worker
-  can be spawned with a CWD deep inside the project (see `resolve-project-root`), so process cwd
-  is not guaranteed to equal the project root without this `cd` — omitting it would render
-  decisions into a stray nested `.devflow/` or the wrong project entirely.
+- **Directive spawn depends on model compliance**: the hook only *asks* the main model to spawn
+  the Dream agent. A model that skips the spawn delays processing to the next session — the
+  queue persists (bounded by the 200→100 overflow truncation), so nothing is lost, but nothing
+  is processed either. This is an accepted trade against the deleted worker machinery.
+- **`claude -p` sessions receive the directive too**: SessionStart hooks fire in non-interactive
+  sessions (except the memory worker's own, which the `DEVFLOW_BG_UPDATER` guard excludes). An
+  unrelated `claude -p` run in the project may receive — and may or may not act on — the
+  directive. Accepted-class exposure.
+- **The project-root prompt**: the directive's prompt carries `Project root: <root>` because a
+  session can start in a subdirectory; the agent runs every command from that root, so
+  `$(pwd)`-relative op invocations (`render-decisions.cjs render "$(pwd)"`) resolve correctly.
 - **Accepted append-vs-claim race**: `queue_append_row`'s overflow truncation is read-then-replace
   (`tail -100 file > tmp && mv tmp file`), not an in-place lock-held write. A lock-free
   concurrent append landing between the `tail` snapshot and the `mv` can be silently dropped.
-  This is a known, accepted, pre-existing race class (extracted unchanged from the old
-  `dream-capture`/`dream-dispatch` queue-overflow logic, not introduced by this simplification) —
-  the guarantee that actually holds is "the file is never corrupted" (every surviving line is
-  valid JSON), not "no data is ever lost under a genuine race."
+  This is a known, accepted race class — the guarantee that actually holds is "the file is never
+  corrupted" (every surviving line is valid JSON), not "no data is ever lost under a genuine
+  race." The same acceptance covers a double stale-reclaim: two sessions that both start >900s
+  after a crash can both re-claim the same batch (sub-second window); dedup rules and
+  `assign-anchor`'s preconditions bound the damage to redundant analysis.
 - **AskUserQuestion fixtures are empirically pinned, not invented**: `capture-question`'s parser
   was built against real payload samples mined from `~/.claude/projects` (see
   `tests/capture-hooks.test.ts`) because no genuine cancelled/interrupted or free-text ("Other")
@@ -379,16 +376,15 @@ error.
 - **Memory/dream file isolation is a hard invariant**: `cleanQueueFiles`
   (`devflow memory --clear`) touches only `getPendingTurnsPath`/`getPendingTurnsProcessingPath`
   under `memory/`, and skips a project entirely while `.working-memory.lock` is held.
-  `devflow decisions --clear`/`--reset` resolve the git root explicitly and skip a project
-  entirely while `dream/.worker.lock` is held (a plain existence check, deferring to the
-  worker — not a lock acquisition, so it never races it). Neither command's cleanup logic ever
-  crosses into the sibling feature's files.
+  `devflow decisions --clear`/`--reset` resolve the git root explicitly and drain only the
+  dream queue + decisions state. Neither command's cleanup logic ever crosses into the sibling
+  feature's files.
 - **The `opus` default is duplicated by design, in two languages**: `decisions-config.ts`'s
-  `DEFAULTS.model` and `background-dream-update`'s bash `MODEL` resolution both implement the
-  same project-`decisions.json` → global-`~/.devflow/decisions.json` → `"opus"` precedence
-  independently, because the bash worker reads raw JSON directly rather than shelling out to the
-  TS loader. Changing one default without the other silently desyncs the CLI-reported default
-  from the worker's actual behavior.
+  `DEFAULTS.model` and `session-start-context`'s bash `DREAM_MODEL` resolution both implement
+  the same project-`decisions.json` → global-`~/.devflow/decisions.json` → `"opus"` precedence
+  independently, because the hook reads raw JSON directly rather than shelling out to the TS
+  loader. Changing one default without the other silently desyncs the CLI-reported default from
+  the directive's actual behavior.
 
 ## Key Files
 
@@ -396,42 +392,36 @@ error.
   capture hooks; all three source `queue-append` and share the truncate → `queue_read_gates` →
   `queue_append_both` shape
 - `scripts/hooks/queue-append` — shared helper: `queue_append_row`, `queue_append_both`,
-  `queue_read_gates` (single-fork dual-signal read)
+  `queue_read_gates` (single-fork config read)
 - `scripts/hooks/memory-worker` — Stop-hook 120s throttle + touch-before-spawn +
   `background-memory-update` spawn
-- `scripts/hooks/spawn-dream-worker` — SessionStart dual-signal + queue-or-processing +
-  claude-on-PATH gate, spawns `background-dream-update`
 - `scripts/hooks/background-memory-update` — detached memory-refresh worker (haiku,
   skip-permissions, 300s/90s lock, 120s watchdog)
-- `scripts/hooks/background-dream-update` — detached decisions worker (opus default,
-  allowlist-only, 900s/2s lock, 600s watchdog)
-- `scripts/hooks/dream-procedure.md` — the plain-text procedure the dream worker's agent reads
-  and follows; Iron Laws for detection + curation
-- `scripts/hooks/session-start-context`, `session-start-memory` — SessionStart injection hooks
-  (decisions TL;DR + last-run-summary; 3-state memory header + D56c cold path)
+- `scripts/hooks/session-start-context` — SessionStart injection: decisions TL;DR (Section 1) +
+  Dream maintenance directive with model resolution (Section 2)
+- `shared/agents/dream.md` — the Dream agent: claim protocol, detection bar, curation bounds,
+  consume-then-delete finishing
+- `scripts/hooks/session-start-memory` — 3-state memory header + D56c cold path
 - `scripts/hooks/dream-lock` — generic mkdir-based lock (30s stale-break); used only by
-  `queue-append`, NOT by either worker's own bespoke lock
-- `src/cli/commands/capture.ts`, `dream.ts` — hook (de)registration for the always-on capture
-  bundle and `spawn-dream-worker`
+  `queue-append`, NOT by the memory worker's own bespoke lock
+- `src/cli/commands/capture.ts` — hook (de)registration for the always-on capture bundle
+- `src/cli/commands/dream.ts` — `removeDreamHook`/`hasDreamHook` upgrade cleanup of the retired
+  spawn-dream-worker settings entry
 - `src/cli/commands/memory.ts`, `decisions.ts` — CLI toggles, `cleanQueueFiles`,
-  `--clear`/`--reset`
-- `src/cli/utils/decisions-config.ts` — TS `DecisionsConfig` loader (`model`, `debug` only — no
-  throttle/cap fields)
+  `--clear`/`--reset`, unconditional disable-drain
+- `src/cli/utils/decisions-config.ts` — TS `DecisionsConfig` loader (`model`, `debug` only)
 - `src/cli/utils/project-paths.ts` — single source of truth for every path referenced above; has
   a required CJS mirror at `scripts/hooks/lib/project-paths.cjs`
 
 ## Related
 
 - `.devflow/features/feature-knowledge-system/KNOWLEDGE.md` — sibling `.devflow/` persistence
-  layer; contrast its write-through/in-command model against this system's SessionStart-spawned
-  detached workers.
-- ADR-001 — this branch's own `purge-dream-marker-pipeline-v1` migration and the wholesale
-  deletion of the old marker-pipeline files follow the same clean-break precedent ADR-001
-  established.
+  layer; contrast its write-through/in-command model against this system's queue + background
+  processors.
+- ADR-001 — the config-only gate (no sentinel files) and the `purge-dream-worker-state-v1`
+  migration follow the clean-break precedent ADR-001 established.
 - ADR-002 — contrast: unlike `.devflow/features/`, none of `.devflow/memory/`, `.devflow/dream/`,
   or `.devflow/decisions/` are git-tracked; every file in this system stays local and gitignored.
-- ADR-003 — this knowledge base documents the post-branch end state only, per ADR-003; the
-  branch itself practiced it (e.g. the dedicated "fix stale cross-phase comment references"
-  cleanup commit), leaving no tombstone comments behind.
-- `docs/working-memory.md`, `docs/reference/file-organization.md` — user-facing docs already
-  updated for this end-state; consistent source for the file-tree summary above.
+- ADR-003 — this knowledge base documents the current end state only, per ADR-003.
+- `docs/working-memory.md`, `docs/reference/file-organization.md` — user-facing docs for the
+  same architecture; consistent source for the file-tree summary above.

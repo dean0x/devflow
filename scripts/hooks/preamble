@@ -62,9 +62,9 @@ esac
 shopt -u nocasematch
 
 # Fire when the first word is a workflow keyword followed by at least one more word.
-# (The former trailing-'?' guard was removed: it produced false negatives on
-# command-style prompts that close with a clarifying/rhetorical question, e.g.
-# "implement X … should I use Redis?" or "Explore the ambient mode … could it be?".)
+# Prompts that end with a question mark still count — command-style prompts often
+# close with a clarifying question ("implement X … should I use Redis?"), so a
+# trailing-'?' exclusion would produce false negatives.
 if [[ -n "$SKILL" && -n "$REST" ]]; then
   dbg "WORKFLOW_KEYWORD detected: $SKILL — injecting directive"
   json_prompt_output "The user's prompt begins with the \`$SKILL\` keyword, which signals the \`devflow:$SKILL\` workflow. In one short sentence, tell the user you're invoking \`devflow:$SKILL\`. Then immediately invoke it with the Skill tool, passing the user's full request (everything after the leading \`$SKILL\` keyword) as the skill input. Do not pause to ask whether to proceed."

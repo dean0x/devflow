@@ -6,14 +6,14 @@ import { getDecisionsConfigPath } from './project-paths.js';
 /**
  * Merged decisions agent configuration from global and project-level config files.
  *
- * The background dream worker (background-dream-update, spawned by spawn-dream-worker)
- * has no daily-run cap or throttle of its own — it is gated by queue non-emptiness
- * (spawn-dream-worker only spawns when the dream queue is non-empty or a leftover
- * .processing batch exists) rather than a fixed daily/minute budget, so those knobs
- * were dropped in the dream-system simplification.
+ * The Dream agent has no daily-run cap or throttle: session-start-context emits
+ * its spawn directive only when the dream queue is non-empty (or a stale
+ * .processing batch exists), so queue emptiness is the natural gate.
+ * session-start-context reads these config files directly (same project →
+ * global → default precedence) when resolving the model for the directive.
  */
 export interface DecisionsConfig {
-  /** Model alias for the detached dream worker. Default: 'opus' */
+  /** Model alias for the Dream agent. Default: 'opus' */
   model: string;
   /** Emit verbose logs when true. Default: false */
   debug: boolean;
@@ -27,8 +27,8 @@ const DEFAULTS: DecisionsConfig = {
 /**
  * Apply a single JSON config layer onto a DecisionsConfig, returning a new object.
  * Skips fields with wrong types. Swallows parse errors — callers see defaults.
- * Unknown/dropped fields (e.g. a pre-simplification config still on disk with
- * max_daily_runs/throttle_minutes) are silently ignored, not an error.
+ * Unknown fields (e.g. an old config still on disk with extra knobs) are
+ * silently ignored, not an error.
  */
 export function applyDecisionsConfigLayer(
   config: DecisionsConfig,

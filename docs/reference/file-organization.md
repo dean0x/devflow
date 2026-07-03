@@ -15,7 +15,7 @@ devflow/
 │   │   │   └── references/
 │   │   ├── software-design/
 │   │   └── ...
-│   └── agents/                       # SINGLE SOURCE OF TRUTH (15 shared agents)
+│   └── agents/                       # SINGLE SOURCE OF TRUTH (16 shared agents)
 │       ├── git.md
 │       ├── synthesizer.md
 │       ├── coder.md
@@ -54,12 +54,9 @@ devflow/
 │       ├── queue-append             # Shared helper: queue_append_row / queue_append_both / queue_read_gates
 │       ├── memory-worker            # Stop hook (registered after capture-turn): 120s throttle, spawns background-memory-update
 │       ├── background-memory-update # Detached claude -p haiku worker: rewrites WORKING-MEMORY.md (spawned by memory-worker)
-│       ├── spawn-dream-worker       # SessionStart hook: spawns background-dream-update when the dream queue is non-empty
-│       ├── background-dream-update  # Detached claude -p worker: decisions detection + curation via dream-procedure.md
-│       ├── dream-procedure.md       # Combined decisions-detection + curation procedure read directly by the worker's agent
 │       ├── dream-lock               # Shared helper: mkdir-based locking
 │       ├── session-start-memory     # SessionStart hook: injects memory + git state; recovers orphaned .pending-turns.processing itself
-│       ├── session-start-context    # SessionStart hook: injects decisions TL;DR + optional dream last-run-summary
+│       ├── session-start-context    # SessionStart hook: injects decisions TL;DR + the Dream agent spawn directive when the queue is pending
 │       ├── pre-compact-memory       # PreCompact hook: saves git state backup
 │       ├── preamble                 # UserPromptSubmit hook: ambient keyword + plan auto-detection (zero overhead for normal prompts)
 │       ├── get-mtime                # Shared helper: portable mtime (BSD/GNU stat)
@@ -75,8 +72,7 @@ devflow/
 │       └── lib/                     # Node.js helper modules
 │           ├── decisions-index.cjs    # Decisions index builder
 │           ├── project-paths.cjs      # Project slug + path resolution
-│           ├── safe-path.cjs          # Path safety validation
-│           └── staleness.cjs          # Code reference staleness checker
+│           └── safe-path.cjs          # Path safety validation
 └── src/
     └── cli/
         ├── commands/
@@ -164,7 +160,7 @@ Skills and agents are **not duplicated** in git. Instead:
 
 ### Shared vs Plugin-Specific Agents
 
-- **Shared** (15): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`
+- **Shared** (16): `git`, `synthesizer`, `skimmer`, `simplifier`, `coder`, `reviewer`, `resolver`, `evaluator`, `tester`, `scrutinizer`, `validator`, `designer`, `knowledge`, `researcher`, `bug-analyzer`, `dream`
 - **Plugin-specific** (1): `claude-md-auditor` — committed directly in its plugin
 
 ## Settings Override
@@ -191,16 +187,14 @@ A capture/spawn split across always-on shell-script hooks. Queue-append (`captur
 | `capture-question` | PostToolUse (matcher: `AskUserQuestion`) | Appends each answered question as a `{role:"qa"}` row to both queues |
 | `memory-worker` | Stop (registered after `capture-turn` — append-before-spawn ordering) | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), spawns `background-memory-update` as a detached `nohup` worker (`claude -p --model haiku`) |
 | `background-memory-update` | Detached worker (spawned by `memory-worker`) | Drains `.pending-turns.jsonl` → calls `claude -p --model haiku` (prompt on stdin) → rewrites `WORKING-MEMORY.md` with `<!-- memory-head: <sha> branch: <name> -->` on line 1. On success: removes `.processing`, touches `.last-refresh-ok`. On failure: leaves `.processing` for crash recovery at next SessionStart. |
-| `spawn-dream-worker` | SessionStart | When the dream queue is non-empty (or a leftover `.processing` batch exists) and `claude` is on PATH, spawns `background-dream-update` as a detached `nohup` worker |
-| `background-dream-update` | Detached worker (spawned by `spawn-dream-worker`) | Claims the dream queue (rename-to-claim), resolves the model (project → global `decisions.json` → `opus` default), spawns `claude -p` pointed at `dream-procedure.md`. The agent does all decision/pitfall detection and periodic curation itself, then touches `.last-dream-ok` (success stamp) |
 | `session-start-memory` | SessionStart | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled 3-state header (A in-sync / B drifted / C refresh-failing banner); also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path) |
-| `session-start-context` | SessionStart | Injects decisions TL;DR and, when present, the dream worker's optional `last-run-summary` (deleted after injection) |
+| `session-start-context` | SessionStart | Injects the decisions TL;DR and, when the dream queue is non-empty (or a crashed run left a stale `.processing` batch), a `--- DREAM MAINTENANCE ---` directive instructing the main model to spawn the background Dream agent with the resolved model (project → global `decisions.json` → `opus` default) |
 | `pre-compact-memory` | PreCompact | Saves git state + WORKING-MEMORY.md snapshot |
 | `preamble` | UserPromptSubmit | Ambient keyword + plan auto-detection (zero overhead for normal prompts) |
 
-**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which rewrites `WORKING-MEMORY.md` directly via `claude -p`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR; `spawn-dream-worker` spawns `background-dream-update` if the dream queue has pending turns — that worker's agent reads `dream-procedure.md` and performs decision/pitfall detection and curation directly, with no marker files and no Claude Code subagent involved.
+**Flow**: User sends prompt → `capture-prompt` appends the user turn to both queues → session ends → `capture-turn` appends the assistant turn to both queues, then `memory-worker` spawns `background-memory-update` (if the 120s throttle has expired) which rewrites `WORKING-MEMORY.md` directly via `claude -p`. On `/clear` or new session → `session-start-memory` injects the already-written `WORKING-MEMORY.md` as `additionalContext` (3-state git-reconciled header); `session-start-context` injects the decisions TL;DR and, when the dream queue has pending turns, the Dream maintenance directive — the main model spawns the Dream agent in the background, which claims the queue atomically, performs decision/pitfall detection and curation directly against the data files, deletes the claimed batch as its final act, and reports a 1–3 line summary.
 
-`devflow memory --disable` disables Working Memory (hooks stay registered; queue writes for memory are skipped). Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow decisions --clear`/`--reset` for the dream queue and decisions state (both skip a project entirely while `.devflow/dream/.worker.lock` is held).
+`devflow memory --disable` disables Working Memory (hooks stay registered; queue writes for memory are skipped). Use `devflow memory --clear` to clean up pending memory queue files across all projects, or `devflow decisions --clear`/`--reset` for the dream queue and decisions state.
 
 Hooks auto-create `.devflow/` on first run — no manual setup needed per project.
 

@@ -37,10 +37,8 @@ const MEMORY_HOOK_CONFIG: Record<string, string> = {
 };
 
 /**
- * Legacy hook filename markers from the pre-sidecar 8-hook system, the v3
- * sidecar→dream rename, and the dream-system-simplification cutover (dream-dispatch/
- * dream-capture/dream-evaluate marker pipeline retired in favor of capture.ts +
- * dream.ts). Used by removeMemoryHooks to clean up hooks from upgrading users.
+ * Legacy hook filename markers from prior architectures.
+ * Used by removeMemoryHooks to clean up hooks from upgrading users.
  */
 const LEGACY_HOOK_MARKERS: Record<string, string[]> = {
   UserPromptSubmit: ['prompt-capture-memory', 'sidecar-dispatch', 'dream-dispatch'],

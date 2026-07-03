@@ -176,7 +176,7 @@ This framework is used by:
 - **Review agents**: Creates review reports
 - **Bug analysis agents**: Creates bug analysis reports
 - **Working Memory hooks**: Auto-maintains `.devflow/memory/WORKING-MEMORY.md`
-- **Dream agent**: background LLM agent (spawned at SessionStart) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
+- **Dream agent**: background LLM agent (spawned via the session-start directive) promotes observations to ADRs/PFs via `assign-anchor`, which renders `decisions.md` / `pitfalls.md`
 
 All persisting agents should load this skill to ensure consistent documentation.
 

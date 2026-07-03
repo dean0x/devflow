@@ -226,11 +226,11 @@ describe('capture-turn', () => {
     expect(readJsonl(path.join(projectDir, '.devflow', 'dream', '.pending-turns.jsonl'))).toHaveLength(1);
   });
 
-  it('decisions usage scanner still runs when memory is disabled (matches dream-capture behavior)', () => {
+  it('decisions usage scanner still runs when memory is disabled', () => {
     writeDreamConfig(projectDir, { memory: false });
     // decisions-usage-scan.cjs itself no-ops when .devflow/memory/ is absent
-    // (its own guard) — pre-create it, matching the established convention in
-    // sentinel.test.ts's mkMemoryDir helper for the equivalent dream-capture test.
+    // (its own guard) — pre-create it, matching sentinel.test.ts's mkMemoryDir
+    // convention.
     fs.mkdirSync(path.join(projectDir, '.devflow', 'memory'), { recursive: true });
     fs.mkdirSync(path.join(projectDir, '.devflow', 'decisions'), { recursive: true });
     const usagePath = path.join(projectDir, '.devflow', 'decisions', '.decisions-usage.json');

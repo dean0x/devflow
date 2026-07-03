@@ -9,12 +9,10 @@ import { type LearningObservation, loadAndCountObservations } from './observatio
  * File I/O for observations and user-facing warnings.
  * Bridges the pure data module (observations.ts) with the filesystem.
  *
- * NOTE: `updateDecisionsStatus` was removed in Phase 6 of the decisions-ledger-render
- * refactor. The `.md` files are now a pure render of the decisions ledger — they must
- * not be edited directly. To change the status of a decision or pitfall, use the
- * `retire-anchor` op in `json-helper.cjs`, which flips `decisions_status` on the
- * ledger row and re-renders both `.md` files atomically. At the time of removal,
- * `updateDecisionsStatus` had zero callers in the TypeScript codebase.
+ * The `.md` files are a pure render of the decisions ledger — never edit them
+ * directly. To change the status of a decision or pitfall, use the
+ * `retire-anchor` op in `json-helper.cjs`, which flips `decisions_status` on
+ * the ledger row and re-renders both `.md` files atomically.
  */
 
 /**

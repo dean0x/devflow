@@ -244,10 +244,11 @@ describe('buildTldrLine', () => {
 // ---------------------------------------------------------------------------
 // json-helper.cjs byte-compat: assign-anchor delegates to decisions-format
 // ---------------------------------------------------------------------------
-// We verify this by running merge-observation + assign-anchor via the CLI and
-// checking the output matches what formatDecisionBody/formatPitfallBody would
-// produce.  This ensures the write path delegates to decisions-format.cjs
-// correctly (AC-A8: decisions-append is removed; assign-anchor is the writer).
+// We verify this by seeding an observation row directly (as the Dream agent
+// appends it), promoting via assign-anchor, and checking the output matches
+// what formatDecisionBody/formatPitfallBody would produce. This ensures the
+// write path delegates to decisions-format.cjs correctly (AC-A8: assign-anchor
+// is the sole writer).
 
 import { execSync } from 'child_process';
 import * as fs from 'fs';
