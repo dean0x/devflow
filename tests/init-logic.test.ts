@@ -163,6 +163,60 @@ describe('substituteSettingsTemplate', () => {
   });
 });
 
+// AC-C2 end-state shape: the shipped settings.json template must seed all 5
+// always-on hooks (UserPromptSubmit/PostToolUse/Stop capture bundle + the
+// SessionStart/PreCompact memory-dream bundle) exactly, not rely on init's
+// addCaptureHooks runtime healing to fill gaps.
+describe('settings.json template: AC-C2 complete hook seed shape', () => {
+  const TEMPLATE_PATH = path.resolve(__dirname, '..', 'src', 'templates', 'settings.json');
+
+  async function loadHooks(): Promise<Record<string, Array<{ matcher?: string; hooks: { command: string }[] }>>> {
+    const raw = await fs.readFile(TEMPLATE_PATH, 'utf-8');
+    return JSON.parse(raw).hooks;
+  }
+
+  it('seeds all 5 always-on hook event types', async () => {
+    const hooks = await loadHooks();
+    expect(Object.keys(hooks).sort()).toEqual(
+      ['PostToolUse', 'PreCompact', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
+    );
+  });
+
+  it('UserPromptSubmit seeds capture-prompt', async () => {
+    const hooks = await loadHooks();
+    expect(hooks.UserPromptSubmit).toHaveLength(1);
+    expect(hooks.UserPromptSubmit[0].hooks[0].command).toContain('run-hook capture-prompt');
+  });
+
+  it('PostToolUse seeds capture-question scoped to matcher: "AskUserQuestion"', async () => {
+    const hooks = await loadHooks();
+    expect(hooks.PostToolUse).toHaveLength(1);
+    expect(hooks.PostToolUse[0].matcher).toBe('AskUserQuestion');
+    expect(hooks.PostToolUse[0].hooks[0].command).toContain('run-hook capture-question');
+  });
+
+  it('Stop keeps the AC-C2 order: [capture-turn, memory-worker]', async () => {
+    const hooks = await loadHooks();
+    const commands = hooks.Stop.map((m) => m.hooks[0].command);
+    expect(commands[0]).toContain('run-hook capture-turn');
+    expect(commands[1]).toContain('run-hook memory-worker');
+  });
+
+  it('SessionStart keeps the AC-C2 order: [session-start-memory, session-start-context, spawn-dream-worker]', async () => {
+    const hooks = await loadHooks();
+    const commands = hooks.SessionStart.map((m) => m.hooks[0].command);
+    expect(commands[0]).toContain('run-hook session-start-memory');
+    expect(commands[1]).toContain('run-hook session-start-context');
+    expect(commands[2]).toContain('run-hook spawn-dream-worker');
+  });
+
+  it('PreCompact seeds pre-compact-memory', async () => {
+    const hooks = await loadHooks();
+    expect(hooks.PreCompact).toHaveLength(1);
+    expect(hooks.PreCompact[0].hooks[0].command).toContain('run-hook pre-compact-memory');
+  });
+});
+
 describe('computeGitignoreAppend', () => {
   it('returns all entries when gitignore is empty', () => {
     const result = computeGitignoreAppend('', ['.claude/', '.devflow/']);

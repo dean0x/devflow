@@ -993,11 +993,16 @@ describe('run-hook behavioral', () => {
 // session-start-context root .gitignore describe below.
 // =============================================================================
 
-function runHook(hookPath: string, input: object, homeDir: string): { stdout: string; stderr: string; exitCode: number } {
+function runHook(
+  hookPath: string,
+  input: object,
+  homeDir: string,
+  extraEnv: Record<string, string> = {},
+): { stdout: string; stderr: string; exitCode: number } {
   try {
     const result = execSync(`bash "${hookPath}"`, {
       input: JSON.stringify(input),
-      env: { ...process.env, HOME: homeDir },
+      env: { ...process.env, HOME: homeDir, ...extraEnv },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return { stdout: result.toString(), stderr: '', exitCode: 0 };
@@ -1054,6 +1059,84 @@ describe('session-start-context root .gitignore (memory-independent)', () => {
     expect(fs.existsSync(gitignore)).toBe(true);
     expect(fs.readFileSync(gitignore, 'utf-8').split('\n').map(l => l.trim())).toContain('!.devflow/features/*/KNOWLEDGE.md');
     expect(fs.existsSync(path.join(tmpDir, '.devflow', '.root-gitignore-configured-v2'))).toBe(true);
+  });
+});
+
+// =============================================================================
+// session-start-context: AC-F15 dream last-run-summary injection (inject-once-then-delete)
+// =============================================================================
+//
+// background-dream-update (see dream-procedure.md) writes .devflow/dream/last-run-summary
+// only when it changed the ledger. session-start-context injects its content next to the
+// decisions TL;DR, under a "--- DREAM LAST RUN ---" header, then deletes the file — no
+// file means no injection and no error. The re-entrancy guards (DEVFLOW_BG_DREAM /
+// DEVFLOW_BG_UPDATER) sit at the very top of the hook, before any filesystem writes or
+// deletes, so a nested dream/memory-worker session must never consume the summary file.
+
+describe('session-start-context: AC-F15 dream last-run-summary injection', () => {
+  const CONTEXT_HOOK = path.join(HOOKS_DIR, 'session-start-context');
+
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-lastrun-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-ctx-lastrun-home-'));
+    fs.mkdirSync(path.join(homeDir, '.devflow', 'logs'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'dream'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  function summaryPath(dir: string): string {
+    return path.join(dir, '.devflow', 'dream', 'last-run-summary');
+  }
+
+  it('injects last-run-summary content under the DREAM LAST RUN header and deletes the file', () => {
+    fs.writeFileSync(summaryPath(tmpDir), 'Materialized ADR-009 from 2 dialog pairs.');
+
+    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+    expect(exitCode).toBe(0);
+
+    const json = JSON.parse(stdout);
+    const ctx = json.hookSpecificOutput.additionalContext;
+    expect(ctx).toContain('--- DREAM LAST RUN ---');
+    expect(ctx).toContain('Materialized ADR-009 from 2 dialog pairs.');
+
+    // Inject-once-then-delete: the file must be gone after injection.
+    expect(fs.existsSync(summaryPath(tmpDir))).toBe(false);
+  });
+
+  it('no summary file present -> output lacks the DREAM LAST RUN header, exit 0', () => {
+    // Seed a decisions TL;DR so CONTEXT is non-empty and there is real JSON output
+    // to inspect (a hard assertion rather than a conditional on empty stdout).
+    fs.mkdirSync(path.join(tmpDir, '.devflow', 'decisions'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.devflow', 'decisions', 'decisions.md'),
+      '<!-- TL;DR: 1 decision. Key: ADR-001 Test -->\n# Architectural Decisions',
+    );
+
+    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir);
+    expect(exitCode).toBe(0);
+
+    const json = JSON.parse(stdout);
+    const ctx = json.hookSpecificOutput.additionalContext;
+    expect(ctx).not.toContain('DREAM LAST RUN');
+  });
+
+  it('DEVFLOW_BG_DREAM=1 -> no injection, summary file survives (guard precedes all writes/deletes)', () => {
+    fs.writeFileSync(summaryPath(tmpDir), 'Should not be touched.');
+
+    const { stdout, exitCode } = runHook(CONTEXT_HOOK, { cwd: tmpDir }, homeDir, { DEVFLOW_BG_DREAM: '1' });
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe('');
+
+    // The guard exits before the AC-F15 read/inject/delete block ever runs.
+    expect(fs.existsSync(summaryPath(tmpDir))).toBe(true);
+    expect(fs.readFileSync(summaryPath(tmpDir), 'utf-8')).toBe('Should not be touched.');
   });
 });
 

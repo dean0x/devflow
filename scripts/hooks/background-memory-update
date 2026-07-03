@@ -27,8 +27,15 @@ set -e
 # spawning this worker, bail out immediately rather than cascading a memory
 # refresh out of a nested dream-agent session (belt-and-suspenders alongside the
 # equivalent guard in memory-worker, which is the intended sole spawn site).
+# Also guards its own DEVFLOW_BG_UPDATER=1 (a nested memory-worker claude -p
+# session firing its own Stop hooks) — mirrors background-dream-update's
+# symmetric pair of self-guards exactly.
 if [ "${DEVFLOW_BG_DREAM:-}" = "1" ]; then
   echo "background-memory-update: EXIT: bg_dream" >&2
+  exit 0
+fi
+if [ "${DEVFLOW_BG_UPDATER:-}" = "1" ]; then
+  echo "background-memory-update: EXIT: bg_updater" >&2
   exit 0
 fi
 

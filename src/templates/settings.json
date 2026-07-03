@@ -4,6 +4,29 @@
     "command": "${DEVFLOW_DIR}/scripts/hud.sh"
   },
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook capture-prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${DEVFLOW_DIR}/scripts/hooks/run-hook capture-question",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
